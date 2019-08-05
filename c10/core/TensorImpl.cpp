@@ -96,7 +96,20 @@ bool TensorImpl::compute_contiguous() const {
 }
 
 bool TensorImpl::compute_channels_last_contiguous() const {
-  return dim() == 4 && strides() == get_channels_last_strides(sizes());
+  if (dim() == 4) {
+    int64_t expected = 1;
+    for (auto& d : {1, 3, 2, 0}) {
+      if (size(d) != 1) {
+        if (stride(d) == expected) {
+          expected *= size(d);
+        } else {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  return false;
 }
 
 bool TensorImpl::compute_strides_like_channels_last() const {

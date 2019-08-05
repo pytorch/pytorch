@@ -8286,28 +8286,30 @@ class _TestTorchMixin(object):
                                                 [True, False, True, False, True]], device=device))
 
     def test_masked_scatter(self):
-        for dtype in [torch.uint8, torch.bool]:
-            num_copy, num_dest = 3, 10
-            dest = torch.randn(num_dest)
-            src = torch.randn(num_copy)
-            mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=dtype)
-            dest2 = dest.clone()
-            dest.masked_scatter_(mask, src)
-            j = 0
-            for i in range(num_dest):
-                if mask[i]:
-                    dest2[i] = src[j]
-                    j += 1
-            self.assertEqual(dest, dest2, 0)
-
-            # make source bigger than number of 1s in mask
-            src = torch.randn(num_dest)
-            dest.masked_scatter_(mask, src)
-
-            # make src smaller. this should fail
-            src = torch.randn(num_copy - 1)
-            with self.assertRaises(RuntimeError):
+        with warnings.catch_warnings(record=True) as w:
+            for dtype in [torch.uint8, torch.bool]:
+                num_copy, num_dest = 3, 10
+                dest = torch.randn(num_dest)
+                src = torch.randn(num_copy)
+                mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=dtype)
+                dest2 = dest.clone()
                 dest.masked_scatter_(mask, src)
+                j = 0
+                for i in range(num_dest):
+                    if mask[i]:
+                        dest2[i] = src[j]
+                        j += 1
+                self.assertEqual(dest, dest2, 0)
+
+                # make source bigger than number of 1s in mask
+                src = torch.randn(num_dest)
+                dest.masked_scatter_(mask, src)
+
+                # make src smaller. this should fail
+                src = torch.randn(num_copy - 1)
+                with self.assertRaises(RuntimeError):
+                    dest.masked_scatter_(mask, src)
+        self.assertEqual(len(w), 3)
 
     def test_masked_scatter_bool_tensor(self):
         for device in torch.testing.get_all_device_types():
@@ -8324,40 +8326,44 @@ class _TestTorchMixin(object):
 
     def test_masked_select(self):
         for device in torch.testing.get_all_device_types():
-            for dtype in [torch.uint8, torch.bool]:
-                num_src = 10
-                src = torch.randn(num_src, device=device)
-                mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(dtype)
-                dst = src.masked_select(mask)
-                dst2 = []
-                for i in range(num_src):
-                    if mask[i]:
-                        dst2 += [src[i]]
-                self.assertEqual(dst, torch.tensor(dst2), 0)
+            with warnings.catch_warnings(record=True) as w:
+                for dtype in [torch.uint8, torch.bool]:
+                    num_src = 10
+                    src = torch.randn(num_src, device=device)
+                    mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(dtype)
+                    dst = src.masked_select(mask)
+                    dst2 = []
+                    for i in range(num_src):
+                        if mask[i]:
+                            dst2 += [src[i]]
+                    self.assertEqual(dst, torch.tensor(dst2), 0)
 
-                dst3 = torch.empty_like(src, device=device)
-                torch.masked_select(src, mask, out=dst3)
-                self.assertEqual(dst3, torch.Tensor(dst2), 0)
+                    dst3 = torch.empty_like(src, device=device)
+                    torch.masked_select(src, mask, out=dst3)
+                    self.assertEqual(dst3, torch.Tensor(dst2), 0)
+            self.assertEquals(len(w), 1)
 
     def test_masked_fill(self):
-        for dtype in [torch.uint8, torch.bool]:
-            num_dest = 10
-            dst = torch.randn(num_dest)
-            mask = torch.rand(num_dest).mul(2).floor().to(dtype)
-            val = random.random()
-            dst2 = dst.clone()
-            dst.masked_fill_(mask, val)
-            for i in range(num_dest):
-                if mask[i]:
-                    dst2[i] = val
-            self.assertEqual(dst, dst2, 0)
+        with warnings.catch_warnings(record=True) as w:
+            for dtype in [torch.uint8, torch.bool]:
+                num_dest = 10
+                dst = torch.randn(num_dest)
+                mask = torch.rand(num_dest).mul(2).floor().to(dtype)
+                val = random.random()
+                dst2 = dst.clone()
+                dst.masked_fill_(mask, val)
+                for i in range(num_dest):
+                    if mask[i]:
+                        dst2[i] = val
+                self.assertEqual(dst, dst2, 0)
 
-            # test non-contiguous case
-            dst = torch.randn(num_dest, num_dest, num_dest).permute((2, 0, 1))
-            dst2 = dst.clone()
-            dst.masked_fill_((dst > 0).to(dtype), val)
-            dst2.masked_fill_((dst2 > 0).to(dtype), val)
-            self.assertEqual(dst, dst2, 0)
+                # test non-contiguous case
+                dst = torch.randn(num_dest, num_dest, num_dest).permute((2, 0, 1))
+                dst2 = dst.clone()
+                dst.masked_fill_((dst > 0).to(dtype), val)
+                dst2.masked_fill_((dst2 > 0).to(dtype), val)
+                self.assertEqual(dst, dst2, 0)
+            self.assertEquals(len(w), 3)
 
     def test_masked_fill_bool_tensor(self):
         for device in torch.testing.get_all_device_types():
@@ -8404,6 +8410,12 @@ class _TestTorchMixin(object):
         val1 = rec.select(-1, -1).data[0][0][0].sum()
         val2 = rec.select(-1, -1).data.abs()[0][0][0].sum()
         self.assertEqual(val1, val2, 1e-8, 'absolute value')
+
+        # Both abs(0.0) and abs(-0.0) should result in 0.0
+        for dtype in (torch.float, torch.double):
+            abs_zeros = torch.tensor([0.0, -0.0], dtype=dtype).abs().tolist()
+            for num in abs_zeros:
+                self.assertGreater(math.copysign(1.0, num), 0.0)
 
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
@@ -9121,6 +9133,15 @@ class _TestTorchMixin(object):
 
         with self.assertRaises(RuntimeError):
             torch.repeat_interleave(y, torch.arange(9).reshape(3, 3), dim=0)
+
+        # test zero sized dimension
+        x = torch.zeros((5, 0))
+        y = torch.repeat_interleave(x, repeats=3, dim=1)
+        self.assertEqual(y, x.new_zeros(5, 0))
+
+        x = torch.tensor([], dtype=torch.int64)
+        y = torch.repeat_interleave(x, x)
+        self.assertEqual(y, x)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_repeat_tile(self):
@@ -12483,6 +12504,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_memory_format_operators_cpu(self):
         self._test_memory_format_operators('cpu')
 
+
     def test_memory_format_preserved_after_permute(self):
         x = torch.randn(10, 3, 32, 32)
         nhwc = x.contiguous(memory_format=torch.channels_last)
@@ -12495,10 +12517,16 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         alias.fill_(7)
         self.assertEqual(fake, alias)
 
+    def test_memory_format_contiguous_returns_same_tensor_if_already_satisfies(self):
+        x = torch.randn(10, 32, 32, 3).permute(0, 3, 1, 2)
+        alias = x.contiguous(memory_format=torch.channels_last)
+        alias.fill_(7)
+        self.assertEqual(x, alias)
+
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_memory_format_permute_cuda(self):
-        x = torch.randn(10, 3, 32, 32)
-        nhwc = x.contiguous(memory_format=torch.channels_last).cuda()
+        x = torch.randn(10, 3, 32, 32).cuda()
+        nhwc = x.contiguous(memory_format=torch.channels_last)
         y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
         self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
 
@@ -12506,40 +12534,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         fake = self.permute_as_nhwc(10, 3, 7, 7)
         fake.max()
 
-
-    def _test_memory_format_empty_like(self, x):
-        nhwc = x.contiguous(memory_format=torch.channels_last)
-
-        like = torch.empty_like(nhwc, memory_format=torch.preserve_format)
-        self.assertFalse(like.is_contiguous())
-        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
-
-        like_x = torch.empty_like(x, memory_format=torch.preserve_format)
-        self.assertTrue(like_x.is_contiguous())
-        self.assertFalse(like_x.is_contiguous(memory_format=torch.channels_last))
-
-        like = torch.empty_like(x, memory_format=torch.channels_last)
-        self.assertFalse(like.is_contiguous())
-        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
-
-        like = torch.empty_like(nhwc, memory_format=torch.contiguous_format)
-        self.assertTrue(like.is_contiguous())
-        self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
-
-        like = torch.empty_like(nhwc)
-        self.assertFalse(like.is_contiguous())
-        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
-
-        sparse = x.to_sparse()
-        with self.assertRaises(RuntimeError):
-            z = torch.empty_like(sparse, memory_format=torch.preserve_format)
-
-    def test_memory_format_empty(self):
-        with self.assertRaises(RuntimeError):
-            x = torch.empty((3, 3), memory_format=torch.channels_last)
-        x = torch.empty((3, 3, 3, 3), memory_format=torch.channels_last)
-        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
-
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_memory_format_empty_like_cuda(self):
         x = torch.randn(10, 3, 32, 32).cuda()
@@ -12590,6 +12584,39 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_memory_format_empty_like_cpu(self):
         x = torch.randn(10, 3, 32, 32)
         self._test_memory_format_empty_like(x)
+
+    def _test_memory_format_empty_like(self, x):
+        nhwc = x.contiguous(memory_format=torch.channels_last)
+
+        like = torch.empty_like(nhwc, memory_format=torch.preserve_format)
+        self.assertFalse(like.is_contiguous())
+        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
+
+        like_x = torch.empty_like(x, memory_format=torch.preserve_format)
+        self.assertTrue(like_x.is_contiguous())
+        self.assertFalse(like_x.is_contiguous(memory_format=torch.channels_last))
+
+        like = torch.empty_like(x, memory_format=torch.channels_last)
+        self.assertFalse(like.is_contiguous())
+        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
+
+        like = torch.empty_like(nhwc, memory_format=torch.contiguous_format)
+        self.assertTrue(like.is_contiguous())
+        self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
+
+        like = torch.empty_like(nhwc)
+        self.assertFalse(like.is_contiguous())
+        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
+
+        sparse = x.to_sparse()
+        with self.assertRaises(RuntimeError):
+            z = torch.empty_like(sparse, memory_format=torch.preserve_format)
+
+    def test_memory_format_empty(self):
+        with self.assertRaises(RuntimeError):
+            x = torch.empty((3, 3), memory_format=torch.channels_last)
+        x = torch.empty((3, 3, 3, 3), memory_format=torch.channels_last)
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
 
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor

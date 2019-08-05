@@ -1385,6 +1385,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual void empty_tensor_restride(MemoryFormat memory_format) {
     is_contiguous_ = false;
     is_channels_last_contiguous_ = false;
+    is_channels_last_ = false;
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
         strides_.resize(sizes_.size(), 0);
@@ -1412,7 +1413,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
-  bool vitalyf_is_channels_last() const {
+  bool is_strides_like_channels_last() const {
     return is_channels_last_;
   }
 
@@ -1614,8 +1615,17 @@ protected:
   // should pack this into a bitfield.
   TensorTypeId type_id_;
   bool is_contiguous_ = true;
-  bool is_channels_last_contiguous_ = false;
+
+  // Tensor is stored in the channels last memory format, when dimensions
+  // order is NCHW and C-strides < W-strides < H-strides < N-strides
+  // (If size of any dimension is equal to 1, this dimension strides value
+  // is not taken into account).
   bool is_channels_last_ = false;
+
+  // Channels last contiguous tensor is channel last tensor which occupies
+  // contiguous memory block.
+  bool is_channels_last_contiguous_ = false;
+
   bool is_wrapped_number_ = false;
 
   // NOTE [ Metadata Change for a Detached Tensor ]

@@ -211,10 +211,16 @@ _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments
 
 
 def build_param_list(ctx, py_args, self_name):
-    if py_args.vararg is not None or py_args.kwarg is not None:
-        raise ValueError(_vararg_kwarg_err)
+    if py_args.kwarg is not None:
+        expr = py_args.kwarg
+        ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
+        raise NotSupportedError(ctx_range, _vararg_kwarg_err)
+    if py_args.vararg is not None:
+        expr = py_args.vararg
+        ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
+        raise NotSupportedError(ctx_range, _vararg_kwarg_err)
     if not PY2 and py_args.kw_defaults:
-        raise ValueError(_vararg_kwarg_err)
+        raise NotSupportedError(ctx_range, _vararg_kwarg_err)
     result = [build_param(ctx, arg, self_name, False) for arg in py_args.args]
     if not PY2:
         result += [build_params(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]

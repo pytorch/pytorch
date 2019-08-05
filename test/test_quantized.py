@@ -13,7 +13,7 @@ from hypothesis import strategies as st
 import hypothesis_utils as hu
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
-from common_quantized import _quantize, _dequantize, _requantize
+from common_quantized import _quantize, _dequantize
 
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
@@ -65,7 +65,6 @@ def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
         Prod_XqWq_ref += b_q
     Y_q_ref = _quantize(Prod_XqWq_ref, Y_scale / (X_scale * W_scale), Y_zp)
     return Y_q_ref
-
 
 class TestQuantizedOps(TestCase):
     """Computes the output shape given pooling parameters."""
@@ -432,7 +431,6 @@ class TestQuantizedLinear(unittest.TestCase):
         np.testing.assert_equal(W_q.q_scale(), W_q_origin.q_scale())
         np.testing.assert_equal(W_q.q_zero_point(), W_q_origin.q_zero_point())
 
-
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
     " Quantized convolution requires FBGEMM. FBGEMM does not play"
@@ -454,6 +452,12 @@ class TestQuantizedConv(unittest.TestCase):
            pad_h=st.integers(0, 2),
            pad_w=st.integers(0, 2),
            dilation=st.integers(1, 1),
+           X_scale=st.floats(0.2, 1.6),
+           X_zero_point=st.integers(0, 4),
+           W_scale=st.floats(0.2, 1.6),
+           W_zero_point=st.integers(-5, 5),
+           Y_scale=st.floats(0.2, 1.6),
+           Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
            use_relu=st.booleans())
     def test_qconv(
@@ -471,6 +475,12 @@ class TestQuantizedConv(unittest.TestCase):
             pad_h,
             pad_w,
             dilation,
+            X_scale,
+            X_zero_point,
+            W_scale,
+            W_zero_point,
+            Y_scale,
+            Y_zero_point,
             use_bias,
             use_relu
     ):
@@ -506,79 +516,84 @@ class TestQuantizedConv(unittest.TestCase):
 
         b_init = torch.from_numpy(np.random.randint(0, 10, (output_channels,)))
 
-        # Existing floating point conv operator
-        conv_op = torch.nn.Conv2d(
-            input_channels,
-            output_channels,
-            (kernel_h, kernel_w),
-            (stride_h, stride_w),
-            (pad_h, pad_w),
-            (dilation_h, dilation_w),
-            groups,
-        )
-
-        # assign the weights
-        conv_op.weight = torch.nn.Parameter(
-            W_init.to(dtype=torch.float), requires_grad=False
-        )
-        conv_op.bias = torch.nn.Parameter(
-            b_init.to(dtype=torch.float), requires_grad=False
-        ) if use_bias else None
+        stride = [stride_h, stride_w]
+        pad = [pad_h, pad_w]
+        dilation = [dilation_h, dilation_w]
 
         X_value_min = 0
         X_value_max = 4
         X_init = torch.from_numpy(np.random.randint(
             X_value_min, X_value_max, (batch_size, input_channels, height, width)))
 
-        # run on an input tensor
-        result_ref = conv_op(X_init.to(dtype=torch.float))
+        X = X_scale * (X_init - X_zero_point).to(dtype=torch.float)
 
-        # reformat X_init and W_init in the required format by conv operator
-        # NCHW -> NHWC
-        X_NHWC = X_init.permute([0, 2, 3, 1]).contiguous()
-        # K(C/G)RS -> KRS(C/G)
-        W_KRSC = W_init.permute([0, 2, 3, 1]).contiguous()
-
-        X_scale = 1.5
-        # Currently only 0 as zero point is supported.
-        X_zero_point = 0
-        X = X_scale * (X_NHWC - X_zero_point).to(dtype=torch.float)
-
-        W_scale = 2.5
-        W_zero_point = 0
-        W = W_scale * (W_KRSC - W_zero_point).to(dtype=torch.float)
+        W = W_scale * (W_init - W_zero_point).to(dtype=torch.float)
 
         b = X_scale * W_scale * (b_init - 0).to(dtype=torch.float)
 
-        X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
-        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zero_point, dtype=torch.qint8)
+        # Existing floating point conv operator
+        conv_op = torch.nn.Conv2d(input_channels,
+                                  output_channels,
+                                  (kernel_h, kernel_w),
+                                  (stride_h, stride_w),
+                                  (pad_h, pad_w),
+                                  (dilation_h, dilation_w),
+                                  groups)
+
+        # assign weights
+        conv_op.weight = torch.nn.Parameter(W, requires_grad=False)
+
+        conv_op.bias = torch.nn.Parameter(b, requires_grad=False) if use_bias else None
+
+        result_ref = conv_op(X)
+        if use_relu:
+            relu = torch.nn.ReLU()
+            result_ref = relu(result_ref)
+        # quantize reference results for comparision
+        result_ref_q = torch.quantize_linear(result_ref, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
+
+        # reformat X_init and W_init in the required format by qconv operator
+        # NCHW -> NHWC
+        X_NHWC = X.permute([0, 2, 3, 1]).contiguous()
+        # K(C/G)RS -> KRS(C/G)
+        W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
+
+        X_q = torch.quantize_linear(X_NHWC, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
+        W_q = torch.quantize_linear(W_KRSC, scale=W_scale, zero_point=W_zero_point, dtype=torch.qint8)
         b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32) if use_bias else None
 
-        W_prepack = qconv_prepack(W_q, [stride_h, stride_w], [pad_h, pad_w], [dilation_h, dilation_w], groups)
-        Y_scale = 7.3
-        Y_zero_point = 5
+        W_prepack = qconv_prepack(W_q, stride, pad, dilation, groups)
 
         Y_q = qconv(
             X_q,
             W_prepack,
             b_q,
-            [stride_h, stride_w],  # stride
-            [pad_h, pad_w],  # padding
-            [dilation_h, dilation_w],  # dilation
-            groups,  # groups
+            stride,
+            pad,
+            dilation,
+            groups,
             Y_scale,
             Y_zero_point,
         )
 
-        result_NHWK = result_ref.permute([0, 2, 3, 1])
-        result_q = _requantize(
-            result_NHWK.numpy(), X_scale * W_scale / Y_scale, Y_zero_point
-        )
-        if use_relu:
-            result_q[result_q < Y_zero_point] = Y_zero_point
+        # Back to NCHW format
+        Y_q = Y_q.permute([0, 3, 1, 2]).contiguous()
+
 
         # Make sure the results match
-        np.testing.assert_equal(result_q, Y_q.int_repr().numpy())
+        # assert_array_almost_equal compares using the following formula:
+        #     abs(desired-actual) < 1.5 * 10**(-decimal)
+        # (https://docs.scipy.org/doc/numpy/reference/generated/numpy.testing.assert_almost_equal.html)
+
+        # We use decimal = 0 to ignore off-by-1 differences between reference and
+        # test. Off-by-1 differences arise due to the order of round and
+        # zero_point addition operation, i.e., if addition followed by round is
+        # used by reference and round followed by addition is used by test, the
+        # results may differ by 1.
+
+        # For example, the result of round(2.5) + 1 is 3 while round(2.5 + 1) is 4
+        # assuming the rounding mode is round-to-nearest, ties-to-even.
+        np.testing.assert_array_almost_equal(result_ref_q.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=0)
 
     """Tests the correctness of the quantized::fbgemm_qconv_unpack op."""
     @given(X=hu.tensor_conv2d(min_batch=1, max_batch=3,

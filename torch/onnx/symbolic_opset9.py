@@ -1408,9 +1408,14 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
 
         extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
         if variant == 'RNN':
+            if bidirectional:
+                activation = [nonlinearity, nonlinearity]
+            else:
+                activation = [nonlinearity]
+
             prev_output, h_out = g.op('RNN', *inputs, outputs=2,
                                       hidden_size_i=hidden_size,
-                                      activations_s=[nonlinearity],
+                                      activations_s=activation,
                                       **extra_kwargs)
         elif variant == 'GRU':
             prev_output, h_out = g.op('GRU', *inputs, outputs=2,
@@ -1837,3 +1842,23 @@ def index(g, self, index):
                     axis_i=0)
 
             return g.op("Reshape", self, final_shape)
+
+
+@parse_args('v', 'is', 'i')
+def frobenius_norm(g, self, dim=None, keepdim=False):
+    sqrt = g.op('Mul', self, self)
+    sumsqrt = g.op('ReduceSum', sqrt, axes_i=dim, keepdims_i=keepdim)
+    return g.op('Sqrt', sumsqrt)
+
+
+@parse_args('v', 'i', 'b', 'v')
+def multinomial(g, input, num_samples, replacement=False, generator=None):
+    if generator is not None and not generator.node().mustBeNone():
+        _unimplemented("Multinomial", "generator is not supported for multinomial")
+    if not replacement and num_samples > 1:
+        _unimplemented("Multinomial", "replacement=False when num_samples > 1 is not supported for multinomial")
+
+    log_input = log(g, input)
+    return g.op("Multinomial", log_input,
+                dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
+                sample_size_i=num_samples)
