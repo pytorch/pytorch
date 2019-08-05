@@ -1,5 +1,3 @@
-import torch
-import warnings
 from .adam import Adam
 from .sgd import SGD
 
@@ -17,7 +15,7 @@ def extend_with_decoupled_weight_decay(base_optimizer):
     For adaptive gradient algorithms, it regularizes variables with large
     gradients more than L2 regularization would, which was shown to yield better
     training loss and generalization error in the paper above.
-    
+
     .. note:: The weight decay is implicitly scheduled by multiplying it with the
         learning rate.
 
@@ -27,16 +25,15 @@ def extend_with_decoupled_weight_decay(base_optimizer):
         should not be used.
 
     Example:
-        >>> AdamW = extend_with_decoupled_weight_decay(torch.optim.Adam)
-        >>> optimizer = AdamW(weight_decay=1e-5, lr=1e-3)
+        .optim.Adam)
+    >>> optimizer = AdamW(weight_decay=1e-5, lr=1e-3)
     """
-    
+
     class DecoupledWeightDecayOptimizer(base_optimizer):
 
-        __doc__ = \
-        """
+        __doc__ = """
         Implements the {0}W algorithm.
-            
+
         I.e., this class implements the update step of {0} with weight
         decay, where the weight decay is decoupled from the optimization
         steps w.r.t. to the loss function, as proposed in Decoupled Weight
@@ -44,23 +41,24 @@ def extend_with_decoupled_weight_decay(base_optimizer):
         https://arxiv.org/abs/1711.05101
 
         .. note:: The weight decay is implicitly scheduled by multiplying it with the
-        learning rate.
+            learning rate.
 
-        
         Arguments:
-            weight_decay (float, optional): decoupled weight decay (default: 1e-2).
             *args: arguments passed to the base optimizer.
-            **kwargs: keyword arguments passed to the base optimizer.
-        
+            **kwargs: keyword arguments passed to the base optimizer. May
+                additionally contain the keyword weight_decay (default: 1e-2).
+
         Details on the update step can be found in the documentation of the
         wrapped {0} optimizer.
         """.format(base_optimizer.__name__)
 
         def __init__(self, *args, **kwargs):
-            # Remove weight decay from kwargs to prevent L2 decay or unexpected
-            # keyword argument error
-            wd = kwargs.pop("weight_decay", 1e-2)
+            # Remove weight decay from kwargs to prevent unexpected keyword
+            # argument error
+            wd = kwargs.pop("weight_decay", None)
             super(DecoupledWeightDecayOptimizer, self).__init__(*args, **kwargs)
+            # use the positional weight decay argument
+            wd = wd or self.defaults["weight_decay"] or 1e-2
             self.defaults["decoupled_weight_decay"] = wd
             # update all param groups to contain the default weight decay
             # by re-adding them
