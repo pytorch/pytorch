@@ -1736,9 +1736,11 @@ class _TestTorchMixin(object):
 
             if (dtype == torch.half or dtype == torch.bool):
                 self.assertRaises(RuntimeError, lambda: m1 - m2)
-            else:
-                # bfloat16 has a lower precision so we have to have specified precision
+            elif (dtype == torch.bfloat16):
+                # bfloat16 has a lower precision so we have to have a separate check for it
                 self.assertEqual(m1 - m2, torch.tensor([1.11, 2.11], dtype=dtype), 0.01)
+            else:
+                self.assertEqual(m1 - m2, torch.tensor([1.11, 2.11], dtype=dtype))
 
     def test_csub(self):
         # with a tensor
@@ -1881,7 +1883,7 @@ class _TestTorchMixin(object):
 
         a1 = torch.tensor([4.2, 6.2], dtype=torch.bfloat16)
         a2 = torch.tensor([2., 2.], dtype=torch.bfloat16)
-        self.assertEqual(a1 / a2, torch.tensor([2.1, 3.1], dtype=torch.bfloat16), 0.1)
+        self.assertEqual(a1 / a2, torch.tensor([2.1, 3.1], dtype=torch.bfloat16), 0.01)
 
     def test_floordiv(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
