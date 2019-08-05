@@ -11,6 +11,10 @@ using torch::jit::Unpickler;
 
 } // namespace
 
+static constexpr char BUILTIN_OP_NAMESPACE_[] = "torch.ops.aten.";
+static constexpr char ATEN_PREFIX_[] = "aten::";
+static constexpr int ATEN_PREFIX_LEN_ = 6;
+
 ScriptCall::ScriptCall(
     std::shared_ptr<Operator> op, std::vector<at::IValue>&& args)
     : op_(std::move(op)), stack_(args) {}
