@@ -89,44 +89,28 @@ static inline double _get_epsilon(const ScalarType& sc_type) {
   }
 }
 
-// Validates input shapes and devices for linear solve methods (gesv, cholesky_solve)
-static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
-  int64_t self_is_cuda = self.is_cuda();
-  int64_t A_is_cuda = A.is_cuda();
-
-  std::stringstream ss;
-  if (self_is_cuda != A_is_cuda) {
-    ss << "Expected b and A to be on the same device, but found b on ";
-    if (self_is_cuda) {
-      ss << "GPU";
-    } else {
-      ss << "CPU";
-    }
-    ss << " and A on ";
-    if (A_is_cuda) {
-      ss << "GPU";
-    } else {
-      ss << "CPU";
-    }
-    ss << " instead.";
-    AT_ERROR(ss.str());
-  }
+// Validates input shapes and devices
+// for linear solve methods (solve, cholesky_solve, lu_solve, triangular_solve)
+static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, const char* name) {
+  TORCH_CHECK(self.device() == A.device(),
+              "Expected b and A to be on the same device, but found b on ",
+              self.device(), " and A on ", A.device(), " instead.");
 
   TORCH_CHECK(A.size(-1) == A.size(-2),
-           "A must be batches of square matrices, "
-           "but they are ", A.size(-1), " by ", A.size(-2), " matrices");
+              "A must be batches of square matrices, "
+              "but they are ", A.size(-1), " by ", A.size(-2), " matrices");
 
   TORCH_CHECK(A.size(-1) == self.size(-2),
-           "Incompatible matrix sizes for matmul: each A "
-           "matrix is ", A.size(-1), " by ", A.size(-1),
-           " but each b matrix is ", self.size(-2), " by ", self.size(-1));
+              "Incompatible matrix sizes for ", name, ": each A "
+              "matrix is ", A.size(-1), " by ", A.size(-1),
+              " but each b matrix is ", self.size(-2), " by ", self.size(-1));
 }
 
 // Validates input shapes for operations on batches of square matrices (inverse, cholesky, lu, symeig)
 static inline void squareCheckInputs(const Tensor& self) {
   TORCH_CHECK(self.size(-1) == self.size(-2),
-           "A must be batches of square matrices, "
-           "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
+              "A must be batches of square matrices, "
+              "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
 }
 
 /*
@@ -141,10 +125,10 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
       AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
     } else if (info > 0) {
       if (strstr(name, "svd")) {
-        AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")")
+        AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
       } else if (strstr(name, "symeig")) {
         AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
-                 " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.")
+                 " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
       } else {
         AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
       }
@@ -178,10 +162,10 @@ static inline void singleCheckErrors(int64_t info, const char* name) {
     AT_ERROR(name, ": Argument ", -info, " has illegal value");
   } else if (info > 0) {
     if (strstr(name, "svd")) {
-      AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")")
+      AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
     } else if (strstr(name, "symeig")) {
       AT_ERROR(name, ": the algorithm failed to converge; ", info,
-               " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.")
+               " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
     } else {
       AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
     }
@@ -195,8 +179,8 @@ static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
   }
 }
 
-static inline std::tuple<Tensor,Tensor> _linear_solve_broadcast_args(const Tensor& arg1, const Tensor& arg2) {
-  linearSolveCheckInputs(arg1, arg2);
+static inline std::tuple<Tensor,Tensor> _linear_solve_broadcast_args(const Tensor& arg1, const Tensor& arg2, const char* name) {
+  linearSolveCheckInputs(arg1, arg2, name);
 
   // broadcast the batch dimensions of arg1 and arg2.
   IntArrayRef arg1_batch_sizes(arg1.sizes().data(), arg1.ndimension() - 2);

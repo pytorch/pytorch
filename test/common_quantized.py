@@ -1,6 +1,7 @@
 r"""Importing this file includes common utility methods for checking quantized
 tensors and modules.
 """
+from __future__ import absolute_import, division, print_function, unicode_literals
 import numpy as np
 import torch
 
@@ -55,4 +56,4 @@ def _calculate_dynamic_qparams(X, dtype):
         zero_point = qmin - round(min_val / scale)
         zero_point = max(qmin, zero_point)
         zero_point = min(qmax, zero_point)
-    return [scale, zero_point]
+    return [float(scale), int(zero_point)]

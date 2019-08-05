@@ -39,7 +39,7 @@ Tensor quantized_cat(const std::vector<Tensor>& qxs, int64_t axis,
     qy = at::quantize_linear(y, scale, zero_point, SCALAR_TYPE);
     if (ReLUFused) {
       auto iter = TensorIterator::unary_op(qy, qy);
-      cpu_kernel(*iter, [&](scalar_t value) -> scalar_t {
+      cpu_kernel(iter, [&](scalar_t value) -> scalar_t {
         return scalar_t(std::max<underlying_t>(value.val_, zero_point));
       });
     }

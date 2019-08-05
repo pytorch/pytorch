@@ -115,7 +115,6 @@ libtorch_sources = [
     "torch/csrc/api/src/jit.cpp",
     "torch/csrc/jit/script/edit_distance.cpp",
     "torch/csrc/jit/script/logging.cpp",
-    "torch/csrc/jit/script/final_returns.cpp",
     "torch/csrc/jit/script/convert_to_ssa.cpp",
     "torch/csrc/jit/script/exit_transforms.cpp",
     "torch/csrc/jit/script/inline_loop_condition.cpp",
