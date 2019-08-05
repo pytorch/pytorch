@@ -773,7 +773,7 @@ static inline void grid_sample_2d_grid_slice_iterator(
 
 Tensor grid_sampler_2d_cpu_kernel_impl(const Tensor& input, const Tensor& grid,
                                        int64_t interpolation_mode,
-                                       int64_t padding_mode) {
+                                       int64_t padding_mode, bool align_corners) {
   auto N = input.size(0);
   auto H = grid.size(1);
   auto W = grid.size(2);
@@ -831,7 +831,8 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
                                          const Tensor& input,
                                          const Tensor& grid,
                                          int64_t interpolation_mode,
-                                         int64_t padding_mode) {
+                                         int64_t padding_mode,
+                                         bool align_corners) {
   // grad_output should be contiguous most of time. Ensuring that it is
   // contiguous can greatly simplify this code.
   auto grad_output = grad_output_.contiguous();

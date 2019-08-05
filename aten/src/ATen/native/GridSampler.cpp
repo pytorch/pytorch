@@ -106,7 +106,8 @@ namespace {
   template<typename scalar_t>
   Tensor grid_sampler_3d_cpu_impl(const Tensor& input, const Tensor& grid,
                                   GridSamplerInterpolation interpolation_mode,
-                                  GridSamplerPadding padding_mode) {
+                                  GridSamplerPadding padding_mode,
+                                  bool align_corners) {
     int64_t N = input.size(0);
     int64_t C = input.size(1);
     int64_t inp_D = input.size(2);
@@ -274,7 +275,8 @@ namespace {
   grid_sampler_3d_backward_cpu_impl(const Tensor& grad_output,
                                     const Tensor& input, const Tensor& grid,
                                     GridSamplerInterpolation interpolation_mode,
-                                    GridSamplerPadding padding_mode) {
+                                    GridSamplerPadding padding_mode,
+                                    bool align_corners) {
     auto grad_input = at::zeros_like(input);
     auto grad_grid = at::empty_like(grid);
     // If interpolation mode is Nearest, then grad_grid is not filled in the
@@ -506,8 +508,10 @@ namespace {
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
-                           int64_t interpolation_mode, int64_t padding_mode) {
-  return grid_sampler_2d_cpu_kernel(kCPU, input, grid, interpolation_mode, padding_mode);
+                           int64_t interpolation_mode, int64_t padding_mode,
+                           bool align_corners) {
+  return grid_sampler_2d_cpu_kernel(
+    kCPU, input, grid, interpolation_mode, padding_mode, align_corners);
 }
 
 DEFINE_DISPATCH(grid_sampler_2d_cpu_kernel);
@@ -515,19 +519,21 @@ DEFINE_DISPATCH(grid_sampler_2d_cpu_kernel);
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 Tensor grid_sampler_3d_cpu(const Tensor& input, const Tensor& grid,
-                           int64_t interpolation_mode, int64_t padding_mode) {
+                           int64_t interpolation_mode, int64_t padding_mode,
+                           bool align_corners) {
   return AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler3d_cpu", [&] {
     return grid_sampler_3d_cpu_impl<scalar_t>(
       input, grid, static_cast<GridSamplerInterpolation>(interpolation_mode),
-      static_cast<GridSamplerPadding>(padding_mode));
+      static_cast<GridSamplerPadding>(padding_mode), align_corners);
   });
 }
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 std::tuple<Tensor, Tensor>
 grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
-                             int64_t interpolation_mode, int64_t padding_mode) {
-  return grid_sampler_2d_backward_cpu_kernel(kCPU, grad_output, input, grid, interpolation_mode, padding_mode);
+                             int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
+  return grid_sampler_2d_backward_cpu_kernel(
+    kCPU, grad_output, input, grid, interpolation_mode, padding_mode, align_corners);
 }
 
 DEFINE_DISPATCH(grid_sampler_2d_backward_cpu_kernel);
@@ -535,12 +541,12 @@ DEFINE_DISPATCH(grid_sampler_2d_backward_cpu_kernel);
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 std::tuple<Tensor, Tensor>
 grid_sampler_3d_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
-                             int64_t interpolation_mode, int64_t padding_mode) {
+                             int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
   return AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler_3d_backward_cpu", [&] {
     return grid_sampler_3d_backward_cpu_impl<scalar_t>(
       grad_output, input, grid,
       static_cast<GridSamplerInterpolation>(interpolation_mode),
-      static_cast<GridSamplerPadding>(padding_mode));
+      static_cast<GridSamplerPadding>(padding_mode), align_corners);
   });
 }
 
