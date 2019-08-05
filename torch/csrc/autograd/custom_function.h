@@ -56,10 +56,13 @@ TORCH_API variable_list _wrap_outputs(
 // auto y = MyFunction::apply(6, x);
 // Example backward call:
 // y[0].sum().backward();
+template<typename X, typename... Args>
+using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
+
 template <class T>
 struct TORCH_API Function {
-  template<typename... Args>
-  static variable_list apply(Args&&... args);
+  template<typename X=T, typename... Args>
+  static auto apply(Args&&... args) -> typename std::enable_if<std::is_same<X,T>::value, forward_t<X,Args...>>::type;
 };
 
 // Context to save information during forward that can be accessed in backward
@@ -159,9 +162,15 @@ template <typename... Args>
 void extract_vars(std::vector<bool> &is_var, variable_list& list, Args&& ... args) {
 }
 
+template <typename T>
+typename std::enable_if<std::is_same<T, variable_list>::value, T>::type to_output_type(variable_list& output_list) { return output_list; }
+
+template <typename T>
+typename std::enable_if<std::is_same<T, Variable>::value, T>::type to_output_type(variable_list& output_list) { return output_list[0]; }
+
 template<class T>
-template<typename... Args>
-variable_list Function<T>::apply(Args&&... args) {
+template<typename X, typename... Args>
+auto Function<T>::apply(Args&&... args) -> typename std::enable_if<std::is_same<X,T>::value, forward_t<X,Args...>>::type {
   std::shared_ptr<CppNode<T>> node(new CppNode<T>(), deleteNode);
   variable_list input_vars;
 
@@ -182,7 +191,8 @@ variable_list Function<T>::apply(Args&&... args) {
       node->input_info_.emplace_back(var);
   }
 
-  variable_list outputs;
+  typedef forward_t<X, Args...> forward_return_t;
+  forward_return_t outputs;
   {
     AutoGradMode grad_mode(false);
     outputs = T::forward(&node->ctx_, std::forward<Args>(args)...);
@@ -201,7 +211,7 @@ variable_list Function<T>::apply(Args&&... args) {
     node->save_variables_to_ctx();
   }
 
-  return wrapped_outputs;
+ return to_output_type<forward_return_t>(wrapped_outputs);
 }
 
 // The logic here is the same as PyNode::apply, so changes to it should be done
