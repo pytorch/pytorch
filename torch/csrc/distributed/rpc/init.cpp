@@ -64,7 +64,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
 } // namespace
 
-static PyMethodDef methods[] = {
+static PyMethodDef methods[] = {  // NOLINT
     {"_rpc_init", (PyCFunction)rpc_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 

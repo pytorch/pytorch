@@ -11,14 +11,9 @@ using torch::jit::Unpickler;
 
 } // namespace
 
-#define BUILTIN_OP_NAMESPACE "torch.ops.aten."
-#define ATEN_PREFIX "aten::"
-#define ATEN_PREFIX_LEN 6
-
 ScriptCall::ScriptCall(
     std::shared_ptr<Operator> op, std::vector<at::IValue>&& args)
     : op_(std::move(op)), stack_(args) {}
-
 
 std::shared_ptr<Operator> ScriptCall::op() const {
   return *op_;
@@ -46,9 +41,9 @@ Message ScriptCall::toMessage() {
     // insert qualified name
     auto opName = (*op_)->schema().name();
     TORCH_CHECK(opName.find("::") == opName.rfind("::")
-        && opName.rfind(ATEN_PREFIX) == 0, "Unexpected operator name ", opName);
+        && opName.rfind(ATEN_PREFIX_) == 0, "Unexpected operator name ", opName);
     // aten::add -> torch.ops.aten.add
-    opName.replace(0, ATEN_PREFIX_LEN, BUILTIN_OP_NAMESPACE);
+    opName.replace(0, ATEN_PREFIX_LEN_, BUILTIN_OP_NAMESPACE_);
     pickler.pushIValue(opName);
   }
   pickler.endTuple();
@@ -71,7 +66,7 @@ ScriptCall ScriptCall::fromMessage(const Message& message) {
       "contain one IValue as the operator schema.");
 
   const std::string& qualifiedName = values.back().toStringRef();
-  if (qualifiedName.rfind(BUILTIN_OP_NAMESPACE) == 0) {
+  if (qualifiedName.rfind(BUILTIN_OP_NAMESPACE_) == 0) {
     values.pop_back();
 
     const std::string& str_schema = values.back().toStringRef();
