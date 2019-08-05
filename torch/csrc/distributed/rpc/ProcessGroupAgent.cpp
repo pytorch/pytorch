@@ -77,13 +77,6 @@ ProcessGroupAgent::ProcessGroupAgent(
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
-ProcessGroupAgent::~ProcessGroupAgent() {
-  if (!stop_) {
-    AT_ERROR(stop_, "Must call ProcessGroupAgent::shutdown before destructor");
-  }
-}
-
-
 void ProcessGroupAgent::join() {
   // Every process i sends a SHUTDOWN message to process i + 1. This is
   // necessary for now because:
