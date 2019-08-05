@@ -314,7 +314,7 @@ def format_postrecord_trace(declaration):
             at::Tensor local_output = %s;
             if (local_output.defined()) {
             if (local_output.dim() > 2 && local_output.dim() < 6) {
-            bool output_c_l = local_output.unsafeGetTensorImpl()->vitalyf_is_channels_last();
+            bool output_c_l = local_output.suggest_memory_format() == MemoryFormat::ChannelsLast;
             std::cout << "output %s of %s is " << output_c_l << " size " << local_output.sizes() << std::endl;
             AT_ASSERT(output_c_l, " output of %s must be channels_last ");
             } else {
@@ -432,7 +432,7 @@ def format_prerecord_trace(declaration):
 
     CHECK_CHANNLES_LAST = """
     {
-    bool ttmmpp = %s.unsafeGetTensorImpl()->vitalyf_is_channels_last();
+    bool ttmmpp = %s.suggest_memory_format() == MemoryFormat::ChannelsLast;
     if (ttmmpp) {
     std::cout << "input %s of %s is " << ttmmpp << " size " << %s.sizes() << std::endl;
     }

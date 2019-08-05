@@ -198,11 +198,7 @@ std::vector<at::Tensor> scatter(
           "(expected ", device_index, ")");
       cuda_guard.reset_stream(*(*streams)[chunk]);
     }
-    auto memory_format = MemoryFormat::Contiguous;
-    if (chunks[chunk].unsafeGetTensorImpl()->vitalyf_is_channels_last())
-    {
-      memory_format = MemoryFormat::ChannelsLast;
-    }
+    auto memory_format = chunks[chunk].suggest_memory_format();
     chunks[chunk] = chunks[chunk].contiguous(memory_format).to(
         {at::DeviceType::CUDA, device_index}, /*non_blocking=*/true);
   }

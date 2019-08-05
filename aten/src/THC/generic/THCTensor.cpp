@@ -155,7 +155,7 @@ THCTensor *THCTensor_(newClone)(THCState *state, THCTensor *self)
   at::Tensor tensor_wrap = THTensor_wrap(tensor);
   at::Tensor self_wrap = THTensor_wrap(self);
   tensor_wrap.resize_as_(self_wrap);
-  if (self->vitalyf_is_channels_last()) {
+  if (self_wrap.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
     tensor->empty_tensor_restride(at::MemoryFormat::ChannelsLast);
   }
   THCTensor_(copy)(state, tensor, self);

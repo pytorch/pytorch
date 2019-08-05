@@ -898,11 +898,7 @@ Tensor cudnn_convolution_forward(
 {
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
-  auto memory_format = MemoryFormat::Contiguous;
-  if (input->unsafeGetTensorImpl()->vitalyf_is_channels_last()) {
-    memory_format = MemoryFormat::ChannelsLast;
-  }
-
+  auto memory_format = input->suggest_memory_format();
   auto output_t = at::empty(
                     conv_output_size(input->sizes(), weight->sizes(),
                                      padding, stride, dilation, groups),

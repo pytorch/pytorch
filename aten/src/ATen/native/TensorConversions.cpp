@@ -20,11 +20,7 @@ static inline Device ensure_has_index(Device device) {
 }
 
 static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking) {
-  auto memory_format = MemoryFormat::Contiguous;
-  if (self.unsafeGetTensorImpl()->vitalyf_is_channels_last())
-  {
-    memory_format = MemoryFormat::ChannelsLast;
-  }
+  auto memory_format = self.suggest_memory_format();
   auto r = at::empty(self.sizes(), options, memory_format);
   r.copy_(self, non_blocking);
   return r;

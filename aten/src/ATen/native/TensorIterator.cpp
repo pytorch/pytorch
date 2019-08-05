@@ -220,7 +220,7 @@ void TensorIterator::analyze_memory_formats() {
   for (auto& op : operands_) {
     if (!op.tensor.defined())
       continue;
-    if (op.tensor.unsafeGetTensorImpl()->vitalyf_is_channels_last()) {
+    if (op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
       input_had_channels_last_format_ = true;
     }
   }
