@@ -8410,6 +8410,12 @@ class _TestTorchMixin(object):
         val2 = rec.select(-1, -1).data.abs()[0][0][0].sum()
         self.assertEqual(val1, val2, 1e-8, 'absolute value')
 
+        # Both abs(0.0) and abs(-0.0) should result in 0.0
+        for dtype in (torch.float, torch.double):
+            abs_zeros = torch.tensor([0.0, -0.0], dtype=dtype).abs().tolist()
+            for num in abs_zeros:
+                self.assertGreater(math.copysign(1.0, num), 0.0)
+
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
         float_types = [
