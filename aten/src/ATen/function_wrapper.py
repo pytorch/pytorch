@@ -1086,8 +1086,7 @@ def create_generic(top_env, declarations):
         # that is sent to top_env. This is because some of this code (Type.h,
         # Tensor.h, TensorMethods.h) is checked into the repo and must be
         # the same regardless of BUILD_NAMEDTENSOR status.
-        is_named_tensor_only = (has_named_tensor_formals(formals) or
-                                option['api_name'] == 'align_tensors')
+        is_named_tensor_only = has_named_tensor_formals(formals)
 
         def check_namedtensor_enabled(code):
             if is_named_tensor_only:
