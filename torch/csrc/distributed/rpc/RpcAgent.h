@@ -43,6 +43,9 @@ class RpcAgent {
   // If ``message.isRequest()`` is true, the ``FutureMessage`` will be completed
   // when the response arrives. For other message types, the Future should be
   // ignored by the caller.
+  //
+  // TODO: avoid passing strings all the time, e.g., by using symbols as a
+  // faster alternative.
   virtual std::shared_ptr<FutureMessage> send(
       const std::string& to, Message&& message) = 0;
 

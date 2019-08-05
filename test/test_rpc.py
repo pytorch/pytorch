@@ -11,6 +11,7 @@ from common_utils import load_tests, run_tests
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+
 if not dist.is_available():
     print('c10d not available, skipping tests')
     sys.exit(0)
@@ -28,6 +29,7 @@ def _wrap_with_rpc(func):
 
     return wrapper
 
+
 class RpcTest(MultiProcessTestCase):
 
     @property
@@ -40,7 +42,6 @@ class RpcTest(MultiProcessTestCase):
         dstRank = n % self.world_size
         ret = dist.rpc_sync('worker%d' % dstRank, torch.add,
                             args=(torch.ones(n, n), torch.ones(n, n)))
-        dist.barrier()
         self.assertEqual(ret, torch.ones(n, n) * 2)
 
     @_wrap_with_rpc
@@ -59,7 +60,6 @@ class RpcTest(MultiProcessTestCase):
                              args=(torch.ones(n, n), torch.ones(n, n)))
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
-
     @_wrap_with_rpc
     def test_nonzero(self):
         n = self.rank + 1
@@ -76,10 +76,7 @@ class RpcTest(MultiProcessTestCase):
             n = i + self.rank + 1
             ret = dist.rpc_sync('worker%d' % dstRank, torch.add,
                                 args=(torch.ones(n, n), torch.ones(n, n)))
-
             self.assertEqual(ret, torch.ones(n, n) * 2)
-
-        dist.barrier()
 
 
 if __name__ == '__main__':
