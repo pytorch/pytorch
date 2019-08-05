@@ -960,17 +960,17 @@ jobs:
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_cuda10_1_cudnn7_py3_build:
+  pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10.1-cudnn7-py3-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3:327"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:327"
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_cuda10_1_cudnn7_py3_test:
+  pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10.1-cudnn7-py3-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3:327"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:327"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2815,13 +2815,13 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
-      - pytorch_linux_xenial_cuda10_1_cudnn7_py3_build:
+      - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build:
           requires:
             - setup
-      - pytorch_linux_xenial_cuda10_1_cudnn7_py3_test:
+      - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_test:
           requires:
             - setup
-            - pytorch_linux_xenial_cuda10_1_cudnn7_py3_build
+            - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build
       - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
           requires:
             - setup
