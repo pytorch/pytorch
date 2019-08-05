@@ -3987,7 +3987,6 @@ class TestNN(NNTestCase):
 
                     input = torch.randn((1,) + output_size).fill_(1.0)
                     output = module(input)
-                    print(input, output)
                     self.assertAlmostEqual(input, output)
 
     def test_Conv2d_naive_groups(self):
