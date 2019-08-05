@@ -1142,13 +1142,13 @@ void testAliasRegistration() {
   }
   {
     auto registry = torch::RegisterOperators().op(
-        "foo::rand6(Tensor arg1) -> Tensor",
+        "aten::rand6(Tensor arg1) -> Tensor",
         torch::RegisterOperators::options()
             .catchAllKernel([](at::Tensor) -> at::Tensor {
               return at::rand({2, 2});
             })
             .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
-    const auto rand_op = Symbol::fromQualString("foo::rand6");
+    const auto rand_op = Symbol::fromQualString("aten::rand6");
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
     auto b = graph->insert(rand_op, {a});
@@ -1159,15 +1159,11 @@ void testAliasRegistration() {
   }
   {
     auto registry = torch::RegisterOperators().op(
-        "foo::rand7(Tensor(a) arg1) -> Tensor(a)",
+        "aten::rand7(Tensor(a) arg1) -> Tensor(a)",
         torch::RegisterOperators::options()
             .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
             .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
-    const auto rand_op = Symbol::fromQualString("foo::rand");
-
-
-
-
+    const auto rand_op = Symbol::fromQualString("aten::rand7");
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
     auto b = graph->insert(rand_op, {a});
@@ -1177,11 +1173,11 @@ void testAliasRegistration() {
   }
   {
     auto registry = torch::RegisterOperators().op(
-        "foo::rand8(Tensor(a) arg1) -> Tensor(b)",
+        "aten::rand8(Tensor(a) arg1) -> Tensor(b)",
         torch::RegisterOperators::options()
             .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
             .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
-    const auto rand_op = Symbol::fromQualString("foo::rand8");
+    const auto rand_op = Symbol::fromQualString("aten::rand8");
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
     auto b = graph->insert(rand_op, {a});
