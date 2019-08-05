@@ -1632,6 +1632,50 @@ class _TestTorchMixin(object):
         res2 = x1.sum(axis=(0, 2), keepdims=True)
         self.assertEqual(res1, res2)
 
+    def test_addcdiv(self):
+        def _test_addcdiv(a, alpha, b, c):
+            actual = torch.addcdiv(a, alpha, b, c, equal_nan=True)
+            expected = a + alpha * (b / c)
+            self.assertTrue(torch.allclose(expected, actual))
+
+        for device in  torch.testing.get_all_device_types():
+            for dtype in [torch.float, torch.double]:
+                _test_addcdiv(
+                    torch.randn(2, 2, dtype=dtype, device=device),
+                    0.5,
+                    torch.randn(2, 2, dtype=dtype, device=device),
+                    torch.randn(2, 2, dtype=dtype, device=device))
+                _test_addcdiv(
+                    torch.randn(2, 2, dtype=dtype, device=device),
+                    -10,
+                    torch.randn(2, 2, dtype=dtype, device=device),
+                    torch.randn(2, 2, dtype=dtype, device=device))
+                _test_addcdiv(
+                    torch.randn(2, 2, dtype=dtype, device=device),
+                    0,
+                    torch.randn(2, 2, dtype=dtype, device=device),
+                    torch.randn(2, 2, dtype=dtype, device=device))
+                _test_addcdiv(
+                    torch.randn(5, 5, dtype=dtype, device=device),
+                    0,
+                    torch.randn(5, 5, dtype=dtype, device=device),
+                    torch.zeros(5, 5, dtype=dtype, device=device))
+                _test_addcdiv(
+                    torch.randn(5, 5, dtype=dtype, device=device),
+                    10,
+                    torch.zeros(5, 5, dtype=dtype, device=device),
+                    torch.zeros(5, 5, dtype=dtype, device=device))
+                _test_addcdiv(
+                    torch.randn(5, 5, dtype=dtype, device=device),
+                    10,
+                    torch.randn(5, 5, dtype=dtype, device=device),
+                    torch.zeros(5, 5, dtype=dtype, device=device))
+                _test_addcdiv(
+                    torch.randn(5, 5, dtype=dtype, device=device),
+                    0,
+                    torch.zeros(5, 5, dtype=dtype, device=device),
+                    torch.zeros(5, 5, dtype=dtype, device=device))
+
     def test_add(self):
         for device in torch.testing.get_all_device_types():
             # [res] torch.add([res,] tensor1, tensor2)
