@@ -689,13 +689,12 @@ const std::vector<std::string> functions = {
                 return grad_output.reshape(self_size), None
 
             return torch.view(self, size), backward
-
     )",
     R"(
         def AD_sizes_if_not_equal_multi(t1, t2, res):
             return torch._size_if_not_equal(t1.size(), res.size()), torch._size_if_not_equal(t2.size(), res.size())
 
-        def mul(self, other):
+        def mul_0(self, other):
             result = self * other
             self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
 
@@ -707,8 +706,13 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_other
 
             return result, backward
+        
+        def mul_1(self, other: number):
+            def backward(grad_output):
+                return grad_output * other, None
+            return self * other, backward
 
-        def div(self, other):
+        def div_0(self, other):
             result = self / other
             self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
 
@@ -718,6 +722,11 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_other
 
             return result, backward
+        
+        def div_1(self, other: number):
+            def backward(grad_output):
+                return grad_output / other, None
+            return self / other, backward
 
         def max(self, other):
             result = torch.max(self, other)
@@ -1048,6 +1057,18 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None, None, None, None
             return output, backward
 
+        def max_pool2d_with_indices(self,
+                                    kernel_size: List[int],
+                                    stride: List[int],
+                                    padding: List[int],
+                                    dilation: List[int],
+                                    ceil_mode: bool):
+            output, indices = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
+            def backward(grad_output):
+                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
+                return grad_self, None, None, None, None, None
+            return output, indices, backward
+
         def batch_norm(input : Tensor,
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
@@ -1289,7 +1310,130 @@ const std::vector<std::string> functions = {
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
 
-      )"};
+      )", 
+      R"(
+        def add_0(self, 
+                  other,
+                  *, 
+                  alpha: number = 1.0):
+            self_size = self.size()
+            other_size = other.size()
+            def backward(grad_output):
+                grad_other = (grad_output * alpha)._grad_sum_to_size(other_size)
+                grad_self = (grad_output)._grad_sum_to_size(self_size)
+                return grad_self, grad_other, None
+            return torch.add(self, other, alpha=alpha), backward
+        
+        def add_1(self,
+                  other: number,
+                  alpha: number = 1.0):
+            def backward(grad_output):
+                return grad_output, None, None
+            return torch.add(self, other, alpha=alpha), backward
+
+        def sub_0(self,
+                  other,
+                  *,
+                  alpha: number = 1.0):
+            self_size = self.size()
+            other_size = other.size()
+            def backward(grad_output):
+                grad_other = (-grad_output * alpha)._grad_sum_to_size(other_size)
+                grad_self = (grad_output)._grad_sum_to_size(self_size)
+                return grad_self, grad_other, None
+            return torch.sub(self, other, alpha=alpha), backward
+
+        def sub_1(self,
+                  other: number,
+                  alpha: number = 1.0):
+            def backward(grad_output):
+                return grad_output, None, None
+            return torch.sub(self, other, alpha=alpha), backward
+        
+        def clamp(self,
+                  min: Optional[number],
+                  max: Optional[number]):
+            def backward(grad_output):
+                # Note: duplication of return is intentional to allow fusion
+                if min is not None and max is not None:
+                    mask = ((self >= float(min)) * (self <= float(max))).type_as(self)
+                    return grad_output * mask, None, None
+                elif min is not None:
+                    mask = (self >= float(min)).type_as(self)
+                    return grad_output * mask, None, None
+                elif max is not None: 
+                    mask = (self <= float(max)).type_as(self)
+                    return grad_output * mask, None, None
+                else: #min is None and max is None
+                    return grad_output, None, None
+
+            return torch.clamp(self, min=min, max=max), backward
+
+        def threshold(self,
+                      threshold: number,
+                      value: number):
+            def backward(grad_output):
+                mask = (self >= threshold).type_as(self)
+                return grad_output * mask, None, None
+            return torch.threshold(self, threshold, value), backward
+
+        def fmod(self,
+                 other: number):
+            def backward(grad_output):
+                return grad_output, None
+            return torch.fmod(self, other), backward
+        
+        def remainder(self,
+                      other: number):
+            def backward(grad_output):
+                return grad_output, None
+            return torch.remainder(self, other), backward
+        
+        def addmm(self, 
+                  mat1, 
+                  mat2, 
+                  *, 
+                  beta: number, 
+                  alpha: number):
+            self_size = self.size()
+            def backward(grad_output):
+                self_grad = (grad_output * beta)._grad_sum_to_size(self_size)
+                mat1_grad = grad_output.mm(mat2.t()) * alpha
+                mat2_grad = mat1.t().mm(grad_output) * alpha
+                return self_grad, mat1_grad, mat2_grad, None, None
+            return torch.addmm(self, mat1, mat2, beta=beta, alpha=alpha), backward
+
+        # Comparison operators
+        def lt(self, other: number):
+            def backward(grad_output):
+                return None, None
+            return torch.lt(self, other), backward
+        
+        def le(self, other: number):
+            def backward(grad_output):
+                return None, None
+            return torch.le(self, other), backward
+        
+        def gt(self, other: number):
+            def backward(grad_output):
+                return None, None
+            return torch.gt(self, other), backward
+
+        def ge(self, other: number):
+            def backward(grad_output):
+                return None, None
+            return torch.ge(self, other), backward
+
+        def eq(self, other: number):
+            def backward(grad_output):
+                return None, None
+            return torch.eq(self, other), backward
+
+        def ne(self, other: number):
+            def backward(grad_output):
+                return None, None
+            return torch.ne(self, other), backward
+    )"};
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
 // This map is a workaround to cache compiled gradient_pairs. Ideally this graph
