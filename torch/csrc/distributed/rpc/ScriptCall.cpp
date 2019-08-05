@@ -86,6 +86,8 @@ ScriptCall ScriptCall::fromMessage(const Message& message) {
 
 std::shared_ptr<Operator> ScriptCall::matchOperator(
     at::Symbol& symbol, const std::string& str_schema) {
+  // TODO: This is a temporary solution. We should pass enough information to
+  // allow deterministically matched to one operator.
   for (auto op: torch::jit::getAllOperatorsFor(symbol)) {
     if (toString(op->schema()).compare(str_schema) == 0) {
       return op;
