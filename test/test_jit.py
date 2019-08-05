@@ -2093,21 +2093,28 @@ graph(%Ra, %Rb):
         ten = torch.rand(3, 3)
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
 
-    def test_sparse_tensors_error(self):
+    @suppress_warnings
+    def test_sparse_tensors(self):
         @torch.jit.ignore
         def get_sparse():
             return torch.sparse.FloatTensor(2, 3)
 
         @torch.jit.script
-        def sparse(input):
+        def test_is_sparse(input):
+            # type: (Tensor) -> bool
+            return input.is_sparse
+
+        script_out_is_sparse = test_is_sparse(get_sparse())
+        script_out_is_dense = test_is_sparse(torch.randn(2, 3))
+        self.assertEqual(script_out_is_sparse, True)
+        self.assertEqual(script_out_is_dense, False)
+
+        def test_basic_sparse(input):
             output = get_sparse()
             return output, input
 
-        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
-            sparse(get_sparse())
-
-        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
-            sparse(torch.tensor([1]))
+        self.checkScript(test_basic_sparse, (get_sparse(),))
+        self.checkScript(test_basic_sparse, (torch.tensor([1]),))
 
     def test_tuple_specialization(self):
         @torch.jit.script
@@ -3062,6 +3069,84 @@ def foo(x):
                 o2 = cu.f()
             self.assertEqual(o1, o2)
 
+    def test_tracing_hooks(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+
+            def forward(self, x):
+                return x + x
+
+        def test_hook(is_post_hook, hook, fc):
+            n = Net()
+            if is_post_hook:
+                n.register_forward_hook(hook)
+            else:
+                n.register_forward_pre_hook(hook)
+
+            module = torch.jit.trace(n, (torch.tensor(1.0),))
+
+            eager_input = torch.tensor(1.0)
+            eager_out = n(eager_input)
+
+            fc.run(module.forward.graph)
+            input = torch.tensor(1.0)
+            output = module(input)
+
+            self.assertEqual(input, eager_input)
+            self.assertEqual(output, eager_out)
+
+        def hook_no_return(mod, input, output):
+            input[0].add_(1)
+            output.sub_(1)
+
+        fc = FileCheck().check("add(").check("add_(").check("sub_(")
+        test_hook(True, hook_no_return, fc)
+
+        def hook_return(mod, input, output):
+            input[0].add_(1)
+            return output - 3
+
+        fc = FileCheck().check("add(").check("add_(").check("sub(")
+        test_hook(True, hook_return, fc)
+
+        b = torch.tensor(3.0)
+
+        def captured_hook(mod, input, output):
+            return output - b
+
+        fc = FileCheck().check("add(").check("sub(")
+        test_hook(True, captured_hook, fc)
+
+        def pre_hook_no_ret(mod, input):
+            input[0].add_(3)
+
+        fc = FileCheck().check("add_(").check("add(")
+        test_hook(False, pre_hook_no_ret, fc)
+
+        def pre_hook_ret(mod, input):
+            return input[0] - 4
+
+        fc = FileCheck().check("sub(").check("add(")
+        test_hook(False, pre_hook_ret, fc)
+
+    def test_tracing_backward_hook_error(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+
+            def forward(self, x):
+                return x + x
+
+        n = Net()
+
+        def backward_hook(module, grad_input, grad_output):
+            pass
+
+        n.register_backward_hook(backward_hook)
+        with self.assertRaisesRegex(Exception, "backward hooks assigned"):
+            torch.jit.trace(n, (torch.tensor(1.0),))
+
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
@@ -3463,14 +3548,21 @@ def foo(xyz):
         self.checkScript(f, (x,))
 
     def test_tensor_grad(self):
-        x = torch.tensor(1.0, requires_grad=True)
-        y = torch.tensor(1.0, requires_grad=False)
+        x = torch.randn(3, 4, requires_grad=True)
+        y = torch.randn(3, 4, requires_grad=False)
 
-        def f(x):
+        def f_requires_grad(x):
             return x.requires_grad
 
-        self.checkScript(f, (x,))
-        self.checkScript(f, (y,))
+        self.checkScript(f_requires_grad, (x,))
+        self.checkScript(f_requires_grad, (y,))
+
+        def f_grad(x):
+            return x.grad
+
+        x.sum().backward()
+        self.checkScript(f_grad, (x,))
+        self.checkScript(f_grad, (y,))
 
     def test_tensor_dtype(self):
         x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
@@ -12819,6 +12911,40 @@ a")
 
         self.assertEqual(eager_out, script_out)
 
+    def test_nn_GRU(self):
+        from torch.nn.utils.rnn import PackedSequence
+        seq_input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
+        tensor_input = torch.randn(5, 5, 5)
+
+        class SeqLengthGRU(torch.jit.ScriptModule):
+            def __init__(self):
+                super(SeqLengthGRU, self).__init__()
+                self.x = torch.nn.GRU(5, 5)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                # type: (PackedSequence) -> Tuple[PackedSequence, Tensor]
+                return self.x(input)
+
+        class TensorGRU(torch.jit.ScriptModule):
+            def __init__(self):
+                super(TensorGRU, self).__init__()
+                self.x = torch.nn.GRU(5, 5)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return self.x(input)
+
+        seq_eager_out = self.runAndSaveRNG(lambda x: torch.nn.GRU(5, 5)(x), (seq_input,))[0]
+        seq_script_out = self.runAndSaveRNG(lambda x: SeqLengthGRU()(x), (seq_input,))[0]
+        tensor_eager_out = self.runAndSaveRNG(lambda x: torch.nn.GRU(5, 5)(x), (tensor_input,))[0]
+        tensor_script_out = self.runAndSaveRNG(lambda x: TensorGRU()(x), (tensor_input,))[0]
+
+        self.assertEqual(seq_eager_out, seq_script_out)
+        self.assertEqual(tensor_eager_out, tensor_script_out)
+
+
     def test_torchscript_multi_head_attn(self):
         @torch.jit.script
         def jit_multihead_attn_forward(query,                   # type: Tensor
@@ -13434,13 +13560,12 @@ a")
         self.checkScript(fn, ("abcdefgh",))
 
     def test_dict_in_not_in(self):
-        def test_in_dict(x):
+        def fn(x):
             # type: (Dict[str, int]) -> bool
             return 'hi' in x
 
-        self.checkScript(test_in_dict, ({'hi': 2, 'bye': 3},))
-        self.checkScript(test_in_dict, ({'bye': 3},))
-
+        self.checkScript(fn, ({'hi': 2, 'bye': 3},))
+        self.checkScript(fn, ({'bye': 3},))
 
         # Check evaluation order
         @torch.jit.script
@@ -13473,7 +13598,6 @@ a")
         self.checkScript(test_not_in_dict, ({"hello": 1, "world": 2}, ))
         self.checkScript(test_not_in_dict, ({"world": 2}, ))
 
-        @torch.jit.script
         def test_dict_tensor_key(a, t):
             # type: (Dict[Tensor, int], Tensor) -> bool
             if t in a:
@@ -13484,10 +13608,10 @@ a")
         inp1 = torch.tensor(3)
         inp2 = torch.tensor(5)
         dict_a = {inp1: 1, inp2: 3}
-        print(test_dict_tensor_key(dict_a, torch.tensor(4)))
-        print(test_dict_tensor_key(dict_a, torch.tensor(3)))
-        print(test_dict_tensor_key(dict_a, inp1))
-        print(test_dict_tensor_key(dict_a, inp2))
+        self.checkScript(test_dict_tensor_key, (dict_a, torch.tensor(4)))
+        self.checkScript(test_dict_tensor_key, (dict_a, torch.tensor(3)))
+        self.checkScript(test_dict_tensor_key, (dict_a, inp1))
+        self.checkScript(test_dict_tensor_key, (dict_a, inp2))
 
     def test_in_for_and_comp_expr(self):
         def fn(d):
@@ -13544,6 +13668,26 @@ a")
 
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "keyword-arg expansion is not supported"):
             torch.jit.script(fn)
+
+    @unittest.skipIf(PY2, "kwarg expansion requires Python 3")
+    def test_kwargs_error_msg(self):
+        def other(**kwargs):
+            print(kwargs)
+
+        def fn():
+            return other()
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, 'variable number'):
+            torch.jit.script(fn)
+
+        def another_other(*args):
+            print(args)
+
+        def another_fn():
+            return another_other()
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, 'variable number'):
+            torch.jit.script(another_fn)
 
     def test_inferred_error_msg(self):
         """
@@ -16979,16 +17123,6 @@ class TestDict(JitTestCase):
         self.checkScript(update, (self.dict(), self.dict()))
         self.checkScript(update, (self.dict(), self.dict2()))
 
-    def test_aug_assign(self):
-        def aug_assign_dict(a):
-            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
-            a['a'] += 1
-            a['b'] += 12
-            a['c'] += 123
-            return a
-
-        self.checkScript(aug_assign_dict, (self.dict(),))
-
     def test_popitem(self):
         @torch.jit.script
         def popitem(x):
@@ -17850,13 +17984,9 @@ class TestOptimizer(JitTestCase):
         print(test.add_one())
         print(test.add_one())
         print(test.add_one())
-        print(test.add_one())
-        print(test.add_one())
-        
-
 
     def test_adagrad_jit(self):
-        # import torch.optim as optim
+        import torch.optim as optim
         # from torchvision import datasets, transforms
 
         class Net(torch.jit.ScriptModule):
@@ -17880,7 +18010,6 @@ class TestOptimizer(JitTestCase):
 
 
         model = Net()
-        import pdb; pdb.set_trace()
 
         # data_loader = torch.utils.data.DataLoader(
         # datasets.MNIST('../data', train=True, download=True,
@@ -17892,14 +18021,17 @@ class TestOptimizer(JitTestCase):
 
         data = torch.randn(1, 1, 28, 28)
         target = torch.tensor([9])
-            # for batch_idx, (data, target) in enumerate(data_loader):
+        # for batch_idx, (data, target) in enumerate(data_loader):
         # optimizer = optim.Adagrad(model.parameters())
-        optimizer = optim.AdagradJit(model.parameters())
-        output = model(data)
-        loss = F.nll_loss(output, target)
-        loss.backward()
-        optimizer.step()
-            # break
+        optimizer = optim.AdagradJit(list(model.parameters()))
+
+        for i in range(10):
+            output = model(data)
+            loss = F.nll_loss(output, target)
+            loss.backward()
+            optimizer.step()
+            print(loss)
+        # break
         # optimizer = optim.AdagradJit(model.parameters())
         # optimizer = optim.Adagrad(model.parameters())
         # test = torch.jit.script(optimizer)

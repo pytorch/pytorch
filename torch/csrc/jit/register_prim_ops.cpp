@@ -568,11 +568,33 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::grad(Tensor a) -> Tensor",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.grad());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::data(Tensor a) -> Tensor",
+         noop,
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_cuda(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_cuda());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::is_sparse(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_sparse());
            return 0;
          },
          aliasAnalysisFromSchema()),

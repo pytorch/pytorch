@@ -56,8 +56,6 @@ class Adagrad(Optimizer):
         if closure is not None:
             loss = closure()
 
-        import pdb; pdb.set_trace()
-
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
@@ -83,7 +81,6 @@ class Adagrad(Optimizer):
 
                     def make_sparse(values):
                         constructor = grad.new
-                        import pdb; pdb.set_trace()
                         if grad_indices.dim() == 0 or values.dim() == 0:
                             return constructor().resize_as_(grad)
                         return constructor(grad_indices, values, size)

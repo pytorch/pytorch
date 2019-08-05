@@ -6,6 +6,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/tracer.h>
@@ -92,9 +93,6 @@ inline MatchTypeReturn tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
     auto tensor = py::cast<at::Tensor>(input);
-    if (tensor.is_sparse()) {
-      return MatchTypeReturn("Sparse tensors not supported");
-    }
     if (tensor.is_mkldnn()) {
       // mkldnn tensor as opaque tensor doesn't have strides, so we can
       // not create a CompleteTensorType
@@ -327,7 +325,8 @@ inline IValue toIValue(
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
-        AT_ERROR("sparse tensors not supported");
+        AT_WARN(
+            "Sparse tensors in TorchScript is experimental and likely to break");
       }
       return var;
     }
@@ -397,6 +396,7 @@ inline IValue toIValue(
             return repeated;
           }
         case TypeKind::DimensionedTensorType:
+        case TypeKind::ProfiledTensorType:
         case TypeKind::TensorType:
           return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:
@@ -447,6 +447,8 @@ inline IValue toIValue(
       break;
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
+    case TypeKind::CapsuleType:
+      AT_ERROR("Capsule Values aren't supported");
   }
   AT_ERROR(
       "Missing cases in toIValue for type: ",
@@ -509,13 +511,25 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   }
 }
 
+inline c10::optional<py::object> tryToConvertToCustomClass(
+    const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
+  if (obj->name().find("__torch__.torch.classes") == 0) {
+    auto objPtr = (void*)obj->getSlot(0).toCapsule().release();
+    auto classConverter = c10::getClassConverter()[obj->name()];
+    py::handle rawPyObj = classConverter(objPtr);
+    auto o = py::reinterpret_steal<py::object>(rawPyObj);
+    return o;
+  }
+  return c10::nullopt;
+}
 inline py::object toPyObject(IValue&& ivalue) {
   if (ivalue.isNone()) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.is_sparse()) {
-      AT_ERROR("sparse tensors not supported");
+      AT_WARN(
+          "Sparse tensors in TorchScript is experimental and likely to break");
     }
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
@@ -572,6 +586,10 @@ inline py::object toPyObject(IValue&& ivalue) {
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
     auto pyCu = get_python_cu();
+    auto res = tryToConvertToCustomClass(obj);
+    if (res.has_value()) {
+      return res.value();
+    }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
