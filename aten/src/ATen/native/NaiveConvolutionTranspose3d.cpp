@@ -10,7 +10,7 @@ namespace at {
 namespace native {
 namespace {
 
-static inline void naive_conv_transpose3d_shape_check(
+static inline void slow_conv_transpose3d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
@@ -158,7 +158,7 @@ static inline void naive_conv_transpose3d_shape_check(
   }
 }
 
-void naive_conv_transpose3d_out_cpu_template(
+void slow_conv_transpose3d_out_cpu_template(
     Tensor& output,
     const Tensor& input_, // 4D or 5D (batch) tensor
     const Tensor& weight_, // weight tensor (n_input_plane x n_output_plane x
@@ -217,7 +217,7 @@ void naive_conv_transpose3d_out_cpu_template(
   // internal ones buffer
   Tensor& ones = fgrad_input;
 
-  naive_conv_transpose3d_shape_check(
+  slow_conv_transpose3d_shape_check(
       input_,
       Tensor(),
       weight_,
@@ -292,7 +292,7 @@ void naive_conv_transpose3d_out_cpu_template(
   }
 
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
-      input.scalar_type(), "naive_conv_transpose3d_out_cpu", [&] {
+      input.scalar_type(), "slow_conv_transpose3d_out_cpu", [&] {
         // Helpers
         Tensor input_n;
         Tensor output_n;
@@ -389,7 +389,7 @@ void naive_conv_transpose3d_out_cpu_template(
       });
 }
 
-void naive_conv_transpose3d_backward_out_cpu_template(
+void slow_conv_transpose3d_backward_out_cpu_template(
     const Tensor& input_,
     const Tensor& grad_output_,
     Tensor& grad_input,
@@ -446,7 +446,7 @@ void naive_conv_transpose3d_backward_out_cpu_template(
 
   // number of input & output planes and kernel size is indirectly defined by
   // the weight tensor
-  naive_conv_transpose3d_shape_check(
+  slow_conv_transpose3d_shape_check(
       input_,
       grad_output_,
       weight_,
@@ -516,7 +516,7 @@ void naive_conv_transpose3d_backward_out_cpu_template(
        input_depth * input_height * input_width});
 
   AT_DISPATCH_FLOATING_TYPES(
-      input.scalar_type(), "naive_conv_transpose3d_backward_out_cpu", [&] {
+      input.scalar_type(), "slow_conv_transpose3d_backward_out_cpu", [&] {
         // Helpers
         Tensor grad_input_n;
         Tensor grad_output_n;
@@ -589,7 +589,7 @@ void naive_conv_transpose3d_backward_out_cpu_template(
       });
 }
 
-void naive_conv_transpose3d_acc_grad_parameters_cpu(
+void slow_conv_transpose3d_acc_grad_parameters_cpu(
     const Tensor& input_,
     const Tensor& grad_output_,
     Tensor& grad_weight,
@@ -645,7 +645,7 @@ void naive_conv_transpose3d_acc_grad_parameters_cpu(
 
   // number of input & output planes and kernel size is indirectly defined by
   // the grad_weight tensor
-  naive_conv_transpose3d_shape_check(
+  slow_conv_transpose3d_shape_check(
       input_,
       grad_output_,
       grad_weight,
@@ -735,7 +735,7 @@ void naive_conv_transpose3d_acc_grad_parameters_cpu(
 
   AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(),
-      "naive_conv_transpose3d_acc_grad_parameters_cpu",
+      "slow_conv_transpose3d_acc_grad_parameters_cpu",
       [&] {
         // Helpers
         Tensor input_n;
@@ -838,7 +838,7 @@ void naive_conv_transpose3d_acc_grad_parameters_cpu(
 
 } // namespace
 
-Tensor& naive_conv_transpose3d_out_cpu(
+Tensor& slow_conv_transpose3d_out_cpu(
     Tensor& output,
     const Tensor& input,
     const Tensor& weight,
@@ -851,7 +851,7 @@ Tensor& naive_conv_transpose3d_out_cpu(
   Tensor finput = at::empty_like(input);
   Tensor fgrad = at::empty_like(input);
 
-  naive_conv_transpose3d_out_cpu_template(
+  slow_conv_transpose3d_out_cpu_template(
       output,
       input,
       weight,
@@ -867,7 +867,7 @@ Tensor& naive_conv_transpose3d_out_cpu(
   return output;
 }
 
-Tensor naive_conv_transpose3d_cpu(
+Tensor slow_conv_transpose3d_cpu(
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -880,7 +880,7 @@ Tensor naive_conv_transpose3d_cpu(
   Tensor finput = at::empty_like(input);
   Tensor fgrad = at::empty_like(input);
 
-  naive_conv_transpose3d_out_cpu_template(
+  slow_conv_transpose3d_out_cpu_template(
       output,
       input,
       weight,
@@ -896,7 +896,7 @@ Tensor naive_conv_transpose3d_cpu(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> naive_conv_transpose3d_backward_out_cpu(
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cpu(
     Tensor& grad_input,
     Tensor& grad_weight,
     Tensor& grad_bias,
@@ -911,7 +911,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> naive_conv_transpose3d_backward_out_cpu(
     const Tensor& finput,
     const Tensor& fgrad) {
   if (grad_input.defined()) {
-    naive_conv_transpose3d_backward_out_cpu_template(
+    slow_conv_transpose3d_backward_out_cpu_template(
         input,
         grad_output,
         grad_input,
@@ -936,7 +936,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> naive_conv_transpose3d_backward_out_cpu(
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {
-    naive_conv_transpose3d_acc_grad_parameters_cpu(
+    slow_conv_transpose3d_acc_grad_parameters_cpu(
         input,
         grad_output,
         grad_weight,
@@ -955,7 +955,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> naive_conv_transpose3d_backward_out_cpu(
       grad_input, grad_weight, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor> naive_conv_transpose3d_backward_cpu(
+std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -990,7 +990,7 @@ std::tuple<Tensor, Tensor, Tensor> naive_conv_transpose3d_backward_cpu(
   }
 
   if (grad_input.defined()) {
-    naive_conv_transpose3d_backward_out_cpu_template(
+    slow_conv_transpose3d_backward_out_cpu_template(
         input,
         grad_output,
         grad_input,
@@ -1015,7 +1015,7 @@ std::tuple<Tensor, Tensor, Tensor> naive_conv_transpose3d_backward_cpu(
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {
-    naive_conv_transpose3d_acc_grad_parameters_cpu(
+    slow_conv_transpose3d_acc_grad_parameters_cpu(
         input,
         grad_output,
         grad_weight,

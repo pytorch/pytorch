@@ -14,7 +14,7 @@ namespace at {
 namespace native {
 namespace {
 
-static inline void naive_conv_transpose3d_shape_check(
+static inline void slow_conv_transpose3d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
@@ -159,7 +159,7 @@ static inline void naive_conv_transpose3d_shape_check(
   }
 }
 
-void naive_conv_transpose3d_out_cuda_template(
+void slow_conv_transpose3d_out_cuda_template(
     Tensor& output,
     const Tensor& input_,
     const Tensor& weight_,
@@ -223,10 +223,10 @@ void naive_conv_transpose3d_out_cuda_template(
       columns_arg{columns, "columns", 5}, ones_arg{ones, "ones", 6};
 
   checkAllSameGPU(
-      "naive_conv_transpose3d_out_cuda",
+      "slow_conv_transpose3d_out_cuda",
       {input_arg, output_arg, weight_arg, bias_arg, columns_arg, ones_arg});
 
-  naive_conv_transpose3d_shape_check(
+  slow_conv_transpose3d_shape_check(
       input_,
       Tensor(),
       weight_,
@@ -298,7 +298,7 @@ void naive_conv_transpose3d_out_cuda_template(
   }
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.scalar_type(), "naive_conv_transpose3d_out_cuda", [&] {
+      input.scalar_type(), "slow_conv_transpose3d_out_cuda", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         // Helpers
@@ -399,7 +399,7 @@ void naive_conv_transpose3d_out_cuda_template(
       });
 }
 
-void naive_conv_transpose3d_backward_out_cuda_template(
+void slow_conv_transpose3d_backward_out_cuda_template(
     const Tensor& input_,
     const Tensor& grad_output_,
     Tensor& grad_input,
@@ -464,14 +464,14 @@ void naive_conv_transpose3d_backward_out_cuda_template(
       grad_input_arg{grad_input, "grad_input", 5};
 
   checkAllSameGPU(
-      "naive_conv_transpose3d_backward_out_cuda",
+      "slow_conv_transpose3d_backward_out_cuda",
       {input_arg,
        grad_output_arg,
        weight_arg,
        grad_columns_arg,
        grad_input_arg});
 
-  naive_conv_transpose3d_shape_check(
+  slow_conv_transpose3d_shape_check(
       input_,
       grad_output_,
       weight_,
@@ -534,7 +534,7 @@ void naive_conv_transpose3d_backward_out_cuda_template(
        input_depth * input_height * input_width});
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.scalar_type(), "naive_conv_transpose3d_backward_out_cuda", [&] {
+      input.scalar_type(), "slow_conv_transpose3d_backward_out_cuda", [&] {
         // Helpers
         Tensor grad_input_n;
         Tensor grad_output_n;
@@ -608,7 +608,7 @@ void naive_conv_transpose3d_backward_out_cuda_template(
       });
 }
 
-void naive_conv_transpose3d_acc_grad_parameters_cuda(
+void slow_conv_transpose3d_acc_grad_parameters_cuda(
     const Tensor& input_,
     const Tensor& grad_output_,
     Tensor& grad_weight,
@@ -672,7 +672,7 @@ void naive_conv_transpose3d_acc_grad_parameters_cuda(
       columns_arg{columns, "columns", 5}, ones_arg{ones, "ones", 6};
 
   checkAllSameGPU(
-      "naive_conv_transpose3d_acc_grad_parameters_cuda",
+      "slow_conv_transpose3d_acc_grad_parameters_cuda",
       {input_arg,
        grad_output_arg,
        grad_weight_arg,
@@ -680,7 +680,7 @@ void naive_conv_transpose3d_acc_grad_parameters_cuda(
        columns_arg,
        ones_arg});
 
-  naive_conv_transpose3d_shape_check(
+  slow_conv_transpose3d_shape_check(
       input_,
       grad_output_,
       grad_weight,
@@ -766,7 +766,7 @@ void naive_conv_transpose3d_acc_grad_parameters_cuda(
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(),
-      "naive_conv_transpose3d_acc_grad_parameters_cuda",
+      "slow_conv_transpose3d_acc_grad_parameters_cuda",
       [&] {
         // Helpers
         Tensor input_n;
@@ -871,7 +871,7 @@ void naive_conv_transpose3d_acc_grad_parameters_cuda(
 
 } // namespace
 
-Tensor& naive_conv_transpose3d_out_cuda(
+Tensor& slow_conv_transpose3d_out_cuda(
     Tensor& output,
     const Tensor& input,
     const Tensor& weight,
@@ -884,7 +884,7 @@ Tensor& naive_conv_transpose3d_out_cuda(
   Tensor finput = at::empty_like(input);
   Tensor fgrad = at::empty_like(input);
 
-  naive_conv_transpose3d_out_cuda_template(
+  slow_conv_transpose3d_out_cuda_template(
       output,
       input,
       weight,
@@ -900,7 +900,7 @@ Tensor& naive_conv_transpose3d_out_cuda(
   return output;
 }
 
-Tensor naive_conv_transpose3d_cuda(
+Tensor slow_conv_transpose3d_cuda(
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -913,7 +913,7 @@ Tensor naive_conv_transpose3d_cuda(
   Tensor finput = at::empty_like(input);
   Tensor fgrad = at::empty_like(input);
 
-  naive_conv_transpose3d_out_cuda_template(
+  slow_conv_transpose3d_out_cuda_template(
       output,
       input,
       weight,
@@ -929,7 +929,7 @@ Tensor naive_conv_transpose3d_cuda(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> naive_conv_transpose3d_backward_out_cuda(
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cuda(
     Tensor& grad_input,
     Tensor& grad_weight,
     Tensor& grad_bias,
@@ -944,7 +944,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> naive_conv_transpose3d_backward_out_cuda(
     const Tensor& finput,
     const Tensor& fgrad) {
   if (grad_input.defined()) {
-    naive_conv_transpose3d_backward_out_cuda_template(
+    slow_conv_transpose3d_backward_out_cuda_template(
         input,
         grad_output,
         grad_input,
@@ -969,7 +969,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> naive_conv_transpose3d_backward_out_cuda(
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {
-    naive_conv_transpose3d_acc_grad_parameters_cuda(
+    slow_conv_transpose3d_acc_grad_parameters_cuda(
         input,
         grad_output,
         grad_weight,
@@ -988,7 +988,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> naive_conv_transpose3d_backward_out_cuda(
       grad_input, grad_weight, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor> naive_conv_transpose3d_backward_cuda(
+std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -1023,7 +1023,7 @@ std::tuple<Tensor, Tensor, Tensor> naive_conv_transpose3d_backward_cuda(
   }
 
   if (grad_input.defined()) {
-    naive_conv_transpose3d_backward_out_cuda_template(
+    slow_conv_transpose3d_backward_out_cuda_template(
         input,
         grad_output,
         grad_input,
@@ -1048,7 +1048,7 @@ std::tuple<Tensor, Tensor, Tensor> naive_conv_transpose3d_backward_cuda(
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {
-    naive_conv_transpose3d_acc_grad_parameters_cuda(
+    slow_conv_transpose3d_acc_grad_parameters_cuda(
         input,
         grad_output,
         grad_weight,
