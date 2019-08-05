@@ -213,7 +213,7 @@ class CMake:
         }
         additional_options.update({
             # Build options that have the same environment variable name and CMake variable name and that do not start
-            # with "BUILD_", "USE_", or "CMAKE_". If you are adding a new build option, also make sure you add it to
+            # with "BUILD_", "INSTALL_", "USE_", or "CMAKE_". If you are adding a new build option, also make sure you add it to
             # CMakeLists.txt.
             var: var for var in
             ('BLAS',
@@ -229,7 +229,7 @@ class CMake:
         })
 
         for var, val in my_env.items():
-            # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is
+            # We currently pass over all environment variables that start with "BUILD_", "INSTALL_", "USE_", and "CMAKE_". This is
             # because we currently have no reliable way to get the list of all build options we have specified in
             # CMakeLists.txt. (`cmake -L` won't print dependent options when the dependency condition is not met.) We
             # will possibly change this in the future by parsing CMakeLists.txt ourselves (then additional_options would
@@ -237,7 +237,7 @@ class CMake:
             true_var = additional_options.get(var)
             if true_var is not None:
                 build_options[true_var] = val
-            elif var.startswith(('BUILD_', 'USE_', 'CMAKE_')):
+            elif var.startswith(('BUILD_', 'INSTALL_', 'USE_', 'CMAKE_')):
                 build_options[var] = val
 
         # Some options must be post-processed. Ideally, this list will be shrunk to only one or two options in the
@@ -246,7 +246,7 @@ class CMake:
         # "BUILD_" or "USE_" and must be overwritten here.
         build_options.update({
             # Note: Do not add new build options to this dict if it is directly read from environment variable -- you
-            # only need to add one in `CMakeLists.txt`. All build options that start with "BUILD_", "USE_", or "CMAKE_"
+            # only need to add one in `CMakeLists.txt`. All build options that start with "BUILD_", "INSTALL_", "USE_", or "CMAKE_"
             # are automatically passed to CMake; For other options you can add to additional_options above.
             'BUILD_PYTHON': build_python,
             'BUILD_TEST': build_test,
@@ -273,13 +273,14 @@ class CMake:
                   ' should not be specified in the environment variable. They are directly set by PyTorch build script.')
             sys.exit(1)
         build_options.update(cmake__options)
+        if 'INSTALL_TEST' not in build_options.keys():
+            build_options['INSTALL_TEST'] = build_test,
 
         CMake.defines(args,
                       PYTHON_EXECUTABLE=escape_path(sys.executable),
                       PYTHON_LIBRARY=escape_path(cmake_python_library),
                       PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
                       TORCH_BUILD_VERSION=version,
-                      INSTALL_TEST=build_test,
                       NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
                       CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
                       **build_options)
