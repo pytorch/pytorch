@@ -239,6 +239,10 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
                          << err.str();
 }
 
+Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
+  return self_;
+}
+
 std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
     Function& m,
