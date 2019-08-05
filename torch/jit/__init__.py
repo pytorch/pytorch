@@ -255,7 +255,18 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_input
     return LegacyTracedModule(f, _force_outplace, return_inputs)(*args, **kwargs)
 
 
+def _remove_unused_input(mod):
+    # Note: Removing unused input "num_batches_tracked" from BatchNorm model. "num_batches_tracked" is stored in
+    # register_buffer, but it's not used in ONNX export. To preserve "num_batches_tracked" in register_buffer for
+    # training, module's attribute 'training' could be used.
+    batchnorm = 'bn'
+    for sub_name, sub_mod in mod.named_modules():
+        if sub_name and batchnorm in sub_name and sub_mod.track_running_stats:
+            sub_mod.register_buffer('num_batches_tracked', None)
+
+
 def _unique_state_dict(module, keep_vars=False):
+    _remove_unused_input(module)
     # since Parameter.data always creates a new torch.Tensor instance,
     # id(v) doesn't work with it. So we always get the Parameter or Buffer
     # as values, and deduplicate the params using Parameters and Buffers
