@@ -105,9 +105,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 
     int K = packB->outputChannels();
 
-    std::vector<int32_t> row_offset_buf(
-        fbgemm::PackAWithIm2Col<uint8_t>::rowOffsetBufferSize());
-
     int pad_l = padding[0];
     int pad_t = padding[1];
     int stride_h = stride[0];
@@ -124,13 +121,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         {kernel_h, kernel_w},
         {stride_h, stride_w},
         {pad_l, pad_t, pad_l, pad_t});
-
-    fbgemm::PackAWithIm2Col<uint8_t> packA(
-        conv_p,
-        act_ptr,
-        nullptr,
-        act.q_zero_point(),
-        row_offset_buf.data());
 
     fbgemm::DoNothing<> NoOpObj{};
 
@@ -160,7 +150,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         output_zero_point,
         act_zero_point,
         &weight_zero_point_int32,
-        packA.getRowOffsetBuffer(),
+        nullptr, /* row offset buffer */
         col_offsets.data(),
         bias_ptr,
         K,
@@ -177,7 +167,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         outShape, device(kCPU).dtype(kQUInt8), output_scale, output_zero_point);
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
-    // Do the GEMM
     fbgemm::fbgemmConv(
         conv_p,
         act_ptr,
