@@ -5,7 +5,6 @@
 #include <torch/csrc/distributed/rpc/RpcAgent.h>
 #include <torch/csrc/distributed/rpc/ScriptCall.h>
 #include <torch/csrc/distributed/rpc/ScriptRet.h>
-#include <torch/csrc/distributed/rpc/rpc_headers.h>
 
 namespace torch {
 namespace distributed {

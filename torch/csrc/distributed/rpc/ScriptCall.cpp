@@ -4,6 +4,13 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+
+using torch::jit::Pickler;
+using torch::jit::Unpickler;
+
+} // namespace
+
 ScriptCall::ScriptCall(
     std::shared_ptr<Operator> op, std::vector<at::IValue>&& args)
     : op_(std::move(op)), stack_(args) {}
@@ -43,16 +50,16 @@ Message ScriptCall::toMessage() {
   pickler.endTuple();
   pickler.stop();
 
-  auto meta = pickler.stack();
-  return Message(std::move(meta),
+  auto payload = pickler.stack();
+  return Message(std::move(payload),
                  std::move(tensor_table),
                  MessageType::SCRIPT_CALL);
 }
 
 ScriptCall ScriptCall::fromMessage(const Message& message) {
-  auto meta = static_cast<const void*>(message.meta().data());
-  auto meta_size = message.meta().size();
-  Unpickler unpickler(meta, meta_size, &message.tensors(), nullptr);
+  auto payload = static_cast<const void*>(message.payload().data());
+  auto payload_size = message.payload().size();
+  Unpickler unpickler(payload, payload_size, &message.tensors(), nullptr);
 
   std::vector<IValue> values = unpickler.parse_ivalue_list();
 

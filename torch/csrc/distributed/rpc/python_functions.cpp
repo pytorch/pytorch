@@ -8,7 +8,8 @@ py::object to_py_obj(const Message& message) {
   switch (message.type()) {
     case MessageType::SCRIPT_RET: {
       ScriptRet ret = ScriptRet::fromMessage(message);
-      Stack stack = ret.values();
+      Stack stack;
+      stack.push_back(ret.value());
       return torch::jit::createPyObjectForStack(std::move(stack));
     }
     default: {

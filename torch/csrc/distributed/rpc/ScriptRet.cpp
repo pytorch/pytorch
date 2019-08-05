@@ -4,10 +4,17 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-ScriptRet::ScriptRet(std::vector<at::IValue>&& values) : values_(values) {}
+namespace {
 
-const std::vector<at::IValue>& ScriptRet::values() {
-  return values_;
+using torch::jit::Pickler;
+using torch::jit::Unpickler;
+
+} // namespace
+
+ScriptRet::ScriptRet(at::IValue&& value) : value_(value) {}
+
+const at::IValue& ScriptRet::value() {
+  return value_;
 }
 
 Message ScriptRet::toMessage() {
@@ -16,24 +23,26 @@ Message ScriptRet::toMessage() {
 
   pickler.protocol();
   pickler.startTuple();
-  for (auto& value: values_) {
-    pickler.pushIValue(value);
-  }
+  pickler.pushIValue(value_);
   pickler.endTuple();
   pickler.stop();
 
-  auto meta = pickler.stack();
-  return Message(std::move(meta),
+  auto payload = pickler.stack();
+  return Message(std::move(payload),
                  std::move(tensor_table),
                  MessageType::SCRIPT_RET);
 }
 
 ScriptRet ScriptRet::fromMessage(const Message& message) {
-  auto meta = static_cast<const void*>(message.meta().data());
-  auto meta_size = message.meta().size();
-  Unpickler unpickler(meta, meta_size, &message.tensors(), nullptr);
+  auto payload = static_cast<const void*>(message.payload().data());
+  auto payload_size = message.payload().size();
+  Unpickler unpickler(payload, payload_size, &message.tensors(), nullptr);
 
-  return ScriptRet(unpickler.parse_ivalue_list());
+  auto values = unpickler.parse_ivalue_list();
+  AT_ASSERT(values.size() == 1, "Return value of a builtin operator or a "
+      "TorchScript function should be a single IValue, got a vector of size ",
+      values.size());
+  return ScriptRet(std::move(values.front()));
 }
 
 } // namespace rpc

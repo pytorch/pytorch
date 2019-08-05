@@ -7,31 +7,31 @@ namespace rpc {
 Message::Message() = default;
 
 Message::Message(
-    std::vector<char>&& meta,
+    std::vector<char>&& payload,
     std::vector<torch::Tensor>&& tensors,
     MessageType type)
-    : meta_(meta), tensors_(tensors), type_(type) {}
+    : payload_(payload), tensors_(tensors), type_(type) {}
 
 Message::Message(
-    std::vector<char>&& meta,
+    std::vector<char>&& payload,
     std::vector<torch::Tensor>&& tensors,
     MessageType type,
     int64_t id)
-    : meta_(meta), tensors_(tensors), type_(type), id_(id) {}
+    : payload_(payload), tensors_(tensors), type_(type), id_(id) {}
 
 Message::Message(const Message& other) = default;
 
 Message::Message(Message&& other) noexcept = default;
 
 Message& Message::operator=(Message const& rhs) & {
-  auto meta = rhs.meta_;
+  auto payload = rhs.payload_;
   auto tensors = rhs.tensors_;
-  Message(std::move(meta), std::move(tensors), rhs.type_, rhs.id_).swap(*this);
+  Message(std::move(payload), std::move(tensors), rhs.type_, rhs.id_).swap(*this);
   return *this;
 }
 
 Message& Message::operator=(Message&& rhs) & {
-  Message(std::move(rhs.meta_),
+  Message(std::move(rhs.payload_),
           std::move(rhs.tensors_),
           std::move(rhs.type_),
           rhs.id_).swap(*this);
@@ -39,14 +39,14 @@ Message& Message::operator=(Message&& rhs) & {
 }
 
 void Message::swap(Message& rhs) noexcept {
-  std::swap(meta_, rhs.meta_);
+  std::swap(payload_, rhs.payload_);
   std::swap(tensors_, rhs.tensors_);
   std::swap(type_, rhs.type_);
   std::swap(id_, rhs.id_);
 }
 
-const std::vector<char>& Message::meta() const {
-  return meta_;
+const std::vector<char>& Message::payload() const {
+  return payload_;
 }
 
 const std::vector<torch::Tensor>& Message::tensors() const {

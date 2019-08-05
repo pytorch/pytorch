@@ -1,17 +1,10 @@
 import sys
-import tempfile
-import time
-
-from functools import wraps
-
 
 import torch
 import torch.distributed as dist
-import torch.multiprocessing as mp
 
 from common_distributed import MultiProcessTestCase
-from common_utils import TestCase, load_tests, run_tests
-from common_utils import NO_MULTIPROCESSING_SPAWN
+from common_utils import load_tests, run_tests
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -23,7 +16,7 @@ if not dist.is_available():
     sys.exit(0)
 
 
-def _init_rpc(func):
+def _wrap_with_rpc(func):
     def wrapper(self):
         store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend='gloo', rank=self.rank,
@@ -41,7 +34,7 @@ class RpcTest(MultiProcessTestCase):
     def world_size(self):
         return 4
 
-    @_init_rpc
+    @_wrap_with_rpc
     def test_add(self):
         n = self.rank + 1
         dstRank = n % self.world_size
@@ -50,7 +43,7 @@ class RpcTest(MultiProcessTestCase):
         dist.barrier()
         self.assertEqual(ret, torch.ones(n, n) * 2)
 
-    @_init_rpc
+    @_wrap_with_rpc
     def test_scalar_add(self):
         n = self.rank + 1
         dstRank = n % self.world_size
@@ -58,7 +51,7 @@ class RpcTest(MultiProcessTestCase):
                             args=(torch.ones(n, n), n))
         self.assertEqual(ret, (torch.ones(n, n) + n))
 
-    @_init_rpc
+    @_wrap_with_rpc
     def test_async_add(self):
         n = self.rank + 1
         dstRank = n % self.world_size
@@ -67,7 +60,7 @@ class RpcTest(MultiProcessTestCase):
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
 
-    @_init_rpc
+    @_wrap_with_rpc
     def test_nonzero(self):
         n = self.rank + 1
         dstRank = n % self.world_size
@@ -76,7 +69,7 @@ class RpcTest(MultiProcessTestCase):
         ret = dist.rpc_sync('worker%d' % dstRank, torch.nonzero, args=(x,))
         self.assertEqual(ret, x.nonzero())
 
-    @_init_rpc
+    @_wrap_with_rpc
     def test_multi_rpc(self):
         dstRank = (self.rank + 1) % self.world_size
         for i in range(20):

@@ -11,14 +11,14 @@ void serialize(const Message& message, std::ostream& os) {
   // We cast const void* to void* here because we need to create a tensor using
   // that memory space. If is fine as that tensor stays function-local, and will
   // not be modified during its lifetime.
-  auto meta = const_cast<void*>(  // NOLINT
-      static_cast<const void*>(message.meta().data()));
-  auto meta_size = message.meta().size();
+  auto payload = const_cast<void*>(  // NOLINT
+      static_cast<const void*>(message.payload().data()));
+  auto payload_size = message.payload().size();
 
   // getting tensor table from the message
   std::vector<torch::Tensor> tensors = message.tensors();
-  // append meta as a tensor
-  tensors.push_back(torch::from_blob(meta, meta_size, {torch::kChar}));
+  // append payload as a tensor
+  tensors.push_back(torch::from_blob(payload, payload_size, {torch::kChar}));
   // append id and type as a tensor
   tensors.push_back(torch::tensor(
       {message.id(), (int64_t) message.type()}, {torch::kInt64}
@@ -35,18 +35,18 @@ Message deserialize(std::istream& is) {
   TORCH_CHECK(tensors.size() >= 2, "Failed to deserialize a message.");
   auto miscTensor = std::move(tensors.back());
   tensors.pop_back();
-  auto metaTensor = std::move(tensors.back());
+  auto payloadTensor = std::move(tensors.back());
   tensors.pop_back();
 
   int64_t* miscItems = miscTensor.storage().data<int64_t>();
   int64_t id = miscItems[0];
   MessageType type = MessageType(miscItems[1]);
 
-  std::vector<char> meta(metaTensor.numel());
+  std::vector<char> payload(payloadTensor.numel());
   std::memcpy(
-      meta.data(), metaTensor.storage().data(), metaTensor.numel());
+      payload.data(), payloadTensor.storage().data(), payloadTensor.numel());
 
-  return Message(std::move(meta), std::move(tensors), type, id);
+  return Message(std::move(payload), std::move(tensors), type, id);
 }
 
 } // namespace

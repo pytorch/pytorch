@@ -5,7 +5,6 @@
 #include <torch/csrc/distributed/rpc/RpcAgent.h>
 #include <torch/csrc/distributed/rpc/functions.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
-#include <torch/csrc/distributed/rpc/rpc_headers.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>

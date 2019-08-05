@@ -1,12 +1,13 @@
 #pragma once
 
 #include <torch/csrc/distributed/rpc/Message.h>
-#include <torch/csrc/distributed/rpc/rpc_headers.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
+
+// This class holds a message that will be ready in the future.
 struct TORCH_API FutureMessage final {
 
  public:

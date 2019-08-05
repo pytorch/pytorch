@@ -49,7 +49,6 @@ class ProcessGroupAgent : public RpcAgent {
   void listenLoop();
 
   int64_t nextId() {
-    std::lock_guard<std::mutex> lock{idMutex_};
     return nextId_++;
   }
 
@@ -57,12 +56,11 @@ class ProcessGroupAgent : public RpcAgent {
   std::unordered_map<std::string, int> nameMap_;
   bool stop_;
   std::shared_ptr<c10d::ProcessGroup> pg_;
-  int64_t nextId_;
+  std::atomic<int64_t> nextId_;
   // names_[rank] stores the name of the corresponding worker, use this vector
   // to get worker name from rank and pass it to the RequestCallback.
   std::vector<std::string> names_;
   std::deque<SendWork> sendQueue_;
-  std::mutex idMutex_;
   std::mutex sendQueueMutex_;
   std::condition_variable workProduceCV_;
   std::condition_variable workConsumeCV_;

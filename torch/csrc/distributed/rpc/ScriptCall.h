@@ -2,23 +2,24 @@
 
 #include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/Message.h>
-#include <torch/csrc/distributed/rpc/rpc_headers.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/pickler.h>
 #include <vector>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
+using torch::jit::Operator;
+
 #define BUILTIN_OP_NAMESPACE "torch.ops.aten."
 
-// A ScriptCall instance represents an invocation of a builtin operator. It
+// A ScriptCall instance represents an invocation of a builtin operator for a
+// TorchScript function (not implemented yet). If it is a builtin operator, it
 // contains a shared ptr to the `Operator` and a list of arguments.
 class TORCH_API ScriptCall final {
  public:
-  //ScriptCall(std::string qualifiedName, std::vector<at::IValue>&& args);
   ScriptCall(std::shared_ptr<Operator> op, std::vector<at::IValue>&& args);
-
-  //at::IValue operator()() const;
 
   std::shared_ptr<Operator> op() const;
   // return the argument stack of this builtin operator
@@ -29,9 +30,12 @@ class TORCH_API ScriptCall final {
 
  private:
 
+  // Given an operator symbol and a string schema, return the matched operator.
   static std::shared_ptr<Operator> matchOperator(
       at::Symbol& symbol, const std::string& str_schema);
 
+  // This field has value if this ScriptCall represents invocation of a builtin
+  // operator.
   c10::optional<std::shared_ptr<Operator>> op_;
   const std::vector<at::IValue> stack_;
 };

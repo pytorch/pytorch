@@ -1,24 +1,23 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/rpc_headers.h>
 #include <torch/csrc/distributed/rpc/Message.h>
-#include <vector>
+#include <torch/csrc/jit/pickler.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
-// Return value of a builtin operator
+// Return value of a builtin operator or a TorchScript function.
 class TORCH_API ScriptRet final {
  public:
-  explicit ScriptRet(std::vector<at::IValue>&& values);
+  explicit ScriptRet(at::IValue&& values);
 
-  const std::vector<at::IValue>& values();
+  const at::IValue& value();
   Message toMessage();
   static ScriptRet fromMessage(const Message& message);
 
  private:
-  const std::vector<at::IValue> values_;
+  const at::IValue value_;
 };
 
 }

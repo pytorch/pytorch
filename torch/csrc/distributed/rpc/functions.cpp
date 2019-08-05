@@ -9,9 +9,14 @@ void processRequestBlocking(
   switch (request.type()) {
     case MessageType::SCRIPT_CALL: {
       ScriptCall op = ScriptCall::fromMessage(request);
+
       auto stack = op.stack();
       op.op()->getOperation()(stack);
-      auto response = ScriptRet(std::move(stack)).toMessage();
+      AT_ASSERT(stack.size() == 1, "Return value of a builtin operator or a "
+          "TorchScript function should be a single IValue, got a vector of size ",
+          stack.size());
+
+      auto response = ScriptRet(std::move(stack.front())).toMessage();
       response.setId(request.id());
       agent.send(std::move(from), std::move(response));
       break;
