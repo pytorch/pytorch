@@ -2417,6 +2417,14 @@ class TestAutograd(TestCase):
         _test_cdist_for_size((2, 3, 5))
         _test_cdist_for_size((1, 2, 3))
 
+    def test_cdist_gpu_with_type(self):
+        x = torch.randn(1, device="cuda", dtype=torch.double)
+        eee = 1e-6
+        orig = x[0].item()
+        orig_minus =  orig - eee
+        x[0] = orig_minus
+        self.assertEqual(orig, x[0].item())
+
     def test_cdist_gpu_0(self):
         def _test_cdist_for_size(sizes):
             devices = [] if not torch.cuda.is_available() else ['cuda']

@@ -122,9 +122,11 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, printDebug=False):
                 orig = x_tensor[x_idx].item()
                 orig_minus = orig - eps
                 x_tensor[x_idx] = orig_minus
+                o1 = x_tensor[x_idx].item()
                 outa = fn(input).clone()
                 orig_plus = orig + eps
                 x_tensor[x_idx] = orig_plus
+                o2 = x_tensor[x_idx].item()
                 outb = fn(input).clone()
                 x_tensor[x_idx] = orig
                 diff = (outb - outa)
@@ -149,7 +151,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, printDebug=False):
                     diff_l.append(t3[inx].item())
                     r_l.append(t4[inx].item())
 
-                debugInfo.append((d_idx, x_idx, orig, eps, orig_minus, outa_l, dt1, orig_plus, outb_l, dt2, diff_l, dt3, r_l, dt4))
+                debugInfo.append((d_idx, x_idx, orig, eps, orig_minus, o1, outa_l, dt1, orig_plus, o2, outb_l, dt2, diff_l, dt3, r_l, dt4))
             if printDebug:
                 return debugInfo
 
