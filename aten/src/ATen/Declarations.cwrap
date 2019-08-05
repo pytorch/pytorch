@@ -1769,32 +1769,6 @@
         - THTensor* self
 ]]
 [[
-  name: _th_neg
-  backends:
-    - CUDA
-  variants:
-    - function
-  options:
-    - cname: neg
-      return: argument 0
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-]]
-[[
-  name: _th_neg_
-  backends:
-    - CUDA
-  variants: function
-  options:
-    - cname: neg
-      return: self
-      arguments:
-        - THTensor* self
-        - THTensor* self
-]]
-[[
   name: _th_atan2
   types:
     - floating_point
@@ -2386,6 +2360,8 @@
   cname: addcmul
   variants:
     - function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2403,6 +2379,8 @@
   options:
     - cname: addcmul
       variants: function
+      backends:
+        - CUDA
       return: argument 0
       arguments:
         - THTensor* self
