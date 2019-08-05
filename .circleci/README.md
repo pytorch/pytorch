@@ -81,7 +81,7 @@ A **binary configuration** is a collection of
     * MacOS
     * Windows - these are built on Azure pipelines
 * devtoolset version (gcc compiler version)
-    * This only matters on Linux cause only Linux uses gcc. tldr is gcc made a backwards incompatible change from gcc 4.8 to gcc 5, because it had to change how it implemented std::vector and std::string 
+    * This only matters on Linux cause only Linux uses gcc. tldr is gcc made a backwards incompatible change from gcc 4.8 to gcc 5, because it had to change how it implemented std::vector and std::string
 
 ### Where are the binaries?
 
@@ -101,12 +101,12 @@ All binaries are built in CircleCI workflows. There are checked-in workflows (co
 
 # CircleCI structure of the binaries
 
-Some quick vocab: 
+Some quick vocab:
 
-* A\**workflow** is a CircleCI concept; it is a DAG of '**jobs**'. ctrl-f 'workflows' on\https://github.com/pytorch/pytorch/blob/master/.circleci/config.yml to see the workflows. 
+* A\**workflow** is a CircleCI concept; it is a DAG of '**jobs**'. ctrl-f 'workflows' on\https://github.com/pytorch/pytorch/blob/master/.circleci/config.yml to see the workflows.
 * **jobs** are a sequence of '**steps**'
 * **steps** are usually just a bash script or a builtin CircleCI command.* All steps run in new environments, environment variables declared in one script DO NOT persist to following steps*
-* CircleCI has a **workspace**, which is essentially a cache between steps of the *same job* in which you can store artifacts between steps. 
+* CircleCI has a **workspace**, which is essentially a cache between steps of the *same job* in which you can store artifacts between steps.
 
 ## How are the workflows structured?
 
@@ -116,9 +116,9 @@ The nightly binaries have 3 workflows. We have one job (actually 3 jobs:  build,
     1. every day midnight EST
     2. linux: https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/linux-binary-build-defaults.yml
     3. macos: https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/macos-binary-build-defaults.yml
-    4. For each binary configuration, e.g. linux_conda_3.7_cpu there is a 
+    4. For each binary configuration, e.g. linux_conda_3.7_cpu there is a
         1. binary_linux_conda_3.7_cpu_build
-            1. Builds the build. On linux jobs this uses the 'docker executor'. 
+            1. Builds the build. On linux jobs this uses the 'docker executor'.
             2. Persists the package to the workspace
         2. binary_linux_conda_3.7_cpu_test
             1. Loads the package to the workspace
@@ -134,16 +134,16 @@ The nightly binaries have 3 workflows. We have one job (actually 3 jobs:  build,
     3. See below for what these are for and why they're needed
     4. Three jobs that each examine the current contents of aws and the conda repo and update some html files in s3
 3. binarysmoketests
-    1. every day 
+    1. every day
     2. https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/nightly-build-smoke-tests-defaults.yml
-    3. For each binary configuration, e.g. linux_conda_3.7_cpu there is a 
+    3. For each binary configuration, e.g. linux_conda_3.7_cpu there is a
         1. smoke_linux_conda_3.7_cpu
             1. Downloads the package from the cloud, e.g. using the official pip or conda instructions
             2. Runs the smoke tests
 
 ## How are the jobs structured?
 
-The jobs are in https://github.com/pytorch/pytorch/tree/master/.circleci/verbatim-sources . Jobs are made of multiple steps. There are some shared steps used by all the binaries/smokes. Steps of these jobs are all delegated to scripts in https://github.com/pytorch/pytorch/tree/master/.circleci/scripts . 
+The jobs are in https://github.com/pytorch/pytorch/tree/master/.circleci/verbatim-sources . Jobs are made of multiple steps. There are some shared steps used by all the binaries/smokes. Steps of these jobs are all delegated to scripts in https://github.com/pytorch/pytorch/tree/master/.circleci/scripts .
 
 * Linux jobs: https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/linux-binary-build-defaults.yml
     * binary_linux_build.sh
@@ -177,7 +177,7 @@ CircleCI creates a  final yaml file by inlining every <<* segment, so if we were
 So, CircleCI has several executor types: macos, machine, and docker are the ones we use. The 'machine' executor gives you two cores on some linux vm. The 'docker' executor gives you considerably more cores (nproc was 32 instead of 2 back when I tried in February). Since the dockers are faster, we try to run everything that we can in dockers. Thus
 
 * linux build jobs use the docker executor. Running them on the docker executor was at least 2x faster than running them on the machine executor
-* linux test jobs use the machine executor and spin up their own docker. Why this nonsense? It's cause we run nvidia-docker for our GPU tests; any code that calls into the CUDA runtime needs to be run on nvidia-docker. To run a nvidia-docker you need to install some nvidia packages on the host machine and then call docker with the '—runtime nvidia' argument. CircleCI doesn't support this, so we have to do it ourself. 
+* linux test jobs use the machine executor and spin up their own docker. Why this nonsense? It's cause we run nvidia-docker for our GPU tests; any code that calls into the CUDA runtime needs to be run on nvidia-docker. To run a nvidia-docker you need to install some nvidia packages on the host machine and then call docker with the '—runtime nvidia' argument. CircleCI doesn't support this, so we have to do it ourself.
     * This is not just a mere inconvenience. **This blocks all of our linux tests from using more than 2 cores.** But there is nothing that we can do about it, but wait for a fix on circleci's side. Right now, we only run some smoke tests (some simple imports) on the binaries, but this also affects non-binary test jobs.
 * linux upload jobs use the machine executor. The upload jobs are so short that it doesn't really matter what they use
 * linux smoke test jobs use the machine executor for the same reason as the linux test jobs
@@ -243,7 +243,7 @@ Every type of package has an entrypoint build script that handles the all the im
 
 Both Linux and MacOS use the same code flow for the conda builds.
 
-Conda packages are built with conda-build, see https://conda.io/projects/conda-build/en/latest/resources/commands/conda-build.html 
+Conda packages are built with conda-build, see https://conda.io/projects/conda-build/en/latest/resources/commands/conda-build.html
 
 Basically, you pass `conda build` a build folder (pytorch-nightly/ above) that contains a build script and a meta.yaml. The meta.yaml specifies in what python environment to build the package in, and what dependencies the resulting package should have, and the build script gets called in the env to build the thing.
 tldr; on conda-build is
@@ -266,7 +266,7 @@ The entrypoint file `builder/conda/build_conda.sh` is complicated because
 
 ## Manywheels (linux pip and libtorch packages)
 
-Manywheels are pip packages for linux distros. Note that these manywheels are not actually manylinux compliant. 
+Manywheels are pip packages for linux distros. Note that these manywheels are not actually manylinux compliant.
 
 `builder/manywheel/build_cpu.sh` and `builder/manywheel/build.sh` (for CUDA builds) just set different env vars and then call into `builder/manywheel/build_common.sh`
 
@@ -313,13 +313,12 @@ Libtorch packages are built in the wheel build scripts: manywheel/build_*.sh for
 All linux builds occur in docker images. The docker images are
 
 * soumith/conda-cuda
-    * Has ALL CUDA versions installed. The script pytorch/builder/conda/switch_cuda_version.sh sets /usr/local/cuda to a symlink to e.g. /usr/local/cuda-8.0 to enable different CUDA builds
-    * Also used for cpu builds
-* soumith/manylinux-cuda80
+    * Has ALL CUDA versions installed. The script pytorch/builder/conda/switch_cuda_version.sh sets /usr/local/cuda to a symlink to e.g. /usr/local/cuda-10.0 to enable different CUDA builds
     * Also used for cpu builds
 * soumith/manylinux-cuda90
 * soumith/manylinux-cuda92
 * soumith/manylinux-cuda100
+    * Also used for cpu builds
 
 The Dockerfiles are available in pytorch/builder, but there is no circleci job or script to build these docker images, and they cannot be run locally (unless you have the correct local packages/paths). Only Soumith can build them right now.
 
@@ -380,7 +379,7 @@ The advantage of this flow is that you can make new changes to the base commit a
 
 ### Linux
 
-You can build Linux binaries locally easily using docker. 
+You can build Linux binaries locally easily using docker.
 
 ```
 # Run the docker
@@ -400,7 +399,7 @@ docker run \
     -v your/builder/repo:/builder \
     -v where/you/want/packages/to/appear:/final_pkgs \
     -it soumith/conda-cuda /bin/bash
-    
+
 # Export whatever variables are important to you. All variables that you'd
 # possibly need are in .circleci/scripts/binary_populate_env.sh
 # You should probably always export at least these 3 variables
@@ -410,14 +409,14 @@ export DESIRED_CUDA=cpu
 
 # Call the entrypoint
 # `|& tee foo.log` just copies all stdout and stderr output to foo.log
-# The builds generate lots of output so you probably need this when 
+# The builds generate lots of output so you probably need this when
 # building locally.
 /builder/conda/build_pytorch.sh |& tee build_output.log
 ```
 
 **Building CUDA binaries on docker**
 
-To build a CUDA binary you need to use `nvidia-docker run` instead of just `docker run` (or you can manually pass `--runtime=nvidia`). This adds some needed libraries and things to build CUDA stuff. 
+To build a CUDA binary you need to use `nvidia-docker run` instead of just `docker run` (or you can manually pass `--runtime=nvidia`). This adds some needed libraries and things to build CUDA stuff.
 
 You can build CUDA binaries on CPU only machines, but you can only run CUDA binaries on CUDA machines. This means that you can build a CUDA binary on a docker on your laptop if you so choose (though it’s gonna take a loong time).
 
@@ -431,7 +430,7 @@ But if you want to try, then I’d recommend
 
 ```
 # Create a new terminal
-# Clear your LD_LIBRARY_PATH and trim as much out of your PATH as you 
+# Clear your LD_LIBRARY_PATH and trim as much out of your PATH as you
 # know how to do
 
 # Install a new miniconda
@@ -462,11 +461,11 @@ export DESIRED_CUDA=cpu
 path/to/builder/wheel/build_wheel.sh
 ```
 
-N.B. installing a brand new miniconda is important. This has to do with how conda installations work. See the “General Python” section above, but tldr; is that 
+N.B. installing a brand new miniconda is important. This has to do with how conda installations work. See the “General Python” section above, but tldr; is that
 
 1. You make the ‘conda’ command accessible by prepending `path/to/conda_root/bin` to your PATH.
-2. You make a new env and activate it, which then also gets prepended to your PATH. Now you have `path/to/conda_root/envs/new_env/bin:path/to/conda_root/bin:$PATH` 
-3. Now say you (or some code that you ran) call python executable `foo` 
+2. You make a new env and activate it, which then also gets prepended to your PATH. Now you have `path/to/conda_root/envs/new_env/bin:path/to/conda_root/bin:$PATH`
+3. Now say you (or some code that you ran) call python executable `foo`
     1. if you installed `foo` in `new_env`, then `path/to/conda_root/envs/new_env/bin/foo` will get called, as expected.
     2. But if you forgot to installed `foo` in `new_env` but happened to previously install it in your root conda env (called ‘base’), then unix/linux will still find `path/to/conda_root/bin/foo` . This is dangerous, since `foo` can be a different version than you want; `foo` can even be for an incompatible python version!
 
@@ -475,4 +474,3 @@ Newer conda versions and proper python hygiene can prevent this, but just instal
 ### Windows
 
 Maybe @peterjc123 can fill this section in.
-
