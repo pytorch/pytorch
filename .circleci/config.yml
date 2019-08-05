@@ -2818,10 +2818,20 @@ workflows:
       - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build:
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_test:
           requires:
             - setup
             - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
           requires:
             - setup
