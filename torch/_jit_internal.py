@@ -397,6 +397,10 @@ def _qualified_name(obj):
     name = obj.__name__
     module_name = obj.__module__
 
+    # If the module is actually a torchbind module, then we should short circuit
+    if module_name == "torch._classes":
+        return obj.qualified_name
+
     # The Python docs are very clear that `__module__` can be None, but I can't
     # figure out when it actually would be.
     if module_name is None:

@@ -1163,10 +1163,7 @@ void testAliasRegistration() {
         torch::RegisterOperators::options()
             .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
             .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
-    const auto rand_op = Symbol::fromQualString("foo::rand");
-
-
-
+    const auto rand_op = Symbol::fromQualString("foo::rand7");
 
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();

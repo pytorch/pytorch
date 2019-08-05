@@ -42,7 +42,7 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
         "3.6m",
         "3.7m",
     ],
-    conda=dimensions.CONDA_PYTHON_VERSIONS,
+    conda=dimensions.STANDARD_PYTHON_VERSIONS,
     libtorch=[
         "2.7m",
     ],
@@ -52,7 +52,7 @@ CONFIG_TREE_DATA = OrderedDict(
     linux=(dimensions.CUDA_VERSIONS, LINUX_PACKAGE_VARIANTS),
     macos=([None], OrderedDict(
         wheel=dimensions.STANDARD_PYTHON_VERSIONS,
-        conda=dimensions.CONDA_PYTHON_VERSIONS,
+        conda=dimensions.STANDARD_PYTHON_VERSIONS,
         libtorch=[
             "2.7",
         ],
