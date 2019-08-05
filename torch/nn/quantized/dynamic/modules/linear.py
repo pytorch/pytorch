@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from ....modules.linear import Linear as NNLinear
 import torch.nn.quantized as nnq
+from torch.quantization.observer import default_weight_observer
 
 class Linear(nnq.Linear):
     r"""
@@ -50,7 +51,7 @@ class Linear(nnq.Linear):
     # TODO: support initializing from quantization parameters when Quantizer is
     # exposed in python
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, weight_observer=default_weight_observer):
         r"""Create a dynamic quantized module from a float module or qparams_dict
 
             Args: `mod` a float module, either produced by torch.quantization utilities
@@ -58,7 +59,8 @@ class Linear(nnq.Linear):
         """
         assert type(mod) == NNLinear, 'nn.quantized.dynamic.Linear.from_float only works for nn.Linear'
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-        weight_observer = mod.qconfig.weight()
+        if mod.qconfig is not None and mod.qconfig.weight() is not None:
+            weight_observer = mod.qconfig.weight()
         weight_observer(mod.weight)
         wt_qparams = weight_observer.calculate_qparams()
         qweight = torch.quantize_linear(mod.weight.float(), wt_qparams[0], wt_qparams[1].long().item(), torch.qint8)
