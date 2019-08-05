@@ -64,8 +64,7 @@ class TestONNXOpset(TestCase):
             def forward(self, x):
                 return torch.isnan(x)
 
-        ops = [{"op_name" : "IsNaN"},
-               {"op_name" : "Cast", "attributes" : [{"name" : "to", "i" : 2, "type" : 2}]}]
+        ops = [{"op_name" : "IsNaN"}]
         ops = {9 : ops, 10 : ops}
         x = torch.tensor([1.0, float('nan'), 2.0])
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
