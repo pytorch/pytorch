@@ -7874,17 +7874,17 @@ class _TestTorchMixin(object):
             y_tensor = torch.tensor([y], dtype=dtype, device=device)
             actual = torch.atan2(y_tensor, x_tensor)
             self.assertTrue(torch.allclose(expected_tensor, actual, rtol=0, atol=0.02))
-        for device in  torch.testing.get_all_device_types():
+        for device in torch.testing.get_all_device_types():
             for dtype in [torch.float, torch.double]:
                 _test_atan2(0, 0, 0, device, dtype)
                 _test_atan2(0, 1, math.pi / 2, device, dtype)
                 _test_atan2(0, -1, math.pi / -2, device, dtype)
                 _test_atan2(-1, 0, math.pi, device, dtype)
                 _test_atan2(1, 0, 0, device, dtype)
-                _test_atan2(-1, -1, math.pi * -3/4 , device, dtype)
-                _test_atan2(1, 1, math.pi /4 , device, dtype)
-                _test_atan2(1, -1, math.pi /-4 , device, dtype)
-                _test_atan2(-1, 1, math.pi * 3/4 , device, dtype)
+                _test_atan2(-1, -1, math.pi * -3 / 4 , device, dtype)
+                _test_atan2(1, 1, math.pi / 4 , device, dtype)
+                _test_atan2(1, -1, math.pi / -4 , device, dtype)
+                _test_atan2(-1, 1, math.pi * 3 / 4 , device, dtype)
                 _test_atan2(0, sys.float_info.max, math.pi / 2, device, dtype)
                 _test_atan2(0, -1 * sys.float_info.max, math.pi / -2, device, dtype)
                 _test_atan2(-1 * sys.float_info.max, 0, math.pi, device, dtype)
