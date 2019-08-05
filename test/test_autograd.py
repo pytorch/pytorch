@@ -2474,7 +2474,7 @@ class TestAutograd(TestCase):
                     run_functional_checks(self, "test_cdist_gpu_1", "cdist", f,
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
-        _test_cdist_for_size((S, S))
+        _test_cdist_for_size((2, 2))
         #_test_cdist_for_size((S, S, S))
         #_test_cdist_for_size((3, 5))
         #_test_cdist_for_size((2, 3, 5))
