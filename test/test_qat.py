@@ -9,7 +9,7 @@ from torch.nn._intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.quantization.QConfig import default_qat_qconfig
 from torch.nn import Parameter
 from common_utils import TestCase, run_tests
-from hypothesis import given, settings, seed
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from functools import reduce
 
@@ -31,7 +31,6 @@ def disable_mkldnn_conv():
 
 class IntrinsicQATModuleTest(TestCase):
 
-    @seed(42)
     @settings(deadline=None)
     @given(batch_size=st.integers(1, 3),
            input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
