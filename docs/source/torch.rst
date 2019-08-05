@@ -49,6 +49,7 @@ Creation Ops
 .. autofunction:: eye
 .. autofunction:: empty
 .. autofunction:: empty_like
+.. autofunction:: empty_strided
 .. autofunction:: full
 .. autofunction:: full_like
 
