@@ -31,7 +31,7 @@ class C10_API Scalar {
   // We can't set v in the initializer list using the
   // syntax v{ .member = ... } because it doesn't work on MSVC
 
-  AT_FORALL_SCALAR_TYPES_EXCEPT_QINT(DEFINE_IMPLICIT_CTOR)
+  AT_FORALL_SCALAR_TYPES(DEFINE_IMPLICIT_CTOR)
 
 #undef DEFINE_IMPLICIT_CTOR
 
@@ -71,7 +71,7 @@ class C10_API Scalar {
   }
 
   // TODO: Support ComplexHalf accessor
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(
       DEFINE_ACCESSOR)
 
   // also support scalar.to<int64_t>();
@@ -115,6 +115,6 @@ inline T Scalar::to() {
   inline T Scalar::to<T>() {  \
     return to##name();        \
   }
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(DEFINE_TO)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO)
 #undef DEFINE_TO
 } // namespace c10

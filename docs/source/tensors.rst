@@ -176,6 +176,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: argsort
    .. automethod:: asin
    .. automethod:: asin_
+   .. automethod:: as_strided
    .. automethod:: atan
    .. automethod:: atan2
    .. automethod:: atan2_
@@ -316,6 +317,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: log_normal_
    .. automethod:: logsumexp
    .. automethod:: long
+   .. automethod:: lstsq
    .. automethod:: lt
    .. automethod:: lt_
    .. automethod:: lu

@@ -101,6 +101,23 @@ enum PicklerClass : uint8_t {
 
 using ::c10::IValue;
 
+struct WriteableTensorData {
+  const char* data() const {
+    return static_cast<const char*>(tensor_.storage().data());
+  }
+  size_t sizeInBytes() const {
+    return size_;
+  }
+  size_t numel() const {
+    return tensor_.storage().numel();
+  }
+
+ private:
+  friend WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
+  at::Tensor tensor_;
+  uint64_t size_;
+};
+
 class Pickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
@@ -111,23 +128,24 @@ class Pickler {
   const std::vector<char>& stack();
 
   // Push protocol onto the stack
-  void start();
+  void protocol();
 
   // Push STOP OpCode onto the stack
-  void finish();
+  void stop();
 
-  void addIValue(const IValue& ivalue);
+  void pushIValue(const IValue& ivalue);
 
   // See torch/serialization.py for details, pushes a magic number, torch
   // serialization version, and system info to the pickle archive all as
   // individual pickle programs
-  void pushMetadata();
+  void torchSaveStart();
+  void torchSaveStop();
 
   void startTuple();
   void endTuple();
 
  private:
-  void addIValueImpl(const IValue& ivalue);
+  void pushIValueImpl(const IValue& ivalue);
   void pushDict(const IValue& ivalue);
   void pushDouble(const IValue& ivalue);
   void pushGenericList(const IValue& ivalue);
@@ -135,13 +153,13 @@ class Pickler {
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
   void pushLiteralTensor(const IValue& ivalue);
-  void pushMemoization(const IValue& ivalue);
   void pushTensor(const IValue& ivalue);
   void pushTensorReference(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
   // unmemoized version
   void pushStringImpl(const std::string& string);
+  void pushStorageOfTensor(const at::Tensor& tensor);
 
   void pushBinGet(uint32_t memo_id);
   void pushClass(PicklerClass cls);
@@ -178,9 +196,6 @@ class Pickler {
   // are serialized directly into the pickle
   std::vector<at::Tensor>* tensor_table_;
 
-  // List of tensors to serialize in the same binary as the pickle data
-  std::vector<at::Tensor> literal_tensors_;
-
   // TODO: only use this if necessary (add a pass to find all shared ivalues,
   // and only memoize those)
   uint32_t memo_id_ = 0;
@@ -194,6 +209,11 @@ class Pickler {
   // Otherwise, it is possible that a raw address gets reused for another
   // object, and we will alias it to the old object at that address.
   std::vector<IValue> memoized_ivalues_;
+
+  // List of tensor storages to serialize in the same binary as the pickle data
+  // similar to ivalues, they are memoized using BINPUT
+  std::vector<WriteableTensorData> tensor_data_;
+  std::unordered_map<const void*, uint32_t> memoized_storage_map_;
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
@@ -259,10 +279,15 @@ class Unpickler {
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
 // if necessary
-std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor);
+WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
 
 // return the value of the tensor's storage pointer
 uint64_t getStorageKey(const at::Tensor& tensor);
+
+// if the cls has __getstate__/__setstate__
+// assert they have the right schema and return true,
+// otherwise return false
+bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 
 } // namespace jit
 } // namespace torch

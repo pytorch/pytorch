@@ -39,6 +39,7 @@ from caffe2.python.operator_test.torch_integration_test import (generate_rois_ro
 import onnx
 import caffe2.python.onnx.backend as c2
 
+from test_pytorch_common import BATCH_SIZE, RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from test_pytorch_common import skipIfTravis, skipIfNoLapack, skipIfNoCuda
 from test_pytorch_common import skipIfUnsupportedOpsetVersion, skipIfUnsupportedMinOpsetVersion
 import verify
@@ -92,13 +93,6 @@ except ImportError:
     print('Cannot import torch, hence caffe2-torch test will not run.')
     sys.exit(0)
 
-
-BATCH_SIZE = 2
-
-RNN_BATCH_SIZE = 7
-RNN_SEQUENCE_LENGTH = 11
-RNN_INPUT_SIZE = 5
-RNN_HIDDEN_SIZE = 3
 
 model_urls = {
     'alexnet': 'https://download.pytorch.org/models/alexnet-owt-4df8aa71.pth',
@@ -604,7 +598,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             def forward(self, input):
                 return fn(input)
 
-        m1 = torch.randn(3, 4)
+        m1 = torch.randn(3, 4, 5, 6, 7)
         self.run_model_test(MyModel(), input=m1, train=False, batch_size=BATCH_SIZE)
 
     def test_index_1d(self):
@@ -622,16 +616,47 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_index_2d_neg_slice(self):
         self._test_index_generic(lambda input: input[0:-1, :])
 
-    # TODO: Slicing along two dimensions is currently unsupported by the caffe2
-    # backend. Revisit if this becomes supported in the future.
-    """
+    @skipIfUnsupportedOpsetVersion([10])
     def test_index_2d_2dimslice(self):
         self._test_index_generic(lambda input: input[0:1, 0:1])
-    """
-    """
+
+    @skipIfUnsupportedOpsetVersion([10])
     def test_index_2d_neg_slice2dim(self):
         self._test_index_generic(lambda input: input[0:-1, 0:-1])
-    """
+
+    def test_tensor_index_1d(self):
+        self._test_index_generic(lambda input: input[torch.tensor([0, 2])])
+
+    def test_tensor_index_2d_1dconstant(self):
+        self._test_index_generic(lambda input: input[1, torch.tensor([0, 2])])
+
+    @skipIfUnsupportedOpsetVersion([10])
+    def test_tensor_index_2d_1dslice(self):
+        self._test_index_generic(lambda input: input[torch.tensor([0, 2]), 0:1])
+
+    @skipIfUnsupportedOpsetVersion([10])
+    def test_tensor_index_2d_1dslice_first(self):
+        self._test_index_generic(lambda input: input[1:3, torch.tensor([0, 2])])
+
+    def test_tensor_index_newaxis(self):
+        self._test_index_generic(lambda input: input[None, torch.tensor([0, 2])])
+
+    def test_tensor_index_advanced_indexing(self):
+        self._test_index_generic(
+            lambda input: input[:, torch.tensor([[0, 2], [1, 1]]), :, torch.tensor([2, 1]), torch.tensor([0, 3])])
+
+    @skipIfUnsupportedOpsetVersion([10])
+    def test_tensor_index_advanced_indexing_with_slice(self):
+        self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), None, 2:4, torch.tensor([[1, 3], [4, 0]])])
+        self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), torch.tensor([1]), 2:4, torch.tensor([[1], [4]])])
+
+    def test_tensor_index_advanced_indexing_consecutive(self):
+        self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), torch.tensor([[1, 3], [4, 0]]), None])
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_tensor_index_advanced_indexing_masked(self):
+        self._test_index_generic(
+            lambda input: input[:, torch.tensor([1, 0, 1, 0], dtype=torch.uint8), torch.tensor([[1, 3], [4, 0]]), None])
 
     def test_chunk(self):
         class MyModel(torch.nn.Module):
@@ -1782,6 +1807,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_model_test(CeilModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test__dim_arange(self):
         class DimArange(torch.nn.Module):
             def forward(self, input):
@@ -1789,6 +1815,60 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.ones(5, 6)
         self.run_model_test(DimArange(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_end(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(a.size(0), dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_model_test(ArangeScript(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(a.size(0), dtype=torch.float).view(-1, 1) + a
+
+        self.run_model_test(ArangeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_start_end(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_model_test(ArangeScript(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
+
+        self.run_model_test(ArangeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_start_end_step(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_model_test(ArangeScript(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
+
+        self.run_model_test(ArangeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
 
     def test_log2(self):
         class Log2Model(torch.nn.Module):
@@ -1823,6 +1903,22 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         prepared = c2.prepare(onnx_model)
         caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
         self.assertEqual(caffe2_out[0].shape, x.shape)
+
+    # The order of returned indices from Multinomial is undefined, so randomly generated inputs
+    # in Caffe2BackendTestEmbed doesn't work with this op.
+    @skipIfEmbed
+    def test_multinomial(self):
+        class Multinomial(torch.nn.Module):
+            def forward(self, weight):
+                return torch.multinomial(weight, 3, replacement=True)
+
+        class MultinomialNoReplacement(torch.nn.Module):
+            def forward(self, weight):
+                return torch.multinomial(weight, 1)
+
+        weight = torch.tensor([[0, 10, 0, 0], [0, 0, 100, 0]], dtype=torch.float)
+        self.run_model_test(Multinomial(), train=False, input=weight, batch_size=BATCH_SIZE)
+        self.run_model_test(MultinomialNoReplacement(), train=False, input=weight, batch_size=BATCH_SIZE)
 
     def test_prim_shape(self):
         x = torch.randn(4, 5, requires_grad=True)

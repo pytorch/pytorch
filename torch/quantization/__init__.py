@@ -3,6 +3,7 @@ from .quantize import *  # noqa: F401
 from .observer import *  # noqa: F401
 from .QConfig import *  # noqa: F401
 from .fake_quantize import *  # noqa: F401
+from .fuse_modules import fuse_modules  # noqa: F401
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -28,6 +29,6 @@ _all__ = [
     'QConfig', 'default_qconfig',
     # QAT utilities
     'default_qat_qconfig', 'prepare_qat', 'quantize_qat',
-    # Dynamic quantization utilities
-    'quantize_dynamic',
+    # module transformations
+    'fuse_modules',
 ]
