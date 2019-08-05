@@ -61,6 +61,10 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
       }
     }
 
+    if (auto fn = cu_.find_function(fullName)) {
+      return std::make_shared<FunctionValue>(fn);
+    }
+
     return std::make_shared<ClassNamespaceValue>(std::move(fullName), cu_);
   }
   std::string kind() const override {

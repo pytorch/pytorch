@@ -971,6 +971,10 @@ struct PythonPrintPass {
         stmt << "uninitialized(" << node->output()->type()->python_str() << ")";
       } break;
       case prim::Constant: {
+        if (node->outputs().size() == 1 &&
+            node->output()->type()->kind() == TypeKind::FunctionType) {
+          break;
+        }
         if (node->kind() == prim::Constant && !node->mustBeNone()) {
           IValue v = toIValue(node->output()).value();
           printConstant(stmt, v);
@@ -1062,6 +1066,19 @@ struct PythonPrintPass {
           printQuotedString(field_stream, field);
           stmt << field_stream.str() << ")";
         }
+      } break;
+      case prim::CallFunction: {
+        const auto& fn_qualname = node->inputs()
+                                      .at(0)
+                                      ->type()
+                                      ->expect<FunctionType>()
+                                      ->function()
+                                      ->qualname();
+        stmt << fn_qualname.qualifiedName() << "(";
+        for (size_t i = 1; i < node->inputs().size(); i++) {
+          stmt << useOf(node->inputs()[i]) << ", ";
+        }
+        stmt << ")";
       } break;
       default: {
         Symbol kind = node->kind();
@@ -1379,6 +1396,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::CreateObject,
       prim::GetAttr,
       prim::SetAttr,
+      prim::CallFunction,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
