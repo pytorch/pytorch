@@ -4,6 +4,7 @@ from common_cuda import TEST_CUDA
 from collections import namedtuple
 import itertools
 import torch
+import torch.nn.functional as F
 import sys
 
 
@@ -98,6 +99,12 @@ class TestNamedTensor(TestCase):
 
         none_named_tensor = torch.zeros(2, 3).set_names_([None, None])
         self.assertEqual(repr(none_named_tensor), expected)
+
+    def test_noncontig_contiguous(self):
+        # This type of contiguous is special-cased and therefore needs its own test
+        for device in torch.testing.get_all_device_types():
+            x = torch.randn(2, 3, device=device).t().set_names_(('N', 'C'))
+            self.assertEqual(x.contiguous().names, ('N', 'C'))
 
     def test_copy_transpose(self):
         # This type of copy is special-cased and therefore needs its own test
@@ -359,6 +366,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('clamp_max', 2),
             method('cauchy_'),
             method('clone'),
+            method('contiguous'),
             fn_method_and_inplace('cos'),
             fn_method_and_inplace('cosh'),
             fn_method_and_inplace('digamma'),
@@ -420,7 +428,16 @@ class TestNamedTensor(TestCase):
             method('narrow', 0, 0, 1),
 
             # creation functions
-            fn('empty_like')
+            fn('empty_like'),
+
+            # bernoulli variants
+            fn('bernoulli'),
+            out_function('bernoulli'),
+            method('bernoulli_', 0.5),
+            method('bernoulli_', torch.tensor(0.5)),
+
+            [Function('F.dropout(inplace)', lambda t: F.dropout(t, inplace=True))],
+            [Function('F.dropout(outplace)', lambda t: F.dropout(t, inplace=False))],
         ]
         tests = flatten(tests)
 
