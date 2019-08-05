@@ -10,6 +10,8 @@ Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, Scalar value) {
   // As we dispatch on self and TH is type-checked, we need different definitions.
   // This can be fixed by moving to ATen.
   if (mask.dtype() == at::ScalarType::Byte) {
+    AT_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
+            "please use a mask with dtype torch.bool instead.");
     return legacy::cpu::_th_masked_fill_(self, mask, value);
   } else {
     return legacy::cpu::_th_masked_fill_bool_(self, mask, value);
@@ -20,6 +22,8 @@ Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, const Tensor & valu
   // As we dispatch on self and TH is type-checked, we need different definitions.
   // This can be fixed by moving to ATen.
   if (mask.dtype() == at::ScalarType::Byte) {
+    AT_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
+            "please use a mask with dtype torch.bool instead.");
     return legacy::cpu::_th_masked_fill_(self, mask, value);
   } else {
     return legacy::cpu::_th_masked_fill_bool_(self, mask, value);
@@ -30,6 +34,8 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
   // As we dispatch on self and TH is type-checked, we need different definitions.
   // This can be fixed by moving to ATen.
   if (mask.dtype() == at::ScalarType::Byte) {
+    AT_WARN("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
+            "please use a mask with dtype torch.bool instead.");
     return legacy::cpu::_th_masked_scatter_(self, mask, source);
   } else {
     return legacy::cpu::_th_masked_scatter_bool_(self, mask, source);
@@ -38,6 +44,8 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
 
 Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
   if (mask.dtype() == at::ScalarType::Byte) {
+    AT_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
+            "please use a mask with dtype torch.bool instead.");
     return legacy::cpu::_th_masked_select(self, mask);
   } else {
     return legacy::cpu::_th_masked_select_bool(self, mask);
