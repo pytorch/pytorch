@@ -39,6 +39,7 @@ from caffe2.python.operator_test.torch_integration_test import (generate_rois_ro
 import onnx
 import caffe2.python.onnx.backend as c2
 
+from test_pytorch_common import BATCH_SIZE, RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from test_pytorch_common import skipIfTravis, skipIfNoLapack, skipIfNoCuda
 from test_pytorch_common import skipIfUnsupportedOpsetVersion, skipIfUnsupportedMinOpsetVersion
 import verify
@@ -92,13 +93,6 @@ except ImportError:
     print('Cannot import torch, hence caffe2-torch test will not run.')
     sys.exit(0)
 
-
-BATCH_SIZE = 2
-
-RNN_BATCH_SIZE = 7
-RNN_SEQUENCE_LENGTH = 11
-RNN_INPUT_SIZE = 5
-RNN_HIDDEN_SIZE = 3
 
 model_urls = {
     'alexnet': 'https://download.pytorch.org/models/alexnet-owt-4df8aa71.pth',
