@@ -170,6 +170,14 @@ Note that argument type modifiers such as defaults and optional are not currentl
 
 The declarations also support the following attributes:
 
+**Overloads.** You can register multiple functions with the same name and different
+function signatures if you give them unique overload names. An overload name
+is specified after the function name, separated by a dot:
+
+```
+- func: func_name.overload_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
+```
+
 ### `variants`
 
 ```
