@@ -128,6 +128,11 @@ struct ExitTransformer {
     }
   }
 
+  static void replaceBlockOutputs(Block* b, at::ArrayRef<Value*> outs) {
+    removeOutputs(b);
+    registerBlockOutputs(b, outs);
+  }
+
   static void addIfOutputs(
       Node* n,
       at::ArrayRef<Value*> true_outs,
@@ -431,6 +436,8 @@ struct ExitTransformer {
     // update returned exit to false. then, reset the target_block to whatever
     // it was previously
     if (target_block_ == block) {
+      // if we might have exited, use the new exit values if we did exit,
+      // otherwise use the existing block outputs.
       if (getExitStatus(exit_pair) == ExitStatus::MIGHT) {
         auto new_if =
             graph_->create(prim::If, 0)->insertBefore(block->return_node());
@@ -438,16 +445,17 @@ struct ExitTransformer {
         new_if->addBlock();
         new_if->addInput(exit_pair.hasExited());
         addIfOutputs(new_if, exit_pair.exitValues(), block->outputs());
-        exit_pair = constructWillExitPair(new_if->outputs());
+        replaceBlockOutputs(block, new_if->outputs());
+      } else if (getExitStatus(exit_pair) == ExitStatus::WILL) {
+        replaceBlockOutputs(block, exit_pair.exitValues());
       }
 
-      if (getExitStatus(exit_pair) == ExitStatus::WILL) {
-        removeOutputs(block);
-        registerBlockOutputs(block, exit_pair.exitValues());
-      }
-
-      // reset the exiting status so that e.g. an exception from a closure block
-      // wont propagate to the enclosing function
+      // reset the exiting status. an exit should only reach its target block.
+      // e.g. a continue only affects most recent loop, return in closure
+      // does not affect enclosing graph.
+      // Exceptions do not propagate from Loops bc we might not enter the loop,
+      // and not from closures bc the Function node is a declaration and not
+      // an invocation.
       exit_pair = constructWontExitPair();
     }
     target_block_ = prev_target_block;

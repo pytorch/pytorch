@@ -1490,13 +1490,6 @@ struct to_ir {
   // raise a
   //
   // We ignore the expression following raise
-  //
-  // NYI: add exception logic to control-flow nodes
-  // if True:
-  //   a = 1
-  // else
-  //   raise Exception("Hi")
-  // print(a)
   void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
     auto string_input = insertConstant(*graph, exception, nullptr, loc);

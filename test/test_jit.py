@@ -12465,7 +12465,7 @@ a")
         self.assertEqual(test(None), 1)
         self.assertEqual(test(2), 2)
 
-    def test_excpetions_with_control_flow(self):
+    def test_exceptions_with_control_flow(self):
         def test_num_ifs(func, num_ifs):
             g = torch.jit.script(func).graph
             FileCheck().check_count("prim::If", num_ifs, exactly=True).run(g)
@@ -12483,6 +12483,28 @@ a")
         self.checkScript(no_guard_ifs_added, (1,))
         self.checkScriptRaisesRegex(no_guard_ifs_added, (2,), Exception, "")
         test_num_ifs(no_guard_ifs_added, 2)
+
+        # FUNCTION LOOKS LIKE:
+        # graph(%x.1 : int):
+        #   %7 : str = prim::Constant[value="Exception"]()
+        #   %2 : int = prim::Constant[value=1]()
+        #   %5 : int = prim::Constant[value=2]()
+        #   %19 : int = prim::Uninitialized()
+        #   %3 : bool = aten::eq(%x.1, %2)
+        #   %20 : int = prim::If(%3)
+        #     block0():
+        #       -> (%2)
+        #     block1():
+        #       %6 : bool = aten::eq(%x.1, %5)
+        #        = prim::If(%6)
+        #         block0():
+        #            = prim::RaiseException(%7)
+        #           -> ()
+        #         block1():
+        #            = prim::RaiseException(%7)
+        #           -> ()
+        #       -> (%19)
+        #   return (%20)
 
         def no_ifs_added(x):
             # type: (int) -> int
