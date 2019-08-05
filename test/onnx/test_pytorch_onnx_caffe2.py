@@ -746,10 +746,6 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 return input - 1
         self.run_model_test(MyModel(), train=False, batch_size=BATCH_SIZE)
 
-    def test_dataparallel(self):
-        model = nn.DataParallel(nn.ReflectionPad2d((1, 2, 3, 4)))
-        self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
-
     def test_embedding(self):
         model = nn.Embedding(10, 3, padding_idx=-1)
         input = torch.LongTensor(list(range(10))[::-1])
@@ -1913,6 +1909,22 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         prepared = c2.prepare(onnx_model)
         caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
         self.assertEqual(caffe2_out[0].shape, x.shape)
+
+    # The order of returned indices from Multinomial is undefined, so randomly generated inputs
+    # in Caffe2BackendTestEmbed doesn't work with this op.
+    @skipIfEmbed
+    def test_multinomial(self):
+        class Multinomial(torch.nn.Module):
+            def forward(self, weight):
+                return torch.multinomial(weight, 3, replacement=True)
+
+        class MultinomialNoReplacement(torch.nn.Module):
+            def forward(self, weight):
+                return torch.multinomial(weight, 1)
+
+        weight = torch.tensor([[0, 10, 0, 0], [0, 0, 100, 0]], dtype=torch.float)
+        self.run_model_test(Multinomial(), train=False, input=weight, batch_size=BATCH_SIZE)
+        self.run_model_test(MultinomialNoReplacement(), train=False, input=weight, batch_size=BATCH_SIZE)
 
     def test_prim_shape(self):
         x = torch.randn(4, 5, requires_grad=True)

@@ -539,6 +539,51 @@ void testWriteTracking() {
     ASSERT_TRUE(aliasDb.writesToAlias(
         writingNode, std::unordered_set<const Value*>{aAlias}));
   }
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph(%x: Tensor):
+    %b : (Tensor) = aten::relu_(%x)
+    return (%b)
+    )IR",
+        &*graph);
+    auto node_iter = graph->block()->nodes().begin();
+    auto relu = *node_iter;
+    AliasDb aliasDb(graph);
+    AT_ASSERT(aliasDb.isMutable(relu));
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph(%x: Tensor, %y : Tensor):
+    %b : (Tensor) = aten::mul(%x, %y)
+    return (%b)
+    )IR",
+        &*graph);
+    auto node_iter = graph->block()->nodes().begin();
+    auto mul = *node_iter;
+    AliasDb aliasDb(graph);
+    AT_ASSERT(!aliasDb.isMutable(mul));
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(
+        R"IR(
+  graph(%x: Tensor, %y : Tensor):
+    %c1 : int = prim::Constant[value=1]()
+    %b : (Tensor) = aten::add_(%x, %y, %c1)
+    return (%b)
+    )IR",
+        &*graph,
+        vmap);
+    auto add = vmap["b"]->node();
+    AliasDb aliasDb(graph);
+    AT_ASSERT(aliasDb.hasWriters(add));
+    AT_ASSERT(aliasDb.isMutable(add));
+  }
 }
 
 void testContainerAliasing() {

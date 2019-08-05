@@ -55,3 +55,8 @@ __all__ = [
     'TransformerEncoderLayer', 'TransformerDecoderLayer', 'Transformer',
     'Flatten'
 ]
+
+# Generated modules -- use torch/quantization/tools/make_modules to regenerate.
+from ._generated import Add
+
+__all__ += ['Add']
