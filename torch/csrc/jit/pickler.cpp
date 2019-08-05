@@ -141,7 +141,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
       push<OpCode>(OpCode::NEWFALSE);
     }
   } else if (ivalue.isString()) {
-    pushStringImpl(ivalue.toStringRef());
+    pushString(ivalue.toStringRef());
   } else if (ivalue.isGenericList()) {
     pushGenericList(ivalue);
   } else if (ivalue.isGenericDict()) {
