@@ -18,9 +18,8 @@ def extend_with_decoupled_weight_decay(base_optimizer):
     gradients more than L2 regularization would, which was shown to yield better
     training loss and generalization error in the paper above.
     
-    .. note:: The weight decay is not coupled with the learning rate. If a
-        scheduler is used for the learning rate, it is reasonable to schedule
-        the weight decay as well.
+    .. note:: The weight decay is implicitly scheduled by multiplying it with the
+        learning rate.
 
     .. note:: To prevent copying of the parameters, the weight decay is
         applied before the optimizer update. If the update step relies on
@@ -29,7 +28,7 @@ def extend_with_decoupled_weight_decay(base_optimizer):
 
     Example:
         >>> AdamW = extend_with_decoupled_weight_decay(torch.optim.Adam)
-        >>> optimizer = AdamW(decoupled_weight_decay=1e-5, lr=1e-3)
+        >>> optimizer = AdamW(weight_decay=1e-5, lr=1e-3)
     """
     
     class DecoupledWeightDecayOptimizer(base_optimizer):
@@ -44,12 +43,12 @@ def extend_with_decoupled_weight_decay(base_optimizer):
         Decay Regularization by  Loshchilov & Hutter:
         https://arxiv.org/abs/1711.05101
 
-        .. note:: The weight decay is not coupled with the  learning rate.
-            If a scheduler is used for the learning  rate, it is reasonable to
-            schedule the weight decay as well.
+        .. note:: The weight decay is implicitly scheduled by multiplying it with the
+        learning rate.
+
         
         Arguments:
-            decoupled_weight_decay (float, optional): weight decay (default: 0)
+            weight_decay (float, optional): decoupled weight decay (default: 1e-2).
             *args: arguments passed to the base optimizer.
             **kwargs: keyword arguments passed to the base optimizer.
         
@@ -57,29 +56,46 @@ def extend_with_decoupled_weight_decay(base_optimizer):
         wrapped {0} optimizer.
         """.format(base_optimizer.__name__)
 
-        def __init__(self, decoupled_weight_decay, *args, **kwargs):
+        def __init__(self, *args, **kwargs):
+            # Remove weight decay from kwargs to prevent L2 decay or unexpected
+            # keyword argument error
+            wd = kwargs.pop("weight_decay", 1e-2)
             super(DecoupledWeightDecayOptimizer, self).__init__(*args, **kwargs)
-            if self.defaults["weight_decay"] != 0:
-                warnings.warn(
-                    "The weight decay parameter of the base optimizer is not "
-                    "0. This means the weights will be decayed with l2 loss "
-                    "AND decoupled weight decay.", UserWarning)
-            self.defaults["decoupled_weight_decay"] = decoupled_weight_decay
+            self.defaults["decoupled_weight_decay"] = wd
             # update all param groups to contain the default weight decay
             # by re-adding them
             for group in self.param_groups:
-                group.setdefault("decoupled_weight_decay", decoupled_weight_decay)
+                group.setdefault("decoupled_weight_decay", wd)
+                group.setdefault("weight_decay", 0)
 
         def step(self, closure=None):
             # First perform the weight decay, then execute the optimizer step.
             # This way, we don't need to store the parameter value prior to the
             # update. The drawback is, that the optimizer's step function must
             # not depend on the parameter value but only the gradient.
+            # This also means that the closure has to be evaluated beforehand,
+            # so it won't work with optimizers that depend on closures.
+            loss = None
+            if closure is not None:
+                loss = closure()
             for group in self.param_groups:
+                wd = group['decoupled_weight_decay']
                 for p in group['params']:
-                    if p.grad is not None:
-                        p.data.mul_(1 - group['decoupled_weight_decay'])
-            return super(DecoupledWeightDecayOptimizer, self).step(closure)
+                    if p.grad is None:
+                        continue
+                    if p.grad.is_sparse:
+                        grad = p.grad.data
+                        grad = grad.coalesce()
+                        sparse_data = p.data.sparse_mask(grad)._values()
+                        sparse_data.mul_(group['lr'] * wd)
+                        sparse_data = grad.new(grad._indices(), sparse_data,
+                                               grad.size())
+                        p.data.sub_(sparse_data)
+                    else:
+                        p.data.mul_(1 - group['lr'] * wd)
+            # We don't pass the closure here as the result would be wrong due
+            # to the preceding weight decay.
+            return loss or super(DecoupledWeightDecayOptimizer, self).step()
 
         # copy the documentation string of the base optimizer
         step.__doc__ = base_optimizer.step.__doc__
