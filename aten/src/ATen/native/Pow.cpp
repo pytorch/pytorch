@@ -22,7 +22,7 @@ Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
               exp.isIntegral() && exp.toLong() < 0),
               "Integers to negative integer powers are not allowed.");
   if (exp.toDouble() == 0.0) {
-    result.copy_(ones(base.sizes(), base.options()));
+    result.resize_as_(base).fill_(1);
   } else if (exp.toDouble() == 1.0) {
     result.copy_(base);
   } else {
@@ -34,7 +34,7 @@ Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
 
 Tensor& pow_out(Tensor& result, Scalar base, const Tensor& exp) {
   if (base.toDouble() == 1.0) {
-    result.copy_(ones(exp.sizes(), exp.options()));
+    result.resize_as_(exp).fill_(1);
   } else {
     auto iter = TensorIterator::unary_op(result, exp);
     pow_scalar_tensor_stub(iter.device_type(), iter, base);

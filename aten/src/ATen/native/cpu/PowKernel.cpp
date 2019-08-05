@@ -121,25 +121,16 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
 }
 
 void pow_scalar_tensor_kernel(TensorIterator& iter, Scalar base_scalar) {
-  if (base_scalar.isFloatingPoint()) {
-    const auto base = base_scalar.to<double>();
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), "pow", [&]() {
-      cpu_kernel(iter,
-        [=](scalar_t exp) -> scalar_t {
-          return std::pow((long double)base, exp);
-        }
-      );
-    });
-  } else {
-    const auto base = base_scalar.to<int64_t>();
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), "pow", [&]() {
-      cpu_kernel(iter,
-        [=](scalar_t exp) -> scalar_t {
-          return std::pow((long double)base, exp);
-        }
-      );
-    });
-  }
+  const long double base = base_scalar.isFloatingPoint() ?
+                           static_cast<long double>(base_scalar.to<double>()) :
+                           static_cast<long double>(base_scalar.to<int64_t>());
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "pow", [&]() {
+    cpu_kernel(iter,
+      [=](scalar_t exp) -> scalar_t {
+        return std::pow(base, exp);
+      }
+    );
+  });
 }
 
 } // anonymous namespace
