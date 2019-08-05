@@ -24,9 +24,9 @@ __all__ = [
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
-    'ShortStorage', 'CharStorage', 'ByteStorage',
+    'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-    'ShortTensor', 'CharTensor', 'ByteTensor', 'Tensor',
+    'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
 ]
 
 ################################################################################
