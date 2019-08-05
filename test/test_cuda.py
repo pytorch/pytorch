@@ -6,6 +6,7 @@ from itertools import repeat
 import os
 from contextlib import contextmanager
 import threading
+import math
 if sys.version_info[0] == 3:
     import queue
 else:
@@ -1084,6 +1085,13 @@ class TestCuda(TestCase):
         self.assertEqual(x.int().get_device(), 1)
         self.assertEqual(x.type(torch.int).get_device(), 1)
         self.assertEqual(x.to(torch.int).get_device(), 1)
+
+    def test_abs_zero(self):
+        # Both abs(0.0) and abs(-0.0) should result in 0.0
+        for dtype in (torch.float, torch.double):
+            abs_zeros = torch.tensor([0.0, -0.0], device='cuda', dtype=dtype).abs().tolist()
+            for num in abs_zeros:
+                self.assertGreater(math.copysign(1.0, num), 0.0)
 
     def test_neg(self):
         _TestTorchMixin._test_neg(self, lambda t: t.cuda())
