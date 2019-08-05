@@ -377,6 +377,17 @@
     CPU: bitwise_not_out
     CUDA: bitwise_not_out
 
+- func: logical_not(Tensor self) -> Tensor
+  variants: function, method
+
+- func: logical_not_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
+
+- func: logical_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: logical_not_out
+    CUDA: logical_not_out
+
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: blackman_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor

@@ -1812,6 +1812,25 @@ class _TestTorchMixin(object):
     def test_bitwise_not(self):
         self._test_bitwise_not(self, 'cpu')
 
+    @staticmethod
+    def _test_logical_not(self, device):
+        for dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+                      torch.float, torch.double) + ((torch.half,) if device != 'cpu' else ()):
+            expected_res = torch.tensor([0, 0, 1], dtype=dtype)
+            a = torch.tensor([10, 1, 0], dtype=dtype)
+            # new tensor
+            self.assertEqual(expected_res, a.logical_not())
+            # out
+            b = torch.empty(0, dtype=dtype, device=device)
+            torch.logical_not(a, out=b)
+            self.assertEqual(expected_res, b)
+            # in-place
+            a.logical_not_()
+            self.assertEqual(expected_res, a)
+
+    def test_logical_not(self):
+        self._test_logical_not(self, 'cpu')
+
     def test_threshold(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
             if dtype != torch.uint8 and dtype != torch.float16:
