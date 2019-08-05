@@ -4538,7 +4538,7 @@ a")
         x = torch.zeros(3, 4, dtype=torch.long)
         graph = _propagate_shapes(fn.graph, (x,), False)
         default = torch.get_default_dtype()
-        if( default == torch.float ):
+        if(default == torch.float):
             FileCheck().check('Float(*, *) = aten::add').run(graph)
         else:
             FileCheck().check('Double(*, *) = aten::add').run(graph)
@@ -5760,19 +5760,6 @@ a")
                 continue
 
             test(op, tensor, const, swap_args)
-
-        alpha_template = dedent('''
-        def func(t):
-            return torch.{{op}}({{lhs}}, {{rhs}}, alpha={alpha})
-        ''')
-        template = alpha_template.format(alpha="5.2")
-        test('add', float_tensor, 1, False, template=template)
-        test('add', long_tensor, 1.5, False, template=template)
-        test('sub', float_tensor, 1.5, False, template=template)
-        test('sub', float_tensor, 2, False, template=template)
-        template = alpha_template.format(alpha="5")
-        test('add', long_tensor, 1, False, template=template)
-
 
     def test_tensor_number_math(self):
         self._test_tensor_number_math()
@@ -7028,17 +7015,29 @@ a")
             with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
                 fb.run("22 1 22")
 
+    def _dtype_to_jit_name(self, dtype):
+        if(dtype == torch.float32):
+            return "Float"
+        if(dtype == torch.float64):
+            return "Double"
+        if(dtype == torch.int64):
+            return "Long"
+        if(dtype == torch.int32):
+            return "Int"
+        if(dtype == torch.bool):
+            return "Bool"
+        raise RuntimeError('dtype not handled')
+
     def _dtype_to_expect(self, dtype, dim=0):
         param = ', '.join(['*'] * dim)
         param = '(' + param + ')'
-        if(dtype == torch.float32):
-            return "Float" + param
-        if(dtype == torch.float64):
-            return "Double" + param
-        if(dtype == torch.int64):
-            return "Long" + param
-        if(dtype == torch.int32):
-            return "Int" + param
+        jit_type = self._dtype_to_jit_name(dtype)
+        if dim >= 0:
+            return jit_type + param
+        # special case representing wrapped number
+        else:
+            return jit_type.lower()
+
 
     def _test_dtype_op_shape(self, ops, args, input_dims=1):
         if input_dims < 1:
@@ -7089,6 +7088,95 @@ a")
         self._test_dtype_op_shape(ops, args=[0])
 
         self._test_dtype_op_shape(ops, args=[1], input_dims=4)
+
+
+    def _test_binary_op_shape(self, ops, input_dims=1):
+
+        dtypes = [torch.float32, torch.float64, torch.int64, torch.int32, torch.bool]
+
+        if input_dims == 0:
+            shape = '1'
+        else:
+            shape = '[' + ('1,' * 4) + ']'
+            for _ in range(1, input_dims):
+                shape = '[' + ",".join([shape] * 4) + ']'
+
+        template = dedent('''
+        def func():
+            arg1 = {}
+            arg2 = {}
+            return torch.{}(arg1, arg2)
+        ''')
+
+        args = []
+        for dtype in dtypes:
+            args = args + ["torch.tensor({}, dtype={})".format(shape, dtype)]
+        args = args + [1, 1.5]
+
+        def isBool(arg):
+            return type(arg) == bool or (type(arg) == str and "torch.bool" in arg)
+
+        for op in ops:
+            for first_arg in args:
+                for second_arg in args:
+                    # subtract not supported for bool
+                    if (op == 'sub' or op == 'div') and (isBool(first_arg) or isBool(second_arg)):
+                        continue
+                    # div not implemneted correctly for mixed-type scalar params
+                    if (op == 'div' and type(first_arg) != type(second_arg) and type(first_arg) != str and type(second_arg) != str):
+                        continue
+                    return_line = "torch.{}({}, {})".format(op, first_arg, second_arg)
+                    # uncomment for debugging a failed test:
+                    # print("testing {}".format(return_line))
+                    code = template.format(first_arg, second_arg, op)
+                    scope = {}
+                    exec(code, globals(), scope)
+                    non_jit_result = scope['func']()
+
+                    cu = torch.jit.CompilationUnit(code)
+                    graph = cu.func.graph
+                    torch._C._jit_pass_complete_shape_analysis(graph, (), False)
+                    # use dim=-1 to represent a python/jit scalar.
+                    dim = -1 if type(first_arg) != str and type(second_arg) != str else non_jit_result.dim()
+                    dtype = non_jit_result.dtype
+                    # jit only supports int/float scalars.
+                    if dim < 0:
+                        if dtype == torch.int64:
+                            dtype = torch.int32
+                        if dtype == torch.float64:
+                            dtype = torch.float32
+                    expect = self._dtype_to_expect(dtype, dim)
+                    inferred_output = next(graph.outputs())
+
+                    check = FileCheck()
+                    if dim >= 0:
+                        check = check.check("aten::tensor")
+                    check.check(expect).run(graph)
+
+    def test_binary_op_shape(self):
+        self._test_binary_op_shape(['mul', 'div', 'add', 'sub'], 0)
+        self._test_binary_op_shape(['mul', 'div', 'add', 'sub'], 3)
+
+    def test_no_dtype_shape(self):
+
+        @torch.jit.script
+        def foo(x):
+            scalar_number = x.item()
+            return x.add(scalar_number)
+
+        @torch.jit.script
+        def foo2(x):
+            scalar_number = x.item()
+            return torch.tensor(1).add(scalar_number)
+
+        t = torch.tensor(5)
+        g = foo.graph_for(t)
+        type = next(g.outputs())
+        self.assertTrue(type.type() == torch._C.TensorType.get())
+        g2 = foo2.graph_for(t)
+        type = next(g.outputs())
+        self.assertTrue(type.type() == torch._C.TensorType.get())
+
 
     def test_filecheck_parse(self):
         def test_check():

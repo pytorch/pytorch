@@ -181,7 +181,7 @@ class TestTypePromotion(TestCase):
         x = torch.ones(4, dtype=torch.int)
         err = 'alpha must not be'
         self.assertRaisesRegex(RuntimeError, err,
-            lambda: torch.add(x, x, alpha=1.1))
+                               lambda: torch.add(x, x, alpha=1.1))
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
