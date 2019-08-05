@@ -346,6 +346,12 @@ def build_deps():
 # Building dependent libraries
 ################################################################################
 
+# the list of runtime dependencies required by this built package
+install_requires = []
+
+if sys.version_info <= (2, 7):
+    install_requires += ['future']
+
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
 Please install it via `conda install {module}` or `pip install {module}`
@@ -366,6 +372,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
         cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
         if cmake_cache_vars['USE_NUMPY']:
             report('-- Building with NumPy bindings')
+            global install_requires
+            install_requires += ['numpy']
         else:
             report('-- NumPy not found')
         if cmake_cache_vars['USE_CUDNN']:
@@ -758,6 +766,7 @@ if __name__ == '__main__':
         cmdclass=cmdclass,
         packages=packages,
         entry_points=entry_points,
+        install_requires=install_requires,
         package_data={
             'torch': [
                 'py.typed',
