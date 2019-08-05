@@ -58,18 +58,28 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
          static_cast<int>(padding[0]),
          static_cast<int>(padding[1])});
 
-    // int NDim = output_channels / groups;
-    // int KDim_per_group = kernel_h * kernel_w * input_channels_per_group;
-
     auto weight_contig = weight.contiguous();
     int32_t weight_zero_point_int32 = weight.q_zero_point();
-    TORCH_CHECK(
-        weight_zero_point_int32 == 0,
-        "Only symmetric quantization is supported for weights yet");
     const int8_t* weight_ptr_int8 =
         reinterpret_cast<int8_t*>(weight_contig.data<c10::qint8>());
 
     std::vector<int32_t> col_offsets(output_channels);
+    // compute column offsets (Similar to
+    // fbgemm::col_offsets_with_zero_pt_s8acc32_ref) please note that offsets
+    // include the sum of columns as well as the scalar term weight_zero_point *
+    // KDim
+    int NDim = output_channels / groups;
+    int KDim_per_group = kernel_h * kernel_w * input_channels_per_group;
+    for (int g = 0; g < groups; ++g) {
+      for (int j = 0; j < NDim; ++j) {
+        int32_t sum = 0;
+        for (int k = 0; k < KDim_per_group; ++k) {
+          sum += weight_ptr_int8[(g * NDim + j) * KDim_per_group + k];
+        }
+        col_offsets[g * NDim + j] =
+            sum - weight_zero_point_int32 * KDim_per_group;
+      }
+    }
 
     auto ret_ptr = guts::make_unique<PackedConvWeight>(
         PackedConvWeight{guts::make_unique<fbgemm::PackWeightsForConv<2>>(

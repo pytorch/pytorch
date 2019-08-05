@@ -60,18 +60,34 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
   GRAPH_DEBUG(toString());
 }
 
-bool AliasDb::hasWriters(const Node* n) const {
+bool AliasDb::isMutable(Node* n) const {
+  ValueSet vs;
+  for (const auto input : n->inputs()) {
+    vs.insert(input);
+  }
+  return writesToAlias(n, vs);
+}
+
+bool AliasDb::hasInputWriters(const Node* n) const {
   for (const auto input : n->inputs()) {
     if (hasWriters(input)) {
       return true;
     }
   }
+  return false;
+}
+
+bool AliasDb::hasOutputWriters(const Node* n) const {
   for (const auto output : n->outputs()) {
     if (hasWriters(output)) {
       return true;
     }
   }
   return false;
+}
+
+bool AliasDb::hasWriters(const Node* n) const {
+  return hasInputWriters(n) || hasOutputWriters(n);
 }
 
 bool AliasDb::hasWriters(const Value* v) const {
