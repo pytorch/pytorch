@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import torch
 from torch._ops import ops
-from torch.nn.modules import Module
+from torch.nn import Module
 
 _FLOAT_MODULES = {
     torch.add: ops.quantized.add
