@@ -256,8 +256,8 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_input
 
 
 def _remove_unused_input(mod):
-    # Note: Removing unused input "num_batches_tracked" from BatchNorm model. "num_batches_tracked" is stored in
-    # register_buffer, but it's not used in ONNX export. To preserve "num_batches_tracked" in register_buffer for
+    # Note: Removing unused input 'num_batches_tracked' from BatchNorm model. 'num_batches_tracked' is stored in
+    # register_buffer, but it's not used in ONNX export. To preserve 'num_batches_tracked' in register_buffer for
     # training, module's attribute 'training' could be used.
     batchnorm = 'bn'
     for sub_name, sub_mod in mod.named_modules():
