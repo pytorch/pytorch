@@ -679,6 +679,10 @@ class TestOperators(TestCase):
         self.assertONNX(model, x,
                         operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
+    def test_frobenius_norm(self):
+        x = torch.randn(2, 3, 4).float()
+        self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
