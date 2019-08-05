@@ -320,6 +320,24 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         checkQuantized(model)
 
 
+class ScriptabilityTest(QuantizationTestCase):
+    def test_wrapper_scriptable(self):
+        WrapperModule = nnq.modules.wrapper_module.WrapperModule
+        QWrapperModule = nnq.modules.wrapper_module.QuantizedWrapperModule
+        script_module = torch.jit.trace(WrapperModule(torch.add),
+            (torch.tensor(0), torch.tensor(0)))
+        script_qmodule = torch.jit.trace(WrapperModule(torch.add),
+            (torch.tensor(0), torch.tensor(0)))
+
+        a = torch.tensor(24)
+        b = torch.tensor(42)
+        y = a + b
+        y_hat = script_module(a, b)
+        self.assertEqual(y, y_hat, "Results of the scripted wrapper are off!")
+        y_hat = script_qmodule(a, b)
+        self.assertEqual(y, y_hat, "Results of the scripted qwrapper are off!")
+
+
 class FusionTest(QuantizationTestCase):
     def test_fuse_module_train(self):
         import torch.nn._intrinsic.modules.fused as torch_fused

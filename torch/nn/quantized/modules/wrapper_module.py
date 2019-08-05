@@ -16,7 +16,7 @@ class WrapperModule(torch.nn.Module):
         super(WrapperModule, self).__init__()
         self.operation = operation
 
-    def forward(self, x):
+    def forward(self, *x):
         return self.operation(*x)
 
 
@@ -27,7 +27,7 @@ class QuantizedWrapperModule(torch.nn.Module):
         self.register_buffer('scale', torch.tensor([1.0], dtype=torch.double))
         self.register_buffer('zero_point', torch.tensor([0], dtype=torch.long))
 
-    def forward(self, x):
+    def forward(self, *x):
         return self.operation(*x, scale=self.scale, zero_point=self.zero_point)
 
     @classmethod
