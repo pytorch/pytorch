@@ -8,7 +8,6 @@
 
 namespace torch {
 namespace jit {
-
 struct GraphExecutorState;
 struct Code;
 
@@ -38,7 +37,7 @@ struct GraphExecutorState {
 struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
-  GraphExecutor(std::shared_ptr<Graph> graph, bool optimize = true);
+  GraphExecutor(std::shared_ptr<Graph> graph);
   void run(Stack& inputs);
   ExecutionPlan getPlanFor(Stack& inputs);
   explicit operator bool() const {
@@ -59,6 +58,9 @@ TORCH_API void debugSetAutodiffSubgraphInlining(bool state);
 TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 
 TORCH_API bool& getProfilingMode();
+
+TORCH_API void setGraphExecutorOptimize(bool o);
+TORCH_API bool getGraphExecutorOptimize();
 
 namespace detail {
 

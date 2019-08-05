@@ -42,6 +42,7 @@ struct SchemaParser {
     std::vector<Argument> returns;
     bool kwarg_only = false;
     bool is_vararg = false;
+    bool is_varret = false;
     size_t idx = 0;
     parseList('(', ',', ')', [&] {
       if (is_vararg)
@@ -58,17 +59,32 @@ struct SchemaParser {
     });
     idx = 0;
     L.expect(TK_ARROW);
-    if (L.cur().kind == '(') {
+    if (L.nextIf(TK_DOTS)) {
+      is_varret = true;
+    } else if (L.cur().kind == '(') {
       parseList('(', ',', ')', [&] {
-        returns.push_back(
-            parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false));
+        if (is_varret) {
+          throw ErrorReport(L.cur())
+            << "... must be the last element of the return list";
+        }
+        if (L.nextIf(TK_DOTS)) {
+          is_varret = true;
+        } else {
+          returns.push_back(
+              parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false));
+        }
       });
     } else {
       returns.push_back(
           parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
     }
     return make_right<OperatorName, FunctionSchema>(
-        std::move(name.name), std::move(name.overload_name), std::move(arguments), std::move(returns), is_vararg, false);
+        std::move(name.name),
+        std::move(name.overload_name),
+        std::move(arguments),
+        std::move(returns),
+        is_vararg,
+        is_varret);
   }
 
   c10::OperatorName parseName() {

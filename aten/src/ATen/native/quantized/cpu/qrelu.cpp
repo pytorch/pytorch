@@ -16,7 +16,7 @@ Tensor quantized_relu(const Tensor& qx) {
                                      qx.q_scale(),
                                      qx.q_zero_point());
     auto iter = TensorIterator::unary_op(qy, qx);
-    cpu_kernel(*iter, [&](scalar_t value) -> scalar_t {
+    cpu_kernel(iter, [&](scalar_t value) -> scalar_t {
       return scalar_t(std::max<underlying_t>(value.val_, zero_point));
     });
   });

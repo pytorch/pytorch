@@ -16,6 +16,14 @@
 namespace torch {
 namespace jit {
 
+namespace {
+c10::OperatorOptions aliasAnalysisIsSpecialCase() {
+  c10::OperatorOptions options;
+  options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
+  return options;
+}
+} // namespace
+
 // This pass looks for trees in the graph, where leaves are mm ops, and the
 // inner vertices are add nodes. Once we have such a tree they can be reduced to
 // two concats and a single mm (basically into a single multiply of a wide
@@ -100,8 +108,9 @@ bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
   return m < 512 || ((l < 256 && r < 256) || (l > 256 && r > 256));
 }
 
-RegisterOperators mm_tree_reduction_reg(
-    {Operator(prim::MMTreeReduce, [](const Node* node) {
+RegisterOperators mm_tree_reduction_reg({Operator(
+    prim::MMTreeReduce,
+    [](const Node* node) {
       size_t num_inputs = node->inputs().size();
       return [num_inputs](Stack& stack) {
         std::vector<at::Tensor> inputs;
@@ -152,7 +161,8 @@ RegisterOperators mm_tree_reduction_reg(
         }
         return 0;
       };
-    })});
+    },
+    aliasAnalysisIsSpecialCase())});
 
 // TreeTokens will be used to label nodes of the graph, if the nodes will fit
 // our mm/add tree pattern. Basically we do dynamic programming on DAGs, where
@@ -309,8 +319,9 @@ bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
   return other_side_input.numel() <= 1024 * 2048;
 }
 
-RegisterOperators mm_batch_side_reg(
-    {Operator(prim::MMBatchSide, [](const Node* node) {
+RegisterOperators mm_batch_side_reg({Operator(
+    prim::MMBatchSide,
+    [](const Node* node) {
       size_t num_other_side_inputs = node->inputs().size() - 1;
       Side single_side = static_cast<Side>(node->i(Symbol::attr("side")));
       return [num_other_side_inputs, single_side](Stack& stack) {
@@ -354,7 +365,8 @@ RegisterOperators mm_batch_side_reg(
 
         return 0;
       };
-    })});
+    },
+    aliasAnalysisIsSpecialCase())});
 
 std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
     Value* value,
