@@ -1844,6 +1844,13 @@ def index(g, self, index):
             return g.op("Reshape", self, final_shape)
 
 
+@parse_args('v', 'is', 'i')
+def frobenius_norm(g, self, dim=None, keepdim=False):
+    sqrt = g.op('Mul', self, self)
+    sumsqrt = g.op('ReduceSum', sqrt, axes_i=dim, keepdims_i=keepdim)
+    return g.op('Sqrt', sumsqrt)
+
+
 @parse_args('v', 'i', 'b', 'v')
 def multinomial(g, input, num_samples, replacement=False, generator=None):
     if generator is not None and not generator.node().mustBeNone():

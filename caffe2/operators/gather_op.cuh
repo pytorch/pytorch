@@ -44,14 +44,11 @@ static bool gather_impl_cuda(
     int indicesIdx,
     int outputIdx,
     int axis,
-    bool wrap_indices,
-    bool match_outer) {
+    bool wrap_indices) {
   const Tensor& data = op->Input(dataIdx);
   const Tensor& indices = op->Input(indicesIdx);
   const TypeMeta dataType = data.dtype();
   size_t item_bytesize = dataType.itemsize();
-
-  CAFFE_ENFORCE(!match_outer, "match_outer=true is currently NOT supported for CUDA");
 
   // ONNX allows negative axis to index from the back, valid range: [-r, r].
   if (axis < 0) {
@@ -65,7 +62,7 @@ static bool gather_impl_cuda(
   // New shape:
   //  [data dims before axis] + [indices dims] + [data dims after axis]
   vector<int64_t> shape =
-      calc_output_shape_vector<int64_t>(data.sizes(), indices.sizes(), axis, match_outer);
+      calc_output_shape_vector<int64_t>(data.sizes(), indices.sizes(), axis);
   Tensor* output = op->Output(outputIdx, shape, at::dtype(dataType));
   float* out = static_cast<float*>(output->raw_mutable_data(dataType));
 
