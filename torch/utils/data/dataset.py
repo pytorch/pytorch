@@ -1,9 +1,11 @@
 import bisect
 import warnings
+import itertools
+import random
 
 from torch._utils import _accumulate
 from torch import randperm
-from torch.utils.data import BatchSampler, StrideSampler
+from torch.utils.data import Sampler, BatchSampler, StrideSampler
 from torch.utils.data._utils.worker import get_worker_info
 
 
@@ -277,6 +279,7 @@ class ChunkDataReader(object):
         pass
 
     def __call__(self, idx):
+        r"""Returns a [possibly empty] list"""
         raise NotImplementedError
 
 
@@ -290,16 +293,21 @@ class ChunkDataset(IterableDataset):
     size of the dataset is unknown .
     """
 
-    def __init__(self, example_sampler, chunk_sampler, chunk_reader):
+    def __init__(self, chunk_sampler, chunk_reader, batch_size, shuffle_cache=True):
         super(ChunkDataset, self).__init__()
-        assert isinstance(example_sampler, BatchSampler), 'sampler must be a `BatchSampler`'
         assert isinstance(chunk_sampler, StrideSampler), 'sampler must be a `StrideSampler`'
         assert callable(chunk_reader), 'chunk_reader must be `callable()` and return a container with data'
-        self.example_sampler = example_sampler
+        assert isinstance(batch_size, int), 'batch_size must be a `int`'
+        assert isinstance(shuffle_cache, bool), 'shuffle_cache must be a `bool`'
+
         self.chunk_sampler = chunk_sampler
         self.chunk_reader = chunk_reader
-        self._example_sampler_iter = iter(self.example_sampler)
+        self.batch_size = batch_size
+        self.shuffle_cache = shuffle_cache
+
+        # Internal state
         self._chunk_sampler_iter = iter(self.chunk_sampler)
+        self._cache = []
 
     def __iter__(self):
         return self
@@ -309,14 +317,20 @@ class ChunkDataset(IterableDataset):
 
     def __next__(self):
         r"""Returns a batch or raises exception when exhausted"""
-        original_batch = self.chunk_reader(next(self._chunk_sampler_iter))
-        if original_batch is None:
+
+        if len(self._cache) < self.batch_size:
+            new_chunk = self.chunk_reader(next(self._chunk_sampler_iter))
+            self._cache = list(itertools.chain(self._cache, new_chunk))
+            if self.shuffle_cache:
+                random.shuffle(self._cache)
+
+        if not self._cache:
             raise StopIteration
 
-        example_indices = next(self._example_sampler_iter)
-        shuffled_batch = [original_batch[i] for i in example_indices]
+        batch = self._cache[:self.batch_size]
+        self._cache = self._cache[self.batch_size:]
 
-        return shuffled_batch
+        return batch
 
     def reset(self):
         r"""Resets internal state
@@ -326,7 +340,6 @@ class ChunkDataset(IterableDataset):
         worker_id = get_worker_info().id
         # print('ChunkDataset.reset({})'.format(worker_id))
         self.chunk_sampler.reset(worker_id)
-        self._example_sampler_iter = iter(self.example_sampler)
         self._chunk_sampler_iter = iter(self.chunk_sampler)
 
     next = __next__  # py2 compatibility
