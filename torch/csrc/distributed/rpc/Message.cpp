@@ -36,7 +36,7 @@ Message& Message::operator=(Message const& rhs) & {
 Message& Message::operator=(Message&& rhs) & {
   Message(std::move(rhs.payload_),
           std::move(rhs.tensors_),
-          std::move(rhs.type_),
+          rhs.type_,
           rhs.id_).swap(*this);
   return *this;
 }

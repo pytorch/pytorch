@@ -11,6 +11,10 @@ using torch::jit::Unpickler;
 
 } // namespace
 
+#define BUILTIN_OP_NAMESPACE "torch.ops.aten."
+#define ATEN_PREFIX "aten::"
+#define ATEN_PREFIX_LEN 6
+
 ScriptCall::ScriptCall(
     std::shared_ptr<Operator> op, std::vector<at::IValue>&& args)
     : op_(std::move(op)), stack_(args) {}
@@ -42,9 +46,9 @@ Message ScriptCall::toMessage() {
     // insert qualified name
     auto opName = (*op_)->schema().name();
     TORCH_CHECK(opName.find("::") == opName.rfind("::")
-        && opName.rfind("aten::") == 0, "Unexpected operator name ", opName);
+        && opName.rfind(ATEN_PREFIX) == 0, "Unexpected operator name ", opName);
     // aten::add -> torch.ops.aten.add
-    opName.replace(0, 6, BUILTIN_OP_NAMESPACE);
+    opName.replace(0, ATEN_PREFIX_LEN, BUILTIN_OP_NAMESPACE);
     pickler.pushIValue(opName);
   }
   pickler.endTuple();

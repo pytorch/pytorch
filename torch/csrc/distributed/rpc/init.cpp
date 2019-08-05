@@ -52,11 +52,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def("invoke_rpc", [](
       RpcAgent& agent,
-      std::string dstName,
-      std::string opName,
-      py::args args,
-      py::kwargs kwargs) {
-    return py_rpc(agent, std::move(dstName), std::move(opName), args, kwargs);
+      const std::string& dstName,
+      const std::string& opName,
+      const py::args& args,
+      const py::kwargs& kwargs) {
+    return py_rpc(agent, dstName, opName, args, kwargs);
   });
 
   Py_RETURN_TRUE;

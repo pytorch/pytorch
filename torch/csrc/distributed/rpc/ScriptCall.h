@@ -12,8 +12,6 @@ namespace rpc {
 
 using torch::jit::Operator;
 
-#define BUILTIN_OP_NAMESPACE "torch.ops.aten."
-
 // A ScriptCall instance represents an invocation of a builtin operator for a
 // TorchScript function (not implemented yet). If it is a builtin operator, it
 // contains a shared ptr to the `Operator` and a list of arguments.

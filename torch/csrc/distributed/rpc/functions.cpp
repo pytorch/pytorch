@@ -5,7 +5,7 @@ namespace distributed {
 namespace rpc {
 
 void processRequestBlocking(
-    std::string from, Message&& request, RpcAgent& agent) {
+    const std::string& from, Message&& request, RpcAgent& agent) {
   switch (request.type()) {
     case MessageType::SCRIPT_CALL: {
       ScriptCall op = ScriptCall::fromMessage(request);
@@ -18,7 +18,7 @@ void processRequestBlocking(
 
       auto response = ScriptRet(std::move(stack.front())).toMessage();
       response.setId(request.id());
-      agent.send(std::move(from), std::move(response));
+      agent.send(from, std::move(response));
       break;
     }
     default: {
