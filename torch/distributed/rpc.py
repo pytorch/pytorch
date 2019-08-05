@@ -32,6 +32,16 @@ def _collect_worker_names(name, group):
     return names
 
 
+def destroy_rpc():
+    r"""
+    Destroy the local RPC agent. This is blocking until globally all RPC agents
+    are destroyed.
+    """
+    global _agent
+    _agent.shutdown()
+    _agent = None
+
+
 def init_rpc(name, backend='pg'):
     r"""
     Initialize the local RPC agent which immediately becomes ready to make and

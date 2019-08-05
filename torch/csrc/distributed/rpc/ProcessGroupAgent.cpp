@@ -78,14 +78,20 @@ ProcessGroupAgent::ProcessGroupAgent(
 }
 
 ProcessGroupAgent::~ProcessGroupAgent() {
-  //TORCH_CHECK(stop_, "Cannot destroy ProcessGroupAgent before shutdown.");
+  if (!stop_) {
+    AT_ERROR(stop_, "Must call ProcessGroupAgent::shutdown before destructor");
+  }
+}
 
+
+void ProcessGroupAgent::shutdown() {
   // Every process i sends a SHUTDOWN message to process i + 1. This is
   // necessary for now because:
   // 1. There is no abort API for ProcessGroup::recvAnysource yet. We have to
   //    feed it a message or kill the thread.
   // 2. A GLOO process cannot send message to itself. (there is an ongoing
   //    effort to fix this problem).
+  pg_->barrier()->wait();
   int dst = (pg_->getRank() + 1) % pg_->getSize();
   enqueue(SendWork(dst, Message({}, {}, MessageType::SHUTDOWN)));
   std::unique_lock<std::mutex> lock(sendQueueMutex_);
@@ -96,7 +102,9 @@ ProcessGroupAgent::~ProcessGroupAgent() {
   workProduceCV_.notify_all();
   sendThread_.join();
   listenerThread_.join();
+  pg_->barrier()->wait();
 }
+
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const std::string& to, Message&& message) {
@@ -170,7 +178,7 @@ void ProcessGroupAgent::sendLoop() {
 }
 
 void ProcessGroupAgent::listenLoop() {
-  while (!stop_) {
+  while (true) {
     // rank, tensor size
     std::vector<torch::Tensor> preamble = {torch::empty({2}, {torch::kInt64})};
     pg_->recvAnysource(preamble, pg_->getRank())->wait();

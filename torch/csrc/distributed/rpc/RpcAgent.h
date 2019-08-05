@@ -47,6 +47,17 @@ class RpcAgent {
   virtual std::shared_ptr<FutureMessage> send(
       const std::string& to, Message&& message) = 0;
 
+  // This is a temporary solution to gracefully stop the listening loop.
+  // ProcessGroupAgent does this by sending a SHUTDOWN message to the
+  // (rank + 1) % world_size peer, which means we cannot create
+  // ProcessGroupAgent with world_size == 1. We can drop this in the future when
+  // we find a way to gracefully exit the blocking recvAnysource call.
+  //
+  // FIXME: putting its implementation in destructor sometimes causes
+  // "Connection reset by peer" error. It seems somehow ProcessGroup object get
+  // destructed before RpcAgent object?
+  virtual void shutdown() = 0;
+
  protected:
   const std::string workerName_;
   const RequestCallback cb_;
