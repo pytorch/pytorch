@@ -469,9 +469,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: where
    .. automethod:: zero_
 
-.. class:: ByteTensor()
+.. class:: BoolTensor()
 
-   The following methods are unique to :class:`torch.ByteTensor`.
+   The following methods are unique to :class:`torch.BoolTensor`.
 
    .. automethod:: all
    .. automethod:: any
