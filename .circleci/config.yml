@@ -1529,35 +1529,35 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset7"
     docker:
-      - image: "soumith/manylinux-cuda80"
+      - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_manywheel_2.7mu_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset7"
     docker:
-      - image: "soumith/manylinux-cuda80"
+      - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.5m_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset7"
     docker:
-      - image: "soumith/manylinux-cuda80"
+      - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.6m_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset7"
     docker:
-      - image: "soumith/manylinux-cuda80"
+      - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_manywheel_3.7m_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset7"
     docker:
-      - image: "soumith/manylinux-cuda80"
+      - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_manywheel_2.7m_cu92_devtoolset7_build:
@@ -1719,7 +1719,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
     docker:
-      - image: "soumith/manylinux-cuda80"
+      - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_build:
@@ -1727,7 +1727,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
     docker:
-      - image: "soumith/manylinux-cuda80"
+      - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_build:
@@ -1735,7 +1735,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
     docker:
-      - image: "soumith/manylinux-cuda80"
+      - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_build:
@@ -1743,7 +1743,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
     docker:
-      - image: "soumith/manylinux-cuda80"
+      - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_build:
@@ -1863,31 +1863,31 @@ jobs:
   binary_linux_manywheel_2.7m_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
   binary_linux_manywheel_2.7mu_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
   binary_linux_manywheel_3.5m_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
   binary_linux_manywheel_3.6m_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
   binary_linux_manywheel_3.7m_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
   binary_linux_manywheel_2.7m_cu92_devtoolset7_test:
@@ -2339,31 +2339,31 @@ jobs:
   smoke_linux_manywheel_2.7m_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
   smoke_linux_manywheel_2.7mu_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
   smoke_linux_manywheel_3.5m_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
   smoke_linux_manywheel_3.6m_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
   smoke_linux_manywheel_3.7m_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
   smoke_linux_manywheel_2.7m_cu92_devtoolset7:
