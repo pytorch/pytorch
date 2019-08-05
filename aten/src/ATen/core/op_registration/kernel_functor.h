@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/op_registration/infer_schema.h>
+#include <ATen/core/ivalue.h>
 
 namespace c10 {
 /**
@@ -37,7 +38,10 @@ namespace detail {
   >;
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported input type.");
+    assert_is_valid_input_type() {
+      auto tmap = c10::getCustomClassTypeMap();
+      TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class as input argument");
+    }
   };
 
   template<class T, bool AllowDeprecatedTypes>
@@ -98,7 +102,10 @@ namespace detail {
   };
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_output_type {
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported output type.");
+    assert_is_valid_output_type() {
+      auto tmap = getCustomClassTypeMap();
+      TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class as output");
+    }
   };
 
   template<class T, bool AllowDeprecatedTypes>
@@ -170,7 +177,7 @@ namespace detail {
   template<class T, bool AllowDeprecatedTypes>
   IValue return_to_ivalue(T&& v) {
     assert_is_valid_output_type<T, AllowDeprecatedTypes>();
-    return IValue(std::move(v));
+    return c10::ivalue::from(v);
   }
 
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
