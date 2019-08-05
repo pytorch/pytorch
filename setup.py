@@ -858,13 +858,11 @@ if __name__ == '__main__':
                 'share/cmake/Caffe2/Modules_CUDA_fix/upstream/FindCUDA/*.cmake',
                 'share/cmake/Gloo/*.cmake',
                 'share/cmake/Torch/*.cmake',
+                'tools/amd_build/pyHIPIFY/*.py'
             ],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',
             ]
-        },
-        package_dir={
-            '': 'tools/amd_build/pyHIPIFY'
         },
         url='https://pytorch.org/',
         download_url='https://github.com/pytorch/pytorch/tags',
