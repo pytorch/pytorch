@@ -5,8 +5,8 @@ from __future__ import unicode_literals
 
 import torch
 import torch.nn.quantized as nnq
-import torch.nn._intrinsic.quantized as nnq_fused
 import torch.nn.quantized.dynamic as nnqd
+import torch.nn._intrinsic.quantized as nnq_fused
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
 from torch.nn._intrinsic.quantized import ConvReLU2d
