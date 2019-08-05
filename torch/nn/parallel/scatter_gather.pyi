@@ -9,8 +9,12 @@ T = TypeVar('T', Dict, List, Tuple)
 @overload
 def scatter(inputs: Tensor, target_gpus: _devices_t, dim: int = ...) -> Tuple[Tensor, ...]: ...
 
+# flake8 will raise a spurious error here since `torch/__init__.pyi` has not been generated yet
+# so mypy will interpret `Tensor` as `Any` since it is an import from what it belives to be an
+# untyped module. Thus to mypy, the first definition of `scatter` looks strictly more general
+# than this overload.
 @overload
-def scatter(inputs: T, target_gpus: _devices_t, dim: int = ...) -> List[T]: ...
+def scatter(inputs: T, target_gpus: _devices_t, dim: int = ...) -> List[T]: ...  # type: ignore 
 
 
 # TODO More precise types here.

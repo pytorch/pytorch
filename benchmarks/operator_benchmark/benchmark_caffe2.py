@@ -4,6 +4,8 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import workspace
+from caffe2.python import core 
+from caffe2.proto import caffe2_pb2
 import benchmark_core
 import benchmark_utils
 
@@ -23,8 +25,25 @@ class Caffe2BenchmarkBase(object):
     def __init__(self):
         self.args = {}
         self.user_provided_name = None
+        self._num_inputs_require_grads = 0
+        self._pass_count = 0
 
-    def tensor(self, shapes, dtype='float32'):
+    def _set_backward_test(self, is_backward):
+        pass
+
+    def _device_option(self, device):
+        """ This method is used to set device option.
+        """
+        if device not in ['cuda', 'cpu']:
+            raise ValueError("Missing attrs in configs")
+
+        if 'cuda' in device: 
+            self.dev = core.DeviceOption(caffe2_pb2.CUDA, 0)
+        else: 
+            self.dev = core.DeviceOption(caffe2_pb2.CPU)
+        return self.dev
+
+    def tensor(self, shapes, dtype='float32', device='cpu'):
         """ A wapper function to create C2 tensor filled with random data.
             The name/label of the tensor is returned and it is available 
             throughout the benchmark execution phase. 
@@ -36,7 +55,9 @@ class Caffe2BenchmarkBase(object):
                 C2 tensor of dtype 
         """
         blob_name = 'blob_' + str(Caffe2BenchmarkBase.tensor_index)
-        workspace.FeedBlob(blob_name, benchmark_utils.numpy_random(dtype, *shapes))
+        dev = self._device_option(device)
+        with core.DeviceScope(dev):
+            workspace.FeedBlob(blob_name, benchmark_utils.numpy_random(dtype, *shapes))
         Caffe2BenchmarkBase.tensor_index += 1
         return blob_name
 
@@ -58,7 +79,7 @@ class Caffe2BenchmarkBase(object):
             ret = int(value)
         return str(ret)
 
-    def test_name(self, name_type, **kargs):
+    def test_name(self, name_type="long", **kargs):
         """ this is a globally unique name which can be used to
             label a specific test
         """
@@ -93,13 +114,17 @@ class Caffe2OperatorTestCase(object):
     def run_forward(self, num_runs):
         """ Run the forward path of an operator in a loop
         """
-        if not workspace.RunOperatorMultiple(self.op_bench.forward(), num_runs):
+        with core.DeviceScope(self.op_bench.dev):
+            op = self.op_bench.forward()
+        if not workspace.RunOperatorMultiple(op, num_runs):
             raise ValueError("Unable to run operator test case: {}".format(self.test_name))
 
     def run_backward(self, num_runs):
         """ Run the backward path of an operator in a loop
         """
-        if not workspace.RunOperatorMultiple(self.op_bench.backward(), num_runs):
+        with core.DeviceScope(self.op_bench.dev):
+            op = self.op_bench.backward()
+        if not workspace.RunOperatorMultiple(op, num_runs):
             raise ValueError("Unable to run operator gradient test case: {}".format(self.test_name))
 
 

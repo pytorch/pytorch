@@ -196,7 +196,7 @@ def _tensor_str(self, indent):
         return '[]'
 
     summarize = self.numel() > PRINT_OPTS.threshold
-    if self.dtype is torch.float16:
+    if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
         self = self.float()
     formatter = _Formatter(get_summarized_data(self) if summarize else self)
     return _tensor_str_with_formatter(self, indent, formatter, summarize)

@@ -129,10 +129,13 @@ namespace {
     auto osizeW = output_size[1];
 
     /* resize output */
-    if (input.ndimension() == 3)
+    if (input.ndimension() == 3 || input.size(-4) == 1)
     {
-      output.resize_({sizeD, osizeH, osizeW});
-
+      if (input.ndimension() == 3) {
+        output.resize_({sizeD, osizeH, osizeW});
+      } else {
+        output.resize_({1, sizeD, osizeH, osizeW});
+      }
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "adaptive_avg_pool2d_cpu", [&] {
           auto input_data = input.data<scalar_t>();
           auto output_data = output.data<scalar_t>();
@@ -260,7 +263,7 @@ namespace {
     auto gradOutput = gradOutput_.contiguous();
 
     /* backprop */
-    if (input.ndimension() == 3)
+    if (input.ndimension() == 3 || input.size(-4) == 1)
     {
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(), "adaptive_avg_pool2d_backward_cpu", [&] {
@@ -323,13 +326,15 @@ namespace {
       return at::mkldnn_adaptive_avg_pool2d(input, output_size);
     }
 
-    if (output_size[0] == 1 && output_size[1] == 1) {
-//in this case, adaptive pooling is just computing mean over hw dimensions, which can be done more efficiently
-       int64_t mean_size = input.size(-1) * input.size(-2);
-       Tensor out = input.contiguous().view({-1, mean_size}).mean(-1);
-       return input.ndimension() == 3 ? out.view({input.size(0), 1, 1}) : out.view({input.size(0), input.size(1), 1, 1});
+    if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
+      // in this case, adaptive pooling is just computing mean over hw
+      // dimensions, which can be done more efficiently
+      int64_t mean_size = input.size(-1) * input.size(-2);
+      Tensor out = input.contiguous().view({-1, mean_size}).mean(-1);
+      return input.dim() == 3 ? out.view({input.size(0), 1, 1})
+                              : out.view({input.size(0), input.size(1), 1, 1});
     } else {
-       return _adaptive_avg_pool2d(input, output_size);
+      return _adaptive_avg_pool2d(input, output_size);
     }
   }
 

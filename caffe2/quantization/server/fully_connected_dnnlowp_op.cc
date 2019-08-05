@@ -20,6 +20,7 @@ C10_DEFINE_bool(
     "(currently only honored by FC)");
 
 C10_DECLARE_bool(caffe2_dnnlowp_dump_tensors);
+C10_DECLARE_bool(caffe2_dnnlowp_force_slow_path);
 
 namespace caffe2 {
 
@@ -435,17 +436,50 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
     }
 #endif
 
+// #define DNNLOWP_DETAILED_LOG_IN_SLOW_PATH
+#ifdef DNNLOWP_DETAILED_LOG_IN_SLOW_PATH
+    int overflow_cnt = 0, underflow_cnt = 0;
+#endif
+
     Y_int32_.resize(Y->size());
     for (int i = 0; i < M; ++i) {
       for (int j = 0; j < N; ++j) {
         int32_t sum = 0;
         for (int k = 0; k < K; ++k) {
+          int x = Xdata[i * K + k];
           int w = Wdata[j * K + k];
-          sum += Xdata[i * K + k] * w;
+          sum += x * w;
+#ifdef DNNLOWP_DETAILED_LOG_IN_SLOW_PATH
+          if (k < K - 1) {
+            int x2 = Xdata[i * K + k + 1];
+            int w2 = Wdata[j * K + k + 1];
+            int sum2 = x * w + x2 * w2;
+            bool overflowed = false, underflowed = false;
+            if (sum2 > numeric_limits<int16_t>::max()) {
+              overflowed = true;
+              ++overflow_cnt;
+            } else if (sum2 < numeric_limits<int16_t>::min()) {
+              underflowed = true;
+              ++underflow_cnt;
+            }
+            if (overflowed || underflowed) {
+              LOG(INFO) << "i " << i << " j " << j << " k " << k << " " << x
+                        << " * " << w << " + " << x2 << " * " << w2 << " = "
+                        << sum2;
+            }
+          }
+#endif
         }
         Y_int32_[i * N + j] = sum;
       } // for each output element
     } // for each row
+
+#ifdef DNNLOWP_DETAILED_LOG_IN_SLOW_PATH
+    LOG(INFO) << "underflow_cnt " << underflow_cnt << " ("
+              << static_cast<float>(underflow_cnt) / (M * N * K) * 100
+              << ") overflow_cnt " << overflow_cnt << " ("
+              << static_cast<float>(overflow_cnt) / (M * N * K) * 100 << ")";
+#endif
   }
 
   if (FLAGS_caffe2_dnnlowp_dump_tensors) {
@@ -588,7 +622,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
   int signed_min = -(1 << (qfactory_->GetWeightPrecision() - 1));
   if (is_weight_constant_) {
     bool fast_path = is_same<T, uint8_t>::value && GetCpuId().avx2() &&
-        this->debug_def().engine() != "DNNLOWP_ACC16";
+        this->debug_def().engine() != "DNNLOWP_ACC16" &&
+        !FLAGS_caffe2_dnnlowp_force_slow_path;
 
     if ((fast_path && !Wq_packed_) || (!fast_path && W_quantized_.empty())) {
       if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1)) {
@@ -638,6 +673,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
           reason = "fbgemm only supports AVX2";
         } else if (this->debug_def().engine() == "DNNLOWP_ACC16") {
           reason = "";
+        } else if (FLAGS_caffe2_dnnlowp_force_slow_path) {
+          reason = "slow path enforced";
         } else {
           assert(false);
         }

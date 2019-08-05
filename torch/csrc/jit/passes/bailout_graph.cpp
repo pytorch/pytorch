@@ -138,7 +138,7 @@ struct BailOutGraphBuilderForNode {
 // version of an original graph from a particular point
 struct BailOutInserter {
   explicit BailOutInserter(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)) {}
+      : graph_(std::move(graph)), bailout_index_(0) {}
 
   void run() {
     liveness_sets_ = BuildLivenessSets(graph_);

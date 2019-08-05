@@ -16,8 +16,13 @@ void TensorIterator::reorder_dimensions() {
   // at the front. NOTE: that this inverts the order of C-contiguous tensors.
   // strides[0] is the fastest moving dimension instead of strides[ndim - 1].
 
-  // initialize perm with n-1, n-2, ..., 1, 0
   perm_.resize(ndim());
+  if (ndim() == 1) {
+    perm_[0] = 0;
+    return;
+  }
+
+  // initialize perm with n-1, n-2, ..., 1, 0
   std::iota(perm_.rbegin(), perm_.rend(), 0);
 
   // returns 1 if the dim0 should come after dim1, -1 if dim0 should come
@@ -221,8 +226,42 @@ void TensorIterator::analyze_memory_formats() {
   }
 }
 
+#ifdef BUILD_NAMEDTENSOR
+void TensorIterator::propagate_names_to_outputs() {
+  NameVector names;
+
+  // build names
+  for (auto& op : operands_) {
+    if (!op.tensor.defined()) continue;
+    // don't include output tensors that are not also input tensors.
+    if (resize_outputs_ && op.is_output && !op.is_read_write) continue;
+    // perform name inference
+    if (!op.tensor.has_names()) {
+      continue;
+    }
+    auto tensor_names = *op.tensor.names();
+    if (names.empty()) {
+      names = tensor_names;
+    } else {
+      names = NameVector(unify_from_right(names, tensor_names).value());
+    }
+  }
+  if (names.empty()) {
+    return;
+  }
+
+  // propagate names
+  for (int i = 0; i < num_outputs_; i++) {
+    auto& op = operands_[i];
+    // must call propagate_names_to_outputs after outputs have been allocated.
+    TORCH_INTERNAL_ASSERT(op.tensor.defined());
+    at::internal_set_names_inplace(op.tensor, names);
+  }
+}
+#endif
+
 void TensorIterator::coalesce_dimensions() {
-  if (ndim() == 0) {
+  if (ndim() <= 1) {
     return;
   }
 
@@ -533,44 +572,59 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
   }
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
-  auto builder = TensorIterator::Builder();
-  builder.add_output(out);
-  builder.add_input(a);
-  builder.add_input(b);
-  builder.iter_->allow_cpu_scalars_ = true;
-  return builder.build();
+TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
+    const Tensor& b, bool check_internal_overlap) {
+  auto iter = TensorIterator();
+  if (check_internal_overlap) {
+    iter.check_and_add_output(out);
+  } else {
+    iter.add_output(out);
+  }
+  iter.add_input(a);
+  iter.add_input(b);
+  iter.allow_cpu_scalars_ = true;
+  iter.build();
+  return iter;
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::unary_op(Tensor& out, const Tensor& a) {
-  auto builder = TensorIterator::Builder();
-  builder.add_output(out);
-  builder.add_input(a);
-  return builder.build();
+TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
+    bool check_internal_overlap) {
+  auto iter = TensorIterator();
+  if (check_internal_overlap) {
+    iter.check_and_add_output(out);
+  } else {
+    iter.add_output(out);
+  }
+  iter.add_input(a);
+  iter.num_outputs_ = 1;
+  iter.build();
+  return iter;
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::nullary_op(Tensor& out) {
-  auto builder = TensorIterator::Builder();
-  builder.add_output(out);
+TensorIterator TensorIterator::nullary_op(Tensor& out) {
+  auto iter = TensorIterator();
+  iter.add_output(out);
   // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
-  builder.iter_->resize_outputs_ = false;
-  return builder.build();
+  iter.resize_outputs_ = false;
+  iter.build();
+  return iter;
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
-  AT_ASSERT(out.defined());
-  auto builder = TensorIterator::Builder();
-  builder.add_output(out);
-  builder.add_input(a);
-  builder.iter_->promote_gpu_output_dtypes_ = true;
-  builder.iter_->resize_outputs_ = false;
-  builder.iter_->is_reduction_ = true;
-  return builder.build();
+TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
+  TORCH_INTERNAL_ASSERT(out.defined());
+  auto iter = TensorIterator();
+  iter.add_output(out);
+  iter.add_input(a);
+  iter.promote_gpu_output_dtypes_ = true;
+  iter.resize_outputs_ = false;
+  iter.is_reduction_ = true;
+  iter.build();
+  return iter;
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
-  AT_ASSERT(out1.defined());
-  AT_ASSERT(out2.defined());
+TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
+  TORCH_INTERNAL_ASSERT(out1.defined());
+  TORCH_INTERNAL_ASSERT(out2.defined());
   TORCH_CHECK((!a.is_cuda() && !out1.is_cuda() && !out2.is_cuda()) || (a.device() == out1.device() && out1.device() == out2.device()),
       "reduce_op(): expected input and both outputs to be on same device, but input is on ", a.device(),
       ", output1 is on ", out1.device(), " and output2 is on", out2.device());
@@ -580,14 +634,15 @@ std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out1, Tensor& 
       " and output2 has ", out2.sizes());
   TORCH_CHECK(out1.strides() == out2.strides(), "reduce_op(): expected both outputs to have same strides, but output1 has ", out1.strides(),
            " and output2 has ", out2.strides());
-  auto builder = TensorIterator::Builder();
-  builder.add_output(out1);
-  builder.add_output(out2);
-  builder.add_input(a);
-  builder.iter_->promote_gpu_output_dtypes_ = true;
-  builder.iter_->resize_outputs_ = false;
-  builder.iter_->is_reduction_ = true;
-  return builder.build();
+  auto iter = TensorIterator();
+  iter.add_output(out1);
+  iter.add_output(out2);
+  iter.add_input(a);
+  iter.promote_gpu_output_dtypes_ = true;
+  iter.resize_outputs_ = false;
+  iter.is_reduction_ = true;
+  iter.build();
+  return iter;
 }
 
 void TensorIterator::mark_outputs() {
@@ -647,28 +702,22 @@ void TensorIterator::compute_shape() {
   }
 }
 
-static DimVector compute_stride(const Tensor& tensor, IntArrayRef shape) {
-  int ndim = shape.size();
-  auto original_shape = tensor.sizes();
-  auto original_stride = tensor.strides();
-  auto element_size_in_bytes = tensor.element_size();
-
-  auto stride = DimVector(ndim, 0);
-  auto offset = ndim - original_shape.size();
-  for (size_t i = 0; i < original_shape.size(); i++) {
-    if (original_shape[i] == 1) {
-      stride[offset + i] = 0;
-    } else {
-      stride[offset + i] = original_stride[i] * element_size_in_bytes;
-    }
-  }
-  return stride;
-}
-
 void TensorIterator::compute_strides() {
   for (auto& op : operands_) {
     if (op.tensor.defined()) {
-      op.stride_bytes = compute_stride(op.tensor, shape_);
+      auto original_shape = op.tensor.sizes();
+      auto original_stride = op.tensor.strides();
+      auto element_size_in_bytes = op.tensor.element_size();
+
+      op.stride_bytes.resize(ndim(), 0);
+      auto offset = ndim() - original_shape.size();
+      for (size_t i = 0; i < original_shape.size(); i++) {
+        if (original_shape[i] == 1) {
+          op.stride_bytes[offset + i] = 0;
+        } else {
+          op.stride_bytes[offset + i] = original_stride[i] * element_size_in_bytes;
+        }
+      }
     }
   }
 }
@@ -723,34 +772,36 @@ int TensorIterator::get_dim_to_split() const {
   return dim_to_split;
 }
 
-SplitUntil32Bit TensorIterator::with_32bit_indexing() const {
-  return SplitUntil32Bit(*this);
-}
-
-std::unique_ptr<TensorIterator> TensorIterator::Builder::build() {
+void TensorIterator::build() {
   // Analyze inputs memory format
-  iter_->analyze_memory_formats();
+  analyze_memory_formats();
   // set is_output and is_read_write flags on appropriate tensors
-  iter_->mark_outputs();
+  mark_outputs();
   // compute the broadcasted shape
-  iter_->compute_shape();
+  compute_shape();
   // compute each tensor's stride after broadcasting
-  iter_->compute_strides();
+  compute_strides();
   // re-order dimensions to improve coalescing
-  iter_->reorder_dimensions();
+  reorder_dimensions();
   // compute the result dtype and device
-  iter_->compute_types();
+  compute_types();
   // allocate the output tensor if it's not provided
-  iter_->allocate_outputs();
+  allocate_outputs();
+#ifdef BUILD_NAMEDTENSOR
+  // perform name inference
+  propagate_names_to_outputs();
+#endif
   // coalesce adjacent dimensions when possible
-  iter_->coalesce_dimensions();
+  coalesce_dimensions();
 
-  for (auto& op : iter_->operands_) {
-    AT_ASSERT(op.tensor.defined());
+  for (auto& op : operands_) {
+    TORCH_INTERNAL_ASSERT(op.tensor.defined());
     op.data = op.tensor.data_ptr();
   }
+}
 
-  return std::move(iter_);
+SplitUntil32Bit TensorIterator::with_32bit_indexing() const {
+  return SplitUntil32Bit(*this);
 }
 
 /// SplitUntil32Bit. Recursively splits an iterator into sub-iterators that

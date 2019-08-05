@@ -170,6 +170,30 @@ __global__ void AxpySliceKernel(
   }
 }
 
+// this kernel is a custom version of AxpySliceKernel
+// to be used when there is only one weighted X to update 
+// slice of Y.
+template <typename T_INDEX>
+__global__ void AxpySliceKernel2(
+    const float* weight0,
+    const int64_t N,
+    const int64_t slice_size,
+    const float* alpha,
+    const float* X,
+    const T_INDEX* Indices,
+    float* Y,
+    const int64_t M) {
+  // This implementation requires that the first weight is 1.0
+  CUDA_KERNEL_ASSERT(weight0[0] == 1.0);
+  for (int i = blockIdx.x; i < N; i += gridDim.x) {
+    T_INDEX idx = Indices[i];
+    float* y_offset = Y + (idx * slice_size);
+    for (int j = threadIdx.x; j < slice_size; j += blockDim.x){
+      atomicAdd(&y_offset[j], alpha[0] * X[(i * slice_size) + j]);
+    }
+  }
+}
+
 template <>
 bool ScatterWeightedSumOp<float, CUDAContext>::RunOnDevice() {
   return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(2));
@@ -195,46 +219,67 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
   int64_t block_size = M / N;
 
   float* data = output->template mutable_data<float>();
-
-  // In order to have all device pointers of x_i (and weight_i similarly)
-  // consecutively in device memory, copy pointers to a host vector and then
-  // copy back into a device array.
+  
   const int64_t B = (InputSize() - 3) / 2;
-  ReinitializeTensor(&x_data_host_, {B}, at::dtype<const float*>().device(CPU));
-  ReinitializeTensor(&weights_host_, {B}, at::dtype<const float*>().device(CPU));
-  ReinitializeTensor(&x_data_device_, {B}, at::dtype<const float*>().device(CUDA));
-  ReinitializeTensor(&weights_device_, {B}, at::dtype<const float*>().device(CUDA));
+  if(B > 1) {
+    // In order to have all device pointers of x_i (and weight_i similarly)
+    // consecutively in device memory, copy pointers to a host vector and then
+    // copy back into a device array.
+    ReinitializeTensor(&x_data_host_, {B}, at::dtype<const float*>().device(CPU));
+    ReinitializeTensor(&weights_host_, {B}, at::dtype<const float*>().device(CPU));
+    ReinitializeTensor(&x_data_device_, {B}, at::dtype<const float*>().device(CUDA));
+    ReinitializeTensor(&weights_device_, {B}, at::dtype<const float*>().device(CUDA));
 
-  const float** x_data_host = x_data_host_.mutable_data<const float*>();
-  const float** weights_host = weights_host_.mutable_data<const float*>();
-  const float** x_data_device = x_data_device_.mutable_data<const float*>();
-  const float** weights_device = weights_device_.mutable_data<const float*>();
+    const float** x_data_host = x_data_host_.mutable_data<const float*>();
+    const float** weights_host = weights_host_.mutable_data<const float*>();
+    const float** x_data_device = x_data_device_.mutable_data<const float*>();
+    const float** weights_device = weights_device_.mutable_data<const float*>();
 
-  for (int inp = 3; inp < InputSize(); inp += 2) {
-    int idx = (inp - 3) / 2;
-    x_data_host[idx] = static_cast<const float*>(Input(inp).raw_data());
-    weights_host[idx] = static_cast<const float*>(Input(inp + 1).raw_data());
-  }
-  context_.Copy<const float*, CPUContext, CUDAContext>(
-      B, x_data_host, x_data_device);
-  context_.Copy<const float*, CPUContext, CUDAContext>(
-      B, weights_host, weights_device);
+    for (int inp = 3; inp < InputSize(); inp += 2) {
+      int idx = (inp - 3) / 2;
+      x_data_host[idx] = static_cast<const float*>(Input(inp).raw_data());
+      weights_host[idx] = static_cast<const float*>(Input(inp + 1).raw_data());
+    }
+    context_.Copy<const float*, CPUContext, CUDAContext>(
+        B, x_data_host, x_data_device);
+    context_.Copy<const float*, CPUContext, CUDAContext>(
+        B, weights_host, weights_device);
 
-  AxpySliceKernel<<<
-      std::min<int64_t>(K, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      weight0.template data<float>(),
-      K,
-      B,
-      block_size,
-      weights_device,
-      x_data_device,
-      indices.template data<Index>(),
-      data,
-      M);
-
+    AxpySliceKernel<<<
+        std::min<int64_t>(K, CAFFE_MAXIMUM_NUM_BLOCKS),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context_.cuda_stream()>>>(
+        weight0.template data<float>(),
+        K,
+        B,
+        block_size,
+        weights_device,
+        x_data_device,
+        indices.template data<Index>(),
+        data,
+        M);
+  } 
+  else {
+    // when only one input exists to update data buffer,
+    // avoid copying pointers to device array to prevent
+    // copy overhead      
+    auto& X1 = Input(3);
+    auto& weight1 = Input(4);
+    AxpySliceKernel2<<<
+        std::min<int64_t>(K, CAFFE_MAXIMUM_NUM_BLOCKS),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context_.cuda_stream()>>>(
+        weight0.template data<float>(),
+        K,
+        block_size,
+        weight1.template data<float>(),
+        X1.template data<float>(),
+        indices.template data<Index>(),
+        data,
+        M);
+  }   
   return true;
 }
 

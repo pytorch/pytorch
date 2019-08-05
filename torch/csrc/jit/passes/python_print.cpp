@@ -168,7 +168,7 @@ const static std::unordered_set<std::string> reserved_names = {
 
 struct PythonPrintPass {
   using SourceRangeStack = std::vector<SourceRange>;
-  SourceRangeStack source_range_stack_ = {SourceRange("")};
+  SourceRangeStack source_range_stack_ = {SourceRange()};
 
   struct WithSourceRange {
     explicit WithSourceRange(SourceRangeStack* stack, Node* n) : stack(stack) {
@@ -176,7 +176,7 @@ struct PythonPrintPass {
       if (auto gen_source = n->sourceRange().findSourceRangeThatGenerated()) {
         stack->push_back(std::move(gen_source.value()));
       } else {
-        stack->push_back(std::move(n->sourceRange()));
+        stack->push_back(n->sourceRange());
       }
     }
 
@@ -582,6 +582,18 @@ struct PythonPrintPass {
     stmt << end;
   }
 
+  void printValueIndex(TaggedStringStream& stmt, at::ArrayRef<Value*> inputs) {
+    const std::string val_name = useOf(inputs[0])->str();
+    if (isValidIdentifier(val_name)) {
+      stmt << val_name;
+    } else {
+      stmt << "(" << val_name << ")";
+    }
+    stmt << "[";
+    stmt << useOf(inputs[1]);
+    stmt << "]";
+  }
+
   void printDict(
       TaggedStringStream& stmt,
       at::ArrayRef<Value*> key_value_pairs,
@@ -628,45 +640,20 @@ struct PythonPrintPass {
     }
   }
 
-  // our way of encoding loops makes them difficult to turn back into python
-  // syntax. we have to check properties of the condition and trip count inputs
-  // to figure out which one it initially was
-  static bool shouldEmitAsForLoop(LoopView stmt) {
-    auto trip_count = toIValue(stmt.maxTripCount());
-    auto cond_input = toIValue(stmt.inputCond());
-    auto cond_next = toIValue(stmt.nextCond());
-
-    bool condition_is_always_true =
-        cond_input && cond_input->toBool() && cond_next && cond_next->toBool();
-    bool trip_count_is_specified = !trip_count || // trip is not a constant
-        trip_count->toInt() !=
-            std::numeric_limits<int64_t>::max() || // it is a constant but not
-                                                   // the default one
-        stmt.currentTripCount()->uses().size() >
-            0; // it is actually being used in the body.
-
-    if (condition_is_always_true) {
-      // if the trip count was not specified this was a user-written while True:
-      return trip_count_is_specified;
-    } else {
-      // this must be a while loop, but check that there isn't _also_ a trip
-      // count
-      if (trip_count_is_specified) {
-        throw script::ErrorReport(stmt.node()->sourceRange())
-            << "loop cannot be printed as python "
-            << "because it has gone through an optimization "
-            << "that combined while and for loops. File a bug.";
-      }
-      return false;
-    }
-  }
-
   void printLoop(LoopView stmt) {
     // Loop carried dependencies are handled by assigning their initial
     // values to the node->outputs() before the loop,
     // and assign node->outputs() to the new values at the end of each trip.
 
-    bool emit_as_for_loop = shouldEmitAsForLoop(stmt);
+    auto loop_type = stmt.loopType();
+    if (loop_type == LoopView::ModifiedLoop) {
+      throw script::ErrorReport(stmt.node()->sourceRange())
+          << "loop cannot be printed as python "
+          << "because it has gone through an optimization "
+          << "that combined while and for loops. File a bug";
+    }
+
+    bool emit_as_for_loop = loop_type == LoopView::For;
 
     assignValuesToTheirUniqueNames(stmt.carriedOutputs());
     // Add aliases for loop-carried dependencies
@@ -799,7 +786,7 @@ struct PythonPrintPass {
         if (enforce_importable_ && node->inputs().size() != 1) {
           throw script::ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
-              << "Normal use of ScriptMethods should enforce this.";
+              << "Normal use of ScriptMethods should enforce this";
         }
         if (node->inputs().size() > 0) {
           indent();
@@ -1014,8 +1001,14 @@ struct PythonPrintPass {
       case aten::str: {
         printValueList(stmt, node->inputs(), "str(", ")");
       } break;
+      case aten::__getitem__: {
+        printValueIndex(stmt, node->inputs());
+      } break;
       case prim::Print: {
         printValueList(stmt, node->inputs(), "print(", ")");
+      } break;
+      case aten::sorted: {
+        printValueList(stmt, node->inputs(), "sorted(", ")");
       } break;
       case prim::TupleConstruct: {
         if (auto qualname = node->output()
@@ -1058,10 +1051,6 @@ struct PythonPrintPass {
         } else {
           printDict(stmt, node->inputs());
         }
-      } break;
-      case prim::DictIndex: {
-        stmt << "(" << useOf(node->inputs().at(0)) << ")["
-             << useOf(node->inputs().at(1)) << "]";
       } break;
       case prim::CreateObject: {
         const auto classType = node->output()->type()->expect<ClassType>();
@@ -1236,9 +1225,9 @@ struct PythonPrintPass {
     }
   }
 
-  void printCompilationUnit(const script::CompilationUnit& cu) {
-    for (auto& func : cu.get_functions()) {
-      printFunction(*func);
+  void printModuleMethods(const script::Module& module) {
+    for (const auto method : module.type()->methods()) {
+      printFunction(*method);
     }
   }
 
@@ -1296,13 +1285,13 @@ void PythonPrint(
 void PythonPrint(
     std::ostream& out,
     SourceRangeRecords& source_ranges_out,
-    const script::CompilationUnit& cu,
-    bool is_method,
+    const script::Module& module,
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  pp.printCompilationUnit(cu);
+  PythonPrintPass pp(
+      tensor_table, class_table, enforce_importable, /*isMethod=*/true);
+  pp.printModuleMethods(module);
   pp.print(out, source_ranges_out);
 }
 
@@ -1337,7 +1326,6 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::PythonOp,
       prim::TupleConstruct,
       prim::TupleIndex,
-      prim::DictIndex,
       prim::TupleSlice,
       prim::TupleUnpack,
       prim::CreateObject,

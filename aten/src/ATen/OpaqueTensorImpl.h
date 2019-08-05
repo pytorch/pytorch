@@ -104,7 +104,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
    * see NOTE [ TensorImpl Shallow-Copying ].
    */
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
-    AT_ASSERT(typeid(*(impl.get())) == typeid(OpaqueTensorImpl<OpaqueHandle>));
+    AT_ASSERT(has_compatible_shallow_copy_type(impl->type_id()));
     auto opaque_impl = static_cast<const OpaqueTensorImpl<OpaqueHandle>*>(impl.get());
     copy_tensor_metadata(
       /*src_impl=*/opaque_impl,

@@ -103,6 +103,9 @@ void THCTensor_(sign)(THCState* state, THCTensor* self_, THCTensor* src) {
   }
 
   THCudaCheck(cudaGetLastError());
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(self_, src);
+#endif
 }
 
 void THCTensor_(cmax)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
@@ -193,8 +196,8 @@ static void propagate_names_if_named_tensor_enabled(THCTensor* result, THCTensor
   };                                                                    \
                                                                         \
   void THCTensor_(NAME)(THCState* state, THCTensor* self_, THCTensor* src) { \
-    THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));               \
-    at::assert_no_internal_overlap(self_, #NAME);                       \
+    THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));       \
+    at::assert_no_internal_overlap(self_);                              \
     if (self_ == src) {                                                 \
       if (!THC_pointwiseApply1<scalar_t>(state, self_, Tensor_##NAME##_##REAL##_Op())) { \
         THArgCheck(false, 2, CUTORCH_DIM_WARNING);                      \
@@ -247,7 +250,6 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cinv, THCNumerics<scalar_t>::cinv,  Real)
 
 #endif
 
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  neg, THCNumerics<scalar_t>::neg,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  abs, THCNumerics<scalar_t>::abs,   Real)
 
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_

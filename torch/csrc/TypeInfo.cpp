@@ -84,7 +84,7 @@ PyObject* THPIInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   TORCH_CHECK(r.idx == 0, "Not a type");
 
   at::ScalarType scalar_type = r.scalartype(0);
-  if (!at::isIntegralType(scalar_type)) {
+  if (!at::isIntegralType(scalar_type) && !at::isQIntType(scalar_type)) {
     return PyErr_Format(
         PyExc_TypeError,
         "torch.iinfo() requires an integer input type. Use torch.finfo to handle '%s'",
@@ -141,14 +141,26 @@ static PyObject* THPFInfo_min(THPFInfo* self, void*) {
 }
 
 static PyObject* THPIInfo_max(THPFInfo* self, void*) {
-  return AT_DISPATCH_INTEGRAL_TYPES(self->type, "max", [] {
-    return THPUtils_packInt64(std::numeric_limits<scalar_t>::max());
+  if (at::isIntegralType(self->type)) {
+    return AT_DISPATCH_INTEGRAL_TYPES(self->type, "max", [] {
+      return THPUtils_packInt64(std::numeric_limits<scalar_t>::max());
+    });
+  }
+  // Quantized Type
+  return AT_DISPATCH_QINT_TYPES(self->type, "max", [] {
+      return THPUtils_packInt64(std::numeric_limits<underlying_t>::max());
   });
 }
 
 static PyObject* THPIInfo_min(THPFInfo* self, void*) {
-  return AT_DISPATCH_INTEGRAL_TYPES(self->type, "min", [] {
-    return THPUtils_packInt64(std::numeric_limits<scalar_t>::lowest());
+  if (at::isIntegralType(self->type)) {
+    return AT_DISPATCH_INTEGRAL_TYPES(self->type, "min", [] {
+      return THPUtils_packInt64(std::numeric_limits<scalar_t>::lowest());
+    });
+  }
+  // Quantized Type
+  return AT_DISPATCH_QINT_TYPES(self->type, "min", [] {
+      return THPUtils_packInt64(std::numeric_limits<underlying_t>::lowest());
   });
 }
 

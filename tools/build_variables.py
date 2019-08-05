@@ -36,6 +36,7 @@ libtorch_sources = [
     ":generate-code=VariableType_4.cpp",
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/autograd/anomaly_mode.cpp",
+    "torch/csrc/autograd/custom_function.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/function_hook.cpp",
@@ -114,8 +115,10 @@ libtorch_sources = [
     "torch/csrc/api/src/jit.cpp",
     "torch/csrc/jit/script/edit_distance.cpp",
     "torch/csrc/jit/script/logging.cpp",
-    "torch/csrc/jit/script/final_returns.cpp",
     "torch/csrc/jit/script/convert_to_ssa.cpp",
+    "torch/csrc/jit/script/exit_transforms.cpp",
+    "torch/csrc/jit/script/inline_loop_condition.cpp",
+    "torch/csrc/jit/script/canonicalize_modified_loop.cpp",
     "torch/csrc/jit/script/script_type_parser.cpp",
     "torch/csrc/jit/script/sugared_value.cpp",
     "torch/csrc/jit/script/schema_matching.cpp",
@@ -137,7 +140,6 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/codegen.cpp",
     "torch/csrc/jit/fuser/fallback.cpp",
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
-    "torch/csrc/jit/fuser/cpu/dynamic_library_unix.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
     "torch/csrc/jit/function.cpp",
     "test/cpp/jit/test.cpp",
@@ -147,7 +149,6 @@ libtorch_cuda_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/nccl.cpp",
     "torch/csrc/jit/fuser/cuda/fused_kernel.cpp",
-    "torch/csrc/jit/fuser/cuda/thnvrtc.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp"
 ]
@@ -231,6 +232,7 @@ def add_torch_libs():
         "torch/csrc/jit/init.cpp",
         "torch/csrc/jit/passes/inline_fork_wait.cpp",
         "torch/csrc/jit/passes/onnx.cpp",
+        "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
         "torch/csrc/jit/passes/onnx/constant_fold.cpp",
         "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
         "torch/csrc/jit/passes/onnx/peephole.cpp",
@@ -350,7 +352,6 @@ def add_torch_libs():
         # TODO: putting USE_CUDA in propagated_pp_flags is error-prone
         propagated_pp_flags=propagated_pp_flags + [
             "-DUSE_CUDA",
-            "-DUSE_DIRECT_NVRTC",
         ],
         deps=[
             ":generated-autograd-headers",

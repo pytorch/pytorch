@@ -1,5 +1,5 @@
 from typing import Any, TypeVar
-from .. import Module
+from ..modules import Module
 
 
 class WeightNorm:

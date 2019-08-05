@@ -14,13 +14,11 @@ using Kwargs = std::unordered_map<std::string, IValue>;
 // underlying Function that also provides a `self` object.
 struct TORCH_API Function {
   Function(
-      std::string name,
-      bool optimize,
+      c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
       std::function<void(Function&)> function_creator)
       : name_(std::move(name)),
         graph_(std::move(graph)),
-        optimize_(optimize),
         function_creator_(std::move(function_creator)) {}
 
   void run(Stack& stack) {
@@ -43,8 +41,12 @@ struct TORCH_API Function {
     return graph_;
   }
 
-  const std::string& name() const {
+  const c10::QualifiedName& qualname() const {
     return name_;
+  }
+
+  const std::string& name() const {
+    return name_.name();
   }
 
   // if this isn't yet defined, run its method_creator function
@@ -78,7 +80,10 @@ struct TORCH_API Function {
   }
 
   bool is_optimized() const {
-    return optimize_;
+    AT_WARN(
+        "Function::is_optimized() is deprecated and always returns true. "
+        "Please use getGraphExecutorOptimize()");
+    return true;
   }
 
   void check_single_output() {
@@ -91,7 +96,7 @@ struct TORCH_API Function {
     ensure_defined();
     std::call_once(executor_init_, [&] {
       check_single_output();
-      executor_ = GraphExecutor(graph(), optimize_);
+      executor_ = GraphExecutor(graph());
     });
     return executor_;
   }
@@ -114,9 +119,8 @@ struct TORCH_API Function {
     return {function.name(), "", std::move(args), std::move(returns)};
   }
 
-  std::string name_;
+  c10::QualifiedName name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
-  bool optimize_;
 
   GraphExecutor executor_; // for execution
 

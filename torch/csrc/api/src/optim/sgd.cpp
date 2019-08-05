@@ -26,6 +26,7 @@ void SGD::step() {
     auto update = p.grad();
 
     if (options.weight_decay_ > 0) {
+      NoGradGuard guard;
       update += options.weight_decay_ * p;
     }
 

@@ -1,3 +1,5 @@
+#include <ATen/ATen.h>
+
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
 #endif
@@ -27,17 +29,7 @@ static PyObject * THPStorage_(isPinned)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
 #if defined(USE_CUDA)
-  cudaPointerAttributes attr;
-  cudaError_t err = cudaPointerGetAttributes(&attr, THWStorage_(data)(LIBRARY_STATE self->cdata));
-  if (err != cudaSuccess) {
-    cudaGetLastError();
-    Py_RETURN_FALSE;
-  }
-  #if CUDA_VERSION >= 10000
-    return PyBool_FromLong(attr.type == cudaMemoryTypeHost);
-  #else
-    return PyBool_FromLong(attr.memoryType == cudaMemoryTypeHost);
-  #endif
+  return PyBool_FromLong(at::globalContext().isPinnedPtr(THWStorage_(data)(LIBRARY_STATE self->cdata)));
 #else
   Py_RETURN_FALSE;
 #endif
@@ -170,6 +162,8 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   THP_decodeInt64Buffer((int64_t*) THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_HALF)
   THP_decodeHalfBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+#elif defined(TH_REAL_IS_BFLOAT16)
+  THP_decodeBFloat16Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_FLOAT)
   THP_decodeFloatBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_DOUBLE)
