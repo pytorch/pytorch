@@ -1,6 +1,26 @@
 import math
 import torch
+import os
+from distutils.util import strtobool
 from .optimizer import Optimizer
+from ..hub import _check_module_exists
+
+NUMBA_CUDA_EXIST = False
+NUMBA_CUDA_THREAD_PER_BLOCK = 512
+if not strtobool(os.environ.get('NO_NUMBA', 'n')) and _check_module_exists("numba.cuda"):
+    import numba.cuda
+    NUMBA_CUDA_EXIST = numba.cuda.is_available()
+
+    @numba.cuda.jit()
+    def numba_cuda_kernel(param, grad, exp_avg, exp_avg_sq, beta1, beta2, step_size, bias_correction2, eps):
+        i = numba.cuda.grid(1)
+        if i >= param.size:
+            return
+        exp_avg[i] = exp_avg[i] * beta1 + (1 - beta1) * grad[i]
+        exp_avg_sq[i] = exp_avg_sq[i] * beta2 + (1 - beta2) * grad[i]*grad[i]
+
+        denom = math.sqrt(exp_avg_sq[i]) / bias_correction2 + eps
+        param[i] = param[i] + (-step_size) * (exp_avg[i] / denom)
 
 
 class Adam(Optimizer):
@@ -87,24 +107,31 @@ class Adam(Optimizer):
 
                 state['step'] += 1
                 bias_correction1 = 1 - beta1 ** state['step']
-                bias_correction2 = 1 - beta2 ** state['step']
+                bias_correction2 = math.sqrt(1 - beta2 ** state['step'])
                 step_size = group['lr'] / bias_correction1
 
                 if group['weight_decay'] != 0:
                     grad.add_(group['weight_decay'], p.data)
 
-                # Decay the first and second moment running average coefficient
-                exp_avg.mul_(beta1).add_(1 - beta1, grad)
-                exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
-                if amsgrad:
-                    max_exp_avg_sq = state['max_exp_avg_sq']
-                    # Maintains the maximum of all 2nd moment running avg. till now
-                    torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
-                    # Use the max. for normalizing running avg. of gradient
-                    denom = (max_exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
+                if NUMBA_CUDA_EXIST and numba.cuda.is_cuda_array(p.data) and not amsgrad:
+                    numba_param = numba.cuda.as_cuda_array(p.flatten())
+                    numba_grad = numba.cuda.as_cuda_array(grad.flatten())
+                    numba_exp_avg = numba.cuda.as_cuda_array(exp_avg.flatten())
+                    numba_exp_avg_sq = numba.cuda.as_cuda_array(exp_avg_sq.flatten())
+                    blockspergrid = (p.data.numel() + (NUMBA_CUDA_THREAD_PER_BLOCK - 1)) // NUMBA_CUDA_THREAD_PER_BLOCK
+                    numba_cuda_kernel[blockspergrid, NUMBA_CUDA_THREAD_PER_BLOCK](numba_param, numba_grad, numba_exp_avg, numba_exp_avg_sq, beta1, beta2, step_size, bias_correction2, eps)
                 else:
-                    denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
-
-                p.data.addcdiv_(-step_size, exp_avg, denom)
+                    # Decay the first and second moment running average coefficient
+                    exp_avg.mul_(beta1).add_(1 - beta1, grad)
+                    exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
+                    if amsgrad:
+                        max_exp_avg_sq = state['max_exp_avg_sq']
+                        # Maintains the maximum of all 2nd moment running avg. till now
+                        torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
+                        # Use the max. for normalizing running avg. of gradient
+                        denom = (max_exp_avg_sq.sqrt() / bias_correction2).add_(eps)
+                    else:
+                        denom = (exp_avg_sq.sqrt() / bias_correction2).add_(eps)
+                    p.data.addcdiv_(-step_size, exp_avg, denom)
 
         return loss
