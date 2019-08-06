@@ -1,21 +1,19 @@
 #pragma once
 
+#include <ATen/core/TensorBody.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
+
 #include <c10/util/Optional.h>
-#include <c10/core/ScalarType.h>
-#include <c10/core/Device.h>
 
 #include <iostream>
 #include <memory>
 #include <type_traits>
 
 struct ClassType;
-namespace at {
-class Tensor;
-}
 namespace torch {
 namespace jit {
 struct Function;
@@ -26,10 +24,6 @@ struct CompilationUnit;
 } // namespace torch
 
 namespace c10 {
-class IValue;
-class Scalar;
-template<class T> class List;
-template<class K, class V> class Dict;
 
 struct FunctionSchema;
 using OptNameList = c10::optional<std::vector<std::string>>;
@@ -426,7 +420,13 @@ struct CAFFE2_API DimensionedTensorType : public TensorType {
  protected:
   DimensionedTensorType(
       const at::Tensor& tensor,
-      TypeKind kind = TypeKind::DimensionedTensorType);
+      TypeKind kind = TypeKind::DimensionedTensorType)
+      : DimensionedTensorType(
+            tensor.scalar_type(),
+            tensor.device(),
+            tensor.dim(),
+            tensor.is_variable() && tensor.requires_grad(),
+            kind) {}
   DimensionedTensorType(
       at::ScalarType scalar_type,
       at::Device device,
@@ -627,7 +627,13 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
   static const TypeKind Kind = TypeKind::ProfiledTensorType;
 
  private:
-  ProfiledTensorType(const at::Tensor& tensor);
+  ProfiledTensorType(const at::Tensor& tensor)
+      : TensorType(),
+        scalar_type_(tensor.scalar_type()),
+        device_(tensor.device()),
+        sizes_(tensor.sizes().vec()),
+        strides_(tensor.strides().vec()),
+        requires_grad_(tensor.requires_grad()) {}
   ProfiledTensorType(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
@@ -743,7 +749,10 @@ struct CAFFE2_API CompleteTensorType : public DimensionedTensorType {
   static TypePtr fromBoolType();
 
  private:
-  CompleteTensorType(const at::Tensor& tensor);
+  CompleteTensorType(const at::Tensor& tensor)
+      : DimensionedTensorType(tensor, TypeKind::CompleteTensorType),
+        sizes_(tensor.sizes().vec()),
+        strides_(tensor.strides().vec()) {}
   CompleteTensorType(
       at::ScalarType scalar_type,
       at::Device device,
@@ -1374,7 +1383,13 @@ CAFFE2_API c10::optional<TypePtr> unifyTypes(
 namespace detail {
 template <typename T>
 struct getTypePtr_ final {
-  static TypePtr call();
+  static TypePtr call() {
+    if (!isCustomClassRegistered<T>()) {
+      throw c10::Error("Type could not be converted to any of the known types.", "");
+    }
+    auto res = getCustomClassType<T>();
+    return std::dynamic_pointer_cast<Type>(res.type_);
+  }
 };
 
 template <>
@@ -1648,5 +1663,3 @@ struct CAFFE2_API ClassType : public NamedType {
 };
 
 } // namespace c10
-
-#include "jit_type_inl.h"

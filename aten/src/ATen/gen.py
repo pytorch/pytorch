@@ -120,7 +120,7 @@ TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
 REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegistrationDeclarations.h")
 
-TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Tensor.h")
+TENSOR_BODY_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
@@ -152,7 +152,7 @@ quantized_scalar_types = [
 ]
 
 
-# shared environment for non-derived base classes Tensor.h Storage.h
+# shared environment for non-derived base classes TensorBody.h Storage.h
 top_env = {
     'cpu_type_headers': [],
     'cuda_type_headers': [],
@@ -325,7 +325,7 @@ def iterate_types():
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['Tensor.h', 'TensorMethods.h']
+    core_files = ['TensorBody.h', 'TensorMethods.h']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
@@ -397,7 +397,7 @@ def generate_outputs():
     file_manager.write("Declarations.yaml", format_yaml(output_declarations))
 
     # Filter out named-tensor only declarations.
-    # They are necessary in create_generic because that generates Type.h, Tensor.h,
+    # They are necessary in create_generic because that generates Type.h, TensorBody.h,
     # and TensorMethods.h, all of which are checked in to the codebase and therefore
     # need to be consistent whether or not BUILD_NAMEDTENSOR is on/off.
     if not BUILD_NAMEDTENSOR:
@@ -408,7 +408,7 @@ def generate_outputs():
         generate_storage_type_and_tensor(backend, density, declarations)
 
     core_files = {
-        'Tensor.h': TENSOR_H,
+        'TensorBody.h': TENSOR_BODY_H,
         'TensorMethods.h': TENSOR_METHODS_H
     }
 

@@ -10,7 +10,6 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
-#include <ATen/core/Tensor.h>
 
 namespace torch {
 namespace jit {
@@ -39,34 +38,6 @@ template <typename TaggedCapsuleType>
 struct tagged_capsule {
   IValue ivalue;
 };
-
-inline bool IValue::isAliasOf(const IValue& rhs) const {
-  if (this->tag != rhs.tag) {
-    // Trivially don't alias if the type is different
-    return false;
-  }
-
-  if (!this->is_intrusive_ptr) {
-    // Primitive types don't alias anything
-    return false;
-  }
-
-  AT_ASSERT(rhs.is_intrusive_ptr);
-
-  // Tensors should be compared based on internal storage
-  if (this->isTensor()) {
-    const auto thisTensor = this->toTensor();
-    const auto rhsTensor = rhs.toTensor();
-    return thisTensor.is_alias_of(rhsTensor);
-  }
-
-  // Other types can be compared by their ptr value
-  return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
-}
-
-inline at::TensorImpl* IValue::unsafeToTensorImpl() const {
-  return static_cast<at::TensorImpl*>(payload.as_intrusive_ptr);
-}
 
 template<class T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::moveToIntrusivePtr() {
@@ -623,26 +594,6 @@ inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() && {
 inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() const & {
   AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
   return toIntrusivePtr<ivalue::Tuple>();
-}
-
-inline IValue::IValue(at::Tensor&& t)
-: tag(Tag::Tensor), is_intrusive_ptr(t.defined())  {
-  // Note: the undefined tensor is not refcounted, so while it
-  // is tagged as a tensor, is_intrusive_ptr is set to false.
-  // This is not an optional optimization: our incref call
-  // *will not* do the right thing when called on an
-  // undefined tensor.
-  payload.as_intrusive_ptr = t.unsafeReleaseTensorImpl();
-}
-
-inline IValue::IValue(const at::Tensor& t)
-: tag(Tag::Tensor), is_intrusive_ptr(t.defined())  {
-  // Note: the undefined tensor is not refcounted, so while it
-  // is tagged as a tensor, is_intrusive_ptr is set to false.
-  // This is not an optional optimization: our incref call
-  // *will not* do the right thing when called on an
-  // undefined tensor.
-  payload.as_intrusive_ptr = at::Tensor(t).unsafeReleaseTensorImpl();
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
