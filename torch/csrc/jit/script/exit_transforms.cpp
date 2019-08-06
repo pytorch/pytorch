@@ -8,6 +8,12 @@
 namespace torch {
 namespace jit {
 
+// WILL states that a node/block must hit the exit, MIGHT that it may happen,
+// WONT that it will not happen. THROWS states that a node/block always throws,
+// and allows us to create better graphs by not conditionalizing execution
+// when it is not necessary. It is an optimization; replacing it with WONT
+// would preserve graph semantics.
+
 enum class ExitStatus { WILL, MIGHT, WONT, THROWS };
 
 enum class Transform { Returns, LoopContinuations };
@@ -163,7 +169,8 @@ struct ExitTransformer {
     Block* body = loop.bodyBlock();
     auto exit_pair = transformExits(body);
     // if we're not exiting to outside the loop we don't need to do any work.
-    // since we may not enter the loop return WONT for the THROWS case
+    // since we may not enter the loop return WONT for the THROWS case.
+
     if (getExitStatus(exit_pair) == ExitStatus::WONT ||
         getExitStatus(exit_pair) == ExitStatus::THROWS) {
       return constructWontExitPair();
