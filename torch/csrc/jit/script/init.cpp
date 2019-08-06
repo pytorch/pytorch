@@ -701,7 +701,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& qualname,
          const Def& def,
          ResolutionCallback rcb,
-         FunctionDefaults defaults) {
+         const FunctionDefaults& defaults) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
         const auto name = c10::QualifiedName(qualname);
         TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
@@ -726,7 +726,7 @@ void initJitScriptBindings(PyObject* module) {
          const Decl& overload_decl,
          const Def& implementation_def,
          ResolutionCallback rcb,
-         FunctionDefaults defaults) {
+         const FunctionDefaults& defaults) {
         const auto name = c10::QualifiedName(qualname);
         auto cu = get_python_cu();
         checkOverloadDecl(overload_decl, implementation_def.decl());
