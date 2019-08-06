@@ -196,9 +196,15 @@ static inline size_t elementSize(ScalarType t) {
 }
 
 static inline bool isIntegralType(ScalarType t) {
+  // C10_DEPRECATED_MESSAGE("isIntegralType is deprecated. Please use the overload with includeBool parameter instead.")
   return (
       t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
-      t == ScalarType::Long || t == ScalarType::Short || t == ScalarType::Bool);
+      t == ScalarType::Long || t == ScalarType::Short);
+}
+
+static inline bool isIntegralType(ScalarType t, bool includeBool) {
+  bool isIntegral = isIntegralType(t);
+  return includeBool ? isIntegral || (t == ScalarType::Bool) : isIntegral;
 }
 
 static inline bool isFloatingType(ScalarType t) {
