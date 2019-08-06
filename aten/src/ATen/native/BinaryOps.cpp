@@ -199,7 +199,7 @@ Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
 }
 
 Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.scalar_type() == kBool && other.scalar_type() == kBOol,
+  TORCH_CHECK(self.scalar_type() == kBool && other.scalar_type() == kBool,
               "logical_xor only supports bool tensors.");
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_internal_overlap=*/true);
