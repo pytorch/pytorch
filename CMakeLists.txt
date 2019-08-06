@@ -110,9 +110,14 @@ option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" OFF)
 option(USE_METAL "Use Metal for iOS build" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
+if (USE_CUDA OR USE_ROCM)
+  set(USE_GPU TRUE)
+else()
+  set(USE_GPU FALSE)
+endif()
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
-    "USE_CUDA;UNIX;NOT APPLE" OFF)
+    "USE_GPU;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(
     USE_STATIC_NCCL "Use static NCCL" OFF
     "USE_NCCL" OFF)

@@ -276,6 +276,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("cusparse.h", ("hipsparse.h", CONV_INCLUDE, API_RAND)),
     ("cufft.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
     ("cufftXt.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
+    ("<nccl.h>", ("<rccl.h>", CONV_INCLUDE, API_RUNTIME)), #PyTorch also has a source file named "nccl.h", so we need to "<"">" to differentiate
 ])
 
 CUDA_IDENTIFIER_MAP = collections.OrderedDict([
