@@ -107,7 +107,33 @@ skip this section.
 
 Overview
 ~~~~~~~~
-PyTorch 1.2 brings changes to the scripting API to close the usability gap between the TorchScript compiler and the tracer. Rather than inherit directly from ``torch.jit.ScriptModule``, a ``torch.nn.Module`` instance can be passed to ``torch.jit.script()``, which returns a compiled ``ScriptModule`` version of the module.
+There are two main changes to the TorchScript API with 1.2.
+
+1. ``torch.jit.script`` will now attempt to recursively compile functions,
+methods, and classes that it encounters. Once you call ``torch.jit.script``,
+compilation is "opt-out", rather than "opt-in".
+
+2. ``torch.jit.script(nn_module_obj)`` is now the preferred way to create
+``ScriptModule``\s, instead of inheriting from ``torch.jit.ScriptModule``.
+These changes combine to provide a simpler, easier-to-use API for converting
+your ``nn.Module``\s into ``ScriptModule``\s, ready to be optimized and executed in a
+non-Python environment.
+
+The new usage looks like this::
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super(Model, self).__init__()
+            self.conv1 = nn.Conv2d(1, 20, 5)
+            self.conv2 = nn.Conv2d(20, 20, 5)
+
+        def forward(self, x):
+        x = F.relu(self.conv1(x))
+        return F.relu(self.conv2(x))
+
+    my_model = Model()
+    my_scripted_model = torch.jit.script(my_model)
+
   * The module's ``forward`` is compiled by default. Methods called from ``forward`` are lazily compiled in the order they are used in ``forward``.
   * To compile a method other than ``forward`` that is not called from ``forward``, add ``@torch.jit.export``
   * To stop the compiler from compiling a method and leave it as a call to Python, add ``@torch.jit.ignore``
@@ -122,7 +148,7 @@ As a result of these changes, the following items are considered deprecated and 
 
 Modules
 ~~~~~~~
-When passed to the ``torch.jit.script`` function, a ``torch.nn.Module``\'s data is copied to a ``ScriptModule`` and the TorchScript compiler compiles the functions called by forward and any ``@torch.jit.export`` functions.
+When passed to the ``torch.jit.script`` function, a ``torch.nn.Module``\'s data is copied to a ``ScriptModule`` and the TorchScript compiler compiles the module. The module's ``forward`` is compiled by default. Methods called from ``forward`` are lazily compiled in the order they are used in ``forward``, as we as any ``@torch.jit.export`` methods.
 
 ``@torch.jit.export``
 ^^^^^^^^^^^^^^^^^^^^^
