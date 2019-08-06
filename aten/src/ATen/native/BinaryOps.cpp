@@ -206,10 +206,9 @@ Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other)
 }
 
 Tensor logical_xor(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  logical_xor_stub(iter.device_type(), iter);
-  return iter.output();
+  Tensor result = at::empty({0}, self.options());
+  at::logical_xor_out(result, self, other);
+  return result;
 }
 
 Tensor& logical_xor_(Tensor& self, const Tensor& other) {

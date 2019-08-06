@@ -2564,7 +2564,7 @@ Example:
 
 add_docstr(torch.logical_xor,
            r"""
-logical_not(input, other, out=None) -> Tensor
+logical_xor(input, other, out=None) -> Tensor
 
 Computes the element-wise logical XOR of the given input tensor. The output tensor always has the same dtype as that of
 :attr:`input`.
