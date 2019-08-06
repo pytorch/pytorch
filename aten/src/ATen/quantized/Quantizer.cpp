@@ -202,10 +202,20 @@ template <typename SRC_T, typename DST_T>
 DST_T requantize_val(double src_scale, int64_t src_zero_point,
                      double dst_scale, int64_t dst_zero_point,
                      SRC_T src) {
-  // const auto new_scale = dst_scale / src_scale;
-  // const auto new_zero_point = dst_zero_point;
-  // const auto new_src = float(src.val_) - src_zero_point;
-  // return quantize_val<DST_T>(new_scale, new_zero_point, new_src);
+  if (typeid(SRC_T) == typeid(DST_T)) {
+    DST_T dst;
+    if (src_scale == dst_scale) {
+      if (src_zero_point == dst_zero_point) {
+        dst = src;
+      } else {
+        dst.val_ = src.val_ - src_zero_point + dst_zero_point;
+      }
+    } else {
+      const auto multiplier = src_scale / dst_scale;
+      dst.val_ = (src - src_zero_point) * multiplier + dst_zero_point;
+    }
+    return dst;
+  }
   const auto dq = dequantize_val<SRC_T>(src_scale, src_zero_point, src);
   return quantize_val<DST_T>(dst_scale, dst_zero_point, dq);
 }
