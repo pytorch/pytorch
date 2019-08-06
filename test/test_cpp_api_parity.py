@@ -55,21 +55,22 @@ void test_module_state_equality(std::shared_ptr<torch::nn::Module> m1, std::shar
 
         TORCH_NN_MODULE_WRAPPER = Template("""\n
 void ${module_variant_name}_test_init(const std::string& saved_module_path) {
-  ${module_qualified_name} m1${cpp_constructor_args};
-  ${module_qualified_name} m2${cpp_constructor_args};
-  torch::load(m2, saved_module_path);
+  ${module_qualified_name} m_init_by_python${cpp_constructor_args};
+  torch::load(m_init_by_python, saved_module_path);
 
-  test_module_state_equality(m1.ptr(), m2.ptr());
+  ${module_qualified_name} m_init_by_cpp${cpp_constructor_args};
+
+  test_module_state_equality(m_init_by_cpp.ptr(), m_init_by_python.ptr());
 }
 
 void ${module_variant_name}_test_forward(
     const std::string& saved_module_path,
     torch::Tensor input,
-    torch::Tensor expected_output) {
+    torch::Tensor python_output) {
   ${module_qualified_name} module${cpp_constructor_args};
   torch::load(module, saved_module_path);
   TORCH_CHECK(
-    module(input).allclose(expected_output),
+    module(input).allclose(python_output),
     parity_test_error_msg, ": forward output doesn't match");
 }
 """)
@@ -96,6 +97,7 @@ void ${module_variant_name}_test_forward(
                 test_params_map[module_name] = []
             test_params_map[module_name].append(test_params)
 
+        # Generate C++ code for each test case
         cpp_source = TORCH_NN_MODULE_COMMON_TEST_HARNESS + test_params['cpp_source']
         functions = []
         for module_name in module_names:
@@ -107,6 +109,7 @@ void ${module_variant_name}_test_forward(
                 for method in torch_nn_test_methods:
                     functions.append(test_params['module_variant_name'] + '_test_' + method)
 
+        # Just-in-time compile the C++ test code
         cpp_module = torch.utils.cpp_extension.load_inline(
             name=test_suite_name,
             cpp_sources=cpp_source,
