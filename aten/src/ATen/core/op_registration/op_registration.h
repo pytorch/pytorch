@@ -345,7 +345,7 @@ public:
    * >     .op("my_op", &my_kernel_cpu);
    *
    * If your kernel is small and the overhead of calling it matters,
-   * then this API might be the wrong choice since the followig API
+   * then this API might be the wrong choice since the following API
    * has a slightly lower overhead for calling into the kernel:
    *
    * > static auto registry = c10::RegisterOperators()

@@ -15,15 +15,20 @@ TORCH_API variable_list _wrap_outputs(
   const at::ArrayRef<Variable> raw_outputs,
   const std::shared_ptr<Node> &cdata);
 
+
+// Get the return type of the forward function of the custom Function class X
+template<typename X, typename... Args>
+using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
 // To use custom autograd operations implement a Function subclass with
 // static backward and forward functions
 //
-// forward() can take as many arguments as you want and should return a
-// variable list. Use of any direct Variable arguments will be registered in
-// the graph but no vectors/sets or any other data structures will be traversed.
-// It should take an AutogradContext* as the first argument. Variables can be
-// saved in the ctx using save_for_backward() and other data can be saved in the
-// map ctx.save in the form of <std::string, at::IValue> pairs.
+// forward() can take as many arguments as you want and should return either a
+// variable list or a Variable. Use of any direct Variable arguments will be
+// registered in the graph but no vectors/sets or any other data structures will
+// be traversed. It should take an AutogradContext* as the first argument.
+// Variables can be saved in the ctx using save_for_backward() and other data
+// can be saved in the map ctx.save in the form of <std::string, at::IValue>
+// pairs.
 //
 // backward() should take an AutogradContext* and a variable list containing as
 // many Variables as there were outputs from forward as arguments. It should
@@ -56,11 +61,13 @@ TORCH_API variable_list _wrap_outputs(
 // auto y = MyFunction::apply(6, x);
 // Example backward call:
 // y[0].sum().backward();
-template<typename X, typename... Args>
-using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
-
 template <class T>
 struct TORCH_API Function {
+  // We need to use a different template paramter than T here because T will
+  // inherit from Function, and when Function<T> is instantiated, T::forward
+  // is not declared yet.
+  // The enable_if check is to ensure that the user doesn't explicitly provide
+  // the parameter X.
   template<typename X=T, typename... Args>
   static auto apply(Args&&... args) -> typename std::enable_if<std::is_same<X,T>::value, forward_t<X,Args...>>::type;
 };
@@ -163,7 +170,7 @@ void extract_vars(std::vector<bool> &is_var, variable_list& list, Args&& ... arg
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, variable_list>::value, T>::type to_output_type(variable_list& output_list) { return output_list; }
+typename std::enable_if<std::is_same<T, variable_list>::value, T&>::type to_output_type(variable_list& output_list) { return output_list; }
 
 template <typename T>
 typename std::enable_if<std::is_same<T, Variable>::value, T>::type to_output_type(variable_list& output_list) { return output_list[0]; }
@@ -211,6 +218,8 @@ auto Function<T>::apply(Args&&... args) -> typename std::enable_if<std::is_same<
     node->save_variables_to_ctx();
   }
 
+  // wrapped_outputs will be a variable_list so, convert it to the correct return
+  // type. Only Variable and variable_list are accepted as return types.
  return to_output_type<forward_return_t>(wrapped_outputs);
 }
 
