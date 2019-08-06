@@ -7885,10 +7885,6 @@ class _TestTorchMixin(object):
                 _test_atan2(1, 1, math.pi / 4 , device, dtype)
                 _test_atan2(1, -1, math.pi / -4 , device, dtype)
                 _test_atan2(-1, 1, math.pi * 3 / 4 , device, dtype)
-                _test_atan2(0, sys.float_info.max, math.pi / 2, device, dtype)
-                _test_atan2(0, -1 * sys.float_info.max, math.pi / -2, device, dtype)
-                _test_atan2(-1 * sys.float_info.max, 0, math.pi, device, dtype)
-                _test_atan2(sys.float_info.max, 0, 0, device, dtype)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_newaxis_numpy_comparison(self):
