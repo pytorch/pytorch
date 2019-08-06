@@ -2543,11 +2543,6 @@ logical_not(input, out=None) -> Tensor
 Computes the element-wise logical NOT of the given input tensor. The output tensor always has the same dtype as that of
 :attr:`input`.
 
-- The logical NOT of a bool is the one that is the same as standard textbook definition: False -> True, True ->
-  False.
-- The logical NOT of an integer: 0 -> 1, nonzero -> 0.
-- The logical NOT of a floating-point number: 0.0, -0.0 -> 1.0, nonzero -> 0.0.
-
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor

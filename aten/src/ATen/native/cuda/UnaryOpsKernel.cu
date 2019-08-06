@@ -24,10 +24,8 @@ void bitwise_not_kernel_cuda(TensorIterator& iter) {
 }
 
 void logical_not_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(), "logical_not_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return scalar_t(!a);
-    });
+  gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+    return scalar_t(!a);
   });
 }
 
