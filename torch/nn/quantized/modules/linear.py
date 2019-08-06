@@ -31,8 +31,8 @@ class Quantize(Module):
         self._dtype = out_dtype
 
     def forward(self, X):
-        return torch.quantize_linear(X, self._scale.item(),
-                                     self._zero_point.item(), self._dtype)
+        return torch.quantize_linear(X, float(self._scale),
+                                     int(self._zero_point), self._dtype)
 
     @staticmethod
     def from_float(mod):

@@ -107,6 +107,9 @@ class QuantizationTestCase(TestCase):
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
 
+    def checkScriptable(self, mod):
+        scripted = torch.jit.script(mod)
+        self._checkScriptable(scripted)
 
 # Below are a series of neural net models to use in testing quantization
 class SingleLayerLinearModel(torch.nn.Module):

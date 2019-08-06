@@ -35,10 +35,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
+        self.checkScriptable(model)
 
         # test one line API
         model = quantize(SingleLayerLinearModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
+        self.checkScriptable(model)
 
     def test_two_layers(self):
         r"""TwoLayerLinearModel has two Linear modules but we only quantize the second one
@@ -64,10 +66,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
+        self.checkScriptable(model)
 
         # test one line API
         model = quantize(AnnotatedTwoLayerLinearModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
+        self.checkScriptable(model)
 
     def test_nested1(self):
         r"""Test quantization for nested model, top level 'fc3' and
@@ -101,10 +105,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
+        self.checkScriptable(model)
 
         # test one line API
         model = quantize(AnnotatedNestedModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
+        self.checkScriptable(model)
 
 
     def test_nested2(self):
@@ -138,10 +144,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
+        self.checkScriptable(model)
 
         # test one line API
         model = quantize(AnnotatedSubNestedModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
+        self.checkScriptable(model)
 
     def test_nested3(self):
         r"""More complicated nested test case with child qconfig overrides
@@ -175,10 +183,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
+        self.checkScriptable(model)
 
         # test one line API
         model = quantize(AnnotatedCustomConfigNestedModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
+        self.checkScriptable(model)
 
     def test_skip_quant(self):
         r"""The case when we want to skip quantizing some layers
@@ -200,10 +210,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
+        self.checkScriptable(model)
 
         # test one line API
         model = quantize(SkipQuantModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
+        self.checkScriptable(model)
 
 
     def test_manual(self):
@@ -224,10 +236,12 @@ class PostTrainingQuantTest(QuantizationTestCase):
             test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
+        self.checkScriptable(model)
 
         # test one line API
         model = quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
+        self.checkScriptable(model)
 
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
@@ -245,6 +259,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
 
         model = quantize_qat(ManualLinearQATModel(), test_only_train_fn, self.train_data)
         checkQuantized(model)
+        self.checkScriptable(model)
 
     def test_eval_only_fake_quant(self):
         r"""Using FakeQuant in evaluation only mode,
@@ -275,10 +290,12 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
             test_only_eval_fn(model, self.img_data)
 
         checkQuantized(model)
+        self.checkScriptable(model)
 
         model = ManualConvLinearQATModel()
         model = quantize_qat(model, test_only_train_fn, self.img_data)
         checkQuantized(model)
+        self.checkScriptable(model)
 
 
 class FusionTest(QuantizationTestCase):
