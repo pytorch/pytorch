@@ -36,10 +36,12 @@ void test_module_state_equality(std::shared_ptr<torch::nn::Module> m1, std::shar
   TORCH_CHECK(
     params1.size() == params2.size(),
     parity_test_error_msg, ": ", "# of parameters doesn't match");
-  for (auto& param : params1)
+  for (auto& param : params1) {
     TORCH_CHECK(
-      param.value().equal(params2[param.key()]),
+      param->sizes().vec() == params2[param.key()].sizes().vec() &&
+      param->allclose(params2[param.key()]),
       parity_test_error_msg, ": ", "value of `", param.key(), "` doesn't match");
+  }
 
   auto buffers1 = m1->named_buffers();
   auto buffers2 = m2->named_buffers();
@@ -48,7 +50,8 @@ void test_module_state_equality(std::shared_ptr<torch::nn::Module> m1, std::shar
     parity_test_error_msg, ": ", "# of buffers doesn't match");
   for (auto& buffer : buffers1)
     TORCH_CHECK(
-      buffer.value().equal(buffers2[buffer.key()]),
+      buffer->sizes().vec() == buffers2[buffer.key()].sizes().vec() &&
+      buffer->allclose(buffers2[buffer.key()]),
       parity_test_error_msg, ": ", "value of `", buffer.key(), "` doesn't match");
 }
 """
@@ -75,7 +78,8 @@ void ${module_variant_name}_test_forward(
   auto cpp_output = module(input);
 
   TORCH_CHECK(
-    cpp_output.equal(python_output),
+    cpp_output.sizes().vec() == python_output.sizes().vec() &&
+    cpp_output.allclose(python_output),
     parity_test_error_msg, ": forward output doesn't match");
 }
 """)
