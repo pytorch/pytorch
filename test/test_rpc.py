@@ -105,7 +105,7 @@ class RpcTest(MultiProcessTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "^RPC has not been initialized"):
             dist.rpc('worker%d' % dstRank, torch.add,
-                           args=(torch.ones(n, n), torch.ones(n, n)))
+                     args=(torch.ones(n, n), torch.ones(n, n)))
 
         # it's safe to call join_rpc() multiple times
         dist.join_rpc()
