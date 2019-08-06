@@ -3731,23 +3731,17 @@
 - func: nonzero_numpy(Tensor self) -> Tensor[]
   variants: method, function
 
-- func: _gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CPU: _gather_out_cpu
-    CUDA: _gather_out_cuda
-
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
   variants: function
-
-- func: _gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
-  variants: function
   dispatch:
-    CPU: _gather_cpu
-    CUDA: _gather_cuda
+    CPU: gather_out_cpu
+    CUDA: gather_out_cuda
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: gather_cpu
+    CUDA: gather_cuda
 
 - func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
 

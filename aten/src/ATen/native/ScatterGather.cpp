@@ -5,14 +5,6 @@
 
 namespace at { namespace native {
 
-Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  return at::_gather_out(result, self, dim, index, sparse_grad);
-}
-
-Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  return at::_gather(self, dim, index, sparse_grad);
-}
-
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   return at::_scatter_(self, dim, index, source);
 }
