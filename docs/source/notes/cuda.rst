@@ -76,8 +76,8 @@ requested.)
 
 A consequence of the asynchronous computation is that time measurements without
 synchronizations are not accurate. To get precise measurements, one should either
-run entire script in synchronous mode with environment variable ``CUDA_LAUNCH_BLOCKING=1``
-or call :func:`torch.cuda.synchronize()` before recording times.
+call :func:`torch.cuda.synchronize()` before measuring, or use :class:`torch.cuda.Event`
+to record times.
 
 As an exception, several functions such as :meth:`~torch.Tensor.to` and
 :meth:`~torch.Tensor.copy_` admit an explicit :attr:`non_blocking` argument,
