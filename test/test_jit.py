@@ -12914,8 +12914,30 @@ a")
             impl_compile_failure("one", "two")
 
 
-        with self.assertRaisesRegex(Exception, r"# type: (str, str) -> (str"):
-            torch.jit.script(impl_compile_failure)
+        with self.assertRaisesRegex(Exception, "Arguments for call are not valid"):
+            torch.jit.script(test)
+
+    def test_function_overloading_isinstance(self):
+        @torch.jit.overload  # noqa: F811
+        def my_conv(x, y):  # noqa: F811
+            # type: (float, str) -> (float)
+            pass
+
+        @torch.jit.overload  # noqa: F811
+        def my_conv(x, y=2.0):  # noqa: F811
+            # type: (float, float) -> (float)
+            pass
+
+        def my_conv(x, y=2.0):  # noqa: F811
+            if isinstance(y, str):
+                return 4.0 - x
+            else:
+                return 2.0 + x
+
+        def test_uses():
+            return my_conv(1.5), my_conv(1.5, "hi"), my_conv(1.5, 5.0)
+
+        self.checkScript(test_uses, ())
 
     @unittest.skipIf(True, "Removing weak script")
     def test_overloading(self):

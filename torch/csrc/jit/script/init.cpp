@@ -180,13 +180,13 @@ void checkOverloadDecl(const Decl& new_decl, const Decl& old_decl) {
 
   TORCH_INTERNAL_ASSERT(
       new_params.size() == old_params.size(),
-      "Overload must have same number of parameters",
+      "Overload must have same number of parameters\n",
       new_decl.range(),
       old_decl.range());
   for (size_t i = 0; i < new_decl.params().size(); ++i) {
     TORCH_INTERNAL_ASSERT(
         new_params[i].ident().name() == old_params[i].ident().name(),
-        "Overload parameters must have the same names",
+        "Overload parameters must have the same names\n",
         new_params[i].ident(),
         old_params[i].ident());
   }

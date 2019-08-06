@@ -1157,22 +1157,28 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         check_directly_compile_overloaded(obj)
         ast = get_jit_def(obj)
         if _rcb is None:
-            closure_rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
-            stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-
-            def _rcb(name):
-                # since type comments aren't captured in the function's closures,
-                # we still need to try to the rcb based on stack frames if the
-                # closure rcb fails
-                result = closure_rcb(name)
-                if result:
-                    return result
-                return stack_rcb(name)
+            _rcb = _gen_rcb(obj, _frames_up)
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
         return fn
 
+def _gen_rcb(obj, _frames_up):
+    _frames_up = _frames_up + 1  # for invoking _gen_rcb()
+
+    closure_rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+    stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
+
+    def _rcb(name):
+        # since type comments aren't captured in the function's closures,
+        # we still need to try to the rcb based on stack frames if the
+        # closure rcb fails
+        result = closure_rcb(name)
+        if result:
+            return result
+        return stack_rcb(name)
+
+    return _rcb
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
@@ -2088,14 +2094,14 @@ _compiled_overloaded_fns = {}
 def overload(func):
     qual_name = _qualified_name(func)
     global _overloaded_fns
-    li = _overloaded_fns.get(qual_name)
-    if li is None:
-        li = []
-        _overloaded_fns[qual_name] = li
+    fn_overload_list = _overloaded_fns.get(qual_name)
+    if fn_overload_list is None:
+        fn_overload_list = []
+        _overloaded_fns[qual_name] = fn_overload_list
     signature = torch.jit.annotations.get_signature(func)
     if signature is None:
         raise RuntimeError("Must explicitly add type annotations to overloaded functions: {obj}").format(func)
-    li.append((torch.jit.get_jit_def(func).decl(), get_default_args(func)))
+    fn_overload_list.append((torch.jit.get_jit_def(func).decl(), get_default_args(func)))
     return func
 
 def compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
@@ -2105,15 +2111,8 @@ def compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_d
     # and refactor with above usage
     closure_rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)
     stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-
-    def _rcb(name):
-        # since type comments aren't captured in the function's closures,
-        # we still need to try to the rcb based on stack frames if the
-        # closure rcb fails
-        result = closure_rcb(name)
-        if result:
-            return result
-        return stack_rcb(name)
+    _frames_up = 0
+    _rcb = _gen_rcb(impl_fn, _frames_up)
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
 
