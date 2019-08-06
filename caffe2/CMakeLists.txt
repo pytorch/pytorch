@@ -363,10 +363,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
-    ${TORCH_SRC_DIR}/csrc/distributed/rpc/FutureMessage.cpp
-    ${TORCH_SRC_DIR}/csrc/distributed/rpc/Message.cpp
-    ${TORCH_SRC_DIR}/csrc/distributed/rpc/ScriptCall.cpp
-    ${TORCH_SRC_DIR}/csrc/distributed/rpc/ScriptRet.cpp
     ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
@@ -462,13 +458,17 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
 
   if (NOT INTERN_BUILD_MOBILE)
-    list(APPEND TORCH_SRCS 
+    list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/FutureMessage.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/Message.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/ScriptCall.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/ScriptRet.cpp
       ${TORCH_SRC_DIR}/csrc/jit/export.cpp
       ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
     if (NOT WIN32)
-      list(APPEND TORCH_SRCS 
+      list(APPEND TORCH_SRCS
         ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp)
     endif()
   endif()
