@@ -70,6 +70,7 @@
   variants: function
   dispatch:
      CUDA: fused_dropout_cuda
+  named_guard: False
 
 - func: _masked_scale(Tensor self, Tensor mask, float scale) -> Tensor
   variants: function
