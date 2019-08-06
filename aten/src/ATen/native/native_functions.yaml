@@ -3756,7 +3756,6 @@
   variants: method, function
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
-  variants: function
   dispatch:
     CPU: gather_out_cpu
     CUDA: gather_out_cuda
