@@ -4017,7 +4017,7 @@ class _TestTorchMixin(object):
             self.assertTrue(pool.map(method, [arg]))
 
     def test_addcmul(self):
-        for device in  torch.testing.get_all_device_types():
+        for device in torch.testing.get_all_device_types():
             for dtype in [torch.float, torch.double]:
                 a = torch.randn(2, 2, dtype=dtype, device=device)
                 b = torch.randn(2, 2, dtype=dtype, device=device)
