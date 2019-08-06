@@ -66,8 +66,8 @@ Tensor& logical_not_(Tensor& self) {
 }
 
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() == kBool,
-              "logical_not only supports bool tensors.");
+  TORCH_CHECK(self.scalar_type() == kBool && result.scalar_type() == kBool,
+              r"logical_not currently only supports bool tensors\.");
   auto iter = TensorIterator::unary_op(result, self,
     /*check_internal_overlap=*/true);
   logical_not_stub(iter.device_type(), iter);

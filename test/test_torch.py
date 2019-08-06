@@ -1827,9 +1827,14 @@ class _TestTorchMixin(object):
             # new tensor
             self.assertEqual(expected_res, a.logical_not())
             # out
-            b = torch.empty(0, dtype=dtype, device=device)
+            b = torch.empty(0, dtype=bool, device=device)
             torch.logical_not(a, out=b)
             self.assertEqual(expected_res, b)
+            # out is not bool
+            b = torch.empty(0, dtype=torch.uint8, device=device)
+            with self.assertRaisesRegex(RuntimeError,
+                                        "logical_not currently only supports bool tensors."):
+                torch.logical_not(a, out=b)
             # in-place
             a.logical_not_()
             self.assertEqual(expected_res, a)
@@ -1849,6 +1854,11 @@ class _TestTorchMixin(object):
             c = torch.empty(0, dtype=dtype, device=device)
             torch.logical_xor(a, b, out=c)
             self.assertEqual(expected_res, c)
+            # out is not bool
+            c = torch.empty(0, dtype=torch.uint8, device=device)
+            self.assertRaisesRegex(RuntimeError,
+                                   r"logical_xor currently only supports bool tensors\."):
+                torch.logical_xor(a, b, out=c)
             # in-place
             a.logical_xor_(b)
             self.assertEqual(expected_res, a)
