@@ -1833,7 +1833,7 @@ class _TestTorchMixin(object):
             # out is not bool
             b = torch.empty(0, dtype=torch.uint8, device=device)
             with self.assertRaisesRegex(RuntimeError,
-                                        "logical_not currently only supports bool tensors."):
+                                        r"The output tensor of logical_not must be a bool tensor\."):
                 torch.logical_not(a, out=b)
             # in-place
             a.logical_not_()
