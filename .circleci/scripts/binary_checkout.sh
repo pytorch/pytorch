@@ -17,22 +17,8 @@ export PYTORCH_ROOT="$workdir/pytorch"
 export BUILDER_ROOT="$workdir/builder"
 
 # Clone the Pytorch branch
-git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
+git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT" -b v1.2.0
 pushd "$PYTORCH_ROOT"
-if [[ -n "${CIRCLE_PR_NUMBER:-}" ]]; then
-  # "smoke" binary build on PRs
-  git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
-  git reset --hard "$CIRCLE_SHA1"
-  git checkout -q -B "$CIRCLE_BRANCH"
-  git reset --hard "$CIRCLE_SHA1"
-elif [[ -n "${CIRCLE_SHA1:-}" ]]; then
-  # Scheduled workflows & "smoke" binary build on master on PR merges
-  git reset --hard "$CIRCLE_SHA1"
-  git checkout -q -B master
-else
-  echo "Can't tell what to checkout"
-  exit 1
-fi
 git submodule update --init --recursive --quiet
 echo "Using Pytorch from "
 git --no-pager log --max-count 1
