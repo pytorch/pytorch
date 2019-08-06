@@ -17,7 +17,7 @@ Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Te
   // Special cases that we should handle:
   // Case 1: index is empty tensor and src is scalar tensor:
   //         dispatch to noop
-  // Case 2: Case 1 is not true and one or two of self or index is/are scalar:
+  // Case 2: Case 1 is not true, and one or two of self or index is/are scalar or index is empty:
   //         dispatch to and handled in legacy scatter_add_
   // Case 3: Case 1, 2 are not true and src is scalar tensor:
   //         expand src to the correct shape, then handled usually by legacy scatter_add_
