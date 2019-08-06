@@ -14,10 +14,8 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar va
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  if (index.numel() == 0) {
-    return self;
-  }
-  if (self.dim() == 0 || index.dim() == 0) {
+  if (self.dim() == 0 || index.dim() == 0 || index.numel() == 0) {
+    // special cases that we are handled in _legacy_scatter_add_
     return at::_legacy_scatter_add_(self, dim, index, source);
   }
   if (source.dim() == 0) {
