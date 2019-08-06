@@ -14,8 +14,17 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar va
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  // Special cases that we should handle:
+  // Case 1: index is empty tensor and src is scalar tensor:
+  //         dispatch to noop
+  // Case 2: Case 1 is not true and one or two of self or index is/are scalar:
+  //         dispatch to and handled in legacy scatter_add_
+  // Case 3: Case 1, 2 are not true and src is scalar tensor:
+  //         expand src to the correct shape, then handled usually by legacy scatter_add_
+  if (source.dim() == 0 && index.numel() == 0) {
+    return self;
+  }
   if (self.dim() == 0 || index.dim() == 0 || index.numel() == 0) {
-    // special cases that we are handled in _legacy_scatter_add_
     return at::_legacy_scatter_add_(self, dim, index, source);
   }
   if (source.dim() == 0) {
