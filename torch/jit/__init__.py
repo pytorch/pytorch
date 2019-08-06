@@ -1517,7 +1517,9 @@ if _enabled:
             else:
                 self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
 
-            Module.__init__(self)
+            Module._Module__construct(self)
+            Module.__setattr__(self, "training", True)
+
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
             self._modules = OrderedModuleDict(self._c)
@@ -1564,7 +1566,7 @@ if _enabled:
                 # to improve invocation performance
                 self.__dict__[attr] = script_method
                 return script_method
-            return Module.__getattr__(self, attr)
+            return super(ScriptModule, self).__getattr__(attr)
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
@@ -2038,7 +2040,6 @@ def _get_builtin_table():
         (torch.nn.init._no_grad_normal_, "aten::_no_grad_normal_"),
         (torch.nn.init._no_grad_uniform_, "aten::_no_grad_uniform_"),
         (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
-        (torch.nn.utils.rnn.get_packed_sequence, "aten::_pack_sequence"),
         (torch._C._get_tracing_state, "aten::_get_tracing_state"),
         (warnings.warn, "aten::warn"),
     ]

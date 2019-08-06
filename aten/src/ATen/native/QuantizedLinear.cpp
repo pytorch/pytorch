@@ -235,16 +235,16 @@ Tensor fbgemm_pack_quantized_matrix(const Tensor& weight) {
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
-  int64_t input_channels = weight.size(1);
-  int64_t output_channels = weight.size(0);
+  int64_t K = weight.size(1);
+  int64_t N = weight.size(0);
   auto weight_contig = weight.contiguous();
   auto contiguous_ptr = weight_contig.data<int8_t>();
   auto ptr = guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
       /*trans=*/fbgemm::matrix_op_t::Transpose,
-      /*nRow=*/input_channels,
-      /*nCol=*/output_channels,
+      /*nRow=*/K,
+      /*nCol=*/N,
       /*smat=*/contiguous_ptr,
-      /*ld=*/input_channels,
+      /*ld=*/K,
       /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
       /*groups=*/1);
   return cpp_custom_type_hack::create(std::move(ptr), weight.options());
