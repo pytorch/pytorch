@@ -9,6 +9,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/util/python_stub.h>
 
 namespace at {
 class Tensor;
