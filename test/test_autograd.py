@@ -2692,10 +2692,10 @@ class TestAutograd(TestCase):
                                           True, f_args_variable, f_args_tensor, run_gradgradcheck=False)
 
         _test_cdist_for_size((2, 2))
-        #_test_cdist_for_size((S, S, S))
-        #_test_cdist_for_size((3, 5))
-        #_test_cdist_for_size((2, 3, 5))
-        #_test_cdist_for_size((1, 2, 3))
+    #     #_test_cdist_for_size((S, S, S))
+    #     #_test_cdist_for_size((3, 5))
+    #     #_test_cdist_for_size((2, 3, 5))
+    #     #_test_cdist_for_size((1, 2, 3))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_cdist_if_same(self):

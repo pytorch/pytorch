@@ -200,6 +200,9 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 template <typename scalar_t, typename F>
 __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t * x1, const scalar_t * x2,
     const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m, const int64_t r_size, const int64_t l1_size, const int64_t l2_size) {
+  if (threadIdx.x > m) {
+    return;
+  }
   const int64_t l = blockIdx.x / r_size;
   const int64_t k = blockIdx.x % r_size;
   const int64_t i = k / r2;
@@ -211,17 +214,16 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   const scalar_t * a = start + threadIdx.x;
   const scalar_t * b = x2 + l * l2_size + j * m + threadIdx.x;
 
-  scalar_t agg = 0.0;
-  for (; a < end; a += stride, b += stride) {
-    scalar_t d = std::abs(*a - *b);
-    F::inc(agg, d, p);
-    printf("---> cdist: a = %f b = %f diff = %f agg = %f p = %f\n", *a, *b, d, agg, p);
-  }
-  agg = reduce_agg<scalar_t, F>(agg);
+  scalar_t agg = std::abs(*a - *b);
+  //for (; a < end; a += stride, b += stride) {
+    //F::inc(agg, std::abs(*a - *b), p);
+    //agg += std::abs(*a - *b);
+  //}
+  scalar_t agg1 = reduce_agg<scalar_t, F>(agg);
+
   if (threadIdx.x == 0) {
-    scalar_t f = F::finish(agg, p);
-    result[blockIdx.x] = f;
-    printf("===> cdist: agg = %f finish = %f\n", agg, f);
+    //result[blockIdx.x] = F::finish(agg, p);
+    result[blockIdx.x] = agg1;
   }
 }
 
