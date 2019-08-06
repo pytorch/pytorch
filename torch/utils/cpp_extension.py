@@ -79,8 +79,8 @@ use {pytorch_compiler} to to compile your extension. Alternatively, you may
 compile PyTorch from source using {user_compiler}, and then you can also use
 {user_compiler} to compile your extension.
 
-See https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md for help
-with compiling PyTorch from source.
+See https://github.com/pytorch/pytorch/blob/master/.github/CONTRIBUTING.md for
+help with compiling PyTorch from source.
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
                               !! WARNING !!
