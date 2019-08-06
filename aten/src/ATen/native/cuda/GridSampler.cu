@@ -127,7 +127,8 @@ namespace {
       TensorInfo<scalar_t, int> grid,
       TensorInfo<scalar_t, int> output,
       const GridSamplerInterpolation interpolation_mode,
-      const GridSamplerPadding padding_mode) {
+      const GridSamplerPadding padding_mode,
+      bool align_corners) {
 
     int C = input.sizes[1];
     int inp_H = input.sizes[2];
@@ -235,7 +236,8 @@ namespace {
       TensorInfo<scalar_t, int> grid,
       TensorInfo<scalar_t, int> output,
       const GridSamplerInterpolation interpolation_mode,
-      const GridSamplerPadding padding_mode) {
+      const GridSamplerPadding padding_mode,
+      bool align_corners) {
 
     int C = input.sizes[1];
     int inp_D = input.sizes[2];
@@ -401,7 +403,8 @@ namespace {
       TensorInfo<scalar_t, int> grad_input,  // initialized to zeros
       TensorInfo<scalar_t, int> grad_grid,   // initialized to empty
       const GridSamplerInterpolation interpolation_mode,
-      const GridSamplerPadding padding_mode) {
+      const GridSamplerPadding padding_mode,
+      bool align_corners) {
 
     int C = input.sizes[1];
     int inp_H = input.sizes[2];
@@ -556,7 +559,8 @@ namespace {
       TensorInfo<scalar_t, int> grad_input,  // initialized to zeros
       TensorInfo<scalar_t, int> grad_grid,   // initialized to empty
       const GridSamplerInterpolation interpolation_mode,
-      const GridSamplerPadding padding_mode) {
+      const GridSamplerPadding padding_mode,
+      bool align_corners) {
 
     int C = input.sizes[1];
     int inp_D = input.sizes[2];
@@ -784,7 +788,8 @@ namespace {
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
-                            int64_t interpolation_mode, int64_t padding_mode) {
+                            int64_t interpolation_mode, int64_t padding_mode,
+                            bool align_corners) {
   auto N = input.size(0);
   auto H = grid.size(1);
   auto W = grid.size(2);
@@ -799,7 +804,8 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
           getTensorInfo<scalar_t, int>(grid),
           getTensorInfo<scalar_t, int>(output),
           static_cast<GridSamplerInterpolation>(interpolation_mode),
-          static_cast<GridSamplerPadding>(padding_mode));
+          static_cast<GridSamplerPadding>(padding_mode),
+          align_corners);
     });
   }
   return output;
@@ -807,7 +813,8 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
-                            int64_t interpolation_mode, int64_t padding_mode) {
+                            int64_t interpolation_mode, int64_t padding_mode,
+                            bool align_corners) {
   auto N = input.size(0);
   auto D = grid.size(1);
   auto H = grid.size(2);
@@ -823,7 +830,8 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
           getTensorInfo<scalar_t, int>(grid),
           getTensorInfo<scalar_t, int>(output),
           static_cast<GridSamplerInterpolation>(interpolation_mode),
-          static_cast<GridSamplerPadding>(padding_mode));
+          static_cast<GridSamplerPadding>(padding_mode),
+          align_corners);
     });
   }
   return output;
@@ -831,8 +839,9 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 std::tuple<Tensor, Tensor>
-grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
-                              int64_t interpolation_mode, int64_t padding_mode) {
+grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
+                              const Tensor& grid, int64_t interpolation_mode,
+                              int64_t padding_mode, bool align_corners) {
   auto N = input.size(0);
   auto H = grid.size(1);
   auto W = grid.size(2);
@@ -850,7 +859,8 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input, co
           getTensorInfo<scalar_t, int>(grad_input),
           getTensorInfo<scalar_t, int>(grad_grid),
           static_cast<GridSamplerInterpolation>(interpolation_mode),
-          static_cast<GridSamplerPadding>(padding_mode));
+          static_cast<GridSamplerPadding>(padding_mode),
+          align_corners);
     });
   }
   return std::make_tuple(grad_input, grad_grid);
@@ -858,8 +868,9 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input, co
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 std::tuple<Tensor, Tensor>
-grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
-                              int64_t interpolation_mode, int64_t padding_mode) {
+grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
+                              const Tensor& grid, int64_t interpolation_mode, int64_t padding_mode,
+                              bool align_corners) {
   auto N = input.size(0);
   auto D = grid.size(1);
   auto H = grid.size(2);
@@ -878,7 +889,8 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input, co
           getTensorInfo<scalar_t, int>(grad_input),
           getTensorInfo<scalar_t, int>(grad_grid),
           static_cast<GridSamplerInterpolation>(interpolation_mode),
-          static_cast<GridSamplerPadding>(padding_mode));
+          static_cast<GridSamplerPadding>(padding_mode),
+          align_corners);
     });
   }
   return std::make_tuple(grad_input, grad_grid);
