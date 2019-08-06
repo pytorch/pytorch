@@ -199,6 +199,7 @@ _(aten, arange) \
 _(aten, argmax) \
 _(aten, argmin) \
 _(aten, as_strided) \
+_(aten, as_tensor) \
 _(aten, asin) \
 _(aten, atan) \
 _(aten, atan2) \
@@ -334,7 +335,6 @@ _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
 _(aten, ge) \
-_(aten, gels) \
 _(aten, geometric) \
 _(aten, geqrf) \
 _(aten, ger) \
@@ -415,6 +415,7 @@ _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
+_(aten, lstsq) \
 _(aten, lt) \
 _(aten, lu_solve) \
 _(aten, margin_ranking_loss) \
@@ -651,14 +652,14 @@ _(aten, thnn_conv3d_forward) \
 _(aten, thnn_conv_depthwise2d) \
 _(aten, thnn_conv_depthwise2d_backward) \
 _(aten, thnn_conv_depthwise2d_forward) \
-_(aten, conv_dilated2d) \
-_(aten, conv_dilated2d_backward) \
-_(aten, conv_dilated3d) \
-_(aten, conv_dilated3d_backward) \
-_(aten, conv_transpose2d) \
-_(aten, conv_transpose2d_backward) \
-_(aten, conv_transpose3d) \
-_(aten, conv_transpose3d_backward) \
+_(aten, slow_conv_dilated2d) \
+_(aten, slow_conv_dilated2d_backward) \
+_(aten, slow_conv_dilated3d) \
+_(aten, slow_conv_dilated3d_backward) \
+_(aten, slow_conv_transpose2d) \
+_(aten, slow_conv_transpose2d_backward) \
+_(aten, slow_conv_transpose3d) \
+_(aten, slow_conv_transpose3d_backward) \
 _(aten, threshold) \
 _(aten, threshold_backward) \
 _(aten, to) \

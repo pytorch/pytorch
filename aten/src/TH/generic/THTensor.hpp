@@ -10,7 +10,6 @@
 
 TH_CPP_API void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
                                       at::IntArrayRef size_, at::IntArrayRef stride_);
-TH_CPP_API THTensor *THTensor_(newView)(THTensor *tensor, at::IntArrayRef size);
 /* strides.data() might be NULL */
 TH_CPP_API THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset,
                                                at::IntArrayRef sizes, at::IntArrayRef strides);

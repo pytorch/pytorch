@@ -641,49 +641,32 @@ class TestMSNPUTensor(common.TestCase):
         msnpu_extension.init_msnpu_extension()
 
     def test_unregistered(self):
-        a = torch.empty(5, 5, device='cpu')
-        with self.assertRaisesRegex(RuntimeError, "No function registered"):
-            b = torch.empty(5, 5, device='msnpu')
+        a = torch.arange(0, 10, device='cpu')
+        with self.assertRaisesRegex(RuntimeError, "No function is registered"):
+            b = torch.arange(0, 10, device='msnpu')
 
     def test_zeros(self):
-        a = torch.zeros(5, 5, device='cpu')
+        a = torch.empty(5, 5, device='cpu')
         self.assertEqual(a.device, torch.device('cpu'))
-        self.assertEqual(a.sum(), 0)
 
-        b = torch.zeros(5, 5, device='msnpu')
+        b = torch.empty(5, 5, device='msnpu')
         self.assertEqual(b.device, torch.device('msnpu', 0))
         self.assertEqual(msnpu_extension.get_test_int(), 0)
         self.assertEqual(torch.get_default_dtype(), b.dtype)
 
-        c = torch.zeros((5, 5), dtype=torch.int64, device='msnpu')
+        c = torch.empty((5, 5), dtype=torch.int64, device='msnpu')
         self.assertEqual(msnpu_extension.get_test_int(), 0)
         self.assertEqual(torch.int64, c.dtype)
 
     def test_add(self):
-        a = torch.zeros(5, 5, device='msnpu')
+        a = torch.empty(5, 5, device='msnpu', requires_grad=True)
         self.assertEqual(msnpu_extension.get_test_int(), 0)
 
-        b = torch.zeros(5, 5, device='msnpu')
+        b = torch.empty(5, 5, device='msnpu')
         self.assertEqual(msnpu_extension.get_test_int(), 0)
 
-        c = torch.add(a, b)
+        c = a + b
         self.assertEqual(msnpu_extension.get_test_int(), 1)
-
-    def test_backwards(self):
-        a = torch.zeros(5, 5, device='msnpu', requires_grad=True)
-        self.assertEqual(msnpu_extension.get_test_int(), 0)
-
-        b = torch.zeros(5, 5, device='msnpu')
-        self.assertEqual(msnpu_extension.get_test_int(), 0)
-
-        c = torch.kl_div(a, b)
-        self.assertEqual(msnpu_extension.get_test_int(), 3)
-
-        d = c.sum()
-        self.assertEqual(msnpu_extension.get_test_int(), 2)
-
-        d.backward(torch.zeros(0, device='msnpu'))
-        self.assertEqual(msnpu_extension.get_test_int(), 4)
 
 
 if __name__ == "__main__":
