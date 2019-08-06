@@ -1856,8 +1856,8 @@ class _TestTorchMixin(object):
             self.assertEqual(expected_res, c)
             # out is not bool
             c = torch.empty(0, dtype=torch.uint8, device=device)
-            self.assertRaisesRegex(RuntimeError,
-                                   r"The output tensor of logical_xor must be a bool tensor.\."):
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"The output tensor of logical_xor must be a bool tensor\."):
                 torch.logical_xor(a, b, out=c)
             # in-place
             a.logical_xor_(b)
