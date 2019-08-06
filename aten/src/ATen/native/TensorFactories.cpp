@@ -123,7 +123,7 @@ Tensor empty(
     at::optional<DimnameList> names,
     const TensorOptions& options) {
   if (!names.has_value()) {
-    return at::empty(size, options, optional_memory_format);
+    return at::empty(size, options);
   }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
