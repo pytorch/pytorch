@@ -126,8 +126,11 @@ def hparams(hparam_dict=None, metric_dict=None):
 
     content = HParamsPluginData(experiment=exp, version=PLUGIN_DATA_VERSION)
     smd = SummaryMetadata(
-        plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME,
-            content=content.SerializeToString()))
+        plugin_data=SummaryMetadata.PluginData(
+            plugin_name=PLUGIN_NAME,
+            content=content.SerializeToString()
+        )
+    )
     exp = Summary(value=[Summary.Value(tag=EXPERIMENT_TAG, metadata=smd)])
 
     ssi = SessionStartInfo()
@@ -147,15 +150,21 @@ def hparams(hparam_dict=None, metric_dict=None):
     content = HParamsPluginData(session_start_info=ssi,
                                 version=PLUGIN_DATA_VERSION)
     smd = SummaryMetadata(
-        plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME,
-            content=content.SerializeToString()))
+        plugin_data=SummaryMetadata.PluginData(
+            plugin_name=PLUGIN_NAME,
+            content=content.SerializeToString()
+        )
+    )
     ssi = Summary(value=[Summary.Value(tag=SESSION_START_INFO_TAG, metadata=smd)])
 
     sei = SessionEndInfo(status=Status.STATUS_SUCCESS)
     content = HParamsPluginData(session_end_info=sei, version=PLUGIN_DATA_VERSION)
     smd = SummaryMetadata(
-        plugin_data=SummaryMetadata.PluginData(plugin_name=PLUGIN_NAME,
-            content=content.SerializeToString()))
+        plugin_data=SummaryMetadata.PluginData(
+            plugin_name=PLUGIN_NAME,
+            content=content.SerializeToString()
+        )
+    )
     sei = Summary(value=[Summary.Value(tag=SESSION_END_INFO_TAG, metadata=smd)])
 
     return exp, ssi, sei
