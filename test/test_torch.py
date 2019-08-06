@@ -1638,7 +1638,7 @@ class _TestTorchMixin(object):
             expected = a + alpha * (b / c)
             self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
 
-        for device in  torch.testing.get_all_device_types():
+        for device in torch.testing.get_all_device_types():
             for dtype in [torch.float, torch.double]:
                 _test_addcdiv(
                     torch.randn(2, 2, dtype=dtype, device=device),
