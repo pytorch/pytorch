@@ -120,10 +120,15 @@ BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 """)
 
 C10_DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op("${schema_string}", torch::RegisterOperators::options().impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>().aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+.op("${schema_string}", torch::RegisterOperators::options()
+  .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 C10_BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op("${schema_string}", torch::RegisterOperators::options().impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(c10::backendToTensorTypeId(Backend::${Backend})).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+.op("${schema_string}", torch::RegisterOperators::options()
+  .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(
+    c10::backendToTensorTypeId(Backend::${Backend}))
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 # Generate a file that lists all functions and their schema string. Used for XLA
@@ -534,6 +539,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'device_guard': bool,
     'device_guard_declaration': str,
     'dispatch_scalar_type_declaration': str,
+    'exclude_from_c10_dispatcher': bool,
     'with_gil': bool,
     'cpu_half': bool,
     'cpu_bfloat16': bool,
@@ -546,6 +552,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_with_defaults': List[str],
     'formals': List[str],
     'formals_types': List[str],
+    'formals_types_with_return': List[str],
     'inferred_backend': str,
     'inferred_is_variable': str,
     'inplace': bool,
@@ -563,6 +570,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'name': str,
     'overload_name': str,
     'native_actuals': List[str],
+    'native_actuals_with_comma_prefix': str,
     'native_type_method_dispatch': str,
     # options should be List[FunctionOption]
     'options': Any,
@@ -1292,7 +1300,7 @@ def create_generic(top_env, declarations):
 
 
 def create_derived(backend_type_env, declarations):
-    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[str], List[str], List[str]]
+    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str]]
     type_object_declarations = []  # type: List[str]
     type_object_definitions = []  # type: List[str]
     function_registrations = []  # type: List[str]
