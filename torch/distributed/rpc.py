@@ -12,7 +12,8 @@ def _collect_worker_names(name, group):
 
     # collect name length
     ws = get_world_size(group)
-    name_len = len(name)
+    encoded_name = list(name.encode('utf-8'))
+    name_len = len(encoded_name)
     len_input = torch.ones(1, dtype=torch.int64) * name_len
     len_outputs = [torch.empty(1, dtype=torch.int64) for _ in range(ws)]
     all_gather(len_outputs, len_input, group=group)
@@ -20,7 +21,7 @@ def _collect_worker_names(name, group):
     # collect name value
     max_len = torch.stack(len_outputs).max().item()
     name_input = torch.empty(max_len, dtype=torch.uint8)
-    name_input[:name_len] = torch.Tensor(list(name.encode('utf-8')))
+    name_input[:name_len] = torch.tensor(encoded_name, dtype=torch.uint8)
     name_outputs = [torch.empty(max_len, dtype=torch.uint8) for _ in range(ws)]
     all_gather(name_outputs, name_input, group=group)
 
