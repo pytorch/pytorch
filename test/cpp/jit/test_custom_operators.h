@@ -144,7 +144,7 @@ void testCustomOperatorAliasing() {
         a.add_(b);
         return a;
       });
-  getAllOperatorsFor(Symbol::fromQualString("foo::aliasing"));
+  auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::aliasing"));
 
   {
     auto graph = std::make_shared<Graph>();

@@ -72,11 +72,11 @@ std::vector<int64_t> get_output_size(
   return output_size;
 }
 /*
-  slow_conv_dilated_shape_check - check user-input to dilated convolution
+  conv_dilated_shape_check - check user-input to dilated convolution
   forward and backward functions.
 */
 template <int64_t dim>
-void slow_conv_dilated_shape_check(
+void conv_dilated_shape_check(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,

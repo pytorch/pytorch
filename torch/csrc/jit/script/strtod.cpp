@@ -29,7 +29,6 @@
 #define D_PINF ((double)+INFINITY)
 
 namespace {
-#ifdef __ANDROID__
 int case_insensitive_match(const char *s, const char *t)
 {
     while (*t && tolower(*s) == *t) {
@@ -70,7 +69,6 @@ double parse_inf_or_nan(const char *p, char **endptr)
     *endptr = (char *)s;
     return retval;
 }
-#endif
 
 }
 

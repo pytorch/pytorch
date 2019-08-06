@@ -335,10 +335,6 @@ inline IValue toIValue(
     case TypeKind::FloatType:
       return py::cast<double>(obj);
     case TypeKind::IntType:
-      if (THPDtype_Check(obj.ptr())) {
-        auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
-        return static_cast<int64_t>(dtype->scalar_type);
-      }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
       if (!obj.is_none()) {
@@ -441,17 +437,12 @@ inline IValue toIValue(
       }
       return userObj;
     }
-    case TypeKind::NumberType: {
-      if (THPDtype_Check(obj.ptr())) {
-        auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
-        return static_cast<int64_t>(dtype->scalar_type);
-      }
+    case TypeKind::NumberType:
       if (py::isinstance<py::int_>(obj)) {
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
       }
-    }
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
