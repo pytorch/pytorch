@@ -3093,23 +3093,17 @@
 - func: index_fill(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
   variants: function, method
 
-- func: _scatter_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CPU: legacy::cpu::_th_scatter_
-    CUDA: legacy::cuda::_th_scatter_
-
-- func: _scatter_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CPU: legacy::cpu::_th_scatter_
-    CUDA: legacy::cuda::_th_scatter_
-
 - func: scatter_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_scatter_
+    CUDA: legacy::cuda::_th_scatter_
 
 - func: scatter_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_scatter_
+    CUDA: legacy::cuda::_th_scatter_
 
 - func: scatter(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   variants: function, method

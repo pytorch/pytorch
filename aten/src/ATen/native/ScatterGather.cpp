@@ -5,22 +5,12 @@
 
 namespace at { namespace native {
 
-Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return at::_scatter_(self, dim, index, source);
-}
-
-Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-  return at::_scatter_(self, dim, index, value);
-}
-
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  Tensor ret = self.clone();
-  return at::_scatter_(ret, dim, index, source);
+  return self.clone().scatter_(dim, index, source);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-  Tensor ret = self.clone();
-  return at::_scatter_(ret, dim, index, value);
+  return self.clone().scatter_(dim, index, value);
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
