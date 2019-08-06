@@ -31,24 +31,26 @@ void Adam::step() {
     auto& exp_average_sq = buffer_at(exp_average_sq_buffers, i);
 
     buffer_at(step_buffers, i) += 1;
+    const auto bias_correction1 =
+        1 - std::pow(options.beta1_, buffer_at(step_buffers, i));
+    const auto bias_correction2 =
+        1 - std::pow(options.beta2_, buffer_at(step_buffers, i));
 
     exp_average.mul_(options.beta1_).add_(p.grad(), 1 - options.beta1_);
     exp_average_sq.mul_(options.beta2_)
         .addcmul_(p.grad(), p.grad(), 1 - options.beta2_);
 
-    Tensor denom = exp_average_sq;
+    Tensor denom;
     if (options.amsgrad_) {
       auto& max_exp_average_sq = buffer_at(max_exp_average_sq_buffers, i);
       max_exp_average_sq = torch::max(max_exp_average_sq, exp_average_sq);
-      denom = max_exp_average_sq;
+      denom = max_exp_average_sq / bias_correction2;
+    } else {
+      denom = exp_average_sq / bias_correction2;
     }
 
-    const auto bias_correction1 =
-        1 - std::pow(options.beta1_, buffer_at(step_buffers, i));
-    const auto bias_correction2 =
-        1 - std::pow(options.beta2_, buffer_at(step_buffers, i));
     const auto step_size =
-        options.learning_rate_ * std::sqrt(bias_correction2) / bias_correction1;
+        options.learning_rate_ / bias_correction1;
 
     NoGradGuard guard;
     p.addcdiv_(exp_average, denom.sqrt() + options.eps_, -step_size);
