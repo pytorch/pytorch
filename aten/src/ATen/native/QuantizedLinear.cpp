@@ -49,13 +49,13 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   auto* input_ptr = input_contig.data<float>();
 
   TORCH_CHECK(input.dim() >= 2);
-  int64_t batch_size = size_to_dim_(input.dim() - 1, input.sizes());
-  int64_t input_channels = input.size(input.dim() - 1);
+  int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
+  int64_t K = input.size(input.dim() - 1);
   TORCH_CHECK(weight.dim() == 2);
-  TORCH_CHECK(input_channels == weight.size(1));
-  auto output_channels = weight.size(0);
+  TORCH_CHECK(K == weight.size(1));
+  auto N = weight.size(0);
   TORCH_CHECK(bias.dim() == 1);
-  TORCH_CHECK(bias.size(0) == output_channels);
+  TORCH_CHECK(bias.size(0) == N);
   TORCH_CHECK(weight_scale.isFloatingPoint());
   TORCH_CHECK(weight_zero_point.isIntegral());
 
@@ -93,10 +93,10 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   //  below.
   fbgemm::PackAWithQuantRowOffset<uint8_t> packA(
       /*trans=*/fbgemm::matrix_op_t::NoTranspose,
-      /*nRow=*/batch_size,
-      /*nCol=*/input_channels,
+      /*nRow=*/M,
+      /*nCol=*/K,
       /*smat=*/input_ptr,
-      /*ld=*/input_channels,
+      /*ld=*/K,
       /*pmat=*/nullptr, // packA manages ownership of `pmat`
       /*scale=*/q_params.scale,
       /*zero_pt=*/q_params.zero_point);
@@ -129,11 +129,11 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
       /*row_offsets=*/packA.getRowOffsetBuffer(),
       /*col_offsets=*/col_offsets.data<int32_t>(),
       /*bias=*/bias_contig.data<float>(),
-      /*nCol=*/output_channels);
+      /*nCol=*/N);
 
   // Allocate output Tensor and a buffer for fbgemmPacked to use
   auto output = at::zeros(
-      {batch_size, output_channels}, bias.options().dtype(at::kFloat));
+      {M, N}, bias.options().dtype(at::kFloat));
   auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
   // Pull out the PackBMatrix instance from the owning tensor
@@ -145,7 +145,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
       /*packB=*/packB,
       /*C=*/output.data<float>(),
       /*C_buffer=*/buffer.data<int32_t>(),
-      /*ldc=*/output_channels,
+      /*ldc=*/N,
       /*outProcess=*/outputProcObj,
       /*thread_id=*/0,
       /*num_threads=*/1);
@@ -153,7 +153,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   // The resulting matrix here is 2-D, let's view it with the original
   // left hand dimensions of the input.
   std::vector<int64_t> out_sizes = input.sizes().vec();
-  out_sizes.back() = output_channels;
+  out_sizes.back() = N;
   return output.view(out_sizes);
 }
 
@@ -182,20 +182,20 @@ Tensor fbgemm_linear_int8_weight(
 namespace {
 // Calculate the column offsets
 // Note this includes the sum of the columns as well as the scalar term
-// B_zero_point * input_channels, whereas the row_offsets created by
+// B_zero_point * K, whereas the row_offsets created by
 // PackAWithQuantRowOffset is only the sum of the A rows.
 void calc_col_offsets_transpose(
-    int input_channels,
-    int output_channels,
+    int K,
+    int N,
     const int8_t* Bint8,
     int32_t B_zero_point,
     int32_t* col_offsets) {
-  for (size_t i = 0; i < output_channels; ++i) {
+  for (size_t i = 0; i < N; ++i) {
     int32_t sum = 0;
-    for (size_t j = 0; j < input_channels; ++j) {
-      sum += Bint8[i * input_channels + j];
+    for (size_t j = 0; j < K; ++j) {
+      sum += Bint8[i * K + j];
     }
-    col_offsets[i] = sum - B_zero_point * input_channels;
+    col_offsets[i] = sum - B_zero_point * K;
   }
 }
 } // namespace
@@ -241,8 +241,8 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   auto col_offsets =
       at::zeros_like(quantized).sum({1}).to(at::kInt).contiguous();
   calc_col_offsets_transpose(
-      /*input_channels=*/quantized.size(1),
-      /*output_channels=*/quantized.size(0),
+      /*K=*/quantized.size(1),
+      /*N=*/quantized.size(0),
       /*Bint8=*/quantized.data<int8_t>(),
       /*B_zero_point=*/q_params.zero_point,
       /*col_offsets=*/col_offsets.data<int32_t>());
@@ -257,8 +257,8 @@ bool fbgemm_is_cpu_supported() {
 
 Tensor fbgemm_pack_quantized_matrix(
     const Tensor& weight,
-    int64_t input_channels,
-    int64_t output_channels) {
+    int64_t K,
+    int64_t N) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -267,10 +267,10 @@ Tensor fbgemm_pack_quantized_matrix(
   auto contiguous_ptr = weight_contig.data<int8_t>();
   auto ptr = guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
       /*trans=*/fbgemm::matrix_op_t::Transpose,
-      /*nRow=*/input_channels,
-      /*nCol=*/output_channels,
+      /*nRow=*/K,
+      /*nCol=*/N,
       /*smat=*/contiguous_ptr,
-      /*ld=*/input_channels,
+      /*ld=*/K,
       /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
       /*groups=*/1);
   return cpp_custom_type_hack::create(std::move(ptr), weight.options());
@@ -329,12 +329,12 @@ Tensor fbgemm_pack_gemm_matrix_fp16(
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
 
-  int64_t input_channels = weight.size(1);
-  int64_t output_channels = weight.size(0);
+  int64_t K = weight.size(1);
+  int64_t N = weight.size(0);
   Tensor weight_contig = weight.contiguous();
   auto weight_contig_ptr = weight_contig.data<float>();
 
-  handle_weights_saturation(weight_contig_ptr, input_channels*output_channels);
+  handle_weights_saturation(weight_contig_ptr, K*N);
 
   // TODO(mingzhe09088):
   // Consider using a functor here in PackedGemmMatrixFP16
@@ -345,8 +345,8 @@ Tensor fbgemm_pack_gemm_matrix_fp16(
   // flows across dll boundaries.
   auto ptr = guts::make_unique<fbgemm::PackedGemmMatrixFP16>(
       fbgemm::matrix_op_t::Transpose,
-      input_channels,
-      output_channels,
+      K,
+      N,
       1,
       weight_contig_ptr);
   return cpp_custom_type_hack::create(std::move(ptr), weight.options());
@@ -372,15 +372,15 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
   TORCH_CHECK(input.dim() >= 2);
   TORCH_CHECK(bias.dim() == 1);
 
-  int64_t batch_size = size_to_dim_(input.dim() - 1, input.sizes());
-  int64_t output_channels = packed_weight_fp16.numCols();
+  int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
+  int64_t N = packed_weight_fp16.numCols();
 
-  auto output = at::empty({batch_size, output_channels}, bias.options().dtype(at::kFloat));
+  auto output = at::empty({M, N}, bias.options().dtype(at::kFloat));
 
   // Call the fp16 gemm interface
   fbgemm::cblas_gemm_compute(
       fbgemm::matrix_op_t::NoTranspose,
-      batch_size,
+      M,
       input_ptr,
       packed_weight_fp16,
       0.0f,
@@ -390,7 +390,7 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
   output.add_(bias);
 
   std::vector<int64_t> out_sizes = input.sizes().vec();
-  out_sizes.back() = output_channels;
+  out_sizes.back() = N;
   return output.view(out_sizes);
 }
 
@@ -453,8 +453,8 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
 
 Tensor fbgemm_pack_quantized_matrix(
     const Tensor& /*input*/,
-    int64_t /*input_channels*/,
-    int64_t /*output_channels*/) {
+    int64_t /*K*/,
+    int64_t /*N*/) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
