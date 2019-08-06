@@ -24,8 +24,8 @@ void bitwise_not_kernel_cuda(TensorIterator& iter) {
 }
 
 void logical_not_kernel_cuda(TensorIterator& iter) {
-  gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-    return scalar_t(!a);
+  gpu_kernel(iter, []GPU_LAMBDA(bool a) -> bool {
+    return !a;
   });
 }
 
