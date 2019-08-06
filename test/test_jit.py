@@ -13429,6 +13429,18 @@ a")
 
         FileCheck().check('foo').run(redirect.s)
 
+    def test_dtype_attr(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.dtype = torch.zeros([]).dtype
+
+            def forward(self):
+                return torch.zeros(3, 4, dtype=self.dtype)
+
+        f = Foo()
+        torch.jit.script(f)
+
     def test_optional_tuple(self):
         def fn(x=None):
             # type: (Optional[Tuple[int, int]]) -> Tuple[int, int]
