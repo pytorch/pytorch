@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
+#include <ATen/core/TensorBody.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
