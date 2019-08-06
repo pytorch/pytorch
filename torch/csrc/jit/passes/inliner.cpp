@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
 
@@ -20,6 +21,9 @@ void inlineCalls(Block* block) {
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
         cur->removeInput(0);
+        GRAPH_UPDATE(
+            "Inlining function '", fun_type->function()->name(), "' to ", *cur);
+        GRAPH_UPDATE("Function body: ", *fun_type->function()->graph());
         inlineCallTo(cur, fun_type->function());
         if (!function_constant->hasUses()) {
           function_constant->destroy();
@@ -29,6 +33,8 @@ void inlineCalls(Block* block) {
         const std::string& name = cur->s(attr::name);
         auto function =
             cur->input(0)->type()->expect<ClassType>()->getMethod(name);
+        GRAPH_UPDATE("Inlining method '", function->name(), "' to ", *cur);
+        GRAPH_UPDATE("Function body: ", *function->graph());
         inlineCallTo(cur, function);
       } break;
       default: {
@@ -41,7 +47,9 @@ void inlineCalls(Block* block) {
 }
 
 void Inline(Graph& graph) {
+  GRAPH_DUMP("Before Inlining: ", &graph);
   inlineCalls(graph.block());
+  GRAPH_DUMP("After Inlining: ", &graph);
 }
 
 } // namespace jit
