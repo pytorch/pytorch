@@ -44,6 +44,11 @@ def join_rpc():
     Every RPC process must call this method before exit.
     """
     global _agent
+
+    if _agent is None:
+        raise RuntimeError("RPC has not been initialized. "
+                           "Call init_rpc(name) first.")
+
     _agent.join()
     _agent = None
 
@@ -55,6 +60,10 @@ def sync_rpc():
     level, if multiple threads are spawned, only one of them should call this
     method at a time.
     """
+    if _agent is None:
+        raise RuntimeError("RPC has not been initialized. "
+                           "Call init_rpc(name) first.")
+
     _agent.sync()
 
 
