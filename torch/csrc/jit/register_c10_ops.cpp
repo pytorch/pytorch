@@ -16,13 +16,13 @@ namespace {
 std::unordered_set<c10::OperatorName> ops_blacklisted_from_c10_to_jit_export() {
   std::unordered_set<c10::OperatorName> result;
   for (c10::OperatorName name : ops_blacklisted_from_c10_to_jit_export_0()) {
-    result.insert(name);
+    result.insert(std::move(name));
   }
   for (c10::OperatorName name : ops_blacklisted_from_c10_to_jit_export_1()) {
-    result.insert(name);
+    result.insert(std::move(name));
   }
   for (c10::OperatorName name : ops_blacklisted_from_c10_to_jit_export_2()) {
-    result.insert(name);
+    result.insert(std::move(name));
   }
   return result;
 }
