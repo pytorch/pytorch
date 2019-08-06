@@ -71,7 +71,7 @@ std::vector<IValue> unpickle(
         return to_read;
       },
       [&]() {
-        return bytes_read >= size;
+        return bytes_read < size;
       },
       tensor_table,
       std::move(class_resolver));
