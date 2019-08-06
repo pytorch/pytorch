@@ -29,7 +29,8 @@ from common_methods_invocations import tri_tests_args, run_additional_tri_tests,
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, pytorchtest
+    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, pytorchtest, \
+    memory_format_propagation
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -12399,11 +12400,35 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(nhwc.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(nhwc, x)
 
+    @pytorchtest.test_all_device_types()
+    def test_memory_format_clone(self, device):
+        with memory_format_propagation():
+            nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
+            clone = nhwc.clone()
+            self.assertFalse(clone.is_contiguous())
+            self.assertTrue(clone.is_contiguous(memory_format=torch.channels_last))
+            self.assertEqual(nhwc, clone)
+
     def test_memory_format_preserved_after_permute(self):
         x = torch.randn(10, 3, 32, 32)
         nhwc = x.contiguous(memory_format=torch.channels_last)
         y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
         self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_memory_format_preserved_during_device_transfer(self):
+        nhwc = torch.randn((10, 3, 32, 32), device='cpu').contiguous(memory_format=torch.channels_last)
+
+        on_cuda = nhwc.to('cuda')
+        self.assertFalse(on_cuda.is_contiguous(memory_format=torch.channels_last))
+        on_cuda = nhwc.cuda()
+        self.assertFalse(on_cuda.is_contiguous(memory_format=torch.channels_last))
+
+        with memory_format_propagation():
+            on_cuda = nhwc.to('cuda')
+            self.assertTrue(on_cuda.is_contiguous(memory_format=torch.channels_last))
+            on_cuda = nhwc.cuda()
+            self.assertTrue(on_cuda.is_contiguous(memory_format=torch.channels_last))
 
     def test_memory_format_contiguous_returns_same_tensor_if_already_satisfies(self):
         x = torch.randn(10, 32, 32, 3).permute(0, 3, 1, 2)
@@ -12411,9 +12436,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         alias.fill_(7)
         self.assertEqual(x, alias)
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_memory_format_permute_cuda(self):
-        x = torch.randn(10, 3, 32, 32).cuda()
+    @pytorchtest.test_all_device_types()
+    def test_memory_format_permute(self, device):
+        x = torch.randn((10, 3, 32, 32), device=device)
         nhwc = x.contiguous(memory_format=torch.channels_last)
         y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
         self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
@@ -12449,6 +12474,10 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         like = torch.empty_like(nhwc)
         self.assertTrue(like.is_contiguous())
         self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
+
+        with memory_format_propagation():
+            like = torch.empty_like(nhwc)
+            self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
 
         sparse = x.to_sparse()
         with self.assertRaises(RuntimeError):

@@ -197,6 +197,14 @@ if TEST_NUMPY:
     import numpy
 
 
+@contextmanager
+def memory_format_propagation():
+    saved = torch.get_memory_format_proparation()
+    torch.set_memory_format_proparation(True)
+    yield
+    torch.set_memory_format_proparation(saved)
+
+
 def skipIfRocm(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
