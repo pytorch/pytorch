@@ -147,6 +147,8 @@ public:
   /**
    * Perform a dynamic dispatch and get the kernel for an operator.
    */
+  // TODO Remove lookup(TensorTypeId) and instead have a lookup based on
+  // the (unboxed?) arguments the operator is to be called with.
   OpKernel lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const;
 
   /**
