@@ -48,7 +48,8 @@ Tensor affine_grid_generator_4D(
     int64_t N,
     int64_t C,
     int64_t H,
-    int64_t W) {
+    int64_t W,
+    bool align_corners) {
   Tensor base_grid = make_base_grid_4D(theta, N, C, H, W);
   auto grid = base_grid.view({N, H * W, 3}).bmm(theta.transpose(1, 2));
   return grid.view({N, H, W, 2});
@@ -60,21 +61,23 @@ Tensor affine_grid_generator_5D(
     int64_t C,
     int64_t D,
     int64_t H,
-    int64_t W) {
+    int64_t W,
+    bool align_corners) {
   Tensor base_grid = make_base_grid_5D(theta, N, C, D, H, W);
   auto grid = base_grid.view({N, D * H * W, 4}).bmm(theta.transpose(1, 2));
   return grid.view({N, D, H, W, 3});
 }
 
-Tensor affine_grid_generator(const Tensor& theta, IntArrayRef size) {
+Tensor affine_grid_generator(const Tensor& theta, IntArrayRef size, bool align_corners) {
   TORCH_CHECK(
       size.size() == 4 || size.size() == 5,
       "AffineGridGenerator needs 4d (spatial) or 5d (volumetric) inputs.");
   if (size.size() == 4) {
-    return affine_grid_generator_4D(theta, size[0], size[1], size[2], size[3]);
+    return affine_grid_generator_4D(
+        theta, size[0], size[1], size[2], size[3], align_corners);
   } else {
     return affine_grid_generator_5D(
-        theta, size[0], size[1], size[2], size[3], size[4]);
+        theta, size[0], size[1], size[2], size[3], size[4], align_corners);
   }
 }
 
@@ -83,7 +86,8 @@ Tensor affine_grid_generator_4D_backward(
     int64_t N,
     int64_t C,
     int64_t H,
-    int64_t W) {
+    int64_t W,
+    bool align_corners) {
   auto base_grid = make_base_grid_4D(grad_grid, N, C, H, W);
   AT_ASSERT(grad_grid.sizes() == IntArrayRef({N, H, W, 2}));
   auto grad_theta = base_grid.view({N, H * W, 3})
@@ -98,7 +102,8 @@ Tensor affine_grid_generator_5D_backward(
     int64_t C,
     int64_t D,
     int64_t H,
-    int64_t W) {
+    int64_t W,
+    bool align_corners) {
   auto base_grid = make_base_grid_5D(grad_grid, N, C, D, H, W);
   AT_ASSERT(grad_grid.sizes() == IntArrayRef({N, D, H, W, 3}));
   auto grad_theta = base_grid.view({N, D * H * W, 4})
@@ -107,16 +112,16 @@ Tensor affine_grid_generator_5D_backward(
   return grad_theta.transpose(1, 2);
 }
 
-Tensor affine_grid_generator_backward(const Tensor& grad, IntArrayRef size) {
+Tensor affine_grid_generator_backward(const Tensor& grad, IntArrayRef size, bool align_corners) {
   TORCH_CHECK(
       size.size() == 4 || size.size() == 5,
       "AffineGridGenerator needs 4d (spatial) or 5d (volumetric) inputs.");
   if (size.size() == 4) {
     return affine_grid_generator_4D_backward(
-        grad, size[0], size[1], size[2], size[3]);
+        grad, size[0], size[1], size[2], size[3], align_corners);
   } else {
     return affine_grid_generator_5D_backward(
-        grad, size[0], size[1], size[2], size[3], size[4]);
+        grad, size[0], size[1], size[2], size[3], size[4], align_corners);
   }
 }
 
