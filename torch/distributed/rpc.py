@@ -45,12 +45,9 @@ def join_rpc():
     """
     global _agent
 
-    if _agent is None:
-        raise RuntimeError("RPC has not been initialized. "
-                           "Call init_rpc(name) first.")
-
-    _agent.join()
-    _agent = None
+    if _agent:
+        _agent.join()
+        _agent = None
 
 
 def sync_rpc():

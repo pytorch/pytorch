@@ -94,6 +94,21 @@ class RpcTest(MultiProcessTestCase):
             self.assertEqual(ret1, torch.ones(n, n) * 2)
             self.assertEqual(ret2, torch.ones(n, n) * 3)
 
+    @_wrap_with_rpc
+    def test_join_rpc(self):
+        n = self.rank + 1
+        dstRank = n % self.world_size
+        ret = dist.rpc('worker%d' % dstRank, torch.add,
+                       args=(torch.ones(n, n), torch.ones(n, n)))
+        self.assertEqual(ret, torch.ones(n, n) * 2)
+        dist.join_rpc()
+
+        with self.assertRaisesRegex(RuntimeError, "^RPC has not been initialized"):
+            dist.rpc('worker%d' % dstRank, torch.add,
+                           args=(torch.ones(n, n), torch.ones(n, n)))
+
+        # it's safe to call join_rpc() multiple times
+        dist.join_rpc()
 
 if __name__ == '__main__':
     run_tests()
