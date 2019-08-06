@@ -721,7 +721,7 @@
   self: grad.clone().scatter_(dim, index, 0)
   index: non_differentiable
 
-- name: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
+- name: _legacy_scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   self: grad
   index: non_differentiable
   src: grad.gather(dim, index)
