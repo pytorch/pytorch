@@ -4,7 +4,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import numpy as np
 from caffe2.python import schema
-from caffe2.python.layers.layers import ModelLayer
+from caffe2.python.layers.layers import ModelLayer, AccessedFeatures
 
 
 class FeatureSparseToDense(ModelLayer):
@@ -294,3 +294,16 @@ class FeatureSparseToDense(ModelLayer):
             if feature_specs.feature_type == "FLOAT":
                 metadata[-1][0]["cardinality"] = 1
         return metadata
+
+    def get_accessed_features(self):
+        accessed_features = {}
+
+        # The features that are accessed are just those features that appear in
+        # the input specs
+        for field, feature_specs in self.input_specs:
+            accessed_features[field] = AccessedFeatures(
+                feature_specs.feature_type,
+                set(feature_specs.feature_ids)
+            )
+
+        return accessed_features

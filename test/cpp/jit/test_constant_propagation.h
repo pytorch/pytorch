@@ -14,6 +14,14 @@
 namespace torch {
 namespace jit {
 
+namespace {
+inline c10::OperatorOptions _aliasAnalysisFromSchema() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
+}
+} // namespace
+
 void testConstantPropagation() {
   {
     auto graph = std::make_shared<Graph>();
@@ -77,7 +85,8 @@ graph():
                         tup, TupleType::create({ListType::ofFloats()})));
                 return 0;
               };
-            }),
+            },
+            _aliasAnalysisFromSchema()),
         Operator(
             "prim::run_float_list(float[] a) -> (int)",
             [](const Node* node) {
@@ -86,7 +95,8 @@ graph():
                 push(stack, 1);
                 return 0;
               };
-            }),
+            },
+            _aliasAnalysisFromSchema()),
     });
     auto graph = std::make_shared<Graph>();
     script::parseIR(

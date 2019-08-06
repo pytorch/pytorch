@@ -7,8 +7,6 @@ TH_EXTERNC void dgels_(char *trans, int *m, int *n, int *nrhs, double *a, int *l
 TH_EXTERNC void sgels_(char *trans, int *m, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, float *work, int *lwork, int *info);
 TH_EXTERNC void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
 TH_EXTERNC void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
-TH_EXTERNC void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
-TH_EXTERNC void sgetrs_(char *trans, int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
 TH_EXTERNC void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
 TH_EXTERNC void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
 TH_EXTERNC void sgeqrf_(int *m, int *n, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
@@ -17,8 +15,6 @@ TH_EXTERNC void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, 
 TH_EXTERNC void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
 TH_EXTERNC void sormqr_(char *side, char *trans, int *m, int *n, int *k, float *a, int *lda, float *tau, float *c, int *ldc, float *work, int *lwork, int *info);
 TH_EXTERNC void dormqr_(char *side, char *trans, int *m, int *n, int *k, double *a, int *lda, double *tau, double *c, int *ldc, double *work, int *lwork, int *info);
-TH_EXTERNC void spstrf_(char *uplo, int *n, float *a, int *lda, int *piv, int *rank, float *tol, float *work, int *info);
-TH_EXTERNC void dpstrf_(char *uplo, int *n, double *a, int *lda, int *piv, int *rank, double *tol, double *work, int *info);
 
 
 /* Solve overdetermined or underdetermined real linear systems involving an
@@ -51,19 +47,6 @@ void THLapack_(geev)(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar
 #endif
 }
 
-void THLapack_(getrs)(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info)
-{
-#ifdef  USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
-#else
-  sgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
-#endif
-#else
-  THError("getrs : Lapack library not found in compile time\n");
-#endif
-}
-
 /* Cholesky factorization based Matrix Inverse */
 void THLapack_(potri)(char uplo, int n, scalar_t *a, int lda, int *info)
 {
@@ -75,20 +58,6 @@ void THLapack_(potri)(char uplo, int n, scalar_t *a, int lda, int *info)
 #endif
 #else
   THError("potri: Lapack library not found in compile time\n");
-#endif
-}
-
-/* Cholesky factorization with complete pivoting */
-void THLapack_(pstrf)(char uplo, int n, scalar_t *a, int lda, int *piv, int *rank, scalar_t tol, scalar_t *work, int *info)
-{
-#ifdef  USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dpstrf_(&uplo, &n, a, &lda, piv, rank, &tol, work, info);
-#else
-  spstrf_(&uplo, &n, a, &lda, piv, rank, &tol, work, info);
-#endif
-#else
-  THError("pstrf: Lapack library not found at compile time\n");
 #endif
 }
 

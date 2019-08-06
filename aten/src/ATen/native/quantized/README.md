@@ -28,7 +28,7 @@ Tensor quantized_and(Tensor qa, Tensor qb) {
     Tensor qc = at::_empty_affine_quantized(qa.sizes(),
                                             at::device(kCPU).dtype(SCALAR_TYPE),
                                             scale, zero_point);
-    cpu_kernel(*iter, [&](scalar_t a_value, scalar_t b_value) -> scalar_t {
+    cpu_kernel(iter, [&](scalar_t a_value, scalar_t b_value) -> scalar_t {
       return scalar_t(a_value.val_ & b_value.val_);
     });
   });

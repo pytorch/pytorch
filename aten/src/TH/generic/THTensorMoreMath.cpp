@@ -9,30 +9,30 @@
 #include <ATen/NamedTensorUtils.h>
 #endif
 
-#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP) \
-  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value) \
-  { \
-    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL); \
-    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t, \
-                     *r__data = (*t_data OP value) ? 1 : 0;); \
-  } \
-  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value) \
-  { \
-    THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL); \
-    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, \
-                     *r__data = (*t_data OP value) ? 1 : 0;); \
-  } \
-  void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
-  { \
-    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL); \
-    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb, \
-                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
-  } \
-  void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
-  { \
-    THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL); \
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb, \
-                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
+#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)                                      \
+  void THTensor_(NAME##Value)(THBoolTensor *r_, THTensor* t, scalar_t value)   \
+  {                                                                            \
+    THBoolTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);         \
+    TH_TENSOR_APPLY2(bool, r_, scalar_t, t,                                    \
+                     *r__data = (*t_data OP value) ? 1 : 0;);                  \
+  }                                                                            \
+  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value)      \
+  {                                                                            \
+    THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL);           \
+    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,                                \
+                     *r__data = (*t_data OP value) ? 1 : 0;);                  \
+  }                                                                            \
+  void THTensor_(NAME##Tensor)(THBoolTensor *r_, THTensor *ta, THTensor *tb)   \
+  {                                                                            \
+    THBoolTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);       \
+    TH_TENSOR_APPLY3(bool, r_, scalar_t, ta, scalar_t, tb,                     \
+                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;);              \
+  }                                                                            \
+  void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb)      \
+  {                                                                            \
+    THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);         \
+    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,                 \
+                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;);              \
   }
 
 TENSOR_IMPLEMENT_LOGICAL(lt,<)
@@ -41,6 +41,27 @@ TENSOR_IMPLEMENT_LOGICAL(le,<=)
 TENSOR_IMPLEMENT_LOGICAL(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL(eq,==)
 TENSOR_IMPLEMENT_LOGICAL(ne,!=)
+
+#define TENSOR_IMPLEMENT_LOGICAL_BYTE(NAME,OP)                                            \
+  void THTensor_(NAME##ValueByte)(THByteTensor *r_, THTensor* t, scalar_t value)          \
+  {                                                                                       \
+    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);                    \
+    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,                                      \
+                     *r__data = (*t_data OP value) ? 1 : 0;);                             \
+  }                                                                                       \
+  void THTensor_(NAME##TensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb)          \
+  {                                                                                       \
+    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                  \
+    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,                       \
+                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;);                         \
+  }                                                                                       \
+
+TENSOR_IMPLEMENT_LOGICAL_BYTE(lt,<)
+TENSOR_IMPLEMENT_LOGICAL_BYTE(gt,>)
+TENSOR_IMPLEMENT_LOGICAL_BYTE(le,<=)
+TENSOR_IMPLEMENT_LOGICAL_BYTE(ge,>=)
+TENSOR_IMPLEMENT_LOGICAL_BYTE(eq,==)
+TENSOR_IMPLEMENT_LOGICAL_BYTE(ne,!=)
 
 int THTensor_(equal)(THTensor *ta, THTensor* tb)
 {
@@ -84,6 +105,9 @@ TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
     if (*t_data > 0) *r__data = 1;
     else if (*t_data < 0) *r__data = -1;
     else *r__data = 0;);
+#endif
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(r_, t);
 #endif
 }
 
@@ -300,6 +324,40 @@ void THTensor_(cminValue)(THTensor *r, THTensor *t, scalar_t value) {
                    *r_data = *t_data > value ? value : *t_data;);  // this order propagates NaN
 }
 
+void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
+{
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
+      dimension);
+
+  THTensor_(resizeAs)(r_, t);
+
+  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
+                       accreal cumsum = 0;
+                       int64_t i;
+                       for(i = 0; i < t_size; i++)
+                       {
+                         cumsum += t_data[i*t_stride];
+                         r__data[i*r__stride] = (scalar_t)cumsum;
+                       });
+}
+
+void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension)
+{
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
+      dimension);
+
+  THTensor_(resizeAs)(r_, t);
+
+  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
+                       accreal cumprod = 1;
+                       int64_t i;
+                       for(i = 0; i < t_size; i++)
+                       {
+                         cumprod *= t_data[i*t_stride];
+                         r__data[i*r__stride] = (scalar_t)cumprod;
+                       });
+}
+
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
@@ -411,40 +469,6 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
   if (!keepdim) {
     THTensor_(squeeze1d)(r_, r_, dimension);
   }
-}
-
-void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
-      dimension);
-
-  THTensor_(resizeAs)(r_, t);
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                       accreal cumsum = 0;
-                       int64_t i;
-                       for(i = 0; i < t_size; i++)
-                       {
-                         cumsum += t_data[i*t_stride];
-                         r__data[i*r__stride] = (scalar_t)cumsum;
-                       });
-}
-
-void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
-      dimension);
-
-  THTensor_(resizeAs)(r_, t);
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                       accreal cumprod = 1;
-                       int64_t i;
-                       for(i = 0; i < t_size; i++)
-                       {
-                         cumprod *= t_data[i*t_stride];
-                         r__data[i*r__stride] = (scalar_t)cumprod;
-                       });
 }
 
 accreal THTensor_(trace)(THTensor *t)

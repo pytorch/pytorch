@@ -86,34 +86,6 @@ static bool isValidIdentifier(const std::string& name) {
   return true;
 }
 
-static void emitQualifiedName(std::ostream& out, const QualifiedName& name) {
-  const auto& name_ = name.name();
-  const auto& prefix_ = name.prefix();
-  if (isValidIdentifier(name_)) {
-    if (!prefix_.empty()) {
-      emitQualifiedName(out, QualifiedName(prefix_));
-      out << ".";
-    }
-    out << name_;
-  } else {
-    AT_ASSERT(!prefix_.empty());
-    out << "getattr(";
-    emitQualifiedName(out, QualifiedName(prefix_));
-    out << ", ";
-    printQuotedString(out, name_);
-    out << ")";
-  }
-}
-
-// Get a stringified version of the qualified name.
-// if a field is not a valid Python identifier, then it will print as, e.g.
-// getattr(self, "0").b
-static std::string getValidQualifiedName(const QualifiedName& name) {
-  std::stringstream ss;
-  emitQualifiedName(ss, name);
-  return ss.str();
-}
-
 // some names are valid identifiers but off limits because
 // they are keywords or namespaces used in the output
 const static std::unordered_set<std::string> reserved_names = {
@@ -168,7 +140,7 @@ const static std::unordered_set<std::string> reserved_names = {
 
 struct PythonPrintPass {
   using SourceRangeStack = std::vector<SourceRange>;
-  SourceRangeStack source_range_stack_ = {SourceRange("")};
+  SourceRangeStack source_range_stack_ = {SourceRange()};
 
   struct WithSourceRange {
     explicit WithSourceRange(SourceRangeStack* stack, Node* n) : stack(stack) {
@@ -176,7 +148,7 @@ struct PythonPrintPass {
       if (auto gen_source = n->sourceRange().findSourceRangeThatGenerated()) {
         stack->push_back(std::move(gen_source.value()));
       } else {
-        stack->push_back(std::move(n->sourceRange()));
+        stack->push_back(n->sourceRange());
       }
     }
 
@@ -650,7 +622,7 @@ struct PythonPrintPass {
       throw script::ErrorReport(stmt.node()->sourceRange())
           << "loop cannot be printed as python "
           << "because it has gone through an optimization "
-          << "that combined while and for loops. File a bug.";
+          << "that combined while and for loops. File a bug";
     }
 
     bool emit_as_for_loop = loop_type == LoopView::For;
@@ -786,7 +758,7 @@ struct PythonPrintPass {
         if (enforce_importable_ && node->inputs().size() != 1) {
           throw script::ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
-              << "Normal use of ScriptMethods should enforce this.";
+              << "Normal use of ScriptMethods should enforce this";
         }
         if (node->inputs().size() > 0) {
           indent();
@@ -1007,6 +979,9 @@ struct PythonPrintPass {
       case prim::Print: {
         printValueList(stmt, node->inputs(), "print(", ")");
       } break;
+      case aten::sorted: {
+        printValueList(stmt, node->inputs(), "sorted(", ")");
+      } break;
       case prim::TupleConstruct: {
         if (auto qualname = node->output()
                                 ->type()
@@ -1222,9 +1197,9 @@ struct PythonPrintPass {
     }
   }
 
-  void printCompilationUnit(const script::CompilationUnit& cu) {
-    for (auto& func : cu.get_functions()) {
-      printFunction(*func);
+  void printModuleMethods(const script::Module& module) {
+    for (const auto method : module.type()->methods()) {
+      printFunction(*method);
     }
   }
 
@@ -1282,13 +1257,13 @@ void PythonPrint(
 void PythonPrint(
     std::ostream& out,
     SourceRangeRecords& source_ranges_out,
-    const script::CompilationUnit& cu,
-    bool is_method,
+    const script::Module& module,
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  pp.printCompilationUnit(cu);
+  PythonPrintPass pp(
+      tensor_table, class_table, enforce_importable, /*isMethod=*/true);
+  pp.printModuleMethods(module);
   pp.print(out, source_ranges_out);
 }
 

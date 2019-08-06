@@ -54,15 +54,13 @@ static void max_pool2d_with_indices_single_out_frame(
           int64_t *indp = ind_p   + k*owidth*oheight + i*owidth + j;
 
           /* compute local max: */
-          int64_t maxindex = -1;
-          scalar_t maxval = -std::numeric_limits<scalar_t>::max();
-          int64_t tcntr = 0;
-          int64_t x,y;
-          for(y = hstart; y < hend; y += dilationH)
+          int64_t maxindex = hstart*iwidth + wstart;
+          scalar_t maxval = -std::numeric_limits<scalar_t>::infinity();
+          for(int64_t y = hstart; y < hend; y += dilationH)
           {
-            for(x = wstart; x < wend; x += dilationW)
+            for(int64_t x = wstart; x < wend; x += dilationW)
             {
-              tcntr = y*iwidth + x;
+              int64_t tcntr = y*iwidth + x;
               scalar_t val = *(ip + tcntr);
               if ((val > maxval) || std::isnan(val))
               {

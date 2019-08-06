@@ -658,7 +658,7 @@ struct CodeImpl {
 
     auto empty_graph = std::make_shared<Graph>();
     auto func = torch::make_unique<Function>(
-        "bailout", /*optimize=*/true, empty_graph, build_bailout_graph);
+        "bailout", empty_graph, build_bailout_graph);
     function_table_.emplace_back(func.get());
     bailout_functions_.emplace_back(std::move(func));
     createBailoutBlock(jf_index);

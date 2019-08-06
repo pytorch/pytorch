@@ -61,6 +61,7 @@ SmallVector<int64_t, 4> convOutputShape(
  * is 32767.
  *
  */
+template <bool ReluFused>
 class QConv2dInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
@@ -99,14 +100,10 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     PackedConvWeight& pack_ptr =
         cpp_custom_type_hack::cast<PackedConvWeight>(packed_weight);
     auto packB = pack_ptr.w.get();
-    // packB->printPackedMatrix("PackedB inside QConv2dInt8:");
     auto& col_offsets = pack_ptr.col_offsets;
     auto& kernel = pack_ptr.kernel;
 
-    int K = packB->numCols() * packB->numGroups();
-
-    std::vector<int32_t> row_offset_buf(
-        fbgemm::PackAWithIm2Col<uint8_t>::rowOffsetBufferSize());
+    int K = packB->outputChannels();
 
     int pad_l = padding[0];
     int pad_t = padding[1];
@@ -124,13 +121,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         {kernel_h, kernel_w},
         {stride_h, stride_w},
         {pad_l, pad_t, pad_l, pad_t});
-
-    fbgemm::PackAWithIm2Col<uint8_t> packA(
-        conv_p,
-        act_ptr,
-        nullptr,
-        act.q_zero_point(),
-        row_offset_buf.data());
 
     fbgemm::DoNothing<> NoOpObj{};
 
@@ -154,13 +144,13 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     float output_multiplier_float =
         (act_scale * weight_scale_float) / static_cast<float>(output_scale);
 
-    fbgemm::ReQuantizeOutput<false> outputProcObj(
+    fbgemm::ReQuantizeOutput<ReluFused> outputProcObj(
         NoOpObj,
         &output_multiplier_float,
         output_zero_point,
         act_zero_point,
         &weight_zero_point_int32,
-        packA.getRowOffsetBuffer(),
+        nullptr, /* row offset buffer */
         col_offsets.data(),
         bias_ptr,
         K,
@@ -177,13 +167,12 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         outShape, device(kCPU).dtype(kQUInt8), output_scale, output_zero_point);
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
-    // Do the GEMM
-    fbgemm::fbgemmPacked(
-        packA,
+    fbgemm::fbgemmConv(
+        conv_p,
+        act_ptr,
         *packB,
         reinterpret_cast<uint8_t*>(output.data<c10::quint8>()),
         buffer.data<int32_t>(),
-        K,
         outputProcObj,
         0 /* thread_id*/,
         1 /* num_threads */);
@@ -208,10 +197,14 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 #endif // USE_FBGEMM
 };
 
-static auto registry = c10::RegisterOperators().op(
-    "quantized::fbgemm_conv2d",
-    c10::RegisterOperators::options().kernel<QConv2dInt8>(
-        QuantizedCPUTensorId()));
+static auto registry =
+    c10::RegisterOperators()
+        .op("quantized::fbgemm_conv2d",
+            c10::RegisterOperators::options().kernel<QConv2dInt8<false>>(
+                QuantizedCPUTensorId()))
+        .op("quantized::fbgemm_conv2d_relu",
+            c10::RegisterOperators::options().kernel<QConv2dInt8<true>>(
+                QuantizedCPUTensorId()));
 
 } // namespace
 } // namespace native
