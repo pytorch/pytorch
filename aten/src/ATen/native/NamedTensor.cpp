@@ -20,15 +20,12 @@ static void report_moving_unnamed_dim_error(
     DimnameList names, DimnameList other, bool is_aligning_two_tensors) {
   if (is_aligning_two_tensors) {
     TORCH_CHECK(false,
-        "Could not infer the alignment of Tensor", names, " and Tensor", other,
-        ", please name the unnamed dimensions to resolve ambiguity.");
-    TORCH_CHECK(false,
-        "Aligning tensor `a` with dims ", names, " to tensor `b` with dims ", other,
+        "Aligning Tensor", names, " and Tensor", other,
         " would change the absolute position from the right of an unnamed dimension. ",
         "Please name unnamed dimensions to avoid ambiguity.");
   } else {
     TORCH_CHECK(false,
-        "Aligning tensor `a` with dims ", names, " to `names` ", other,
+        "Aligning Tensor", names, " to `names` ", other,
         " would change the absolute position from the right of an unnamed dimension. ",
         "Please name unnamed dimensions to avoid ambiguity.");
   }
@@ -40,12 +37,12 @@ static void report_not_a_subsequence_error(
     auto shorter = names.size() > other.size() ? other : names;
     auto longer = names.size() > other.size() ? names : other;
     TORCH_CHECK(false,
-        "Could not align tensor `a` with dims ", shorter, " and tensor `b` with dims ", longer,
-        " because `a.names` is not a subsequence of `b.names`. ");
+        "Could not align Tensor", shorter, " and Tensor", longer,
+        " because ", shorter, " is not a subsequence of ", longer, ". ");
   } else {
     TORCH_CHECK(false,
-        "Could not align tensor `a` with dims ", names,
-        " to `names` ", other, " because `a.names` is not a subsequence of `names`.");
+        "Could not align Tensor", names, " to `names` ", other,
+        " because ", names, " is not a subsequence of `names`.");
   }
 }
 
