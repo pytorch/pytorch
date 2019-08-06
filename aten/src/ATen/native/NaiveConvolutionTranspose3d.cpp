@@ -1,20 +1,16 @@
 #include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/Utils.h>
 
-#include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <TH/THBlasUtils.h>
 
-#include <ATen/native/cuda/vol2col.cuh>
+#include <ATen/native/vol2col.h>
 
 namespace at {
 namespace native {
 namespace {
 
-static inline void conv_transpose3d_shape_check(
+static inline void slow_conv_transpose3d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
@@ -85,10 +81,11 @@ static inline void conv_transpose3d_shape_check(
   // number of input & output planes and kernel size is indirectly defined by
   // the weight tensor
   if (weight.defined()) {
+    /* TODO: TORCH_CHECK just have 2 args: condition and message */
     TORCH_CHECK(
         weight.numel() != 0 && weight.dim() == 5,
-        "non-empty 5D (n_output_plane x n_input_plane ",
-        "x kernel_depth x kernel_height x kernel_width) tensor ",
+        "non-empty 5D (n_output_plane x n_input_plane x kernel_depth",
+        " x kernel_height x kernel_width) tensor ",
         "expected for weight, but got: ",
         weight.sizes());
     if (bias.defined()) {
@@ -116,17 +113,18 @@ static inline void conv_transpose3d_shape_check(
     check_dim_size(input, ndim, dimf, n_input_plane);
   }
 
-  int64_t input_width = input.size(dimw);
-  int64_t input_height = input.size(dimh);
-  int64_t input_depth = input.size(dimd);
-
-  int64_t output_depth = (input_depth - 1) * stride_depth - 2 * padding_depth +
-      (dilation_depth * (kernel_depth - 1) + 1) + output_padding_depth;
-  int64_t output_height = (input_height - 1) * stride_height -
+  const int64_t input_width = input.size(dimw);
+  const int64_t input_height = input.size(dimh);
+  const int64_t input_depth = input.size(dimd);
+  const int64_t output_depth = (input_depth - 1) * stride_depth -
+      2 * padding_depth + (dilation_depth * (kernel_depth - 1) + 1) +
+      output_padding_depth;
+  const int64_t output_height = (input_height - 1) * stride_height -
       2 * padding_height + (dilation_height * (kernel_height - 1) + 1) +
       output_padding_height;
-  int64_t output_width = (input_width - 1) * stride_width - 2 * padding_width +
-      (dilation_width * (kernel_width - 1) + 1) + output_padding_width;
+  const int64_t output_width = (input_width - 1) * stride_width -
+      2 * padding_width + (dilation_width * (kernel_width - 1) + 1) +
+      output_padding_width;
 
   if (output_depth < 1 || output_width < 1 || output_height < 1) {
     AT_ERROR(
@@ -136,7 +134,8 @@ static inline void conv_transpose3d_shape_check(
         input_height,
         " x ",
         input_width,
-        "). Calculated output size per channel: (",
+        "). "
+        "Calculated output size per channel: (",
         output_depth,
         " x ",
         output_height,
@@ -159,12 +158,13 @@ static inline void conv_transpose3d_shape_check(
   }
 }
 
-void conv_transpose3d_out_cuda_template(
+void slow_conv_transpose3d_out_cpu_template(
     Tensor& output,
-    const Tensor& input_,
-    const Tensor& weight_,
+    const Tensor& input_, // 4D or 5D (batch) tensor
+    const Tensor& weight_, // weight tensor (n_input_plane x n_output_plane x
+                           // kernel_depth x kernel_height x kernel_width)
     IntArrayRef kernel_size,
-    const Tensor& bias,
+    const Tensor& bias_,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
@@ -212,25 +212,16 @@ void conv_transpose3d_out_cuda_template(
   int64_t output_padding_height = output_padding[1];
   int64_t output_padding_width = output_padding[2];
 
-  Tensor columns = finput;
-  Tensor ones = fgrad_input;
+  // internal columns buffer
+  Tensor& columns = finput;
+  // internal ones buffer
+  Tensor& ones = fgrad_input;
 
-  int n_input_plane = weight_.size(0);
-  int n_output_plane = weight_.size(1);
-
-  TensorArg input_arg{input_, "input", 1}, output_arg{output, "output", 2},
-      weight_arg{weight_, "weight", 3}, bias_arg{bias, "bias", 4},
-      columns_arg{columns, "columns", 5}, ones_arg{ones, "ones", 6};
-
-  checkAllSameGPU(
-      "conv_transpose3d_out_cuda",
-      {input_arg, output_arg, weight_arg, bias_arg, columns_arg, ones_arg});
-
-  conv_transpose3d_shape_check(
+  slow_conv_transpose3d_shape_check(
       input_,
       Tensor(),
       weight_,
-      bias,
+      bias_,
       kernel_depth,
       kernel_width,
       kernel_height,
@@ -248,14 +239,14 @@ void conv_transpose3d_out_cuda_template(
       output_padding_height,
       0);
 
-  TORCH_CHECK(
-      !bias.defined() || bias.is_contiguous(),
-      "bias tensor has to be contiguous");
-
   Tensor input = input_.contiguous();
   Tensor weight = weight_.contiguous();
+  Tensor bias = bias_.defined() ? bias_.contiguous() : bias_;
 
-  int is_batch = false;
+  const int n_input_plane = (int)weight.size(0);
+  const int n_output_plane = (int)weight.size(1);
+
+  bool is_batch = false;
   if (input.dim() == 4) {
     // Force batch
     is_batch = true;
@@ -263,20 +254,22 @@ void conv_transpose3d_out_cuda_template(
         {1, input.size(0), input.size(1), input.size(2), input.size(3)});
   }
 
-  int64_t input_width = input.size(4);
-  int64_t input_height = input.size(3);
-  int64_t input_depth = input.size(2);
+  const int64_t input_width = input.size(4);
+  const int64_t input_height = input.size(3);
+  const int64_t input_depth = input.size(2);
 
-  int64_t output_depth = (input_depth - 1) * stride_depth - 2 * padding_depth +
-      (dilation_depth * (kernel_depth - 1) + 1) + output_padding_depth;
-  int64_t output_height = (input_height - 1) * stride_height -
+  const int64_t output_depth = (input_depth - 1) * stride_depth -
+      2 * padding_depth + (dilation_depth * (kernel_depth - 1) + 1) +
+      output_padding_depth;
+  const int64_t output_height = (input_height - 1) * stride_height -
       2 * padding_height + (dilation_height * (kernel_height - 1) + 1) +
       output_padding_height;
-  int64_t output_width = (input_width - 1) * stride_width - 2 * padding_width +
-      (dilation_width * (kernel_width - 1) + 1) + output_padding_width;
+  const int64_t output_width = (input_width - 1) * stride_width -
+      2 * padding_width + (dilation_width * (kernel_width - 1) + 1) +
+      output_padding_width;
 
   // Batch size + input planes
-  int64_t batch_size = input.size(0);
+  const int64_t batch_size = input.size(0);
 
   // Resize output
   output.resize_(
@@ -285,6 +278,7 @@ void conv_transpose3d_out_cuda_template(
   // Resize temporary columns
   columns.resize_({n_output_plane * kernel_width * kernel_height * kernel_depth,
                    input_depth * input_height * input_width});
+  columns.zero_();
 
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets
@@ -297,48 +291,45 @@ void conv_transpose3d_out_cuda_template(
     ones.fill_(1);
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.scalar_type(), "conv_transpose3d_out_cuda", [&] {
-        using accscalar_t = at::acc_type<scalar_t, true>;
-
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
+      input.scalar_type(), "slow_conv_transpose3d_out_cpu", [&] {
         // Helpers
         Tensor input_n;
         Tensor output_n;
 
+        int elt;
         // For each elt in batch, do:
-        for (int elt = 0; elt < batch_size; elt++) {
+        for (elt = 0; elt < batch_size; ++elt) {
           // Matrix mulitply per output:
           input_n = input.select(0, elt);
           output_n = output.select(0, elt);
 
           // M,N,K are dims of matrix A and B
           // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-          int64_t m =
+          const int64_t m =
               weight.size(1) * weight.size(2) * weight.size(3) * weight.size(4);
-          int64_t n = columns.size(1);
-          int64_t k = weight.size(0);
+          const int64_t n = columns.size(1);
+          const int64_t k = weight.size(0);
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          at::cuda::blas::gemm<scalar_t>(
-              at::cuda::getCurrentCUDAStream(),
+          THBlas_gemm<scalar_t>(
               'n',
               't',
               n,
               m,
               k,
-              static_cast<scalar_t>(1),
+              1,
               input_n.data<scalar_t>(),
               n,
               weight.data<scalar_t>(),
               m,
-              static_cast<scalar_t>(0),
+              0,
               columns.data<scalar_t>(),
               n);
 
           // Unpack columns back into input:
-          at::native::col2vol<scalar_t, accscalar_t>(
-              at::cuda::getCurrentCUDAStream(),
+          at::native::col2vol<scalar_t>(
               columns.data<scalar_t>(),
               n_output_plane,
               output_depth,
@@ -364,26 +355,25 @@ void conv_transpose3d_out_cuda_template(
           // Do Bias after:
           // M,N,K are dims of matrix A and B
           // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-          int64_t m_ = n_output_plane;
-          int64_t n_ = output_depth * output_height * output_width;
-          int64_t k_ = 1;
+          const int64_t m_ = n_output_plane;
+          const int64_t n_ = output_depth * output_height * output_width;
+          const int64_t k_ = 1;
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
           if (bias.defined()) {
-            at::cuda::blas::gemm<scalar_t>(
-                at::cuda::getCurrentCUDAStream(),
+            THBlas_gemm<scalar_t>(
                 't',
                 'n',
                 n_,
                 m_,
                 k_,
-                static_cast<scalar_t>(1),
+                1,
                 ones.data<scalar_t>(),
                 k_,
                 bias.data<scalar_t>(),
                 k_,
-                static_cast<scalar_t>(1),
+                1,
                 output_n.data<scalar_t>(),
                 n_);
           }
@@ -399,7 +389,7 @@ void conv_transpose3d_out_cuda_template(
       });
 }
 
-void conv_transpose3d_backward_out_cuda_template(
+void slow_conv_transpose3d_backward_out_cpu_template(
     const Tensor& input_,
     const Tensor& grad_output_,
     Tensor& grad_input,
@@ -438,9 +428,6 @@ void conv_transpose3d_backward_out_cuda_template(
 
   Tensor grad_columns = finput;
 
-  int n_input_plane = weight_.size(0);
-  int n_output_plane = weight_.size(1);
-
   int64_t kernel_depth = kernel_size[0];
   int64_t kernel_height = kernel_size[1];
   int64_t kernel_width = kernel_size[2];
@@ -457,21 +444,9 @@ void conv_transpose3d_backward_out_cuda_template(
   int64_t output_padding_height = output_padding[1];
   int64_t output_padding_width = output_padding[2];
 
-  TensorArg input_arg{input_, "input", 1},
-      grad_output_arg{grad_output_, "grad_output", 2},
-      weight_arg{weight_, "weight", 3},
-      grad_columns_arg{grad_columns, "grad_columns", 4},
-      grad_input_arg{grad_input, "grad_input", 5};
-
-  checkAllSameGPU(
-      "conv_transpose3d_backward_out_cuda",
-      {input_arg,
-       grad_output_arg,
-       weight_arg,
-       grad_columns_arg,
-       grad_input_arg});
-
-  conv_transpose3d_shape_check(
+  // number of input & output planes and kernel size is indirectly defined by
+  // the weight tensor
+  slow_conv_transpose3d_shape_check(
       input_,
       grad_output_,
       weight_,
@@ -494,8 +469,11 @@ void conv_transpose3d_backward_out_cuda_template(
       0);
 
   Tensor input = input_.contiguous();
-  Tensor grad_output = grad_output_.contiguous();
   Tensor weight = weight_.contiguous();
+  Tensor grad_output = grad_output_.contiguous();
+
+  const int64_t n_input_plane = weight.size(0);
+  const int64_t n_output_plane = weight.size(1);
 
   bool is_batch = false;
   if (input.dim() == 4) {
@@ -510,44 +488,48 @@ void conv_transpose3d_backward_out_cuda_template(
                          grad_output.size(3)});
   }
 
-  int64_t input_width = input.size(4);
-  int64_t input_height = input.size(3);
-  int64_t input_depth = input.size(2);
-  int64_t output_depth = (input_depth - 1) * stride_depth - 2 * padding_depth +
-      (dilation_depth * (kernel_depth - 1) + 1) + output_padding_depth;
-  int64_t output_height = (input_height - 1) * stride_height -
+  const int64_t input_width = input.size(4);
+  const int64_t input_height = input.size(3);
+  const int64_t input_depth = input.size(2);
+
+  const int64_t output_depth = (input_depth - 1) * stride_depth -
+      2 * padding_depth + (dilation_depth * (kernel_depth - 1) + 1) +
+      output_padding_depth;
+  const int64_t output_height = (input_height - 1) * stride_height -
       2 * padding_height + (dilation_height * (kernel_height - 1) + 1) +
       output_padding_height;
-  int64_t output_width = (input_width - 1) * stride_width - 2 * padding_width +
-      (dilation_width * (kernel_width - 1) + 1) + output_padding_width;
+  const int64_t output_width = (input_width - 1) * stride_width -
+      2 * padding_width + (dilation_width * (kernel_width - 1) + 1) +
+      output_padding_width;
 
   // Batch size + input planes
-  int64_t batch_size = input.size(0);
+  const int64_t batch_size = input.size(0);
 
   // Resize output
   grad_input.resize_(
       {batch_size, n_input_plane, input_depth, input_height, input_width});
+  grad_input.zero_();
 
   // Resize temporary columns
   grad_columns.resize_(
       {n_output_plane * kernel_width * kernel_height * kernel_depth,
        input_depth * input_height * input_width});
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.scalar_type(), "conv_transpose3d_backward_out_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(
+      input.scalar_type(), "slow_conv_transpose3d_backward_out_cpu", [&] {
         // Helpers
         Tensor grad_input_n;
         Tensor grad_output_n;
 
+        int elt;
         // For each elt in batch, do:
-        for (int elt = 0; elt < batch_size; elt++) {
+        for (elt = 0; elt < batch_size; ++elt) {
           // Matrix mulitply per sample:
           grad_input_n = grad_input.select(0, elt);
           grad_output_n = grad_output.select(0, elt);
 
           // Extract columns:
           at::native::vol2col<scalar_t>(
-              at::cuda::getCurrentCUDAStream(),
               grad_output_n.data<scalar_t>(),
               n_output_plane,
               output_depth,
@@ -572,26 +554,25 @@ void conv_transpose3d_backward_out_cuda_template(
 
           // M,N,K are dims of matrix A and B
           // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-          int64_t m = weight.size(0);
-          int64_t n = grad_columns.size(1);
-          int64_t k =
+          const int64_t m = weight.size(0);
+          const int64_t n = grad_columns.size(1);
+          const int64_t k =
               weight.size(1) * weight.size(2) * weight.size(3) * weight.size(4);
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          at::cuda::blas::gemm<scalar_t>(
-              at::cuda::getCurrentCUDAStream(),
+          THBlas_gemm<scalar_t>(
               'n',
               'n',
               n,
               m,
               k,
-              static_cast<scalar_t>(1),
+              1,
               grad_columns.data<scalar_t>(),
               n,
               weight.data<scalar_t>(),
               k,
-              static_cast<scalar_t>(0),
+              0,
               grad_input_n.data<scalar_t>(),
               n);
         }
@@ -608,7 +589,7 @@ void conv_transpose3d_backward_out_cuda_template(
       });
 }
 
-void conv_transpose3d_acc_grad_parameters_cuda(
+void slow_conv_transpose3d_acc_grad_parameters_cpu(
     const Tensor& input_,
     const Tensor& grad_output_,
     Tensor& grad_weight,
@@ -662,25 +643,9 @@ void conv_transpose3d_acc_grad_parameters_cuda(
   int64_t output_padding_height = output_padding[1];
   int64_t output_padding_width = output_padding[2];
 
-  Tensor columns = finput;
-  Tensor ones = fgrad_input;
-
-  TensorArg input_arg{input_, "input", 1},
-      grad_output_arg{grad_output_, "grad_output", 2},
-      grad_weight_arg{grad_weight, "grad_weight", 3},
-      grad_bias_arg{grad_bias, "grad_bias", 4},
-      columns_arg{columns, "columns", 5}, ones_arg{ones, "ones", 6};
-
-  checkAllSameGPU(
-      "conv_transpose3d_acc_grad_parameters_cuda",
-      {input_arg,
-       grad_output_arg,
-       grad_weight_arg,
-       grad_bias_arg,
-       columns_arg,
-       ones_arg});
-
-  conv_transpose3d_shape_check(
+  // number of input & output planes and kernel size is indirectly defined by
+  // the grad_weight tensor
+  slow_conv_transpose3d_shape_check(
       input_,
       grad_output_,
       grad_weight,
@@ -702,7 +667,7 @@ void conv_transpose3d_acc_grad_parameters_cuda(
       output_padding_height,
       1);
 
-  int n_output_plane;
+  int64_t n_output_plane;
   if (grad_weight.defined()) {
     n_output_plane = grad_weight.size(1);
   } else if (grad_bias.defined()) {
@@ -711,17 +676,19 @@ void conv_transpose3d_acc_grad_parameters_cuda(
     return;
   }
 
+  Tensor columns = finput;
+  Tensor ones = fgrad_input;
+
+  Tensor input = input_.contiguous();
+  Tensor grad_output = grad_output_.contiguous();
+
   if (grad_weight.defined()) {
-    TORCH_CHECK(
-        grad_weight.is_contiguous(), "grad_weight needs to be contiguous");
+    TORCH_CHECK(grad_weight.is_contiguous(), "grad_weight needs to be contiguous");
   }
   if (grad_bias.defined()) {
     TORCH_CHECK(grad_bias.is_contiguous(), "grad_bias needs to be contiguous");
     TORCH_CHECK(ones.is_contiguous(), "ones needs to be contiguous");
   }
-
-  Tensor input = input_.contiguous();
-  Tensor grad_output = grad_output_.contiguous();
 
   bool is_batch = false;
   if (input.dim() == 4) {
@@ -736,20 +703,22 @@ void conv_transpose3d_acc_grad_parameters_cuda(
                          grad_output.size(3)});
   }
 
-  int64_t input_width = input.size(4);
-  int64_t input_height = input.size(3);
-  int64_t input_depth = input.size(2);
+  const int64_t input_width = input.size(4);
+  const int64_t input_height = input.size(3);
+  const int64_t input_depth = input.size(2);
 
-  int64_t output_depth = (input_depth - 1) * stride_depth - 2 * padding_depth +
-      (dilation_depth * (kernel_depth - 1) + 1) + output_padding_depth;
-  int64_t output_height = (input_height - 1) * stride_height -
+  const int64_t output_depth = (input_depth - 1) * stride_depth -
+      2 * padding_depth + (dilation_depth * (kernel_depth - 1) + 1) +
+      output_padding_depth;
+  const int64_t output_height = (input_height - 1) * stride_height -
       2 * padding_height + (dilation_height * (kernel_height - 1) + 1) +
       output_padding_height;
-  int64_t output_width = (input_width - 1) * stride_width - 2 * padding_width +
-      (dilation_width * (kernel_width - 1) + 1) + output_padding_width;
+  const int64_t output_width = (input_width - 1) * stride_width -
+      2 * padding_width + (dilation_width * (kernel_width - 1) + 1) +
+      output_padding_width;
 
   // Batch size + input planes
-  int64_t batch_size = input.size(0);
+  const int64_t batch_size = input.size(0);
 
   // Define a buffer of ones, for bias accumulation
   if (ones.dim() != 3 ||
@@ -764,9 +733,9 @@ void conv_transpose3d_acc_grad_parameters_cuda(
   columns.resize_({n_output_plane * kernel_width * kernel_height * kernel_depth,
                    input_depth * input_height * input_width});
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(),
-      "conv_transpose3d_acc_grad_parameters_cuda",
+      "slow_conv_transpose3d_acc_grad_parameters_cpu",
       [&] {
         // Helpers
         Tensor input_n;
@@ -774,8 +743,9 @@ void conv_transpose3d_acc_grad_parameters_cuda(
 
         scalar_t scale = static_cast<scalar_t>(scale_);
 
+        int elt;
         // For each elt in batch, do:
-        for (int elt = 0; elt < batch_size; elt++) {
+        for (elt = 0; elt < batch_size; ++elt) {
           // Matrix mulitply per output:
           grad_output_n = grad_output.select(0, elt);
 
@@ -786,7 +756,6 @@ void conv_transpose3d_acc_grad_parameters_cuda(
 
             // Extract columns:
             at::native::vol2col<scalar_t>(
-                at::cuda::getCurrentCUDAStream(),
                 grad_output_n.data<scalar_t>(),
                 n_output_plane,
                 output_depth,
@@ -811,14 +780,13 @@ void conv_transpose3d_acc_grad_parameters_cuda(
 
             // M,N,K are dims of matrix A and B
             // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-            int64_t n = columns.size(0); // n_output_plane * kt * kh * kw
-            int64_t m = input_n.size(0); // n_input_plane
-            int64_t k = columns.size(1); // input_height * input_width
+            const int64_t n = columns.size(0); // n_output_plane * kt * kh * kw
+            const int64_t m = input_n.size(0); // n_input_plane
+            const int64_t k = columns.size(1); // input_height * input_width
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            at::cuda::blas::gemm<scalar_t>(
-                at::cuda::getCurrentCUDAStream(),
+            THBlas_gemm<scalar_t>(
                 't',
                 'n',
                 n,
@@ -829,7 +797,7 @@ void conv_transpose3d_acc_grad_parameters_cuda(
                 k,
                 input_n.data<scalar_t>(),
                 k,
-                static_cast<scalar_t>(1),
+                1,
                 grad_weight.data<scalar_t>(),
                 n);
           }
@@ -838,13 +806,12 @@ void conv_transpose3d_acc_grad_parameters_cuda(
           if (grad_bias.defined()) {
             // M,N,K are dims of matrix A and B
             // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-            int64_t m_ = n_output_plane;
-            int64_t k_ = output_depth * output_height * output_width;
+            const int64_t m_ = n_output_plane;
+            const int64_t k_ = output_depth * output_height * output_width;
 
             // Do GEMV (note: this is a bit confusing because gemv assumes
             // column-major matrices)
-            at::cuda::blas::gemv<scalar_t>(
-                at::cuda::getCurrentCUDAStream(),
+            THBlas_gemv<scalar_t>(
                 't',
                 k_,
                 m_,
@@ -853,7 +820,7 @@ void conv_transpose3d_acc_grad_parameters_cuda(
                 k_,
                 ones.data<scalar_t>(),
                 1,
-                static_cast<scalar_t>(1),
+                1,
                 grad_bias.data<scalar_t>(),
                 1);
           }
@@ -871,7 +838,7 @@ void conv_transpose3d_acc_grad_parameters_cuda(
 
 } // namespace
 
-Tensor& conv_transpose3d_out_cuda(
+Tensor& slow_conv_transpose3d_out_cpu(
     Tensor& output,
     const Tensor& input,
     const Tensor& weight,
@@ -884,7 +851,7 @@ Tensor& conv_transpose3d_out_cuda(
   Tensor finput = at::empty_like(input);
   Tensor fgrad = at::empty_like(input);
 
-  conv_transpose3d_out_cuda_template(
+  slow_conv_transpose3d_out_cpu_template(
       output,
       input,
       weight,
@@ -900,7 +867,7 @@ Tensor& conv_transpose3d_out_cuda(
   return output;
 }
 
-Tensor conv_transpose3d_cuda(
+Tensor slow_conv_transpose3d_cpu(
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -913,7 +880,7 @@ Tensor conv_transpose3d_cuda(
   Tensor finput = at::empty_like(input);
   Tensor fgrad = at::empty_like(input);
 
-  conv_transpose3d_out_cuda_template(
+  slow_conv_transpose3d_out_cpu_template(
       output,
       input,
       weight,
@@ -929,7 +896,7 @@ Tensor conv_transpose3d_cuda(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> conv_transpose3d_backward_out_cuda(
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cpu(
     Tensor& grad_input,
     Tensor& grad_weight,
     Tensor& grad_bias,
@@ -944,7 +911,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv_transpose3d_backward_out_cuda(
     const Tensor& finput,
     const Tensor& fgrad) {
   if (grad_input.defined()) {
-    conv_transpose3d_backward_out_cuda_template(
+    slow_conv_transpose3d_backward_out_cpu_template(
         input,
         grad_output,
         grad_input,
@@ -969,7 +936,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv_transpose3d_backward_out_cuda(
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {
-    conv_transpose3d_acc_grad_parameters_cuda(
+    slow_conv_transpose3d_acc_grad_parameters_cpu(
         input,
         grad_output,
         grad_weight,
@@ -988,7 +955,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv_transpose3d_backward_out_cuda(
       grad_input, grad_weight, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor> conv_transpose3d_backward_cuda(
+std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -1023,7 +990,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_transpose3d_backward_cuda(
   }
 
   if (grad_input.defined()) {
-    conv_transpose3d_backward_out_cuda_template(
+    slow_conv_transpose3d_backward_out_cpu_template(
         input,
         grad_output,
         grad_input,
@@ -1048,7 +1015,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_transpose3d_backward_cuda(
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {
-    conv_transpose3d_acc_grad_parameters_cuda(
+    slow_conv_transpose3d_acc_grad_parameters_cpu(
         input,
         grad_output,
         grad_weight,
