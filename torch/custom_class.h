@@ -104,7 +104,7 @@ class class_ {
     c10::getCustomClassTypeMap().insert({typeid(c10::tagged_capsule<CurClass>).name(),
                               StrongTypePtr(classCu, classTypePtr)});
 
-    classCu->register_class(classTypePtr);
+    classCu->register_type(classTypePtr);
   }
 
   template <typename... Types>
