@@ -2473,6 +2473,7 @@ class TestAutograd(TestCase):
         #_test_cdist_for_size((2, 3, 5))
         #_test_cdist_for_size((1, 2, 3))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_cdist_if_same(self):
         b = torch.tensor([1.00819670773727, -0.23274465960590035, 0.273863044005079, -2.2174871734580344], device="cuda", dtype=torch.double)
 
