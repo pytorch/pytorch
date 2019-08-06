@@ -35,10 +35,13 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
 }
 
 void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
+  // Casting exponent to double(not tensor.dtype) allows powering integral
+  // tensors to float exponent e.g. tensor([4]).pow(0.5) will be tensor([2])
+  const auto exp = exp_scalar.to<double>();
   if (isFloatingType(iter.dtype())) {
+    // Floating types allow AVX2 vector optimizations for pow/sqrt/rsqrt:
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "pow", [&]() {
       using Vec = Vec256<scalar_t>;
-      auto exp = exp_scalar.to<double>();
       if (exp == 0.5) {
         cpu_kernel_vec(iter,
           [](scalar_t base) -> scalar_t {
@@ -61,7 +64,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
           [](scalar_t base) -> scalar_t {
             return 1.0 / std::sqrt((long double)base);
           },
-          [](Vec base) -> Vec { return base.sqrt().reciprocal(); }
+          [](Vec base) -> Vec { return base.rsqrt(); }
         );
       } else if (exp == -1) {
         cpu_kernel_vec(iter,
@@ -83,8 +86,11 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
       }
     });
   } else {
+    // Integral types do not allow AVX2 vector optimizations for pow/sqrt/rsqrt.
+    // Trying to implement pow/sqrt/rsqrt as loops in vec256_int.h does not allow
+    // powering integral tensor to float exponent. That's why we need this code
+    // duplication:
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow", [&]() {
-      auto exp = exp_scalar.to<double>();
       if (exp == 0.5) {
         cpu_kernel(iter,
           [](scalar_t base) -> scalar_t { return std::sqrt(base); }
