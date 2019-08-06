@@ -101,7 +101,7 @@ inline int64_t get_num_states(int64_t mode) {
 //   weight_ih_00, weight_hh_00, bias_00, /* layer = 0, direction = 0 */
 //   weight_ih_01, weight_hh_01, bias_01, /* layer = 0, direction = 1 */
 //   ..., ..., ...,
-//   weight_ih_ld, weight_hh_ld, bias_ld /* layer = ld, direction = d */
+//   weight_ih_ld, weight_hh_ld, bias_ld /* layer = l, direction = d */
 // }
 //
 std::vector<ideep::tensor> get_weight_itensors(const Tensor& flatten_weight,
@@ -133,7 +133,7 @@ std::vector<ideep::tensor> get_weight_itensors(const Tensor& flatten_weight,
   return weights;
 };
 
-} // anonymous namespace 
+} // anonymous namespace
 
 Tensor _mkldnn_rnn_flatten_weight(TensorList weight, bool has_bias,
     int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional) {
