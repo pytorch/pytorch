@@ -12537,6 +12537,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         TestTorch.unary_check_mem_overlap(self, lambda t: t.tan_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.tanh_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.trunc_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.pow_(42), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.pow_(t), device=device)
 
     @staticmethod
     def _test_inplace_binary_mem_overlap(self, device='cpu'):
