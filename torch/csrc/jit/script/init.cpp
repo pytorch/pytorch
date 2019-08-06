@@ -96,7 +96,8 @@ struct PythonResolver : public Resolver {
         py::hasattr(obj, "_fields");
   }
 
-  TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
+  TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      const override {
     if (classType_ && name == classname_) {
       return classType_;
     }
@@ -147,7 +148,8 @@ struct PythonResolver : public Resolver {
       auto tt = TupleType::create(
           annotations,
           qualifiedName,
-          TupleType::namedTupleSchemaFromNamesAndTypes(qualifiedName, fields, annotations));
+          TupleType::namedTupleSchemaFromNamesAndTypes(
+              qualifiedName, fields, annotations));
       get_python_cu()->register_class(tt);
       return tt;
     }
@@ -230,9 +232,7 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
   const py::object& pyModule_;
 };
 
-static TypePtr getTensorType(
-    const at::Tensor& t,
-    const TypeKind type_kind) {
+static TypePtr getTensorType(const at::Tensor& t, const TypeKind type_kind) {
   switch (type_kind) {
     case TypeKind::DimensionedTensorType:
       return DimensionedTensorType::create(t);
@@ -258,7 +258,8 @@ static TupleTypePtr getTupleTensorType(
   std::vector<TypePtr> types;
   for (const auto& subType : tupleType->containedTypes()) {
     if (subType->kind() == TupleType::Kind) {
-      types.push_back(getTupleTensorType(s_iter+1, s_iter_end, subType, type_kind));
+      types.push_back(
+          getTupleTensorType(s_iter + 1, s_iter_end, subType, type_kind));
     } else {
       types.push_back(getTensorType(s_iter->toTensor(), type_kind));
     }
@@ -276,8 +277,7 @@ static void setInputTensorTypes(
     AT_ASSERT(s_iter != stack.end());
     if (v->type()->kind() == TupleType::Kind) {
       AT_ASSERT(v->node()->kind() == prim::Param);
-      v->setType(
-          getTupleTensorType(s_iter, stack.end(), v->type(), type_kind));
+      v->setType(getTupleTensorType(s_iter, stack.end(), v->type(), type_kind));
     } else {
       v->setType(getTensorType(s_iter->toTensor(), type_kind));
       s_iter++;
@@ -303,10 +303,12 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
     bool propagate = true) {
   auto retval = graph.copy();
   if (propagate) {
-    setInputTensorTypes(*retval, fmap<IValue>(inputs), TypeKind::DimensionedTensorType);
+    setInputTensorTypes(
+        *retval, fmap<IValue>(inputs), TypeKind::DimensionedTensorType);
     PropagateInputShapes(retval);
   }
-  setInputTensorTypes(*retval, fmap<IValue>(inputs), TypeKind::CompleteTensorType);
+  setInputTensorTypes(
+      *retval, fmap<IValue>(inputs), TypeKind::CompleteTensorType);
 
   return retval;
 }
@@ -541,13 +543,7 @@ void initJitScriptBindings(PyObject* module) {
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> classes;
             SourceRangeRecords source_ranges;
-            PythonPrint(
-                ss,
-                source_ranges,
-                self,
-                tensors,
-                classes,
-                false);
+            PythonPrint(ss, source_ranges, self, tensors, classes, false);
             return ss.str();
           })
       .def("apply", &Module::apply)
@@ -559,8 +555,7 @@ void initJitScriptBindings(PyObject* module) {
             m.clone_method(orig, name);
           });
 
-  py::class_<ErrorReport, std::shared_ptr<ErrorReport>>(
-      m, "ErrorReport")
+  py::class_<ErrorReport, std::shared_ptr<ErrorReport>>(m, "ErrorReport")
       .def(py::init<SourceRange>())
       .def("what", &ErrorReport::what);
 
@@ -777,10 +772,7 @@ void initJitScriptBindings(PyObject* module) {
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         return import_ir_module(
-            std::move(cu),
-            filename,
-            optional_device,
-            extra_files);
+            std::move(cu), filename, optional_device, extra_files);
       });
   m.def(
       "import_ir_module_from_buffer",
@@ -823,24 +815,15 @@ void initJitScriptBindings(PyObject* module) {
       debugSetAutodiffSubgraphInlining);
   m.def("_propagate_shapes", _propagate_shapes);
   m.def(
-      "_propagate_and_assign_input_shapes",
-      _propagate_and_assign_input_shapes);
-  m.def(
-      "_assign_output_shapes",
-      _assign_output_shapes);
-  m.def("_jit_python_print", [](py::object obj) {
+      "_propagate_and_assign_input_shapes", _propagate_and_assign_input_shapes);
+  m.def("_assign_output_shapes", _assign_output_shapes);
+  m.def("_jit_python_print", [](const py::object& obj) {
     std::ostringstream ss;
     std::vector<at::Tensor> constants;
     std::vector<c10::NamedTypePtr> classes;
     SourceRangeRecords source_ranges;
     if (auto self = as_module(obj)) {
-      PythonPrint(
-          ss,
-          source_ranges,
-          *self,
-          constants,
-          classes,
-          true);
+      PythonPrint(ss, source_ranges, *self, constants, classes, true);
     } else if (auto self = as_function(obj)) {
       PythonPrint(
           ss, source_ranges, *self->function_, false, constants, classes, true);
