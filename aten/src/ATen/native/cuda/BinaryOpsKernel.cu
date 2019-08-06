@@ -62,7 +62,7 @@ void mul_kernel_cuda(TensorIterator& iter) {
 }
 
 void logical_xor_kernel_cuda(TensorIterator& iter) {
-  gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+  gpu_kernel(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
     return a != b;
   });
 }
