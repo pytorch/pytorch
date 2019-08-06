@@ -2898,7 +2898,7 @@ add_docstr(torch.argmax,
            r"""
 .. function:: argmax(input) -> LongTensor
 
-Returns the indices of all elements in the :attr:`input` tensor.
+Returns the indices of the maximum value of all elements in the :attr:`input` tensor.
 
 This is the second value returned by :meth:`torch.max`. See its
 documentation for the exact semantics of this method.
