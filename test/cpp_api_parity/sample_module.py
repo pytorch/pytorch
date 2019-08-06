@@ -33,7 +33,7 @@ class SampleModule(torch.nn.Module):
         else:
             return x
 
-SAMPLE_MODULE_CPP_SOURCE = """
+SAMPLE_MODULE_CPP_SOURCE = """\n
 struct SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImpl> {
   SampleModuleImpl() {
     reset();

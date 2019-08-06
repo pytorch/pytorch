@@ -1,12 +1,9 @@
 import os
 import shutil
-import sys
 import tempfile
-import traceback
 from string import Template
 
 import torch
-from torch._six import raise_from
 import common_utils as common
 from common_nn import module_tests
 import torch.utils.cpp_extension
@@ -21,10 +18,16 @@ class TestCppApiParity(common.TestCase):
         if os.path.exists(default_build_root):
             shutil.rmtree(default_build_root)
 
-    def _test_torch_nn_modules(self, test_suite_name, module_names, module_tests, python_module_class=None, cpp_namespace='torch::nn::'):
+    def _test_torch_nn_modules(
+            self,
+            test_suite_name,
+            module_names,
+            module_tests,
+            python_module_class=None,
+            cpp_namespace='torch::nn::'):
         torch_nn_test_methods = ['init', 'forward']
 
-        TORCH_NN_MODULE_COMMON_TEST_HARNESS = """
+        TORCH_NN_MODULE_COMMON_TEST_HARNESS = """\n
 const char * const parity_test_error_msg = "Parity test failed";
 
 void test_module_state_equality(std::shared_ptr<torch::nn::Module> m1, std::shared_ptr<torch::nn::Module> m2) {
@@ -50,7 +53,7 @@ void test_module_state_equality(std::shared_ptr<torch::nn::Module> m1, std::shar
 }
 """
 
-        TORCH_NN_MODULE_WRAPPER = Template("""
+        TORCH_NN_MODULE_WRAPPER = Template("""\n
 void ${module_variant_name}_test_init(const std::string& saved_module_path) {
   ${module_qualified_name} m1${cpp_constructor_args};
   ${module_qualified_name} m2${cpp_constructor_args};
@@ -99,10 +102,10 @@ void ${module_variant_name}_test_forward(
             for test_params in test_params_map[module_name]:
                 cpp_source += TORCH_NN_MODULE_WRAPPER.substitute(
                     module_variant_name=test_params['module_variant_name'],
-                    module_qualified_name=test_params['cpp_namespace']+test_params['module_name'],
+                    module_qualified_name=test_params['cpp_namespace'] + test_params['module_name'],
                     cpp_constructor_args=test_params['cpp_constructor_args'])
                 for method in torch_nn_test_methods:
-                    functions.append(test_params['module_variant_name']+'_test_'+method)
+                    functions.append(test_params['module_variant_name'] + '_test_' + method)
 
         cpp_module = torch.utils.cpp_extension.load_inline(
             name=test_suite_name,
@@ -117,7 +120,7 @@ void ${module_variant_name}_test_forward(
             python_module_class = test_params['python_module_class']
             python_constructor_args = test_params['python_constructor_args']
             module_variant_name = test_params['module_variant_name']
-            test_name = module_variant_name+'_test_'+method_name
+            test_name = module_variant_name + '_test_' + method_name
             example_input = torch.randn(input_size)
             with common.freeze_rng_state():
                 torch.manual_seed(2)
@@ -126,7 +129,12 @@ void ${module_variant_name}_test_forward(
                     python_output = module(example_input)
                 # We use JIT tracing to transfer Python module state to C++
                 traced_script_module = torch.jit.trace(module, example_input)
-                with tempfile.NamedTemporaryFile() as f:
+                # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
+                # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
+                # close the file after creation and try to remove it manually
+                f = tempfile.NamedTemporaryFile(delete=False)
+                try:
+                    f.close()
                     traced_script_module.save(f.name)
                     torch.manual_seed(2)
                     if method_name == 'init':
@@ -138,6 +146,8 @@ void ${module_variant_name}_test_forward(
                             getattr(cpp_module, test_name)(*args)
                     else:
                         getattr(cpp_module, test_name)(*args)
+                finally:
+                    os.unlink(f.name)
 
         for module_name in module_names:
             for test_params in test_params_map[module_name]:

@@ -59,6 +59,7 @@ WINDOWS_BLACKLIST = [
 
 ROCM_BLACKLIST = [
     'c10d',
+    'cpp_api_parity',
     'cpp_extensions',
     'distributed',
     'multiprocessing',
