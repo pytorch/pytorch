@@ -222,7 +222,8 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
 
 void Pickler::pushIValue(const IValue& ivalue) {
   // Check if reference ivalue has been saved before
-  // NOTE: Strings are always memoized by value rather than by pointer.
+  // NOTE: Immutable types should be memoized by value rather than by pointer.
+  // This includes strings and tuples.
   if (ivalue.isPtrType() && !ivalue.isString() && !ivalue.isTuple()) {
     const void* ptr = ivalue.internalToPointer();
     TORCH_CHECK(
@@ -714,7 +715,7 @@ OpCode Unpickler::readInstruction() {
     case OpCode::TUPLE2: {
         auto stack_size = stack_.size();
         auto tuple = c10::ivalue::Tuple::create(
-          {stack_[stack_size-2], stack_[stack_size-1]});
+          {stack_.at(stack_size-2), stack_.at(stack_size-1)});
         stack_.pop_back();
         stack_.pop_back();
         stack_.emplace_back(tuple);
@@ -722,7 +723,7 @@ OpCode Unpickler::readInstruction() {
     case OpCode::TUPLE3: {
         auto stack_size = stack_.size();
         auto tuple = c10::ivalue::Tuple::create(
-          {stack_[stack_size-3], stack_[stack_size-2], stack_[stack_size-1]});
+          {stack_.at(stack_size-3), stack_.at(stack_size-2), stack_.at(stack_size-1)});
         stack_.pop_back();
         stack_.pop_back();
         stack_.pop_back();
