@@ -4,6 +4,17 @@
 
 namespace c10 {
 
+namespace detail {
+template<typename T>
+inline TypePtr getTypePtr_<T>::call() {
+  if (!isCustomClassRegistered<T>()) {
+    throw c10::Error("Type could not be converted to any of the known types.", "");
+  }
+  auto res = getCustomClassType<T>();
+  return std::dynamic_pointer_cast<Type>(res.type_);
+}
+}
+
 inline ProfiledTensorType::ProfiledTensorType(const at::Tensor& tensor)
     : TensorType(),
       scalar_type_(tensor.scalar_type()),
