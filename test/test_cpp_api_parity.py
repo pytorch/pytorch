@@ -55,13 +55,11 @@ void test_module_state_equality(std::shared_ptr<torch::nn::Module> m1, std::shar
 
         TORCH_NN_MODULE_WRAPPER = Template("""\n
 void ${module_variant_name}_test_init(const std::string& saved_module_path) {
-  // NOTE: `m_init_by_cpp` must be constructed before `m_init_by_python`,
-  // because we want `m_init_by_cpp`'s initialization to use a clean random number
-  // generator state (which we reset before calling this function).
-  ${module_qualified_name} m_init_by_cpp${cpp_constructor_args};
-
   ${module_qualified_name} m_init_by_python${cpp_constructor_args};
   torch::load(m_init_by_python, saved_module_path);
+
+  torch::manual_seed(2);
+  ${module_qualified_name} m_init_by_cpp${cpp_constructor_args};
 
   test_module_state_equality(m_init_by_cpp.ptr(), m_init_by_python.ptr());
 }
@@ -72,8 +70,12 @@ void ${module_variant_name}_test_forward(
     torch::Tensor python_output) {
   ${module_qualified_name} module${cpp_constructor_args};
   torch::load(module, saved_module_path);
+
+  torch::manual_seed(2);
+  auto cpp_output = module(input);
+
   TORCH_CHECK(
-    module(input).equal(python_output),
+    cpp_output.equal(python_output),
     parity_test_error_msg, ": forward output doesn't match");
 }
 """)
@@ -132,6 +134,7 @@ void ${module_variant_name}_test_forward(
                 torch.manual_seed(2)
                 module = python_module_class(*python_constructor_args)
                 if method_name == 'forward':
+                    torch.manual_seed(2)
                     python_output = module(example_input)
                 # We use JIT tracing to transfer Python module state to C++
                 traced_script_module = torch.jit.trace(module, example_input)
@@ -142,7 +145,6 @@ void ${module_variant_name}_test_forward(
                 try:
                     f.close()
                     traced_script_module.save(f.name)
-                    torch.manual_seed(2)
                     if method_name == 'init':
                         args = (f.name, )
                     elif method_name == 'forward':
