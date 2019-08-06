@@ -2550,10 +2550,6 @@ Example:
 
     >>> torch.logical_not(torch.tensor([True, False]))
     tensor([ False,  True])
-    >>> torch.logical_not(torch.tensor([-1, 2, 0], dtype=torch.int8))
-    tensor([ 0, 0, 1], dtype=torch.int8)
-    >>> torch.logical_not(torch.tensor([-1, 2, 0], dtype=torch.float))
-    tensor([ 0.0, 0.0, 1.0])
 """)
 
 add_docstr(torch.logical_xor,
@@ -2571,10 +2567,6 @@ Example:
 
     >>> torch.logical_xor(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
     tensor([ False, False,  True])
-    >>> torch.logical_xor(torch.tensor([0, 10, 3], dtype=torch.int8), torch.tensor([0, 1, 0], dtype=torch.int8))
-    tensor([ 0, 0, 1], dtype=torch.int8)
-    >>> torch.logical_xor(torch.tensor([0.0, 10.0, 3.0]), torch.tensor([0.0, 1.0, 0.0]))
-    tensor([ 0.0, 0.0, 1.0])
 """)
 
 add_docstr(torch.logspace,
