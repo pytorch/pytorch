@@ -14,26 +14,29 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar va
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  // Special cases that we should handle:
-  // Case 1: index is empty tensor and src is scalar tensor:
-  //         dispatch to noop
-  // Case 2: Case 1 is not true, and one or two of self or index is/are scalar or index is empty:
-  //         dispatch to and handled in legacy scatter_add_
-  // Case 3: Case 1, 2 are not true and src is scalar tensor:
-  //         expand src to the correct shape, then handled usually by legacy scatter_add_
-  if (source.dim() == 0 && index.numel() == 0) {
-    return self;
-  }
-  if (self.dim() == 0 || index.dim() == 0 || index.numel() == 0) {
+  // The legacy scatter_add_ does not support scalar source, so scalar source should be manually
+  // broadcasted to the correct shape, so that it could be handled by legacy scatter_add.
+  // The general rule of broadcasting source is, for dimenisons d!=dim, the sizes of source should
+  // match with self and for dimension d==dim, the size of source should match with index.
+  //
+  // The general rule does not always apply. There are special cases that could not be treated as usual.
+  // Things to worry are: self, index, source could be scalar tensor, and index could be empty.
+  //
+  // When one of self or index is scalar, then the other and source needs to be either scalar
+  // or shape (1,) vector. Also, dim has to be 0. These are all handled well in legacy scatter_add_
+  //
+  // Empty index when source is not scalar is also handled well in legacy scatter_add_, but need special
+  // treatment when source is scalar.
+  if (source.dim() > 0 || self.dim() == 0 || index.dim() == 0) {
     return at::_legacy_scatter_add_(self, dim, index, source);
   }
-  if (source.dim() == 0) {
-    dim = c10::maybe_wrap_dim(dim, index.dim());
-    std::vector<int64_t> source_sizes = self.sizes().vec();
-    source_sizes[dim] = index.size(dim);
-    return at::_legacy_scatter_add_(self, dim, index, source.expand(source_sizes));
+  if (index.numel() == 0) {
+    return self;
   }
-  return at::_legacy_scatter_add_(self, dim, index, source);
+  dim = c10::maybe_wrap_dim(dim, index.dim());
+  std::vector<int64_t> source_sizes = self.sizes().vec();
+  source_sizes[dim] = index.size(dim);
+  return at::_legacy_scatter_add_(self, dim, index, source.expand(source_sizes));
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
