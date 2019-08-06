@@ -2052,6 +2052,27 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         inputs = torch.randn(3, 2, 1)
         self.run_model_test(model, train=False, input=(inputs, ), batch_size=BATCH_SIZE)
 
+    def test_std(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, unbiased=False)
+
+        model = StandardDeviation()
+        inputs = torch.randn(2, 3, 4)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_std_along_dims(self):
+        class StandardDeviationAlongDims(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), unbiased=False, keepdim=False)
+
+        model = StandardDeviationAlongDims()
+        inputs = torch.randn(2, 3, 4)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
