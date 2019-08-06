@@ -71,12 +71,10 @@ void div_kernel(TensorIterator& iter) {
 }
 
 void logical_xor_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(), "logical_xor_cpu", [&]() {
-    cpu_kernel(iter,
-      [](scalar_t a, scalar_t b) -> scalar_t {
-        return scalar_t((!a) != (!b));
-      });
-  });
+  cpu_kernel(iter,
+    [](scalar_t a, scalar_t b) -> scalar_t {
+      return a != b;
+    });
 }
 
 } // anonymous namespace
