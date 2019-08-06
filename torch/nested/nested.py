@@ -87,6 +87,16 @@ def nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_memory
     else:
         if not (isinstance(data, list) or isinstance(data, tuple)):
             raise ValueError("Pass a list or tuple to construct NestedTensor.")
+
+        nested_tensors = []
+        for data_ in data:
+            if is_nested_tensor(data_):
+                nested_tensors.append(data_.clone().detach())
+        if len(nested_tensors) > 0:
+            if len(nested_tensors) != len(data):
+                raise ValueError("All entries of the passed list must either be Tensors or NestedTensors")
+            return NestedTensor(nested_tensors)
+
         for data_ in data:
             if not torch.is_tensor(data_):
                 raise ValueError("Each element of the tuple or list must "
@@ -94,8 +104,7 @@ def nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_memory
         tensors = []
         for data_ in data:
             # torch.tensor copies on construction
-            new_data = torch.empty_like(data_)
-            new_data.copy_(data_)
+            new_data = data_.clone().detach()
             new_data = new_data.to(dtype=dtype, device=device)
             new_data = new_data.requires_grad_(requires_grad)
             if pin_memory:
@@ -112,12 +121,20 @@ def as_nested_tensor(data, dtype=None, device=None):
         ret = ret.to(device)
     return ret
 
-def nested_tensor_from_mask(data, mask):
-    limit = mask.sum(1)
-    tensors = [data[i][:limit[i]] for i in range(len(mask))]
-    return as_nested_tensor(tensors)
+def _nested_apply(f):
+    def decorator(self, *args, **kwargs):
+        if not(torch.is_tensor(self) or is_nested_tensor(self)):
+            raise ValueError("First argument must be Tensor or NestedTensor")
+        if self.nested_dim == 1:
+            f(self, *args, **kwargs)
+        else:
+            for component in self.unbind():
+                f(component, *args, **kwargs)
+    return decorator
 
-def _verify_tensors(tensors):
+@_nested_apply
+def _verify_tensors(obj):
+    tensors = obj.unbind()
     for tensor in tensors:
         assert torch.is_tensor(tensor)
     if len(tensors):
@@ -163,7 +180,15 @@ class NestedTensor(object):
     #     is_pinned
     def __init__(self, tensors):
         self._tensors = tensors
-        _verify_tensors(self._tensors)
+        _verify_tensors(self)
+
+    # TODO: Create level of nesting function from tuples
+    @property
+    def nested_dim(self):
+        if torch.is_tensor(self._tensors[0]):
+            return 1
+        else:
+            return (self._tensors[0]).nested_dim + 1
 
     @property
     def grad(self):
@@ -181,25 +206,25 @@ class NestedTensor(object):
     @property
     def dim(self):
         if DEBUG:
-            _verify_tensors(self._tensors)
+            _verify_tensors(self)
         return self._tensors[0].dim
 
     @property
     def dtype(self):
         if DEBUG:
-            _verify_tensors(self._tensors)
+            _verify_tensors(self)
         return self._tensors[0].dtype
 
     @property
     def layout(self):
         if DEBUG:
-            _verify_tensors(self._tensors)
+            _verify_tensors(self)
         return self._tensors[0].layout
 
     @property
     def device(self):
         if DEBUG:
-            _verify_tensors(self._tensors)
+            _verify_tensors(self)
         return self._tensors[0].device
 
     @property
@@ -209,7 +234,7 @@ class NestedTensor(object):
     @property
     def requires_grad(self):
         if DEBUG:
-            _verify_tensors(self._tensors)
+            _verify_tensors(self)
         return self._tensors[0].requires_grad
 
     @property
@@ -267,7 +292,10 @@ class NestedTensor(object):
         if dim is None:
             return torch.stack(tuple(t.sum() for t in self._tensors)).sum()
         else:
-            return torch.as_nested_tensor(tuple(t.sum(dim) for t in self._tensors))
+            if dim > 0:
+                return torch.as_nested_tensor(tuple(t.sum(dim - 1) for t in self._tensors))
+            else:
+                raise NotImplementedError("Reductions over NestedTensor dimension not defined")
 
     # Tensor ops
     def detach(self):

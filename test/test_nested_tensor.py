@@ -45,17 +45,32 @@ def random_int_tensor(seed, size, low=0, high=2 ** 32, a=22695477, c=1, m=2 ** 3
     """
     return torch.floor(random_float_tensor(seed, size, a, c, m) * (high - low)) + low
 
+def gen_float_tensor(seed, shape, requires_grad=False):
+    return random_float_tensor(seed, shape, requires_grad=requires_grad)
+
 
 class TestNestedTensor(TestCase):
 
-    def gen_float_tensor(self, seed, shape, requires_grad=False):
-        return random_float_tensor(seed, shape, requires_grad=requires_grad)
+
+    def test_nested_constructor(self):
+        def _gen_nested_tensor():
+            tensors = []
+            num_tensors = 4
+            for i in range(num_tensors):
+                tensors.append(gen_float_tensor(i, (i + 1, 128, 128)))
+            return torch.nested_tensor(tensors)
+        num_nested_tensor = 3
+        nested_tensors = [_gen_nested_tensor() for _ in range(num_nested_tensor)]
+        nested_tensor = torch.nested_tensor(nested_tensors)
+        nested_tensor.cos_()
+        import pdb; pdb.set_trace()
+
 
     def test_constructor(self):
         tensors = []
         num_tensors = 16
         for i in range(num_tensors):
-            tensors.append(self.gen_float_tensor(i, (i + 1, 128, 128)))
+            tensors.append(gen_float_tensor(i, (i + 1, 128, 128)))
         nested_tensor = torch.nested_tensor(tensors)
         for i in range(num_tensors):
             tensors[i].mul_(i + 2)
@@ -96,8 +111,8 @@ class TestNestedTensor(TestCase):
 
     def test_unary(self):
         for func in torch.nested.codegen.extension.get_unary_functions():
-            data = [self.gen_float_tensor(1, (2, 3)) - 0.5,
-                    self.gen_float_tensor(2, (2, 3)) - 0.5]
+            data = [gen_float_tensor(1, (2, 3)) - 0.5,
+                    gen_float_tensor(2, (2, 3)) - 0.5]
             if func in ['log', 'log10', 'log2', 'rsqrt', 'sqrt']:
                 data = list(map(lambda x: x.abs(), data))
             a1 = torch.nested_tensor(data)
@@ -109,9 +124,9 @@ class TestNestedTensor(TestCase):
 
     def test_binary(self):
         for func in torch.nested.codegen.extension.get_binary_functions():
-            a = self.gen_float_tensor(1, (2, 3))
-            b = self.gen_float_tensor(2, (2, 3))
-            c = self.gen_float_tensor(3, (2, 3))
+            a = gen_float_tensor(1, (2, 3))
+            b = gen_float_tensor(2, (2, 3))
+            c = gen_float_tensor(3, (2, 3))
             # The constructor is supposed to copy!
             a1 = torch.nested_tensor([a, b])
             a2 = torch.nested_tensor([b, c])
@@ -123,9 +138,9 @@ class TestNestedTensor(TestCase):
             self.assertTrue((a3 == a1).all())
 
     def test_detach(self):
-        data = [self.gen_float_tensor(1, (10, 10)),
-                self.gen_float_tensor(2, (10, 10)),
-                self.gen_float_tensor(3, (10, 10))]
+        data = [gen_float_tensor(1, (10, 10)),
+                gen_float_tensor(2, (10, 10)),
+                gen_float_tensor(3, (10, 10))]
         ones_data = [torch.ones(10, 10),
                      torch.ones(10, 10),
                      torch.ones(10, 10)]
@@ -182,4 +197,14 @@ class TestNestedTensor(TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    # unittest.main()
+    def _gen_nested_tensor():
+        tensors = []
+        num_tensors = 4
+        for i in range(num_tensors):
+            tensors.append(gen_float_tensor(i, (i + 1, 128, 128)))
+        return torch.nested_tensor(tensors)
+    num_nested_tensor = 3
+    nested_tensors = [_gen_nested_tensor() for _ in range(num_nested_tensor)]
+    nested_tensor = torch.nested_tensor(nested_tensors)
+    nested_tensor.cos_()
