@@ -465,8 +465,6 @@ binary_linux_build: &binary_linux_build
   - attach_workspace:
       at: ~/workspace
   - run:
-      <<: *should_run_job
-  - run:
       <<: *binary_checkout
   - run:
       <<: *binary_populate_env
