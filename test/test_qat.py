@@ -9,15 +9,18 @@ from torch.nn._intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.quantization.QConfig import default_qat_qconfig
 from torch.nn import Parameter
 from torch.utils.mkldnn import disable_mkldnn_conv
+from common_quantization import no_deadline
 from common_utils import TestCase, run_tests
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 from functools import reduce
 
 
 class IntrinsicQATModuleTest(TestCase):
+    # NOTE: Tests in this class are decorated with no_deadline
+    # to prevent spurious failures due to cuda runtime initialization.
 
-    @settings(deadline=None)
+    @no_deadline
     @given(batch_size=st.integers(1, 3),
            input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            height=st.integers(10, 16),
