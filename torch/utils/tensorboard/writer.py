@@ -275,7 +275,8 @@ class SummaryWriter(object):
               you added by `add_scalar` will be displayed in hparam plugin. In most
               cases, this is unwanted.
 
-            ps. The value in the dictionary can be `int`, `float`, or 0-dim tensor.
+            ps. The value in the dictionary can be `int`, `float`, `bool`, `str`, or
+            0-dim tensor
         Examples::
             from torch.utils.tensorboard import SummaryWriter
             with SummaryWriter() as w:

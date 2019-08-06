@@ -89,6 +89,7 @@ def hparams(hparam_dict=None, metric_dict=None):
       The `Summary` protobufs for Experiment, SessionStartInfo and
         SessionEndInfo
     """
+    import torch
     from tensorboard.plugins.hparams.api_pb2 import (
         Experiment, HParamInfo, MetricInfo, MetricName, Status
     )
@@ -135,6 +136,10 @@ def hparams(hparam_dict=None, metric_dict=None):
 
     ssi = SessionStartInfo()
     for k, v in hparam_dict.items():
+        if isinstance(v, int) or isinstance(v, float):
+            ssi.hparams[k].number_value = v
+            continue
+
         if isinstance(v, str):
             ssi.hparams[k].string_value = v
             continue
@@ -143,9 +148,11 @@ def hparams(hparam_dict=None, metric_dict=None):
             ssi.hparams[k].bool_value = v
             continue
 
-        if not isinstance(v, int) or not isinstance(v, float):
-            v = make_np(v)
+        if isinstance(v, torch.Tensor):
+            v = make_np(v)[0]
             ssi.hparams[k].number_value = v
+            continue
+        raise ValueError('value should be one of int, float, str, bool, or torch.Tensor')
 
     content = HParamsPluginData(session_start_info=ssi,
                                 version=PLUGIN_DATA_VERSION)

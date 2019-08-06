@@ -394,10 +394,11 @@ if TEST_TENSORBOARD:
                 summary.hparams([], {})
             with self.assertRaises(TypeError):
                 summary.hparams({}, [])
-            with self.assertRaises(NotImplementedError):
+            with self.assertRaises(ValueError):
                 res = summary.hparams({'pytorch': [1, 2]}, {'accuracy': 2.0})
+            # metric data is used in writer.py so the code path is different, which leads to different exception type.
             with self.assertRaises(NotImplementedError):
-                with SummaryWriter() as writer:  # metric data is used outside summary.py
+                with SummaryWriter() as writer:
                     writer.add_hparams({'pytorch': 1.0}, {'accuracy': [1, 2]})
 
     def remove_whitespace(string):
