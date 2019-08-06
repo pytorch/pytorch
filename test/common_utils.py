@@ -207,21 +207,28 @@ def skipIfRocm(fn):
     return wrapper
 
 
+
+def _test_function(fn ,device):
+    def run_test_function(self):
+        return fn(self, device)
+    return run_test_function
+
 class pytorchtest():
     @classmethod
     def test_all_device_types(cls):
         def wrapper(fn):
+            test_names = []
+
             for device in torch.testing.get_all_device_types():
                 test_name = fn.__name__ + '_' + device
                 assert not hasattr(cls, test_name), "Duplicated test name: " + test_name
-                setattr(cls, test_name, lambda self: fn(self, device=device))
-
+                setattr(cls, test_name, _test_function(fn, device))
+                test_names.append(test_name)
 
             @wraps(fn)
             def empty_test(*args, **kwargs):
-                pass
+                raise unittest.SkipTest("Look at {} results.".format(", ".join(test_names)))
             return empty_test
-
         return wrapper
 
 
