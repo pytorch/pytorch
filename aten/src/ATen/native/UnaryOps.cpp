@@ -57,21 +57,27 @@ Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor logical_not(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
   return at::logical_not_out(result, self);
 }
 
 Tensor& logical_not_(Tensor& self) {
-  return at::logical_not_out(self, self);
+  auto iter = TensorIterator::unary_op(self, self, /*check_internal_overlap=*/true);
+  logical_not_inplace_stub(iter.device_type(), iter);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(self, self);
+#endif
+  return self;
 }
 
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() == kBool,
-              "logical_not currently only supports bool tensors.");
   TORCH_CHECK(result.scalar_type() == kBool,
               "The output tensor of logical_not must be a bool tensor.");
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
+  TensorIterator iter;
+  iter.dont_compute_common_dtype();
+  iter.check_and_add_output(result);
+  iter.add_input(self);
+  iter.build();
   logical_not_stub(iter.device_type(), iter);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
@@ -259,6 +265,7 @@ DEFINE_DISPATCH(log10_stub);
 DEFINE_DISPATCH(log1p_stub);
 DEFINE_DISPATCH(log2_stub);
 DEFINE_DISPATCH(logical_not_stub);
+DEFINE_DISPATCH(logical_not_inplace_stub);
 DEFINE_DISPATCH(neg_stub);
 DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);

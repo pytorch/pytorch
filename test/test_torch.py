@@ -1821,15 +1821,15 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_logical_not(self, device):
-        for dtype in (torch.bool,):  # will add more dtypes in the future
+        for dtype in [torch.bool,] + torch.testing.get_all_math_dtypes(device):
             expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
             a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
             # new tensor
-            self.assertEqual(expected_res, a.logical_not())
+            self.assertEqual(expected_res.bool(), a.logical_not())
             # out
-            b = torch.empty(0, dtype=bool, device=device)
+            b = torch.empty(0, dtype=torch.bool, device=device)
             torch.logical_not(a, out=b)
-            self.assertEqual(expected_res, b)
+            self.assertEqual(expected_res.bool(), b)
             # out is not bool
             b = torch.empty(0, dtype=torch.uint8, device=device)
             with self.assertRaisesRegex(RuntimeError,

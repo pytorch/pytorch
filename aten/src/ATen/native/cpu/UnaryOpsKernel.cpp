@@ -82,7 +82,15 @@ static void frac_kernel(TensorIterator& iter) {
 
 
 static void logical_not_kernel(TensorIterator& iter) {
-  cpu_kernel(iter, [](bool a) -> bool { return !a; });
+  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(), "logical_not_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a) -> bool { return !a; });
+  });
+}
+
+static void logical_not_inplace_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(), "logical_not_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a) -> scalar_t { return !a; });
+  });
 }
 
 static void reciprocal_kernel(TensorIterator& iter) {
@@ -230,6 +238,7 @@ REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
+REGISTER_DISPATCH(logical_not_inplace_stub, &logical_not_inplace_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
