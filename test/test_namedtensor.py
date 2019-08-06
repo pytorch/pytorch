@@ -431,8 +431,6 @@ class TestNamedTensor(TestCase):
             fn('empty_like'),
 
             # bernoulli variants
-            fn('bernoulli'),
-            out_function('bernoulli'),
             method('bernoulli_', 0.5),
             method('bernoulli_', torch.tensor(0.5)),
 
@@ -443,6 +441,16 @@ class TestNamedTensor(TestCase):
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             _test(testcase, device=device)
+
+    def test_bernoulli(self):
+        for device in torch.testing.get_all_device_types():
+            names = ('N', 'D')
+            tensor = torch.rand(2, 3, names=names)
+            result = torch.empty(0)
+            self.assertEqual(tensor.bernoulli().names, names)
+
+            torch.bernoulli(tensor, out=result)
+            self.assertEqual(result.names, names)
 
     def test_reduction_fns(self):
         def test_simple_reduce(op_name, device):
