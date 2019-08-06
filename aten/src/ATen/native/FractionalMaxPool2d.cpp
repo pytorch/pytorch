@@ -15,17 +15,20 @@ static std::vector<int> fractional_max_pool2d_generate_intervals(
   int inputSize,
   int outputSize,
   int poolSize) {
-  scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
-    static_cast<scalar_t>(outputSize - 1);
-  std::vector<int> sequence(outputSize);
+    std::vector<int> sequence(outputSize);
 
-  for (int i = 0; i < outputSize - 1; ++i) {
-    sequence[i] =
-      static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
-  }
-  sequence[outputSize - 1] = inputSize - poolSize;
+    if (outputSize > 1) {
+      scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
+        static_cast<scalar_t>(outputSize - 1);
 
-  return sequence;
+      for (int i = 0; i < outputSize - 1; ++i) {
+        sequence[i] =
+          static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
+      }
+    }
+
+    sequence[outputSize - 1] = inputSize - poolSize;
+    return sequence;
 }
 
 template <typename scalar_t>
@@ -338,6 +341,7 @@ std::tuple<Tensor, Tensor> fractional_max_pool2d_cpu(
   IntArrayRef output_size,
   const at::Tensor& randomSamples)
 {
+  std::cout << "im here" << std::endl;
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
   fractional_max_pool2d_out_cpu_template(
