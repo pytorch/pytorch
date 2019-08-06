@@ -40,7 +40,7 @@ class RpcTest(MultiProcessTestCase):
         n = self.rank + 1
         dstRank = n % self.world_size
         ret = dist.rpc('worker%d' % dstRank, torch.add,
-                            args=(torch.ones(n, n), torch.ones(n, n)))
+                       args=(torch.ones(n, n), torch.ones(n, n)))
         self.assertEqual(ret, torch.ones(n, n) * 2)
 
     @_wrap_with_rpc
@@ -48,15 +48,17 @@ class RpcTest(MultiProcessTestCase):
         n = self.rank + 1
         dstRank = n % self.world_size
         ret = dist.rpc('worker%d' % dstRank, torch.add,
-                            args=(torch.ones(n, n), n))
+                       args=(torch.ones(n, n), n))
         self.assertEqual(ret, (torch.ones(n, n) + n))
 
     @_wrap_with_rpc
     def test_async_add(self):
         n = self.rank + 1
         dstRank = n % self.world_size
-        fut = dist.rpc('worker%d' % dstRank, torch.add,
-                        args=(torch.ones(n, n), torch.ones(n, n)), async_call=True)
+        fut = dist.rpc('worker%d' % dstRank,
+                       torch.add,
+                       args=(torch.ones(n, n), torch.ones(n, n)),
+                       async_call=True)
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
     @_wrap_with_rpc
@@ -74,7 +76,7 @@ class RpcTest(MultiProcessTestCase):
         for i in range(20):
             n = i + self.rank + 1
             ret = dist.rpc('worker%d' % dstRank, torch.add,
-                                args=(torch.ones(n, n), torch.ones(n, n)))
+                           args=(torch.ones(n, n), torch.ones(n, n)))
             self.assertEqual(ret, torch.ones(n, n) * 2)
 
 
