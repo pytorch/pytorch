@@ -1132,6 +1132,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     """
     if not _enabled:
         return obj
+
     if optimize is not None:
         warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
 
