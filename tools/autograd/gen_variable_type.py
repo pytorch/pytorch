@@ -78,7 +78,9 @@ DONT_REQUIRE_DERIVATIVE = {
     '_sobol_engine_draw', '_sobol_engine_ff', '_sobol_engine_scramble_',
     '_sobol_engine_initialize_state_',
     # This is an unsafe method that is meant to be out of reach of autograd.
-    '_coalesced_', 'quantize_linear'
+    '_coalesced_',
+    # Quantize functions should not record gradients
+    'quantize_linear'
 }
 
 # NOTE [ Invariant: TensorImpl and Storage Pointer Equality ]
