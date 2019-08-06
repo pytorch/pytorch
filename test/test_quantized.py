@@ -250,7 +250,7 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             qX_hat = op(qX, output_size=output_size)
             qX_repr = qX_hat.int_repr()
-            self.assertEqual(X_ref, qX_repr,
+            self.assertEqual(X_ref, qX_repr, prec=1.0,
                              message=error_message.format(name, X_ref, qX_repr))
 
 
