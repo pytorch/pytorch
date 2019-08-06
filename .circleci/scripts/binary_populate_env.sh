@@ -37,7 +37,7 @@ else
   export DOCKER_IMAGE="soumith/manylinux-cuda${DESIRED_CUDA:2}"
 fi
 
-# Upload to parallel folder for gcc abis
+# Upload to parallel folder for devtoolsets
 # All nightlies used to be devtoolset3, then devtoolset7 was added as a build
 # option, so the upload was redirected to nightly/devtoolset7 to avoid
 # conflicts with other binaries (there shouldn't be any conflicts). Now we are
@@ -68,6 +68,7 @@ export PACKAGE_TYPE="$PACKAGE_TYPE"
 export DESIRED_PYTHON="$DESIRED_PYTHON"
 export DESIRED_CUDA="$DESIRED_CUDA"
 export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
+export CXX_ABI_VARIANT="${CXX_ABI_VARIANT:-}"
 export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
 export DESIRED_DEVTOOLSET="$DESIRED_DEVTOOLSET"
 

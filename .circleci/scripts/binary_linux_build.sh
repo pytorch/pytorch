@@ -26,5 +26,8 @@ if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
   export PATH=/just_tclsh_bin:$PATH
 fi
 
+# yf225 TODO debug
+echo ".circleci/scripts/binary_linux_build.sh: CXX_ABI_VARIANT: ", $CXX_ABI_VARIANT
+
 # Build the package
 SKIP_ALL_TESTS=1 unbuffer "/builder/$build_script" | ts
