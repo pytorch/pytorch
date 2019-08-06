@@ -39,7 +39,7 @@ class RpcTest(MultiProcessTestCase):
     def test_add(self):
         n = self.rank + 1
         dstRank = n % self.world_size
-        ret = dist.rpc_sync('worker%d' % dstRank, torch.add,
+        ret = dist.rpc('worker%d' % dstRank, torch.add,
                             args=(torch.ones(n, n), torch.ones(n, n)))
         self.assertEqual(ret, torch.ones(n, n) * 2)
 
@@ -47,7 +47,7 @@ class RpcTest(MultiProcessTestCase):
     def test_scalar_add(self):
         n = self.rank + 1
         dstRank = n % self.world_size
-        ret = dist.rpc_sync('worker%d' % dstRank, torch.add,
+        ret = dist.rpc('worker%d' % dstRank, torch.add,
                             args=(torch.ones(n, n), n))
         self.assertEqual(ret, (torch.ones(n, n) + n))
 
@@ -55,8 +55,8 @@ class RpcTest(MultiProcessTestCase):
     def test_async_add(self):
         n = self.rank + 1
         dstRank = n % self.world_size
-        fut = dist.rpc_async('worker%d' % dstRank, torch.add,
-                             args=(torch.ones(n, n), torch.ones(n, n)))
+        fut = dist.rpc('worker%d' % dstRank, torch.add,
+                        args=(torch.ones(n, n), torch.ones(n, n)), async_call=True)
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
     @_wrap_with_rpc
@@ -65,7 +65,7 @@ class RpcTest(MultiProcessTestCase):
         dstRank = n % self.world_size
         x = torch.ones(self.world_size, self.world_size)
         x[self.rank][self.rank] = 0
-        ret = dist.rpc_sync('worker%d' % dstRank, torch.nonzero, args=(x,))
+        ret = dist.rpc('worker%d' % dstRank, torch.nonzero, args=(x,))
         self.assertEqual(ret, x.nonzero())
 
     @_wrap_with_rpc
@@ -73,7 +73,7 @@ class RpcTest(MultiProcessTestCase):
         dstRank = (self.rank + 1) % self.world_size
         for i in range(20):
             n = i + self.rank + 1
-            ret = dist.rpc_sync('worker%d' % dstRank, torch.add,
+            ret = dist.rpc('worker%d' % dstRank, torch.add,
                                 args=(torch.ones(n, n), torch.ones(n, n)))
             self.assertEqual(ret, torch.ones(n, n) * 2)
 

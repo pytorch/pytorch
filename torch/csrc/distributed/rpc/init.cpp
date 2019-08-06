@@ -30,8 +30,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto rpcAgent = shared_ptr_class_<RpcAgent>(module, "RpcAgent")
       .def("join",
-         &RpcAgent::join,
-         py::call_guard<py::gil_scoped_release>());
+           &RpcAgent::join,
+           py::call_guard<py::gil_scoped_release>())
+      .def("sync",
+           &RpcAgent::sync,
+           py::call_guard<py::gil_scoped_release>());
 
   auto futureMessage = shared_ptr_class_<FutureMessage>(module, "FutureMessage")
       .def("wait",
@@ -48,6 +51,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
                         std::shared_ptr<::c10d::ProcessGroup>>())
           .def("join",
                &ProcessGroupAgent::join,
+               py::call_guard<py::gil_scoped_release>())
+          .def("sync",
+               &ProcessGroupAgent::sync,
                py::call_guard<py::gil_scoped_release>());
 
   module.def("invoke_rpc", [](

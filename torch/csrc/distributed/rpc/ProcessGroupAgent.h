@@ -38,6 +38,8 @@ class ProcessGroupAgent : public RpcAgent {
 
   void join() override;
 
+  void sync() override;
+
  private:
   // put SendWork into a queue and notify the sendLoop thread
   void enqueue(SendWork work);

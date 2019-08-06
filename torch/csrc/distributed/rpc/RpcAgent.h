@@ -49,10 +49,13 @@ class RpcAgent {
   virtual std::shared_ptr<FutureMessage> send(
       const std::string& to, Message&& message) = 0;
 
-  // Block until all RpcAgents reach this method, send out all pending messages,
-  // and join all internal threads. This method should be called before every
-  // RPC process exits.
+  // Call sync and join all internal threads. This method should be called
+  // before every RPC process exits.
   virtual void join() = 0;
+
+  // Synchronize the this process with other RpcAgent processes. Block until all
+  // RpcAgents reach this method and send all pending messages.
+  virtual void sync() = 0;
 
  protected:
   const std::string workerName_;

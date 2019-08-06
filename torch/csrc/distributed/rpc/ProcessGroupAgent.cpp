@@ -88,7 +88,7 @@ void ProcessGroupAgent::join() {
   //    feed it a message or kill the thread.
   // 2. A GLOO process cannot send message to itself. (there is an ongoing
   //    effort to fix this problem).
-  pg_->barrier()->wait();
+  sync();
   int dst = (pg_->getRank() + 1) % pg_->getSize();
   enqueue(SendWork(dst, Message({}, {}, MessageType::SHUTDOWN)));
   std::unique_lock<std::mutex> lock(sendQueueMutex_);
@@ -101,6 +101,20 @@ void ProcessGroupAgent::join() {
   listenerThread_.join();
 }
 
+void ProcessGroupAgent::sync() {
+  // Block until all processes wants to sync. This is necessary before acquiring
+  // the lock below, because other processes might not enter sync() until it
+  // gets some response from this RpcAgent.
+  pg_->barrier()->wait();
+  // Acquire the lock on the send queue to prevent additional messages to be put
+  // onto the send queue.
+  std::unique_lock<std::mutex> lock(sendQueueMutex_);
+  // Wait until the send queue is depleted.
+  workConsumeCV_.wait(lock, [&] { return sendQueue_.empty(); });
+  // Use another barrier in case different RpcAgent handles different amounts of
+  // workloads.
+  pg_->barrier()->wait();
+}
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const std::string& to, Message&& message) {
