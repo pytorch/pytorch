@@ -101,7 +101,7 @@ private:
   // towards a system where ops register autograd wrappers (i.e. functions that
   // do some wrapping code and get a pointer to the actual kernel) instead of
   // autograd functions.
-  // This is a vector because, similar to kernels_, multiple libraries could
+  // This is a list because, similar to kernels_, multiple libraries could
   // be loaded that register autograd kernels for the same op. The list is
   // ordered by registration time descendingly, i.e. newer registrations are
   // before older registrations and the list head is the autograd kernel
