@@ -115,6 +115,8 @@ class QuantizationTestCase(TestCase):
     # Call this twice: once for a scripted module and once for a traced module
     def _checkScriptable(self, script_mod):
         # Test save/load
+        #
+        # TODO: need __get_state__ and __set_state__
         buffer = io.BytesIO()
         torch.jit.save(script_mod, buffer)
 
