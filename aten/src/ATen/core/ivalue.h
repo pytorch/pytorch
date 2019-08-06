@@ -2,18 +2,9 @@
 
 #include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10/util/Optional.h>
-#include <c10/core/Scalar.h>
-#include <c10/core/Device.h>
-#include <c10/core/Layout.h>
-#include <c10/core/MemoryFormat.h>
-#include <c10/core/QScheme.h>
+#include <ATen/core/TensorBody.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <c10/util/python_stub.h>
 
-namespace at {
-class Tensor;
-}
 namespace torch {
 namespace jit {
 class CustomClassHolder : public c10::intrusive_ptr_target {};
@@ -28,7 +19,6 @@ template<class Key, class Value> class Dict;
 template<class T> class List;
 struct IValue;
 struct ClassType;
-class TensorImpl;
 namespace ivalue {
 struct Tuple;
 struct Future;
@@ -93,8 +83,29 @@ struct CAFFE2_API IValue final {
 
   void dump() const;
 
-  bool isAliasOf(const IValue& rhs) const;
+  bool isAliasOf(const IValue& rhs) const {
+    if (this->tag != rhs.tag) {
+      // Trivially don't alias if the type is different
+      return false;
+    }
 
+    if (!this->is_intrusive_ptr) {
+      // Primitive types don't alias anything
+      return false;
+    }
+
+    AT_ASSERT(rhs.is_intrusive_ptr);
+
+    // Tensors should be compared based on internal storage
+    if (this->isTensor()) {
+      const auto thisTensor = this->toTensor();
+      const auto rhsTensor = rhs.toTensor();
+      return thisTensor.is_alias_of(rhsTensor);
+    }
+
+    // Other types can be compared by their ptr value
+    return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+  }
   void swap(IValue & rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
@@ -106,12 +117,21 @@ struct CAFFE2_API IValue final {
   // we prefer to write them manually for clarity
 
   // Tensor
-  IValue(at::Tensor&& t);
-  IValue(const at::Tensor& t);
+  IValue(at::Tensor t)
+  : tag(Tag::Tensor), is_intrusive_ptr(t.defined())  {
+    // Note: the undefined tensor is not refcounted, so while it
+    // is tagged as a tensor, is_intrusive_ptr is set to false.
+    // This is not an optional optimization: our incref call
+    // *will not* do the right thing when called on an
+    // undefined tensor.
+    payload.as_intrusive_ptr = t.unsafeReleaseTensorImpl();
+  }
   bool isTensor() const { return Tag::Tensor == tag; }
   at::Tensor toTensor() &&;
   at::Tensor toTensor() const &;
-  at::TensorImpl* unsafeToTensorImpl() const;
+  at::TensorImpl* unsafeToTensorImpl() const {
+    return static_cast<at::TensorImpl*>(payload.as_intrusive_ptr);
+  }
 
   const IValue& toIValue() const {
     return *this;

@@ -394,5 +394,3 @@ Tensor make_tensor(Args&&... args) {
 } // namespace detail
 
 } // namespace at
-
-#include <ATen/core/TensorMethods.h>

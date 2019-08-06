@@ -1,12 +1,6 @@
 #pragma once
 
-#include <c10/util/ArrayRef.h>
-#include <vector>
-#include <functional>
-
-namespace c10 {
-class IValue;
-}
+#include <ATen/core/ivalue.h>
 
 // TODO move this to c10 namespace
 
@@ -38,11 +32,6 @@ static inline IValue& peek(Stack& stack, size_t i, size_t N) {
 static inline const IValue& peek(const Stack& stack, size_t i, size_t N) {
   return *(stack.end() - N + i);
 }
-}
-}
-#include <ATen/core/ivalue.h>
-namespace torch {
-namespace jit {
 // treat the last N elements of the stack as a list, looking up the
 // slice starting at index i and having length len
 static inline at::ArrayRef<IValue> peekSlice(
