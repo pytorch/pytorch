@@ -3,12 +3,12 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/ScalarOps.h>
 
 namespace at { namespace native {
 
 DEFINE_DISPATCH(pow_tensor_tensor_stub);
 DEFINE_DISPATCH(pow_tensor_scalar_stub);
-DEFINE_DISPATCH(pow_scalar_tensor_stub);
 
 Tensor& pow_out(Tensor& result, const Tensor& base, const Tensor& exp) {
   auto iter = TensorIterator::binary_op(result, base, exp);
@@ -36,8 +36,7 @@ Tensor& pow_out(Tensor& result, Scalar base, const Tensor& exp) {
   if (base.toDouble() == 1.0) {
     result.resize_as_(exp).fill_(1);
   } else {
-    auto iter = TensorIterator::unary_op(result, exp);
-    pow_scalar_tensor_stub(iter.device_type(), iter, base);
+    native::pow_out(result, c10::scalar_to_tensor(base), exp);
   }
   return result;
 }

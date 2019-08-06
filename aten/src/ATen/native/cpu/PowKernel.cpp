@@ -126,23 +126,9 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
   }
 }
 
-void pow_scalar_tensor_kernel(TensorIterator& iter, Scalar base_scalar) {
-  const long double base = base_scalar.isFloatingPoint() ?
-                           static_cast<long double>(base_scalar.to<double>()) :
-                           static_cast<long double>(base_scalar.to<int64_t>());
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "pow", [&]() {
-    cpu_kernel(iter,
-      [=](scalar_t exp) -> scalar_t {
-        return std::pow(base, exp);
-      }
-    );
-  });
-}
-
 } // anonymous namespace
 
 REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_kernel);
 REGISTER_DISPATCH(pow_tensor_scalar_stub, &pow_tensor_scalar_kernel);
-REGISTER_DISPATCH(pow_scalar_tensor_stub, &pow_scalar_tensor_kernel);
 
 }} // namespace at::native

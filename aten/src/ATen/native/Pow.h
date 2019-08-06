@@ -11,11 +11,9 @@ namespace native {
 
 using pow_tensor_tensor_fn = void (*)(TensorIterator&);
 using pow_tensor_scalar_fn = void (*)(TensorIterator&, Scalar);
-using pow_scalar_tensor_fn = void (*)(TensorIterator&, Scalar);
 
 DECLARE_DISPATCH(pow_tensor_tensor_fn, pow_tensor_tensor_stub);
 DECLARE_DISPATCH(pow_tensor_scalar_fn, pow_tensor_scalar_stub);
-DECLARE_DISPATCH(pow_scalar_tensor_fn, pow_scalar_tensor_stub);
 
 } // namespace native
 

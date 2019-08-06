@@ -146,6 +146,7 @@ void tensor_pow_scalar(const Vals vals, const Pows pows) {
 template<typename Vals, typename Pows>
 void scalar_pow_tensor(const Vals vals, const Pows pows) {
   using T = typename Pows::value_type;
+
   const auto pow_tensor = torch::tensor(pows);
 
   for (const auto val : vals) {
@@ -157,7 +158,7 @@ void scalar_pow_tensor(const Vals vals, const Pows pows) {
     int i = 0;
     for (const auto pow : pows) {
       const auto exp = static_cast<T>(
-        std::pow(static_cast<long double>(val), pow));
+        std::pow(static_cast<T>(val), pow));
 
       const auto act_pow = actual_pow[i].template item<T>();
       assert_eq<T>(val, act_pow, exp);
@@ -256,23 +257,17 @@ TEST(PowTest, IntScalarPowAllTensors) {
 }
 
 TEST(PowTest, LongScalarPowAllTensors) {
-  scalar_pow_tensor(longs, ints);
   scalar_pow_tensor(longs, longs);
   scalar_pow_tensor(longs, floats);
   scalar_pow_tensor(longs, doubles);
 }
 
 TEST(PowTest, FloatScalarPowAllTensors) {
-  scalar_pow_tensor(floats, ints);
-  scalar_pow_tensor(floats, longs);
   scalar_pow_tensor(floats, floats);
   scalar_pow_tensor(floats, doubles);
 }
 
 TEST(PowTest, DoubleScalarPowAllTensors) {
-  scalar_pow_tensor(doubles, ints);
-  scalar_pow_tensor(doubles, longs);
-  scalar_pow_tensor(doubles, floats);
   scalar_pow_tensor(doubles, doubles);
 }
 
