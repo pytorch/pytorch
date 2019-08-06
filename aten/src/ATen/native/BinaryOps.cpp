@@ -13,6 +13,7 @@ DEFINE_DISPATCH(add_stub);
 DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
+DEFINE_DISPATCH(logical_xor_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
@@ -195,6 +196,24 @@ Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
+}
+
+Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_internal_overlap=*/true);
+  logical_xor_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor logical_xor(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  logical_xor_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& logical_xor_(Tensor& self, const Tensor& other) {
+  return native::logical_xor_out(self, self, other);
 }
 
 }

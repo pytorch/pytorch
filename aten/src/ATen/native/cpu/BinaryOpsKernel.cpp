@@ -70,6 +70,15 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
+void logical_xor_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(), "logical_xor_cpu", [&]() {
+    cpu_kernel(iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return scalar_t((!a) != (!b));
+      });
+  });
+}
+
 } // anonymous namespace
 
 
@@ -77,5 +86,6 @@ REGISTER_DISPATCH(add_stub, &add_kernel);
 REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
+REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
 
 }} // namespace at::native

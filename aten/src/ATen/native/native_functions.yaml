@@ -388,6 +388,20 @@
     CPU: logical_not_out
     CUDA: logical_not_out
 
+- func: logical_xor(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: logical_xor_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  named_guard: False
+
+- func: logical_xor.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: logical_xor_out
+    CUDA: logical_xor_out
+  named_guard: False
+
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: blackman_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor

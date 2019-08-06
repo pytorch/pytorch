@@ -2562,6 +2562,33 @@ Example:
     tensor([ 0.0, 0.0, 1.0])
 """)
 
+add_docstr(torch.logical_xor,
+           r"""
+logical_not(input, other, out=None) -> Tensor
+
+Computes the element-wise logical XOR of the given input tensor. The output tensor always has the same dtype as that of
+:attr:`input`.
+
+- The logical XOR of a bool is the one that is the same as standard textbook definition: False XOR True -> True, False
+  XOR False -> False, True XOR True -> False
+- The logical XOR of two integers: 0 XOR nonzero -> 1, 0 XOR 0 -> 0, nonzero XOR nonzero -> 0.
+- The logical NOT of a floating-point number: 0.0 XOR nonzero -> 1.0, 0.0 XOR 0.0 -> 0.0, nonzero XOR nonzero -> 0.0.
+
+Args:
+    input (Tensor): the input tensor
+    other (Tensor): the tensor to compute XOR with
+    out (Tensor, optional): the output tensor
+
+Example:
+
+    >>> torch.logical_xor(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
+    tensor([ False, False,  True])
+    >>> torch.logical_xor(torch.tensor([0, 10, 3], dtype=torch.int8), torch.tensor([0, 1, 0], dtype=torch.int8))
+    tensor([ 0, 0, 1], dtype=torch.int8)
+    >>> torch.logical_xor(torch.tensor([0.0, 10.0, 3.0]), torch.tensor([0.0, 1.0, 0.0]))
+    tensor([ 0.0, 0.0, 1.0])
+""")
+
 add_docstr(torch.logspace,
            r"""
 logspace(start, end, steps=100, base=10.0, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
