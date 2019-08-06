@@ -49,6 +49,7 @@ bool needTrimGrad(Node* n) {
 bool isDifferentiable(Node* n) {
   // TODO: scalar-tensor ops should be canonicalized
   static OperatorSet differentiable_ops = {
+      "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
       "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
       "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
   };
@@ -198,21 +199,6 @@ class GradientHelper {
  private:
   Node* node;
 
-  SymbolicVariable gradSumToSizeOf(
-      SymbolicVariable v,
-      Symbol input_name,
-      SymbolicVariable fw_output) {
-    Value* size;
-    {
-      // We insert after the current node because we want to use
-      // its output.
-      WithInsertPoint insert_guard{node->next()};
-      size = SymbolicVariable(node->namedInput(input_name))
-                 .size_if_not_equal(fw_output);
-    }
-    return v.gradSumToSize(size);
-  };
-
   std::vector<SymbolicVariable> buildSymbolicGradient(const std::vector<SymbolicVariable>& grads) {
     auto inputs = fmap<SymbolicVariable>(node->inputs());
     auto outputs = fmap<SymbolicVariable>(node->outputs());
@@ -225,6 +211,36 @@ class GradientHelper {
     }  else if (
         node->kind() == prim::Constant || node->kind() == prim::AutogradZero) {
       return {};
+    } else if (node->matches(
+            "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor")) {
+      // handle the case that min/max is None
+      Value* min = inputs.at(1);
+      bool min_must_be_none = min->mustBeNone();
+      Value* max = inputs.at(2);
+      bool max_must_be_none = max->mustBeNone();
+      // XXX - this formula is wrong when min or max are not stricly a constant
+      // None but may be None dynamically. In this case an internal compiler
+      // error will get thrown when trying to generate expressions involving the
+      // values of min/max
+      if (!min_must_be_none && !max_must_be_none) {
+        return {grads.at(0) *
+                    (1 - (inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0))) *
+                    (1 - (inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))),
+                nullptr,
+                nullptr};
+      } else if (max_must_be_none) {
+        return {grads.at(0) *
+                    (1 - (inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0))),
+                nullptr,
+                nullptr};
+      } else if (min_must_be_none) {
+        return {grads.at(0) *
+                    (1 - (inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))),
+                nullptr,
+                nullptr};
+      } else {
+        return {grads.at(0), nullptr, nullptr};
+      }
     } else if (
         node->matches(
             "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)")) {
