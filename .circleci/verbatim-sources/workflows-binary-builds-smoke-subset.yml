@@ -5,22 +5,22 @@
       # pytorch-ci-hud to adjust the list of whitelisted builds
       # at https://github.com/ezyang/pytorch-ci-hud/blob/master/src/BuildHistoryDisplay.js
 
-      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build:
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.7m_cu100_devtoolset3_build:
+      - binary_linux_manywheel_3.7m_cu100_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_2.7_cpu_build:
+      - binary_linux_conda_2.7_cpu_devtoolset7_build:
           requires:
             - setup
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
-      # - binary_linux_conda_3.6_cu90_build
-      - binary_linux_libtorch_2.7m_cpu_devtoolset3_build:
+      # - binary_linux_conda_3.6_cu90_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_build:
           requires:
             - setup
       # TODO we should test a libtorch cuda build, but they take too long
-      # - binary_linux_libtorch_2.7m_cu90_devtoolset3_build
+      # - binary_linux_libtorch_2.7m_cu90_devtoolset7_static-without-deps_build
       - binary_macos_wheel_3.6_cpu_build:
           requires:
             - setup
@@ -31,21 +31,21 @@
           requires:
             - setup
 
-      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_test:
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build
-      - binary_linux_manywheel_3.7m_cu100_devtoolset3_test:
+            - binary_linux_manywheel_2.7mu_cpu_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cu100_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.7m_cu100_devtoolset3_build
-      - binary_linux_conda_2.7_cpu_test:
+            - binary_linux_manywheel_3.7m_cu100_devtoolset7_build
+      - binary_linux_conda_2.7_cpu_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_2.7_cpu_build
+            - binary_linux_conda_2.7_cpu_devtoolset7_build
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
-      # - binary_linux_conda_3.6_cu90_test:
+      # - binary_linux_conda_3.6_cu90_devtoolset7_test:
       #     requires:
       #       - setup
-      #       - binary_linux_conda_3.6_cu90_build
+      #       - binary_linux_conda_3.6_cu90_devtoolset7_build
 

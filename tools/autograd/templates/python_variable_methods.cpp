@@ -77,6 +77,9 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   static PythonArgParser parser({
     "size(int64_t dim)",
     "size()",
+#ifdef BUILD_NAMEDTENSOR
+    "size(Dimname dim)",
+#endif
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<3> parsed_args;
@@ -92,6 +95,14 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
     // torch.Size and tuple in python.
     return THPSize_New(self_);
   }
+#ifdef BUILD_NAMEDTENSOR
+  else if (r.idx == 2) {
+    if (jit::tracer::isTracing()) {
+      TORCH_INTERNAL_ASSERT("NYI: Named tensors w/ JIT");
+    }
+    return wrap(self_.size(r.dimname(0)));
+  }
+#endif
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -102,6 +113,9 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   static PythonArgParser parser({
     "stride(int64_t dim)",
     "stride()",
+#ifdef BUILD_NAMEDTENSOR
+    "stride(Dimname dim)",
+#endif
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<3> parsed_args;
@@ -115,6 +129,11 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     // torch.Size and tuple in python
     return THPUtils_packInt64Array(strides.size(), strides.data());
   }
+#ifdef BUILD_NAMEDTENSOR
+  else if (r.idx == 2) {
+    return wrap(self_.stride(r.dimname(0)));
+  }
+#endif
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -126,6 +145,16 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
   return wrap(self.get_device());
   END_HANDLE_TH_ERRORS
 }
+
+#ifdef BUILD_NAMEDTENSOR
+static PyObject * THPVariable_has_names(PyObject* self_, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
+  return wrap(self.has_names());
+  END_HANDLE_TH_ERRORS
+}
+#endif
 
 static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
 {
@@ -285,14 +314,14 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
 static Tensor dispatch_invert(const Tensor & self) {
   AutoNoGIL no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  return 1 - self;
+  return self.bitwise_not();
 }
 
 static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (self_.scalar_type() != at::kByte) {
-    throw TypeError("~ (operator.invert) is only implemented on byte tensors");
+  if (!isIntegralType(self_.scalar_type()) && self_.scalar_type() != at::kBool) {
+    throw TypeError("~ (operator.invert) is only implemented on integer and Boolean-type tensors");
   }
   return THPVariable_Wrap(dispatch_invert(self_));
   END_HANDLE_TH_ERRORS
@@ -744,6 +773,9 @@ PyMethodDef variable_methods[] = {
   {"cuda", (PyCFunction)THPVariable_cuda, METH_VARARGS | METH_KEYWORDS, NULL},
   {"data_ptr", (PyCFunction)THPVariable_data_ptr, METH_NOARGS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
+#ifdef BUILD_NAMEDTENSOR
+  {"has_names", (PyCFunction)THPVariable_has_names, METH_NOARGS, NULL},
+#endif
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
   {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},

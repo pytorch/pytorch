@@ -111,7 +111,7 @@ class UnsupportedNodeError(NotSupportedError):
                                       offending_node.col_offset + range_len)
         feature_name = pretty_node_names.get(node_type, node_type.__name__)
         msg = "{} aren't supported".format(feature_name)
-        super(NotSupportedError, self).__init__(source_range, msg)
+        super(UnsupportedNodeError, self).__init__(source_range, msg)
 
 
 class FrontendTypeError(FrontendError):
@@ -185,7 +185,7 @@ class Builder(object):
 def build_class_def(ctx, py_def, methods, self_name):
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("class"))
-    return ClassDef(Ident(r, self_name), methods)
+    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods])
 
 
 def build_def(ctx, py_def, type_line, self_name=None):
@@ -211,10 +211,16 @@ _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments
 
 
 def build_param_list(ctx, py_args, self_name):
-    if py_args.vararg is not None or py_args.kwarg is not None:
-        raise ValueError(_vararg_kwarg_err)
+    if py_args.kwarg is not None:
+        expr = py_args.kwarg
+        ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
+        raise NotSupportedError(ctx_range, _vararg_kwarg_err)
+    if py_args.vararg is not None:
+        expr = py_args.vararg
+        ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
+        raise NotSupportedError(ctx_range, _vararg_kwarg_err)
     if not PY2 and py_args.kw_defaults:
-        raise ValueError(_vararg_kwarg_err)
+        raise NotSupportedError(ctx_range, _vararg_kwarg_err)
     result = [build_param(ctx, arg, self_name, False) for arg in py_args.args]
     if not PY2:
         result += [build_params(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
@@ -435,6 +441,8 @@ class ExprBuilder(Builder):
         for kw in expr.keywords:
             kw_expr = build_expr(ctx, kw.value)
             # XXX: we could do a better job at figuring out the range for the name here
+            if not kw.arg:
+                raise NotSupportedError(kw_expr.range(), 'keyword-arg expansion is not supported')
             kwargs.append(Attribute(Ident(kw_expr.range(), kw.arg), kw_expr))
         return Apply(func, args, kwargs)
 

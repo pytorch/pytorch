@@ -32,8 +32,8 @@ default_set = [
     'caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04',
 
     # Binaries
-    'manywheel 2.7mu cpu devtoolset3',
-    'libtorch 2.7m cpu devtoolset3',
+    'manywheel 2.7mu cpu devtoolset7',
+    'libtorch 2.7m cpu devtoolset7',
 
     # Caffe2 Android
     'caffe2-py2-android-ubuntu16.04',

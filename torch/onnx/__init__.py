@@ -11,7 +11,7 @@ ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 # and use these values in the exporter
 ir_version = 4
 producer_name = "pytorch"
-producer_version = "1.1"
+producer_version = "1.2"
 
 
 class ExportTypes:

@@ -1,3 +1,8 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
 from .module import Module
 from .utils import _single, _pair, _triple
 from .. import functional as F
@@ -69,10 +74,6 @@ class MaxPool1d(_MaxPoolNd):
         return F.max_pool1d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
-
-    def extra_repr(self):
-        return 'kernel_size={kernel_size}, stride={stride}, padding={padding}' \
-            ', dilation={dilation}, ceil_mode={ceil_mode}'.format(**self.__dict__)
 
 
 class MaxPool2d(_MaxPoolNd):

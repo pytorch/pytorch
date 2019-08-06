@@ -92,7 +92,7 @@ CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # it the below pattern.
 BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
 
-COMMON_MSVC_FLAGS = ['/MD', '/wd4819']
+COMMON_MSVC_FLAGS = ['/MD', '/wd4819', '/EHsc']
 
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
@@ -110,7 +110,8 @@ def _is_binary_build():
 
 
 def _accepted_compilers_for_platform():
-    return ['clang++', 'clang'] if sys.platform.startswith('darwin') else ['g++', 'gcc']
+    # gnu-c++ and gnu-cc are the conda gcc compilers
+    return ['clang++', 'clang'] if sys.platform.startswith('darwin') else ['g++', 'gcc', 'gnu-c++', 'gnu-cc']
 
 
 def get_default_build_root():
@@ -547,7 +548,17 @@ def library_paths(cuda=False):
         paths.append(lib_path)
 
     if cuda:
-        lib_dir = 'lib/x64' if IS_WINDOWS else 'lib64'
+        if IS_WINDOWS:
+            lib_dir = 'lib/x64'
+        else:
+            lib_dir = 'lib64'
+            if (not os.path.exists(_join_cuda_home(lib_dir)) and
+                    os.path.exists(_join_cuda_home('lib'))):
+                # 64-bit CUDA may be installed in 'lib' (see e.g. gh-16955)
+                # Note that it's also possible both don't exist (see
+                # _find_cuda_home) - in that case we stay with 'lib64'.
+                lib_dir = 'lib'
+
         paths.append(_join_cuda_home(lib_dir))
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, lib_dir))
@@ -1007,7 +1018,7 @@ def _write_ninja_file(path,
     # sysconfig.get_paths()['include'] gives us the location of Python.h
     system_includes.append(sysconfig.get_paths()['include'])
 
-    # Windoze does not understand `-isystem`.
+    # Windows does not understand `-isystem`.
     if IS_WINDOWS:
         user_includes += system_includes
         system_includes.clear()
@@ -1021,15 +1032,19 @@ def _write_ninja_file(path,
 
     common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
 
-    cflags = common_cflags + ['-fPIC', '-std=c++11'] + extra_cflags
     if IS_WINDOWS:
+        cflags = common_cflags + COMMON_MSVC_FLAGS + extra_cflags
         from distutils.spawn import _nt_quote_args
         cflags = _nt_quote_args(cflags)
+    else:
+        cflags = common_cflags + ['-fPIC', '-std=c++11'] + extra_cflags
     flags = ['cflags = {}'.format(' '.join(cflags))]
 
     if with_cuda:
         cuda_flags = common_cflags + COMMON_NVCC_FLAGS
         if IS_WINDOWS:
+            for flag in COMMON_MSVC_FLAGS:
+                cuda_flags = ['-Xcompiler', flag] + cuda_flags
             cuda_flags = _nt_quote_args(cuda_flags)
             cuda_flags += _nt_quote_args(extra_cuda_cflags)
         else:
