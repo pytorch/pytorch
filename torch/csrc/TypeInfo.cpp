@@ -84,7 +84,7 @@ PyObject* THPIInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   TORCH_CHECK(r.idx == 0, "Not a type");
 
   at::ScalarType scalar_type = r.scalartype(0);
-  if (!at::isIntegralType(scalar_type, /*includeBool*/ false) && !at::isQIntType(scalar_type)) {
+  if (!at::isIntegralType(scalar_type, /*includeBool*/ true) && !at::isQIntType(scalar_type)) {
     return PyErr_Format(
         PyExc_TypeError,
         "torch.iinfo() requires an integer input type. Use torch.finfo to handle '%s'",
