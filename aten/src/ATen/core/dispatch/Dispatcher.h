@@ -152,8 +152,12 @@ public:
   /**
    * Perform a dynamic dispatch and get the kernel for an operator.
    */
+  // TODO Remove lookup(TensorTypeId) and instead have a lookup based on
+  // the (unboxed?) arguments the operator is to be called with.
   OpKernel lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const;
 
+  // TODO Remove callUnboxedAutogradKernel() and instead figure out in a generic
+  // callKernel() wrapper if the autograd or the regular kernel need to be called.
   template<class Result, class... Args>
   Result callUnboxedAutogradKernel(const OperatorHandle& op, Args... args) const;
 
