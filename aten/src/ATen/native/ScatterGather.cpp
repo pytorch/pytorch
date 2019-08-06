@@ -18,15 +18,15 @@ Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Te
     return self;
   }
   if (self.dim() == 0 || index.dim() == 0) {
-    return at::_scatter_add_(self, dim, index, source);
+    return at::_legacy_scatter_add_(self, dim, index, source);
   }
   if (source.dim() == 0) {
     dim = c10::maybe_wrap_dim(dim, index.dim());
     std::vector<int64_t> source_sizes = self.sizes().vec();
     source_sizes[dim] = index.size(dim);
-    return at::_scatter_add_(self, dim, index, source.expand(source_sizes));
+    return at::_legacy_scatter_add_(self, dim, index, source.expand(source_sizes));
   }
-  return at::_scatter_add_(self, dim, index, source);
+  return at::_legacy_scatter_add_(self, dim, index, source);
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
