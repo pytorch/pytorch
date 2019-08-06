@@ -7,6 +7,7 @@ r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
 
+import io
 import torch
 import torch.nn.quantized as nnq
 from common_utils import TestCase
@@ -109,6 +110,17 @@ class QuantizationTestCase(TestCase):
 
     def checkScriptable(self, mod):
         scripted = torch.jit.script(mod)
+        self._checkScriptable(scripted)
+
+    # Call this twice: once for a scripted module and once for a traced module
+    def _checkScriptable(self, script_mod):
+        # Test save/load
+        buffer = io.BytesIO()
+        torch.jit.save(script_mod, buffer)
+
+        buffer.seek(0)
+        torch.jit.load(buffer)
+
 
 # Below are a series of neural net models to use in testing quantization
 class SingleLayerLinearModel(torch.nn.Module):
