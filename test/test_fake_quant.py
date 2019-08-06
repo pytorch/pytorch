@@ -5,9 +5,10 @@ import torch.cuda
 import torch.jit
 import numpy as np
 import unittest
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
+from common_quantization import no_deadline
 from common_utils import run_tests
 from torch.quantization import FakeQuantize
 
@@ -29,13 +30,13 @@ NP_RANDOM_SEED = 19
 tolerance = 1e-6
 
 class TestFakeQuantizePerTensorAffine(unittest.TestCase):
-    # NOTE: Tests in this class are decorated with settings(deadline=None)
+    # NOTE: Tests in this class are decorated with no_deadline
     # to prevent spurious failures due to cuda runtime initialization.
 
     def to_tensor(self, X, device):
         return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)
 
-    @settings(deadline=None)
+    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
@@ -53,7 +54,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
             X, scale, zero_point, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
-    @settings(deadline=None)
+    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
@@ -77,7 +78,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
-    @settings(deadline=None)
+    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
@@ -96,7 +97,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
             X, scale, zero_point, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
-    @settings(deadline=None)
+    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
