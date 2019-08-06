@@ -11,9 +11,8 @@ using torch::jit::Unpickler;
 
 } // namespace
 
-static constexpr char BUILTIN_OP_NAMESPACE_[] = "torch.ops.aten.";
-static constexpr char ATEN_PREFIX_[] = "aten::";
-static constexpr int ATEN_PREFIX_LEN_ = 6;
+const std::string ScriptCall::BUILTIN_OP_NAMESPACE_("torch.ops.aten.");
+const std::string ScriptCall::ATEN_PREFIX_("aten::");
 
 ScriptCall::ScriptCall(
     std::shared_ptr<Operator> op, std::vector<at::IValue>&& args)
@@ -44,10 +43,11 @@ Message ScriptCall::toMessage() {
     pickler.pushIValue(toString((*op_)->schema()));
     // insert qualified name
     auto opName = (*op_)->schema().name();
-    TORCH_CHECK(opName.find("::") == opName.rfind("::")
-        && opName.rfind(ATEN_PREFIX_) == 0, "Unexpected operator name ", opName);
+    TORCH_CHECK(opName.find("::") == opName.rfind("::") &&
+                opName.rfind(ATEN_PREFIX_) == 0,
+                "Unexpected operator name ", opName);
     // aten::add -> torch.ops.aten.add
-    opName.replace(0, ATEN_PREFIX_LEN_, BUILTIN_OP_NAMESPACE_);
+    opName.replace(0, ATEN_PREFIX_.length(), BUILTIN_OP_NAMESPACE_);
     pickler.pushIValue(opName);
   }
   pickler.endTuple();

@@ -43,8 +43,12 @@ Message deserialize(std::istream& is) {
   MessageType type = MessageType(miscItems[1]);
 
   std::vector<char> payload(payloadTensor.numel());
-  std::memcpy(
-      payload.data(), payloadTensor.storage().data(), payloadTensor.numel());
+
+  if (payloadTensor.numel() > 0) {
+    std::memcpy(payload.data(),
+                payloadTensor.storage().data(),
+                payloadTensor.numel());
+  }
 
   return Message(std::move(payload), std::move(tensors), type, id);
 }

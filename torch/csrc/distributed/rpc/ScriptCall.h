@@ -32,6 +32,9 @@ class TORCH_API ScriptCall final {
   static std::shared_ptr<Operator> matchOperator(
       at::Symbol& symbol, const std::string& str_schema);
 
+  static const std::string BUILTIN_OP_NAMESPACE_;
+  static const std::string ATEN_PREFIX_;
+
   // This field has value if this ScriptCall represents invocation of a builtin
   // operator.
   c10::optional<std::shared_ptr<Operator>> op_;
