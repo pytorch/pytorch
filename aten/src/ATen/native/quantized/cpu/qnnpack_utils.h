@@ -8,5 +8,4 @@ struct QnnpackOperatorDeleter {
     qnnp_delete_operator(op);
   }
 };
-
 #endif
