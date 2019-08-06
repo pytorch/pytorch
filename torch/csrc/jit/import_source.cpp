@@ -404,30 +404,14 @@ struct SourceImporter {
   std::shared_ptr<SourceResolver> resolver_;
 };
 
-void import_functions(
-    const c10::optional<c10::QualifiedName>& prefix,
-    std::shared_ptr<CompilationUnit> cu,
-    const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& tensor_table,
-    const Self* self,
-    const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(std::move(cu), src, tensor_table, import_callback);
-  importer.importFunctions(prefix, self);
-}
-
 void LEGACY_import_methods(
     const Module& mod,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const std::function<void(const std::string&)>& import_callback) {
+  SourceImporter importer(mod.class_compilation_unit(), src, constant_table, import_callback);
   auto self = SimpleSelf(mod.type());
-  import_functions(
-      mod.name(),
-      mod.class_compilation_unit(),
-      src,
-      constant_table,
-      &self,
-      import_callback);
+  importer.importFunctions(mod.name(), &self);
 }
 
 void import_libs(
