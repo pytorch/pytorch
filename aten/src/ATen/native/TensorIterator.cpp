@@ -549,18 +549,21 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
   return iter;
 }
 
-TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
-    bool check_internal_overlap) {
-  auto iter = TensorIterator();
+TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a, bool check_internal_overlap) {
+  TensorIterator iter;
+  return iter.unary_opize(out, a, check_internal_overlap);
+}
+
+TensorIterator& TensorIterator::unary_opize(Tensor& out, const Tensor& a, bool check_internal_overlap) {
   if (check_internal_overlap) {
-    iter.check_and_add_output(out);
+    this->check_and_add_output(out);
   } else {
-    iter.add_output(out);
+    this->add_output(out);
   }
-  iter.add_input(a);
-  iter.num_outputs_ = 1;
-  iter.build();
-  return iter;
+  this->add_input(a);
+  this->num_outputs_ = 1;
+  this->build();
+  return *this;
 }
 
 TensorIterator TensorIterator::nullary_op(Tensor& out) {
