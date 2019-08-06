@@ -72,7 +72,7 @@ void div_kernel(TensorIterator& iter) {
 
 void logical_xor_kernel(TensorIterator& iter) {
   cpu_kernel(iter,
-    [](scalar_t a, scalar_t b) -> scalar_t {
+    [](bool a, bool b) -> bool {
       return a != b;
     });
 }

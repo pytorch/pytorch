@@ -82,9 +82,7 @@ static void frac_kernel(TensorIterator& iter) {
 
 
 static void logical_not_kernel(TensorIterator& iter) {
-  cpu_kernel(
-      iter,
-      [](scalar_t a) -> scalar_t { return !a; });
+  cpu_kernel(iter, [](bool a) -> bool { return !a; });
 }
 
 static void reciprocal_kernel(TensorIterator& iter) {
