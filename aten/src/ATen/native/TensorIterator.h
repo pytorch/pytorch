@@ -86,10 +86,14 @@ struct CAFFE2_API OperandInfo {
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   DimVector stride_bytes;
 
-  /// The original tensor operand. Note that the strides, data pointer, and
+  /// The tensor operand. Note that the strides, data pointer, and
   /// other attributes may differ due to dimension reordering and
   /// coalescing.
   Tensor tensor;
+
+  // Buffer the original tensor operand in cases when an output is modified
+  // (e.g. if dtype is changed)
+  Tensor buffer;
 
   /// The desired device and type for the operand. For inputs, this specifies that
   /// the input should be converted to this type if necessary. For outputs, this
@@ -195,6 +199,9 @@ struct CAFFE2_API TensorIterator {
       for(int i=0; i < noutputs(); i++) {
         if (dtype(i) != op_dtype(i)) {
           operands_[i].tensor = operands_[i].tensor.to(op_dtype(i));
+          if (operands_[i].buffer.defined()) {
+            operands_[i].buffer.copy_(operands_[i].tensor);
+          }
         }
       }
     }

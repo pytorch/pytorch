@@ -226,9 +226,9 @@ void TensorIterator::compute_types() {
         } else {
           op.dtype = common_dtype;
         }
-        auto tensor = op.tensor;
-        op.tensor = tensor.to(common_dtype);
-        auto original_element_size = tensor.element_size();
+        op.buffer = op.tensor;
+        op.tensor = op.tensor.to(common_dtype);
+        auto original_element_size = op.buffer.element_size();
         auto new_element_size = op.tensor.element_size();
 
         // stride size (in bytes) can change if we change the dtype.
