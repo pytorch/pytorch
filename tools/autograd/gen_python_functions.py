@@ -369,6 +369,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 typename = 'IntArrayRef'
             if typename.startswith('LongTensor'):
                 typename = 'Tensor'
+            if typename == 'c10::optional<DimnameList>':
+                unpack_args = True
 
             if arg.get('python_default_init'):
                 assert typename in unpack_with_default_methods, \

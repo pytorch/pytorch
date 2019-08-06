@@ -49,6 +49,7 @@ Creation Ops
 .. autofunction:: eye
 .. autofunction:: empty
 .. autofunction:: empty_like
+.. autofunction:: empty_strided
 .. autofunction:: full
 .. autofunction:: full_like
 
@@ -320,6 +321,7 @@ BLAS and LAPACK Operations
 .. autofunction:: addr
 .. autofunction:: baddbmm
 .. autofunction:: bmm
+.. autofunction:: bitwise_not
 .. autofunction:: chain_matmul
 .. autofunction:: cholesky
 .. autofunction:: cholesky_inverse
@@ -333,6 +335,7 @@ BLAS and LAPACK Operations
 .. autofunction:: det
 .. autofunction:: logdet
 .. autofunction:: slogdet
+.. autofunction:: lstsq
 .. autofunction:: lu
 .. autofunction:: lu_solve
 .. autofunction:: lu_unpack

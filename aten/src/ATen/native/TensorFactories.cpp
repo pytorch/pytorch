@@ -122,6 +122,10 @@ Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
     const TensorOptions& options) {
+  TORCH_CHECK(options.layout() == Layout::Strided,
+      "NYI: named tensors only support strided layout");
+  TORCH_CHECK(options.backend() == Backend::CPU || options.backend() == Backend::CUDA,
+      "NYI: named tensors only support CPU and CUDA tensors");
   auto result = at::empty(size, options);
   internal_set_names_inplace(result, names);
   return result;
@@ -165,7 +169,7 @@ Tensor& empty_out(
     return self.to(ScalarType::n, non_blocking);                 \
   }
 
-AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(DEFINE_CAST_OP)
+AT_FORALL_SCALAR_TYPES_AND_BOOL(DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
@@ -802,7 +806,7 @@ Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
       return tensor_cpu(values, options);                           \
     }                                                               \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(TENSOR)
+AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
 #undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
@@ -820,6 +824,14 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
     auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::CPUTensorId());
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
     return tensor;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clone ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor clone(const Tensor& src) {
+  auto self = at::empty_like(src);
+  self.copy_(src);
+  return self;
 }
 
 } // namespace native

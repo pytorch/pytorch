@@ -49,10 +49,7 @@ Tensor fbgemm_linear_int8_weight(
   auto* input_ptr = input_contig.data<float>();
 
   TORCH_CHECK(input.dim() >= 2);
-  int64_t M = 1;
-  for (size_t i = 0; i < input.dim() - 1; ++i) {
-    M *= input.size(i);
-  }
+  int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   int64_t K = input.size(input.dim() - 1);
   TORCH_CHECK(weight.dim() == 2);
   TORCH_CHECK(K == weight.size(1));

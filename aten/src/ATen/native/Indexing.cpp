@@ -206,26 +206,28 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
     AT_ERROR("shape mismatch: value tensor of shape ", value.sizes(),
              " cannot be broadcast to indexing result of shape ", info.src.sizes());
   }
-  auto builder = TensorIterator::Builder();
-  builder.dont_compute_common_dtype();
-  builder.dont_resize_outputs();
-  builder.add_output(info.src);
-  builder.add_input(value, info.src.device(), info.src.scalar_type());
+  auto iter = TensorIterator();
+  iter.dont_compute_common_dtype();
+  iter.dont_resize_outputs();
+  iter.add_output(info.src);
+  iter.add_input(value, info.src.device(), info.src.scalar_type());
   for (auto& index : info.indices) {
-    builder.add_input(index);
+    iter.add_input(index);
   }
-  return builder.build();
+  iter.build();
+  return iter;
 }
 
 static TensorIterator make_index_iterator(const AdvancedIndex& info) {
-  auto builder = TensorIterator::Builder();
-  builder.dont_compute_common_dtype();
-  builder.add_output(Tensor(), info.src.device(), info.src.scalar_type());
-  builder.add_input(info.src);
+  auto iter = TensorIterator();
+  iter.dont_compute_common_dtype();
+  iter.add_output(Tensor(), info.src.device(), info.src.scalar_type());
+  iter.add_input(info.src);
   for (auto& index : info.indices) {
-    builder.add_input(index);
+    iter.add_input(index);
   }
-  return builder.build();
+  iter.build();
+  return iter;
 }
 
 Tensor index(const Tensor & self, TensorList indices) {

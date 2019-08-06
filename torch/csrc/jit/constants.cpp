@@ -7,6 +7,14 @@
 namespace torch {
 namespace jit {
 
+namespace {
+c10::OperatorOptions aliasAnalysisInternalSpecialCase() {
+  c10::OperatorOptions options;
+  options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
+  return options;
+}
+} // namespace
+
 Value* insertConstant(
     Graph& g,
     const IValue& val,
@@ -188,7 +196,8 @@ RegisterOperators reg({
             ss << "constant literal not supported for: " << type->str();
             throw std::runtime_error(ss.str());
           }
-        }),
+        },
+        aliasAnalysisInternalSpecialCase()),
 });
 
 c10::optional<IValue> toIValue(const Value* v) {
