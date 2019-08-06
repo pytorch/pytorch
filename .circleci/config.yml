@@ -1553,7 +1553,7 @@ jobs:
       LIBTORCH_VARIANT: "shared-with-deps"
       CXX_ABI_VARIANT: "cxx11-abi"
     docker:
-      - image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/tmp-binary-docker-image-ubuntu16.04"
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:1"
     <<: *binary_linux_build
 
 ##############################################################################
