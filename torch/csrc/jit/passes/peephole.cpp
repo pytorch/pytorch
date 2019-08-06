@@ -335,12 +335,15 @@ void PeepholeOptimize(Block* block, bool addmm_fusion_enabled) {
   PeepholeOptimizeImpl(block, addmm_fusion_enabled);
   GRAPH_DUMP("After PeepholeOptimize: ", block->owningGraph());
   // Eliminate dead code created by any peephole passes we've just done
+  block->owningGraph()->dump();
   EliminateDeadCode(block);
+  block->owningGraph()->dump();
 }
 
 void PeepholeOptimize(
     const std::shared_ptr<Graph>& graph,
     bool addmm_fusion_enabled) {
+  EliminateDeadCode(graph);
   PeepholeOptimize(graph->block(), addmm_fusion_enabled);
 }
 } // namespace jit

@@ -317,6 +317,8 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
+    case aten::backward:
+      return analyzeBackward(node);
     case prim::TupleConstruct:
       return analyzeTupleConstruct(node);
     case prim::GradOf:
@@ -662,6 +664,35 @@ void AliasDb::analyzeWait(Node* node) {
   // for safety we just register a write to every wildcard.
   for (const auto& pr : wildcardIndex_) {
     registerWrite(pr.second, node);
+  }
+}
+
+void AliasDb::analyzeBackward(Node* node) {
+  // for backward function, we analyaze the whole graph and writes to every
+  // tensor in the graph
+  TORCH_INTERNAL_ASSERT(node->kind() == aten::backward);
+  Graph* g = node->owningGraph();
+  Block* block = g->block();
+
+  for (const Value* input : g->inputs()) {
+    if (input->type()->isSubtypeOf(TensorType::get())) {
+      registerWrite(input, node);
+    }
+  }
+  for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
+       ++it) {
+    // register all writes for the input
+    for (const Value* input : it->inputs()) {
+      if (input->type()->isSubtypeOf(TensorType::get())) {
+        registerWrite(input, node);
+      }
+    }
+    // register all writes for the output
+    for (const Value* input : it->inputs()) {
+      if (input->type()->isSubtypeOf(TensorType::get())) {
+        registerWrite(input, node);
+      }
+    }
   }
 }
 
@@ -1261,6 +1292,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::Print,
       prim::CallFunction,
       prim::CallMethod,
+      aten::backward,
       aten::wait,
   };
 

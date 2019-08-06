@@ -49,7 +49,16 @@ namespace jit {
 
 namespace {
 
-template<class T>
+// XXX: This function is to specialize IValue for tensor type in
+// interpreter, it should only be used in this file
+at::Tensor toOptionalTensor(const IValue& v) {
+  if (v.isNone()) {
+    return at::Tensor();
+  }
+  return v.toTensor();
+}
+
+template <class T>
 c10::List<T> make_result_list() {
   return c10::List<T>();
 }
@@ -612,6 +621,18 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     Operator(
+         "aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         [](Stack& stack) {
+           bool create_graph = pop(stack).toBool();
+           auto retain_graph = pop(stack).toOptional<bool>();
+           at::Tensor gradient = toOptionalTensor(pop(stack));
+           at::Tensor self = pop(stack).toTensor();
+           bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
+           self.backward(gradient, keep_graph, create_graph);
+           return 0;
+         },
+         aliasAnalysisSpecialCase()),
      Operator(
          "prim::AutogradZero() -> Tensor",
          [](const Node* node) {
