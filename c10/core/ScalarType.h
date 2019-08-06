@@ -203,7 +203,10 @@ static inline bool isIntegralType(ScalarType t) {
 }
 
 static inline bool isIntegralType(ScalarType t, bool includeBool) {
-  bool isIntegral = isIntegralType(t);
+  bool isIntegral = (
+      t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
+      t == ScalarType::Long || t == ScalarType::Short);
+
   return includeBool ? isIntegral || (t == ScalarType::Bool) : isIntegral;
 }
 
