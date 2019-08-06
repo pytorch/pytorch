@@ -1901,7 +1901,7 @@ frac(input, out=None) -> Tensor
 Computes the fractional portion of each element in :attr:`input`.
 
 .. math::
-    \text{out}_{i} = \text{input}_{i} - \left\lfloor \text{input}_{i} \right\rfloor
+    \text{out}_{i} = \text{input}_{i} - \left\lfloor |\text{input}_{i}| \right\rfloor * \operatorname{sgn}(\text{input}_{i})
 
 Example::
 
@@ -5962,7 +5962,7 @@ Example::
             [[ 1.1336, -0.4025],
              [-0.7089,  0.9032]]])
     >>> A.det()
-    tensor([1.1990, 0.4099, 0.7386])    
+    tensor([1.1990, 0.4099, 0.7386])
 """)
 
 add_docstr(torch.where,
