@@ -398,6 +398,9 @@ struct Def : public TreeView {
     auto new_ident = Ident::create(name().range(), std::move(new_name));
     return create(range(), new_ident, decl(), statements());
   }
+  Def withDecl(Decl decl) const {
+    return create(range(), name(), decl, statements());
+  }
   Ident name() const {
     return Ident(subtree(0));
   }
