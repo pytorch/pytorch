@@ -1839,8 +1839,7 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_logical_xor(self, device):
-        for dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-                      torch.float, torch.double) + ((torch.half,) if device != 'cpu' else ()):
+        for dtype in (torch.bool,):  # Will add more dtypes in the future
             expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
             a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
             b = torch.tensor([1, 0, 0, 10], dtype=dtype, device=device)

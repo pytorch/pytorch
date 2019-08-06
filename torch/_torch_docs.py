@@ -2540,8 +2540,7 @@ add_docstr(torch.logical_not,
            r"""
 logical_not(input, out=None) -> Tensor
 
-Computes the element-wise logical NOT of the given input tensor. The output tensor always has the same dtype as that of
-:attr:`input`.
+Computes the element-wise logical NOT of the given input tensor. The input tensor must have the bool dtype.
 
 Args:
     input (Tensor): the input tensor
@@ -2561,13 +2560,7 @@ add_docstr(torch.logical_xor,
            r"""
 logical_xor(input, other, out=None) -> Tensor
 
-Computes the element-wise logical XOR of the given input tensor. The output tensor always has the same dtype as that of
-:attr:`input`.
-
-- The logical XOR of a bool is the one that is the same as standard textbook definition: False XOR True -> True, False
-  XOR False -> False, True XOR True -> False
-- The logical XOR of two integers: 0 XOR nonzero -> 1, 0 XOR 0 -> 0, nonzero XOR nonzero -> 0.
-- The logical NOT of a floating-point number: 0.0 XOR nonzero -> 1.0, 0.0 XOR 0.0 -> 0.0, nonzero XOR nonzero -> 0.0.
+Computes the element-wise logical XOR of the given input tensors. Both input tensors must have the bool dtype.
 
 Args:
     input (Tensor): the input tensor
