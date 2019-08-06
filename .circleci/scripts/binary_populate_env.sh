@@ -79,7 +79,7 @@ export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
 
 # TODO: We don't need this anymore IIUC
 export TORCH_PACKAGE_NAME='torch'
-export TORCH_CONDA_BUILD_FOLDER='pytorch-1.2.0'
+export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
 
 export USE_FBGEMM=1
 export PIP_UPLOAD_FOLDER="$PIP_UPLOAD_FOLDER"
