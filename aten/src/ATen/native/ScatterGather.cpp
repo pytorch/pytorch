@@ -20,7 +20,7 @@ Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Te
   // match with self and for dimension d==dim, the size of source should match with index.
   //
   // The general rule does not always apply. There are special cases that could not be treated as usual.
-  // Things to worry are: self, index, source could be scalar tensor, and index could be empty.
+  // Things to worry are: self, index could be scalar tensor, and index could be empty.
   //
   // When one of self or index is scalar, then the other and source needs to be either scalar
   // or shape (1,) vector. Also, dim has to be 0. These are all handled well in legacy scatter_add_
