@@ -2107,8 +2107,6 @@ def overload(func):
 def compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
     _frames_up = 0
     impl_ast = torch.jit.get_jit_def(impl_fn)
-    # TODO: figure out correct closure_rcb, stack_rcb, although this seems to work
-    # and refactor with above usage
     closure_rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)
     stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
     _frames_up = 0
