@@ -14,7 +14,7 @@ _FLOAT_MODULES = {
 
 
 """Wrappes unary operators."""
-class UnaryWrapper(torch.nn.Module):
+class UnaryWrapper(Module):
     def __init__(self, operation):
         super(UnaryWrapper, self).__init__()
         self.operation = operation
@@ -33,7 +33,7 @@ class BinaryWrapper(UnaryWrapper):
 
 
 """Wraps unary operators (quantized)."""
-class QuantizedUnaryWrapper(torch.nn.Module):
+class QuantizedUnaryWrapper(Module):
     def __init__(self, operation):
         super(WrapperModule, self).__init__()
         self.operation = operation

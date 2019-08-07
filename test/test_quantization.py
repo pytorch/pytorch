@@ -295,9 +295,9 @@ class ScriptabilityTest(QuantizationTestCase):
         UnaryWrapper = nnq.modules.wrapper_module.UnaryWrapper
         QUnaryWrapper = nnq.modules.wrapper_module.QuantizedUnaryWrapper
         script_module = torch.jit.trace(UnaryWrapper(torch.cat),
-            (torch.tensor(0), torch.tensor(0)))
+                                        (torch.tensor(0), torch.tensor(0)))
         script_qmodule = torch.jit.trace(QUnaryWrapper(torch.cat),
-            (torch.tensor(0), torch.tensor(0)))
+                                         (torch.tensor(0), torch.tensor(0)))
 
         a = torch.tensor(24)
         b = torch.tensor(42)
@@ -312,9 +312,9 @@ class ScriptabilityTest(QuantizationTestCase):
         BinaryWrapper = nnq.modules.wrapper_module.BinaryWrapper
         QBinaryWrapper = nnq.modules.wrapper_module.QuantizedBinaryWrapper
         script_module = torch.jit.trace(BinaryWrapper(torch.add),
-            (torch.tensor(0), torch.tensor(0)))
+                                        (torch.tensor(0), torch.tensor(0)))
         script_qmodule = torch.jit.trace(QBinaryWrapper(torch.add),
-            (torch.tensor(0), torch.tensor(0)))
+                                         (torch.tensor(0), torch.tensor(0)))
 
         a = torch.tensor(24)
         b = torch.tensor(42)
