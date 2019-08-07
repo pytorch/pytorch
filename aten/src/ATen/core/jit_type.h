@@ -13,6 +13,7 @@
 #include <memory>
 #include <type_traits>
 
+struct ClassType;
 namespace torch {
 namespace jit {
 struct Function;
@@ -48,7 +49,8 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(ProfiledTensorType)     \
   _(DeviceObjType)          \
   _(FunctionType)           \
-  _(ClassType)
+  _(ClassType)              \
+  _(CapsuleType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -579,6 +581,7 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
   bool requires_grad() const override {
     return requires_grad_ ? *requires_grad_ : false;
   }
+
 
   bool operator==(const Type& rhs) const override {
     if (rhs.kind() != kind()) {
@@ -1303,6 +1306,28 @@ struct VarType : public Type {
   std::string name_;
 };
 
+struct CapsuleType;
+using CapsuleTypePtr = std::shared_ptr<CapsuleType>;
+// This type represents a Python Capsule
+struct CAFFE2_API CapsuleType : public Type {
+  static CapsuleTypePtr create() {
+    return CapsuleTypePtr(new CapsuleType()); // NOLINT(modernize-make-shared)
+  }
+  DEFINE_IS_SUBCLASS(CapsuleType);
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Capsule";
+  }
+  static const TypeKind Kind = TypeKind::CapsuleType;
+  // global singleton
+  static CapsuleTypePtr get();
+private:
+  CapsuleType()
+  : Type(TypeKind::CapsuleType) {}
+};
+
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const VaryingShape& t);
 // what is the type, ignoring extra size/shape information?
@@ -1358,9 +1383,13 @@ CAFFE2_API c10::optional<TypePtr> unifyTypes(
 namespace detail {
 template <typename T>
 struct getTypePtr_ final {
-  static_assert(
-      guts::false_t<T>::value,
-      "Type could not be converted to any of the known types.");
+  static TypePtr call() {
+    if (!isCustomClassRegistered<T>()) {
+      throw c10::Error("Type could not be converted to any of the known types.", "");
+    }
+    auto res = getCustomClassType<T>();
+    return std::dynamic_pointer_cast<Type>(res.type_);
+  }
 };
 
 template <>
@@ -1641,4 +1670,5 @@ struct CAFFE2_API ClassType : public NamedType {
   // List of methods associated with this class.
   std::vector<Function*> methods_;
 };
+
 } // namespace c10
