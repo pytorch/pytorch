@@ -126,8 +126,8 @@ class Linear(NNLinear):
         Y_q = torch.ops.quantized.fbgemm_linear(
             x, self._packed_weight,
             self.bias,
-            self.scale,
-            self.zero_point)
+            float(self.scale),
+            int(self.zero_point))
         return Y_q
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):

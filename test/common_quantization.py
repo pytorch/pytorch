@@ -117,14 +117,16 @@ class QuantizationTestCase(TestCase):
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
 
-    def checkScriptable(self, mod, ref_inputs=None, ref_outputs=None):
-        assert not ((ref_inputs is None) ^ (ref_outputs is None)), 'Both or neither' \
-            'of ref_inputs and ref_outputs must be specified'
-        scripted = torch.jit.script(mod)
-        self._checkScriptable(scripted)
+    # calib_data follows the same schema as calib_data for
+    # test_only_eval_fn, i.e. (input iterable, output iterable)
+    def checkScriptable(self, orig_mod, calib_data):
+        scripted = torch.jit.script(orig_mod)
+        self._checkScriptable(orig_mod, scripted, calib_data)
 
     # Call this twice: once for a scripted module and once for a traced module
-    def _checkScriptable(self, script_mod, ref_inputs=None, ref_outputs=None):
+    def _checkScriptable(self, orig_mod, script_mod, calib_data):
+        self._checkModuleCorrectnessAgainstOrig(orig_mod, script_mod, calib_data)
+
         # Test save/load
         #
         # TODO: need __get_state__ and __set_state__
@@ -132,10 +134,17 @@ class QuantizationTestCase(TestCase):
         torch.jit.save(script_mod, buffer)
 
         buffer.seek(0)
-        torch.jit.load(buffer)
+        loaded_mod = torch.jit.load(buffer)
 
-        if ref_inputs is not None:
-            self.assertEqual(scripted(*ref_inputs), ref_outputs)
+        # Pending __get_state_ and __set_state__ support
+        # See tracking task https://github.com/pytorch/pytorch/issues/23984
+        # self._checkModuleCorrectnessAgainstOrig(orig_mod, loaded_mod, calib_data)
+
+    def _checkModuleCorrectnessAgainstOrig(self, orig_mod, test_mod, calib_data):
+        for (inp, _) in calib_data:
+            ref_output = orig_mod(inp)
+            scripted_output = test_mod(inp)
+            self.assertEqual(scripted_output, ref_output)
 
 # Below are a series of neural net models to use in testing quantization
 class SingleLayerLinearModel(torch.nn.Module):
