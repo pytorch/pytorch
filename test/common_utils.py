@@ -199,10 +199,10 @@ if TEST_NUMPY:
 
 @contextmanager
 def memory_format_propagation():
-    saved = torch.get_memory_format_proparation()
-    torch.set_memory_format_proparation(True)
+    saved = torch.get_memory_format_propagation()
+    torch.set_memory_format_propagation(True)
     yield
-    torch.set_memory_format_proparation(saved)
+    torch.set_memory_format_propagation(saved)
 
 
 def skipIfRocm(fn):

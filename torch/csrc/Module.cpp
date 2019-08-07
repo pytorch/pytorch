@@ -160,14 +160,14 @@ static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
 
 static PyObject * THPModule_setMemoryFormatPropagation(PyObject *module, PyObject *arg)
 {
-  THPUtils_assert(PyBool_Check(arg), "set_memory_format_proparation expects a bool, "
+  THPUtils_assert(PyBool_Check(arg), "set_memory_format_propagation expects a bool, "
           "but got %s", THPUtils_typename(arg));
-  at::set_memory_format_proparation(arg == Py_True);
+  at::set_memory_format_propagation(arg == Py_True);
   Py_RETURN_NONE;
 }
 
 PyObject* THPModule_getMemoryFormatPropagation(PyObject* _unused) {
-  if (at::get_memory_format_proparation()) {
+  if (at::get_memory_format_propagation()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -519,8 +519,8 @@ static PyMethodDef TorchMethods[] = {
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     nullptr},
   {"get_default_dtype", (PyCFunction)THPModule_getDefaultDtype, METH_NOARGS,  nullptr},
   {"_get_default_device", (PyCFunction)THPModule_getDefaultDevice, METH_NOARGS,  nullptr},
-  {"_set_memory_format_proparation", (PyCFunction)THPModule_setMemoryFormatPropagation, METH_O,  nullptr},
-  {"_get_memory_format_proparation", (PyCFunction)THPModule_getMemoryFormatPropagation, METH_NOARGS,  nullptr},
+  {"_set_memory_format_propagation", (PyCFunction)THPModule_setMemoryFormatPropagation, METH_O,  nullptr},
+  {"_get_memory_format_propagation", (PyCFunction)THPModule_getMemoryFormatPropagation, METH_NOARGS,  nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

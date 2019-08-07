@@ -41,8 +41,8 @@ inline std::ostream& operator<<(
   }
 }
 
-C10_API bool get_memory_format_proparation();
-C10_API void set_memory_format_proparation(bool value);
+C10_API bool get_memory_format_propagation();
+C10_API void set_memory_format_propagation(bool value);
 
 inline std::vector<int64_t> get_channels_last_strides(IntArrayRef sizes) {
   AT_ASSERT(sizes.size() == 4);
