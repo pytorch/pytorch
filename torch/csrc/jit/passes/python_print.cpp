@@ -86,34 +86,6 @@ static bool isValidIdentifier(const std::string& name) {
   return true;
 }
 
-static void emitQualifiedName(std::ostream& out, const QualifiedName& name) {
-  const auto& name_ = name.name();
-  const auto& prefix_ = name.prefix();
-  if (isValidIdentifier(name_)) {
-    if (!prefix_.empty()) {
-      emitQualifiedName(out, QualifiedName(prefix_));
-      out << ".";
-    }
-    out << name_;
-  } else {
-    AT_ASSERT(!prefix_.empty());
-    out << "getattr(";
-    emitQualifiedName(out, QualifiedName(prefix_));
-    out << ", ";
-    printQuotedString(out, name_);
-    out << ")";
-  }
-}
-
-// Get a stringified version of the qualified name.
-// if a field is not a valid Python identifier, then it will print as, e.g.
-// getattr(self, "0").b
-static std::string getValidQualifiedName(const QualifiedName& name) {
-  std::stringstream ss;
-  emitQualifiedName(ss, name);
-  return ss.str();
-}
-
 // some names are valid identifiers but off limits because
 // they are keywords or namespaces used in the output
 const static std::unordered_set<std::string> reserved_names = {
