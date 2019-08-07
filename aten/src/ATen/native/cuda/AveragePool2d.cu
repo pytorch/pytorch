@@ -145,10 +145,6 @@ void avg_pool2d_out_cuda_template(
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 2) &&
-              (stride.empty() || stride.size() == 2) &&
-              (padding.size() == 1 || padding.size() == 2),
-    "avg_pool2d: all IntArrayRef sizes must be 2");
 
   TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
     "non-empty 3D or 4D (batch mode) tensor expected for input");
