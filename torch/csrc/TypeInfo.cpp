@@ -87,7 +87,7 @@ PyObject* THPIInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   if (scalar_type == at::ScalarType::Bool) {
     return PyErr_Format(
         PyExc_TypeError,
-	"torch.bool is not supported by torch.iinfo");
+        "torch.bool is not supported by torch.iinfo");
   }
   if (!at::isIntegralType(scalar_type, /*includeBool=*/false) && !at::isQIntType(scalar_type)) {
     return PyErr_Format(
