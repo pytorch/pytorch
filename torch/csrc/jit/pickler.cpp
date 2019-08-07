@@ -221,10 +221,12 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
 }
 
 void Pickler::pushIValue(const IValue& ivalue) {
-  // Check if reference ivalue has been saved before
-  // NOTE: Immutable types should be memoized by value rather than by pointer.
-  // This includes strings and tuples.
-  if (ivalue.isPtrType() && !ivalue.isString() && !ivalue.isTuple()) {
+  bool isMutableType = ivalue.isPtrType() && !ivalue.isString() && !ivalue.isTuple();
+
+  // Mutable ivalues are memoized by pointer equality, which we handle at this outer
+  // granularity.  Immutable ivalues are memoized by value equality which is handled in
+  // the type-specific handlers inside pushIValueImpl.
+  if (isMutableType) {
     const void* ptr = ivalue.internalToPointer();
     TORCH_CHECK(
         ptr != nullptr,
@@ -238,11 +240,13 @@ void Pickler::pushIValue(const IValue& ivalue) {
       pushBinGet(memo_entry->second);
       return;
     }
-  }
-  pushIValueImpl(ivalue);
-  if (ivalue.isPtrType() && !ivalue.isString() && !ivalue.isTuple()) {
+
+    pushIValueImpl(ivalue);
+
     memoized_ivalues_.push_back(ivalue);
     memoized_ivalue_map_[ivalue.internalToPointer()] = pushNextBinPut();
+  } else {
+    pushIValueImpl(ivalue);
   }
 }
 
@@ -708,25 +712,15 @@ OpCode Unpickler::readInstruction() {
       stack_.emplace_back(tuple);
     } break;
     case OpCode::TUPLE1: {
-        auto tuple = c10::ivalue::Tuple::create({stack_.back()});
-        stack_.pop_back();
+        auto tuple = c10::ivalue::Tuple::create(pop(stack_, 1));
         stack_.emplace_back(tuple);
     } break;
     case OpCode::TUPLE2: {
-        auto stack_size = stack_.size();
-        auto tuple = c10::ivalue::Tuple::create(
-          {stack_.at(stack_size-2), stack_.at(stack_size-1)});
-        stack_.pop_back();
-        stack_.pop_back();
+        auto tuple = c10::ivalue::Tuple::create(pop(stack_, 2));
         stack_.emplace_back(tuple);
     } break;
     case OpCode::TUPLE3: {
-        auto stack_size = stack_.size();
-        auto tuple = c10::ivalue::Tuple::create(
-          {stack_.at(stack_size-3), stack_.at(stack_size-2), stack_.at(stack_size-1)});
-        stack_.pop_back();
-        stack_.pop_back();
-        stack_.pop_back();
+        auto tuple = c10::ivalue::Tuple::create(pop(stack_, 3));
         stack_.emplace_back(tuple);
     } break;
     case OpCode::EMPTY_DICT:
