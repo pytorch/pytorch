@@ -471,14 +471,6 @@ static Value* materializeConstant(
   return new_constant;
 }
 
-static Value* ensureInt(const SourceRange& range, Value* v) {
-  if (!v->type()->isSubtypeOf(IntType::get())) {
-    throw ErrorReport(range)
-        << "expected a int but found a " << v->type()->python_str();
-  }
-  return v;
-}
-
 inline bool isSupportedListElementType(const TypePtr& type) {
   return type->isSubtypeOf(TensorType::get()) ||
       type->isSubtypeOf(NumberType::get());
