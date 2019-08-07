@@ -60,8 +60,8 @@ TEST(TestQTensor, QuantDequantAPIs) {
     reqr_data[i].val_ = requantize_val<quint8, qint8>(scale, zero_point,
                                                       new_scale, new_zero_point,
                                                       qr_data[i]).val_;
-    qint8 expected = quantize_val<qint8>(new_scale, new_zero_point,
-                                         rqr_data[i]);
+    const qint8 expected = quantize_val<qint8>(new_scale, new_zero_point,
+                                               rqr_data[i]);
     ASSERT_EQ(expected.val_, reqr_data[i].val_);
   }
 }
