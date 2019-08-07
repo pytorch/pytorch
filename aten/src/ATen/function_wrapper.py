@@ -539,7 +539,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'device_guard': bool,
     'device_guard_declaration': str,
     'dispatch_scalar_type_declaration': str,
-    'exclude_from_c10_dispatcher': bool,
+    'use_c10_dispatcher': bool,
     'with_gil': bool,
     'cpu_half': bool,
     'cpu_bfloat16': bool,
@@ -597,7 +597,7 @@ FunctionOption = TypedDict('FunctionOption', {
 OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('name', str),
     ('overload_name', str),
-    ('exclude_from_c10_dispatcher', bool),
+    ('use_c10_dispatcher', bool),
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('method_prefix_derived', str),
@@ -1103,7 +1103,7 @@ def create_generic(top_env, declarations):
 
         def gen_tensor_method(option):
             # type: (Any) -> FunctionCode
-            if option['exclude_from_c10_dispatcher']:
+            if not option['use_c10_dispatcher']:
                 return FunctionCode(
                     declaration=TENSOR_METHOD_DECLARATION.substitute(option),
                     definition=TENSOR_METHOD_DEFINITION.substitute(option))
@@ -1129,7 +1129,7 @@ def create_generic(top_env, declarations):
             if is_factory_method:
                 fn_definition = FACTORY_DEFINITION.substitute(option)
             else:
-                if option['exclude_from_c10_dispatcher']:
+                if not option['use_c10_dispatcher']:
                     fn_definition = FUNCTION_DEFINITION.substitute(option)
                 else:
                     fn_definition = C10_FUNCTION_DEFINITION.substitute(option)
@@ -1215,7 +1215,7 @@ def create_generic(top_env, declarations):
                 check_namedtensor_enabled(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option)))
             top_env['function_registrations'].append(
                 check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
-            if not option['exclude_from_c10_dispatcher']:
+            if option['use_c10_dispatcher']:
                 top_env['c10_function_registrations'].append(
                     check_namedtensor_enabled(C10_DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
 
@@ -1258,7 +1258,7 @@ def create_generic(top_env, declarations):
         return OutputDeclaration(
             name=option['api_name'],
             overload_name=option['overload_name'],
-            exclude_from_c10_dispatcher=option['exclude_from_c10_dispatcher'],
+            use_c10_dispatcher=option['use_c10_dispatcher'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
             method_prefix_derived=option['method_prefix_derived'],
@@ -1699,7 +1699,7 @@ def create_derived(backend_type_env, declarations):
                         NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
                     function_registrations.append(
                         BACKEND_FUNCTION_REGISTRATION.substitute(env))
-                    if not option['exclude_from_c10_dispatcher']:
+                    if option['use_c10_dispatcher']:
                         c10_function_registrations.append(
                             C10_BACKEND_FUNCTION_REGISTRATION.substitute(env))
 
