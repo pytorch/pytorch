@@ -1081,7 +1081,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     **Scripting an nn.Module**
         Scripting an ``nn.Module`` by default will compile the ``forward`` method and recursively
         compile any methods, submodules, and functions called by ``forward``. If a ``nn.Module`` only uses
-        features supported in TorchScript, no changes to the original module code should be necessary.
+        features supported in TorchScript, no changes to the original module code should be necessary. ``script``
+        will construct ``torch.jit.ScriptModule`` that has copies of the attributes, parameters, and methods of
+        the original module.
 
         Example (scripting a simple module with a Parameter)::
 
@@ -1127,7 +1129,36 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             scripted_module = torch.jit.script(MyModule())
 
         To compile a method other than ``forward`` (and recursively compile anything it calls), add
-        the ``@torch.jit.export`` decorator to the method.
+        the ``@torch.jit.export`` decorator to the method. To opt out of compilation use ``@torch.jit.ignore``.
+
+        Example (an exported and ignored method in a module)::
+
+            import torch
+            import torch.nn as nn
+
+            class MyModule(nn.Module):
+                def __init__(self):
+                    super(MyModule, self).__init__()
+
+                @torch.jit.export
+                def some_entry_point(self, input):
+                    return input + 10
+
+                @torch.jit.ignore
+                def python_only_fn(self, input):
+                    # This function won't be compiled, so any Python APIs can be
+                    # used
+                    import pdb
+                    pdb.set_trace()
+
+                def forward(self, input):
+                    if self.training:
+                        self.python_only_fn(input)
+                    return input * 99
+
+            scripted_module = torch.jit.script(MyModule())
+            print(scripted_module.some_entry_point(torch.randn(2, 2)))
+            print(scripted_module(torch.randn(2, 2)))
     """
     if not _enabled:
         return obj
@@ -1517,7 +1548,9 @@ if _enabled:
             else:
                 self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
 
-            Module.__init__(self)
+            Module._Module__construct(self)
+            Module.__setattr__(self, "training", True)
+
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
             self._modules = OrderedModuleDict(self._c)
@@ -1564,7 +1597,7 @@ if _enabled:
                 # to improve invocation performance
                 self.__dict__[attr] = script_method
                 return script_method
-            return Module.__getattr__(self, attr)
+            return super(ScriptModule, self).__getattr__(attr)
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
@@ -2038,7 +2071,6 @@ def _get_builtin_table():
         (torch.nn.init._no_grad_normal_, "aten::_no_grad_normal_"),
         (torch.nn.init._no_grad_uniform_, "aten::_no_grad_uniform_"),
         (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
-        (torch.nn.utils.rnn.get_packed_sequence, "aten::_pack_sequence"),
         (torch._C._get_tracing_state, "aten::_get_tracing_state"),
         (warnings.warn, "aten::warn"),
     ]

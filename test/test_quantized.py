@@ -401,19 +401,6 @@ class TestDynamicQuantizedLinear(TestCase):
         if use_relu:
             Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
 
-        # print("X_q:")
-        # print(X_q)
-        # print("X_q.dequantize():")
-        # print(X_q.dequantize())
-        # print("W_q:")
-        # print(W_q)
-        # print("W_q.dequantize():")
-        # print(W_q.dequantize())
-        # print("Y_fp32:")
-        # print(Y_fp32)
-        # print("Y_fp32_ref:")
-        # print(Y_fp32_ref)
-
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          message="torch.ops.quantized.fbgemm_linear_dynamic results are off")
 
@@ -487,19 +474,6 @@ class TestDynamicQuantizedLinear(TestCase):
 
         Y_fp32_ref = F.linear(X_q.dequantize(), W_q.dequantize(), b_fp32)
         # Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
-
-        # print("X_q:")
-        # print(X_q)
-        # print("X_q.dequantize():")
-        # print(X_q.dequantize())
-        # print("W_q:")
-        # print(W_q)
-        # print("W_q.dequantize():")
-        # print(W_q.dequantize())
-        # print("Y_fp32:")
-        # print(Y_fp32)
-        # print("Y_fp32_ref:")
-        # print(Y_fp32_ref)
 
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          message="torch.ops.quantized.fbgemm_linear_dynamic results are off")
