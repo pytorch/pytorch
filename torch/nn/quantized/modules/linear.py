@@ -158,7 +158,7 @@ class Linear(NNLinear):
             state_dict.pop(prefix + 'bias')
         state_dict.pop(prefix + 'weight')
         super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                      missing_keys, unexpected_keys, error_msgs)
+                                                  missing_keys, unexpected_keys, error_msgs)
         return
 
     # TODO: support initializing from quantization parameters when Quantizer is
