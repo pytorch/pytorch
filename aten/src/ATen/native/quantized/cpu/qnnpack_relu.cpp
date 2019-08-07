@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/ParallelMobileTPool.h>
+#include <ATen/ParallelMobileThreadPool.h>
 #include <ATen/core/op_registration/op_registration.h>
 
 #include "init_qnnpack.h"

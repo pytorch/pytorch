@@ -1,6 +1,6 @@
-#include <ATen/ParallelMobileTPool.h>
-#include "caffe2/utils/threadpool/ThreadPool.h"
-#include "caffe2/utils/threadpool/pthreadpool.h"
+#include <ATen/ParallelMobileThreadPool.h>
+#include <caffe2/utils/threadpool/ThreadPool.h>
+#include <caffe2/utils/threadpool/pthreadpool.h>
 
 namespace at {
 #ifdef C10_MOBILE
