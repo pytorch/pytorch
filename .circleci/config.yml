@@ -474,7 +474,8 @@ binary_linux_build: &binary_linux_build
         set -eux -o pipefail
         source /env
         retry apt-get update
-        retry apt-get -y install expect-dev moreutils
+        retry apt-get -y install expect moreutils
+        conda install -y -c eumetsat expect
   - run:
       name: Build
       no_output_timeout: "1h"
