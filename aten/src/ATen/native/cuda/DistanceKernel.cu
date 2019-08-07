@@ -223,7 +223,7 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
 
   printf("thx = %d blkId = %d agg = %f agg1 = %f\n", threadIdx.x, blockIdx.x, agg, agg1);
 
-  if (blockIdx.x == 0 && threadIdx.x == 0) {
+  /*if (blockIdx.x == 0 && threadIdx.x == 0) {
     result[0] = *a;
   }
   if (blockIdx.x == 0 && threadIdx.x == 1) {
@@ -234,9 +234,9 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   }
   if (blockIdx.x == 2 && threadIdx.x == 1) {
     result[3] = *a;
-  }
+  }*/
 
-  /*if (blockIdx.x == 1 && threadIdx.x == 0) {
+  if (blockIdx.x == 1 && threadIdx.x == 0) {
     result[0] = *b;
   }
   if (blockIdx.x == 1 && threadIdx.x == 1) {
@@ -247,7 +247,7 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   }
   if (blockIdx.x == 3 && threadIdx.x == 1) {
     result[3] = *b;
-  }*/
+  }
 
   /*if (blockIdx.x == 0 && threadIdx.x == 0) {
     result[0] = agg;
