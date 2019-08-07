@@ -503,8 +503,6 @@ binary_linux_test: &binary_linux_test
   - attach_workspace:
       at: /home/circleci/project
   - run:
-      <<: *should_run_job
-  - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
@@ -1808,6 +1806,7 @@ jobs:
 ##############################################################################
 # Smoke test specs individual job specifications
 ##############################################################################
+  # yf225 TODO: we need to run smoke tests for libtorch!
   smoke_linux_manywheel_2.7m_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset7"
