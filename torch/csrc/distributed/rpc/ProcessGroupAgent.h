@@ -12,15 +12,11 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct SendWork {
-  SendWork(const int dstRank,
-           Message&& message)
-      : dstRank_(dstRank),
-        message_(message) {}
+struct RpcWork {
+  RpcWork(const int rank, Message&& message) : rank_(rank), message_(message) {}
 
-  const int dstRank_;
+  const int rank_;
   Message message_;
-
 };
 
 class ProcessGroupAgent : public RpcAgent {
@@ -29,7 +25,7 @@ class ProcessGroupAgent : public RpcAgent {
   ProcessGroupAgent(std::string workerName,
                     std::unordered_map<std::string, int> nameMap,
                     std::shared_ptr<c10d::ProcessGroup> pg,
-                    int numSendThreads = 4);
+                    int numSendRecvThreads = 4);
 
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
@@ -43,7 +39,8 @@ class ProcessGroupAgent : public RpcAgent {
 
  private:
   // put SendWork into a queue and notify the sendLoop thread
-  void enqueue(SendWork work);
+  void enqueueSend(RpcWork work);
+  void enqueueRecv(RpcWork work);
   // sending out the message
   void sendLoop();
   // receiving messages
@@ -65,7 +62,7 @@ class ProcessGroupAgent : public RpcAgent {
   // when using the same tag.
   std::unique_ptr<std::mutex[]> sendMutexes_;
   std::thread listenerThread_;
-  ThreadPool sendThreadPool_;
+  ThreadPool threadPool_;
   std::unordered_map<int64_t, std::shared_ptr<FutureMessage>> futures_;
   std::mutex futureMutex_;
 };

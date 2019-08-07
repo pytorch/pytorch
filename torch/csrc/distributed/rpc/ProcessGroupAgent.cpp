@@ -59,14 +59,14 @@ ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
     std::unordered_map<std::string, int> nameMap,
     std::shared_ptr<c10d::ProcessGroup> pg,
-    int numSendThreads)
+    int numSendRecvThreads)
     : RpcAgent(std::move(workerName), processRequestBlocking),
       nameMap_(std::move(nameMap)),
       stop_(false),
       pg_(std::move(pg)),
       nextId_(0),
       sendMutexes_(new std::mutex[pg_->getSize()]),
-      sendThreadPool_(numSendThreads) {
+      threadPool_(numSendRecvThreads) {
   TORCH_CHECK(nameMap_.size() > 1, "ProcessGroupAgent requires world_size to "
       "be at least 2, but got ", nameMap_.size());
   auto workerRankIter = nameMap_.find(workerName_);
@@ -92,8 +92,8 @@ void ProcessGroupAgent::join() {
   //    effort to fix this problem).
   sync();
   int dst = (pg_->getRank() + 1) % pg_->getSize();
-  enqueue(SendWork(dst, Message({}, {}, MessageType::SHUTDOWN)));
-  sendThreadPool_.waitWorkComplete();
+  enqueueSend(RpcWork(dst, Message({}, {}, MessageType::SHUTDOWN)));
+  threadPool_.waitWorkComplete();
   listenerThread_.join();
 }
 
@@ -104,7 +104,7 @@ void ProcessGroupAgent::sync() {
   pg_->barrier()->wait();
   // Wait until the all send works are done.
   // NB: There might be additional send works inserted while waiting.
-  sendThreadPool_.waitWorkComplete();
+  threadPool_.waitWorkComplete();
   // Use another barrier in case different RpcAgent handles different amounts of
   // workloads.
   pg_->barrier()->wait();
@@ -132,13 +132,13 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     future->markCompleted();
   }
 
-  enqueue(SendWork(dstRank, std::move(message)));
+  enqueueSend(RpcWork(dstRank, std::move(message)));
   return future;
 }
 
-void ProcessGroupAgent::enqueue(SendWork work) {
-  sendThreadPool_.run(std::bind(
-    [&](SendWork work) {
+void ProcessGroupAgent::enqueueSend(RpcWork work) {
+  threadPool_.run(std::bind(
+    [&](const RpcWork& work) {
       std::stringstream ss;
       serialize(work.message_, ss);
       std::string str = ss.str();
@@ -153,12 +153,32 @@ void ProcessGroupAgent::enqueue(SendWork work) {
 
       // ProcessGroup is not thread-safe when sending with the same tag, hence
       // the lock
-      std::unique_lock<std::mutex> lock(sendMutexes_.get()[work.dstRank_]);
-      pg_->send(preamble, work.dstRank_, work.dstRank_ /* channelTag */)->wait();
+      std::unique_lock<std::mutex> lock(sendMutexes_.get()[work.rank_]);
+      pg_->send(preamble, work.rank_, work.rank_ /* channelTag */)->wait();
       std::vector<torch::Tensor> payload =
           {torch::from_blob((void *)str.c_str(), str.length(), {torch::kChar})};
-      pg_->send(payload, work.dstRank_, work.dstRank_ /* channelTag */)->wait();
+      pg_->send(payload, work.rank_, work.rank_ /* channelTag */)->wait();
       lock.unlock();
+    },
+    std::move(work)
+  ));
+}
+
+void ProcessGroupAgent::enqueueRecv(RpcWork work) {
+  threadPool_.run(std::bind(
+    [&](RpcWork& work) {
+      if (work.message_.isRequest()) {
+        cb_(names_[work.rank_], std::move(work.message_), *this);
+      } else if (work.message_.isResponse()) {
+        auto id = work.message_.id();
+        {
+          std::lock_guard<std::mutex> lock{futureMutex_};
+          futures_[id]->markCompleted(std::move(work.message_));
+          futures_.erase(id);
+        }
+      } else {
+        AT_ERROR("unrecognized message type ", work.message_.type());
+      }
     },
     std::move(work)
   ));
@@ -182,20 +202,11 @@ void ProcessGroupAgent::listenLoop() {
 
     Message message = deserialize(ss);
 
-    if (message.isRequest()) {
-      cb_(names_[srcRank], std::move(message), *this);
-    } else if (message.isResponse()) {
-      auto id = message.id();
-      {
-        std::lock_guard<std::mutex> lock{futureMutex_};
-        futures_[id]->markCompleted(std::move(message));
-        futures_.erase(id);
-      }
-    } else if (message.isShutdown()) {
-      break;
-    } else {
-      AT_ERROR("unrecognized message type ", message.type());
+    if (message.isShutdown()) {
+      return;
     }
+
+    enqueueRecv(RpcWork(srcRank, std::move(message)));
   }
 }
 

@@ -53,7 +53,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
                py::arg("name"),
                py::arg("name_map"),
                py::arg("process_group"),
-               py::arg("num_send_threads") = 4)
+               py::arg("num_send_recv_threads") = 4)
           .def("join",
                &ProcessGroupAgent::join,
                py::call_guard<py::gil_scoped_release>())
