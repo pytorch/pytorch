@@ -51,6 +51,8 @@ def _calculate_dynamic_qparams(X, dtype):
         scale = 1.0
         zero_point = 0
     else:
+        max_val = max(max_val, 0.0)
+        min_val = min(min_val, 0.0)
         scale = (max_val - min_val) / n_levels
         scale = max(scale, torch.finfo(torch.float32).eps)
         zero_point = qmin - round(min_val / scale)

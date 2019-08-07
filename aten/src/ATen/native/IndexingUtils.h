@@ -15,6 +15,10 @@ static std::vector<Tensor> expandTensors(const Tensor & self, TensorList indices
   std::vector<Tensor> result;
   for (const auto & index : indices) {
     if (index.scalar_type() == kByte || index.scalar_type() == kBool) {
+      if (index.scalar_type() == kByte) {
+        AT_WARN("indexing with dtype torch.uint8 is now deprecated," \
+        " please use a dtype torch.bool instead.");
+      }
       // The sizes of the ByteTensor mask or bool tensor must match the sizes of the
       // corresponding dimensions in self
       for (int64_t j = 0; j < index.dim(); j++) {
@@ -122,4 +126,3 @@ struct AdvancedIndex {
 
 
 }}
-
