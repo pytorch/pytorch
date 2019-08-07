@@ -62,10 +62,6 @@ inline TensorOptions Tensor::options() const {
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 ${tensor_method_definitions}
 
-inline bool Tensor::is_variable() const noexcept {
-  return impl_->is_variable();
-}
-
 inline caffe2::TypeMeta Tensor::dtype() const noexcept {
   return impl_->dtype();
 }
