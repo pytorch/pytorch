@@ -222,11 +222,11 @@ class ShapePropagator {
     // binary arithmetic ops, more than 2 args is alpha.
     for (size_t i = 0 ; i < 2 ; i++ ) {
       auto dtt = node->inputs()[i]->type()->expect<DimensionedTensorType>();
+      auto inputDtype = dtt->scalarType();
       if (dtt->dim() > 0) {
-        dimmed = unionScalarTypes(dimmed, dtt->scalarType());
+        dimmed = unionScalarTypes(dimmed, inputDtype);
       } else if (!isFloatingType(dimmed)) {
-        // if not dimensioned
-        auto inputDtype = dtt->scalarType();
+        // if no dimensions
         zerodim = unionScalarTypes(zerodim, inputDtype);
       }
     }
