@@ -93,7 +93,7 @@ struct CAFFE2_API OperandInfo {
 
   // Buffer the original tensor operand in cases when an output is modified
   // (e.g. if dtype is changed)
-  Tensor buffer;
+  Tensor original_buffer;
 
   /// The desired device and type for the operand. For inputs, this specifies that
   /// the input should be converted to this type if necessary. For outputs, this
@@ -198,9 +198,11 @@ struct CAFFE2_API TensorIterator {
     if (compute_common_dtype_) {
       for(int i=0; i < noutputs(); i++) {
         if (dtype(i) != op_dtype(i)) {
-          operands_[i].tensor = operands_[i].tensor.to(op_dtype(i));
-          if (operands_[i].buffer.defined()) {
-            operands_[i].buffer.copy_(operands_[i].tensor);
+          if (operands_[i].original_buffer.defined()) {
+            operands_[i].original_buffer.copy_(operands_[i].tensor);
+            operands_[i].tensor = operands_[i].original_buffer;
+          } else {
+            operands_[i].tensor = operands_[i].tensor.to(op_dtype(i));
           }
         }
       }

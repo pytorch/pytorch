@@ -1332,7 +1332,7 @@ inline TypePtr CompleteTensorType::fromBoolType() {
   return CompleteTensorType::create(at::kLong, at::kCPU, {});
 }
 
-inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
+inline c10::optional<c10::ScalarType> optionalScalarTypeFromJitType(const c10::TypePtr & type) {
   if (type == FloatType::get()) {
     return at::ScalarType::Double;
   } else if (type == IntType::get()) {
@@ -1340,10 +1340,16 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   } else if (type == BoolType::get()) {
     return at::ScalarType::Bool;
   }
+  return c10::nullopt;
+}
+
+inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
+  auto result = optionalScalarTypeFromJitType(type);
   AT_ASSERTM(
-      0,
+      result,
       "Add new condition, expected Float, Int, or Bool but got",
       type->str());
+  return *result;
 }
 
 // Attempt to find the correct supertype of t1 and t2. If none is found then

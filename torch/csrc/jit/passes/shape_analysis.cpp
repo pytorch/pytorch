@@ -203,17 +203,12 @@ class ShapePropagator {
     return tensor_types;
   }
 
-  c10::optional<c10::ScalarType> typeToScalarType(const c10::TypePtr & type) {
-    if(auto cast = type->cast<DimensionedTensorType>()) {
-      return cast->scalarType();
-    } else if (auto cast = type->cast<FloatType>()) {
-      return c10::ScalarType::Float;
-    } else if (auto cast = type->cast<IntType>()) {
-      return c10::ScalarType::Long;
-    } else if (auto cast = type->cast<BoolType>()) {
-      return c10::ScalarType::Bool;
+  c10::ScalarType unionScalarTypes(c10::ScalarType original, c10::ScalarType next) {
+    if (original == c10::ScalarType::Undefined) {
+      return next;
+    } else {
+      return c10::promoteTypes(original, next);
     }
-    return c10::nullopt;
   }
 
   // Promotes result types for arithmetic operations using new type promotion logic.
@@ -224,29 +219,15 @@ class ShapePropagator {
   c10::optional<c10::ScalarType> getPromotedTypeForArithmeticOp(Node *node) {
     c10::ScalarType dimmed = c10::ScalarType::Undefined;
     c10::ScalarType zerodim = c10::ScalarType::Undefined;
-    auto& args = node->schema().arguments();
     // binary arithmetic ops, more than 2 args is alpha.
     for (size_t i = 0 ; i < 2 ; i++ ) {
-      auto arg = args[i];
-      auto dtt = node->inputs()[i]->type()->cast<DimensionedTensorType>();
-      if ( dtt && dtt->dim() > 0) {
-        if (dtt->dim() > 0) {
-          if (dimmed == c10::ScalarType::Undefined) {
-            dimmed = dtt->scalarType();
-          } else {
-            dimmed = c10::promoteTypes(dimmed, dtt->scalarType());
-          }
-        }
+      auto dtt = node->inputs()[i]->type()->expect<DimensionedTensorType>();
+      if (dtt->dim() > 0) {
+        dimmed = unionScalarTypes(dimmed, dtt->scalarType());
       } else if (!isFloatingType(dimmed)) {
         // if not dimensioned
-        auto inputDtype = typeToScalarType(node->inputs()[i]->type());
-        if (!inputDtype) {
-          return c10::nullopt;
-        } else if (zerodim == c10::ScalarType::Undefined) {
-          zerodim = *inputDtype;
-        } else {
-          zerodim = c10::promoteTypes(zerodim, *inputDtype);
-        }
+        auto inputDtype = dtt->scalarType();
+        zerodim = unionScalarTypes(zerodim, inputDtype);
       }
     }
     // if a tensor with dimensions is already of the highest category, don't
@@ -962,7 +943,7 @@ class ShapePropagator {
             if (auto maybe_tensor_types =
                     gatherTensorTypes<DimensionedTensorType>(node)) {
               auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
-              auto second_scalar_type = typeToScalarType(node->inputs()[1]->type());
+              auto second_scalar_type = optionalScalarTypeFromJitType(node->inputs()[1]->type());
               if (!second_scalar_type) {
                 return {};
               }
