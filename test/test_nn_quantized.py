@@ -116,7 +116,7 @@ class ModuleAPITest(QuantizationTestCase):
         # self.assertEqual(qLinear.zero_point, loaded.zero_point)
 
         # Test JIT
-        self.checkScriptable(qlinear, zip([X_q], [Z_ref]))
+        self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])))
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
@@ -216,7 +216,7 @@ class ModuleAPITest(QuantizationTestCase):
                          message="Tensors are not equal.")
 
         # JIT testing
-        self.checkScriptable(conv_under_test, zip([qX], [result_reference]))
+        self.checkScriptable(conv_under_test, list(zip([qX], [result_reference])))
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.
@@ -243,7 +243,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(qX_expect, qX_hat)
 
         # JIT Testing
-        self.checkScriptable(pool_under_test, zip([X], [qX_expect]))
+        self.checkScriptable(pool_under_test, list(zip([X], [qX_expect])))
 
 if __name__ == '__main__':
     run_tests()
