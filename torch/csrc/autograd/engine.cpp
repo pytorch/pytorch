@@ -179,7 +179,7 @@ struct GraphTask {
   // exec_info_ is safe to read without synchronization
   std::unordered_map<Node*, ExecInfo> exec_info_;
   std::vector<Variable> captured_vars_;
-  std::shared_ptr<at::ThreadLocalDebugInfoBase> debug_info_;
+  std::shared_ptr<at::ThreadLocalDebugInfoBase> debug_info_ = at::getThreadLocalDebugInfo();
 
   void init_to_execute(Node& graph_root, const edge_list& outputs);
 
@@ -661,7 +661,6 @@ auto Engine::execute(const edge_list& roots,
   ClearCallbacks _cb_guard(final_callbacks_, post_callbacks_lock_);
 
   GraphTask graph_task(keep_graph, create_graph, worker_device == NO_DEVICE ? 0 : total_depth+1);
-  graph_task.debug_info_ = at::getThreadLocalDebugInfo();
   // Lock mutex while GraphTask is being set up
   std::unique_lock<std::mutex> lock(graph_task.mutex_);
 
