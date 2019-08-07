@@ -65,6 +65,7 @@ ProcessGroupAgent::ProcessGroupAgent(
       stop_(false),
       pg_(std::move(pg)),
       nextId_(0),
+      sendMutexes_(new std::mutex[pg_->getSize()]),
       sendThreadPool_(numSendThreads) {
   TORCH_CHECK(nameMap_.size() > 1, "ProcessGroupAgent requires world_size to "
       "be at least 2, but got ", nameMap_.size());
@@ -75,7 +76,6 @@ ProcessGroupAgent::ProcessGroupAgent(
       "Resolved worker rank ", workerRankIter -> second,
       " does not match ProcessGroup rank ", pg_->getRank());
 
-  sendMutexes_ = std::make_unique<std::mutex[]>(pg_->getSize());
   names_.resize(nameMap_.size());
   for (auto& entry : nameMap_) {
     names_[entry.second] = entry.first;
