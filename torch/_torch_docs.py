@@ -1694,16 +1694,15 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor. Must be a `ByteTensor`
+    out (Tensor, optional): the output tensor. Must be a `BoolTensor`
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
+    Tensor: A ``torch.BoolTensor`` containing a True at each location where comparison is true
 
 Example::
 
     >>> torch.eq(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 1,  0],
-            [ 0,  1]], dtype=torch.uint8)
+    tensor([[True, False], [False, True]])
 """)
 
 add_docstr(torch.equal,
@@ -2002,16 +2001,15 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor`
+    out (Tensor, optional): the output tensor that must be a `BoolTensor`
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
+    Tensor: A ``torch.BoolTensor`` containing a True at each location where comparison is true
 
 Example::
 
     >>> torch.ge(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 1,  1],
-            [ 0,  1]], dtype=torch.uint8)
+    tensor([[True, True], [False, True]])
 """)
 
 add_docstr(torch.geqrf,
@@ -2165,16 +2163,15 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor`
+    out (Tensor, optional): the output tensor that must be a `BoolTensor`
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
+    Tensor: A ``torch.BoolTensor`` containing a True at each location where comparison is true
 
 Example::
 
     >>> torch.gt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 0,  1],
-            [ 0,  0]], dtype=torch.uint8)
+    tensor([[False, True], [False, False]])
 """)
 
 add_docstr(torch.histc,
@@ -2288,12 +2285,12 @@ Arguments:
     input (Tensor): A tensor to check
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
+    Tensor: A ``torch.BoolTensor`` containing a True at each location of `NaN` elements.
 
 Example::
 
     >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
-    tensor([ 0,  1,  0], dtype=torch.uint8)
+    tensor([False, True, False])
 """)
 
 add_docstr(torch.is_floating_point,
@@ -2359,16 +2356,15 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor`
+    out (Tensor, optional): the output tensor that must be a `BoolTensor`
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
+    Tensor: A ``torch.BoolTensor`` containing a True at each location where comparison is true
 
 Example::
 
     >>> torch.le(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 1,  0],
-            [ 1,  1]], dtype=torch.uint8)
+    tensor([[True, False], [True, True]])
 """)
 
 add_docstr(torch.lerp,
@@ -2682,16 +2678,15 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor`
+    out (Tensor, optional): the output tensor that must be a `BoolTensor`
 
 Returns:
-    Tensor: A `torch.ByteTensor` containing a 1 at each location where comparison is true
+    Tensor: A `torch.BoolTensor` containing a True at each location where comparison is true
 
 Example::
 
     >>> torch.lt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 0,  0],
-            [ 1,  0]], dtype=torch.uint8)
+    tensor([[False, False], [True, False]])
 """)
 
 add_docstr(torch.lu_solve,
@@ -2723,7 +2718,7 @@ add_docstr(torch.masked_select,
 masked_select(input, mask, out=None) -> Tensor
 
 Returns a new 1-D tensor which indexes the :attr:`input` tensor according to
-the binary mask :attr:`mask` which is a `ByteTensor`.
+the boolean mask :attr:`mask` which is a `BoolTensor`.
 
 The shapes of the :attr:`mask` tensor and the :attr:`input` tensor don't need
 to match, but they must be :ref:`broadcastable <broadcasting-semantics>`.
@@ -2733,7 +2728,7 @@ to match, but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     input (Tensor): the input data
-    mask  (ByteTensor): the tensor containing the binary mask to index with
+    mask  (BoolTensor): the tensor containing the boolean mask to index with
     out (Tensor, optional): the output tensor
 
 Example::
@@ -2745,9 +2740,9 @@ Example::
             [ 0.1307, -2.0608,  0.1244,  2.0139]])
     >>> mask = x.ge(0.5)
     >>> mask
-    tensor([[ 0,  0,  0,  0],
-            [ 0,  1,  1,  1],
-            [ 0,  0,  0,  1]], dtype=torch.uint8)
+    tensor([[False, False, False, False],
+            [False, True, True, True],
+            [False, False, False, True]])
     >>> torch.masked_select(x, mask)
     tensor([ 1.2252,  0.5002,  0.6248,  2.0139])
 """)
@@ -3495,16 +3490,15 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor`
+    out (Tensor, optional): the output tensor that must be a `BoolTensor`
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
+    Tensor: A ``torch.BoolTensor`` containing a True at each location where comparison is true.
 
 Example::
 
     >>> torch.ne(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 0,  1],
-            [ 1,  0]], dtype=torch.uint8)
+    tensor([[False, True], [True, False]])
 """)
 
 add_docstr(torch.neg,
@@ -5987,9 +5981,9 @@ The operation is defined as:
     The tensors :attr:`condition`, :attr:`input`, :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Arguments:
-    condition (ByteTensor): When True (nonzero), yield input, otherwise yield other
-    input (Tensor): values selected at indices where :attr:`condition` is ``True``
-    other (Tensor): values selected at indices where :attr:`condition` is ``False``
+    condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
+    x (Tensor): values selected at indices where :attr:`condition` is ``True``
+    y (Tensor): values selected at indices where :attr:`condition` is ``False``
 
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`input`, :attr:`other`
