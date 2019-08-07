@@ -1678,11 +1678,6 @@ class _TestTorchMixin(object):
                     0.5,
                     non_zero_rand((2, 2), dtype=dtype, device=device),
                     non_zero_rand((2, 2), dtype=dtype, device=device))
-                _test_addcdiv(
-                    non_zero_rand((2, 2), dtype=dtype, device=device),
-                    2,
-                    non_zero_rand((2, 2), dtype=dtype, device=device),
-                    non_zero_rand((2, 2), dtype=dtype, device=device))
 
     def test_add(self):
         for device in torch.testing.get_all_device_types():
