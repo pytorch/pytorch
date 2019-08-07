@@ -39,7 +39,7 @@ class QuantizedLinear(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, input):
-        out = torch.fbgemm_linear_int8_weight(
+        out = torch.fbgemm_linear_int8_weight_fp32_activation(
             input.float(), self.weight, self.packed_tensor_ptr, self.col_offsets,
             self.scale, self.zero_point, self.bias)
         return out.to(input.dtype)
@@ -76,7 +76,7 @@ class QuantizedLinearFP16(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, input):
-        out = torch.fbgemm_linear_fp16_weight(
+        out = torch.fbgemm_linear_fp16_weight_fp32_activation(
             input.float(), self.packed_weight, self.bias)
         return out
 
