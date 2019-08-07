@@ -47,9 +47,31 @@ Tensor& bitwise_not_(Tensor& self) {
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
   checkBackend("bitwise_not", result, self.type().backend());
-  assert_no_internal_overlap(result, "bitwise_not");
-  auto iter = TensorIterator::unary_op(result, self);
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_internal_overlap=*/true);
   bitwise_not_stub(iter.device_type(), iter);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
+}
+
+Tensor neg(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::neg_out(result, self);
+}
+
+Tensor& neg_(Tensor& self) {
+  return at::neg_out(self, self);
+}
+
+Tensor& neg_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(self.scalar_type() != kBool,
+              "Negation, the `-` operator, on a bool tensor is not supported. "
+              "If you are trying to invert a mask, use the `~` or `bitwise_not()` operator instead.");
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_internal_overlap=*/true);
+  neg_stub(iter.device_type(), iter);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
 #endif
@@ -161,10 +183,9 @@ static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     checkBackend(#op, result, Backend::CPU);                    \
-    assert_no_internal_overlap(result, #op);                    \
-    auto iter = TensorIterator::unary_op(result, self);         \
-    op##_stub(iter.device_type(), iter);                      \
-    propagate_names_if_namedtensor_enabled(result, self);       \
+    auto iter = TensorIterator::unary_op(result, self,          \
+      /*check_internal_overlap=*/true);                         \
+    op##_stub(iter.device_type(), iter);                        \
     return result;                                              \
   }
 
@@ -185,7 +206,6 @@ IMPLEMENT_UNARY_OP_VEC(log)
 IMPLEMENT_UNARY_OP_VEC(log10)
 IMPLEMENT_UNARY_OP_VEC(log1p)
 IMPLEMENT_UNARY_OP_VEC(log2)
-IMPLEMENT_UNARY_OP_VEC(neg)
 IMPLEMENT_UNARY_OP_VEC(reciprocal)
 IMPLEMENT_UNARY_OP_VEC(round)
 IMPLEMENT_UNARY_OP_VEC(rsqrt)

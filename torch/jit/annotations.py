@@ -120,7 +120,6 @@ def get_type_line(source):
     type_lines = list(filter(lambda line: type_comment in line[1], lines))
     lines_with_type = list(filter(lambda line: 'type' in line[1], lines))
 
-
     if len(type_lines) == 0:
         type_pattern = re.compile('#[\t ]*type[\t ]*:')
         wrong_type_lines = list(filter(lambda line: type_pattern.search(line[1]), lines))

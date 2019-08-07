@@ -749,8 +749,8 @@ add_docstr(torch.bitwise_not,
            r"""
 bitwise_not(input, out=None) -> Tensor
 
-Computes the bitwise NOT of the given input tensor. The input must be of
-integral or Boolean types.
+Computes the bitwise NOT of the given input tensor. The input tensor must be of
+integral or Boolean types. For bool tensors, it computes the logical NOT.
 
 Args:
     input (Tensor): the input tensor
@@ -760,6 +760,8 @@ Example:
 
     >>> torch.bitwise_not(torch.tensor([-1, -2, 3], dtype=torch.int8))
     tensor([ 0,  1, -4], dtype=torch.int8)
+    >>> torch.bitwise_not(torch.tensor([True, False], dtype=torch.bool))
+    tensor([False,  True])
 """)
 
 add_docstr(torch.bmm,
@@ -1694,16 +1696,15 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor. Must be a `ByteTensor`
+    out (Tensor, optional): the output tensor. Must be a `BoolTensor`
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
+    Tensor: A ``torch.BoolTensor`` containing a True at each location where comparison is true
 
 Example::
 
     >>> torch.eq(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 1,  0],
-            [ 0,  1]], dtype=torch.uint8)
+    tensor([[True, False], [False, True]])
 """)
 
 add_docstr(torch.equal,
@@ -1900,7 +1901,7 @@ frac(input, out=None) -> Tensor
 Computes the fractional portion of each element in :attr:`input`.
 
 .. math::
-    \text{out}_{i} = \text{input}_{i} - \left\lfloor \text{input}_{i} \right\rfloor
+    \text{out}_{i} = \text{input}_{i} - \left\lfloor |\text{input}_{i}| \right\rfloor * \operatorname{sgn}(\text{input}_{i})
 
 Example::
 
@@ -2002,83 +2003,15 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor`
+    out (Tensor, optional): the output tensor that must be a `BoolTensor`
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
+    Tensor: A ``torch.BoolTensor`` containing a True at each location where comparison is true
 
 Example::
 
     >>> torch.ge(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 1,  1],
-            [ 0,  1]], dtype=torch.uint8)
-""")
-
-add_docstr(torch.gels,
-           r"""
-gels(input, A, out=None) -> Tensor
-
-Computes the solution to the least squares and least norm problems for a full
-rank matrix :math:`A` of size :math:`(m \times n)` and a matrix :math:`B` of
-size :math:`(m \times k)`.
-
-If :math:`m \geq n`, :func:`gels` solves the least-squares problem:
-
-.. math::
-
-   \begin{array}{ll}
-   \min_X & \|AX-B\|_2.
-   \end{array}
-
-If :math:`m < n`, :func:`gels` solves the least-norm problem:
-
-.. math::
-
-   \begin{array}{ll}
-   \min_X & \|X\|_2 & \text{subject to} & AX = B.
-   \end{array}
-
-Returned tensor :math:`X` has shape :math:`(\max(m, n) \times k)`. The first :math:`n`
-rows of :math:`X` contains the solution. If :math:`m \geq n`, the residual sum of squares
-for the solution in each column is given by the sum of squares of elements in the
-remaining :math:`m - n` rows of that column.
-
-Args:
-    input (Tensor): the matrix :math:`B`
-    A (Tensor): the :math:`m` by :math:`n` matrix :math:`A`
-    out (tuple, optional): the optional destination tensor
-
-Returns:
-    (Tensor, Tensor): A namedtuple (solution, QR) containing:
-
-        - **solution** (*Tensor*): the least squares solution
-        - **QR** (*Tensor*): the details of the QR factorization
-
-.. note::
-
-    The returned matrices will always be transposed, irrespective of the strides
-    of the input matrices. That is, they will have stride `(1, m)` instead of
-    `(m, 1)`.
-
-Example::
-
-    >>> A = torch.tensor([[1., 1, 1],
-                          [2, 3, 4],
-                          [3, 5, 2],
-                          [4, 2, 5],
-                          [5, 4, 3]])
-    >>> B = torch.tensor([[-10., -3],
-                          [ 12, 14],
-                          [ 14, 12],
-                          [ 16, 16],
-                          [ 18, 16]])
-    >>> X, _ = torch.gels(B, A)
-    >>> X
-    tensor([[  2.0000,   1.0000],
-            [  1.0000,   1.0000],
-            [  1.0000,   2.0000],
-            [ 10.9635,   4.8501],
-            [  8.9332,   5.2418]])
+    tensor([[True, True], [False, True]])
 """)
 
 add_docstr(torch.geqrf,
@@ -2232,16 +2165,15 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor`
+    out (Tensor, optional): the output tensor that must be a `BoolTensor`
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
+    Tensor: A ``torch.BoolTensor`` containing a True at each location where comparison is true
 
 Example::
 
     >>> torch.gt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 0,  1],
-            [ 0,  0]], dtype=torch.uint8)
+    tensor([[False, True], [False, False]])
 """)
 
 add_docstr(torch.histc,
@@ -2355,12 +2287,12 @@ Arguments:
     input (Tensor): A tensor to check
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
+    Tensor: A ``torch.BoolTensor`` containing a True at each location of `NaN` elements.
 
 Example::
 
     >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
-    tensor([ 0,  1,  0], dtype=torch.uint8)
+    tensor([False, True, False])
 """)
 
 add_docstr(torch.is_floating_point,
@@ -2426,16 +2358,15 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor`
+    out (Tensor, optional): the output tensor that must be a `BoolTensor`
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
+    Tensor: A ``torch.BoolTensor`` containing a True at each location where comparison is true
 
 Example::
 
     >>> torch.le(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 1,  0],
-            [ 1,  1]], dtype=torch.uint8)
+    tensor([[True, False], [True, True]])
 """)
 
 add_docstr(torch.lerp,
@@ -2667,6 +2598,76 @@ Example::
     tensor([ 0.8442,  1.4322,  0.8711])
 """.format(**multi_dim_common))
 
+add_docstr(torch.lstsq,
+           r"""
+lstsq(input, A, out=None) -> Tensor
+
+Computes the solution to the least squares and least norm problems for a full
+rank matrix :math:`A` of size :math:`(m \times n)` and a matrix :math:`B` of
+size :math:`(m \times k)`.
+
+If :math:`m \geq n`, :func:`lstsq` solves the least-squares problem:
+
+.. math::
+
+   \begin{array}{ll}
+   \min_X & \|AX-B\|_2.
+   \end{array}
+
+If :math:`m < n`, :func:`lstsq` solves the least-norm problem:
+
+.. math::
+
+   \begin{array}{ll}
+   \min_X & \|X\|_2 & \text{subject to} & AX = B.
+   \end{array}
+
+Returned tensor :math:`X` has shape :math:`(\max(m, n) \times k)`. The first :math:`n`
+rows of :math:`X` contains the solution. If :math:`m \geq n`, the residual sum of squares
+for the solution in each column is given by the sum of squares of elements in the
+remaining :math:`m - n` rows of that column.
+
+.. note::
+    The case when :math:`m < n` is not supported on the GPU.
+
+Args:
+    input (Tensor): the matrix :math:`B`
+    A (Tensor): the :math:`m` by :math:`n` matrix :math:`A`
+    out (tuple, optional): the optional destination tensor
+
+Returns:
+    (Tensor, Tensor): A namedtuple (solution, QR) containing:
+
+        - **solution** (*Tensor*): the least squares solution
+        - **QR** (*Tensor*): the details of the QR factorization
+
+.. note::
+
+    The returned matrices will always be transposed, irrespective of the strides
+    of the input matrices. That is, they will have stride `(1, m)` instead of
+    `(m, 1)`.
+
+Example::
+
+    >>> A = torch.tensor([[1., 1, 1],
+                          [2, 3, 4],
+                          [3, 5, 2],
+                          [4, 2, 5],
+                          [5, 4, 3]])
+    >>> B = torch.tensor([[-10., -3],
+                          [ 12, 14],
+                          [ 14, 12],
+                          [ 16, 16],
+                          [ 18, 16]])
+    >>> X, _ = torch.lstsq(B, A)
+    >>> X
+    tensor([[  2.0000,   1.0000],
+            [  1.0000,   1.0000],
+            [  1.0000,   2.0000],
+            [ 10.9635,   4.8501],
+            [  8.9332,   5.2418]])
+""")
+
 add_docstr(torch.lt,
            r"""
 lt(input, other, out=None) -> Tensor
@@ -2679,16 +2680,15 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor`
+    out (Tensor, optional): the output tensor that must be a `BoolTensor`
 
 Returns:
-    Tensor: A `torch.ByteTensor` containing a 1 at each location where comparison is true
+    Tensor: A `torch.BoolTensor` containing a True at each location where comparison is true
 
 Example::
 
     >>> torch.lt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 0,  0],
-            [ 1,  0]], dtype=torch.uint8)
+    tensor([[False, False], [True, False]])
 """)
 
 add_docstr(torch.lu_solve,
@@ -2720,7 +2720,7 @@ add_docstr(torch.masked_select,
 masked_select(input, mask, out=None) -> Tensor
 
 Returns a new 1-D tensor which indexes the :attr:`input` tensor according to
-the binary mask :attr:`mask` which is a `ByteTensor`.
+the boolean mask :attr:`mask` which is a `BoolTensor`.
 
 The shapes of the :attr:`mask` tensor and the :attr:`input` tensor don't need
 to match, but they must be :ref:`broadcastable <broadcasting-semantics>`.
@@ -2730,7 +2730,7 @@ to match, but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     input (Tensor): the input data
-    mask  (ByteTensor): the tensor containing the binary mask to index with
+    mask  (BoolTensor): the tensor containing the boolean mask to index with
     out (Tensor, optional): the output tensor
 
 Example::
@@ -2742,9 +2742,9 @@ Example::
             [ 0.1307, -2.0608,  0.1244,  2.0139]])
     >>> mask = x.ge(0.5)
     >>> mask
-    tensor([[ 0,  0,  0,  0],
-            [ 0,  1,  1,  1],
-            [ 0,  0,  0,  1]], dtype=torch.uint8)
+    tensor([[False, False, False, False],
+            [False, True, True, True],
+            [False, False, False, True]])
     >>> torch.masked_select(x, mask)
     tensor([ 1.2252,  0.5002,  0.6248,  2.0139])
 """)
@@ -3492,16 +3492,15 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor`
+    out (Tensor, optional): the output tensor that must be a `BoolTensor`
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
+    Tensor: A ``torch.BoolTensor`` containing a True at each location where comparison is true.
 
 Example::
 
     >>> torch.ne(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 0,  1],
-            [ 1,  0]], dtype=torch.uint8)
+    tensor([[False, True], [True, False]])
 """)
 
 add_docstr(torch.neg,
@@ -5853,6 +5852,42 @@ Example::
             [ 7.5751e+18,  7.1428e+18,  7.5955e+18]])
 """.format(**factory_like_common_args))
 
+add_docstr(torch.empty_strided,
+           r"""
+empty_strided(size, stride, dtype=None, layout=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
+
+Returns a tensor filled with uninitialized data. The shape and strides of the tensor is
+defined by the variable argument :attr:`size` and :attr:`stride` respectively.
+``torch.empty_strided(size, stride)`` is equivalent to
+``torch.empty(size).as_strided(size, stride)``.
+
+.. warning::
+    More than one element of the created tensor may refer to a single memory
+    location. As a result, in-place operations (especially ones that are
+    vectorized) may result in incorrect behavior. If you need to write to
+    the tensors, please clone them first.
+
+Args:
+    size (tuple of ints): the shape of the output tensor
+    stride (tuple of ints): the strides of the output tensor
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+    {pin_memory}
+
+Example::
+
+    >>> a = torch.empty_strided((2, 3), (1, 2))
+    >>> a
+    tensor([[8.9683e-44, 4.4842e-44, 5.1239e+07],
+            [0.0000e+00, 0.0000e+00, 3.0705e-41]])
+    >>> a.stride()
+    (1, 2)
+    >>> a.size()
+    torch.Size([2, 3])
+""".format(**factory_common_args))
+
 add_docstr(torch.full,
            r"""
 full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -5898,7 +5933,7 @@ add_docstr(torch.det,
            r"""
 det(input) -> Tensor
 
-Calculates determinant of a 2D square tensor.
+Calculates determinant of a square matrix or batches of square matrices.
 
 .. note::
     Backward through :meth:`det` internally uses SVD results when :attr:`input` is
@@ -5907,13 +5942,27 @@ Calculates determinant of a 2D square tensor.
     :meth:`~torch.svd` for details.
 
 Arguments:
-    input (Tensor): The input 2D square tensor
+    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+                batch dimensions.
 
 Example::
 
     >>> A = torch.randn(3, 3)
     >>> torch.det(A)
     tensor(3.7641)
+
+    >>> A = torch.randn(3, 2, 2)
+    >>> A
+    tensor([[[ 0.9254, -0.6213],
+             [-0.5787,  1.6843]],
+
+            [[ 0.3242, -0.9665],
+             [ 0.4539, -0.0887]],
+
+            [[ 1.1336, -0.4025],
+             [-0.7089,  0.9032]]])
+    >>> A.det()
+    tensor([1.1990, 0.4099, 0.7386])
 """)
 
 add_docstr(torch.where,
@@ -5934,9 +5983,9 @@ The operation is defined as:
     The tensors :attr:`condition`, :attr:`input`, :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Arguments:
-    condition (ByteTensor): When True (nonzero), yield input, otherwise yield other
-    input (Tensor): values selected at indices where :attr:`condition` is ``True``
-    other (Tensor): values selected at indices where :attr:`condition` is ``False``
+    condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
+    x (Tensor): values selected at indices where :attr:`condition` is ``True``
+    y (Tensor): values selected at indices where :attr:`condition` is ``False``
 
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`input`, :attr:`other`
@@ -5967,7 +6016,7 @@ add_docstr(torch.logdet,
            r"""
 logdet(input) -> Tensor
 
-Calculates log determinant of a 2D square tensor.
+Calculates log determinant of a square matrix or batches of square matrices.
 
 .. note::
     Result is ``-inf`` if :attr:`input` has zero log determinant, and is ``nan`` if
@@ -5980,7 +6029,8 @@ Calculates log determinant of a 2D square tensor.
     :meth:`~torch.svd` for details.
 
 Arguments:
-    input (Tensor): The input 2D square tensor
+    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+                batch dimensions.
 
 Example::
 
@@ -5989,13 +6039,26 @@ Example::
     tensor(0.2611)
     >>> torch.logdet(A)
     tensor(-1.3430)
+    >>> A
+    tensor([[[ 0.9254, -0.6213],
+             [-0.5787,  1.6843]],
+
+            [[ 0.3242, -0.9665],
+             [ 0.4539, -0.0887]],
+
+            [[ 1.1336, -0.4025],
+             [-0.7089,  0.9032]]])
+    >>> A.det()
+    tensor([1.1990, 0.4099, 0.7386])
+    >>> A.det().log()
+    tensor([ 0.1815, -0.8917, -0.3031])
 """)
 
 add_docstr(torch.slogdet,
            r"""
 slogdet(input) -> (Tensor, Tensor)
 
-Calculates the sign and log value of a 2D square tensor's determinant.
+Calculates the sign and log absolute value of the determinant(s) of a square matrix or batches of square matrices.
 
 .. note::
     If ``input`` has zero determinant, this returns ``(0, -inf)``.
@@ -6007,7 +6070,8 @@ Calculates the sign and log value of a 2D square tensor's determinant.
     See :meth:`~torch.svd` for details.
 
 Arguments:
-    input (Tensor): The input 2D square tensor
+    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+                batch dimensions.
 
 Returns:
     A namedtuple (sign, logabsdet) containing the sign of the determinant, and the log

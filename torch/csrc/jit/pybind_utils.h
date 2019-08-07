@@ -6,6 +6,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/tracer.h>
@@ -334,6 +335,10 @@ inline IValue toIValue(
     case TypeKind::FloatType:
       return py::cast<double>(obj);
     case TypeKind::IntType:
+      if (THPDtype_Check(obj.ptr())) {
+        auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
+        return static_cast<int64_t>(dtype->scalar_type);
+      }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
       if (!obj.is_none()) {
@@ -397,6 +402,7 @@ inline IValue toIValue(
             return repeated;
           }
         case TypeKind::DimensionedTensorType:
+        case TypeKind::ProfiledTensorType:
         case TypeKind::TensorType:
           return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:
@@ -435,18 +441,25 @@ inline IValue toIValue(
       }
       return userObj;
     }
-    case TypeKind::NumberType:
+    case TypeKind::NumberType: {
+      if (THPDtype_Check(obj.ptr())) {
+        auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
+        return static_cast<int64_t>(dtype->scalar_type);
+      }
       if (py::isinstance<py::int_>(obj)) {
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
       }
+    }
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
       break;
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
+    case TypeKind::CapsuleType:
+      AT_ERROR("Capsule Values aren't supported");
   }
   AT_ERROR(
       "Missing cases in toIValue for type: ",
@@ -509,6 +522,17 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   }
 }
 
+inline c10::optional<py::object> tryToConvertToCustomClass(
+    const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
+  if (obj->name().find("__torch__.torch.classes") == 0) {
+    auto objPtr = (void*)obj->getSlot(0).toCapsule().release();
+    auto classConverter = c10::getClassConverter()[obj->name()];
+    py::handle rawPyObj = classConverter(objPtr);
+    auto o = py::reinterpret_steal<py::object>(rawPyObj);
+    return o;
+  }
+  return c10::nullopt;
+}
 inline py::object toPyObject(IValue&& ivalue) {
   if (ivalue.isNone()) {
     return py::none();
@@ -572,6 +596,10 @@ inline py::object toPyObject(IValue&& ivalue) {
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
     auto pyCu = get_python_cu();
+    auto res = tryToConvertToCustomClass(obj);
+    if (res.has_value()) {
+      return res.value();
+    }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
