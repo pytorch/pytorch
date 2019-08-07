@@ -471,10 +471,11 @@ binary_linux_build: &binary_linux_build
   - run:
       name: Install unbuffer and ts
       command: |
+        # yf225 TODO: for CentOS build, make sure to run `retry yum install -q -y zip openssl`
         set -eux -o pipefail
         source /env
         retry apt-get update
-        retry apt-get -y install expect moreutils
+        retry apt-get -y install expect moreutils zip openssl
         conda install -y -c eumetsat expect
   - run:
       name: Build
