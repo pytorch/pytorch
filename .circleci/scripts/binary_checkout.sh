@@ -39,11 +39,8 @@ git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-git clone -q https://github.com/yf225/builder.git "$BUILDER_ROOT"
+git clone -q https://github.com/yf225/builder.git -b cpp_new_abi "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
-git fetch origin
-git checkout cpp_new_abi
-git reset --hard
 echo "Using builder from "
 git --no-pager log --max-count 1
 popd
