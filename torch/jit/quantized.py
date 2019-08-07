@@ -5,7 +5,7 @@ from torch import Tensor  # noqa
 from torch.nn import _VF
 
 from torch._jit_internal import _parameter_list
-from torch.nn.utils.rnn import PackedSequence, get_packed_sequence
+from torch.nn.utils.rnn import PackedSequence
 
 class QuantizedLinear(torch.jit.ScriptModule):
     __constants__ = ['scale', 'zero_point']
@@ -39,7 +39,7 @@ class QuantizedLinear(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, input):
-        out = torch.fbgemm_linear_int8_weight(
+        out = torch.fbgemm_linear_int8_weight_fp32_activation(
             input.float(), self.weight, self.packed_tensor_ptr, self.col_offsets,
             self.scale, self.zero_point, self.bias)
         return out.to(input.dtype)
@@ -76,7 +76,7 @@ class QuantizedLinearFP16(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, input):
-        out = torch.fbgemm_linear_fp16_weight(
+        out = torch.fbgemm_linear_fp16_weight_fp32_activation(
             input.float(), self.packed_weight, self.bias)
         return out
 
@@ -371,8 +371,8 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
-        # type: (Optional[Tensor], Tuple[int, int, int], str) -> None
-        if hx is not None and hx.size() != expected_hidden_size:
+        # type: (Tensor, Tuple[int, int, int], str) -> None
+        if hx.size() != expected_hidden_size:
             raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
 
     @torch.jit.script_method
@@ -497,14 +497,14 @@ class QuantizedLSTM(QuantizedRNNBase):
 
     @torch.jit.script_method
     def forward_packed(self, input, hx=None):
-        # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
+        # type: (PackedSequence, Optional[Tuple[Tensor, Tensor]]) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]  # noqa
         input, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
         max_batch_size = int(max_batch_size)
 
         output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
 
-        output = get_packed_sequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
 
@@ -576,14 +576,14 @@ class QuantizedGRU(QuantizedRNNBase):
 
     @torch.jit.script_method
     def forward_packed(self, input, hx=None):
-        # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tensor]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tensor]  # noqa
+        # type: (PackedSequence, Optional[Tensor]) -> Tuple[PackedSequence, Tensor]
         input, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
         max_batch_size = int(max_batch_size)
 
         output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
 
-        output = get_packed_sequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
     def forward(self, input, hx=None):
