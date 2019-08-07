@@ -5094,6 +5094,17 @@ a")
                 if y is not None and x_none:
                     print(x + y)  # noqa: T484
 
+    def test_assertion_optional_refinement(self):
+        @torch.jit.script
+        def test(x, y):
+            # type: (Optional[int], Optional[int]) -> int
+            assert x is not None and y is not None
+            return x + y
+
+        self.assertEqual(test(2, 2), 4)
+        with self.assertRaisesRegex(Exception, ""):
+            test(1, None)
+
     def test_optional_tensor(self):
         @torch.jit.script
         def fn(x, y):
