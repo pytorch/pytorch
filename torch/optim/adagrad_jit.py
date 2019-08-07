@@ -33,7 +33,7 @@ class AdagradJit(object):
                 self.state[p] = torch.jit.annotate(Dict[str, torch.Tensor], {})
                 state = self.state[p]
                 # TODO: no union or any types in TorchScript, make step a tensor instead
-                state['step'] = torch.tensor(0)
+                state['step'] = torch.tensor(0.0)
                 state['sum'] = torch.full_like(p, initial_accumulator_value)
 
     def add_param_group(self, param_group):

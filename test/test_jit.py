@@ -3564,6 +3564,14 @@ def foo(xyz):
         self.checkScript(f_grad, (x,))
         self.checkScript(f_grad, (y,))
 
+    def test_tensor_data(self):
+        x = torch.randn(3, 4)
+
+        def f_data(x):
+            return x.data
+
+        self.checkScript(f_data, (x,))
+
     def test_tensor_dtype(self):
         x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
         x_long = torch.empty(34, 56, 78, dtype=torch.long)
@@ -12894,6 +12902,7 @@ a")
         self.assertEqual(eager_out, script_out)
 
     def test_nn_LSTM(self):
+        from torch.nn.utils.rnn import PackedSequence
         input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
 
         class S(torch.jit.ScriptModule):
@@ -12903,7 +12912,7 @@ a")
 
             @torch.jit.script_method
             def forward(self, input):
-                # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
+                # type: (PackedSequence) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]  # noqa
                 return self.x(input)
 
         eager_out = self.runAndSaveRNG(lambda x: torch.nn.LSTM(5, 5)(x), (input,))[0]
@@ -13441,6 +13450,18 @@ a")
             sys.stdout = old_stdout
 
         FileCheck().check('foo').run(redirect.s)
+
+    def test_dtype_attr(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.dtype = torch.zeros([]).dtype
+
+            def forward(self):
+                return torch.zeros(3, 4, dtype=self.dtype)
+
+        f = Foo()
+        torch.jit.script(f)
 
     def test_optional_tuple(self):
         def fn(x=None):
@@ -17987,6 +18008,7 @@ class TestOptimizer(JitTestCase):
 
     def test_adagrad_jit(self):
         import torch.optim as optim
+        from torch.optim import AdagradJit
         # from torchvision import datasets, transforms
 
         class Net(torch.jit.ScriptModule):
@@ -18025,12 +18047,20 @@ class TestOptimizer(JitTestCase):
         # optimizer = optim.Adagrad(model.parameters())
         optimizer = optim.AdagradJit(list(model.parameters()))
 
-        for i in range(10):
+        @torch.jit.script
+        def adagrad_jit_step(optimizer):
+            # type: (AdagradJit) -> None
+            optimizer.step()
+
+
+
+        for i in range(40):
             output = model(data)
             loss = F.nll_loss(output, target)
-            loss.backward()
-            optimizer.step()
             print(loss)
+            loss.backward()
+            # print(adagrad_jit_step.graph_for(optimizer))
+            optimizer.step()
         # break
         # optimizer = optim.AdagradJit(model.parameters())
         # optimizer = optim.Adagrad(model.parameters())
