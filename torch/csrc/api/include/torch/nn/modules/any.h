@@ -431,7 +431,11 @@ AnyModule::AnyModule(std::shared_ptr<ModuleType> module)
       torch::detail::has_forward<ModuleType>::value,
       "Can only store module with a forward() method that has a non-templatized"
       "return type into AnyModule (e.g. we cannot store nn::Sequential"
-      "into AnyModule, because its forward() method's return type is templatized)");
+      "into AnyModule, because its forward() method's return type is templatized."
+      " If you need to use nn::Sequentials inside each other you can subclass "
+      "nn::Sequential and write a non-templatized forward function for it. You can checkout "
+      "https://github.com/pytorch/vision/blob/master/torchvision/csrc/models/mnasnet.cpp#L59 "
+      "for an example on how to do this.).");
 }
 
 template <typename ModuleType, typename>
