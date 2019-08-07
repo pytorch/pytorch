@@ -13715,14 +13715,13 @@ a")
 
         self.checkScript(fn, ("abcdefgh",))
 
-    def test_dict_in(self):
-        def fn(x):
+    def test_dict_in_not_in(self):
+        def test_in_dict(x):
             # type: (Dict[str, int]) -> bool
             return 'hi' in x
 
-        self.checkScript(fn, ({'hi': 2, 'bye': 3},))
-        self.checkScript(fn, ({'bye': 3},))
-
+        self.checkScript(test_in_dict, ({'hi': 2, 'bye': 3},))
+        self.checkScript(test_in_dict, ({'bye': 3},))
 
         # Check evaluation order
         @torch.jit.script
@@ -13744,6 +13743,16 @@ a")
         if not IS_WINDOWS:
             # no stdout capturing on windows
             self.assertEqual(captured[0], "a\nb\n")
+
+        def test_not_in_dict(a):
+            # type: (Dict[str, int]) -> bool
+            if "hello" not in a:
+                return False
+            else:
+                return True
+
+        self.checkScript(test_not_in_dict, ({"hello": 1, "world": 2}, ))
+        self.checkScript(test_not_in_dict, ({"world": 2}, ))
 
     def test_get_set_state_with_tensors(self):
         class M(torch.nn.Module):
