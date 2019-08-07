@@ -23,7 +23,9 @@ class ConvReLU2d(Conv2d):
                                          groups=groups, bias=bias, padding_mode=padding_mode)
 
     def forward(self, input):
-        if input.ndim != 4:
+        # Temporarily using len(shape) instead of ndim due to JIT issue
+        # https://github.com/pytorch/pytorch/issues/23890
+        if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
         output = torch.ops.quantized.fbgemm_conv2d_relu(input.permute([0, 2, 3, 1]),
                                                         self._packed_weight, self.bias,

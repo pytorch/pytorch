@@ -7,12 +7,21 @@ r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
 
+import hypothesis
 import torch
 import torch.nn.quantized as nnq
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, QConfig, default_observer, default_weight_observer, \
     default_qat_qconfig
+
+# Disable deadline testing if this version of hypthesis supports it, otherwise
+# just return the original function
+def no_deadline(fn):
+    try:
+        return hypothesis.settings(deadline=None)(fn)
+    except hypothesis.errors.InvalidArgument:
+        return fn
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -107,8 +116,13 @@ class QuantizationTestCase(TestCase):
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
 
-    def checkScriptable(self, mod):
+    def checkScriptable(self, mod, ref_inputs=None, ref_outputs=None):
+        assert not ((ref_inputs is None) ^ (ref_outputs is None)), 'Both or neither' \
+            'of ref_inputs and ref_outputs must be specified'
         scripted = torch.jit.script(mod)
+
+        if ref_inputs is not None:
+            self.assertEqual(scripted(*ref_inputs), ref_outputs)
 
 # Below are a series of neural net models to use in testing quantization
 class SingleLayerLinearModel(torch.nn.Module):
