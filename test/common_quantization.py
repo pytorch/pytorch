@@ -116,13 +116,15 @@ class QuantizationTestCase(TestCase):
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
 
-    def checkScriptable(self, mod, ref_inputs=None, ref_outputs=None):
-        assert not ((ref_inputs is None) ^ (ref_outputs is None)), 'Both or neither' \
-            'of ref_inputs and ref_outputs must be specified'
+    # calib_data follows the same schema as calib_data for
+    # test_only_eval_fn, i.e. (input iterable, output iterable)
+    def checkScriptable(self, mod, calib_data):
         scripted = torch.jit.script(mod)
 
-        if ref_inputs is not None:
-            self.assertEqual(scripted(*ref_inputs), ref_outputs)
+        for (inp, _) in calib_data:
+            ref_output = mod(inp)
+            scripted_output = scripted(inp)
+            self.assertEqual(scripted_output, ref_output)
 
 # Below are a series of neural net models to use in testing quantization
 class SingleLayerLinearModel(torch.nn.Module):

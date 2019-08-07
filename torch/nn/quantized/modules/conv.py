@@ -133,7 +133,7 @@ class Conv2d(_ConvNd):
                                              self._packed_weight, self.bias,
                                              self.stride, self.padding,
                                              self.dilation, self.groups,
-                                             self.scale, self.zero_point)
+                                             float(self.scale), int(self.zero_point))
         return output.permute([0, 3, 1, 2])
 
 
