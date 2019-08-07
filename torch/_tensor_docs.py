@@ -522,7 +522,7 @@ Example::
     tensor([False,  True])
     >>> torch.tensor([0, 1, -10], dtype=torch.int8).logical_not_()
     tensor([1, 0, 0], dtype=torch.int8)
-    >>> torch.logical_not(torch.tensor([0, 1, -10], dtype=torch.double))
+    >>> torch.tensor([0, 1, -10], dtype=torch.double).logical_not_()
     tensor([1., 0., 0.], dtype=torch.float64)
 """)
 
