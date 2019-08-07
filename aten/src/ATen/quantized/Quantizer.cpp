@@ -192,7 +192,7 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
   const auto* qd = qtensor.data<T>();
   float* rd = rtensor.data<float>();
   for (auto i = 0; i < qtensor.numel(); ++i) {
-    rd[i] = dequantize_val<typename T::underlying>(scale, zero_point, qd[i]);
+    rd[i] = dequantize_val<T>(scale, zero_point, qd[i]);
   }
   return rtensor;
 }
