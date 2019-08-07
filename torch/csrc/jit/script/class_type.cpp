@@ -9,7 +9,7 @@ namespace c10 {
 FunctionType::FunctionType(Function* function)
     : NamedType(TypeKind::FunctionType),
       function_(function),
-      name_(function_->qualname()) {}
+      name_(function->qualname()) {}
 
 Function* ClassType::getMethod(const std::string& name) const {
   for (auto method : methods_) {

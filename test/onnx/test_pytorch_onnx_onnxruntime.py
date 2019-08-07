@@ -327,6 +327,33 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
 
+    def test_std(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
+    def test_std_along_dims(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
+    def test_std_keepdim(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), unbiased=False, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
     @skipIfUnsupportedOpsetVersion([7, 8])
     def test_interpolate_upsample_dynamic_sizes(self):
         class MyModel(torch.nn.Module):
@@ -688,6 +715,22 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_test(MaskedFillModel2(), x)
+
+    def test_frobenius_norm(self):
+        class NormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.norm(x, p="fro", dim=0, keepdim=False)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(NormModel(), x)
+
+    def test_frobenius_norm_keepdim(self):
+        class NormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.norm(x, p="fro", dim=(0, 1), keepdim=True)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(NormModel(), x)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
