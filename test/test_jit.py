@@ -5094,17 +5094,6 @@ a")
                 if y is not None and x_none:
                     print(x + y)  # noqa: T484
 
-    def test_assertion_optional_refinement(self):
-        @torch.jit.script
-        def test(x, y):
-            # type: (Optional[int], Optional[int]) -> int
-            assert x is not None and y is not None
-            return x + y
-
-        self.assertEqual(test(2, 2), 4)
-        with self.assertRaisesRegex(Exception, ""):
-            test(1, None)
-
     def test_optional_tensor(self):
         @torch.jit.script
         def fn(x, y):
@@ -13744,30 +13733,6 @@ a")
         if not IS_WINDOWS:
             # no stdout capturing on windows
             self.assertEqual(captured[0], "a\nb\n")
-
-    def test_get_set_state_with_tensors(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.tensor = torch.randn(2, 2)
-
-            @torch.jit.export
-            def __getstate__(self):
-                return (self.tensor,)
-
-            @torch.jit.export
-            def __setstate__(self, state):
-                # type: (Tuple[Tensor])
-                self.tensor = state[0]
-
-            def forward(self, x):
-                return x + self.tensor
-
-        with TemporaryFileName() as fname:
-            m = torch.jit.script(M())
-            m.save(fname)
-            loaded = torch.jit.load(fname)
-            self.assertEqual(loaded.tensor, m.tensor)
 
     def test_in_for_and_comp_expr(self):
         def fn(d):
