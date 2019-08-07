@@ -96,13 +96,7 @@ class OSConfigNode(ConfigNode):
         self.props["cuda_versions"] = cuda_versions
 
     def get_children(self):
-        packaging_variants = [PackageFormatConfigNode(self, k, v) for k, v in self.py_tree.items()]
-
-        if self.find_prop("smoke"):
-            filtered_packaging_variants = list(filter(lambda x: x.get_label() != "libtorch", packaging_variants))
-            return filtered_packaging_variants
-        else:
-            return packaging_variants
+        return [PackageFormatConfigNode(self, k, v) for k, v in self.py_tree.items()]
 
 
 class PackageFormatConfigNode(ConfigNode):
