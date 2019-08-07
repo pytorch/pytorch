@@ -59,17 +59,13 @@ CONFIG_TREE_DATA = OrderedDict(
     )),
 )
 
-
-# Why is this an option?
-# All the nightlies used to be devtoolset3 and built with the old gcc ABI. We
-# added a devtoolset7 option so that we could build nightlies with the new gcc
-# ABI. That didn't work since devtoolset7 can't build with the new gcc ABI. But
-# then we set devtoolset7 to be the default anyways, since devtoolset7
-# understands avx512, which is needed for good fbgemm performance.
-# This should be removed. The base dockers should just be upgraded to
-# devtoolset7 so we don't have to reinstall this in every build job.
-# The same machinery that this uses, though, should be retooled for a different
-# compiler toolchain that can build with the new gcc ABI.
+# GCC config variants:
+#
+# All the nightlies (except libtorch with new gcc ABI) are built with devtoolset7,
+# which can only build with old gcc ABI. It is better than devtoolset3
+# because it understands avx512, which is needed for good fbgemm performance.
+#
+# Libtorch with new gcc ABI is built with gcc 5.4 on Ubuntu 16.04.
 LINUX_GCC_CONFIG_VARIANTS = OrderedDict(
     manywheel=['devtoolset7'],
     conda=['devtoolset7'],
