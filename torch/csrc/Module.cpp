@@ -55,6 +55,7 @@
 #ifdef USE_C10D
 #include <torch/csrc/distributed/c10d/c10d.h>
 #endif
+#include <torch/csrc/distributed/rpc/rpc.h>
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
@@ -626,6 +627,7 @@ PyObject* initModule() {
 #ifdef USE_C10D
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #endif
+THPUtils_addPyMethodDefs(methods, torch::distributed::rpc::python_functions());
 #endif
 
 #if PY_MAJOR_VERSION == 2
@@ -742,6 +744,12 @@ PyObject* initModule() {
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", _GLIBCXX_USE_CXX11_ABI ? Py_True : Py_False));
 #else
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
+#endif
+
+#ifdef BUILD_NAMEDTENSOR
+  ASSERT_TRUE(set_module_attr("_BUILD_NAMEDTENSOR", Py_True));
+#else
+  ASSERT_TRUE(set_module_attr("_BUILD_NAMEDTENSOR", Py_False));
 #endif
 
   auto defaultGenerator = at::detail::getDefaultCPUGenerator();

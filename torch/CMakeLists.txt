@@ -224,6 +224,12 @@ if (USE_DISTRIBUTED)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/comm.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp
+
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/RpcAgent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/ProcessGroupAgent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/functions.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
         )
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
@@ -244,7 +250,7 @@ if (USE_NCCL)
 endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists
-# of type stub files to be omitted. 
+# of type stub files to be omitted.
 # For comptability with older CMake versions, we omit it for now, but leave it as a comment in case comptability with the older
 # CMake versions is eventually dropped.
 # set(Modules

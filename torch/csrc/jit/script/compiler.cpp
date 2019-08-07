@@ -471,14 +471,6 @@ static Value* materializeConstant(
   return new_constant;
 }
 
-static Value* ensureInt(const SourceRange& range, Value* v) {
-  if (!v->type()->isSubtypeOf(IntType::get())) {
-    throw ErrorReport(range)
-        << "expected a int but found a " << v->type()->python_str();
-  }
-  return v;
-}
-
 inline bool isSupportedListElementType(const TypePtr& type) {
   return type->isSubtypeOf(TensorType::get()) ||
       type->isSubtypeOf(NumberType::get());
@@ -549,7 +541,8 @@ struct to_ir {
 
   // If the graph might not return, add an implicit None return at the end
   void handleMaybeNoReturn(const Def& def, Block* block) {
-    if (exit_blocks.count(graph->block()) == 0) {
+    auto decl_ret = def_stack_.back().declared_return_type_;
+    if (exit_blocks.count(block) == 0) {
       auto decl_ret = def_stack_.back().declared_return_type_;
       if (decl_ret && decl_ret != NoneType::get()) {
         throw ErrorReport(def.range())
@@ -559,6 +552,14 @@ struct to_ir {
       WithInsertPoint b(*block->nodes().end());
       emitReturn(Return::create(
           def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
+    } else {
+      // if we haven't seen any return statements, but the graph block exits
+      // (the funciton always throws) then we accept the declared return type if
+      // it exists or set it to none
+      if (def_stack_.back().merged_return_type_ == nullptr) {
+        def_stack_.back().merged_return_type_ =
+            decl_ret != nullptr ? decl_ret : NoneType::get();
+      }
     }
   }
 
@@ -614,9 +615,8 @@ struct to_ir {
     Stack stack;
     // XXX: We need to turn optimization off here because otherwise we try to
     // recursively initialize stuff in DecomposeOps.
-    setGraphExecutorOptimize(false);
+    GraphOptimizerEnabledGuard guard(false);
     cu.get_function(def.name().name()).run(stack);
-    setGraphExecutorOptimize(true);
     return stack.at(0).toTuple()->elements();
   }
 
@@ -762,9 +762,9 @@ struct to_ir {
       const SourceRange& range,
       const FunctionSchema& schema,
       Block* block) {
-    // rewrites ensure there is always a return statement in program
+    // handleMaybeNoReturn ensures that merged_return_type_ is always set
     auto ret_type = def_stack_.back().merged_return_type_;
-    AT_ASSERT(ret_type);
+    TORCH_INTERNAL_ASSERT(ret_type);
 
     // in the ConvertToSSA pass, prim::ReturnStmts are lowered so that the
     // correct return value is set. Until then, we have a correctly-typed
@@ -1481,32 +1481,23 @@ struct to_ir {
   // raise a
   //
   // We ignore the expression following raise
-  //
-  // NYI: add exception logic to control-flow nodes
-  // if True:
-  //   a = 1
-  // else
-  //   raise Exception("Hi")
-  // print(a)
   void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
     auto string_input = insertConstant(*graph, exception, nullptr, loc);
     graph->insert(prim::RaiseException, {string_input}, {}, loc);
+    exit_blocks.insert(environment_stack->block());
   }
 
+  // emit assserions as an if branch so that assertions will reuse the
+  // emitIfElseBlocks refining of types
   void emitAssert(const Assert& stmt) {
     Value* cond_value = emitCond(stmt.test());
-    Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
-
-    n->addInput(cond_value);
-    /* true_block =*/n->addBlock();
-    auto* false_block = n->addBlock();
-
-    // if assert test is false throw exception
-    pushFrame(false_block);
-    WithInsertPoint guard(false_block);
-    emitRaise(stmt.range());
-    popFrame();
+    List<Stmt> true_branch = List<Stmt>::create(stmt.range(), {});
+    List<Stmt> false_branch =
+        List<Stmt>::create(stmt.range(), {Raise::create(stmt.range())});
+    auto if_stmt =
+        If::create(stmt.range(), stmt.test(), true_branch, false_branch);
+    emitIfElseBlocks(cond_value, if_stmt);
   }
 
   // Validate that the `lhs` Expr's in an assignment statement are valid. That

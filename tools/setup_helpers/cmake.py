@@ -219,6 +219,7 @@ class CMake:
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
+             'INSTALL_TEST',
              'MKL_THREADING',
              'MKLDNN_THREADING',
              'MSVC_Z7_OVERRIDE',
@@ -279,7 +280,6 @@ class CMake:
                       PYTHON_LIBRARY=escape_path(cmake_python_library),
                       PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
                       TORCH_BUILD_VERSION=version,
-                      INSTALL_TEST=build_test,
                       NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
                       CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
                       **build_options)

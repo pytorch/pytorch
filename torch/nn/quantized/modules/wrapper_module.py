@@ -8,27 +8,40 @@ from torch._ops import ops
 from torch.nn import Module
 
 _FLOAT_MODULES = {
-    torch.add: ops.quantized.add
+    torch.add: ops.quantized.add,
+    torch.cat: ops.quantized.cat
 }
 
-class WrapperModule(torch.nn.Module):
+
+"""Wrappes unary operators."""
+class UnaryWrapper(torch.nn.Module):
     def __init__(self, operation):
-        super(WrapperModule, self).__init__()
+        super(UnaryWrapper, self).__init__()
         self.operation = operation
 
-    def forward(self, *x):
-        return self.operation(*x)
+    def forward(self, x):
+        return self.operation(x)
 
 
-class QuantizedWrapperModule(torch.nn.Module):
+"""Wrappes binary operators."""
+class BinaryWrapper(UnaryWrapper):
+    def __init__(self, operation):
+        super(BinaryWrapper, self).__init__(operation)
+
+    def forward(self, x, y):
+        return self.operation(x, y)
+
+
+"""Wraps unary operators (quantized)."""
+class QuantizedUnaryWrapper(torch.nn.Module):
     def __init__(self, operation):
         super(WrapperModule, self).__init__()
         self.operation = operation
         self.register_buffer('scale', torch.tensor([1.0], dtype=torch.double))
         self.register_buffer('zero_point', torch.tensor([0], dtype=torch.long))
 
-    def forward(self, *x):
-        return self.operation(*x, scale=self.scale, zero_point=self.zero_point)
+    def forward(self, x):
+        return self.operation(x, scale=self.scale, zero_point=self.zero_point)
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
@@ -46,3 +59,12 @@ class QuantizedWrapperModule(torch.nn.Module):
         mod.scale = torch.tensor(scale, dtype=torch.double)
         mod.zero_point = torch.tensor(zero_point, dtype=torch.long)
         return mod
+
+
+"""Wraps binary operators (quantized)."""
+class QuantizedBinaryWrapper(QuantizedUnaryWrapper):
+    def __init__(self, operation):
+        super(QuantizedBinaryWrapper, self).__init__(operation)
+
+    def forward(self, x, y):
+        return self.operation(x, y, scale=self.scale, zero_point=self.zero_point)
