@@ -32,7 +32,7 @@ fi
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   export DOCKER_IMAGE="soumith/conda-cuda"
 elif [[ "$DESIRED_CUDA" == cpu ]]; then
-  export DOCKER_IMAGE="soumith/manylinux-cuda80"
+  export DOCKER_IMAGE="soumith/manylinux-cuda100"
 else
   export DOCKER_IMAGE="soumith/manylinux-cuda${DESIRED_CUDA:2}"
 fi
@@ -77,7 +77,8 @@ export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
 
-export TORCH_PACKAGE_NAME='torch-nightly'
+# TODO: We don't need this anymore IIUC
+export TORCH_PACKAGE_NAME='torch'
 export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
 
 export USE_FBGEMM=1
