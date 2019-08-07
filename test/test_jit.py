@@ -12880,6 +12880,7 @@ a")
         self.assertEqual(eager_out, script_out)
 
     def test_nn_LSTM(self):
+        from torch.nn.utils.rnn import PackedSequence
         input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
 
         class S(torch.jit.ScriptModule):
@@ -12889,7 +12890,7 @@ a")
 
             @torch.jit.script_method
             def forward(self, input):
-                # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
+                # type: (PackedSequence) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]  # noqa
                 return self.x(input)
 
         eager_out = self.runAndSaveRNG(lambda x: torch.nn.LSTM(5, 5)(x), (input,))[0]
@@ -13428,6 +13429,18 @@ a")
 
         FileCheck().check('foo').run(redirect.s)
 
+    def test_dtype_attr(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.dtype = torch.zeros([]).dtype
+
+            def forward(self):
+                return torch.zeros(3, 4, dtype=self.dtype)
+
+        f = Foo()
+        torch.jit.script(f)
+
     def test_optional_tuple(self):
         def fn(x=None):
             # type: (Optional[Tuple[int, int]]) -> Tuple[int, int]
@@ -13630,6 +13643,41 @@ a")
 
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "keyword-arg expansion is not supported"):
             torch.jit.script(fn)
+
+    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(), "requires FBGEMM")
+    def test_erase_class_tensor_shapes(self):
+        class Linear(torch.nn.Module):
+            def __init__(self, in_features, out_features):
+                super(Linear, self).__init__()
+                qweight = torch._empty_affine_quantized(
+                    [out_features, in_features], scale=1, zero_point=0,
+                    dtype=torch.qint8)
+                self.register_buffer('_packed_weight',
+                                     torch.ops.quantized.fbgemm_linear_prepack(qweight))
+
+            @torch.jit.export
+            def __getstate__(self):
+                return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+
+            def forward(self):
+                return self._packed_weight
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self._packed_weight.set_(
+                    torch.ops.quantized.fbgemm_linear_prepack(state))
+
+            @property
+            def weight(self):
+                return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+
+            @weight.setter
+            def weight(self, w):
+                self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
+
+        with torch.jit._disable_emit_hooks():
+            x = torch.jit.script(Linear(10, 10))
+            torch._C._jit_pass_erase_shape_information(x.graph)
 
     @unittest.skipIf(PY2, "kwarg expansion requires Python 3")
     def test_kwargs_error_msg(self):
