@@ -188,7 +188,7 @@ struct SourceImporter {
     }
   }
 
-  void importLibs(std::shared_ptr<CompilationUnit> owner, const std::string& class_qualifier) {
+  void import(const std::string& qualifier) {
     checkVersionNumber();
     auto& L = p_.lexer();
 
@@ -204,10 +204,10 @@ struct SourceImporter {
           throw ErrorReport(class_def.range())
               << "Torchscript does not support class inheritance.";
         }
-        const auto qualified_classname = QualifiedName(
-            QualifiedName(class_qualifier), class_def.name().name());
+        const auto qualified_classname =
+            QualifiedName(QualifiedName(qualifier), class_def.name().name());
         auto class_type = ClassType::create(
-            c10::QualifiedName(qualified_classname), owner, is_module);
+            c10::QualifiedName(qualified_classname), cu_, is_module);
 
         std::vector<Def> methods;
         std::vector<ResolverPtr> resolvers;
@@ -302,14 +302,14 @@ struct SourceImporter {
           }
         }
 
-        owner->register_type(class_type);
+        cu_->register_type(class_type);
         const auto self = SimpleSelf(class_type);
-        owner->define(qualified_classname, methods, resolvers, &self);
+        cu_->define(qualified_classname, methods, resolvers, &self);
       } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
         auto named_tuple_def = NamedTupleDef(parsed_treeref);
 
-        auto qualified_name = c10::QualifiedName(
-            class_qualifier + "." + named_tuple_def.name().name());
+        auto qualified_name =
+            c10::QualifiedName(qualifier + "." + named_tuple_def.name().name());
 
         std::vector<std::string> field_names;
         std::vector<TypePtr> field_types;
@@ -333,7 +333,7 @@ struct SourceImporter {
             qualified_name,
             TupleType::namedTupleSchemaFromNamesAndTypes(
                 qualified_name, field_names, field_types));
-        owner->register_type(tt);
+        cu_->register_type(tt);
       } else {
         TORCH_INTERNAL_ASSERT(
             false,
@@ -343,7 +343,7 @@ struct SourceImporter {
     }
   }
 
-  void importFunctions(
+  void LEGACY_importFunctions(
       const c10::optional<c10::QualifiedName>& prefix,
       const Self* self) {
     checkVersionNumber();
@@ -413,19 +413,20 @@ void LEGACY_import_methods(
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(mod.class_compilation_unit(), src, constant_table, import_callback);
+  SourceImporter importer(
+      mod.class_compilation_unit(), src, constant_table, import_callback);
   auto self = SimpleSelf(mod.type());
-  importer.importFunctions(mod.name(), &self);
+  importer.LEGACY_importFunctions(mod.name(), &self);
 }
 
 void import_libs(
     std::shared_ptr<CompilationUnit> cu,
-    const std::string& class_qualifier,
+    const std::string& qualifier,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& tensor_table,
     const std::function<void(const std::string&)>& import_callback) {
   SourceImporter importer(cu, src, tensor_table, import_callback);
-  importer.importLibs(cu, class_qualifier);
+  importer.import(qualifier);
 }
 } // namespace script
 } // namespace jit

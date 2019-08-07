@@ -548,7 +548,7 @@ class ScriptModuleSerializer final {
 
   IValue moduleGetState(const script::Module& module);
 
-  void convertClass(const c10::NamedTypePtr& type);
+  void convertNamedType(const c10::NamedTypePtr& type);
 
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
@@ -557,12 +557,11 @@ class ScriptModuleSerializer final {
   std::vector<at::Tensor> tensor_table_;
 
   // all deps used by this module hierarchy
-  std::vector<c10::NamedTypePtr> deps_table_;
-  struct ClassInfo {
+  struct TypeInfo {
     std::string source;
     SourceRangeRecords debug_info;
   };
-  OrderedDict<c10::NamedTypePtr, ClassInfo> converted_classes_;
+  OrderedDict<c10::NamedTypePtr, TypeInfo> converted_types_;
 
   std::vector<IValue> LEGACY_pickled_ivalues_;
   size_t proto_version_ = torch::ProtoVersion::PROTO_VERSION_NEWEST;
@@ -618,18 +617,13 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   static const std::string opset_string =
       c10::str("op_version_set = ", CURRENT_OP_VERSION_SET, "\n");
 
-  // Convert all the classes that this model depends on
-  for (const auto& class_type : deps_table_) {
-    convertClass(class_type);
-  }
-
-  // Mapping of filename => src. We need this because multiple clases may go in
+  // Mapping of filename => src. We need this because multiple classes may go in
   // the same file (e.g. foo.bar.Baz and foo.bar.Qux)
 
-  // Aggregate classes into files by their qualified names
+  // Aggregate dependencies into files by their qualified names
   std::unordered_map<std::string, std::ostringstream> fileToSrc;
   std::unordered_map<std::string, SourceRangeRecords> fileToDebug;
-  for (auto& item : converted_classes_) {
+  for (auto& item : converted_types_) {
     const auto& class_type = item.key();
     auto& class_info = item.value();
 
@@ -684,38 +678,32 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   }
 }
 
-// python print the class and add to the converted_classes_. Recursively
+// python print the type and add to the converted_types_. Recursively
 // python print all classes that this class depends on.
-void ScriptModuleSerializer::convertClass(
+void ScriptModuleSerializer::convertNamedType(
     const c10::NamedTypePtr& class_type) {
-  if (converted_classes_.contains(class_type)) {
+  if (converted_types_.contains(class_type)) {
     return;
   }
 
-  std::vector<c10::NamedTypePtr> class_deps;
-  std::ostringstream class_stream;
+  std::vector<c10::NamedTypePtr> deps;
+  std::ostringstream source_stream;
   SourceRangeRecords source_ranges;
   PythonPrint(
-      class_stream,
+      source_stream,
       source_ranges,
       class_type,
       tensor_table_,
-      class_deps,
+      deps,
       /*enforce_importable=*/true);
 
-  for (const auto& c : class_deps) {
-    if (c == class_type) {
-      // Don't re-process this class and enter an infinite loop. We need this
-      // because we insert to converted_classes_ post-traversal, so the current
-      // class isn't in there yet.
-      continue;
-    }
-    convertClass(c);
+  for (const auto& c : deps) {
+    convertNamedType(c);
   }
   // Insert *after* we've traversed the dependencies. This ensures that any
   // given class will appear after its dependencies in the order.
-  ClassInfo info{class_stream.str(), std::move(source_ranges)};
-  converted_classes_.insert(class_type, std::move(info));
+  TypeInfo info{source_stream.str(), std::move(source_ranges)};
+  converted_types_.insert(class_type, std::move(info));
 }
 
 void ScriptModuleSerializer::convertModel(
@@ -728,7 +716,7 @@ void ScriptModuleSerializer::convertModel(
   model_def->set_proto_version(proto_version_);
   if (proto_version_ >= 6) {
     // Serialize all code info.
-    convertClass(module.type());
+    convertNamedType(module.type());
     // Then pickle the module
     Pickler pickler(&tensor_table_);
     pickler.protocol();
@@ -896,13 +884,17 @@ void ScriptModuleSerializer::LEGACY_convertModule(
     std::ostringstream methods;
     SourceRangeRecords source_ranges;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
+    std::vector<c10::NamedTypePtr> deps_table;
     LEGACY_PythonPrint(
         methods,
         source_ranges,
         module,
         tensor_table_,
-        deps_table_,
+        deps_table,
         /*enforce_importable=*/true);
+    for (const auto& named_type : deps_table) {
+      convertNamedType(named_type);
+    }
     torch::RecordRef* record = module_def->mutable_torchscript_arena();
 
     std::stringstream filename;
