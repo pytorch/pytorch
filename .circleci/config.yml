@@ -1831,6 +1831,15 @@ jobs:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
+  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_build:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4"
+      LIBTORCH_VARIANT: "shared-with-deps"
+      CXX_ABI_VARIANT: "cxx11-abi"
+    docker:
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:1"
+    <<: *binary_linux_build
+
   binary_macos_wheel_2.7_cpu_build:
     environment:
       BUILD_ENVIRONMENT: "wheel 2.7 cpu"
@@ -2079,6 +2088,13 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
+  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_test:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4"
+      LIBTORCH_VARIANT: "shared-with-deps"
+      CXX_ABI_VARIANT: "cxx11-abi"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:1"
+    <<: *binary_linux_test
 
 # There is currently no testing for libtorch TODO
 #  binary_linux_libtorch_2.7m_cpu_test:
@@ -2996,9 +3012,21 @@ workflows:
             - setup
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3.6_cu90_devtoolset7_build
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_build:
+      - binary_linux_libtorch_2.7m_cpu_gcc5.4_shared-with-deps_build:
           requires:
             - setup
+      - binary_linux_libtorch_2.7m_cpu_gcc5.4_shared-with-deps_test:
+          requires:
+            - binary_linux_libtorch_2.7m_cpu_gcc5.4_shared-with-deps_build
+
+      # yf225 TODO: move these two to nightly-only, after we validate that they work in this PR
+      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_test:
+          requires:
+            - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_build
+
       # TODO we should test a libtorch cuda build, but they take too long
       # - binary_linux_libtorch_2.7m_cu90_devtoolset7_static-without-deps_build
       - binary_macos_wheel_3.6_cpu_build:
