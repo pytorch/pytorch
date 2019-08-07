@@ -616,17 +616,16 @@ class TestJit(JitTestCase):
         def test_backward(input):
             # type: (Tensor) -> None
             output = torch.relu(input)
+            output = output.softmax(0)
             sum_out = output.sum()
             sum_out.backward()
 
         inp = torch.randn(3, 4, requires_grad=True)
         scripted_bk = torch.jit.script(test_backward)
         test_backward(inp)
-        print(inp.grad)
         inp1 = inp.clone().detach().requires_grad_(True)
         scripted_bk(inp1)
-        print(inp1.grad)
-
+        self.assertEqual(inp.grad, inp1.grad)
 
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
