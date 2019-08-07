@@ -15,20 +15,17 @@ static std::vector<int> fractional_max_pool2d_generate_intervals(
   int inputSize,
   int outputSize,
   int poolSize) {
-    std::vector<int> sequence(outputSize);
+  scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
+    static_cast<scalar_t>(outputSize - 1);
+  std::vector<int> sequence(outputSize);
 
-      if (outputSize > 1) {
-      scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
-        static_cast<scalar_t>(outputSize - 1);
+  for (int i = 0; i < outputSize - 1; ++i) {
+    sequence[i] =
+      static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
+  }
+  sequence[outputSize - 1] = inputSize - poolSize;
 
-      for (int i = 0; i < outputSize - 1; ++i) {
-        sequence[i] =
-          static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
-      }
-    }
-
-    sequence[outputSize - 1] = inputSize - poolSize;
-    return sequence;
+  return sequence;
 }
 
 template <typename scalar_t>
@@ -169,6 +166,10 @@ void fractional_max_pool2d_out_cpu_template(
   TORCH_CHECK(outputW + poolSizeW - 1 <= inputW,
     "fractional_max_pool2d(): pool width ", poolSizeW,
     " too large relative to input width ", inputW);
+  TORCH_CHECK(outputW > 1,
+    "fractional_max_pool2d(): output width has to be longer than 1");
+  TORCH_CHECK(outputW > 1,
+    "fractional_max_pool2d(): output width has to be longer than 1");
 
   if (ndims == 3) {
     /* resize output */

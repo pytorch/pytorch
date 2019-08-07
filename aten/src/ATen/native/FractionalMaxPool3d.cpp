@@ -15,22 +15,18 @@ static std::vector<int> generate_intervals(
   int64_t inputSize,
   int64_t outputSize,
   int64_t poolSize) {
-    std::vector<int> sequence(outputSize);
+  scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
+    static_cast<scalar_t>(outputSize - 1);
+  std::vector<int> sequence(outputSize);
 
-    if (outputSize > 1) {
-      scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
-        static_cast<scalar_t>(outputSize - 1);
+  for (int i = 0; i < outputSize - 1; ++i) {
+    sequence[i] =
+      static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
+  }
+  sequence[outputSize - 1] = inputSize - poolSize;
 
-      for (int i = 0; i < outputSize - 1; ++i) {
-        sequence[i] =
-          static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
-      }
-    }
-
-    sequence[outputSize - 1] = inputSize - poolSize;
-    return sequence;
+  return sequence;
 }
-
 
 template<typename scalar_t>
 static void fractional_max_pool3d_out_single_batch_frame(
@@ -192,6 +188,10 @@ void fractional_max_pool3d_out_cpu_template(
   TORCH_CHECK(outputH + poolSizeH - 1 < inputH,
            "fractional_max_pool3d_out(): pool height ", poolSizeH,
            " too large relative to input height ", inputH);
+  TORCH_CHECK(outputW > 1,
+           "fractional_max_pool3d_out(): output width has to be longer than 1");
+  TORCH_CHECK(outputW > 1,
+           "fractional_max_pool3d_out(): output width has to be longer than 1");
 
   /* get contiguous input */
   auto input = input_.contiguous();

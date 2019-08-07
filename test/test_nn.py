@@ -3155,6 +3155,9 @@ class TestNN(NNTestCase):
         gradcheck(func, [x])
         gradgradcheck(func, [x])
 
+        x = torch.randn(2, 2, 2)
+        self.assertRaises(RuntimeError, lambda: F.fractional_max_pool2d(x, (1, 1), output_size=(3, 3)))
+
     def test_Dropout(self):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, False, input)

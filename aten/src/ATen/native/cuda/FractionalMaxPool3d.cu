@@ -198,6 +198,10 @@ void fractional_max_pool3d_out_cuda_template(
       "fractional_max_pool3d_out_cuda_template(): ",
       "pool width (", poolSizeW, ") too large relative to input width (",
       inputW, ")");
+      TORCH_CHECK(outputW > 1,
+               "fractional_max_pool3d_out(): output width has to be longer than 1");
+      TORCH_CHECK(outputW > 1,
+               "fractional_max_pool3d_out(): output width has to be longer than 1");
 
     if (ndims == 4) {
       /* resize output */
