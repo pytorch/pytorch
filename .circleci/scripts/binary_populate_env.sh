@@ -43,7 +43,7 @@ fi
 # option, so the upload was redirected to nightly/devtoolset7 to avoid
 # conflicts with other binaries (there shouldn't be any conflicts). Now we are
 # making devtoolset7 the default.
-if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' || "$CXX_ABI_VARIANT" == 'cxx11-abi' || $(uname)" == 'Darwin' ]]; then
+if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' || "$CXX_ABI_VARIANT" == 'cxx11-abi' || "$(uname)" == 'Darwin' ]]; then
   export PIP_UPLOAD_FOLDER='nightly/'
 else
   # On linux machines, this shouldn't actually be called anymore. This is just
