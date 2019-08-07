@@ -134,7 +134,7 @@ class QuantizationTestCase(TestCase):
         torch.jit.save(script_mod, buffer)
 
         buffer.seek(0)
-        loaded_mod = torch.jit.load(buffer)
+        torch.jit.load(buffer)
 
         # Pending __get_state_ and __set_state__ support
         # See tracking task https://github.com/pytorch/pytorch/issues/23984
