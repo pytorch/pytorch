@@ -615,9 +615,8 @@ struct to_ir {
     Stack stack;
     // XXX: We need to turn optimization off here because otherwise we try to
     // recursively initialize stuff in DecomposeOps.
-    setGraphExecutorOptimize(false);
+    GraphOptimizerEnabledGuard guard(false);
     cu.get_function(def.name().name()).run(stack);
-    setGraphExecutorOptimize(true);
     return stack.at(0).toTuple()->elements();
   }
 
@@ -1489,19 +1488,16 @@ struct to_ir {
     exit_blocks.insert(environment_stack->block());
   }
 
+  // emit assserions as an if branch so that assertions will reuse the
+  // emitIfElseBlocks refining of types
   void emitAssert(const Assert& stmt) {
     Value* cond_value = emitCond(stmt.test());
-    Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
-
-    n->addInput(cond_value);
-    /* true_block =*/n->addBlock();
-    auto* false_block = n->addBlock();
-
-    // if assert test is false throw exception
-    pushFrame(false_block);
-    WithInsertPoint guard(false_block);
-    emitRaise(stmt.range());
-    popFrame();
+    List<Stmt> true_branch = List<Stmt>::create(stmt.range(), {});
+    List<Stmt> false_branch =
+        List<Stmt>::create(stmt.range(), {Raise::create(stmt.range())});
+    auto if_stmt =
+        If::create(stmt.range(), stmt.test(), true_branch, false_branch);
+    emitIfElseBlocks(cond_value, if_stmt);
   }
 
   // Validate that the `lhs` Expr's in an assignment statement are valid. That
