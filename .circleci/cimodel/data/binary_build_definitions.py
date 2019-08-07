@@ -119,7 +119,7 @@ def gen_build_env_list(smoke):
 
 
 def predicate_exclude_nonlinux_and_libtorch(config):
-    return config.os == "linux" and (config.smoke or config.pydistro != "libtorch")
+    return config.os == "linux"
 
 
 def add_build_entries(jobs_dict, phase, smoke, filter_predicate=lambda x: True):
