@@ -425,7 +425,7 @@ void import_libs(
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& tensor_table,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(cu, src, tensor_table, import_callback);
+  SourceImporter importer(std::move(cu), src, tensor_table, import_callback);
   importer.import(qualifier);
 }
 } // namespace script
