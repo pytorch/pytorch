@@ -13644,6 +13644,41 @@ a")
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "keyword-arg expansion is not supported"):
             torch.jit.script(fn)
 
+    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(), "requires FBGEMM")
+    def test_erase_class_tensor_shapes(self):
+        class Linear(torch.nn.Module):
+            def __init__(self, in_features, out_features):
+                super(Linear, self).__init__()
+                qweight = torch._empty_affine_quantized(
+                    [out_features, in_features], scale=1, zero_point=0,
+                    dtype=torch.qint8)
+                self.register_buffer('_packed_weight',
+                                     torch.ops.quantized.fbgemm_linear_prepack(qweight))
+
+            @torch.jit.export
+            def __getstate__(self):
+                return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+
+            def forward(self):
+                return self._packed_weight
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self._packed_weight.set_(
+                    torch.ops.quantized.fbgemm_linear_prepack(state))
+
+            @property
+            def weight(self):
+                return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+
+            @weight.setter
+            def weight(self, w):
+                self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
+
+        with torch.jit._disable_emit_hooks():
+            x = torch.jit.script(Linear(10, 10))
+            torch._C._jit_pass_erase_shape_information(x.graph)
+
     @unittest.skipIf(PY2, "kwarg expansion requires Python 3")
     def test_kwargs_error_msg(self):
         def other(**kwargs):
