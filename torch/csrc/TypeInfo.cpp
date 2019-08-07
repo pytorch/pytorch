@@ -17,8 +17,9 @@
 PyObject* THPFInfo_New(const at::ScalarType& type) {
   auto finfo = (PyTypeObject*)&THPFInfoType;
   auto self = THPObjectPtr{finfo->tp_alloc(finfo, 0)};
-  if (!self)
+  if (!self) {
     throw python_error();
+  }
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
   self_->type = type;
   return self.release();
@@ -27,8 +28,9 @@ PyObject* THPFInfo_New(const at::ScalarType& type) {
 PyObject* THPIInfo_New(const at::ScalarType& type) {
   auto iinfo = (PyTypeObject*)&THPIInfoType;
   auto self = THPObjectPtr{iinfo->tp_alloc(iinfo, 0)};
-  if (!self)
+  if (!self) {
     throw python_error();
+  }
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
   self_->type = type;
   return self.release();
