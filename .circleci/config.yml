@@ -477,6 +477,7 @@ binary_linux_build: &binary_linux_build
         retry apt-get update
         retry apt-get -y install expect moreutils zip openssl
         conda install -y -c eumetsat expect
+        conda install -y cmake
   - run:
       name: Build
       no_output_timeout: "1h"
