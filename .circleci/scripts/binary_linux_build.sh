@@ -5,7 +5,7 @@ set -eux -o pipefail
 source /env
 
 # Defaults here so they can be changed in one place
-export MAX_JOBS=31  # yf225 TODO: tmp change
+export MAX_JOBS=12
 
 # Parse the parameters
 if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
@@ -25,9 +25,6 @@ if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
   ln -s /usr/bin/tclsh /just_tclsh_bin/tclsh
   export PATH=/just_tclsh_bin:$PATH
 fi
-
-# yf225 TODO debug
-echo ".circleci/scripts/binary_linux_build.sh: CXX_ABI_VARIANT: ", $CXX_ABI_VARIANT
 
 # Build the package
 SKIP_ALL_TESTS=1 unbuffer "/builder/$build_script" | ts
