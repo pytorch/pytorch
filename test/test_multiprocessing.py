@@ -469,15 +469,14 @@ class TestMultiprocessing(TestCase):
         p.join()
         self.assertIsInstance(outq.get(), RuntimeError)
 
+    @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows (only fails with fork)')
     @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
     def test_wrong_cuda_fork(self):
-        results = self.run_out_of_process("""\
+        results = self.run_process_no_exception("""\
 import torch
 from torch.multiprocessing import Process
-
 def run(rank):
     torch.cuda.set_device(rank)
-
 if __name__ == "__main__":
     size = 2
     processes = []
@@ -487,13 +486,10 @@ if __name__ == "__main__":
         p = Process(target=run, args=(rank,))
         p.start()
         processes.append(p)
-
     for p in processes:
         p.join()
 """)
-        self.assertRegex(results[1].decode('ascii'), "Cannot re-initialize CUDA in forked \
-subprocess. To use CUDA with multiprocessing, \
-you must use the 'spawn' start method")
+        self.assertRegex(results[1].decode('ascii'), "Cannot re-initialize CUDA in forked subprocess.")
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
@@ -783,14 +779,12 @@ you must use the 'spawn' start method")
         self._test_autograd_sharing(param, mp.get_context('spawn'), is_parameter=True)
 
     @staticmethod
-    def run_out_of_process(code):
+    def run_process_no_exception(code):
         popen = subprocess.Popen(
             [sys.executable, '-c', code],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE)
         pipes = popen.communicate()
-        if popen.returncode != 0:
-            raise RuntimeError("run_out_of_process raised non-zero exit code {}".format(popen.returncode))
         return pipes
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \

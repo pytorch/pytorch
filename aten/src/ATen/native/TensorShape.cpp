@@ -403,13 +403,23 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   std::vector<int64_t> padded_size(num_new_dimensions, 1);
   padded_size.insert(padded_size.end(), self.sizes().begin(), self.sizes().end());
   std::vector<int64_t> target_size(repeats.size());
+  bool zero_tensor = false;
   for(size_t idx = 0; idx < repeats.size(); ++idx) {
+    if (repeats[idx] == 0) {
+      zero_tensor = true;
+    }
     target_size[idx] = padded_size[idx] * repeats[idx];
   }
 
   Tensor xtensor = self.expand(padded_size);
 
   Tensor result = at::empty(target_size, self.options());
+
+  // return an empty tensor if one of the repeat dimensions is zero
+  if (zero_tensor) {
+    return result;
+  }
+
   Tensor urtensor = at::alias(result);
   for (int64_t i = 0; i < xtensor.dim(); ++i) {
     // can't unfold with step 0, so make sure step is at least 1
@@ -898,20 +908,36 @@ Tensor numpy_T(const Tensor &self) {
 
 Tensor view(const Tensor& self, IntArrayRef size) {
   auto inferred_size = at::infer_size(size, self.numel());
-  if (self.sizes() == inferred_size) {
-    return self;
-  }
-
   auto stride = at::detail::computeStride(self.sizes(),
-                                           self.strides(),
-                                           inferred_size);
+                                          self.strides(),
+                                          inferred_size);
   TORCH_CHECK(stride.has_value(), "view size is "
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
-  auto self_ = self.clone();
-  self_.set_(self.storage(), self.storage_offset(), inferred_size,
-             stride_value);
+  auto self_ = self.alias();
+  self_.set_(
+    self.storage(), self.storage_offset(), inferred_size, stride_value);
+  return self_;
+}
+
+Tensor alias(const Tensor& self) {
+  Tensor self_;
+  if (self.is_quantized()) {
+    auto impl = c10::make_intrusive<QTensorImpl>(
+                    Storage(self.storage()),
+                    self.type_id(),
+                    get_qtensorimpl(self)->quantizer());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(self.sizes(), self.strides());
+    self_ = Tensor(std::move(impl));
+  } else {
+    auto impl = c10::make_intrusive<TensorImpl>(Storage(self.storage()),
+                                                self.type_id());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(self.sizes(), self.strides());
+    self_ = Tensor(std::move(impl));
+  }
   return self_;
 }
 

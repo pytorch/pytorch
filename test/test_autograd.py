@@ -16,7 +16,8 @@ from torch import nn
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
-from torch.autograd.profiler import profile, format_time, EventList, FunctionEvent, emit_nvtx
+from torch.autograd.profiler import (profile, format_time, EventList,
+                                     FunctionEvent, record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm, slowTest,
@@ -1609,16 +1610,26 @@ class TestAutograd(TestCase):
         target_length = 15
         gradcheck_input_size = 10
 
-        # device, input_length
-        tests = [('cpu', 150, False),
-                 ('cpu', 150, True)]
-        if torch.cuda.is_available():
-            tests += [('cuda', 50, False),
-                      ('cuda', 150, False),
-                      ('cuda', 50, True),
-                      ('cuda', 150, True)]
+        ZERO_NONE = 0
+        ZERO_SOME = 1
+        ZERO_ALL = 2
 
-        for device, input_length, vary_lengths in tests:
+        # device, input_length, vary_lengths, zero_lengths
+        tests = [('cpu', 150, False, ZERO_NONE),
+                 ('cpu', 150, True, ZERO_NONE),
+                 ('cpu', 50, True, ZERO_SOME),
+                 ('cpu', 50, True, ZERO_ALL)]
+        if torch.cuda.is_available():
+            tests += [('cuda', 50, False, ZERO_NONE),
+                      ('cuda', 150, False, ZERO_NONE),
+                      ('cuda', 50, True, ZERO_NONE),
+                      ('cuda', 150, True, ZERO_NONE),
+                      ('cuda', 50, True, ZERO_SOME),
+                      ('cuda', 150, True, ZERO_SOME),
+                      ('cuda', 50, True, ZERO_ALL),
+                      ('cuda', 150, True, ZERO_ALL)]
+
+        for device, input_length, vary_lengths, zero_mode in tests:
             targets = torch.randint(1, num_labels, (batch_size, target_length),
                                     device=device, dtype=torch.long)
             x = torch.randn(gradcheck_input_size, device=device, requires_grad=True)
@@ -1626,8 +1637,15 @@ class TestAutograd(TestCase):
                                        device=device)
             input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
                               if vary_lengths or i == 0 else input_length) for i in range(batch_size)]
-            target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
-                               if vary_lengths else target_length) for i in range(batch_size)]
+            if zero_mode == ZERO_ALL:
+                target_lengths = [0 for _ in range(batch_size)]
+            else:
+                target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
+                                   if vary_lengths else target_length) for _ in range(batch_size)]
+                if zero_mode == ZERO_SOME:
+                    idxes = torch.randint(0, batch_size, (10,))
+                    for i in idxes:
+                        target_lengths[i] = 0
 
             def ctc_after_softmax(x):
                 x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
@@ -2808,6 +2826,22 @@ class TestAutograd(TestCase):
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
 
+    def test_record_function(self):
+        x = torch.randn(10, 10)
+
+        with profile() as p:
+            with record_function("label"):
+                y = x * 2 + 4
+
+        last_end = 0
+        names = ['mul', 'add']
+        labels = ['label']
+        self.assertEqual(len(p.function_events), len(names) + len(labels))
+        for info, expected_name in zip(p.function_events, labels):
+            self.assertGreater(info.cpu_interval.start, last_end)
+            self.assertEqual(info.name, expected_name)
+            last_end = info.cpu_interval.end
+
     @skipIfRocm
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_profiler_emit_nvtx(self):
@@ -3329,14 +3363,14 @@ class TestAutograd(TestCase):
             branch1 = branch1 / branch1
             # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
             # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
-            # So the cpu thread will notify the gpu thread with an empty FunctionTask.
+            # So the cpu thread will notify the gpu thread with an empty NodeTask.
             branch2 = checkpoint(fn_on_gpu, inp)
             out = branch2 + branch1
             return out
 
         inp = torch.rand(2, requires_grad=True)
         out = parent_on_cpu(inp)
-        # This will segfault if the empty FunctionTask is not handled properly in the
+        # This will segfault if the empty NodeTask is not handled properly in the
         # gpu thread ReadyQueue
         out.sum().backward()
 

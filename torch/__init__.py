@@ -1,3 +1,5 @@
+# @lint-ignore-every PYTHON3COMPATIMPORTS
+
 r"""
 The torch package contains data structures for multi-dimensional
 tensors and mathematical operations over these are defined.
@@ -22,9 +24,9 @@ __all__ = [
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
-    'ShortStorage', 'CharStorage', 'ByteStorage',
+    'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-    'ShortTensor', 'CharTensor', 'ByteTensor', 'Tensor',
+    'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
 ]
 
 ################################################################################
@@ -301,6 +303,7 @@ import torch.cuda
 import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled  # noqa: F401
 import torch.nn
+import torch.nn._intrinsic
 import torch.nn.quantized
 import torch.optim
 import torch.multiprocessing
@@ -333,6 +336,7 @@ def compiled_with_cxx11_abi():
 
 # Import the ops "namespace"
 from torch._ops import ops  # noqa: F401
+from torch._classes import classes  # noqa: F401
 
 # Import the quasi random sampler
 import torch.quasirandom

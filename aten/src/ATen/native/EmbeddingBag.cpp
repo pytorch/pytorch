@@ -629,7 +629,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
       mode == MODE_SUM,
       "embedding_bag_backward: per_sample_weights only supported for mode='sum'");
 
-  AT_ASSERT(grad.dim() == 2)
+  AT_ASSERT(grad.dim() == 2);
   auto embedding_features = grad.size(1);
 
   AT_ASSERT(indices.dim() == 1);

@@ -49,12 +49,12 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
   list_of_lists.push_back(list);
   module->run_method("nested_loop", list_of_lists, b);
 
-  auto generic_list = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
-  auto empty_generic_list = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto generic_list = c10::impl::GenericList(at::TensorType::get());
+  auto empty_generic_list = c10::impl::GenericList(at::ListType::create(at::TensorType::get()));
   empty_generic_list.push_back(generic_list);
   module->run_method("nested_loop", empty_generic_list, b);
 
-  auto too_many_lists = c10::impl::GenericList(c10::impl::deprecatedUntypedList());;
+  auto too_many_lists = c10::impl::GenericList(at::ListType::create(at::ListType::create(at::TensorType::get())));
   too_many_lists.push_back(empty_generic_list);
   try {
     module->run_method("nested_loop", too_many_lists, b);
@@ -65,25 +65,6 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
             .find("nested_loop() Expected a value of type 'List[List[Tensor]]'"
                   " for argument 'a' but instead found type "
                   "'List[List[List[t]]]'") == 0);
-  };
-
-  auto gen_list = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
-  c10::List<int64_t> int_list({1, 2, 3});
-
-  gen_list.emplace_back(list);
-  gen_list.emplace_back(int_list);
-
-  try {
-    module->run_method("nested_loop", gen_list, b);
-    AT_ASSERT(false);
-  } catch (const c10::Error& error) {
-    //TODO: currently does not unify types across encounted generic lists,
-    //so the error message is not helpful here.
-    AT_ASSERT(
-        std::string(error.what_without_backtrace())
-            .find("nested_loop() Expected a value of type "
-                  "'List[List[Tensor]]' for argument 'a' but "
-                  "instead found type 'List[List[Tensor]]'") == 0);
   };
 }
 

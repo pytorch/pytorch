@@ -14,5 +14,10 @@ __all__ = [
     'Linear',
     'MaxPool2d',
     'Quantize',
-    'ReLU'
+    'ReLU',
 ]
+
+# Generated modules -- use torch/quantization/tools/make_modules to regenerate.
+from ._generated import Add
+
+__all__ += ['Add']

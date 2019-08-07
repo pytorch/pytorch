@@ -86,34 +86,6 @@ static bool isValidIdentifier(const std::string& name) {
   return true;
 }
 
-static void emitQualifiedName(std::ostream& out, const QualifiedName& name) {
-  const auto& name_ = name.name();
-  const auto& prefix_ = name.prefix();
-  if (isValidIdentifier(name_)) {
-    if (!prefix_.empty()) {
-      emitQualifiedName(out, QualifiedName(prefix_));
-      out << ".";
-    }
-    out << name_;
-  } else {
-    AT_ASSERT(!prefix_.empty());
-    out << "getattr(";
-    emitQualifiedName(out, QualifiedName(prefix_));
-    out << ", ";
-    printQuotedString(out, name_);
-    out << ")";
-  }
-}
-
-// Get a stringified version of the qualified name.
-// if a field is not a valid Python identifier, then it will print as, e.g.
-// getattr(self, "0").b
-static std::string getValidQualifiedName(const QualifiedName& name) {
-  std::stringstream ss;
-  emitQualifiedName(ss, name);
-  return ss.str();
-}
-
 // some names are valid identifiers but off limits because
 // they are keywords or namespaces used in the output
 const static std::unordered_set<std::string> reserved_names = {
@@ -168,7 +140,7 @@ const static std::unordered_set<std::string> reserved_names = {
 
 struct PythonPrintPass {
   using SourceRangeStack = std::vector<SourceRange>;
-  SourceRangeStack source_range_stack_ = {SourceRange("")};
+  SourceRangeStack source_range_stack_ = {SourceRange()};
 
   struct WithSourceRange {
     explicit WithSourceRange(SourceRangeStack* stack, Node* n) : stack(stack) {
@@ -176,7 +148,7 @@ struct PythonPrintPass {
       if (auto gen_source = n->sourceRange().findSourceRangeThatGenerated()) {
         stack->push_back(std::move(gen_source.value()));
       } else {
-        stack->push_back(std::move(n->sourceRange()));
+        stack->push_back(n->sourceRange());
       }
     }
 
@@ -1006,6 +978,9 @@ struct PythonPrintPass {
       } break;
       case prim::Print: {
         printValueList(stmt, node->inputs(), "print(", ")");
+      } break;
+      case aten::sorted: {
+        printValueList(stmt, node->inputs(), "sorted(", ")");
       } break;
       case prim::TupleConstruct: {
         if (auto qualname = node->output()
