@@ -80,7 +80,6 @@ ProcessGroupAgent::ProcessGroupAgent(
   for (auto& entry : nameMap_) {
     names_[entry.second] = entry.first;
   }
-  //sendThread_ = std::thread(&ProcessGroupAgent::sendLoop, this);
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
