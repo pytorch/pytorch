@@ -1729,10 +1729,6 @@ inline Tensor Tensor::alias() const {
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 
-inline bool Tensor::is_variable() const noexcept {
-  return impl_->is_variable();
-}
-
 inline caffe2::TypeMeta Tensor::dtype() const noexcept {
   return impl_->dtype();
 }
