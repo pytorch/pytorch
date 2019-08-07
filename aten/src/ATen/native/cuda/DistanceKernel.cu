@@ -262,7 +262,7 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
     result[3] = *a;
   }*/
 
-  /*if (blockIdx.x == 1 && threadIdx.x == 0) {
+  if (blockIdx.x == 1 && threadIdx.x == 0) {
     result[0] = *b;
   }
   if (blockIdx.x == 1 && threadIdx.x == 1) {
@@ -273,9 +273,9 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   }
   if (blockIdx.x == 3 && threadIdx.x == 1) {
     result[3] = *b;
-  }*/
+  }
 
-  if (blockIdx.x == 0 && threadIdx.x == 0) {
+  /*if (blockIdx.x == 0 && threadIdx.x == 0) {
     result[0] = agg;
   }
   if (blockIdx.x == 0 && threadIdx.x == 1) {
@@ -286,7 +286,7 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   }
   if (blockIdx.x == 1 && threadIdx.x == 1) {
     result[3] = agg;
-  }
+  }*/
 
   /*if (blockIdx.x == 2 && threadIdx.x == 0) {
     result[0] = agg;
@@ -304,7 +304,7 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
 
   if (threadIdx.x == 0) {
     //result[blockIdx.x] = F::finish(agg, p);
-    result[blockIdx.x] = agg1;
+    //result[blockIdx.x] = agg1;
   }
 }
 
