@@ -71,10 +71,21 @@ void div_kernel(TensorIterator& iter) {
 }
 
 void logical_xor_kernel(TensorIterator& iter) {
-  cpu_kernel(iter,
-    [](bool a, bool b) -> bool {
-      return a != b;
+  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(1), "logical_xor_cpu", [&]() {
+    cpu_kernel(iter,
+      [](scalar_t a, scalar_t b) -> bool {
+        return (!a) != (!b);
     });
+  });
+}
+
+void logical_xor_inplace_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(), "logical_xor_cpu", [&]() {
+    cpu_kernel(iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return static_cast<scalar_t>((!a) != (!b));
+    });
+  });
 }
 
 } // anonymous namespace
@@ -85,5 +96,6 @@ REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
+REGISTER_DISPATCH(logical_xor_inplace_stub, &logical_xor_inplace_kernel);
 
 }} // namespace at::native

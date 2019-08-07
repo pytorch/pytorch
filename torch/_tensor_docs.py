@@ -537,7 +537,20 @@ add_docstr_all('logical_xor_',
                r"""
 logical_xor_() -> Tensor
 
-In-place version of :meth:`~Tensor.logical_xor`
+In-place version of :meth:`~Tensor.logical_xor`, except that it always returns a tensor with the same dtype instead of
+bool.
+
+Example::
+
+    >>> torch.tensor([True, False, True]).logical_xor_(torch.tensor([True, False, False]))
+    tensor([ False, False,  True])
+    >>> a = torch.tensor([0.0, 1.0, 10.0, 3.0], dtype=torch.int8)
+    >>> b = torch.tensor([4.0, 0.0, 1.0, 2.0], dtype=torch.int8)
+    >>> a.logical_xor_(b)
+    tensor([1, 1, 0, 0], dtype=torch.int8)
+    >>> a = torch.tensor([0.0, 1.0, 10.0, 3.0], dtype=torch.double)
+    >>> a.logical_xor_(b.double())
+    tensor([1., 1., 0., 0.], dtype=torch.float64)
 """)
 
 add_docstr_all('bmm',

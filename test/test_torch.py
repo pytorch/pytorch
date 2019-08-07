@@ -1844,16 +1844,16 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_logical_xor(self, device):
-        for dtype in (torch.bool,):  # Will add more dtypes in the future
+        for dtype in [torch.bool] + torch.testing.get_all_math_dtypes(device):
             expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
             a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
             b = torch.tensor([1, 0, 0, 10], dtype=dtype, device=device)
             # new tensor
-            self.assertEqual(expected_res, a.logical_xor(b))
+            self.assertEqual(expected_res.bool(), a.logical_xor(b))
             # out
-            c = torch.empty(0, dtype=dtype, device=device)
+            c = torch.empty(0, dtype=torch.bool, device=device)
             torch.logical_xor(a, b, out=c)
-            self.assertEqual(expected_res, c)
+            self.assertEqual(expected_res.bool(), c)
             # out is not bool
             c = torch.empty(0, dtype=torch.uint8, device=device)
             with self.assertRaisesRegex(RuntimeError,
@@ -1862,6 +1862,10 @@ class _TestTorchMixin(object):
             # in-place
             a.logical_xor_(b)
             self.assertEqual(expected_res, a)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"The two input tensors of logical_xor must have the same dtype\."):
+            torch.logical_xor(torch.tensor([1.0]), torch.tensor([True]))
 
     def test_logical_xor(self):
         self._test_logical_xor(self, 'cpu')
