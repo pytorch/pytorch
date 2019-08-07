@@ -2884,6 +2884,11 @@ graph(%Ra, %Rb):
         model_loaded = torch.jit.load(buffer)
         self.assertEqual(model_loaded(), model())
 
+    @unittest.skipIf(
+        TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+        " Quantized Linear requires FBGEMM. FBGEMM does not play"
+        " well with UBSAN at the moment, so we skip the test if"
+        " we are in a UBSAN environment.",)
     def test_serialize_qmodule(self):
         set_rng_seed(2)
         batch_size = 10
