@@ -1,4 +1,5 @@
 #include <ATen/core/List.h>
+#include <ATen/core/Tensor.h>
 #include <gtest/gtest.h>
 
 using namespace c10;

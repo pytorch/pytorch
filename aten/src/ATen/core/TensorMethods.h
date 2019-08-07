@@ -3057,10 +3057,6 @@ inline Tensor Tensor::alias() const {
     }
 }
 
-inline bool Tensor::is_variable() const noexcept {
-  return impl_->is_variable();
-}
-
 inline caffe2::TypeMeta Tensor::dtype() const noexcept {
   return impl_->dtype();
 }

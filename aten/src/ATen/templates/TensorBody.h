@@ -238,7 +238,9 @@ class CAFFE2_API Tensor {
 
   /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
   /// Defined in Type.h because of include order issues.
-  bool is_variable() const noexcept;
+  bool is_variable() const noexcept {
+    return impl_->is_variable();
+  }
 
   /// Returns a `Tensor`'s layout. Defined in Type.h
   Layout layout() const noexcept;
