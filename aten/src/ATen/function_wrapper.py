@@ -1673,5 +1673,5 @@ def create_derived(backend_type_env, declarations):
                         process_native(option)
                 except NYIError:
                     pass
-    return (type_object_declarations, type_object_definitions, function_registrations, c10_function_registrations, legacy_th_declarations,
-            legacy_th_definitions)
+    return (type_object_declarations, type_object_definitions, function_registrations, c10_function_registrations,
+            legacy_th_declarations, legacy_th_definitions)
