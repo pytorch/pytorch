@@ -121,17 +121,32 @@ class Linear(NNLinear):
     def weight(self, w):
         self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
 
+    @torch.jit.export
+    def __getstate__(self):
+        x = torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+        return (x, self.bias, self.scale, self.zero_point)
+
+    @torch.jit.export
+    def __setstate__(self, state):
+        # type: (Tuple[Tensor, Tensor, Tensor, Tensor]) -> None
+        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(state[0])
+        self.bias = state[1]
+        self.scale = state[2]
+        self.zero_point = state[3]
+        self.__constants__ = ['bias', 'in_features', 'out_features']
+        self.weight = self._packed_weight
+
     def forward(self, x):
         # Note that we can handle self.bias == None case.
         Y_q = torch.ops.quantized.fbgemm_linear(
             x, self._packed_weight,
             self.bias,
-            self.scale,
-            self.zero_point)
+            float(self.scale),
+            int(self.zero_point))
         return Y_q
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super()._save_to_state_dict(destination, prefix, keep_vars)
+        super(Linear, self)._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'weight'] = torch.ops.quantized.fbgemm_linear_unpack(destination[prefix + '_packed_weight'])
         destination.pop(prefix + '_packed_weight')
 
@@ -142,7 +157,7 @@ class Linear(NNLinear):
             self.bias.copy_(state_dict[prefix + 'bias'])
             state_dict.pop(prefix + 'bias')
         state_dict.pop(prefix + 'weight')
-        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+        super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                       missing_keys, unexpected_keys, error_msgs)
         return
 
