@@ -22,7 +22,6 @@ int main(int argc, char** argv) {
       FLAGS_input_file,
       FLAGS_input_type,
       FLAGS_iter,
-      FLAGS_measure_memory,
       FLAGS_net,
       FLAGS_output,
       FLAGS_output_folder,
