@@ -12837,12 +12837,12 @@ a")
         # decorators. This is fixed on master but not on version 2.1.1.
         # Next version update remove noqa and add @typing.overload annotation
 
-        @torch.jit.overload  # noqa: F811
+        @torch.jit._overload  # noqa: F811
         def test_simple(x1):  # noqa: F811
             # type: (int) -> int
             pass
 
-        @torch.jit.overload  # noqa: F811
+        @torch.jit._overload  # noqa: F811
         def test_simple(x1):  # noqa: F811
             # type: (float) -> float
             pass
@@ -12856,20 +12856,20 @@ a")
         self.checkScript(invoke_function, ())
 
         # testing that the functions are cached
-        compiled_fns_1 = torch.jit.get_overloads(test_simple)
-        compiled_fns_2 = torch.jit.get_overloads(test_simple)
+        compiled_fns_1 = torch.jit._get_overloads(test_simple)
+        compiled_fns_2 = torch.jit._get_overloads(test_simple)
         for a, b in zip(compiled_fns_1, compiled_fns_2):
             self.assertIs(a, b)
 
         # currently we take the default values have to be specified in the
         # overload as well - TODO take them from implementation and apply
         # where the type is valid.
-        @torch.jit.overload  # noqa: F811
+        @torch.jit._overload  # noqa: F811
         def identity(x1):  # noqa: F811
             # type: (str) -> str
             pass
 
-        @torch.jit.overload  # noqa: F811
+        @torch.jit._overload  # noqa: F811
         def identity(x1=1.0):  # noqa: F811
             # type: (float) -> float
             pass
@@ -12890,19 +12890,18 @@ a")
             torch.jit.script(schema_match_failure)
         except Exception as e:
             thrown = True
-            e_msg = str(e)
-            self.assertTrue(r"of type 'str'" in e_msg and r"of type 'float" in e_msg)
+            self.assertTrue(r"of type 'str'" in str(e) and r"of type 'float" in str(e))
         self.assertTrue(thrown)
 
         with self.assertRaisesRegex(Exception, "cannot be directly compiled"):
             torch.jit.script(identity)
 
-        @torch.jit.overload  # noqa: F811
+        @torch.jit._overload  # noqa: F811
         def impl_compile_failure(x, y):  # noqa: F811
             # type: (str, str) -> (str)
             pass
 
-        @torch.jit.overload  # noqa: F811
+        @torch.jit._overload  # noqa: F811
         def impl_compile_failure(x, y):  # noqa: F811
             # type: (int, int) -> (int)
             pass
@@ -12918,19 +12917,22 @@ a")
             torch.jit.script(test)
 
     def test_function_overloading_isinstance(self):
-        @torch.jit.overload  # noqa: F811
+        @torch.jit._overload  # noqa: F811
         def my_conv(x, y):  # noqa: F811
             # type: (float, str) -> (float)
             pass
 
-        @torch.jit.overload  # noqa: F811
+        @torch.jit._overload  # noqa: F811
         def my_conv(x, y=2.0):  # noqa: F811
             # type: (float, float) -> (float)
             pass
 
         def my_conv(x, y=2.0):  # noqa: F811
             if isinstance(y, str):
-                return 4.0 - x
+                if y == "hi":
+                    return 4.0 - x
+                else:
+                    return 5.0 - x
             else:
                 return 2.0 + x
 

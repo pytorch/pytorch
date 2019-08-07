@@ -573,7 +573,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   py::bool_ isFunction = py::module::import("inspect").attr("isfunction")(obj);
   if (py::cast<bool>(isFunction)) {
-    auto overloads = py::module::import("torch.jit").attr("get_overloads")(obj);
+    auto overloads =
+        py::module::import("torch.jit").attr("_get_overloads")(obj);
     if (!overloads.is_none()) {
       auto compiled_fns = py::cast<std::vector<StrongFunctionPtr>>(overloads);
       return std::make_shared<OverloadedFunctionValue>(std::move(compiled_fns));

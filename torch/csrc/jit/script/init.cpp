@@ -178,6 +178,7 @@ void checkOverloadDecl(const Decl& new_decl, const Decl& old_decl) {
   const auto& new_params = new_decl.params();
   const auto& old_params = old_decl.params();
 
+  // TODO. same number of parameters not strictly necessary.
   TORCH_INTERNAL_ASSERT(
       new_params.size() == old_params.size(),
       "Overload must have same number of parameters\n",
@@ -231,6 +232,27 @@ FunctionSchema getSchemaWithNameAndDefaults(
       schema.returns(),
       schema.is_vararg(),
       schema.is_varret());
+}
+
+static StrongFunctionPtr script_compile_function(
+    const c10::QualifiedName& name,
+    const Def& def,
+    const FunctionDefaults& defaults,
+    ResolutionCallback rcb) {
+  auto cu = get_python_cu();
+  auto defined_functions = cu->define(
+      QualifiedName(name.prefix()),
+      {def},
+      {pythonResolver(std::move(rcb))},
+      nullptr,
+      true);
+  TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
+  auto& defined = defined_functions[0];
+  defined->setSchema(getSchemaWithNameAndDefaults(
+      def.range(), defined->getSchema(), def.name().name(), defaults));
+  StrongFunctionPtr ret(std::move(cu), defined);
+  didFinishEmitFunction(ret);
+  return ret;
 }
 
 struct VISIBILITY_HIDDEN ModuleSelf : public Self {
@@ -705,20 +727,7 @@ void initJitScriptBindings(PyObject* module) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
         const auto name = c10::QualifiedName(qualname);
         TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
-        auto cu = get_python_cu();
-        auto defined_functions = cu->define(
-            QualifiedName(name.prefix()),
-            {def},
-            {pythonResolver(std::move(rcb))},
-            nullptr,
-            true);
-        TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
-        auto& defined = defined_functions[0];
-        defined->setSchema(getSchemaWithNameAndDefaults(
-            def.range(), defined->getSchema(), def.name().name(), defaults));
-        StrongFunctionPtr ret(std::move(cu), defined);
-        didFinishEmitFunction(ret);
-        return ret;
+        return script_compile_function(name, def, defaults, std::move(rcb));
       });
   m.def(
       "_jit_script_compile_overload",
@@ -728,25 +737,9 @@ void initJitScriptBindings(PyObject* module) {
          ResolutionCallback rcb,
          const FunctionDefaults& defaults) {
         const auto name = c10::QualifiedName(qualname);
-        auto cu = get_python_cu();
         checkOverloadDecl(overload_decl, implementation_def.decl());
         auto new_def = implementation_def.withDecl(overload_decl);
-        auto defined_functions = cu->define(
-            QualifiedName(name.prefix()),
-            {new_def},
-            {pythonResolver(std::move(rcb))},
-            nullptr,
-            true);
-        TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
-        auto& defined = defined_functions[0];
-        defined->setSchema(getSchemaWithNameAndDefaults(
-            new_def.range(),
-            defined->getSchema(),
-            new_def.name().name(),
-            defaults));
-        StrongFunctionPtr ret(std::move(cu), defined);
-        didFinishEmitFunction(ret);
-        return ret;
+        return script_compile_function(name, new_def, defaults, std::move(rcb));
       });
 
   m.def(

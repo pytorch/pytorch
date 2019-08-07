@@ -1154,7 +1154,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     else:
-        check_directly_compile_overloaded(obj)
+        _check_directly_compile_overloaded(obj)
         ast = get_jit_def(obj)
         if _rcb is None:
             _rcb = _gen_rcb(obj, _frames_up)
@@ -2091,7 +2091,7 @@ _overloaded_fns = {}
 # qualified name => list[compiled fns]
 _compiled_overloaded_fns = {}
 
-def overload(func):
+def _overload(func):
     qual_name = _qualified_name(func)
     global _overloaded_fns
     fn_overload_list = _overloaded_fns.get(qual_name)
@@ -2104,14 +2104,14 @@ def overload(func):
     fn_overload_list.append((torch.jit.get_jit_def(func).decl(), get_default_args(func)))
     return func
 
-def compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
+def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
     impl_ast = torch.jit.get_jit_def(impl_fn)
     _frames_up = 0
     _rcb = _gen_rcb(impl_fn, _frames_up)
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
 
-def get_overloads(obj):
+def _get_overloads(obj):
     # check for cached compiled fns
     qual_name = _qualified_name(obj)
     global _compiled_overloaded_fns
@@ -2130,7 +2130,7 @@ def get_overloads(obj):
     # incompatible with a type of parameter in an overload, and other validation.
     # This is still an internal api so for now use defaults from overload
     for overload_decl, overload_defaults in overloads:
-        compiled_fn = compile_function_with_overload(qual_name, obj, overload_decl, overload_defaults)
+        compiled_fn = _compile_function_with_overload(qual_name, obj, overload_decl, overload_defaults)
         compiled_fns.append(compiled_fn)
 
     # cache compilation, remove information stored to do compilation
@@ -2138,7 +2138,7 @@ def get_overloads(obj):
     del _overloaded_fns[qual_name]
     return compiled_fns
 
-def check_directly_compile_overloaded(obj):
+def _check_directly_compile_overloaded(obj):
     qual_name = _qualified_name(obj)
     global _compiled_overloaded_fns
     global _overloaded_fns
