@@ -22,7 +22,7 @@ class Conf(object):
     def gen_build_env_parms(self):
         elems = [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.cuda_version)]
         if self.devtoolset_version is not None:
-            elems.append("devtoolset" + str(self.devtoolset_version))
+            elems.append(str(self.devtoolset_version))
         return elems
 
     def gen_docker_image(self):

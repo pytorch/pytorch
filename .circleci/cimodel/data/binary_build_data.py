@@ -70,9 +70,14 @@ CONFIG_TREE_DATA = OrderedDict(
 # devtoolset7 so we don't have to reinstall this in every build job.
 # The same machinery that this uses, though, should be retooled for a different
 # compiler toolchain that can build with the new gcc ABI.
-DEVTOOLSET_VERSIONS = [
-    7,
-]
+LINUX_GCC_CONFIG_VARIANTS = OrderedDict(
+    manywheel=['devtoolset7'],
+    conda=['devtoolset7'],
+    libtorch=[
+        "devtoolset7",
+        "gcc5.4_cxx11",
+    ],
+)
 
 
 class TopLevelNode(ConfigNode):
@@ -113,7 +118,7 @@ class PackageFormatConfigNode(ConfigNode):
 
     def get_children(self):
         if self.find_prop("os_name") == "linux":
-            return [LinuxGccConfigNode(self, v) for v in DEVTOOLSET_VERSIONS]
+            return [LinuxGccConfigNode(self, v) for v in LINUX_GCC_CONFIG_VARIANTS[self.find_prop("package_format")]]
         else:
             return [ArchConfigNode(self, v) for v in self.find_prop("cuda_versions")]
 
