@@ -58,12 +58,14 @@ Message deserialize(std::istream& is) {
 ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
     std::unordered_map<std::string, int> nameMap,
-    std::shared_ptr<c10d::ProcessGroup> pg)
+    std::shared_ptr<c10d::ProcessGroup> pg,
+    int numSendThreads)
     : RpcAgent(std::move(workerName), processRequestBlocking),
       nameMap_(std::move(nameMap)),
       stop_(false),
       pg_(std::move(pg)),
-      nextId_(0) {
+      nextId_(0),
+      sendThreadPool_(numSendThreads) {
   TORCH_CHECK(nameMap_.size() > 1, "ProcessGroupAgent requires world_size to "
       "be at least 2, but got ", nameMap_.size());
   auto workerRankIter = nameMap_.find(workerName_);
@@ -73,11 +75,12 @@ ProcessGroupAgent::ProcessGroupAgent(
       "Resolved worker rank ", workerRankIter -> second,
       " does not match ProcessGroup rank ", pg_->getRank());
 
+  sendMutexes_ = std::make_unique<std::mutex[]>(pg_->getSize());
   names_.resize(nameMap_.size());
   for (auto& entry : nameMap_) {
     names_[entry.second] = entry.first;
   }
-  sendThread_ = std::thread(&ProcessGroupAgent::sendLoop, this);
+  //sendThread_ = std::thread(&ProcessGroupAgent::sendLoop, this);
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
@@ -91,13 +94,7 @@ void ProcessGroupAgent::join() {
   sync();
   int dst = (pg_->getRank() + 1) % pg_->getSize();
   enqueue(SendWork(dst, Message({}, {}, MessageType::SHUTDOWN)));
-  std::unique_lock<std::mutex> lock(sendQueueMutex_);
-  workConsumeCV_.wait(lock, [&] { return sendQueue_.empty(); });
-  stop_ = true;
-  lock.unlock();
-
-  workProduceCV_.notify_all();
-  sendThread_.join();
+  sendThreadPool_.waitWorkComplete();
   listenerThread_.join();
 }
 
@@ -106,11 +103,9 @@ void ProcessGroupAgent::sync() {
   // the lock below, because other processes might not enter sync() until it
   // gets some response from this RpcAgent.
   pg_->barrier()->wait();
-  // Acquire the lock on the send queue to prevent additional messages to be put
-  // onto the send queue.
-  std::unique_lock<std::mutex> lock(sendQueueMutex_);
-  // Wait until the send queue is depleted.
-  workConsumeCV_.wait(lock, [&] { return sendQueue_.empty(); });
+  // Wait until the all send works are done.
+  // NB: There might be additional send works inserted while waiting.
+  sendThreadPool_.waitWorkComplete();
   // Use another barrier in case different RpcAgent handles different amounts of
   // workloads.
   pg_->barrier()->wait();
@@ -143,48 +138,31 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
 }
 
 void ProcessGroupAgent::enqueue(SendWork work) {
-  std::unique_lock<std::mutex> lock(sendQueueMutex_);
-  sendQueue_.emplace_back(std::move(work));
-  lock.unlock();
+  sendThreadPool_.run(std::bind(
+    [&](SendWork work) {
+      std::stringstream ss;
+      serialize(work.message_, ss);
+      std::string str = ss.str();
 
-  workProduceCV_.notify_one();
-}
+      std::vector<torch::Tensor> preamble = {
+        torch::tensor(
+          {
+            (int64_t)pg_->getRank(),
+            (int64_t)str.length(),
+          }, {torch::kLong})
+      };
 
-// making sure tensors are not deleted before send finishes
-void ProcessGroupAgent::sendLoop() {
-  std::unique_lock<std::mutex> lock(sendQueueMutex_);
-
-  while (!stop_) {
-    if (sendQueue_.empty()) {
-      workProduceCV_.wait(lock);
-      continue;
-    }
-
-    auto work = std::move(sendQueue_.front());
-    sendQueue_.pop_front();
-    lock.unlock();
-
-    workConsumeCV_.notify_one();
-
-
-    std::stringstream ss;
-    serialize(work.message_, ss);
-    std::string str = ss.str();
-
-    std::vector<torch::Tensor> preamble = {
-      torch::tensor(
-        {
-          (int64_t)pg_->getRank(),
-          (int64_t)str.length(),
-        }, {torch::kLong})
-    };
-    pg_->send(preamble, work.dstRank_, work.dstRank_ /* channelTag */)->wait();
-    std::vector<torch::Tensor> payload =
-        {torch::from_blob((void *)str.c_str(), str.length(), {torch::kChar})};
-    pg_->send(payload, work.dstRank_, work.dstRank_ /* channelTag */)->wait();
-
-    lock.lock();
-  }
+      // ProcessGroup is not thread-safe when sending with the same tag, hence
+      // the lock
+      std::unique_lock<std::mutex> lock(sendMutexes_.get()[work.dstRank_]);
+      pg_->send(preamble, work.dstRank_, work.dstRank_ /* channelTag */)->wait();
+      std::vector<torch::Tensor> payload =
+          {torch::from_blob((void *)str.c_str(), str.length(), {torch::kChar})};
+      pg_->send(payload, work.dstRank_, work.dstRank_ /* channelTag */)->wait();
+      lock.unlock();
+    },
+    std::move(work)
+  ));
 }
 
 void ProcessGroupAgent::listenLoop() {

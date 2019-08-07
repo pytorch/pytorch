@@ -1,11 +1,11 @@
 #pragma once
 
+#include <c10/core/thread_pool.h>
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/rpc/FutureMessage.h>
 #include <torch/csrc/distributed/rpc/RpcAgent.h>
 #include <torch/csrc/distributed/rpc/functions.h>
 
-#include <deque>
 #include <thread>
 
 namespace torch {
@@ -28,7 +28,8 @@ class ProcessGroupAgent : public RpcAgent {
 
   ProcessGroupAgent(std::string workerName,
                     std::unordered_map<std::string, int> nameMap,
-                    std::shared_ptr<c10d::ProcessGroup> pg);
+                    std::shared_ptr<c10d::ProcessGroup> pg,
+                    int numSendThreads = 4);
 
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
@@ -60,12 +61,11 @@ class ProcessGroupAgent : public RpcAgent {
   // names_[rank] stores the name of the corresponding worker, use this vector
   // to get worker name from rank and pass it to the RequestCallback.
   std::vector<std::string> names_;
-  std::deque<SendWork> sendQueue_;
-  std::mutex sendQueueMutex_;
-  std::condition_variable workProduceCV_;
-  std::condition_variable workConsumeCV_;
-  std::thread sendThread_;
+  // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
+  // when using the same tag.
+  std::unique_ptr<std::mutex[]> sendMutexes_;
   std::thread listenerThread_;
+  ThreadPool sendThreadPool_;
   std::unordered_map<int64_t, std::shared_ptr<FutureMessage>> futures_;
   std::mutex futureMutex_;
 };
