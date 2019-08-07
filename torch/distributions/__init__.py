@@ -94,6 +94,7 @@ from .laplace import Laplace
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import LowRankMultivariateNormal
+from .mixture_same_family import MixtureSameFamily
 from .multinomial import Multinomial
 from .multivariate_normal import MultivariateNormal
 from .negative_binomial import NegativeBinomial
@@ -131,6 +132,7 @@ __all__ = [
     'LogNormal',
     'LogisticNormal',
     'LowRankMultivariateNormal',
+    'MixtureSameFamily',
     'Multinomial',
     'MultivariateNormal',
     'NegativeBinomial',
