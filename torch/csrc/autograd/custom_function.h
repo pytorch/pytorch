@@ -63,7 +63,7 @@ using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
 // y[0].sum().backward();
 template <class T>
 struct TORCH_API Function {
-  // We need to use a different template paramter than T here because T will
+  // We need to use a different template parameter than T here because T will
   // inherit from Function, and when Function<T> is instantiated, T::forward
   // is not declared yet.
   // The enable_if check is to ensure that the user doesn't explicitly provide
@@ -218,8 +218,8 @@ auto Function<T>::apply(Args&&... args) -> typename std::enable_if<std::is_same<
     node->save_variables_to_ctx();
   }
 
-  // wrapped_outputs will be a variable_list so, convert it to the correct return
-  // type. Only Variable and variable_list are accepted as return types.
+  // wrapped_outputs will be a variable_list so, convert it to the correct
+  // return type. Only Variable and variable_list are accepted as return types.
  return to_output_type<forward_return_t>(wrapped_outputs);
 }
 
