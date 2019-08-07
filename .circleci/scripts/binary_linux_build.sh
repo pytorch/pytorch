@@ -5,7 +5,7 @@ set -eux -o pipefail
 source /env
 
 # Defaults here so they can be changed in one place
-export MAX_JOBS=12
+export MAX_JOBS=31  # yf225 TODO: tmp change
 
 # Parse the parameters
 if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
