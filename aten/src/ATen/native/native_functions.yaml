@@ -1125,6 +1125,8 @@
 
 - func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
 
+- func: fbgemm_pack_quantized_matrix(Tensor input) -> Tensor
+
 - func: fbgemm_pack_quantized_matrix(Tensor input, int K, int N) -> Tensor
 
 - func: fbgemm_is_cpu_supported() -> bool

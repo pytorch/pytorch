@@ -24,13 +24,12 @@ class QuantizedLinear(torch.jit.ScriptModule):
 
         self.register_buffer(
             'packed_tensor_ptr',
-            torch.fbgemm_pack_quantized_matrix(self.weight.clone(), self.weight.size(1), self.weight.size(0)))
+            torch.fbgemm_pack_quantized_matrix(self.weight.clone()))
 
     @torch.jit.script_method
     def _unpack(self):
         self.packed_tensor_ptr.set_(
-            torch.fbgemm_pack_quantized_matrix(
-                self.weight, self.weight.size(1), self.weight.size(0)))
+            torch.fbgemm_pack_quantized_matrix(self.weight))
 
     @torch.jit.script_method
     def _pack(self):
@@ -106,11 +105,9 @@ class QuantizedRNNCellBase(torch.jit.ScriptModule):
         self.register_buffer('weight_hh', weight_hh)
         self.register_buffer('col_offsets_hh', col_offsets_hh)
 
-        packed_ih = torch.fbgemm_pack_quantized_matrix(
-            self.weight_ih, self.weight_ih.size(1), self.weight_ih.size(0))
+        packed_ih = torch.fbgemm_pack_quantized_matrix(self.weight_ih)
         self.register_buffer('packed_ih', packed_ih)
-        packed_hh = torch.fbgemm_pack_quantized_matrix(
-            self.weight_hh, self.weight_hh.size(1), self.weight_hh.size(0))
+        packed_hh = torch.fbgemm_pack_quantized_matrix(self.weight_hh)
         self.register_buffer('packed_hh', packed_hh)
 
         self.bias_ih = torch.nn.Parameter(other.bias_ih.clone().float(), requires_grad=False)
@@ -150,11 +147,8 @@ class QuantizedRNNCellBase(torch.jit.ScriptModule):
     # @torch._jit_internal.weak_script_method
     @torch.jit.script_method
     def _unpack(self):
-        self.packed_ih.set_(torch.fbgemm_pack_quantized_matrix(
-            self.weight_ih, self.weight_ih.size(1), self.weight_ih.size(0)))
-        self.packed_hh.set_(
-            torch.fbgemm_pack_quantized_matrix(
-                self.weight_hh, self.weight_hh.size(1), self.weight_hh.size(0)))
+        self.packed_ih.set_(torch.fbgemm_pack_quantized_matrix(self.weight_ih))
+        self.packed_hh.set_(torch.fbgemm_pack_quantized_matrix(self.weight_hh))
 
     # @torch._jit_internal.weak_script_method
     @torch.jit.script_method
@@ -298,8 +292,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                         #   col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh
                         qweight, col_offsets, scale, zero_point = \
                             torch.fbgemm_linear_quantize_weight(weight.clone().float())
-                        packed_weight = torch.fbgemm_pack_quantized_matrix(
-                            qweight, weight.size(1), weight.size(0))
+                        packed_weight = torch.fbgemm_pack_quantized_matrix(qweight)
 
                         params = [qweight, bias, packed_weight, col_offsets, scale, zero_point]
                         pos_names = ['w', 'b', 'packed', 'col_offsets', 'scale', 'zero_point']
@@ -434,8 +427,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
             for i in range(len(packed_weights)):
                 packed = packed_weights[i]
                 quantized = quantized_weights[i]
-                packed.set_(torch.fbgemm_pack_quantized_matrix(
-                    quantized, quantized.size(1), quantized.size(0)))
+                packed.set_(torch.fbgemm_pack_quantized_matrix(quantized))
         else: 
             packed_weights = self._get_packed_weights()
             orig_weights = self._get_orig_weights()
