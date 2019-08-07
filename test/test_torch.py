@@ -2502,26 +2502,6 @@ class _TestTorchMixin(object):
             torch.pow(base, tensor, out=out)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    def test_float_scalar_pow_int_tensor(self):
-        ints = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
-        floats = [2.0, -3 / 2, -1.0, -1 / 2, -1 / 3, 0.0,
-                  1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
-
-        tensor = torch.tensor(ints, dtype=torch.int32)
-        nparr = np.array(ints, dtype=np.int32)
-        out = torch.empty_like(tensor)
-        for base in floats:
-            # Numpy propagates int to float, so we need to cast to np.int32
-            expected = np.power(base, nparr).astype(np.int32)
-
-            actual = torch.pow(base, tensor)
-            self.assertEqual(expected, actual.numpy())
-
-            actual2 = torch.pow(base, tensor, out=actual)
-            self.assertEqual(expected, actual.numpy())
-            self.assertEqual(expected, actual2.numpy())
-
-    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_float_scalar_pow_float_tensor(self):
         def assertEqual(x, y):
             self.assertEqual(np.nan_to_num(x), np.nan_to_num(y), allow_inf=True)
