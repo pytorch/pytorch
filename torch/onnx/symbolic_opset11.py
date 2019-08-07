@@ -8,7 +8,7 @@ from torch.onnx.symbolic_helper import _black_list_in_opset
 # This file exports ONNX ops for opset 11
 
 black_listed_operators = [
-    "loop", "cumsum", "round", "bitshift", "equal"
+    "cumsum", "eq", "ne"
 ]
 
 for black_listed_op in black_listed_operators:
