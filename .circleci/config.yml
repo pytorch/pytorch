@@ -3012,12 +3012,12 @@ workflows:
             - setup
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3.6_cu90_devtoolset7_build
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_shared-with-deps_build:
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_shared-with-deps_test:
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_test:
           requires:
-            - binary_linux_libtorch_2.7m_cpu_gcc5.4_shared-with-deps_build
+            - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_build
 
       # yf225 TODO: move these two to nightly-only, after we validate that they work in this PR
       - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_build:
