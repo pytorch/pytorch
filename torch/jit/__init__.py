@@ -2105,10 +2105,7 @@ def overload(func):
     return func
 
 def compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
-    _frames_up = 0
     impl_ast = torch.jit.get_jit_def(impl_fn)
-    closure_rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)
-    stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
     _frames_up = 0
     _rcb = _gen_rcb(impl_fn, _frames_up)
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
@@ -2147,8 +2144,8 @@ def check_directly_compile_overloaded(obj):
     global _overloaded_fns
     if qual_name in _compiled_overloaded_fns or qual_name in _overloaded_fns:
         raise RuntimeError("Function {} cannot be directly compiled because it"
-                           " is overloaded. Please wrap it with typed inputs of"
-                           " the signature you wish to compile instead".format(obj))
+                           " is overloaded. It must be used in a context of a function"
+                           " where its inputs can determine which overload to call.".format(qual_name))
 
 # torch.jit.Error
 Error = torch._C.JITException
