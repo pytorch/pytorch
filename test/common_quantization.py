@@ -124,7 +124,7 @@ class QuantizationTestCase(TestCase):
         self._checkScriptable(scripted)
 
     # Call this twice: once for a scripted module and once for a traced module
-    def _checkScriptable(self, script_mod):
+    def _checkScriptable(self, script_mod, ref_inputs=None, ref_outputs=None):
         # Test save/load
         #
         # TODO: need __get_state__ and __set_state__
@@ -133,7 +133,6 @@ class QuantizationTestCase(TestCase):
 
         buffer.seek(0)
         torch.jit.load(buffer)
-
 
         if ref_inputs is not None:
             self.assertEqual(scripted(*ref_inputs), ref_outputs)
