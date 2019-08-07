@@ -2547,10 +2547,10 @@ Computes the element-wise logical NOT of the given input tensor. The output tens
 input tensor is not a bool tensor, zeros are treated as ``False`` and non-zeros are treated as ``True``.
 
 Args:
-    input (Tensor): the input tensor
-    out (Tensor, optional): the output tensor
+    {input}
+    {out}
 
-Example:
+Example::
 
     >>> torch.logical_not(torch.tensor([True, False]))
     tensor([ False,  True])
@@ -2558,7 +2558,7 @@ Example:
     tensor([ True, False,  False])
     >>> torch.logical_not(torch.tensor([0, 1, -10], dtype=torch.double))
     tensor([ False,  True,  True])
-""")
+""".format(**common_args))
 
 add_docstr(torch.logical_xor,
            r"""
