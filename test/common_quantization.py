@@ -128,8 +128,6 @@ class QuantizationTestCase(TestCase):
         self._checkModuleCorrectnessAgainstOrig(orig_mod, script_mod, calib_data)
 
         # Test save/load
-        #
-        # TODO: need __get_state__ and __set_state__
         buffer = io.BytesIO()
         torch.jit.save(script_mod, buffer)
 
