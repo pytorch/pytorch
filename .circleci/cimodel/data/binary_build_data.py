@@ -75,7 +75,7 @@ LINUX_GCC_CONFIG_VARIANTS = OrderedDict(
     conda=['devtoolset7'],
     libtorch=[
         "devtoolset7",
-        "gcc5.4_cxx11",
+        "gcc5.4_cxx11-abi",
     ],
 )
 
@@ -124,17 +124,17 @@ class PackageFormatConfigNode(ConfigNode):
 
 
 class LinuxGccConfigNode(ConfigNode):
-    def __init__(self, parent, devtoolset_version):
-        super(LinuxGccConfigNode, self).__init__(parent, "DEVTOOLSET=" + str(devtoolset_version))
+    def __init__(self, parent, gcc_config_variant):
+        super(LinuxGccConfigNode, self).__init__(parent, "GCC_CONFIG_VARIANT=" + str(gcc_config_variant))
 
-        self.props["devtoolset_version"] = devtoolset_version
+        self.props["gcc_config_variant"] = gcc_config_variant
 
     def get_children(self):
         cuda_versions = self.find_prop("cuda_versions")
 
         # XXX devtoolset7 on CUDA 9.0 is temporarily disabled
         # see https://github.com/pytorch/pytorch/issues/20066
-        if self.find_prop("devtoolset_version") == 7:
+        if self.find_prop("gcc_config_variant") == 'devtoolset7':
             cuda_versions = filter(lambda x: x != "90", cuda_versions)
 
         return [ArchConfigNode(self, v) for v in cuda_versions]
