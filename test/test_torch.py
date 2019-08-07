@@ -1821,7 +1821,7 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_logical_not(self, device):
-        for dtype in [torch.bool,] + torch.testing.get_all_math_dtypes(device):
+        for dtype in [torch.bool] + torch.testing.get_all_math_dtypes(device):
             expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
             a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
             # new tensor
