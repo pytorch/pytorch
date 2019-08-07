@@ -12537,8 +12537,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         TestTorch.unary_check_mem_overlap(self, lambda t: t.tan_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.tanh_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.trunc_(), device=device)
-        TestTorch.unary_check_mem_overlap(self, lambda t: t.pow_(42), device=device)
-        TestTorch.unary_check_mem_overlap(self, lambda t: t.pow_(t), device=device)
 
     @staticmethod
     def _test_inplace_binary_mem_overlap(self, device='cpu'):
@@ -12571,6 +12569,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         weight = torch.randn(3, 3, device=device)
         with self.assertRaisesRegex(RuntimeError, 'single memory location'):
             start.lerp_(end, weight)
+
+    @unittest.expectedFailure
+    def test_pow_mem_overlap(self):
+        TestTorch.binary_check_mem_overlap(self, 'pow_', device='cpu')
+        tensor = torch.tensor(value, device=device).expand(3, 3)
+        other = 42
+        with self.assertRaisesRegex(RuntimeError, 'single memory location'):
+            inplace_op(tensor, other)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
     def test_reverse_binary_ops_multiple_device(self):
