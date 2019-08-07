@@ -103,20 +103,6 @@ class MinMaxObserver(ObserverBase):
         return self._calculate_qparams(self.min_val.item(), self.max_val.item())
 
 
-def observer(observer_cls, **kwargs):
-    return partial(observer_cls, **kwargs)
-
-
-def default_observer(**kwargs):
-    return observer(MinMaxObserver, **kwargs)
-
-
-def default_weight_observer(**kwargs):
-    kwargs.setdefault("dtype", torch.qint8)
-    kwargs.setdefault("qscheme", torch.per_tensor_symmetric)
-    return observer(MinMaxObserver, **kwargs)
-
-
 class HistogramObserver(ObserverBase):
     r"""
     The module records the running histogram of tensor values along with
@@ -221,13 +207,32 @@ class HistogramObserver(ObserverBase):
         max_bin = self.bins - 1
         # find the first bin in histogram with non-zero Value from left
         for i in range(self.histogram.size()[0]):
-            if (self.histogram[i].item() > 0):
+            if self.histogram[i].item() > 0:
                 min_bin = i
                 break
         # find the first bin in histogram with non-zero Value from right
         for i in reversed(range(self.histogram.size()[0])):
-            if (self.histogram[i].item() > 0):
+            if self.histogram[i].item() > 0:
                 max_bin = i
                 break
-        bin_width = (self.max_val.item() - self.min_val.item()) / self.histogram.size()[0]
-        return self._calculate_qparams(self.min_val.item() + min_bin * bin_width, self.min_val.item() + (max_bin + 1) * bin_width)
+        bin_width = (self.max_val.item() - self.min_val.item()) / self.histogram.size()[
+            0
+        ]
+        return self._calculate_qparams(
+            self.min_val.item() + min_bin * bin_width,
+            self.min_val.item() + (max_bin + 1) * bin_width,
+        )
+
+
+def observer(observer_cls, **kwargs):
+    return partial(observer_cls, **kwargs)
+
+
+def default_observer(**kwargs):
+    return observer(MinMaxObserver, **kwargs)
+
+
+def default_weight_observer(**kwargs):
+    kwargs.setdefault("dtype", torch.qint8)
+    kwargs.setdefault("qscheme", torch.per_tensor_symmetric)
+    return observer(MinMaxObserver, **kwargs)
