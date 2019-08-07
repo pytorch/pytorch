@@ -2677,7 +2677,7 @@ class TestAutograd(TestCase):
                     x = torch.randn(sizes, device=device, dtype=torch.double)
                     y = torch.randn(sizes, device=device, dtype=torch.double)
 
-                    eee = 1e-5
+                    eee = 1e-6
                     x = x - (((x - y) < eee).double() * 2 * eee)
                     x.requires_grad = True
                     y.requires_grad = True
@@ -4013,10 +4013,7 @@ def gradgradcheck_method_precision_override(test_name):
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):
     printDebug = False
-    eps = 1e-6
-    if test_name in "test_cdist_gpu_1":
-        eps = 1e-5
-    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=eps, atol=PRECISION, printDebug=printDebug))
+    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION, printDebug=printDebug))
     if not run_gradgradcheck or name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
