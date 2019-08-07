@@ -294,6 +294,10 @@ void TestView(DeprecatedTypeProperties& type) {
   ASSERT_TRUE(viewed.sizes().equals({3, 4}));
 }
 
+void TestIntArrayRefExpansion(DeprecatedTypeProperties& type) {
+  max_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
+}
+
 void test(DeprecatedTypeProperties& type) {
   TestResize(type);
   TestOnesAndDot(type);
@@ -322,6 +326,7 @@ void test(DeprecatedTypeProperties& type) {
   TestDispatch();
   TestNegativeDim(type);
   TestView(type);
+  TestIntArrayRefExpansion(type);
 }
 
 TEST(BasicTest, BasicTestCPU) {
