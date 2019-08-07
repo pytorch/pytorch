@@ -64,9 +64,6 @@ Tensor logical_not(const Tensor& self) {
 Tensor& logical_not_(Tensor& self) {
   auto iter = TensorIterator::unary_op(self, self, /*check_internal_overlap=*/true);
   logical_not_inplace_stub(iter.device_type(), iter);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(self, self);
-#endif
   return self;
 }
 
@@ -78,9 +75,6 @@ Tensor& logical_not_out(Tensor& result, const Tensor& self) {
   iter.add_input(self);
   iter.build();
   logical_not_stub(iter.device_type(), iter);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
