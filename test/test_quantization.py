@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn.quantized as nnq
 from torch.quantization import \
-    quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, MinMaxObserver
+    quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, MinMaxObserver, HistogramObserver
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
@@ -339,6 +339,19 @@ class ObserverTest(QuantizationTestCase):
         myobs(y)
         self.assertEqual(myobs.min_val, 1.0)
         self.assertEqual(myobs.max_val, 8.0)
+        qparams = myobs.calculate_qparams()
+        self.assertAlmostEqual(qparams[0].item(), 0.0313725, delta=1e-5)
+        self.assertEqual(qparams[1].item(), 0.0)
+
+    def test_histogram_observer(self):
+        myobs = HistogramObserver(bins=10)
+        x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
+        myobs(x)
+        myobs(y)
+        self.assertEqual(myobs.min_val, 1.0)
+        self.assertEqual(myobs.max_val, 8.0)
+        self.assertEqual(myobs.histogram, [1., 2., 0., 1., 2., 2., 2., 1., 1., 1.])
         qparams = myobs.calculate_qparams()
         self.assertAlmostEqual(qparams[0].item(), 0.0313725, delta=1e-5)
         self.assertEqual(qparams[1].item(), 0.0)
