@@ -503,9 +503,6 @@ at::Tensor _convolution(
 
   const bool input_is_mkldnn = input_r.is_mkldnn();
   auto input = input_r;
-  //if (!input_is_mkldnn) {
-  //  input = input.contiguous();
-  //}
   auto weight = weight_r;
   auto bias = bias_r;
   auto k = weight.ndimension();

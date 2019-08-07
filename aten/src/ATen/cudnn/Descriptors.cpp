@@ -126,6 +126,11 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
   }
   dim = std::max(dim, pad);
   cudnnTensorFormat_t filter_format = CUDNN_TENSOR_NCHW;
+  // Implementation of `suggest_memory_format()` is ambiguous in cases:
+  // a. Tensor with channel size == 1
+  // b. Tensor with both spatial size == 1
+  // It causes mismatch memory format for data & filter in convolution. Hence we
+  // check for contiguous here to fallback to NCHW in those cases.
   if (!t.is_contiguous() && t.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
     filter_format = CUDNN_TENSOR_NHWC;
   }
