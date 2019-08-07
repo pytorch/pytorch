@@ -71,8 +71,7 @@ Tensor& logical_not_(Tensor& self) {
 }
 
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
-  TORCH_CHECK(result.scalar_type() == kBool,
-              "The output tensor of logical_not must be a bool tensor.");
+  TORCH_CHECK(result.scalar_type() == kBool, "The output tensor of logical_not must be a bool tensor.");
   TensorIterator iter;
   iter.dont_compute_common_dtype();
   iter.check_and_add_output(result);
