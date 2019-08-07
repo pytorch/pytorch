@@ -16,7 +16,7 @@ from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
     CyclicLR, CosineAnnealingWarmRestarts
 from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
-
+from torch.optim.early_stopping import EarlyStoppingCriterion
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -1229,52 +1229,24 @@ class TestLRScheduler(TestCase):
                             batch_num, momentum_target[batch_num], param_group['momentum']), delta=1e-5)
 
 class TestEarlyStopping(TestCase):
-    def test_early_stopping_min_mode(self):
-        scores = [0.1, 0.2, 0.3, 0.2, 0.25]
-        targets = [True, True, True, False, False]
-        early_stopping = EarlyStoppingCriterion(patience=2, mode='min', min_delta=0.0)
-        for i, (s, t) in enumerate(zip(scores, targets)):
-            is_continue = early_stopping.step(s)
-            self.assertEqual(t, is_continue,
-                             message='Early stopping is wrong in epoch {}: expected {}, got {}'
-                             .format(i, t, is_continue))
-            if not t:
-                break
+    def test_early_stopping(self):
+        args_list = [
+            ([0.1, 0.2, 0.3, 0.2, 0.25], [True, True, True, False, False], 2, 'min', 0.0),
+            ([0.3, 0.2, 0.1, 0.2, 0.25], [True, True, False, False, False], 1, 'max', 0.0),
+            ([0.1, 0.2, 0.19, 0.2, 0.25], [True, True, False, False, False], 1, 'min', 0.2),
+            ([0.3, 0.31, 0.4, 0.2, 0.1], [True, True, False, False, False], 1, 'max', 0.2)
+        ]
 
-    def test_early_stopping_max_mode(self):
-        scores = [0.3, 0.2, 0.1, 0.2, 0.25]
-        targets = [True, True, False, False, False]
-        early_stopping = EarlyStoppingCriterion(patience=1, mode='max', min_delta=0.0)
-        for i, (s, t) in enumerate(zip(scores, targets)):
-            is_continue = early_stopping.step(s)
-            self.assertEqual(t, is_continue,
-                             message='Early stopping is wrong in epoch {}: expected {}, got {}'
-                             .format(i, t, is_continue))
-            if not t:
-                break
+        for scores, targets, patience_val, mode_val, delta_val in args_list:
+            early_stopping = EarlyStoppingCriterion(patience=patience_val, mode=mode_val, min_delta=delta_val)
+            for i, (s, t) in enumerate(zip(scores, targets)):
+                is_continue = early_stopping.step(s)
+                self.assertEqual(t, is_continue,
+                                 message='Early stopping is wrong in epoch {}: expected {}, got {}'
+                                 .format(i, t, is_continue))
+                if not t:
+                    break
 
-    def test_early_stopping_min_delta_1(self):
-        scores = [0.1, 0.2, 0.19, 0.2, 0.25]
-        targets = [True, True, False, False, False]
-        early_stopping = EarlyStoppingCriterion(patience=1, mode='min', min_delta=0.2)
-        for i, (s, t) in enumerate(zip(scores, targets)):
-            is_continue = early_stopping.step(s)
-            self.assertEqual(t, is_continue,
-                             message='Early stopping is wrong in epoch {}: expected {}, got {}'
-                             .format(i, t, is_continue))
-            if not t:
-                break
-
-    def test_early_stopping_min_delta_2(self):
-        scores = [0.3, 0.31, 0.4, 0.2, 0.1]
-        targets = [True, True, False, False, False]
-        early_stopping = EarlyStoppingCriterion(patience=1, mode='max', min_delta=0.2)
-        for i, (s, t) in enumerate(zip(scores, targets)):
-            is_continue = early_stopping.step(s)
-            self.assertEqual(t, is_continue, message='Early stopping is wrong in epoch {}: expected {}, got {}'
-                             .format(i, t, is_continue))
-            if not t:
-                break
 
     def test_early_stopping_state_dict(self):
         scores = [0.3, 0.2, 0.1, 0.2, 0.25]
