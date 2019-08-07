@@ -41,6 +41,10 @@ struct TORCH_API Function {
     return graph_;
   }
 
+  void replace_graph(std::shared_ptr<Graph> g) {
+    graph_ = std::move(g);
+  }
+
   const c10::QualifiedName& qualname() const {
     return name_;
   }

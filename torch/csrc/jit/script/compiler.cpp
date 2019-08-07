@@ -30,6 +30,15 @@ namespace torch {
 namespace jit {
 namespace script {
 
+struct CachedCompilation {
+  CachedCompilation(std::shared_ptr<Graph> graph, FunctionSchema schema)
+      : graph(std::move(graph)), schema(std::move(schema)) {}
+  std::shared_ptr<Graph> graph;
+  FunctionSchema schema;
+};
+
+thread_local std::unordered_map<QualifiedName, CachedCompilation> code_cache;
+
 using FunctionTable = std::unordered_map<std::string, Function&>;
 using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using TypeTable = std::unordered_map<std::string, TypePtr>;
@@ -3105,7 +3114,17 @@ std::unique_ptr<Function> CompilationUnit::define(
     _resolver =
         std::make_shared<FunctionResolver>(resolver.get(), function_table);
   }
-  auto creator = [def, _resolver, self](Function& method) {
+  auto name = prefix ? QualifiedName(*prefix, def.name().name())
+                     : QualifiedName(def.name().name());
+  auto unmangled_name = name;
+  auto creator = [def, _resolver, self, unmangled_name](Function& method) {
+    if (code_cache.count(unmangled_name) > 0) {
+      std::cout << "hit on " << unmangled_name.qualifiedName() << "\n";
+      auto cached = *code_cache.find(unmangled_name);
+      method.replace_graph(cached.second.graph);
+      method.setSchema(cached.second.schema);
+      return;
+    }
     // Store the function name so that it can be referenced if there is an error
     // while compiling this function
     if (self) {
@@ -3115,11 +3134,13 @@ std::unique_ptr<Function> CompilationUnit::define(
       ErrorReport::CallStack::push_function(method.qualname().name());
     }
     to_ir(def, _resolver, self, method);
+
+    code_cache.insert(
+        {method.qualname(),
+        CachedCompilation(method.graph(), method.getSchema())});
     // Compilation was successful, so remove the function def info
     ErrorReport::CallStack::pop_function();
   };
-  auto name = prefix ? QualifiedName(*prefix, def.name().name())
-                     : QualifiedName(def.name().name());
   if (shouldMangle) {
     // If `shouldMangle` is set, we should generate a unique name for this
     // function if there is already an existing one.

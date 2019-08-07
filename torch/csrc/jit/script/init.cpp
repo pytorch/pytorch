@@ -692,8 +692,8 @@ void initJitScriptBindings(PyObject* module) {
             QualifiedName(name.prefix()),
             {def},
             {pythonResolver(std::move(rcb))},
-            nullptr,
-            true);
+            /*self=*/nullptr,
+            /*shouldMange=*/true);
         TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
         auto& defined = defined_functions[0];
         defined->setSchema(getSchemaWithNameAndDefaults(
