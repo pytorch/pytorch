@@ -299,18 +299,17 @@ with other components of PyTorch in order to reduce overall complexity.
 If you find yourself having to set this field to False add @gchanan to your PR's
 set of reviewers.
 
-### `exclude_from_c10_dispatcher`
+### `use_c10_dispatcher`
 
 ```
-exclude_from_c10_dispatcher: True
+use_c10_dispatcher: True
 ```
 
-This will indicate that the func signature uses features not available in the
-c10 dispatcher yet. Without this flag, the operator will be added to the
-c10 operator library and available there. This should be the default choice
-and over time, as the c10 dispatcher gets more features, there will be fewer
-and fewer funcs that need this flag. If, however, you write a function and
-get compiler errors in c10, adding this flag might help.
+This will indicate that the func signature only uses features supported by
+the c10 dispatcher. With this flag, the operator will be added to the
+c10 operator library and be available there. This should be the default choice
+and over time, as the c10 dispatcher gets more features, there will be more
+and more funcs that have this flag, until (hopefully) all of them are in c10.
 
 ## Writing an implementation in C++
 

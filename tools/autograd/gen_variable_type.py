@@ -472,7 +472,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 declaration, type_definition_body=body))
         wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
             declaration, formal_types=formal_types))
-        if not declaration['exclude_from_c10_dispatcher']:
+        if declaration['use_c10_dispatcher']:
             c10_wrapper_registrations.append(C10_WRAPPER_REGISTRATION.substitute(
                 declaration, formal_types=formal_types))
 
