@@ -90,6 +90,7 @@ def hparams(hparam_dict=None, metric_dict=None):
         SessionEndInfo
     """
     import torch
+    from six import string_types
     from tensorboard.plugins.hparams.api_pb2 import (
         Experiment, HParamInfo, MetricInfo, MetricName, Status
     )
@@ -140,7 +141,7 @@ def hparams(hparam_dict=None, metric_dict=None):
             ssi.hparams[k].number_value = v
             continue
 
-        if isinstance(v, str):
+        if isinstance(v, string_types):
             ssi.hparams[k].string_value = v
             continue
 
