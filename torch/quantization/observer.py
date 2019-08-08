@@ -201,7 +201,7 @@ class HistogramObserver(ObserverBase):
             self.max_val = combined_max
 
     def calculate_qparams(self, **kwargs):
-        if self.max_val is None or self.min_val is None:
+        if self.histogram is None:
             raise Exception("must run observer before calling calculate_qparams!")
         min_bin = 0
         max_bin = self.bins - 1
