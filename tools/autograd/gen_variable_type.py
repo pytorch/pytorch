@@ -740,6 +740,11 @@ def emit_body(declaration):
                     stmt = '{output_var} = as_variable({output_var});'.format(output_var=output_var)
                 extra_wrapping_stmts.append(stmt)
             return call, extra_wrapping_stmts
+        elif name in FACTORY_FUNCTION_NAMES:
+            if is_out_overload(declaration):
+                return 'make_variable(std::move({}), options.requires_grad());'.format(call), []
+            else:
+                return 'make_variable(std::move({}), /*requires_grad=*/false);'.format(call), []
         else:
             return 'as_variable(std::move({}))'.format(call), []
 

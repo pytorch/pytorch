@@ -10,15 +10,7 @@ from .gen_variable_type import format_trace
 
 FUNCTION_TEMPLATE = CodeTemplate("""\
 inline at::Tensor ${name}(${formals}) {
-  ${pre_record_trace}
-  at::Tensor tensor = ([&]() {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return at::${name}(${actuals});
-  })();
-  at::Tensor result =
-    autograd::make_variable(std::move(tensor), /*requires_grad=*/${requires_grad});
-  ${post_record_trace}
-  return result;
+  return at::${name}(${actuals});
 }
 """)
 
@@ -58,16 +50,12 @@ def process_function(decl, has_tensor_options):
         if argument["simple_type"] == "TensorOptions":
             # We want to make `at::{name}` always return a
             # tensor and not a variable, since we create a variable right after.
-            actual = "at::TensorOptions({}).is_variable(false)".format(actual)
+            actual = "at::TensorOptions({}).is_variable(true)".format(actual)
         actuals.append(actual)
-    requires_grad = "options.requires_grad()" if has_tensor_options else "false"
     if decl['name'].endswith('_like') and not has_tensor_options:
         # it's a tensor
-        actuals.append('{}.options().is_variable(false)'.format(actuals[0]))
-
-    pre_record_trace, post_record_trace = format_trace(decl)
+        actuals.append('{}.options().is_variable(true)'.format(actuals[0]))
 
     return FUNCTION_TEMPLATE.substitute(
-        name=decl["name"], formals=formals, actuals=actuals, requires_grad=requires_grad,
-        pre_record_trace=pre_record_trace, post_record_trace=post_record_trace
+        name=decl["name"], formals=formals, actuals=actuals
     )
