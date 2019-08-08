@@ -211,6 +211,15 @@
 - name: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   self: not_implemented("cholesky_inverse")
 
+- name: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
+  self: not_implemented("fbgemm_linear_int8_weight_fp32_activation only supported for inference")
+
+- name: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
+  self: not_implemented("fbgemm_linear_int8_weight only supported for inference")
+
+- name: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+  self: not_implemented("fbgemm_linear_fp16_weight_fp32_activation only supported for inference")
+
 - name: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
   self: not_implemented("fbgemm_linear_fp16_weight only supported for inference")
 
