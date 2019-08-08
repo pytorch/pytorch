@@ -130,7 +130,7 @@ class CAFFE2_API PyTorchStreamWriter final {
   PyTorchStreamWriter(std::ostream* out)
   : PyTorchStreamWriter("archive", out) {}
 
-  void writeRecord(const std::string& name, const void* data, size_t size);
+  void writeRecord(const std::string& name, const void* data, size_t size, bool compress = false);
   void writeEndOfFile();
 
   bool finalized() const {
