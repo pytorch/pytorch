@@ -12989,6 +12989,115 @@ a")
         out = test_non_primitive_types(_MyNamedTuple(value=torch.tensor(5.0)))
         self.assertEqual(out, torch.tensor(6.0))
 
+    def test_function_overloads(self):
+        # TODO: pyflakes currently does not compose @overload annotation with other
+        # decorators. This is fixed on master but not on version 2.1.1.
+        # Next version update remove noqa and add @typing.overload annotation
+
+        @torch.jit._overload  # noqa: F811
+        def test_simple(x1):  # noqa: F811
+            # type: (int) -> int
+            pass
+
+        @torch.jit._overload  # noqa: F811
+        def test_simple(x1):  # noqa: F811
+            # type: (float) -> float
+            pass
+
+        def test_simple(x1):  # noqa: F811
+            return x1 + 5
+
+        def invoke_function():
+            return test_simple(1.0), test_simple(.5)
+
+        self.checkScript(invoke_function, ())
+
+        # testing that the functions are cached
+        compiled_fns_1 = torch.jit._get_overloads(test_simple)
+        compiled_fns_2 = torch.jit._get_overloads(test_simple)
+        for a, b in zip(compiled_fns_1, compiled_fns_2):
+            self.assertIs(a, b)
+
+        # currently we take the default values have to be specified in the
+        # overload as well - TODO take them from implementation and apply
+        # where the type is valid.
+        @torch.jit._overload  # noqa: F811
+        def identity(x1):  # noqa: F811
+            # type: (str) -> str
+            pass
+
+        @torch.jit._overload  # noqa: F811
+        def identity(x1=1.0):  # noqa: F811
+            # type: (float) -> float
+            pass
+
+        def identity(x1=1.0):  # noqa: F811
+            return x1
+
+        def invoke():
+            return identity(), identity(.5), identity("hi")
+
+        self.checkScript(invoke, ())
+
+        def schema_match_failure():
+            return identity((1, 2))
+
+        thrown = False
+        try:
+            torch.jit.script(schema_match_failure)
+        except Exception as e:
+            thrown = True
+            self.assertTrue(r"of type 'str'" in str(e) and r"of type 'float" in str(e))
+        self.assertTrue(thrown)
+
+        with self.assertRaisesRegex(Exception, "cannot be directly compiled"):
+            torch.jit.script(identity)
+
+        @torch.jit._overload  # noqa: F811
+        def impl_compile_failure(x, y):  # noqa: F811
+            # type: (str, str) -> (str)
+            pass
+
+        @torch.jit._overload  # noqa: F811
+        def impl_compile_failure(x, y):  # noqa: F811
+            # type: (int, int) -> (int)
+            pass
+
+        def impl_compile_failure(x, y):  # noqa: F811
+            return x - y
+
+        def test():
+            impl_compile_failure("one", "two")
+
+
+        with self.assertRaisesRegex(Exception, "Arguments for call are not valid"):
+            torch.jit.script(test)
+
+    def test_function_overloading_isinstance(self):
+        @torch.jit._overload  # noqa: F811
+        def my_conv(x, y):  # noqa: F811
+            # type: (float, str) -> (float)
+            pass
+
+        @torch.jit._overload  # noqa: F811
+        def my_conv(x, y=2.0):  # noqa: F811
+            # type: (float, float) -> (float)
+            pass
+
+        def my_conv(x, y=2.0):  # noqa: F811
+            if isinstance(y, str):
+                if y == "hi":
+                    return 4.0 - x
+                else:
+                    return 5.0 - x
+            else:
+                return 2.0 + x
+
+        def test_uses():
+            return my_conv(1.5), my_conv(1.5, "hi"), my_conv(1.5, 5.0)
+
+        self.checkScript(test_uses, ())
+
     @unittest.skipIf(True, "Removing weak script")
     def test_overloading(self):
         @torch._jit_internal.weak_module
