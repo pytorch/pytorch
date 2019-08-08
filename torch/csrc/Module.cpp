@@ -55,7 +55,6 @@
 #ifdef USE_C10D
 #include <torch/csrc/distributed/c10d/c10d.h>
 #endif
-#include <torch/csrc/distributed/rpc/rpc.h>
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
@@ -627,7 +626,6 @@ PyObject* initModule() {
 #ifdef USE_C10D
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #endif
-THPUtils_addPyMethodDefs(methods, torch::distributed::rpc::python_functions());
 #endif
 
 #if PY_MAJOR_VERSION == 2
