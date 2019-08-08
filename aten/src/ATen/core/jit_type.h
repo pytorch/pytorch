@@ -1627,6 +1627,16 @@ struct CAFFE2_API ClassType : public NamedType {
   // These variants are not registered in the global class table.
   ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
 
+  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+    auto ptr = ClassType::create(name_, compilation_unit_);
+    AT_ASSERT(numAttributes() == contained_types.size());
+    for(size_t i = 0; i < attributeNames_.size(); ++i) {
+      AT_ASSERT(attributeTypes_[i]->isSubtypeOf(contained_types[i]));
+      ptr->addAttribute(attributeNames_[i], contained_types[i]);
+    }
+    return ptr;
+  }
+
   bool is_module() const {
     return bool(parameterSlots_);
   }
