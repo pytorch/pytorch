@@ -174,6 +174,23 @@ The declarations also support the following attributes:
 function signatures if you give them unique overload names. An overload name
 is specified after the function name, separated by a dot.
 
+Overload names do not have to be globally unique, but must be unique in the set
+of all overloads for the same function. Please try to make overload names
+semantically meaningful. An overload name that just enumerates the argument
+types isn't helpful. Actually it is hurtful, because overload names cannot be
+changed for backwards compatibility reasons, even if for some reason function
+argument types change.
+
+If you add a new overload to an existing function, please leave the existing
+overload names as they are (for backwards compatibility), but give the new
+overload a new, unique name.
+
+If you add a new function with multiple overloads, give them unique overload
+names, at most one overload is allowed to have no overload name and be the
+base variant.
+
+
+
 ### `variants`
 
 ```
