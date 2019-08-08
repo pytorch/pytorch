@@ -25,7 +25,7 @@ Tensor quantized_relu(const Tensor& qx) {
 
 Tensor& quantized_relu_(Tensor& qx) {
   const auto zero_point = qx.q_zero_point();
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu_", [&]() {
     auto iter = TensorIterator::unary_op(qx, qx);
     cpu_kernel(iter, [&](scalar_t value) -> scalar_t {
       return scalar_t(std::max<underlying_t>(value.val_, zero_point));
