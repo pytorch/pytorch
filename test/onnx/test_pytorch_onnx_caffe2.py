@@ -39,6 +39,7 @@ from caffe2.python.operator_test.torch_integration_test import (generate_rois_ro
 import onnx
 import caffe2.python.onnx.backend as c2
 
+from test_pytorch_common import BATCH_SIZE, RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from test_pytorch_common import skipIfTravis, skipIfNoLapack, skipIfNoCuda
 from test_pytorch_common import skipIfUnsupportedOpsetVersion, skipIfUnsupportedMinOpsetVersion
 import verify
@@ -92,13 +93,6 @@ except ImportError:
     print('Cannot import torch, hence caffe2-torch test will not run.')
     sys.exit(0)
 
-
-BATCH_SIZE = 2
-
-RNN_BATCH_SIZE = 7
-RNN_SEQUENCE_LENGTH = 11
-RNN_INPUT_SIZE = 5
-RNN_HIDDEN_SIZE = 3
 
 model_urls = {
     'alexnet': 'https://download.pytorch.org/models/alexnet-owt-4df8aa71.pth',
@@ -2058,6 +2052,27 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         inputs = torch.randn(3, 2, 1)
         self.run_model_test(model, train=False, input=(inputs, ), batch_size=BATCH_SIZE)
 
+    def test_std(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, unbiased=False)
+
+        model = StandardDeviation()
+        inputs = torch.randn(2, 3, 4)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_std_along_dims(self):
+        class StandardDeviationAlongDims(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), unbiased=False, keepdim=False)
+
+        model = StandardDeviationAlongDims()
+        inputs = torch.randn(2, 3, 4)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):

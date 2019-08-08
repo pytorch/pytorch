@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 from torch.nn.modules import Module
-from torch.nn import Linear as NNLinear
+import torch.nn as nn
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor
@@ -91,7 +91,7 @@ class Linear(NNLinear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    __constants__ = ['bias', 'in_features', 'out_features']
+    _FLOAT_MODULE = nn.Linear
 
     def __init__(self, in_features, out_features, bias=True):
         super(Linear, self).__init__(in_features, out_features, bias)
@@ -148,8 +148,8 @@ class Linear(NNLinear):
 
     # TODO: support initializing from quantization parameters when Quantizer is
     # exposed in python
-    @staticmethod
-    def from_float(mod):
+    @classmethod
+    def from_float(cls, mod):
         r"""Create a quantized module from a float module or qparams_dict
 
         Args:
@@ -160,10 +160,15 @@ class Linear(NNLinear):
             # assert type(mod) == QATLinear, 'training mode nnq.Linear.from_float only works for nn.qat.Linear'
             weight_observer = mod.weight_fake_quant
         else:
-            assert type(mod) == NNLinear, 'nnq.Linear.from_float only works for nn.Linear'
+            assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+                cls._FLOAT_MODULE.__name__
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
             weight_observer = mod.qconfig.weight()
+            # workaround for sequential, ConvReLU2d should probably
+            # inherit from Conv2d instead
+            if type(mod) == nni.LinearReLU:
+                mod = mod[0]
             weight_observer(mod.weight)
         activation_observer = mod.observer
         act_scale, act_zp = activation_observer.calculate_qparams()
@@ -171,7 +176,7 @@ class Linear(NNLinear):
         bias_scale = (wt_scale * act_scale).float()
         qweight = torch.quantize_linear(mod.weight.float(), wt_scale, wt_zp.long().item(), torch.qint8)
         qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
-        qlinear = Linear(mod.in_features, mod.out_features)
+        qlinear = cls(mod.in_features, mod.out_features)
         qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
         qlinear.bias = qbias
         qlinear.scale = torch.tensor([act_scale], dtype=torch.double)

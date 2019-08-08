@@ -6,7 +6,9 @@ import torch.nn._intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
 import torch.nn.qat as nnqat
 
-def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix=''):
+DEFAULT_SKIP_LIST = [nn.Identity, nn.MaxPool2d]
+
+def propagate_qconfig_helper(module, qconfig_dict, skip_list=DEFAULT_SKIP_LIST, qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig`
 
     Args:
@@ -22,7 +24,9 @@ def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix='
     Return:
         None, module is modified inplace with qconfig attached
     """
-    if not hasattr(module, 'qconfig'):
+    if type(module) in skip_list:
+        assert not hasattr(module, 'qconfig'), str(type(module)) + ' module is in skip list, it should not have qconfig'
+    if not hasattr(module, 'qconfig') and type(module) not in skip_list:
         module.qconfig = None
         if qconfig_dict and prefix in qconfig_dict:
             module.qconfig = qconfig_dict[prefix]
@@ -31,8 +35,9 @@ def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix='
 
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
-        propagate_qconfig_helper(child, qconfig_dict, module.qconfig, module_prefix)
+        propagate_qconfig_helper(child, qconfig_dict, skip_list, module.qconfig, module_prefix)
 
+# TODO(jerryzh): expose skip_list
 def propagate_qconfig(module, qconfig_dict=None):
     r"""Propagate qconfig through the module hierarchy and assign `qconfig`
     attribute on each leaf module
@@ -56,9 +61,7 @@ def _observer_forward_hook(self, input, output):
     """
     return self.observer(output)
 
-DEFAULT_SKIP_LIST = [nn.Identity, nn.MaxPool2d]
-
-def add_observer(module, skip_list=DEFAULT_SKIP_LIST):
+def add_observer(module):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -78,7 +81,7 @@ def add_observer(module, skip_list=DEFAULT_SKIP_LIST):
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
-       len(module._modules) == 0 and type(module) not in skip_list:
+       len(module._modules) == 0:
         # observer and hook will be gone after we swap the module
         module.add_module('observer', module.qconfig.activation())
         module.register_forward_hook(_observer_forward_hook)
@@ -220,6 +223,10 @@ DEFAULT_MODULE_MAPPING = {
     # Intrinsic modules:
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.LinearReLU: nniq.LinearReLU,
+    nniqat.ConvReLU2d: nniq.ConvReLU2d,
+    nniqat.LinearReLU: nniq.LinearReLU,
+    nniqat.ConvBn2d: nnq.Conv2d,
+    nniqat.ConvBnReLU2d: nniq.ConvReLU2d,
     # Generated modules:
     nn.Add: nnq.Add,
     # QAT modules:
@@ -251,6 +258,11 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING):
     module_swapped = swap_module(module, mapping)
 
     reassign = {}
+    # TODO(jerryzh): remove after deciding on the impl of
+    # intrinsic moudles
+    if type(module) in [nni.ConvBn2d, nni.ConvBnReLU2d]:
+        return module_swapped
+
     for name, mod in module.named_children():
         new_mod = convert(mod, mapping)
         if new_mod is not mod:

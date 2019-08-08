@@ -1,16 +1,14 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
-from torch.nn import Conv2d
+import torch.nn as nn
 from torch.nn import init
-from torch.nn._intrinsic import ConvBn2d as NNConvBn2d
-from torch.nn._intrinsic import ConvBnReLU2d as NNConvBnReLU2d
-from torch.nn._intrinsic import ConvReLU2d as NNConvReLU2d
+import torch.nn._intrinsic as nni
 from torch.nn.qat import Conv2d as QATConv2d
 from torch.nn import Parameter
 import torch.nn.functional as F
 
 
-class ConvBn2d(Conv2d):
+class ConvBn2d(nn.Conv2d):
     r"""
     A ConvBn2d module is a module fused from Conv2d and BatchNorm2d,
     attached with FakeQuantize modules for both output activation and weight,
@@ -31,7 +29,7 @@ class ConvBn2d(Conv2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    __FLOAT_MODULE = NNConvBn2d
+    _FLOAT_MODULE = nni.ConvBn2d
 
     def __init__(self,
                  # Conv2d args
@@ -150,11 +148,11 @@ class ConvBn2d(Conv2d):
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
-        assert type(mod) == cls.__FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
-            cls.__FLOAT_MODULE.__name__
+        assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
+            cls._FLOAT_MODULE.__name__
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
+            assert mod.qconfig, 'Input float module must has valid qconfig'
             qconfig = mod.qconfig
         conv, bn = mod[0], mod[1]
         qat_convbn = cls(conv.in_channels, conv.out_channels, conv.kernel_size,
@@ -175,7 +173,7 @@ class ConvBn2d(Conv2d):
 
 class ConvBnReLU2d(ConvBn2d):
     r"""
-    A ConvBn2d module is a module fused from Conv2d, BatchNorm2d and ReLU,
+    A ConvBnReLU2d module is a module fused from Conv2d, BatchNorm2d and ReLU,
     attached with FakeQuantize modules for both output activation and weight,
     used in quantization aware training.
 
@@ -193,7 +191,7 @@ class ConvBnReLU2d(ConvBn2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    __FLOAT_MODULE = NNConvBnReLU2d
+    _FLOAT_MODULE = nni.ConvBnReLU2d
 
     def __init__(self,
                  # Conv2d args
@@ -219,6 +217,10 @@ class ConvBnReLU2d(ConvBn2d):
     def forward(self, input):
         return self.observer(F.relu(super(ConvBnReLU2d, self)._forward(input)))
 
+    @classmethod
+    def from_float(cls, mod, qconfig=None):
+        return super(ConvBnReLU2d, cls).from_float(mod, qconfig)
+
 class ConvReLU2d(QATConv2d):
     r"""
     A ConvReLU2d module is a fused module of Conv2d and ReLU, attached with
@@ -234,7 +236,7 @@ class ConvReLU2d(QATConv2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    __FLOAT_MODULE = NNConvReLU2d
+    _FLOAT_MODULE = nni.ConvReLU2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
@@ -253,3 +255,7 @@ class ConvReLU2d(QATConv2d):
                              self.padding, self.weight_fake_quant(self.weight),
                              self.bias, self.stride, self.dilation, self.groups),
                              True))
+
+    @classmethod
+    def from_float(cls, mod, qconfig=None):
+        return super(ConvReLU2d, cls).from_float(mod, qconfig)
