@@ -1611,39 +1611,39 @@ jobs:
       - image: "soumith/manylinux-cuda92"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7m_cu100_devtoolset7_build:
+  binary_linux_manywheel_2.7m_cu101_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu101 devtoolset7"
     docker:
-      - image: "soumith/manylinux-cuda100"
+      - image: "soumith/manylinux-cuda101"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7mu_cu100_devtoolset7_build:
+  binary_linux_manywheel_2.7mu_cu101_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu101 devtoolset7"
     docker:
-      - image: "soumith/manylinux-cuda100"
+      - image: "soumith/manylinux-cuda101"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.5m_cu100_devtoolset7_build:
+  binary_linux_manywheel_3.5m_cu101_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu101 devtoolset7"
     docker:
-      - image: "soumith/manylinux-cuda100"
+      - image: "soumith/manylinux-cuda101"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.6m_cu100_devtoolset7_build:
+  binary_linux_manywheel_3.6m_cu101_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu101 devtoolset7"
     docker:
-      - image: "soumith/manylinux-cuda100"
+      - image: "soumith/manylinux-cuda101"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.7m_cu100_devtoolset7_build:
+  binary_linux_manywheel_3.7m_cu101_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu101 devtoolset7"
     docker:
-      - image: "soumith/manylinux-cuda100"
+      - image: "soumith/manylinux-cuda101"
     <<: *binary_linux_build
 
   binary_linux_conda_2.7_cpu_devtoolset7_build:
@@ -1702,30 +1702,30 @@ jobs:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_2.7_cu100_devtoolset7_build:
+  binary_linux_conda_2.7_cu101_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "conda 2.7 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 2.7 cu101 devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.5_cu100_devtoolset7_build:
+  binary_linux_conda_3.5_cu101_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 3.5 cu101 devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.6_cu100_devtoolset7_build:
+  binary_linux_conda_3.6_cu101_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "conda 3.6 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 3.6 cu101 devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.7_cu100_devtoolset7_build:
+  binary_linux_conda_3.7_cu101_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "conda 3.7 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 3.7 cu101 devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1794,36 +1794,36 @@ jobs:
       - image: "soumith/manylinux-cuda92"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_build:
+  binary_linux_libtorch_2.7m_cu101_devtoolset7_shared-with-deps_build:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu101 devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
     docker:
-      - image: "soumith/manylinux-cuda100"
+      - image: "soumith/manylinux-cuda101"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_build:
+  binary_linux_libtorch_2.7m_cu101_devtoolset7_shared-without-deps_build:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu101 devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
     docker:
-      - image: "soumith/manylinux-cuda100"
+      - image: "soumith/manylinux-cuda101"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_build:
+  binary_linux_libtorch_2.7m_cu101_devtoolset7_static-with-deps_build:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu101 devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
     docker:
-      - image: "soumith/manylinux-cuda100"
+      - image: "soumith/manylinux-cuda101"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_build:
+  binary_linux_libtorch_2.7m_cu101_devtoolset7_static-without-deps_build:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu101 devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
     docker:
-      - image: "soumith/manylinux-cuda100"
+      - image: "soumith/manylinux-cuda101"
     <<: *binary_linux_build
 
   binary_macos_wheel_2.7_cpu_build:
@@ -1946,42 +1946,42 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7m_cu100_devtoolset7_test:
+  binary_linux_manywheel_2.7m_cu101_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu101 devtoolset7"
+      DOCKER_IMAGE: "soumith/manylinux-cuda101"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7mu_cu100_devtoolset7_test:
+  binary_linux_manywheel_2.7mu_cu101_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu101 devtoolset7"
+      DOCKER_IMAGE: "soumith/manylinux-cuda101"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.5m_cu100_devtoolset7_test:
+  binary_linux_manywheel_3.5m_cu101_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu101 devtoolset7"
+      DOCKER_IMAGE: "soumith/manylinux-cuda101"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.6m_cu100_devtoolset7_test:
+  binary_linux_manywheel_3.6m_cu101_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu101 devtoolset7"
+      DOCKER_IMAGE: "soumith/manylinux-cuda101"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.7m_cu100_devtoolset7_test:
+  binary_linux_manywheel_3.7m_cu101_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu101 devtoolset7"
+      DOCKER_IMAGE: "soumith/manylinux-cuda101"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
@@ -2042,33 +2042,33 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_conda_2.7_cu100_devtoolset7_test:
+  binary_linux_conda_2.7_cu101_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "conda 2.7 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 2.7 cu101 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_conda_3.5_cu100_devtoolset7_test:
+  binary_linux_conda_3.5_cu101_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 3.5 cu101 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_conda_3.6_cu100_devtoolset7_test:
+  binary_linux_conda_3.6_cu101_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "conda 3.6 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 3.6 cu101 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_conda_3.7_cu100_devtoolset7_test:
+  binary_linux_conda_3.7_cu101_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "conda 3.7 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 3.7 cu101 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2147,29 +2147,29 @@ jobs:
       BUILD_ENVIRONMENT: "manywheel 3.7m cu92 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7m_cu100_devtoolset7_upload:
+  binary_linux_manywheel_2.7m_cu101_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu101 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7mu_cu100_devtoolset7_upload:
+  binary_linux_manywheel_2.7mu_cu101_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu101 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.5m_cu100_devtoolset7_upload:
+  binary_linux_manywheel_3.5m_cu101_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu101 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.6m_cu100_devtoolset7_upload:
+  binary_linux_manywheel_3.6m_cu101_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu101 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.7m_cu100_devtoolset7_upload:
+  binary_linux_manywheel_3.7m_cu101_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu101 devtoolset7"
     <<: *binary_linux_upload
 
   binary_linux_conda_2.7_cpu_devtoolset7_upload:
@@ -2212,24 +2212,24 @@ jobs:
       BUILD_ENVIRONMENT: "conda 3.7 cu92 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_2.7_cu100_devtoolset7_upload:
+  binary_linux_conda_2.7_cu101_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "conda 2.7 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 2.7 cu101 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.5_cu100_devtoolset7_upload:
+  binary_linux_conda_3.5_cu101_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 3.5 cu101 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.6_cu100_devtoolset7_upload:
+  binary_linux_conda_3.6_cu101_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "conda 3.6 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 3.6 cu101 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.7_cu100_devtoolset7_upload:
+  binary_linux_conda_3.7_cu101_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "conda 3.7 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 3.7 cu101 devtoolset7"
     <<: *binary_linux_upload
 
   binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_upload:
@@ -2280,27 +2280,27 @@ jobs:
       LIBTORCH_VARIANT: "static-without-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_upload:
+  binary_linux_libtorch_2.7m_cu101_devtoolset7_shared-with-deps_upload:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu101 devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_upload:
+  binary_linux_libtorch_2.7m_cu101_devtoolset7_shared-without-deps_upload:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu101 devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_upload:
+  binary_linux_libtorch_2.7m_cu101_devtoolset7_static-with-deps_upload:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu101 devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_upload:
+  binary_linux_libtorch_2.7m_cu101_devtoolset7_static-without-deps_upload:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu101 devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
     <<: *binary_linux_upload
 
@@ -2422,42 +2422,42 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7m_cu100_devtoolset7:
+  smoke_linux_manywheel_2.7m_cu101_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu101 devtoolset7"
+      DOCKER_IMAGE: "soumith/manylinux-cuda101"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7mu_cu100_devtoolset7:
+  smoke_linux_manywheel_2.7mu_cu101_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu101 devtoolset7"
+      DOCKER_IMAGE: "soumith/manylinux-cuda101"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.5m_cu100_devtoolset7:
+  smoke_linux_manywheel_3.5m_cu101_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu101 devtoolset7"
+      DOCKER_IMAGE: "soumith/manylinux-cuda101"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.6m_cu100_devtoolset7:
+  smoke_linux_manywheel_3.6m_cu101_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu101 devtoolset7"
+      DOCKER_IMAGE: "soumith/manylinux-cuda101"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.7m_cu100_devtoolset7:
+  smoke_linux_manywheel_3.7m_cu101_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu101 devtoolset7"
+      DOCKER_IMAGE: "soumith/manylinux-cuda101"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
@@ -2518,33 +2518,33 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_conda_2.7_cu100_devtoolset7:
+  smoke_linux_conda_2.7_cu101_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "conda 2.7 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 2.7 cu101 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.5_cu100_devtoolset7:
+  smoke_linux_conda_3.5_cu101_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 3.5 cu101 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.6_cu100_devtoolset7:
+  smoke_linux_conda_3.6_cu101_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "conda 3.6 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 3.6 cu101 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.7_cu100_devtoolset7:
+  smoke_linux_conda_3.7_cu101_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "conda 3.7 cu100 devtoolset7"
+      BUILD_ENVIRONMENT: "conda 3.7 cu101 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -3067,19 +3067,19 @@ workflows:
       - smoke_linux_manywheel_3.7m_cu92_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_2.7m_cu100_devtoolset7:
+      - smoke_linux_manywheel_2.7m_cu101_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_2.7mu_cu100_devtoolset7:
+      - smoke_linux_manywheel_2.7mu_cu101_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_3.5m_cu100_devtoolset7:
+      - smoke_linux_manywheel_3.5m_cu101_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_3.6m_cu100_devtoolset7:
+      - smoke_linux_manywheel_3.6m_cu101_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_3.7m_cu100_devtoolset7:
+      - smoke_linux_manywheel_3.7m_cu101_devtoolset7:
           requires:
             - setup
       - smoke_linux_conda_2.7_cpu_devtoolset7:
@@ -3106,16 +3106,16 @@ workflows:
       - smoke_linux_conda_3.7_cu92_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_2.7_cu100_devtoolset7:
+      - smoke_linux_conda_2.7_cu101_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_3.5_cu100_devtoolset7:
+      - smoke_linux_conda_3.5_cu101_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_3.6_cu100_devtoolset7:
+      - smoke_linux_conda_3.6_cu101_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_3.7_cu100_devtoolset7:
+      - smoke_linux_conda_3.7_cu101_devtoolset7:
           requires:
             - setup
       - smoke_macos_wheel_2.7_cpu:
@@ -3186,19 +3186,19 @@ workflows:
       - binary_linux_manywheel_3.7m_cu92_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_2.7m_cu100_devtoolset7_build:
+      - binary_linux_manywheel_2.7m_cu101_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_2.7mu_cu100_devtoolset7_build:
+      - binary_linux_manywheel_2.7mu_cu101_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.5m_cu100_devtoolset7_build:
+      - binary_linux_manywheel_3.5m_cu101_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.6m_cu100_devtoolset7_build:
+      - binary_linux_manywheel_3.6m_cu101_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.7m_cu100_devtoolset7_build:
+      - binary_linux_manywheel_3.7m_cu101_devtoolset7_build:
           requires:
             - setup
       - binary_linux_conda_2.7_cpu_devtoolset7_build:
@@ -3225,16 +3225,16 @@ workflows:
       - binary_linux_conda_3.7_cu92_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_2.7_cu100_devtoolset7_build:
+      - binary_linux_conda_2.7_cu101_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_3.5_cu100_devtoolset7_build:
+      - binary_linux_conda_3.5_cu101_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_3.6_cu100_devtoolset7_build:
+      - binary_linux_conda_3.6_cu101_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_3.7_cu100_devtoolset7_build:
+      - binary_linux_conda_3.7_cu101_devtoolset7_build:
           requires:
             - setup
       - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_build:
@@ -3261,16 +3261,16 @@ workflows:
       - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_build:
+      - binary_linux_libtorch_2.7m_cu101_devtoolset7_shared-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_build:
+      - binary_linux_libtorch_2.7m_cu101_devtoolset7_shared-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_build:
+      - binary_linux_libtorch_2.7m_cu101_devtoolset7_static-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_build:
+      - binary_linux_libtorch_2.7m_cu101_devtoolset7_static-without-deps_build:
           requires:
             - setup
       - binary_macos_wheel_2.7_cpu_build:
@@ -3344,26 +3344,26 @@ workflows:
           requires:
             - setup
             - binary_linux_manywheel_3.7m_cu92_devtoolset7_build
-      - binary_linux_manywheel_2.7m_cu100_devtoolset7_test:
+      - binary_linux_manywheel_2.7m_cu101_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_2.7m_cu100_devtoolset7_build
-      - binary_linux_manywheel_2.7mu_cu100_devtoolset7_test:
+            - binary_linux_manywheel_2.7m_cu101_devtoolset7_build
+      - binary_linux_manywheel_2.7mu_cu101_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_2.7mu_cu100_devtoolset7_build
-      - binary_linux_manywheel_3.5m_cu100_devtoolset7_test:
+            - binary_linux_manywheel_2.7mu_cu101_devtoolset7_build
+      - binary_linux_manywheel_3.5m_cu101_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.5m_cu100_devtoolset7_build
-      - binary_linux_manywheel_3.6m_cu100_devtoolset7_test:
+            - binary_linux_manywheel_3.5m_cu101_devtoolset7_build
+      - binary_linux_manywheel_3.6m_cu101_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.6m_cu100_devtoolset7_build
-      - binary_linux_manywheel_3.7m_cu100_devtoolset7_test:
+            - binary_linux_manywheel_3.6m_cu101_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cu101_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.7m_cu100_devtoolset7_build
+            - binary_linux_manywheel_3.7m_cu101_devtoolset7_build
       - binary_linux_conda_2.7_cpu_devtoolset7_test:
           requires:
             - setup
@@ -3396,22 +3396,22 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_3.7_cu92_devtoolset7_build
-      - binary_linux_conda_2.7_cu100_devtoolset7_test:
+      - binary_linux_conda_2.7_cu101_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_2.7_cu100_devtoolset7_build
-      - binary_linux_conda_3.5_cu100_devtoolset7_test:
+            - binary_linux_conda_2.7_cu101_devtoolset7_build
+      - binary_linux_conda_3.5_cu101_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_3.5_cu100_devtoolset7_build
-      - binary_linux_conda_3.6_cu100_devtoolset7_test:
+            - binary_linux_conda_3.5_cu101_devtoolset7_build
+      - binary_linux_conda_3.6_cu101_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_3.6_cu100_devtoolset7_build
-      - binary_linux_conda_3.7_cu100_devtoolset7_test:
+            - binary_linux_conda_3.6_cu101_devtoolset7_build
+      - binary_linux_conda_3.7_cu101_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_3.7_cu100_devtoolset7_build
+            - binary_linux_conda_3.7_cu101_devtoolset7_build
       #- binary_linux_libtorch_2.7m_cpu_test:
       #    requires:
       #      - binary_linux_libtorch_2.7m_cpu_build
@@ -3473,31 +3473,31 @@ workflows:
           requires:
             - setup
             - binary_linux_manywheel_3.7m_cu92_devtoolset7_test
-      - binary_linux_manywheel_2.7m_cu100_devtoolset7_upload:
+      - binary_linux_manywheel_2.7m_cu101_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_2.7m_cu100_devtoolset7_test
-      - binary_linux_manywheel_2.7mu_cu100_devtoolset7_upload:
+            - binary_linux_manywheel_2.7m_cu101_devtoolset7_test
+      - binary_linux_manywheel_2.7mu_cu101_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_2.7mu_cu100_devtoolset7_test
-      - binary_linux_manywheel_3.5m_cu100_devtoolset7_upload:
+            - binary_linux_manywheel_2.7mu_cu101_devtoolset7_test
+      - binary_linux_manywheel_3.5m_cu101_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_3.5m_cu100_devtoolset7_test
-      - binary_linux_manywheel_3.6m_cu100_devtoolset7_upload:
+            - binary_linux_manywheel_3.5m_cu101_devtoolset7_test
+      - binary_linux_manywheel_3.6m_cu101_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_3.6m_cu100_devtoolset7_test
-      - binary_linux_manywheel_3.7m_cu100_devtoolset7_upload:
+            - binary_linux_manywheel_3.6m_cu101_devtoolset7_test
+      - binary_linux_manywheel_3.7m_cu101_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_3.7m_cu100_devtoolset7_test
+            - binary_linux_manywheel_3.7m_cu101_devtoolset7_test
       - binary_linux_conda_2.7_cpu_devtoolset7_upload:
           context: org-member
           requires:
@@ -3538,26 +3538,26 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_3.7_cu92_devtoolset7_test
-      - binary_linux_conda_2.7_cu100_devtoolset7_upload:
+      - binary_linux_conda_2.7_cu101_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_2.7_cu100_devtoolset7_test
-      - binary_linux_conda_3.5_cu100_devtoolset7_upload:
+            - binary_linux_conda_2.7_cu101_devtoolset7_test
+      - binary_linux_conda_3.5_cu101_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_3.5_cu100_devtoolset7_test
-      - binary_linux_conda_3.6_cu100_devtoolset7_upload:
+            - binary_linux_conda_3.5_cu101_devtoolset7_test
+      - binary_linux_conda_3.6_cu101_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_3.6_cu100_devtoolset7_test
-      - binary_linux_conda_3.7_cu100_devtoolset7_upload:
+            - binary_linux_conda_3.6_cu101_devtoolset7_test
+      - binary_linux_conda_3.7_cu101_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_3.7_cu100_devtoolset7_test
+            - binary_linux_conda_3.7_cu101_devtoolset7_test
       - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_upload:
           context: org-member
           requires:
@@ -3598,26 +3598,26 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_build
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_upload:
+      - binary_linux_libtorch_2.7m_cu101_devtoolset7_shared-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_build
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_upload:
+            - binary_linux_libtorch_2.7m_cu101_devtoolset7_shared-with-deps_build
+      - binary_linux_libtorch_2.7m_cu101_devtoolset7_shared-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_build
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_upload:
+            - binary_linux_libtorch_2.7m_cu101_devtoolset7_shared-without-deps_build
+      - binary_linux_libtorch_2.7m_cu101_devtoolset7_static-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_build
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_upload:
+            - binary_linux_libtorch_2.7m_cu101_devtoolset7_static-with-deps_build
+      - binary_linux_libtorch_2.7m_cu101_devtoolset7_static-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_build
+            - binary_linux_libtorch_2.7m_cu101_devtoolset7_static-without-deps_build
       - binary_macos_wheel_2.7_cpu_upload:
           context: org-member
           requires:
