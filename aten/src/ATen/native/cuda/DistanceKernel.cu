@@ -214,108 +214,13 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   const scalar_t * a = start + threadIdx.x;
   const scalar_t * b = x2 + l * l2_size + j * m + threadIdx.x;
 
-  scalar_t agg = std::abs(*a - *b);
-  //for (; a < end; a += stride, b += stride) {
-    //F::inc(agg, std::abs(*a - *b), p);
-    //agg += std::abs(*a - *b);
-  //}
-  scalar_t agg1 = reduce_agg<scalar_t, F>(agg);
-
-  /*if (blockIdx.x == 0 && threadIdx.x == 0) {
-    result[0] = *a;
+  scalar_t agg = 0.0;
+  for (; a < end; a += stride, b += stride) {
+    F::inc(agg, std::abs(*a - *b), p);
   }
-  if (blockIdx.x == 0 && threadIdx.x == 1) {
-    result[1] = *a;
-  }
-  if (blockIdx.x == 2 && threadIdx.x == 0) {
-    result[2] = *a;
-  }
-  if (blockIdx.x == 2 && threadIdx.x == 1) {
-    result[3] = *a;
-  }*/
-
-  /*if (blockIdx.x == 0 && threadIdx.x == 0) {
-    result[0] = *b;
-  }
-  if (blockIdx.x == 0 && threadIdx.x == 1) {
-    result[1] = *b;
-  }
-  if (blockIdx.x == 1 && threadIdx.x == 0) {
-    result[2] = *b;
-  }
-  if (blockIdx.x == 1 && threadIdx.x == 1) {
-    result[3] = *b;
-  }*/
-
-  /*if (blockIdx.x == 1 && threadIdx.x == 0) {
-    result[0] = *a;
-  }
-  if (blockIdx.x == 1 && threadIdx.x == 1) {
-    result[1] = *a;
-  }
-  if (blockIdx.x == 3 && threadIdx.x == 0) {
-    result[2] = *a;
-  }
-  if (blockIdx.x == 3 && threadIdx.x == 1) {
-    result[3] = *a;
-  }*/
-
-  /*if (blockIdx.x == 2 && threadIdx.x == 0) {
-    result[0] = *b;
-  }
-  if (blockIdx.x == 2 && threadIdx.x == 1) {
-    result[1] = *b;
-  }
-  if (blockIdx.x == 3 && threadIdx.x == 0) {
-    result[2] = *b;
-  }
-  if (blockIdx.x == 3 && threadIdx.x == 1) {
-    result[3] = *b;
-  }*/
-
-  /*if (blockIdx.x == 0 && threadIdx.x == 0) {
-    result[0] = agg;
-  }
-  if (blockIdx.x == 0 && threadIdx.x == 1) {
-    result[1] = agg;
-  }
-  if (blockIdx.x == 1 && threadIdx.x == 0) {
-    result[2] = agg;
-  }
-  if (blockIdx.x == 1 && threadIdx.x == 1) {
-    result[3] = agg;
-  }*/
-
-  /*if (blockIdx.x == 2 && threadIdx.x == 0) {
-    result[0] = agg;
-  }
-  if (blockIdx.x == 2 && threadIdx.x == 1) {
-    result[1] = agg;
-  }
-  if (blockIdx.x == 3 && threadIdx.x == 0) {
-    result[2] = agg;
-  }
-  if (blockIdx.x == 3 && threadIdx.x == 1) {
-    result[3] = agg;
-  }*/
-
-  if (blockIdx.x == 0 && threadIdx.x == 0) {
-    result[0] = agg1;
-  }
-  if (blockIdx.x == 1 && threadIdx.x == 0) {
-    result[1] = agg1;
-  }
-  if (blockIdx.x == 2 && threadIdx.x == 0) {
-    result[2] = agg1;
-  }
-  if (blockIdx.x == 3 && threadIdx.x == 0) {
-    result[3] = agg1;
-  }
-
-
+  agg = reduce_agg<scalar_t, F>(agg);
   if (threadIdx.x == 0) {
-    //result[blockIdx.x] = F::finish(agg, p);
-    //result[blockIdx.x] = agg1;
+    result[blockIdx.x] = F::finish(agg, p);
   }
 }
 
