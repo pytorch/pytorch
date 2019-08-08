@@ -91,9 +91,8 @@ static std::string variableType(const std::shared_ptr<c10::Type>& t) {
     return "double";
   } else if (t->kind() == TypeKind::BoolType) {
     return "bool";
-  } else if (t->kind() == TypeKind::DimensionedTensorType) {
-    auto const tt = t->cast<DimensionedTensorType>();
-    return calcScalarTypeName(tt->scalarType());
+  } else if (auto scalar_type = ProfiledTensorType::create(t)->scalarType()) {
+    return calcScalarTypeName(*scalar_type);
   }
   // something went wrong with the type analysis during shape propagation
   throw std::runtime_error(
@@ -116,9 +115,8 @@ static std::string typeCastedValueName(
     // cast here, which may end up being a no-op if the tensor's scalar type
     // is `double`.
     return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
-  } else if (t->kind() == TypeKind::DimensionedTensorType) {
-    auto const tt = t->cast<DimensionedTensorType>();
-    if (tt->scalarType() != outtype) {
+  } else if (auto scalar_type = ProfiledTensorType::create(t)->scalarType()) {
+    if (*scalar_type != outtype) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
     return vn;
@@ -261,17 +259,17 @@ static std::string encodeRHS(const Node* n) {
     return encodeSpecialRHS(n, env);
   } else {
     size_t i = 0;
-    auto outtype = n->output()
-                       ->type()
-                       ->expect<c10::DimensionedTensorType const>()
-                       ->scalarType();
+
+    auto outtype =
+        ProfiledTensorType::create(n->output()->type())->scalarType();
+    TORCH_INTERNAL_ASSERT(outtype);
 
     for (auto in : n->inputs()) {
       // PyTorch converts (scalar) argument types to result before applying the
       // operator e.g. 1.4-torch.tensor(3) = -2
       env.s(
           std::to_string(i),
-          typeCastedValueName(in->type(), outtype, valueName(in)));
+          typeCastedValueName(in->type(), *outtype, valueName(in)));
       // Uncasted operands only used for comparison operators
       env.s(std::to_string(i) + "_nocast", valueName(in));
       i++;
@@ -279,7 +277,7 @@ static std::string encodeRHS(const Node* n) {
 
     const auto& templ = simple_map_ops.at(n->kind());
     const char* str = nullptr;
-    if (outtype == at::kFloat) {
+    if (*outtype == at::kFloat) {
       str = templ.for_float;
     } else {
       str = templ.for_double;

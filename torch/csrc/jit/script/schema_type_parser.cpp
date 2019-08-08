@@ -19,6 +19,7 @@ using c10::GeneratorType;
 using c10::IntType;
 using c10::ListType;
 using c10::NoneType;
+using c10::CapsuleType;
 using c10::NumberType;
 using c10::OptionalType;
 using c10::StringType;
@@ -45,6 +46,7 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"int", IntType::get()},
       {"bool", BoolType::get()},
       {"None", NoneType::get()},
+      {"Capsule", CapsuleType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE)) {

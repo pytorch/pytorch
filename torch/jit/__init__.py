@@ -35,7 +35,6 @@ from torch._jit_internal import ignore, export  # noqa: F401
 if sys.version_info[0] > 2:
     import pathlib
 
-
 def _parse_env(name, default, true_message, false_message):
     value = os.environ.get(name)
     if value is None:
@@ -1058,7 +1057,6 @@ def _compile_and_register_class(obj, rcb, qualified_name):
     _jit_script_class_compile(qualified_name, ast, rcb)
     _add_script_class(obj, qualified_name)
 
-
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
@@ -1082,7 +1080,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     **Scripting an nn.Module**
         Scripting an ``nn.Module`` by default will compile the ``forward`` method and recursively
         compile any methods, submodules, and functions called by ``forward``. If a ``nn.Module`` only uses
-        features supported in TorchScript, no changes to the original module code should be necessary.
+        features supported in TorchScript, no changes to the original module code should be necessary. ``script``
+        will construct ``torch.jit.ScriptModule`` that has copies of the attributes, parameters, and methods of
+        the original module.
 
         Example (scripting a simple module with a Parameter)::
 
@@ -1128,7 +1128,36 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             scripted_module = torch.jit.script(MyModule())
 
         To compile a method other than ``forward`` (and recursively compile anything it calls), add
-        the ``@torch.jit.export`` decorator to the method.
+        the ``@torch.jit.export`` decorator to the method. To opt out of compilation use ``@torch.jit.ignore``.
+
+        Example (an exported and ignored method in a module)::
+
+            import torch
+            import torch.nn as nn
+
+            class MyModule(nn.Module):
+                def __init__(self):
+                    super(MyModule, self).__init__()
+
+                @torch.jit.export
+                def some_entry_point(self, input):
+                    return input + 10
+
+                @torch.jit.ignore
+                def python_only_fn(self, input):
+                    # This function won't be compiled, so any Python APIs can be
+                    # used
+                    import pdb
+                    pdb.set_trace()
+
+                def forward(self, input):
+                    if self.training:
+                        self.python_only_fn(input)
+                    return input * 99
+
+            scripted_module = torch.jit.script(MyModule())
+            print(scripted_module.some_entry_point(torch.randn(2, 2)))
+            print(scripted_module(torch.randn(2, 2)))
     """
     if not _enabled:
         return obj
@@ -1156,24 +1185,31 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     else:
+        _check_directly_compile_overloaded(obj)
         ast = get_jit_def(obj)
         if _rcb is None:
-            closure_rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
-            stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-
-            def _rcb(name):
-                # since type comments aren't captured in the function's closures,
-                # we still need to try to the rcb based on stack frames if the
-                # closure rcb fails
-                result = closure_rcb(name)
-                if result:
-                    return result
-                return stack_rcb(name)
+            _rcb = _gen_rcb(obj, _frames_up)
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
         return fn
 
+def _gen_rcb(obj, _frames_up):
+    _frames_up = _frames_up + 1  # for invoking _gen_rcb()
+
+    closure_rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+    stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
+
+    def _rcb(name):
+        # since type comments aren't captured in the function's closures,
+        # we still need to try to the rcb based on stack frames if the
+        # closure rcb fails
+        result = closure_rcb(name)
+        if result:
+            return result
+        return stack_rcb(name)
+
+    return _rcb
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
@@ -1518,7 +1554,9 @@ if _enabled:
             else:
                 self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
 
-            Module.__init__(self)
+            Module._Module__construct(self)
+            Module.__setattr__(self, "training", True)
+
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
             self._modules = OrderedModuleDict(self._c)
@@ -1565,7 +1603,7 @@ if _enabled:
                 # to improve invocation performance
                 self.__dict__[attr] = script_method
                 return script_method
-            return Module.__getattr__(self, attr)
+            return super(ScriptModule, self).__getattr__(attr)
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
@@ -1863,8 +1901,8 @@ class TracedModule(ScriptModule):
                 self._buffers[name] = buf
                 check_unique(buf)
 
-        if orig._backward_hooks or orig._forward_hooks or orig._forward_pre_hooks:
-            raise ValueError("Modules that have hooks assigned can't be compiled")
+        if orig._backward_hooks:
+            raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(self))
 
         for name, submodule in orig._modules.items():
             if isinstance(submodule, ScriptModule):
@@ -2039,7 +2077,6 @@ def _get_builtin_table():
         (torch.nn.init._no_grad_normal_, "aten::_no_grad_normal_"),
         (torch.nn.init._no_grad_uniform_, "aten::_no_grad_uniform_"),
         (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
-        (torch.nn.utils.rnn.get_packed_sequence, "aten::_pack_sequence"),
         (torch._C._get_tracing_state, "aten::_get_tracing_state"),
         (warnings.warn, "aten::warn"),
     ]
@@ -2078,6 +2115,68 @@ def _get_script_class(name):
         raise RuntimeError("Unknown reference to ScriptClass '{}'. "
                            "Did you forget to import it?".format(name))
     return _script_classes[name]
+
+# qualified_name => list[(overload decl, overload default args)]
+_overloaded_fns = {}
+
+# qualified name => list[compiled fns]
+_compiled_overloaded_fns = {}
+
+def _overload(func):
+    qual_name = _qualified_name(func)
+    global _overloaded_fns
+    fn_overload_list = _overloaded_fns.get(qual_name)
+    if fn_overload_list is None:
+        fn_overload_list = []
+        _overloaded_fns[qual_name] = fn_overload_list
+    signature = torch.jit.annotations.get_signature(func)
+    if signature is None:
+        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {obj}").format(func)
+    fn_overload_list.append((torch.jit.get_jit_def(func).decl(), get_default_args(func)))
+    return func
+
+def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
+    impl_ast = torch.jit.get_jit_def(impl_fn)
+    _frames_up = 0
+    _rcb = _gen_rcb(impl_fn, _frames_up)
+    fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
+    return fn
+
+def _get_overloads(obj):
+    # check for cached compiled fns
+    qual_name = _qualified_name(obj)
+    global _compiled_overloaded_fns
+    compiled_overloads = _compiled_overloaded_fns.get(qual_name, None)
+    if compiled_overloads is not None:
+        return compiled_overloads
+
+    # check for not yet compiled overloads
+    global _overloaded_fns
+    overloads = _overloaded_fns.get(qual_name, None)
+    if overloads is None:
+        return None
+    compiled_fns = []
+    # TODO: use default args from the implementation, not from the overload
+    # This is more complicated because you can have a default arg with a type
+    # incompatible with a type of parameter in an overload, and other validation.
+    # This is still an internal api so for now use defaults from overload
+    for overload_decl, overload_defaults in overloads:
+        compiled_fn = _compile_function_with_overload(qual_name, obj, overload_decl, overload_defaults)
+        compiled_fns.append(compiled_fn)
+
+    # cache compilation, remove information stored to do compilation
+    _compiled_overloaded_fns[qual_name] = compiled_fns
+    del _overloaded_fns[qual_name]
+    return compiled_fns
+
+def _check_directly_compile_overloaded(obj):
+    qual_name = _qualified_name(obj)
+    global _compiled_overloaded_fns
+    global _overloaded_fns
+    if qual_name in _compiled_overloaded_fns or qual_name in _overloaded_fns:
+        raise RuntimeError("Function {} cannot be directly compiled because it"
+                           " is overloaded. It must be used in a context of a function"
+                           " where its inputs can determine which overload to call.".format(qual_name))
 
 # torch.jit.Error
 Error = torch._C.JITException

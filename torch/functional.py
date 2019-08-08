@@ -209,12 +209,12 @@ def isfinite(tensor):
         tensor (Tensor): A tensor to check
 
     Returns:
-        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of finite elements and 0 otherwise
+        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of finite elements and False otherwise
 
     Example::
 
         >>> torch.isfinite(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
-        tensor([ 1,  0,  1,  0,  0], dtype=torch.uint8)
+        tensor([True,  False,  True,  False,  False])
     """
     if not isinstance(tensor, torch.Tensor):
         raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
@@ -224,7 +224,7 @@ def isfinite(tensor):
     # have a similar concept. It's safe to assume any created LongTensor doesn't
     # overflow and it's finite.
     if not tensor.is_floating_point():
-        return torch.ones_like(tensor, dtype=torch.uint8)
+        return torch.ones_like(tensor, dtype=torch.bool)
     return (tensor == tensor) & (tensor.abs() != inf)
 
 
@@ -235,17 +235,17 @@ def isinf(tensor):
         tensor (Tensor): A tensor to check
 
     Returns:
-        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `+/-INF` elements and 0 otherwise
+        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of `+/-INF` elements and False otherwise
 
     Example::
 
         >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
-        tensor([ 0,  1,  0,  1,  0], dtype=torch.uint8)
+        tensor([False,  True,  False,  True,  False])
     """
     if not isinstance(tensor, torch.Tensor):
         raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
     if tensor.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
-        return torch.zeros_like(tensor, dtype=torch.uint8)
+        return torch.zeros_like(tensor, dtype=torch.bool)
     return tensor.abs() == inf
 
 

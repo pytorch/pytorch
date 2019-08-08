@@ -886,13 +886,20 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 # corrupted data in `worker_result_queue` which `pin_memory_thread`
                 # reads from.
                 if hasattr(self, 'pin_memory_thread'):
-                    self.pin_memory_thread_done_event.set()
                     # Use hasattr in case error happens before we set the attribute.
+                    self.pin_memory_thread_done_event.set()
+                    # Send something to pin_memory_thread in case it is waiting
+                    # so that it can wake up and check `pin_memory_thread_done_event`
+                    self.worker_result_queue.put((None, None))
                     self.pin_memory_thread.join()
+                    self.worker_result_queue.close()
 
                 # Exit workers now.
                 self.workers_done_event.set()
-                for worker_id in range(self.num_workers):
+                for worker_id in range(len(self.workers)):
+                    # Get number of workers from `len(self.workers)` instead of
+                    # `self.num_workers` in case we error before starting all
+                    # workers.
                     if self.workers_status[worker_id]:
                         self._shutdown_worker(worker_id)
                 for w in self.workers:
