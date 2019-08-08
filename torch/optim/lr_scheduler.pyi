@@ -1,4 +1,4 @@
-from typing import Iterable, Any, Optional
+from typing import Iterable, Any, Optional, Callable
 from .optimizer import Optimizer
 
 class _LRScheduler:
@@ -32,7 +32,7 @@ class ReduceLROnPlateau:
     def load_state_dict(self, state_dict: dict): ...
 
 class CyclicLR(_LRScheduler):
-    def __init__(self, optimizer: Optimizer, base_lr: float=..., max_lr: float=..., step_size_up: int=..., step_size_down: int=..., mode: str=..., gamma: float=..., scale_fn: Callable[[float], float], scale_mode: str=..., cycle_momentum: bool=..., base_momentum: float=..., max_momentum: float=..., last_epoch: int=...) -> None: ...
+    def __init__(self, optimizer: Optimizer, base_lr: float=..., max_lr: float=..., step_size_up: int=..., step_size_down: int=..., mode: str=..., gamma: float=..., scale_fn: Optional[Callable[[float], float]]=..., scale_mode: str=..., cycle_momentum: bool=..., base_momentum: float=..., max_momentum: float=..., last_epoch: int=...) -> None: ...
 
 class CosineAnnealingWarmRestarts(_LRScheduler):
     def __init__(self, optimizer: Optimizer, T_0: int=..., T_mult: int=..., eta_min: int=..., last_epoch: int=...) -> None: ...
