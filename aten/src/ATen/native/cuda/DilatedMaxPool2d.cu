@@ -40,8 +40,8 @@ __global__ void MaxPoolForward(const int nthreads, const scalar_t* bottom_data,
       hstart += dilation_h;
     while(wstart < 0)
       wstart += dilation_w;
-    accscalar_t maxval = THCNumerics<accscalar_t>::min();
-    int maxidx = -1;
+    accscalar_t maxval = at::numeric_limits<accscalar_t>::lower_bound(); // -Infinity
+    int maxidx = hstart * width + wstart;
     bottom_data += (n * channels + c) * height * width;
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {

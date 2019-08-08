@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
-#include <ATen/core/op_registration/test_helpers.h>
 
+// This intentionally tests a deprecated API
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
+#include <ATen/core/op_registration/test_helpers.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
@@ -11,10 +15,6 @@
  * > auto registry = c10::RegisterOperators()
  * >    .op("myfunc(Tensor a) -> Tensor", [] (Tensor a) -> Tensor {...});
  */
-
-// This intentionally tests a deprecated API
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 using c10::RegisterOperators;
 using c10::TensorTypeId;

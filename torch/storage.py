@@ -87,6 +87,10 @@ class _StorageBase(object):
         """Casts this storage to bool type"""
         return self.type(type(self).__module__ + '.BoolStorage')
 
+    def bfloat16(self):
+        """Casts this storage to bfloat16 type"""
+        return self.type(type(self).__module__ + '.BFloat16Storage')
+
     def pin_memory(self):
         """Copies the storage to pinned memory, if it's not already pinned."""
         if self.is_cuda:

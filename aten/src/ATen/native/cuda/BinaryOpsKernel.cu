@@ -13,7 +13,7 @@
 namespace at { namespace native {
 
 void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "add_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "add_cuda/sub_cuda", [&]() {
     auto alpha = alpha_scalar.to<scalar_t>();
     gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return a + alpha * b;
@@ -22,17 +22,11 @@ void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
 }
 
 static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
-  return add_kernel_cuda(iter, -alpha_scalar);
+  add_kernel_cuda(iter, -alpha_scalar);
 }
 
 void div_kernel_cuda(TensorIterator& iter) {
-  if (isIntegralType(iter.dtype())) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "div_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return a / b;
-      });
-    });
-  } else if (iter.is_cpu_scalar(2)) {
+  if (!isIntegralType(iter.dtype()) && iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division.
@@ -44,7 +38,7 @@ void div_kernel_cuda(TensorIterator& iter) {
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "div_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "div_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a / b;
       });

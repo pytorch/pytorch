@@ -7,6 +7,13 @@
 #include <vector>
 
 namespace torch {
+namespace serialize {
+class OutputArchive;
+class InputArchive;
+} // namespace serialize
+} // namespace torch
+
+namespace torch {
 namespace data {
 namespace datasets {
 

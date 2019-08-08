@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 from test_pytorch_common import TestCase, run_tests, flatten
 
 import torch
@@ -630,6 +632,11 @@ class TestOperators(TestCase):
         y = torch.randn(2, 3).float()
         self.assertONNX(lambda x, y: x + y, (x, y), opset_version=10)
 
+    def test_std(self):
+        x = torch.randn(2, 3, 4).float()
+        y = torch.randn(2, 3, 4).float()
+        self.assertONNX(lambda x: torch.std(x, dim=(0, 1), unbiased=True, keepdim=True), x)
+
     def test_retain_param_name_disabled(self):
         class MyModule(Module):
             def __init__(self):
@@ -670,6 +677,16 @@ class TestOperators(TestCase):
         anchors = torch.ones(A, 4, dtype=torch.float32)
         inputs = (scores, bbox_deltas, im_info, anchors)
         self.assertONNX(model, inputs)
+
+    def test_layer_norm_aten(self):
+        model = torch.nn.LayerNorm([10, 10])
+        x = torch.randn(20, 5, 10, 10)
+        self.assertONNX(model, x,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+
+    def test_frobenius_norm(self):
+        x = torch.randn(2, 3, 4).float()
+        self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
 
 
 if __name__ == '__main__':

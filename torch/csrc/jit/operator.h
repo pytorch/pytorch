@@ -105,15 +105,19 @@ struct TORCH_API Operator {
 
   Operator(
       FunctionSchema schema,
-      Operation op)
+      Operation op,
+      c10::OperatorOptions options = c10::OperatorOptions())
       : schema_(std::make_shared<FunctionSchema>(std::move(schema))),
-        op_(std::make_shared<Operation>(std::move(op))) {}
+        op_(std::make_shared<Operation>(std::move(op))),
+        options_(std::move(options)) {}
 
   Operator(
       const std::string& schema,
-      Operation op)
+      Operation op,
+      c10::OperatorOptions options = c10::OperatorOptions())
       : schema_string_(schema),
-        op_(std::make_shared<Operation>(std::move(op))) {}
+        op_(std::make_shared<Operation>(std::move(op))),
+        options_(std::move(options)) {}
 
   bool matches(const Node* node) const;
 

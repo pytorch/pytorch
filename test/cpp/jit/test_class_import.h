@@ -37,8 +37,8 @@ class FooTest:
 )JIT";
 
 void testClassImport() {
-  CompilationUnit cu1;
-  CompilationUnit cu2;
+  auto cu1 = std::make_shared<CompilationUnit>();
+  auto cu2 = std::make_shared<CompilationUnit>();
   std::vector<at::Tensor> constantTable;
   // Import different versions of FooTest into two namespaces.
   import_libs(
@@ -57,19 +57,19 @@ void testClassImport() {
   // We should get the correct version of `FooTest` for whichever namespace we
   // are referencing
   c10::QualifiedName base("__torch__");
-  auto classType1 = cu1.get_class(c10::QualifiedName(base, "FooTest"));
+  auto classType1 = cu1->get_class(c10::QualifiedName(base, "FooTest"));
   ASSERT_TRUE(classType1->hasAttribute("x"));
   ASSERT_FALSE(classType1->hasAttribute("dx"));
 
-  auto classType2 = cu2.get_class(c10::QualifiedName(base, "FooTest"));
+  auto classType2 = cu2->get_class(c10::QualifiedName(base, "FooTest"));
   ASSERT_TRUE(classType2->hasAttribute("dx"));
   ASSERT_FALSE(classType2->hasAttribute("x"));
 
   // We should only see FooNestedTest in the first namespace
-  auto c = cu1.get_class(c10::QualifiedName(base, "FooNestedTest"));
+  auto c = cu1->get_class(c10::QualifiedName(base, "FooNestedTest"));
   ASSERT_TRUE(c);
 
-  c = cu2.get_class(c10::QualifiedName(base, "FooNestedTest"));
+  c = cu2->get_class(c10::QualifiedName(base, "FooNestedTest"));
   ASSERT_FALSE(c);
 }
 
@@ -78,13 +78,13 @@ void testScriptObject() {
   Module m2("m2");
   std::vector<at::Tensor> constantTable;
   import_libs(
-      *m1.class_compilation_unit(),
+      m1.class_compilation_unit(),
       "__torch__",
       std::make_shared<Source>(classSrcs1),
       constantTable,
       nullptr);
   import_libs(
-      *m2.class_compilation_unit(),
+      m2.class_compilation_unit(),
       "__torch__",
       std::make_shared<Source>(classSrcs2),
       constantTable,

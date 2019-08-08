@@ -91,20 +91,19 @@ bool InstanceNormOp<float, CPUContext>::RunOnDeviceWithOrderNHWC(
   float* scale_data = scale_.template mutable_data<float>();
   float* bias_data = bias_.template mutable_data<float>();
   const float c = 1.0f / static_cast<float>(HxW);
+  EigenArrayMap<float> mean_arr(mean, C, N);
+  EigenArrayMap<float> rstd_arr(rstd, C, N);
   for (int64_t n = 0; n < N; ++n) {
     ConstEigenArrayMap<float> X_arr(X + n * HxW * C, C, HxW);
-    EigenVectorArrayMap<float> mean_arr(mean + n * C, C);
-    EigenVectorArrayMap<float> rstd_arr(rstd + n * C, C);
-    mean_arr = X_arr.col(0);
-    rstd_arr = X_arr.col(0).square();
+    mean_arr.col(n) = X_arr.col(0);
+    rstd_arr.col(n) = X_arr.col(0).square();
     for (int64_t i = 1; i < HxW; ++i) {
-      mean_arr += X_arr.col(i);
-      rstd_arr += X_arr.col(i).square();
+      mean_arr.col(n) += X_arr.col(i);
+      rstd_arr.col(n) += X_arr.col(i).square();
     }
-    mean_arr *= c;
-    rstd_arr =
-        ((rstd_arr * c - mean_arr.square()).max(0.0f) + epsilon_).rsqrt();
   }
+  mean_arr *= c;
+  rstd_arr = ((rstd_arr * c - mean_arr.square()).max(0.0f) + epsilon_).rsqrt();
   ComputeFusedParams<float>(
       N, C, mean, rstd, gamma, beta, scale_data, bias_data);
   InstanceNormForwardNHWC<float>(N, C, HxW, X, scale_data, bias_data, Y);

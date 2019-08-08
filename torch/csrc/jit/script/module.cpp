@@ -12,6 +12,51 @@ namespace torch {
 namespace jit {
 namespace script {
 
+static ModulePtr create_module_object(
+    c10::QualifiedName class_name,
+    std::shared_ptr<CompilationUnit> cu,
+    bool shouldMangle = false) {
+  // XXX: This is a temporary hack so that module names cannot clash with
+  // builtins like `torch`. Delete this with the new serialization format.
+  std::vector<std::string> new_class_name{"__module__"};
+  new_class_name.insert(
+      new_class_name.end(),
+      class_name.atoms().begin(),
+      class_name.atoms().end());
+  class_name = c10::QualifiedName(std::move(new_class_name));
+
+  if (shouldMangle && cu->get_class(class_name) != nullptr) {
+    class_name = cu->mangle(class_name);
+  }
+  auto cls = ClassType::create(std::move(class_name), cu, /*is_module=*/true);
+  cu->register_class(cls);
+  return c10::ivalue::Object::create(
+      c10::StrongTypePtr(std::move(cu), std::move(cls)), 0);
+}
+
+Module::Module(c10::QualifiedName class_name)
+    : module_value_(create_module_object(
+          std::move(class_name),
+          std::make_shared<CompilationUnit>())) {}
+
+Module::Module(
+    c10::QualifiedName class_name,
+    std::shared_ptr<CompilationUnit> cu,
+    bool shouldMangle)
+    : module_value_(create_module_object(
+          std::move(class_name),
+          std::move(cu),
+          shouldMangle)) {}
+
+ModulePtr Module::module_object() const {
+  if (!module_value_) {
+    // User has created a Model without assigning it to something already
+    // loaded. This is done in tests, and when using the .define method.
+    module_value_ = create_module_object("__main__", std::make_shared<CompilationUnit>());
+  }
+  return module_value_;
+}
+
 // first class mode runs models as first class objects,
 // and does not force inlining everywhere. This is experimental
 // as we bring up the system since it will degrade performance
@@ -35,12 +80,20 @@ void Module::to(at::Device device, bool non_blocking) {
 }
 
 void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
+#ifndef C10_MOBILE
   ExportModule(*this, out, extra_files);
+#else
+  AT_ERROR("Saving module is not supported on mobile.");
+#endif
 }
 
 void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
     const {
+#ifndef C10_MOBILE
   ExportModule(*this, filename, extra_files);
+#else
+  AT_ERROR("Saving module is not supported on mobile.");
+#endif
 }
 
 void module_state_to(
@@ -163,8 +216,8 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
-Method::Method(ModulePtr owner, std::shared_ptr<Function> function)
-    : owner_(std::move(owner)), function_(std::move(function)) {}
+Method::Method(ModulePtr owner, Function* function)
+    : owner_(std::move(owner)), function_(function) {}
 
 Module Method::owner() const {
   return Module(owner_);
@@ -193,10 +246,9 @@ std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_grap
 }
 
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
+  const auto self = SimpleSelf(type());
   class_compilation_unit()->define(
-      src,
-      resolver ? resolver : script::nativeResolver(),
-      simpleSelf(module_object()->type()));
+      name(), src, resolver ? resolver : script::nativeResolver(), &self);
 }
 
 void Module::copy_into(
@@ -220,14 +272,14 @@ void Module::copy_into(
     }
   }
 
-  for (auto& fn : class_compilation_unit()->get_functions()) {
-    curr.clone_method(*this, fn->name(), type_remap);
+  for (auto& fn : type()->methods()) {
+    curr.clone_method(*this, *fn, type_remap);
   }
 }
 
 void Module::clone_method(
     const Module& orig,
-    const std::string& name,
+    const Function& method,
     const std::unordered_map<TypePtr, TypePtr>& type_remap) {
   // type remapping - when we copy method implementations from one module
   // singleton to another, we need to update the types of the self arguments
@@ -245,11 +297,13 @@ void Module::clone_method(
       return in;
     return it->second;
   };
-  const Function& fn = orig.class_compilation_unit()->get_function(name);
-  auto graph = fn.graph()->copy();
+  auto graph = method.graph()->copy();
   graph->remapTypes(type_remap_fn);
-  auto schema = fn.getSchema().cloneWithRemappedTypes(type_remap_fn);
-  auto copied = class_compilation_unit()->create_function(fn.name(), graph);
+  auto schema = method.getSchema().cloneWithRemappedTypes(type_remap_fn);
+  const auto this_method_name = getNameForMethod(method.name());
+  auto copied =
+      class_compilation_unit()->create_function(this_method_name, graph);
+  type()->addMethod(copied);
   copied->setSchema(std::move(schema));
 }
 
@@ -265,7 +319,7 @@ void Module::clone_method(const Module& orig, const std::string& name) {
       to_scan.emplace_back(s.to_module(), entry.second.get_module(s.name()));
     }
   }
-  return clone_method(orig, name, type_remap);
+  return clone_method(orig, orig.get_method(name).function(), type_remap);
 }
 
 void Module::train(bool on) {
@@ -292,7 +346,8 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
 
   // Create a bare object with correct number of slots
   const size_t numAttrs = classType->numAttributes();
-  auto obj = c10::ivalue::Object::create(classType, numAttrs);
+  auto obj = c10::ivalue::Object::create(
+      c10::StrongTypePtr(class_compilation_unit(), classType), numAttrs);
 
   // Invoke the `__init__()` of the class with the arguments provided.
   Stack stackWithSelf = {obj};

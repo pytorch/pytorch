@@ -248,6 +248,29 @@ TEST(BoundShapeInference, ConcatInferInputBackwards) {
       {spec.max_batch_size, 101 - 60});
 }
 
+TEST(BoundShapeInference, Bucketize) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Bucketize",
+      "",
+      {"In"},
+      {"Out"},
+      {MakeArgument<std::vector<float>>("boundaries", {1.0, 2.0})}));
+  BoundShapeSpec spec(20, 1000);
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "In", makeTensorInfo(ShapeInfo::DimType::SEQ, {spec.max_batch_size, 60}));
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "Out",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size, 60},
+      TensorProto_DataType_INT32);
+}
+
 TEST(BoundShapeInference, Split) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(

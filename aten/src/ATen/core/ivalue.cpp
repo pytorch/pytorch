@@ -102,6 +102,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printList(out, v.toTensorList(), "[", "]");
     case IValue::Tag::Blob:
       return out << *v.toBlob();
+    case IValue::Tag::Capsule:
+      return out << "Capsule";
     case IValue::Tag::GenericList:
       return printList(out, v.toGenericList(), "[", "]");
     case IValue::Tag::Future:
@@ -129,16 +131,16 @@ void IValue::dump() const {
 
 
 std::string ivalue::Object::name() const {
-  return this->type_->qualname();
+  return this->type_.type_->qualname();
 }
 
 IValue ivalue::Object::getAttr(const std::string& name) const {
-  const size_t slot = type_->getAttributeSlot(name);
+  const size_t slot = type_.type_->getAttributeSlot(name);
   return getSlot(slot);
 }
 
 void ivalue::Object::setAttr(const std::string& name, IValue v) {
-  const size_t slot = type_->getAttributeSlot(name);
+  const size_t slot = type_.type_->getAttributeSlot(name);
   setSlot(slot, std::move(v));
 }
 
@@ -170,4 +172,15 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IV
   return ordered;
 }
 
+std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap() {
+    static std::unordered_map<std::string, c10::StrongTypePtr> tmap;
+    return tmap;
+}
+
+std::unordered_map<std::string, std::function<PyObject*(void*)>>&
+getClassConverter() {
+  static std::unordered_map<std::string, std::function<PyObject*(void*)>>
+      classConverter;
+  return classConverter;
+}
 } // namespace c10
