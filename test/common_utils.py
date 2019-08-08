@@ -213,7 +213,35 @@ def _test_function(fn ,device):
         return fn(self, device)
     return run_test_function
 
+
 class pytorchtest():
+    """Allows to generate and run per-device unittests.
+
+    This decorator class allows to generate and run per-device unittest.
+
+    Example:
+
+    class _TestTorchMixin(pytorchtest):
+
+        @pytorchtest.test_all_device_types()
+        def test_zeros_like(self, device):
+            expected = torch.zeros((100, 100,), device=device)
+
+    Will execute:
+
+        test_zeros_like (__main__.TestTorch) ... skipped 'Look at test_zeros_like_cpu, test_zeros_like_cuda results.'
+        test_zeros_like_cpu (__main__.TestTorch) ... ok
+        test_zeros_like_cuda (__main__.TestTorch) ... ok
+
+    To work properly, test class should be inherited from the `pytorchtest`.
+    test_all_device_types decorator does not guarantee proper functionality in
+    combination with other decorators.
+
+    Please do not extend this decorator to support other cases (such as dtype,
+    layouts, etc) without consulting with bigger group. Devices is the special
+    case as build flags control additions/removals (see
+    https://github.com/pytorch/pytorch/pull/23824 for the reference).
+    """
     @classmethod
     def test_all_device_types(cls):
         def wrapper(fn):
