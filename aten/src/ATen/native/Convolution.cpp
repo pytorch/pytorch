@@ -1,3 +1,5 @@
+#include "ATen/native/Convolution.h"
+
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/utils/ParamUtils.h>
@@ -10,6 +12,8 @@
 static const int MIOPEN_DIM_MAX = 4;
 
 namespace at { namespace native {
+
+std::atomic<bool> disable_mkldnn_conv{false};
 
 struct ConvParams {
   std::vector<int64_t> stride;
@@ -149,6 +153,9 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #if AT_MKLDNN_ENABLED()
+  if (disable_mkldnn_conv.load()) {
+    return false;
+  }
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.type().backend() == at::Backend::CPU &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
@@ -215,7 +222,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
           return true;
         } else if (ch >= 64) {
           if (w >= 14) {
-            return true;  
+            return true;
           }
         } else if ((ch >= 32) && (w >=28)) {
           return true;
@@ -288,7 +295,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
           return true;
         } else if (w >= 56) {
           return true;
-        } 
+        }
       } else if (bs >= 1) {
         if ((ch >= 512) && (w >=112)) {
           return true;
@@ -549,7 +556,7 @@ at::Tensor _convolution(
         output = at::cudnn_convolution(
             input, weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
-        
+
       } else if (params.use_miopen(input)){
         output = at::miopen_depthwise_convolution(
             input, weight, bias,
