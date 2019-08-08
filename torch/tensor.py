@@ -495,8 +495,8 @@ class Tensor(torch._C._TensorBase):
     def _update_names(self, names, inplace):
         # See Note [names_ / view_names API]
         if inplace:
-            return super().names_(names)
+            return super(Tensor, self).names_(names)
         else:
-            return super().view_names(names)
+            return super(Tensor, self).view_names(names)
 
     __module__ = 'torch'
