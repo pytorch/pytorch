@@ -539,6 +539,8 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
   auto iter = TensorIterator();
   if (check_internal_overlap) {
     iter.check_and_add_output(out);
+    assert_no_partial_overlap(out, a);
+    assert_no_partial_overlap(out, b);
   } else {
     iter.add_output(out);
   }

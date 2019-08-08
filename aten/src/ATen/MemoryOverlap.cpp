@@ -34,4 +34,31 @@ void assert_no_internal_overlap(TensorImpl* t) {
     "performing the operation.");
 }
 
+MemOverlapStatus get_overlap_status(const Tensor& a, const Tensor& b) {
+  return get_overlap_status(a.unsafeGetTensorImpl(), b.unsafeGetTensorImpl());
+}
+
+MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
+  const auto a_begin = a->data();
+  const auto a_end = a_begin + a->numel() * a->itemsize();
+  const auto b_begin = b->data();
+  const auto b_end = b_begin + b->numel() * b->itemsize();
+  if (a_begin == b_begin && a_end == b_end) {
+    return MemOverlapStatus::FULL;
+  }
+  if (a_begin <= b_end && b_begin <= a_end) {
+    return MemOverlapStatus::PARTIAL;
+  }
+  return MemOverlapStatus::NO;
+}
+
+void assert_no_partial_overlap(const Tensor& a, const Tensor& b) {
+  assert_no_partial_overlap(a.unsafeGetTensorImpl(), b.unsafeGetTensorImpl());
+}
+
+void assert_no_partial_overlap(TensorImpl* a, TensorImpl* b) {
+  TORCH_CHECK(get_overlap_status(a, b) != MemOverlapStatus::PARTIAL,
+    "unsupported operation: TODO");
+}
+
 }
