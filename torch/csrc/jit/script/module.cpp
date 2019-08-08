@@ -245,10 +245,6 @@ std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_grap
   return std::make_pair(result.first, loadTensors(result.second));
 }
 
-static void clearMethods(c10::ivalue::Object* self) {
-  self->compilation_unit()->drop_all_functions();
-}
-
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
   const auto self = SimpleSelf(type());
   class_compilation_unit()->define(
