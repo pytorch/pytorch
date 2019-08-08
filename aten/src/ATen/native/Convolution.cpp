@@ -611,8 +611,8 @@ at::Tensor _convolution(
           input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
     } else {
       std::vector<Tensor> outputs(params.groups);
+      input = input.contiguous();
       for (int g = 0; g < params.groups; ++g) {
-        input = input.contiguous();
         auto input_g = subtensor(input, 1, params.groups, g);
         auto weight_g = subtensor(weight, 0, params.groups, g);
         auto bias_g = subtensor(bias, 0, params.groups, g);

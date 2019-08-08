@@ -7295,8 +7295,9 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_batchnorm_cudnn_nhwc(self):
-        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda").as_strided((4, 8, 2, 2), (32, 1, 16, 8), 0).requires_grad_(True)
-        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda").as_strided((4, 8, 2, 2), (32, 1, 16, 8), 0)
+        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda", requires_grad=True).contiguous(memory_format=torch.channels_last)
+        input.retain_grad()
+        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda").contiguous(memory_format=torch.channels_last)
         bn = nn.BatchNorm2d(8).cuda().float()
         bn.weight.data.uniform_()
         bn.bias.data.uniform_()
@@ -7311,6 +7312,8 @@ class TestNN(NNTestCase):
         ref_out = ref_bn(ref_input)
         ref_out.backward(ref_grad)
 
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
         self.assertEqual(bn.weight.grad, ref_bn.weight.grad)
         self.assertEqual(bn.bias.grad, ref_bn.bias.grad)
@@ -8709,8 +8712,9 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_conv_cudnn_nhwc(self):
-        input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device="cuda").as_strided((2, 8, 4, 4), (128, 1, 32, 8), 0).requires_grad_(True)
-        grad = torch.rand(2, 4, 2, 2, dtype=torch.float32, device="cuda").as_strided((2, 4, 2, 2), (16, 1, 8, 4), 0)
+        input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device="cuda", requires_grad=True).contiguous(memory_format=torch.channels_last)
+        input.retain_grad()
+        grad = torch.rand(2, 4, 2, 2, dtype=torch.float32, device="cuda").contiguous(memory_format=torch.channels_last)
         conv = nn.Conv2d(8, 4, 3).cuda().float()
 
         ref_input = input.detach().clone().contiguous().requires_grad_(True)
@@ -8723,6 +8727,8 @@ class TestNN(NNTestCase):
         ref_out = ref_conv(ref_input)
         ref_out.backward(ref_grad)
 
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
         self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
         self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
