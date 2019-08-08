@@ -1,0 +1,26 @@
+apply plugin: 'com.android.library'
+apply plugin: 'maven'
+
+android {
+    compileSdkVersion rootProject.compileSdkVersion
+    buildToolsVersion rootProject.buildToolsVersion
+
+    defaultConfig {
+        minSdkVersion rootProject.minSdkVersion
+        targetSdkVersion rootProject.targetSdkVersion
+        buildConfigField "boolean", "IS_INTERNAL_BUILD", 'true'
+
+        sourceSets {
+            main {
+                manifest.srcFile './ApplicationManifest.xml'
+                java {
+                    srcDir 'java'
+                }
+            }
+        }
+    }
+}
+
+dependencies {
+    compileOnly deps.jsr305
+}
