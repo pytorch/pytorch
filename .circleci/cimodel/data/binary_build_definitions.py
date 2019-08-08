@@ -34,8 +34,8 @@ class Conf(object):
 
         docker_distro_prefix = miniutils.override(self.pydistro, docker_word_substitution)
 
-        # The cpu nightlies are built on the soumith/manylinux-cuda80 docker image
-        alt_docker_suffix = self.cuda_version or "80"
+        # The cpu nightlies are built on the soumith/manylinux-cuda100 docker image
+        alt_docker_suffix = self.cuda_version or "100"
         docker_distro_suffix = "" if self.pydistro == "conda" else alt_docker_suffix
         return miniutils.quote("soumith/" + docker_distro_prefix + "-cuda" + docker_distro_suffix)
 
