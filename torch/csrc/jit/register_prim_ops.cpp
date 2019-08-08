@@ -568,7 +568,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::grad(Tensor a) -> Tensor",
+         "prim::grad(Tensor a) -> Tensor(*)",
          [](Stack& stack) {
            at::Tensor a;
            pop(stack, a);
@@ -577,7 +577,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::data(Tensor a) -> Tensor",
+         "prim::data(Tensor(b) a) -> Tensor(b)",
          noop,
          aliasAnalysisFromSchema()),
      Operator(

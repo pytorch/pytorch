@@ -848,7 +848,7 @@ struct CAFFE2_API DictType : public Type {
         AT_ERROR(
             "Cannot create dict for key type '",
             key->str(),
-            "', only int, float, and string keys are supported");
+            "', only int, float, Tensor and string keys are supported");
     }
   }
 

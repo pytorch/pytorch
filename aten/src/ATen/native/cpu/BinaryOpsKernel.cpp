@@ -18,7 +18,7 @@ void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
     auto alpha = alpha_scalar.to<bool>();
     cpu_kernel(iter, [=](bool a, bool b) -> bool { return a + b * alpha; });
   } else {
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_cpu/sub_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "add_cpu/sub_cpu", [&]() {
       auto alpha = alpha_scalar.to<scalar_t>();
       auto alpha_vec = Vec256<scalar_t>(alpha);
       cpu_kernel_vec(iter,
@@ -38,7 +38,7 @@ void mul_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [=](bool a, bool b) -> bool { return a && b; });
   } else {
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), "mul_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "mul_cpu", [&]() {
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
         [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
@@ -58,7 +58,7 @@ void div_kernel(TensorIterator& iter) {
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "div_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "div_cpu", [&]() {
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
            return a / b;
