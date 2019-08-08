@@ -1511,8 +1511,8 @@ protected:
    */
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
-    is_channels_last_contiguous_ = (!is_contiguous_) && compute_channels_last_contiguous();
-    is_channels_last_ = (!is_contiguous_) && (is_channels_last_contiguous_ || compute_strides_like_channels_last());
+    is_channels_last_contiguous_ = compute_channels_last_contiguous();
+    is_channels_last_ = is_channels_last_contiguous_ || compute_strides_like_channels_last();
   }
 
   /**
