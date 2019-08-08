@@ -464,7 +464,8 @@ void initJitScriptBindings(PyObject* module) {
           "_register_attribute",
           [](Module& self, std::string name, TypePtr type, py::object value) {
             auto unshaped = unshapedType(type);
-            self.register_attribute(name, unshaped, toIValue(value, type));
+            self.register_attribute(
+                name, unshaped, toIValue(std::move(value), type));
           })
       .def("_register_module", &Module::register_module)
       .def("_register_buffer", &Module::register_buffer)
