@@ -21,6 +21,8 @@
 #include <functional>
 #include <iostream>
 #include <unordered_set>
+#include <utility>
+#include <utility>
 #include <vector>
 
 // Forward declare, the real meat is in python_ir.cpp
@@ -882,14 +884,14 @@ struct Block {
     return owning_node_;
   }
 
-  Value* addInput(std::string name = "") {
+  Value* addInput(const std::string& name = "") {
     Value* v = input_->addOutput();
-    v->setDebugName(std::move(name));
+    v->setDebugName(name);
     return v;
   }
-  Value* insertInput(size_t i, std::string name = "") {
+  Value* insertInput(size_t i, const std::string& name = "") {
     Value* v = input_->insertOutput(i);
-    v->setDebugName(std::move(name));
+    v->setDebugName(name);
     return v;
   }
   void eraseInput(size_t i) {
@@ -1118,7 +1120,7 @@ struct Graph {
   // Insert constant IValue into the graph. If the type cannot be fully deduced
   // from the ivalue, as with a None that is set to t?, use result_type
   TORCH_API Value* insertConstant(
-      IValue val,
+      const IValue& val,
       const TypePtr& result_type = nullptr,
       c10::optional<SourceRange> loc = c10::nullopt,
       c10::optional<ScopePtr> scope = c10::nullopt);
@@ -1269,7 +1271,7 @@ inline const Graph* Value::owningGraph() const {
 struct ProfileOp : public Node {
   static constexpr Symbol Kind = ::c10::prim::profile;
   ProfileOp(Graph* graph, std::function<void(std::vector<IValue>&)> callback)
-      : Node(graph, ::c10::prim::profile), callback_(callback) {}
+      : Node(graph, ::c10::prim::profile), callback_(std::move(std::move(callback))) {}
 
   void cloneFrom(Node* other_) override;
   Node* allocNewInstance(Graph* g) override;
@@ -1279,7 +1281,7 @@ struct ProfileOp : public Node {
   }
 
   void setCallback(std::function<void(std::vector<IValue>&)> callback) {
-    callback_ = callback;
+    callback_ = std::move(callback);
   }
 
  private:

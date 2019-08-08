@@ -558,7 +558,7 @@ void Unpickler::setInput(size_t memo_id) {
 // avoid it by calling push_back for bool
 template <typename T>
 inline void append(std::vector<T>& a, T&& e) {
-  a.emplace_back(std::move(e));
+  a.emplace_back(std::forward<T>(e));
 }
 template <>
 inline void append<bool>(std::vector<bool>& a, bool&& e) {

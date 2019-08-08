@@ -16,7 +16,7 @@ namespace script {
  */
 class TORCH_API ScriptTypeParser {
  public:
-  explicit ScriptTypeParser() {}
+  explicit ScriptTypeParser() = default;
   explicit ScriptTypeParser(ResolverPtr resolver)
       : resolver_(std::move(resolver)) {}
   c10::optional<std::string> parseBaseTypeName(const Expr& expr) const;

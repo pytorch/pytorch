@@ -349,7 +349,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_try_infer_type",
           [](py::object obj) -> TypePtr {
-            auto match = tryToInferType(obj);
+            auto match = tryToInferType(std::move(obj));
             if (match.type) {
               return *match.type;
             }
@@ -495,7 +495,7 @@ void initJITBindings(PyObject* module) {
       });
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
-    auto operations = getAllOperatorsFor(symbol);
+    const auto& operations = getAllOperatorsFor(symbol);
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
       return op->schema();
     });
@@ -508,7 +508,7 @@ void initJITBindings(PyObject* module) {
     c10::intrusive_ptr<c10::ivalue::Future> fut;
   };
 
-  py::class_<PythonFutureWrapper>(m, "Future");
+  py::class_<PythonFutureWrapper> give_me_a_name(m, "Future");
 
   m.def("fork", [](py::args args) {
     AT_ASSERT(args.size() >= 1);
@@ -576,7 +576,7 @@ void initJITBindings(PyObject* module) {
   });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
-    toIValue(obj, type);
+    toIValue(std::move(obj), type);
   });
 
   initPythonIRBindings(module);

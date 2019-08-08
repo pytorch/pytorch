@@ -1,20 +1,22 @@
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/script/module.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
 static ModuleHook emit_module_callback;
-void didFinishEmitModule(script::Module module) {
+void didFinishEmitModule(const script::Module& module) {
   if (emit_module_callback) {
-    emit_module_callback(std::move(module));
+    emit_module_callback(module);
   }
 }
 
 static FunctionHook emit_function_callback;
 void didFinishEmitFunction(StrongFunctionPtr fn) {
   if (emit_function_callback) {
-    emit_function_callback(fn);
+    emit_function_callback(std::move(fn));
   }
 }
 

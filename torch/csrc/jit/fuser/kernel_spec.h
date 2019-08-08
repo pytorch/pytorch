@@ -122,7 +122,7 @@ struct TORCH_API KernelSpec {
       return c10::nullopt;
     return it->second;
   }
-  void cacheKernel(const ArgSpec& arg_spec, std::shared_ptr<FusedKernel> kernel)
+  void cacheKernel(const ArgSpec& arg_spec, const std::shared_ptr<FusedKernel>& kernel)
       const {
     std::lock_guard<std::mutex> guard{mutex_};
     kernels_.emplace(arg_spec, kernel);

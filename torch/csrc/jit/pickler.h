@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+#include <utility>
+#include <utility>
 #include <vector>
 
 #include <ATen/core/ivalue.h>
@@ -115,7 +117,7 @@ struct WriteableTensorData {
  private:
   friend WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
   at::Tensor tensor_;
-  uint64_t size_;
+  uint64_t size_{};
 };
 
 class Pickler {
@@ -236,7 +238,7 @@ class Unpickler {
       : bytes_(static_cast<const uint8_t*>(data)),
         end_ptr_(bytes_ + size),
         tensor_table_(tensor_table),
-        class_resolver_(class_resolver) {}
+        class_resolver_(std::move(std::move(class_resolver))) {}
 
   std::vector<IValue> parse_ivalue_list();
 

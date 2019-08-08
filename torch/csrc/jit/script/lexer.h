@@ -11,6 +11,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -371,8 +372,8 @@ struct Token {
 };
 
 struct Lexer {
-  explicit Lexer(const std::shared_ptr<Source>& source)
-      : source(source),
+  explicit Lexer(std::shared_ptr<Source>  source)
+      : source(std::move(source)),
         pos(0),
         nesting(0),
         indent_stack(),

@@ -25,6 +25,8 @@
 #include <fstream>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -60,7 +62,7 @@ class ScriptModuleDeserializer final {
   ScriptModuleDeserializer(
       std::shared_ptr<script::CompilationUnit> cu,
       std::unique_ptr<PyTorchStreamReader> reader)
-      : compilation_unit_(cu),
+      : compilation_unit_(std::move(std::move(cu))),
         reader_(std::move(reader)) {}
 
   script::Module deserialize(
@@ -125,7 +127,7 @@ script::Module ScriptModuleDeserializer::deserialize(
   AT_ASSERTM(
       model_def.ParseFromString(binary_string),
       "JSON transcoder produced invalid protobuf output.");
-  device_ = device;
+  device_ = std::move(device);
 
   const auto& module_def = model_def.main_module();
 
@@ -295,7 +297,7 @@ void ScriptModuleDeserializer::moduleSetState(
   if (setstate->num_inputs() == 1) {
     setstate->run({module.module_object()});
   } else if (setstate->num_inputs() == 2) {
-    setstate->run({module.module_object(), state});
+    setstate->run({module.module_object(), std::move(state)});
   } else {
     AT_ERROR("Unexpected schema on '__setstate__'");
   }
@@ -413,7 +415,7 @@ script::Module import_ir_module(
   auto reader = torch::make_unique<PyTorchStreamReader>(&in);
   ScriptModuleDeserializer deserializer(
       std::move(cu), std::move(reader));
-  return deserializer.deserialize(device, extra_files);
+  return deserializer.deserialize(std::move(device), extra_files);
 }
 
 script::Module import_ir_module(
@@ -424,7 +426,7 @@ script::Module import_ir_module(
   auto reader = torch::make_unique<PyTorchStreamReader>(filename);
   ScriptModuleDeserializer deserializer(
       std::move(cu), std::move(reader));
-  return deserializer.deserialize(device, extra_files);
+  return deserializer.deserialize(std::move(device), extra_files);
 }
 
 script::Module import_ir_module(
@@ -435,7 +437,7 @@ script::Module import_ir_module(
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   ScriptModuleDeserializer deserializer(
       std::move(cu), std::move(reader));
-  return deserializer.deserialize(device, extra_files);
+  return deserializer.deserialize(std::move(device), extra_files);
 }
 
 script::Module load(
@@ -444,7 +446,7 @@ script::Module load(
     script::ExtraFilesMap& extra_files) {
   std::unique_ptr<IStreamAdapter> rai =
       caffe2::make_unique<IStreamAdapter>(&in);
-  auto module = load(std::move(rai), device, extra_files);
+  auto module = load(std::move(rai), std::move(device), extra_files);
   return module;
 }
 
@@ -453,7 +455,7 @@ script::Module load(
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   std::unique_ptr<FileAdapter> rai = caffe2::make_unique<FileAdapter>(filename);
-  auto module = load(std::move(rai), device, extra_files);
+  auto module = load(std::move(rai), std::move(device), extra_files);
   return module;
 }
 
@@ -465,7 +467,7 @@ script::Module load(
   auto cu = std::make_shared<script::CompilationUnit>();
   ScriptModuleDeserializer deserializer(
       std::move(cu), std::move(reader));
-  return deserializer.deserialize(device, extra_files);
+  return deserializer.deserialize(std::move(device), extra_files);
 }
 
 } // namespace jit

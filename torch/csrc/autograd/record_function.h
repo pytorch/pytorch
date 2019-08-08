@@ -28,7 +28,7 @@ struct TORCH_API StringView {
 
 struct TORCH_API RecordFunction {
   // Default constructor is used with before function called afterwards
-  RecordFunction() {}
+  RecordFunction() = default;
 
   // before function initializes RecordFunction members and calls
   // start callbacks

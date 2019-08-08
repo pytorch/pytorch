@@ -394,8 +394,8 @@ struct Def : public TreeView {
   explicit Def(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_DEF);
   }
-  Def withName(std::string new_name) const {
-    auto new_ident = Ident::create(name().range(), std::move(new_name));
+  Def withName(const std::string& new_name) const {
+    auto new_ident = Ident::create(name().range(), new_name);
     return create(range(), new_ident, decl(), statements());
   }
   Ident name() const {
@@ -420,8 +420,8 @@ struct ClassDef : public TreeView {
   explicit ClassDef(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_CLASS_DEF);
   }
-  ClassDef withName(std::string new_name) const {
-    auto new_ident = Ident::create(name().range(), std::move(new_name));
+  ClassDef withName(const std::string& new_name) const {
+    auto new_ident = Ident::create(name().range(), new_name);
     return create(range(), new_ident, superclass(), body());
   }
   Ident name() const {

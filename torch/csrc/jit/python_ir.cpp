@@ -15,6 +15,7 @@
 
 #include <iostream>
 #include <sstream>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -134,7 +135,7 @@ std::string ConcretePythonOp::name() const {
 }
 
 void ConcretePythonOp::cloneFrom(Node* other_) {
-  Node::cloneFrom(other_);
+  torch::jit::PythonOp::cloneFrom(other_);
   auto other = other_->cast<ConcretePythonOp>();
   this->cconv = other->cconv;
   Py_INCREF(other->pyobj.get());
@@ -223,7 +224,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
-            AliasDb db(g);
+            AliasDb db(std::move(g));
             db.dump();
           })
       .def(
@@ -657,7 +658,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "isSubtypeOf",
           [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
-            return self->isSubtypeOf(other);
+            return self->isSubtypeOf(std::move(other));
           });
 
   py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
@@ -675,7 +676,7 @@ void initPythonIRBindings(PyObject* module_) {
 
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
       .def(
-          py::init([](std::vector<TypePtr> a) { return TupleType::create(a); }))
+          py::init([](std::vector<TypePtr> a) { return TupleType::create(std::move(a)); }))
       .def("elements", [](TupleType& self) {
         std::vector<TypePtr> types;
         for (const auto& type : self.elements()) {
@@ -690,13 +691,13 @@ void initPythonIRBindings(PyObject* module_) {
       .def("getElementType", &ListType::getElementType);
   py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
       .def(py::init([](TypePtr key, TypePtr value) {
-        return DictType::create(key, value);
+        return DictType::create(std::move(key), std::move(value));
       }))
       .def("getKeyType", &DictType::getKeyType)
       .def("getValueType", &DictType::getValueType);
   py::class_<OptionalType, Type, std::shared_ptr<OptionalType>>(
       m, "OptionalType")
-      .def(py::init([](TypePtr a) { return OptionalType::create(a); }))
+      .def(py::init([](TypePtr a) { return OptionalType::create(std::move(a)); }))
       .def_static("ofTensor", &OptionalType::ofTensor)
       .def("getElementType", &OptionalType::getElementType);
 

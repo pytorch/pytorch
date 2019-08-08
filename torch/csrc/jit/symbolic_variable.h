@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -261,7 +263,7 @@ struct SymbolicVariable {
     return create(t("sinh"), {*this})[0];
   }
   SymbolicVariable sum(c10::optional<c10::ScalarType> dtype=c10::nullopt) const {
-    return create(t("sum"), {*this, insertNullable(dtype)})[0];
+    return create(t("sum"), {*this, insertNullable(std::move(dtype))})[0];
   }
   SymbolicVariable sum(
     int dim,
@@ -273,7 +275,7 @@ struct SymbolicVariable {
         {*this,
           insertConstant(at::IntArrayRef{dim}),
           insertConstant(keepdim),
-          insertNullable(dtype)})[0];
+          insertNullable(std::move(dtype))})[0];
   }
   SymbolicVariable squeeze(Value* dim) const {
     return create(t("squeeze"), {*this, dim})[0];
@@ -329,7 +331,7 @@ struct SymbolicVariable {
   }
 
   SymbolicVariable toType(TypePtr type) const {
-    v->setType(type);
+    v->setType(std::move(type));
     return *this;
   }
 

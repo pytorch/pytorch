@@ -13,7 +13,7 @@ struct Module;
 using ModuleHook = std::function<void(script::Module module)>;
 using FunctionHook = std::function<void(StrongFunctionPtr function)>;
 
-TORCH_API void didFinishEmitModule(script::Module module);
+TORCH_API void didFinishEmitModule(const script::Module& module);
 TORCH_API void didFinishEmitFunction(StrongFunctionPtr defined);
 TORCH_API void setEmitHooks(ModuleHook for_module, FunctionHook for_fn);
 

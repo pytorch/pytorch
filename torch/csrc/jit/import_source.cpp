@@ -6,6 +6,10 @@
 #include <torch/csrc/jit/script/resolver.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
 
+#include <utility>
+
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace script {
@@ -114,7 +118,7 @@ struct SourceResolver : public Resolver {
       std::shared_ptr<CompilationUnit> cu,
       size_t version,
       const std::vector<at::Tensor>& constant_table)
-      : cu_(cu) {
+      : cu_(std::move(std::move(cu))) {
     env_ = {
         {"torch", std::make_shared<BuiltinModule>("aten", version)},
         {"ops", std::make_shared<OpsValue>(version)},
@@ -161,7 +165,7 @@ struct SourceResolver : public Resolver {
 
 struct SourceImporter {
   SourceImporter(
-      const std::shared_ptr<CompilationUnit> cu,
+      const std::shared_ptr<CompilationUnit>& cu,
       const std::shared_ptr<Source>& src,
       const std::vector<at::Tensor>& constant_table,
       const std::function<void(const std::string&)>& import_callback)
@@ -184,7 +188,7 @@ struct SourceImporter {
     }
   }
 
-  void importLibs(std::shared_ptr<CompilationUnit> owner, const std::string& class_qualifier) {
+  void importLibs(const std::shared_ptr<CompilationUnit>& owner, const std::string& class_qualifier) {
     checkVersionNumber();
     auto& L = p_.lexer();
 
@@ -322,7 +326,7 @@ void import_functions(
     const std::vector<at::Tensor>& constant_table,
     const Self* self,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(cu, src, constant_table, import_callback);
+  SourceImporter importer(std::move(cu), src, constant_table, import_callback);
   importer.importFunctions(prefix, self);
 }
 
@@ -342,7 +346,7 @@ void import_methods(
 }
 
 void import_libs(
-    std::shared_ptr<CompilationUnit> cu,
+    const std::shared_ptr<CompilationUnit>& cu,
     const std::string& class_qualifier,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,

@@ -97,7 +97,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// See NOTE [ Autograd View Variables ] for details.
   friend Variable make_variable_view(
       Variable base,
-      at::Tensor data,
+      const at::Tensor& data,
       bool is_differentiable,
       bool allow_tensor_metadata_change,
       Edge gradient_edge);
@@ -108,7 +108,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
   /// type *must* be `Tensor`.
   friend Variable make_variable(
-      at::Tensor data,
+      const at::Tensor& data,
       bool requires_grad,
       bool allow_tensor_metadata_change);
 
@@ -117,7 +117,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// in the autograd graph, and what particular input of that function, this
   /// variable is connected to.
   friend Variable make_variable(
-      at::Tensor data,
+      const at::Tensor& data,
       Edge gradient_edge,
       bool allow_tensor_metadata_change);
 
@@ -471,7 +471,7 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
   }
 
   DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge);
-  ~DifferentiableViewMeta();
+  ~DifferentiableViewMeta() override;
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -491,7 +491,7 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
 // See NOTE [ Autograd View Variables ] for details.
 inline Variable make_variable_view(
     Variable base,
-    at::Tensor data,
+    const at::Tensor& data,
     bool is_differentiable = true,
     bool allow_tensor_metadata_change = true,
     Edge gradient_edge = Edge()) {
@@ -518,7 +518,7 @@ inline Variable make_variable_view(
 }
 
 inline Variable make_variable(
-    at::Tensor data,
+    const at::Tensor& data,
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
   TORCH_CHECK(
@@ -543,7 +543,7 @@ inline Variable make_variable(
 }
 
 inline Variable make_variable(
-    at::Tensor data,
+    const at::Tensor& data,
     Edge gradient_edge,
     bool allow_tensor_metadata_change = true) {
   TORCH_CHECK(

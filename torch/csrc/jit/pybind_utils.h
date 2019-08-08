@@ -73,7 +73,7 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
 }
 
 inline c10::optional<TypePtr> unifyOrInitializeType(
-    TypePtr accum,
+    const TypePtr& accum,
     TypePtr unify) {
   if (!accum) {
     return unify;
@@ -239,7 +239,7 @@ inline IValue toIValue(
     const TypePtr& type,
     c10::optional<int32_t> N = c10::nullopt);
 
-inline bool isTraceableType(TypePtr type) {
+inline bool isTraceableType(const TypePtr& type) {
   if (type->isSubtypeOf(TensorType::get())) {
     return true;
   }
@@ -252,7 +252,7 @@ inline bool isTraceableType(TypePtr type) {
     return std::all_of(
         tuple_type->elements().begin(),
         tuple_type->elements().end(),
-        [](TypePtr element_type) { return isTraceableType(element_type); });
+        [](TypePtr element_type) { return isTraceableType(std::move(element_type)); });
   }
 
   if (auto dict_type = type->cast<DictType>()) {
@@ -298,7 +298,7 @@ inline TypedStack toTypedStack(const py::tuple& inputs) {
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   auto elems = c10::impl::GenericList(elem_type);
   for (auto elem : obj) {
-    elems.push_back(toIValue(std::move(elem), elem_type));
+    elems.push_back(toIValue(elem, elem_type));
   }
   return IValue(std::move(elems));
 }
@@ -671,9 +671,9 @@ inline Stack createStackForSchema(
     push(stack, std::move(*self));
   }
   // First push all positional args.
-  for (size_t i = 0; i < args.size(); ++i) {
+  for (const auto & arg : args) {
     // Use the type information from the schema to convert the PyObject.
-    push(stack, argumentToIValue(schema, stack.size(), args[i]));
+    push(stack, argumentToIValue(schema, stack.size(), arg));
   }
 
   // Now for every remaining non-positional argument in the schema, look for it
@@ -748,11 +748,11 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
 
 inline py::object invokeScriptFunctionFromPython(
     Function& callee,
-    tuple_slice args,
-    py::kwargs kwargs,
+    const tuple_slice& args,
+    const py::kwargs& kwargs,
     c10::optional<IValue> self = c10::nullopt) {
   auto stack = createStackForSchema(
-      callee.getSchema(), std::move(args), std::move(kwargs), std::move(self));
+      callee.getSchema(), args, kwargs, std::move(self));
   {
     AutoNoGIL no_gil_guard;
     callee.run(stack);
@@ -776,10 +776,10 @@ inline py::object invokeScriptMethodFromPython(
 inline py::object invokeOperatorFromPython(
     const Operator& op,
     py::args args,
-    py::kwargs kwargs) {
+    const py::kwargs& kwargs) {
   // Create a stack full of the arguments and keyword arguments.
   auto stack = createStackForSchema(
-      op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
+      op.schema(), std::move(args), kwargs, c10::nullopt);
 
   // Invoke the operation, which puts the return values onto the stack.
   op.getOperation()(stack);

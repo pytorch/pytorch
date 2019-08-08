@@ -37,7 +37,7 @@ class TORCH_API MemoryDAG {
   // explicitly delete copy constructor because otherwise windows build is
   // confused for an exported class see
   // https://stackoverflow.com/a/51033485/105137
-  MemoryDAG() {}
+  MemoryDAG() = default;
   MemoryDAG(const MemoryDAG&) = delete;
   MemoryDAG& operator=(const MemoryDAG&) = delete;
 

@@ -27,6 +27,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -1072,7 +1073,7 @@ std::string prettyPrint(const onnx::ModelProto& model) {
 } // namespace
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
-  GetExtraFilesHook() = hook;
+  GetExtraFilesHook() = std::move(hook);
 }
 
 std::string pretty_print_onnx(
