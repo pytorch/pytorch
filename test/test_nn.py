@@ -40,6 +40,9 @@ from common_utils import TEST_WITH_UBSAN
 
 from torch.nn import MultiheadAttention
 
+from hypothesis import given
+import hypothesis_utils as hu
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -3953,6 +3956,25 @@ class TestNN(NNTestCase):
         indices.add_(1)
         self.assertRaises(RuntimeError, lambda: output.backward(grad_output))
 
+        # Make sure -Infinity is handled correctly
+        t = torch.tensor([[[float("-inf")]]])
+        m = nn.MaxPool1d(kernel_size=1, return_indices=True)
+        output, indices = m(t)
+        self.assertEqual(output[0, 0, 0], float("-inf"), allow_inf=True)
+        self.assertEqual(indices[0, 0, 0], 0)
+
+        t = torch.tensor([[[float("-inf")]]])
+        m = nn.MaxPool2d(kernel_size=1, return_indices=True)
+        output, indices = m(t)
+        self.assertEqual(output[0, 0, 0], float("-inf"), allow_inf=True)
+        self.assertEqual(indices[0, 0, 0], 0)
+
+        t = torch.tensor([[[[float("-inf")]]]])
+        m = nn.MaxPool3d(kernel_size=1, return_indices=True)
+        output, indices = m(t)
+        self.assertEqual(output[0, 0, 0, 0], float("-inf"), allow_inf=True)
+        self.assertEqual(indices[0, 0, 0, 0], 0)
+
     def test_adaptive_pooling_input_size(self):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
@@ -4344,6 +4366,23 @@ class TestNN(NNTestCase):
             for out, expected in zip(outputs, expected_outputs):
                 self.assertEqual(out.data, expected)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_parallel_apply_passes_exception(self):
+        # we define and instantiate a module that will throw a KeyError
+        class TestModule(nn.Module):
+
+            def forward(self, *args):
+                return {}['wonderful']
+
+        l1 = TestModule().to("cuda", torch.float)
+        # and check that parallel_apply passes on the exception
+        # (we can use a single device twice for this test)
+        with self.assertRaisesRegex(KeyError,
+                                    'Caught KeyError in replica \\d '
+                                    'on device 0.\nOriginal Traceback'
+                                    '[\\s\\S]+wonderful'):
+            dp.parallel_apply(modules=(l1, l1), inputs=(None, None))
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_multiple_input(self):
         class TestModule(nn.Module):
@@ -4733,6 +4772,32 @@ class TestNN(NNTestCase):
         i = torch.randn(20, 10, dtype=torch.float, device=cuda0, requires_grad=True)
         out = dp.data_parallel(l, i, device_ids=(cuda0, cuda1), output_device=cuda0)
         self.assertEqual(out, l(i))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_data_parallel_function_deletion(self):
+        # this test case is originated from #16532
+        def gradient_penalty(net, x):
+            output = net(x)
+            loss = torch.autograd.grad(
+                outputs=output, inputs=x,
+                grad_outputs=x.new_ones(output.size()),
+                create_graph=True, retain_graph=True)[0].mean()
+            return loss
+
+        net = nn.Linear(4, 1).cuda()
+        dpn = nn.DataParallel(net, [0, 1])
+        x = torch.ones(2, 4, requires_grad=True).cuda()
+
+        dpn.zero_grad()
+        loss = gradient_penalty(dpn, x)
+        loss.backward()
+        grads = [p.grad for p in net.parameters()]
+        self.assertEqual(2, len(grads))
+        self.assertEqual(
+            torch.tensor([[0.25, 0.25, 0.25, 0.25]], device='cuda:0'),
+            grads[0])
+        self.assertEqual(torch.tensor([0.0], device='cuda:0'), grads[1])
 
     def test_state_dict(self):
         l = nn.Linear(5, 5)
@@ -5224,6 +5289,15 @@ class TestNN(NNTestCase):
         i = torch.rand(1, 2, 1, 1, 1)
         out = m(i, output_size=(1, 2, 2, 2, 2))
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_ConvTranspose2d_half_cublas_gemm(self):
+        with torch.backends.cudnn.flags(enabled=False):
+            inputs = torch.randn(1, 1, 16, 16, device='cuda', dtype=torch.half)
+            deconv = nn.ConvTranspose2d(
+                1, 1, 3, stride=2, padding=1, output_padding=1).cuda().half()
+            output = deconv(inputs)
+            output.mean().backward()
+
     def _test_Conv2d_naive_groups(self, device="cpu", dtype=torch.float):
         # Check that grouped convolutions matches two half convolutions
         m = nn.Conv2d(4, 4, kernel_size=3, groups=2).to(device, dtype)
@@ -5492,7 +5566,7 @@ class TestNN(NNTestCase):
 
         self.assertEqual(l, expected)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 7000), "needs cudnn >= 7.0")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 7000), "needs cudnn >= 7.0")
     def test_CTCLoss_cudnn(self):
         target_lengths = [30, 25, 20]
         input_lengths = [50, 50, 50]
@@ -5534,20 +5608,29 @@ class TestNN(NNTestCase):
         with self.assertRaises(RuntimeError):
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-    def test_CTCLoss_empty_target_cpu(self):
+    def _test_CTCLoss_empty_target(self, device):
         target_lengths = [0, 0, 0]
         input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (0,), dtype=torch.int)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+        targets = torch.randint(1, 15, (0,), dtype=torch.long, device=device)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
+        self.assertAlmostEqual(-log_probs.sum(0)[:, 0], loss)
 
         target_lengths = [0, 9, 0]
         input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (9,), dtype=torch.int)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+        targets = torch.randint(1, 15, (9,), dtype=torch.long, device=device)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
+        self.assertAlmostEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]])
+
+    def test_CTCLoss_empty_target_cpu(self):
+        self._test_CTCLoss_empty_target('cpu')
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_CTCLoss_empty_target_cuda(self):
+        self._test_CTCLoss_empty_target('cuda')
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_zero_infinity(self):
@@ -6811,13 +6894,13 @@ class TestNN(NNTestCase):
         m = torch.nn.utils.remove_weight_norm(m, name=name)
         self.assertEqual(m(input), expected_output)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout(self):
         # checking the assumption that cuDNN sticks dropout in between
         # RNN layers
@@ -6860,7 +6943,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout_state(self):
         import sys
         if sys.version_info[0] == 2:
@@ -6903,7 +6986,7 @@ class TestNN(NNTestCase):
                         self.assertNotEqual(hy1, hy2)
                         self.assertNotEqual(hy1, hy3)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_change_dropout(self):
         for train, cuda in product((True, False), repeat=2):
             rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
@@ -9215,6 +9298,32 @@ class TestNNInit(TestCase):
         def fn():
             init.normal(x)
         self.assertWarnsRegex(fn, 'deprecated', 'methods not suffixed with underscore should be deprecated')
+
+class TestFusionEval(TestCase):
+    @given(X=hu.tensor(shapes=((5, 3, 5, 5),)),
+           running_mean=hu.tensor(shapes=(6,)),
+           running_var=hu.tensor(shapes=(6,)))
+    def test_fuse_module_eval_numerics(self, X, running_mean, running_var):
+        inputs, _ = X
+
+        iC, oC = inputs.shape[1], len(running_mean[0])
+        inputs = torch.from_numpy(inputs).to(torch.double)
+        kernel_size = (3, 3)
+
+        conv_ref = torch.nn.Conv2d(iC, oC, bias=True, kernel_size=kernel_size)
+        bn_ref = torch.nn.BatchNorm2d(oC)
+        bn_ref.running_mean = torch.from_numpy(running_mean[0]).to(torch.double)
+        bn_ref.running_var = torch.from_numpy(running_var[0]).to(torch.double)
+
+        conv_ref.eval()
+        bn_ref.eval()
+
+        Y_ref = bn_ref(conv_ref(inputs))
+        conv_bn_fused = torch.nn.utils.fusion.fuse_conv_bn_eval(conv_ref,
+                                                                bn_ref)
+        Y_hat = conv_bn_fused(inputs)
+
+        self.assertEqual(Y_ref, Y_hat, message="Conv+BN fusion results are off")
 
 
 def add_test(test, decorator=None):

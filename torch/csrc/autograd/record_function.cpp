@@ -162,7 +162,7 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   processCallbacks();
 }
 
-void RecordFunction::before(Function* fn, int64_t sequence_nr) {
+void RecordFunction::before(Node* fn, int64_t sequence_nr) {
   if (!hasCallbacks()) {
     return;
   }

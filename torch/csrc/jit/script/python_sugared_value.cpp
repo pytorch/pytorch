@@ -239,6 +239,35 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
                          << err.str();
 }
 
+std::shared_ptr<SugaredValue> OverloadedFunctionValue::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> inputs_,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  std::stringstream failure_messages;
+  for (bool allow_conversions : {false, true}) {
+    // clear previous error messages
+    failure_messages.str("");
+    for (const auto& compiled_overload : compiled_overloads_) {
+      const auto matched_schema = tryMatchSchema(
+          compiled_overload.function_->getSchema(),
+          loc,
+          *caller.graph(),
+          c10::nullopt,
+          inputs_,
+          attributes,
+          &failure_messages,
+          allow_conversions);
+      if (matched_schema) {
+        return FunctionValue(compiled_overload)
+            .call(loc, caller, inputs_, attributes, n_binders);
+      }
+    }
+  }
+  throw ErrorReport(loc) << failure_messages.str();
+}
+
 std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
     Function& m,
@@ -504,23 +533,34 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
     auto pyCu = get_python_cu();
-    if (auto classType = pyCu->get_class(c10::QualifiedName(qualifiedName))) {
+    auto qualname = c10::QualifiedName(qualifiedName);
+    if (auto classType = pyCu->get_class(qualname)) {
       return std::make_shared<ClassValue>(classType);
     } else {
       // If we can't get the source code for the type, it's implemented in C and
       // probably part of the standard library, so give up and leave it as a
       // call to Python
-      bool can_compile_class = py::cast<bool>(
-          py::module::import("torch._jit_internal").attr("can_compile_class")(obj));
+      bool can_compile_class =
+          py::cast<bool>(py::module::import("torch._jit_internal")
+                             .attr("can_compile_class")(obj));
       if (can_compile_class) {
         // Register class
         auto rcb = py::module::import("torch._jit_internal")
                        .attr("createResolutionCallbackForClassMethods")(obj);
+
+        // We're starting a new compilation, so update the error call stack in
+        // case it fails
+        ErrorReport::CallStack::push_function(qualname.name());
+        ErrorReport::CallStack::update_pending_range(loc);
+
         py::module::import("torch.jit")
             .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
 
+        // Compilation was successful, so pop this entry off the stack
+        ErrorReport::CallStack::pop_function();
+
         // Return class
-        auto newClassType = pyCu->get_class(c10::QualifiedName(qualifiedName));
+        auto newClassType = pyCu->get_class(qualname);
         AT_ASSERT(
             newClassType,
             "Class '",
@@ -533,6 +573,13 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   py::bool_ isFunction = py::module::import("inspect").attr("isfunction")(obj);
   if (py::cast<bool>(isFunction)) {
+    auto overloads =
+        py::module::import("torch.jit").attr("_get_overloads")(obj);
+    if (!overloads.is_none()) {
+      auto compiled_fns = py::cast<std::vector<StrongFunctionPtr>>(overloads);
+      return std::make_shared<OverloadedFunctionValue>(std::move(compiled_fns));
+    }
+
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_fn")(obj, loc);
     if (auto callee = as_function(compiled_fn)) {

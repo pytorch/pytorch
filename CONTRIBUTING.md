@@ -260,7 +260,10 @@ For example:
 DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 python setup.py develop
 ```
 
-Make sure you continue to pass these flags on subsequent builds.
+For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
+options passed for the first time will persist; please run `ccmake build/`, run
+`cmake-gui build/`, or directly edit `build/CMakeCache.txt` to adapt build
+options.
 
 ### Code completion and IDE support
 

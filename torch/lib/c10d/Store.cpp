@@ -10,9 +10,6 @@ Store::~Store() {}
 
 // Set timeout function
 void Store::setTimeout(const std::chrono::milliseconds& timeout) {
-  if (timeout.count() == 0) {
-    timeout_ = kNoTimeout;
-  }
   timeout_ = timeout;
 }
 

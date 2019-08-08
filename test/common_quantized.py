@@ -3,6 +3,12 @@ tensors and modules.
 """
 import numpy as np
 
+"""Computes the output shape given convolution parameters."""
+def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
+                       output_padding=0):
+    return np.floor((input_size + 2 * padding - kernel_size - (kernel_size - 1)
+                     * (dilation - 1)) / stride) + 2 * output_padding + 1
+
 # Quantization references
 def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
     """Quantizes a numpy array."""
