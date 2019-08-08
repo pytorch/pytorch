@@ -1793,6 +1793,13 @@ class _TestTorchMixin(object):
             res_neg_op = -a.clone()
             self.assertEqual(res_neg_op, res_add)
 
+            # bool
+            self.assertRaisesRegex(
+                RuntimeError,
+                r"Negation, the `\-` operator, on a bool tensor is not supported. "
+                r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                lambda: - cast(torch.tensor([False, True])))
+
     def test_neg(self):
         self._test_neg(self, lambda t: t)
 
@@ -9097,7 +9104,6 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.zeros(0).expand((0,)), torch.zeros(0))
 
     def test_repeat(self):
-
         initial_shape = (8, 4)
         tensor = torch.rand(*initial_shape)
 
@@ -9112,6 +9118,9 @@ class _TestTorchMixin(object):
         result = tensor.repeat(torchSize)
         self.assertEqual(result.size(), target, 'Error in repeat using result and LongStorage')
         self.assertEqual(result.mean(0).view(8, 4), tensor, 'Error in repeat (not equal)')
+
+        zeroDimTarget = torch.Size([24, 0])
+        self.assertEqual(tensor.repeat((3, 0)).size(), zeroDimTarget, "Error when calling with 0 repeats")
 
     def test_repeat_interleave(self):
         x = torch.tensor([0, 1, 2, 3])
