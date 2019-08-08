@@ -14,7 +14,7 @@ namespace at {
 namespace native {
 namespace {
 
-static inline void conv_transpose2d_shape_check(
+static inline void slow_conv_transpose2d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
@@ -133,7 +133,7 @@ static inline void conv_transpose2d_shape_check(
   }
 }
 
-void conv_transpose2d_out_cuda_template(
+void slow_conv_transpose2d_out_cuda_template(
     Tensor& output,
     const Tensor& input_,
     const Tensor& weight_,
@@ -175,7 +175,7 @@ void conv_transpose2d_out_cuda_template(
       columns_arg{columns_, "columns", 5}, ones_arg{ones_, "ones", 6};
 
   checkAllSameGPU(
-      "conv_transpose2d_out_cuda",
+      "slow_conv_transpose2d_out_cuda",
       {input_arg, output_arg, weight_arg, bias_arg, columns_arg, ones_arg});
 
   int n_input_plane = weight_.size(0);
@@ -195,7 +195,7 @@ void conv_transpose2d_out_cuda_template(
   int64_t output_padding_height = output_padding[0];
   int64_t output_padding_width = output_padding[1];
 
-  conv_transpose2d_shape_check(
+  slow_conv_transpose2d_shape_check(
       input_,
       Tensor(),
       weight_,
@@ -257,7 +257,7 @@ void conv_transpose2d_out_cuda_template(
   }
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.scalar_type(), "conv_transpose2d_out_cuda", [&] {
+      input.scalar_type(), "slow_conv_transpose2d_out_cuda", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         // Helpers
@@ -349,7 +349,7 @@ void conv_transpose2d_out_cuda_template(
       }); // end of dispatch
 }
 
-static void conv_transpose2d_backward_out_cuda_template(
+static void slow_conv_transpose2d_backward_out_cuda_template(
     const Tensor& input_,
     const Tensor& grad_output_,
     Tensor& grad_input,
@@ -392,7 +392,7 @@ static void conv_transpose2d_backward_out_cuda_template(
       grad_input_arg{grad_input, "grad_input", 5};
 
   checkAllSameGPU(
-      "conv_transpose2d_backward_out_cuda",
+      "slow_conv_transpose2d_backward_out_cuda",
       {input_arg,
        grad_output_arg,
        weight_arg,
@@ -415,7 +415,7 @@ static void conv_transpose2d_backward_out_cuda_template(
 
   Tensor grad_columns = grad_columns_;
 
-  conv_transpose2d_shape_check(
+  slow_conv_transpose2d_shape_check(
       input_,
       grad_output_,
       weight_,
@@ -463,7 +463,7 @@ static void conv_transpose2d_backward_out_cuda_template(
                         input_height * input_width});
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      grad_output.scalar_type(), "conv_transpose2d_backward_out_cuda", [&] {
+      grad_output.scalar_type(), "slow_conv_transpose2d_backward_out_cuda", [&] {
         // Helpers
         Tensor grad_input_n = Tensor();
         Tensor grad_output_n = Tensor();
@@ -527,7 +527,7 @@ static void conv_transpose2d_backward_out_cuda_template(
       }); // end of dispatch
 }
 
-void conv_transpose2d_acc_grad_parameters_cuda_template(
+void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
     const Tensor& input_,
     const Tensor& grad_output_,
     Tensor& grad_weight,
@@ -572,7 +572,7 @@ void conv_transpose2d_acc_grad_parameters_cuda_template(
       columns_arg{columns_, "columns", 5}, ones_arg{ones_, "ones", 6};
 
   checkAllSameGPU(
-      "conv_transpose2d_acc_grad_parameters_cuda",
+      "slow_conv_transpose2d_acc_grad_parameters_cuda",
       {input_arg,
        grad_output_arg,
        grad_weight_arg,
@@ -594,7 +594,7 @@ void conv_transpose2d_acc_grad_parameters_cuda_template(
   Tensor columns = columns_;
   Tensor ones = ones_;
 
-  conv_transpose2d_shape_check(
+  slow_conv_transpose2d_shape_check(
       input_,
       grad_output_,
       grad_weight,
@@ -667,7 +667,7 @@ void conv_transpose2d_acc_grad_parameters_cuda_template(
                    input_height * input_width});
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.scalar_type(), "conv_transpose2d_acc_grad_parameters_cuda", [&] {
+      input.scalar_type(), "slow_conv_transpose2d_acc_grad_parameters_cuda", [&] {
         // Helpers
         Tensor input_n = Tensor();
         Tensor grad_output_n = Tensor();
@@ -762,7 +762,7 @@ void conv_transpose2d_acc_grad_parameters_cuda_template(
 }
 } // namespace
 
-Tensor& conv_transpose2d_out_cuda(
+Tensor& slow_conv_transpose2d_out_cuda(
     Tensor& output,
     const Tensor& input,
     const Tensor& weight,
@@ -775,7 +775,7 @@ Tensor& conv_transpose2d_out_cuda(
   Tensor columns = at::empty_like(input);
   Tensor ones = at::empty_like(input);
 
-  conv_transpose2d_out_cuda_template(
+  slow_conv_transpose2d_out_cuda_template(
       output,
       input,
       weight,
@@ -791,7 +791,7 @@ Tensor& conv_transpose2d_out_cuda(
   return output;
 }
 
-Tensor conv_transpose2d_cuda(
+Tensor slow_conv_transpose2d_cuda(
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -804,7 +804,7 @@ Tensor conv_transpose2d_cuda(
   Tensor columns = at::empty_like(input);
   Tensor ones = at::empty_like(input);
 
-  conv_transpose2d_out_cuda_template(
+  slow_conv_transpose2d_out_cuda_template(
       output,
       input,
       weight,
@@ -820,7 +820,7 @@ Tensor conv_transpose2d_cuda(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> conv_transpose2d_backward_out_cuda(
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cuda(
     Tensor& grad_input,
     Tensor& grad_weight,
     Tensor& grad_bias,
@@ -835,7 +835,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv_transpose2d_backward_out_cuda(
     const Tensor& columns,
     const Tensor& ones) {
   if (grad_input.defined()) {
-    conv_transpose2d_backward_out_cuda_template(
+    slow_conv_transpose2d_backward_out_cuda_template(
         input,
         grad_output,
         grad_input,
@@ -859,7 +859,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv_transpose2d_backward_out_cuda(
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {
-    conv_transpose2d_acc_grad_parameters_cuda_template(
+    slow_conv_transpose2d_acc_grad_parameters_cuda_template(
         input,
         grad_output,
         grad_weight,
@@ -878,7 +878,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv_transpose2d_backward_out_cuda(
       grad_input, grad_weight, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor> conv_transpose2d_backward_cuda(
+std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -913,7 +913,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_transpose2d_backward_cuda(
   }
 
   if (grad_input.defined()) {
-    conv_transpose2d_backward_out_cuda_template(
+    slow_conv_transpose2d_backward_out_cuda_template(
         input,
         grad_output,
         grad_input,
@@ -937,7 +937,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_transpose2d_backward_cuda(
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {
-    conv_transpose2d_acc_grad_parameters_cuda_template(
+    slow_conv_transpose2d_acc_grad_parameters_cuda_template(
         input,
         grad_output,
         grad_weight,
