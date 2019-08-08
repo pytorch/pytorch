@@ -153,7 +153,7 @@ The export decorator marks a method as an entry point into a module. The TorchSc
 
 ``@torch.jit.ignore``
 
-The ignore decorator makes a method opaque to the TorchScript compiler. The function will not be compiled and will be left as an upcall to Python which cannot be exported.
+The ignore decorator makes a method opaque to the TorchScript compiler. The function will not be compiled and will be left as an upcall to Python which cannot be exported. If the ``drop_on_export`` is set to ``True``, then the function will be replaced with an error-ing statement when the model is saved. For example, if you have Python-only training code that will not be run once your model is saved, you can ``@ignore`` it and use Python features that  TorchScript does not support.
 
 .. caution::
     Before PyTorch 1.2 the ``@ignore`` decorator was used to make a function or method callable from code that is exported. To get this functionality back, use ``@torch.jit.ignore(drop_on_export=True)``. ``@torch.jit.ignore`` is equivalent to ``@torch.jit.ignore(drop_on_export=False)``.
