@@ -81,7 +81,7 @@ TEST(CustomAutogradTest, NoGradCustomFunction) {
  auto x = torch::ones({5,5}, torch::requires_grad());
  {
     at::NoGradGuard no_grad;
-    auto y = MyOp::apply(x)[0];
+    auto y = MyOp::apply(x);
     ASSERT_FALSE(y.requires_grad());
  }
 }
@@ -100,7 +100,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiable) {
   };
 
   auto x = torch::randn({5,5}, torch::requires_grad());
-  auto mask = MyFunction::apply(x)[0];
+  auto mask = MyFunction::apply(x);
   ASSERT_FALSE(mask.requires_grad());
   auto y = x.masked_fill(mask, 0);
   y.sum().backward();
@@ -146,7 +146,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiableNone) {
   };
 
   auto x = torch::randn({5,5}, torch::requires_grad());
-  auto r = MyFunction::apply(x * x)[0];
+  auto r = MyFunction::apply(x * x);
   (r * x).sum().backward();
 }
 
@@ -246,10 +246,10 @@ TEST(CustomAutogradTest, InvalidGradients) {
 
   auto input1 = torch::randn({5,5}, torch::dtype(torch::kFloat).requires_grad(true));
   ASSERT_THROWS_WITH(
-    MyFunction::apply(input1)[0].sum().backward(), "expected shape");
+    MyFunction::apply(input1).sum().backward(), "expected shape");
   auto input2 = torch::randn(10, torch::dtype(torch::kDouble).requires_grad(true));
   ASSERT_THROWS_WITH(
-    MyFunction::apply(input2)[0].sum().backward(), "expected type");
+    MyFunction::apply(input2).sum().backward(), "expected type");
 }
 
 TEST(CustomAutogradTest, NoGradInput) {
@@ -267,7 +267,7 @@ TEST(CustomAutogradTest, NoGradInput) {
   Variable y;
   {
     at::NoGradGuard no_grad;
-    y = MyFunction::apply(x)[0];
+    y = MyFunction::apply(x);
   }
 
   ASSERT_TRUE(x.requires_grad());
@@ -380,7 +380,7 @@ TEST(CustomAutogradTest, DeepReentrant) {
 
   // This should not stack overflow
   auto v = torch::tensor(8193, torch::requires_grad());
-  DeepReenter::apply(v)[0].sum().backward();
+  DeepReenter::apply(v).sum().backward();
 }
 
 TEST(CustomAutogradTest, ReentrantPriority) {
@@ -419,10 +419,11 @@ TEST(CustomAutogradTest, ReentrantPriority) {
     }
   };
 
-  auto a = MyFunction::apply(torch::tensor(6, torch::requires_grad()))[0];
-  auto b = Reenter::apply(torch::tensor(9, torch::requires_grad()))[0];
+  auto a = MyFunction::apply(torch::tensor(6, torch::requires_grad()));
+  auto b = Reenter::apply(torch::tensor(9, torch::requires_grad()));
   auto v = a*b;
   v.backward();
+
 
   // All the reentrant tasks should be prioritized over the MyFunction backward
   // task.
