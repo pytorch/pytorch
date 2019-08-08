@@ -4,6 +4,7 @@ TorchScript
 .. toctree::
    :maxdepth: 1
    :caption: Builtin Functions
+   :hidden:
 
    torch.jit.supported_ops <jit_builtin_functions>
 
