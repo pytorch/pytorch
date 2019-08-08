@@ -32,6 +32,7 @@ TESTS = [
     'indexing',
     'indexing_cuda',
     'jit',
+    'jit_string',
     'logging',
     'mkldnn',
     'multiprocessing',

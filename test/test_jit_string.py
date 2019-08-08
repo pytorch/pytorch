@@ -1,6 +1,5 @@
 from test_jit import JitTestCase
-import sys
-sys.setrecursionlimit(10000)
+
 
 class TestScript(JitTestCase):
     def test_str_ops(self):
