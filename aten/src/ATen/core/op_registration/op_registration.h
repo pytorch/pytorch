@@ -165,6 +165,7 @@ public:
     // enable_if: only enable it if FuncType is actually a function
     guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> kernel(TensorTypeId dispatch_key) && {
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernelFunctor<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
     }
@@ -186,6 +187,7 @@ public:
     // enable_if: only enable it if FuncType is actually a function
     guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> catchAllKernel() && {
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernelFunctor<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
     }
@@ -195,6 +197,7 @@ public:
     // enable_if: only enable it if FuncType is actually a function
     guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyKernel(TensorTypeId dispatch_key) && {
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
     }
@@ -204,6 +207,7 @@ public:
     // enable_if: only enable it if FuncType is actually a function
     guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyCatchAllKernel() && {
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
     }
@@ -279,6 +283,7 @@ public:
     template<class Result, class... Args>
     Options&& impl_unboxedAutogradKernel(Result (*kernel)(Args...)) && {
       // TODO Infer and check schema
+      TORCH_CHECK(kernel != nullptr, "Kernel function pointer cannot be nullptr");
       TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "You can only call impl_unboxedAutogradKernel() once per operator registration.");
       unboxedAutogradKernel_ = reinterpret_cast<void*>(kernel);
       return std::move(*this);
@@ -458,8 +463,8 @@ private:
   static c10::FunctionSchema inferSchemaFromKernels_(const std::string& opNameStr, const Options& options);
   void checkNoDuplicateKernels_(const FunctionSchema& schema, const Options& options);
   void registerOp_(FunctionSchema&& schema, Options&& options);
-  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options, c10::optional<void*> unboxedAutogradKernel);
-  void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options, c10::optional<void*> unboxedAutogradKernel);
+  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options, void* unboxedAutogradKernel);
+  void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options, void* unboxedAutogradKernel);
   static OperatorOptions makeOperatorOptions_(const Options& options);
 
   class OperatorRegistrar;
