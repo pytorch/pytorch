@@ -341,16 +341,24 @@ class FusionTest(QuantizationTestCase):
 
 class ObserverTest(QuantizationTestCase):
     def test_minmax_observer(self):
-        myobs = MinMaxObserver()
+        myobs_quint8 = MinMaxObserver(dtype=torch.quint8, qscheme=torch.per_tensor_affine)
         x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
-        myobs(x)
-        myobs(y)
-        self.assertEqual(myobs.min_val, 1.0)
-        self.assertEqual(myobs.max_val, 8.0)
-        qparams = myobs.calculate_qparams()
+        myobs_quint8(x)
+        myobs_quint8(y)
+        self.assertEqual(myobs_quint8.min_val, 1.0)
+        self.assertEqual(myobs_quint8.max_val, 8.0)
+        qparams = myobs_quint8.calculate_qparams()
         self.assertAlmostEqual(qparams[0].item(), 0.0313725, delta=1e-5)
         self.assertEqual(qparams[1].item(), 0.0)
 
+        myobs_qint8 = MinMaxObserver(dtype=torch.qint8, qscheme=torch.per_tensor_affine)
+        myobs_qint8(x)
+        myobs_qint8(y)
+        self.assertEqual(myobs_qint8.min_val, 1.0)
+        self.assertEqual(myobs_qint8.max_val, 8.0)
+        qparams = myobs_qint8.calculate_qparams()
+        self.assertAlmostEqual(qparams[0].item(), 0.0313725, delta=1e-5)
+        self.assertEqual(qparams[1].item(), -128)
 if __name__ == '__main__':
     run_tests()
