@@ -60,7 +60,7 @@ def _list_supported_ops():
             scripted = torch.jit.script(attr)
             schema = scripted.schema
             functions.append(emit_schema(name, elem, schema))
-        except:
+        except:  # noqa
             # Skip interpolate / boolean dispatched things
             pass
 
