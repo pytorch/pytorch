@@ -46,7 +46,6 @@ class ModuleAPITest(QuantizationTestCase):
         """test API functionality for nn.quantized.linear and nn._intrinsic.quantized.linear_relu"""
         W = torch.rand(out_features, in_features).float()
         W_q = torch.quantize_linear(W, 0.1, 4, torch.qint8)
-        W_pack = torch.ops.quantized.fbgemm_linear_prepack(W_q)
         X = torch.rand(batch_size, in_features).float()
         X_q = torch.quantize_linear(X, 0.2, 10, torch.quint8)
         B = torch.rand(out_features).float() if use_bias else None
@@ -58,6 +57,9 @@ class ModuleAPITest(QuantizationTestCase):
         else:
             qlinear = nnq.Linear(in_features, out_features)
         qlinear.set_weight(W_q)
+        # Simple round-trip test to ensure weight()/set_weight() API
+        self.assertEqual(qlinear.weight(), W_q)
+        W_pack = qlinear._packed_weight
         qlinear.bias = B_q if use_bias else None
         qlinear.scale = float(scale)
         qlinear.zero_point = int(zero_point)

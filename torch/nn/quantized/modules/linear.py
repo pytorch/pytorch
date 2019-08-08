@@ -113,7 +113,7 @@ class Linear(torch.nn.Module):
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8)
 
-        self._packed_weight = self.set_weight(qweight)
+        self.set_weight(qweight)
         self.scale = 1.0
         self.zero_point = 0
 
@@ -127,7 +127,7 @@ class Linear(torch.nn.Module):
     # outside the process in which they were created, rather they should be derived
     # from the QTensor weight.
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super()._save_to_state_dict(destination, prefix, keep_vars)
+        super(Linear, self)._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'weight'] = self.weight()
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
@@ -211,7 +211,7 @@ class Linear(torch.nn.Module):
         else:
             qbias = None
         qlinear = Linear(mod.in_features, mod.out_features)
-        qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
+        qlinear.set_weight(qweight)
         qlinear.bias = qbias
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)
