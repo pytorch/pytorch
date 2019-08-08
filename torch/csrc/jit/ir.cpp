@@ -1602,6 +1602,8 @@ std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
       to_replace->inputs(),
       value_map);
 
+  // TODO: We might need to use nodes_map instead of value_map. Otherwise, we
+  // are missing nodes without outputs (e.g. prim::Print).
   std::unordered_set<Node*> updated_nodes;
   for (const auto& kv : value_map) {
     Node* orig_node = kv.first->node();
