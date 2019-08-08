@@ -1551,6 +1551,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                     pooled_h=3,
                     pooled_w=3,
                     sampling_ratio=0,
+                    aligned=False,
                 )
                 return output
 
@@ -1571,7 +1572,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             def forward(self, feature, rois):
                 roi_feature = torch.ops._caffe2.RoIAlign(
                     feature, rois, order="NCHW", spatial_scale=1.0,
-                    pooled_h=3, pooled_w=3, sampling_ratio=3,
+                    pooled_h=3, pooled_w=3, sampling_ratio=3, aligned=False,
                 )
                 return roi_feature
 
