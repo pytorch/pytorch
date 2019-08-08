@@ -266,7 +266,11 @@ try:
 except Exception:
     pass
 
+# the list of runtime dependencies required by this built package
+install_requires = []
+
 if os.getenv('PYTORCH_BUILD_VERSION'):
+    install_requires += ['numpy']
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
     version = os.getenv('PYTORCH_BUILD_VERSION')
@@ -346,10 +350,8 @@ def build_deps():
 # Building dependent libraries
 ################################################################################
 
-# the list of runtime dependencies required by this built package
-install_requires = []
 
-if sys.version_info <= (2, 7):
+if sys.version_info <= (3, 0):
     install_requires += ['future']
 
 missing_pydep = '''
@@ -372,8 +374,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
         if cmake_cache_vars['USE_NUMPY']:
             report('-- Building with NumPy bindings')
-            global install_requires
-            install_requires += ['numpy']
         else:
             report('-- NumPy not found')
         if cmake_cache_vars['USE_CUDNN']:
