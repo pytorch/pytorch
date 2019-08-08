@@ -94,24 +94,26 @@ class Linear(torch.nn.Module):
         torch.Size([128, 30])
     """
 
+    __annotations__ = {'bias' : Optional[torch.Tensor]}
+
     def __init__(self, in_features, out_features, bias_=True):
         super(Linear, self).__init__()
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
+        # Serialization logic is explicitly handled in the below serialization and
+        # deserialization modules
         self.in_features = in_features
         self.out_features = out_features
         if bias_:
-            self.bias = torch.jit.annotate(
-                Optional[torch.Tensor],
-                torch._empty_affine_quantized(
-                    [out_features], scale=1, zero_point=0, dtype=torch.qint32))
+            self.bias = torch._empty_affine_quantized(
+                [out_features], scale=1, zero_point=0, dtype=torch.qint32)
         else:
-            self.bias = torch.jit.annotate(Optional[torch.Tensor], None)
+            self.bias = None
 
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8)
 
-        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
+        self._packed_weight = self.set_weight(qweight)
         self.scale = 1.0
         self.zero_point = 0
 
@@ -126,29 +128,53 @@ class Linear(torch.nn.Module):
     # from the QTensor weight.
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'weight'] = torch.ops.quantized.fbgemm_linear_unpack(
-            self._packed_weight)
+        destination[prefix + 'weight'] = self.weight()
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
         if self.bias is not None:
             destination[prefix + 'bias'] = self.bias
+
+    @torch.jit.export
+    def __getstate__(self):
+        return (
+            self.in_features,
+            self.out_features,
+            self.bias,
+            self.weight(),
+            self.scale,
+            self.zero_point
+        )
 
     # ===== Deserialization methods =====
     # Counterpart to the serialization methods, we must pack the serialized QTensor
     # weight into its packed format for use by the FBGEMM ops.
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(state_dict[prefix + 'weight'])
+        self.set_weight(state_dict[prefix + 'weight'])
+        state_dict.pop(prefix + 'weight')
+
         if prefix + 'bias' in state_dict:
             self.bias.copy_(state_dict[prefix + 'bias'])
             state_dict.pop(prefix + 'bias')
-        state_dict.pop(prefix + 'weight')
+
         self.scale = float(state_dict[prefix + 'scale'])
         state_dict.pop(prefix + 'scale')
+
         self.zero_point = int(state_dict[prefix + 'zero_point'])
         state_dict.pop(prefix + 'zero_point')
+
         super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                       missing_keys, unexpected_keys, error_msgs)
+
+    @torch.jit.export
+    def __setstate__(self, state):
+        # type: (Tuple[int, int, Tensor, Tensor, float, int]) -> None
+        self.in_features = state[0]
+        self.out_features = state[1]
+        self.bias = state[2]
+        self.set_weight(state[3])
+        self.scale = state[4]
+        self.zero_point = state[5]
 
     # Function rather than property to make sure that JIT serialization doesn't
     # register this as an attribute
