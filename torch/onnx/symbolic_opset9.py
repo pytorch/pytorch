@@ -1686,6 +1686,42 @@ def gather(g, self, dim, index, sparse_grad=False):
     return g.op("ReduceSum", mul, axes_i=[dim], keepdims_i=0)
 
 
+@parse_args('v', 'is', 'b', 'i')
+def _std(g, input, dim, unbiased, keepdim):
+    if input.type().kind() == "CompleteTensorType" or input.type().kind() == "DimensionedTensorType":
+        sqrd = g.op("Mul", input, input)
+        if dim is None:
+            sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
+            mean = g.op("ReduceMean", input, keepdims_i=0)
+            redudced_dims = input.type().sizes()
+        else:
+            sqrdmean = g.op("ReduceMean", sqrd, axes_i=dim, keepdims_i=keepdim)
+            mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
+            redudced_dims = [input.type().sizes()[i] for i in dim]
+        meansqrd = g.op("Mul", mean, mean)
+        var = g.op("Abs", g.op("Sub", sqrdmean, meansqrd))
+        # This is to correct bias in calculating variance, by dividing it over (N - 1) instead on N
+        if unbiased:
+            count = numpy.prod(redudced_dims)
+            mul = g.op("Mul", var, g.op("Constant", value_t=torch.tensor(count, dtype=torch.float)))
+            var = g.op("Div", mul, g.op("Constant", value_t=torch.tensor(count - 1, dtype=torch.float)))
+        std = g.op("Sqrt", var)
+        return std
+    else:
+        _unimplemented("std", "Unknown input rank. Cannot compute std along dimensions.")
+
+
+# Since position of optional arguments can change for std, this is a hack to find if first argument
+# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
+# torch.std(input, unbiased=True)
+# torch.std(input, dim, keepdim=False, unbiased=True)
+def std(g, input, *args):
+    if args[0].type().isSubtypeOf(ListType.ofInts()):
+        return _std(g, input, *args)
+    else:
+        return _std(g, input, None, args[0], None)
+
+
 @parse_args('v', 'is', 'i')
 def logsumexp(g, input, dim, keepdim):
     return g.op('ReduceLogSumExp', input, axes_i=dim, keepdims_i=keepdim)
