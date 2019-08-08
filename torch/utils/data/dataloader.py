@@ -896,7 +896,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
                 # Exit workers now.
                 self.workers_done_event.set()
-                for worker_id in range(self.num_workers):
+                for worker_id in range(len(self.workers)):
+                    # Get number of workers from `len(self.workers)` instead of
+                    # `self.num_workers` in case we error before starting all
+                    # workers.
                     if self.workers_status[worker_id]:
                         self._shutdown_worker(worker_id)
                 for w in self.workers:

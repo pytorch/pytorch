@@ -1081,7 +1081,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     **Scripting an nn.Module**
         Scripting an ``nn.Module`` by default will compile the ``forward`` method and recursively
         compile any methods, submodules, and functions called by ``forward``. If a ``nn.Module`` only uses
-        features supported in TorchScript, no changes to the original module code should be necessary.
+        features supported in TorchScript, no changes to the original module code should be necessary. ``script``
+        will construct ``torch.jit.ScriptModule`` that has copies of the attributes, parameters, and methods of
+        the original module.
 
         Example (scripting a simple module with a Parameter)::
 
@@ -1127,7 +1129,36 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             scripted_module = torch.jit.script(MyModule())
 
         To compile a method other than ``forward`` (and recursively compile anything it calls), add
-        the ``@torch.jit.export`` decorator to the method.
+        the ``@torch.jit.export`` decorator to the method. To opt out of compilation use ``@torch.jit.ignore``.
+
+        Example (an exported and ignored method in a module)::
+
+            import torch
+            import torch.nn as nn
+
+            class MyModule(nn.Module):
+                def __init__(self):
+                    super(MyModule, self).__init__()
+
+                @torch.jit.export
+                def some_entry_point(self, input):
+                    return input + 10
+
+                @torch.jit.ignore
+                def python_only_fn(self, input):
+                    # This function won't be compiled, so any Python APIs can be
+                    # used
+                    import pdb
+                    pdb.set_trace()
+
+                def forward(self, input):
+                    if self.training:
+                        self.python_only_fn(input)
+                    return input * 99
+
+            scripted_module = torch.jit.script(MyModule())
+            print(scripted_module.some_entry_point(torch.randn(2, 2)))
+            print(scripted_module(torch.randn(2, 2)))
     """
     if not _enabled:
         return obj

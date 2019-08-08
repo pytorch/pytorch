@@ -659,6 +659,10 @@ struct Raise : public Stmt {
   static Raise create(const SourceRange& range, const Maybe<Expr>& expr) {
     return Raise(Compound::create(TK_RAISE, range, {expr}));
   }
+  static Raise create(const SourceRange& range) {
+    return Raise(
+        Compound::create(TK_RAISE, range, {Maybe<Expr>::create(range)}));
+  }
 };
 
 struct Assert : public Stmt {
