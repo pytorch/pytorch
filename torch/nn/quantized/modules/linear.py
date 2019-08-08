@@ -1,8 +1,8 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
-from ...modules.module import Module
-from ...modules.linear import Linear as NNLinear
+from torch.nn.modules.module import Module
+from torch.nn.modules.linear import Linear as NNLinear
 
 from typing import Optional
 
