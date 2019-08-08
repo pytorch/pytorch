@@ -8,7 +8,8 @@ from .linear import Linear
 from .linear import Quantize
 from .linear import DeQuantize
 
-from .wrapper_module import WrapperModule, QuantizedWrapperModule
+from .wrapper_module import UnaryWrapper, BinaryWrapper
+from .wrapper_module import QuantizedUnaryWrapper, QuantizedBinaryWrapper
 
 __all__ = [
     'Conv2d',
@@ -17,7 +18,9 @@ __all__ = [
     'MaxPool2d',
     'Quantize',
     'ReLU',
-    # Wrapper module
-    'WrapperModule',
-    'QuantizedWrapperModule',
+    # Wrapper modules
+    'UnaryWrapper',
+    'BinaryWrapper',
+    'QuantizedUnaryWrapper',
+    'QuantizedBinaryWrapper',
 ]
