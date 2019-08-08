@@ -284,6 +284,17 @@ def _unique_state_dict(module, keep_vars=False):
     return filtered_dict
 
 
+def _remove_unused_state_batchnorm(module, state_dict):
+    # Removing unused input 'num_batches_tracked' for BatchNorm. 'num_batches_tracked' is stored in
+    # register_buffer, but it's not used at ONNX export. In future, to preserve 'num_batches_tracked' in register_buffer for
+    # training, module's attribute 'training' could be used.
+    batchnorm = 'bn'
+    for sub_name, sub_mod in module.named_modules():
+        if batchnorm in sub_name:
+            state_dict.pop(sub_name+'.num_batches_tracked', None)
+    return state_dict
+
+
 def _create_interpreter_name_lookup_fn(frames_up=1):
     def _get_interpreter_name_for_var(var):
         frame = inspect.currentframe()

@@ -211,6 +211,37 @@ class TestUtilityFuns(TestCase):
                                     'unwrap model from torch.nn.DataParallel. Try '):
             torch.onnx.export(model, x, f, opset_version=self.opset_version)
 
+    def test_batch_norm_unused_input(self):
+        class BatchNormModule(torch.nn.Module):
+            def __init__(self):
+                super(BatchNormModule, self).__init__()
+                self.bn = torch.nn.BatchNorm1d(224)
+
+            def forward(self, input):
+                return self.bn(input)
+
+        x = torch.randn(2, 224)
+        graph, params_dict, __ = utils._model_to_graph(BatchNormModule(), (x,))
+        for input in graph.inputs():
+            assert len(input.uses()) > 0
+
+    def test_batch_norm_no_running_stats(self):
+        class BatchNormModule(torch.nn.Module):
+            def __init__(self):
+                super(BatchNormModule, self).__init__()
+                self.bn = torch.nn.BatchNorm1d(224, track_running_stats=False)
+
+            def forward(self, input):
+                return self.bn(input)
+
+        f = io.BytesIO()
+        x = torch.randn(2, 224)
+        graph, params_dict, __ = utils._model_to_graph(BatchNormModule(), (x,))
+        for input in graph.inputs():
+            assert len(input.uses()) > 0
+        with self.assertRaises(RuntimeError):
+            torch.onnx.export(BatchNormModule(), x, f, opset_version=self.opset_version)
+
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),

@@ -873,8 +873,8 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
-    if running_mean is None or running_mean.node().mustBeNone()\
-            and running_var is None or running_var.node().mustBeNone():
+    if (running_mean is None or running_mean.node().mustBeNone()) \
+            and (running_var is None or running_var.node().mustBeNone()):
         return _unimplemented("batch_norm", "running_mean and running_var are null. "
                                             "Check if trace_ruuning_stats == False in the batchNorm "
                                             "model. This might cause null running_mean and running_var.")

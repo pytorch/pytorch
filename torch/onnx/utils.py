@@ -16,7 +16,7 @@ import contextlib
 import numbers
 import warnings
 from torch._six import string_classes
-from torch.jit import _unique_state_dict
+from torch.jit import _unique_state_dict, _remove_unused_state_batchnorm
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
 from torch._C import ListType, _propagate_and_assign_input_shapes, _assign_output_shapes
 
@@ -212,6 +212,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
         state_dict = _unique_state_dict(model)
+        state_dict = _remove_unused_state_batchnorm(model, state_dict)
         params = list(state_dict.values())
         if _retain_param_name:
             graph_inputs = list(graph.inputs())
