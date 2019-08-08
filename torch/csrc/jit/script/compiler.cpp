@@ -1280,18 +1280,44 @@ struct to_ir {
     }
   }
 
+  bool isIsInstanceCall(const Expr& expr) {
+    if (expr.kind() != TK_APPLY) {
+      return false;
+    }
+    auto callee = Apply(expr).callee();
+    return callee.kind() == TK_VAR && Var(callee).name().name() == "isinstance";
+  }
+
+  bool isPotentialNoneCheck(const Expr& expr) {
+    return expr.kind() == TK_IS || expr.kind() == TK_ISNOT;
+  }
+
   void emitIf(const If& stmt) {
-    // NOTE: emitIf checks on If stmt condition to see if the cond AST kind ==
-    // is/is not, for such cases we do meta programming and disable emitting the
+    // NOTE: emitIf checks on If stmt condition to see if the cond AST is
+    // a potential none check with is/is not, or an isinstance check.
+    // for such cases we do meta programming and disable emitting the
     // corresponding branches
     Expr cond = stmt.cond();
+    bool isinstance_call = isIsInstanceCall(cond);
+    bool potential_none_check = !isinstance_call && isPotentialNoneCheck(cond);
 
-    if (cond.kind() != TK_IS && cond.kind() != TK_ISNOT) {
-      // emit normal IF stmt for cases except TK_IS and TK_ISNOT
+    if (!isinstance_call && !potential_none_check) {
+      // emit normal IF stmt for cases except isinstance & none checks
       Value* cond_value = emitCond(cond);
-      emitIfElseBlocks(cond_value, stmt);
-      return;
+      return emitIfElseBlocks(cond_value, stmt);
     }
+
+    if (isinstance_call) {
+      auto is_instance_result = emitSugaredExpr(cond, 1);
+      auto ivalue = toIValue(is_instance_result->asValue(cond.range(), method));
+      TORCH_INTERNAL_ASSERT(ivalue); // no support for runtime checks
+      if (ivalue->toBool()) {
+        return emitStatements(stmt.trueBranch());
+      } else {
+        return emitStatements(stmt.falseBranch());
+      }
+    }
+
     // meta programming on AST for is/is not cases and emit branches base on the
     // possible output of cond
     auto cond_op = BinOp(cond);
@@ -1657,23 +1683,30 @@ struct to_ir {
     }
   }
 
-  void emitAugAssignToContainer(
-      const std::string& containerType,
-      const TypePtr& elemType,
+  void emitAugAssignmentGeneric(
       const AugAssign& stmt,
       const Subscript& lhs,
       Value* sliceable) {
     // Get the idx to augment
     const auto subscriptExprs = lhs.subscript_exprs();
-    if (subscriptExprs.size() != 1) {
+    const TypePtr type = sliceable->type();
+    TypePtr elemType = nullptr;
+
+    if (const ListTypePtr listType = type->cast<ListType>()) {
+      elemType = listType->getElementType();
+    } else if (const DictTypePtr dictType = type->cast<DictType>()) {
+      elemType = dictType->getKeyType();
+    }
+
+    if (subscriptExprs.size() != 1 || elemType == nullptr) {
       throw ErrorReport(subscriptExprs)
-          << "Sliced expression not yet supported for"
-          << " subscripted " << containerType << " augmented assignment. "
+          << "Sliced expression not yet supported for " << type->python_str()
+          << " augmented assignment. "
           << "File a bug if you want this";
     }
     const auto idxValue = emitExpr(subscriptExprs[0]);
     const auto containerArg =
-        NamedValue(lhs.value().range(), containerType, sliceable);
+        NamedValue(lhs.value().range(), type->str(), sliceable);
     const auto idxArg = NamedValue(subscriptExprs.range(), "idx", idxValue);
     const auto valueArg =
         NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
@@ -1738,22 +1771,8 @@ struct to_ir {
             {},
             stmt.range());
       }
-    } else if (
-        const ListTypePtr listType = sliceable->type()->cast<ListType>()) {
-      // If it's a list.  Lower this expression into:
-      //     list.set_item(get_item(idx).add_(value))
-      // similar to how Python handles things.
-      auto elementType = listType->getElementType();
-      emitAugAssignToContainer("list", elementType, stmt, lhs, sliceable);
-    } else if (
-        // Otherwise it should be a dict, do the same thing as list
-        const DictTypePtr dictType = sliceable->type()->cast<DictType>()) {
-      auto keyType = dictType->getKeyType();
-      emitAugAssignToContainer("dict", keyType, stmt, lhs, sliceable);
     } else {
-      throw ErrorReport(lhs) << "Sliced expression not yet supported for"
-                             << " subscripted list assignment. "
-                             << "File a bug if you want this";
+      emitAugAssignmentGeneric(stmt, lhs, sliceable);
     }
   }
 
