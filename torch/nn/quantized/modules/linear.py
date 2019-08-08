@@ -1,8 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
-from torch.nn.modules import Module
 import torch.nn as nn
+import torch.nn._intrinsic as nni
+from torch.nn.modules import Module
+
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor
@@ -65,7 +67,7 @@ class DeQuantize(Module):
     def from_float(mod):
         return DeQuantize()
 
-class Linear(NNLinear):
+class Linear(nn.Linear):
     r"""
     A quantized linear module with quantized tensor as inputs and outputs.
     We adopt the same interface as `torch.nn.Linear`, please see
