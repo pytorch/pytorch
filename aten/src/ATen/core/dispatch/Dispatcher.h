@@ -240,7 +240,7 @@ inline OpKernel Dispatcher::lookup(const OperatorHandle& op, TensorTypeId dispat
 template<class Result, class... Args>
 inline Result Dispatcher::callUnboxedAutogradKernel(const OperatorHandle& op, Args... args) const {
   void* unboxed_autograd_kernel = op.operatorIterator_->op.lookupUnboxedAutogradKernel();
-  TORCH_CHECK(nullptr != unboxed_autograd_kernel, "Tried to call Dispatcher::callUnboxedAutogradKernel() for an operator that doesn't have an autograd kernel.");
+  TORCH_CHECK(nullptr != unboxed_autograd_kernel, "Tried to call Dispatcher::callUnboxedAutogradKernel() for operator ", toString(op.schema()), " that doesn't have an autograd kernel.");
 
   using OpSignature = Result (Args...);
   OpSignature* kernel = reinterpret_cast<OpSignature*>(unboxed_autograd_kernel);
