@@ -144,6 +144,10 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'either positional args or keyword args'):
             tensor.view_names(None, N='batch')
 
+        # view_names returns a view on the tensor
+        self.assertEqual(tensor.view_names('H', 'W').data_ptr(), tensor.data_ptr())
+        self.assertEqual(tensor.view_names(None).data_ptr(), tensor.data_ptr())
+
     def test_view_names_globber(self):
         scalar = torch.randn([])
         unnamed_tensor = torch.empty(1, 1, 1, 1)
