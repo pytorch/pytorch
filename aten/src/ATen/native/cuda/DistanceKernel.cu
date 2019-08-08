@@ -221,8 +221,6 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   //}
   scalar_t agg1 = reduce_agg<scalar_t, F>(agg);
 
-  printf("thx = %d blkId = %d agg = %f agg1 = %f\n", threadIdx.x, blockIdx.x, agg, agg1);
-
   /*if (blockIdx.x == 0 && threadIdx.x == 0) {
     result[0] = *a;
   }
