@@ -1260,6 +1260,8 @@
   dispatch:
     MkldnnCPU: mkldnn_linear
 
+- func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
+
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
   use_c10_dispatcher: True
 
@@ -1269,8 +1271,12 @@
 - func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
   use_c10_dispatcher: True
 
+- func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+
 - func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
   use_c10_dispatcher: True
+
+- func: fbgemm_pack_quantized_matrix(Tensor input) -> Tensor
 
 - func: fbgemm_pack_quantized_matrix(Tensor input, int K, int N) -> Tensor
   use_c10_dispatcher: True
