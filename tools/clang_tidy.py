@@ -12,6 +12,8 @@ tree are also possible. In both cases, the script allows filtering files via
 glob or regular expressions.
 """
 
+from __future__ import print_function
+
 import argparse
 import collections
 import fnmatch
