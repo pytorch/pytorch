@@ -115,6 +115,8 @@ void OperatorEntry::deregisterCatchallKernel_(std::list<DispatchTableEntry>::ite
 RegistrationHandleRAII OperatorEntry::registerUnboxedAutogradKernel(void* kernel_func) {
   std::unique_lock<std::mutex> lock(unboxedAutogradKernelsMutex_);
 
+  TORCH_INTERNAL_ASSERT(kernel_func != nullptr);
+
   unboxedAutogradKernels_.push_front(kernel_func);
   std::list<void*>::iterator inserted = unboxedAutogradKernels_.begin();
 
@@ -138,7 +140,11 @@ void OperatorEntry::deregisterUnboxedAutogradKernel_(std::list<void*>::iterator 
 void OperatorEntry::updateCurrentUnboxedAutogradKernel_() {
   // precondition: unboxedAutogradKernelsMutex_ is locked
 
-  currentUnboxedAutogradKernel_ = unboxedAutogradKernels_.front();
+  if (unboxedAutogradKernels_.empty()) {
+    currentUnboxedAutogradKernel_ = nullptr;
+  } else {
+    currentUnboxedAutogradKernel_ = unboxedAutogradKernels_.front();
+  }
 }
 
 void OperatorEntry::updateDispatchTable_(TensorTypeId dispatch_key) {

@@ -87,6 +87,7 @@ namespace script {
   _(TK_TUPLE_LITERAL, "tuple-literal", "")       \
   _(TK_FOR, "for", "for")                        \
   _(TK_IN, "in", "in")                           \
+  _(TK_NOTIN, "not in", "not in")                \
   _(TK_STARRED, "starred", "")                   \
   _(TK_UNARY_MINUS, "unary minus", "")           \
   _(TK_POW, "pow operator", "**")                \
