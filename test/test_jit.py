@@ -13892,6 +13892,21 @@ a")
         self.checkScript(test_not_in_dict, ({"hello": 1, "world": 2}, ))
         self.checkScript(test_not_in_dict, ({"world": 2}, ))
 
+        def test_dict_tensor_key(a, t):
+            # type: (Dict[Tensor, int], Tensor) -> bool
+            if t in a:
+                return True
+            else:
+                return False
+
+        inp1 = torch.tensor(3)
+        inp2 = torch.tensor(5)
+        dict_a = {inp1: 1, inp2: 3}
+        self.checkScript(test_dict_tensor_key, (dict_a, torch.tensor(4)))
+        self.checkScript(test_dict_tensor_key, (dict_a, torch.tensor(3)))
+        self.checkScript(test_dict_tensor_key, (dict_a, inp1))
+        self.checkScript(test_dict_tensor_key, (dict_a, inp2))
+
     def test_get_set_state_with_tensors(self):
         class M(torch.nn.Module):
             def __init__(self):
