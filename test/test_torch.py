@@ -2351,15 +2351,13 @@ class _TestTorchMixin(object):
         typecasts = [
             lambda x: x.long(),
             lambda x: x.short(),
-            lambda x: x.byte(),
         ]
 
         if not IS_WINDOWS:
             typecasts.append(lambda x: x.int())
 
-        shape = (11, 5)
-        tensor = cast(torch.LongTensor(shape).random_(-10, 10))
-        exps = [0, 1, 2, 5, cast(torch.LongTensor(shape).random_(0, 20))]
+        tensor = cast(torch.LongTensor(3, 3).random_(-10, 10))
+        exps = [0, 1, 2, 5, cast(torch.LongTensor(3, 3).random_(0, 10))]
 
         for typecast in typecasts:
             for exp in exps:
@@ -2367,8 +2365,27 @@ class _TestTorchMixin(object):
                 e = exp if isinstance(exp, int) else typecast(exp)
                 check_against_np(t, e)
 
+    @staticmethod
+    def _test_byte_pow(self, cast):
+        if not TEST_NUMPY:
+            return
+
+        def check_against_np(tensor, exp):
+            tensor_np = tensor.cpu().numpy()
+            exp_np = exp if isinstance(exp, int) else exp.cpu().numpy()
+            expected = torch.LongTensor(tensor_np ** exp_np).type_as(tensor)
+            self.assertEqual(torch.pow(tensor, exp), expected)
+            self.assertEqual(tensor.pow(exp), torch.pow(tensor, exp))
+
+        tensor = cast(torch.ByteTensor(3, 3).random_(0, 4))
+        exps = [0, 1, 2, 5, cast(torch.ByteTensor(3, 3).random_(0, 10))]
+
+        for exp in exps:
+            check_against_np(tensor, exp)
+
     def test_int_pow(self):
         self._test_int_pow(self, lambda x: x)
+        self._test_byte_pow(self, lambda x: x)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_tensor_pow_neg_ints(self):
