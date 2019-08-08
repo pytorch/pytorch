@@ -541,7 +541,8 @@ struct to_ir {
 
   // If the graph might not return, add an implicit None return at the end
   void handleMaybeNoReturn(const Def& def, Block* block) {
-    if (exit_blocks.count(graph->block()) == 0) {
+    auto decl_ret = def_stack_.back().declared_return_type_;
+    if (exit_blocks.count(block) == 0) {
       auto decl_ret = def_stack_.back().declared_return_type_;
       if (decl_ret && decl_ret != NoneType::get()) {
         throw ErrorReport(def.range())
@@ -551,6 +552,14 @@ struct to_ir {
       WithInsertPoint b(*block->nodes().end());
       emitReturn(Return::create(
           def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
+    } else {
+      // if we haven't seen any return statements, but the graph block exits
+      // (the funciton always throws) then we accept the declared return type if
+      // it exists or set it to none
+      if (def_stack_.back().merged_return_type_ == nullptr) {
+        def_stack_.back().merged_return_type_ =
+            decl_ret != nullptr ? decl_ret : NoneType::get();
+      }
     }
   }
 
@@ -606,9 +615,8 @@ struct to_ir {
     Stack stack;
     // XXX: We need to turn optimization off here because otherwise we try to
     // recursively initialize stuff in DecomposeOps.
-    setGraphExecutorOptimize(false);
+    GraphOptimizerEnabledGuard guard(false);
     cu.get_function(def.name().name()).run(stack);
-    setGraphExecutorOptimize(true);
     return stack.at(0).toTuple()->elements();
   }
 
@@ -804,9 +812,9 @@ struct to_ir {
       const SourceRange& range,
       const FunctionSchema& schema,
       Block* block) {
-    // rewrites ensure there is always a return statement in program
+    // handleMaybeNoReturn ensures that merged_return_type_ is always set
     auto ret_type = def_stack_.back().merged_return_type_;
-    AT_ASSERT(ret_type);
+    TORCH_INTERNAL_ASSERT(ret_type);
 
     // in the ConvertToSSA pass, prim::ReturnStmts are lowered so that the
     // correct return value is set. Until then, we have a correctly-typed
@@ -1322,18 +1330,44 @@ struct to_ir {
     }
   }
 
+  bool isIsInstanceCall(const Expr& expr) {
+    if (expr.kind() != TK_APPLY) {
+      return false;
+    }
+    auto callee = Apply(expr).callee();
+    return callee.kind() == TK_VAR && Var(callee).name().name() == "isinstance";
+  }
+
+  bool isPotentialNoneCheck(const Expr& expr) {
+    return expr.kind() == TK_IS || expr.kind() == TK_ISNOT;
+  }
+
   void emitIf(const If& stmt) {
-    // NOTE: emitIf checks on If stmt condition to see if the cond AST kind ==
-    // is/is not, for such cases we do meta programming and disable emitting the
+    // NOTE: emitIf checks on If stmt condition to see if the cond AST is
+    // a potential none check with is/is not, or an isinstance check.
+    // for such cases we do meta programming and disable emitting the
     // corresponding branches
     Expr cond = stmt.cond();
+    bool isinstance_call = isIsInstanceCall(cond);
+    bool potential_none_check = !isinstance_call && isPotentialNoneCheck(cond);
 
-    if (cond.kind() != TK_IS && cond.kind() != TK_ISNOT) {
-      // emit normal IF stmt for cases except TK_IS and TK_ISNOT
+    if (!isinstance_call && !potential_none_check) {
+      // emit normal IF stmt for cases except isinstance & none checks
       Value* cond_value = emitCond(cond);
-      emitIfElseBlocks(cond_value, stmt);
-      return;
+      return emitIfElseBlocks(cond_value, stmt);
     }
+
+    if (isinstance_call) {
+      auto is_instance_result = emitSugaredExpr(cond, 1);
+      auto ivalue = toIValue(is_instance_result->asValue(cond.range(), method));
+      TORCH_INTERNAL_ASSERT(ivalue); // no support for runtime checks
+      if (ivalue->toBool()) {
+        return emitStatements(stmt.trueBranch());
+      } else {
+        return emitStatements(stmt.falseBranch());
+      }
+    }
+
     // meta programming on AST for is/is not cases and emit branches base on the
     // possible output of cond
     auto cond_op = BinOp(cond);
@@ -1523,32 +1557,23 @@ struct to_ir {
   // raise a
   //
   // We ignore the expression following raise
-  //
-  // NYI: add exception logic to control-flow nodes
-  // if True:
-  //   a = 1
-  // else
-  //   raise Exception("Hi")
-  // print(a)
   void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
     auto string_input = insertConstant(*graph, exception, nullptr, loc);
     graph->insert(prim::RaiseException, {string_input}, {}, loc);
+    exit_blocks.insert(environment_stack->block());
   }
 
+  // emit assserions as an if branch so that assertions will reuse the
+  // emitIfElseBlocks refining of types
   void emitAssert(const Assert& stmt) {
     Value* cond_value = emitCond(stmt.test());
-    Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
-
-    n->addInput(cond_value);
-    /* true_block =*/n->addBlock();
-    auto* false_block = n->addBlock();
-
-    // if assert test is false throw exception
-    pushFrame(false_block);
-    WithInsertPoint guard(false_block);
-    emitRaise(stmt.range());
-    popFrame();
+    List<Stmt> true_branch = List<Stmt>::create(stmt.range(), {});
+    List<Stmt> false_branch =
+        List<Stmt>::create(stmt.range(), {Raise::create(stmt.range())});
+    auto if_stmt =
+        If::create(stmt.range(), stmt.test(), true_branch, false_branch);
+    emitIfElseBlocks(cond_value, if_stmt);
   }
 
   // Validate that the `lhs` Expr's in an assignment statement are valid. That
