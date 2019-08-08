@@ -1,6 +1,12 @@
 TorchScript
 ===========
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Builtin Functions
+
+   torch.jit.supported_ops <jit_builtin_functions>
+
 .. contents:: :local:
 
 .. automodule:: torch.jit
@@ -1200,6 +1206,24 @@ Tracer Warnings
         traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
         print(traced.graph)
 
+Builtin Functions
+~~~~~~~~~~~~~~~~~
+
+TorchScript supports a subset of the builtin tensor and neural network
+functions that PyTorch provides. Most methods on Tensor as well as functions in
+the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
+modules from ``torch.nn`` are supported in TorchScript, excluding those in the
+table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
+
+Unsupported ``torch.nn`` Modules  ::
+
+    torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss
+    torch.nn.modules.normalization.CrossMapLRN2d
+    torch.nn.modules.rnn.RNN
+
+
+See :ref:`builtin-functions` for a full reference of supported functions
+
 
 Frequently Asked Questions
 --------------------------
@@ -1293,24 +1317,5 @@ Q: I would like to trace module's method but I keep getting this error:
         n = Net()
         inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
         module = torch.jit.trace_module(n, inputs)
-
-
-Builtin Functions
-~~~~~~~~~~~~~~~~~
-
-TorchScript supports a subset of the builtin tensor and neural network
-functions that PyTorch provides. Most methods on Tensor as well as functions in
-the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
-modules from ``torch.nn`` are supported in TorchScript, excluding those in the
-table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
-
-Unsupported ``torch.nn`` Modules  ::
-
-    torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss
-    torch.nn.modules.normalization.CrossMapLRN2d
-    torch.nn.modules.rnn.RNN
-
-
-See :ref:`builtin-functions` for a full reference of supported functions
 
 

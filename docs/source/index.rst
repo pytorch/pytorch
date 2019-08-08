@@ -44,8 +44,6 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    torch.distributions <distributions>
    torch.hub <hub>
    torch.jit <jit>
-    Builtin Functions <jit_builtin_functions>
-   torch.multiprocessing <multiprocessing>
    torch.random <random>
    torch.utils.bottleneck <bottleneck>
    torch.utils.checkpoint <checkpoint>
