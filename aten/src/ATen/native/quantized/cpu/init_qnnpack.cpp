@@ -1,8 +1,8 @@
 #ifdef USE_QNNPACK
 
+#include "init_qnnpack.h"
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include "init_qnnpack.h"
 #include <qnnpack.h>
 
 namespace at {
