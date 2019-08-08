@@ -184,6 +184,13 @@ class CAFFE2_API Tensor {
     return impl_->is_contiguous(memory_format);
   }
 
+  at::MemoryFormat suggest_memory_format() const {
+    if (impl_->is_strides_like_channels_last()) {
+      return at::MemoryFormat::ChannelsLast;
+    }
+    return at::MemoryFormat::Contiguous;
+  }
+
   // Total bytes consumed by the "view" of elements of the array.  Does not
   // include size of metadata.  The number reported here does not necessarily
   // correspond to the true physical memory consumed by a tensor; instead,
