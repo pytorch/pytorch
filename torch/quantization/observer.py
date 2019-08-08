@@ -158,9 +158,7 @@ class HistogramObserver(ObserverBase):
                 (self.histogram, torch.zeros(additional_nbins)), dim=0
             )
 
-    def _compute_quantization_error(
-        self, next_start_bin, next_end_bin, norm_type
-    ):
+    def _compute_quantization_error(self, next_start_bin, next_end_bin, norm_type):
         """
         Compute the quantization error if we use start_bin to end_bin as the
         min and max to do the quantization.
@@ -356,28 +354,20 @@ class HistogramObserver(ObserverBase):
             self.min_val = combined_min
             self.max_val = combined_max
 
-    def calculate_qparams(self, **kwargs):
+    def calculate_qparams(self, norm_type="L2", search_type="NonLinear", **kwargs):
         if self.histogram is None:
             raise Exception("must run observer before calling calculate_qparams!")
-        min_bin = 0
-        max_bin = self.bins - 1
-        # find the first bin in histogram with non-zero Value from left
-        for i in range(self.histogram.size()[0]):
-            if self.histogram[i].item() > 0:
-                min_bin = i
-                break
-        # find the first bin in histogram with non-zero Value from right
-        for i in reversed(range(self.histogram.size()[0])):
-            if self.histogram[i].item() > 0:
-                max_bin = i
-                break
-        bin_width = (self.max_val.item() - self.min_val.item()) / self.histogram.size()[
-            0
-        ]
-        return self._calculate_qparams(
-            self.min_val.item() + min_bin * bin_width,
-            self.min_val.item() + (max_bin + 1) * bin_width,
+        assert self.bins == len(self.histogram), (
+            "The number of bins in histogram should be equal to the number of bins "
+            "supplied while making this observer"
         )
+
+        assert (
+            search_type == "NonLinear"
+        ), "Only non-linear search type for min/max is currently supported (aka L2 approx) "
+        new_min, new_max = self._non_linear_param_search(norm_type)
+
+        return self._calculate_qparams(new_min.item(), new_max.item())
 
 
 def observer(observer_cls, **kwargs):
