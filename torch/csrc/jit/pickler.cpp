@@ -940,9 +940,9 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
       set_type->isSubtypeOf(get_type),
       "'__getstate__'s return type (",
       get_type->python_str(),
-      " does not match '__setstate__'s argument type (",
+      ") does not match '__setstate__'s argument type (",
       set_type->python_str(),
-      "))");
+      ")");
 
   return true;
 }
