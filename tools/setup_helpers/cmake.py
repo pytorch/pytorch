@@ -187,9 +187,6 @@ class CMake:
                 toolset_expr = ','.join(["{}={}".format(k, v) for k, v in toolset_dict.items()])
                 args.append('-T' + toolset_expr)
 
-        cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
-        ldflags = os.getenv('LDFLAGS', "")
-
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))))
         install_dir = os.path.join(base_dir, "torch")
@@ -219,6 +216,7 @@ class CMake:
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
+             'INSTALL_TEST',
              'MKL_THREADING',
              'MKLDNN_THREADING',
              'MSVC_Z7_OVERRIDE',
@@ -259,10 +257,6 @@ class CMake:
         # Options starting with CMAKE_
         cmake__options = {
             'CMAKE_INSTALL_PREFIX': install_dir,
-            'CMAKE_C_FLAGS': cflags,
-            'CMAKE_CXX_FLAGS': cflags,
-            'CMAKE_EXE_LINKER_FLAGS': ldflags,
-            'CMAKE_SHARED_LINKER_FLAGS': ldflags,
         }
 
         # We set some CMAKE_* options in our Python build code instead of relying on the user's direct settings. Emit an
@@ -279,7 +273,6 @@ class CMake:
                       PYTHON_LIBRARY=escape_path(cmake_python_library),
                       PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
                       TORCH_BUILD_VERSION=version,
-                      INSTALL_TEST=build_test,
                       NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
                       CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
                       **build_options)
