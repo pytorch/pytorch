@@ -215,7 +215,8 @@ DEFAULT_MODULE_MAPPING = {
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # Wrapped modules:
-    nnq.WrapperModule: nnq.QuantizedWrapperModule,
+    nnq.UnaryWrapper: nnq.QuantizedUnaryWrapper,
+    nnq.BinaryWrapper: nnq.QuantizedBinaryWrapper,
     # QAT modules:
     qat.Linear: nnq.Linear,
     qat.Conv2d: nnq.Conv2d,
