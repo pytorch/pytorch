@@ -187,9 +187,6 @@ class CMake:
                 toolset_expr = ','.join(["{}={}".format(k, v) for k, v in toolset_dict.items()])
                 args.append('-T' + toolset_expr)
 
-        cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
-        ldflags = os.getenv('LDFLAGS', "")
-
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))))
         install_dir = os.path.join(base_dir, "torch")
@@ -260,10 +257,6 @@ class CMake:
         # Options starting with CMAKE_
         cmake__options = {
             'CMAKE_INSTALL_PREFIX': install_dir,
-            'CMAKE_C_FLAGS': cflags,
-            'CMAKE_CXX_FLAGS': cflags,
-            'CMAKE_EXE_LINKER_FLAGS': ldflags,
-            'CMAKE_SHARED_LINKER_FLAGS': ldflags,
         }
 
         # We set some CMAKE_* options in our Python build code instead of relying on the user's direct settings. Emit an
