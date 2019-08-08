@@ -128,13 +128,15 @@ class Conv2d(_ConvNd):
             self._zero_point = torch.Tensor([zp]).to(torch.int)
 
     def forward(self, input):
-        if input.ndim != 4:
+        # Temporarily using len(shape) instead of ndim due to JIT issue
+        # https://github.com/pytorch/pytorch/issues/23890
+        if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
         output = ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]),
                                              self._packed_weight, self.bias,
                                              self.stride, self.padding,
                                              self.dilation, self.groups,
-                                             self.scale, self.zero_point)
+                                             float(self.scale), int(self.zero_point))
         return output.permute([0, 3, 1, 2])
 
 
@@ -150,7 +152,9 @@ class Conv2d(_ConvNd):
             # assert type(mod) == cls.__QAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
             #     cls.__QAT_MODULE.__name__
             if type(mod) == nniqat.ConvBn2d:
-                conv_w, conv_b = fuse_conv_bn_weights(mod.weight, mod.bias, mod.running_mean, mod.running_var, mod.eps, mod.gamma, mod.beta)
+                conv_w, conv_b = \
+                    fuse_conv_bn_weights(mod.weight, mod.bias, mod.running_mean,
+                                         mod.running_var, mod.eps, mod.gamma, mod.beta)
                 mod.weight = torch.nn.Parameter(conv_w)
                 mod.bias = torch.nn.Parameter(conv_b)
             assert hasattr(mod, 'observer'), 'Input QAT module must have observer attached'

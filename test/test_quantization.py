@@ -4,7 +4,6 @@ import unittest
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch.nn.qat as nnqat
 import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
 import torch.nn._intrinsic.qat as nniqat
@@ -44,6 +43,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkHasPrepModules(model.fc1)
             self.checkWrappedQuantizedLinear(model.fc1)
             test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data)
 
         checkQuantized(model)
 
@@ -73,6 +73,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.assertEqual(type(model.fc1), torch.nn.Linear)
             self.checkWrappedQuantizedLinear(model.fc2)
             test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data)
 
         checkQuantized(model)
 
@@ -110,6 +111,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkWrappedQuantizedLinear(model.sub2.fc1)
             self.checkLinear(model.sub2.fc2)
             test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data)
 
         checkQuantized(model)
 
@@ -147,6 +149,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkQuantizedLinear(model.sub2.module.fc2)
             self.checkWrappedQuantizedLinear(model.fc3)
             test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data)
 
         checkQuantized(model)
 
@@ -184,6 +187,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkWrappedQuantizedLinear(model.sub2.fc2)
             self.checkWrappedQuantizedLinear(model.fc3)
             test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data)
 
         checkQuantized(model)
 
@@ -208,7 +212,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkQuantizedLinear(model.sub.module.fc1)
             self.checkQuantizedLinear(model.sub.module.fc2)
             self.assertEqual(type(model.sub.module.relu), nnq.ReLU)
-            test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data)
 
         checkQuantized(model)
 
@@ -233,6 +237,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         def checkQuantized(model):
             self.assertEqual(type(model.fc), nnq.Linear)
             test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data)
 
         checkQuantized(model)
 
@@ -256,6 +261,8 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
             self.assertEqual(type(model.fc1), nnq.Linear)
             self.assertEqual(type(model.fc2), nnq.Linear)
             test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data)
+
         checkQuantized(model)
 
         model = quantize_qat(ManualLinearQATModel(), test_only_train_fn, self.train_data)
@@ -288,6 +295,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
             self.assertEqual(type(model.fc1), nnq.Linear)
             self.assertEqual(type(model.fc2), nnq.Linear)
             test_only_eval_fn(model, self.img_data)
+            self.checkScriptable(model, self.img_data)
 
         checkQuantized(model)
 
@@ -323,6 +331,7 @@ class FusionTest(QuantizationTestCase):
                          "Non-fused submodule ReLU")
         model = prepare_qat(model)
         self.checkObservers(model)
+
         def checkQAT(model):
             self.assertEqual(type(model.conv1), nniqat.ConvBnReLU2d)
             self.assertEqual(type(model.bn1), nn.Identity)

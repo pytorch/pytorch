@@ -29,8 +29,8 @@ class LinearReLU(nnq.Linear):
         Y_q = torch.ops.quantized.fbgemm_linear_relu(
             input, self._packed_weight,
             self.bias,
-            self.scale,
-            self.zero_point)
+            float(self.scale),
+            int(self.zero_point))
         return Y_q
 
     @classmethod
