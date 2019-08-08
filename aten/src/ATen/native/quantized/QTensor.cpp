@@ -135,6 +135,30 @@ Tensor per_tensor_affine_qtensor_cpu(
   return dst;
 }
 
+Tensor per_channel_affine_qtensor_cpu(
+    const Tensor& self,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    IntArrayRef axis) {
+  Tensor dst = at::_empty_perchannel_affine_quantized_like(
+      scales,
+      zero_points,
+      self.sizes(),
+      axis,
+      self.options().dtype(toQIntType(self.scalar_type())));
+  Tensor self_contig = self.contiguous();
+  AT_DISPATCH_QINT_TYPES(
+      dst.scalar_type(), "per_channel_affine_qtensor", [&]() {
+        underlying_t* self_data = self_contig.data<underlying_t>();
+        underlying_t* dst_data =
+            reinterpret_cast<underlying_t*>(dst.data<scalar_t>());
+        if (self.numel() > 0) {
+          memcpy(dst_data, self_data, self.nbytes());
+        }
+      });
+  return dst;
+}
+
 Tensor& set_storage(
     Tensor& self,
     Storage storage,

@@ -64,6 +64,22 @@ class TestQuantizedTensor(TestCase):
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
+    def test_perchannel_qtensor_creation(self):
+        numel = 10
+        ch_axis = 0
+        scales = torch.rand(numel, dtype=torch.double)
+        zero_points = torch.randint(0 , 10, size=(numel,), dtype=torch.long)
+        q = torch._empty_perchannel_affine_quantized_like(scales, zero_points, [numel], [ch_axis], dtype=torch.quint8)
+        self.assertEqual(scales, q.q_scales())
+        self.assertEqual(zero_points, q.q_zero_points())
+
+        # create Tensor from uint8_t Tensor, scales and zero_points
+        int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8)
+        q = torch._per_channel_affine_qtensor(int_tensor, scales, zero_points, [ch_axis])
+        self.assertEqual(int_tensor, q.int_repr())
+        self.assertEqual(scales, q.q_scales())
+        self.assertEqual(zero_points, q.q_zero_points())
+
     def test_qtensor_creation(self):
         scale = 0.5
         zero_point = 10
