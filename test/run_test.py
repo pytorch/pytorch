@@ -48,6 +48,7 @@ TESTS = [
     'quantized',
     'quantized_tensor',
     'quantizer',
+    'rpc',
     'sparse',
     'torch',
     'type_info',
