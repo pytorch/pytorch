@@ -61,6 +61,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(qlinear.weight(), W_q)
         W_pack = qlinear._packed_weight
         qlinear.bias = B_q if use_bias else None
+
         qlinear.scale = float(scale)
         qlinear.zero_point = int(zero_point)
         Z_q = qlinear(X_q)
@@ -73,6 +74,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(Z_ref, Z_q)
 
         # Test serialization of quantized Linear Module using state_dict
+
         model_dict = qlinear.state_dict()
         self.assertEqual(model_dict['weight'], W_q)
         if use_bias:
