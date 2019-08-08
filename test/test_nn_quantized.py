@@ -96,10 +96,6 @@ class ModuleAPITest(TestCase):
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
         self.assertTrue(hasattr(qlinear, '_packed_weight'))
         self.assertTrue(hasattr(loaded_qlinear, '_packed_weight'))
-        self.assertTrue(hasattr(qlinear, 'weight'))
-        self.assertTrue(hasattr(loaded_qlinear, 'weight'))
-        self.assertEqual(qlinear.weight, loaded_qlinear.weight)
-        self.assertEqual(qlinear.weight, torch.ops.quantized.fbgemm_linear_unpack(qlinear._packed_weight))
         Z_q2 = qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 

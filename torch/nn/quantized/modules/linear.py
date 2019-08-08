@@ -113,14 +113,6 @@ class Linear(NNLinear):
         self.register_buffer('zero_point',
                              torch.tensor([0], dtype=torch.long))
 
-    @property
-    def weight(self):
-        return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
-
-    @weight.setter
-    def weight(self, w):
-        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
-
     @torch.jit.export
     def __getstate__(self):
         x = torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
@@ -134,7 +126,6 @@ class Linear(NNLinear):
         self.scale = state[2]
         self.zero_point = state[3]
         self.__constants__ = ['bias', 'in_features', 'out_features']
-        self.weight = self._packed_weight
 
     def forward(self, x):
         # Note that we can handle self.bias == None case.
