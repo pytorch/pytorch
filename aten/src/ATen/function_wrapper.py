@@ -887,6 +887,8 @@ def create_generic(top_env, declarations):
                                     if f['name'] != 'self']
         option['method_formals_with_defaults'] = (
             [formal_with_default(f) for f in formals if f['name'] != 'self'])
+        # *this is 'const Tensor&' since all Tensor methods are const and must
+        # be const_casted to be accepted as native function's non-const argument
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
 
@@ -1041,6 +1043,8 @@ def create_generic(top_env, declarations):
                                     if f['name'] != 'self']
         option['method_formals_with_defaults'] = (
             [formal_with_default(f) for f in formals if f['name'] != 'self'])
+        # *this is 'const Tensor&' since all Tensor methods are const and must
+        # be const_casted to be accepted as native function's non-const argument
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
 
