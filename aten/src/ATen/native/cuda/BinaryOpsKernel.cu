@@ -70,7 +70,7 @@ void logical_xor_kernel_cuda(TensorIterator& iter) {
 }
 
 void logical_xor_inplace_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(), "logical_xor_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(), "logical_xor_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return static_cast<scalar_t>((!a) != (!b));
     });
