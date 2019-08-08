@@ -1113,13 +1113,19 @@
   dispatch:
     MkldnnCPU: mkldnn_linear
 
+- func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
+
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
 - func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)
 
 - func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
 
+- func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+
 - func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+
+- func: fbgemm_pack_quantized_matrix(Tensor input) -> Tensor
 
 - func: fbgemm_pack_quantized_matrix(Tensor input, int K, int N) -> Tensor
 
@@ -1662,15 +1668,12 @@
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
   variants: function, method
-  dispatch:
-    CPU: _neg__cpu
-    CUDA: _neg__cuda
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: _neg_out_cpu
-    CUDA: _neg_out_cuda
+    CPU: neg_out
+    CUDA: neg_out
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -1690,6 +1693,7 @@
 - func: reshape(Tensor self, int[] shape) -> Tensor
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
   device_guard: False
@@ -3436,12 +3440,6 @@
     CPU: legacy::cpu::_th_addbmm
     CUDA: legacy::cuda::_th_addbmm
 
-- func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_addcmul_
-    CUDA: legacy::cuda::_th_addcmul_
-
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
   dispatch:
@@ -3563,8 +3561,8 @@
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_ne_out
-    CUDA: legacy::cuda::_th_ne_out
+    CPU: ne_scalar_out_cpu
+    CUDA: ne_scalar_out_cuda
 
 - func: ne.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
@@ -3574,8 +3572,8 @@
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_ne_out
-    CUDA: legacy::cuda::_th_ne_out
+    CPU: ne_out_cpu
+    CUDA: ne_out_cuda
 
 - func: ne.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -3585,8 +3583,8 @@
 
 - func: eq.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_eq_out
-    CUDA: legacy::cuda::_th_eq_out
+    CPU: eq_scalar_out_cpu
+    CUDA: eq_scalar_out_cuda
 
 - func: eq.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
@@ -3596,8 +3594,8 @@
 
 - func: eq.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_eq_out
-    CUDA: legacy::cuda::_th_eq_out
+    CPU: eq_out_cpu
+    CUDA: eq_out_cuda
 
 - func: eq.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -3607,8 +3605,8 @@
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_ge_out
-    CUDA: legacy::cuda::_th_ge_out
+    CPU: ge_scalar_out_cpu
+    CUDA: ge_scalar_out_cuda
 
 - func: ge.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
@@ -3618,8 +3616,8 @@
 
 - func: ge.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_ge_out
-    CUDA: legacy::cuda::_th_ge_out
+    CPU: ge_out_cpu
+    CUDA: ge_out_cuda
 
 - func: ge.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -3629,8 +3627,8 @@
 
 - func: le.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_le_out
-    CUDA: legacy::cuda::_th_le_out
+    CPU: le_scalar_out_cpu
+    CUDA: le_scalar_out_cuda
 
 - func: le.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
@@ -3640,8 +3638,8 @@
 
 - func: le.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_le_out
-    CUDA: legacy::cuda::_th_le_out
+    CPU: le_out_cpu
+    CUDA: le_out_cuda
 
 - func: le.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -3651,8 +3649,8 @@
 
 - func: gt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_gt_out
-    CUDA: legacy::cuda::_th_gt_out
+    CPU: gt_scalar_out_cpu
+    CUDA: gt_scalar_out_cuda
 
 - func: gt.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
@@ -3662,8 +3660,8 @@
 
 - func: gt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_gt_out
-    CUDA: legacy::cuda::_th_gt_out
+    CPU: gt_out_cpu
+    CUDA: gt_out_cuda
 
 - func: gt.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -3673,8 +3671,8 @@
 
 - func: lt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_lt_out
-    CUDA: legacy::cuda::_th_lt_out
+    CPU: lt_scalar_out_cpu
+    CUDA: lt_scalar_out_cuda
 
 - func: lt.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
@@ -3684,8 +3682,8 @@
 
 - func: lt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_lt_out
-    CUDA: legacy::cuda::_th_lt_out
+    CPU: lt_out_cpu
+    CUDA: lt_out_cuda
 
 - func: lt.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -3755,14 +3753,20 @@
 
 - func: addcmul.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_addcmul_out
+    CPU: addcmul_cpu_out
     CUDA: legacy::cuda::_th_addcmul_out
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_addcmul
+    CPU: addcmul_cpu
     CUDA: legacy::cuda::_th_addcmul
+
+- func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: addcmul_cpu_
+    CUDA: legacy::cuda::_th_addcmul_
 
 - func: addcdiv.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -5446,53 +5450,71 @@
     CPU: legacy::cpu::_thnn_tanh_backward
     CUDA: legacy::cuda::_thnn_tanh_backward
 
-- func: conv_transpose2d.out(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CPU: conv_transpose2d_out_cpu
-    CUDA: conv_transpose2d_out_cuda
+# What's a thnn_conv_ versus a slow_conv_?
+#
+# Historically, we have inefficient implementations of convolutions
+# coming from the THNN/THCUNN library.  These convolutions typically
+# operated by computing the Toeplitz matrix and then doing a matrix
+# multiply with the input; this is very memory inefficient!  However,
+# occasionally, we really don't have anything better, so it's helpful
+# to have these fallbacks when there is no more optimized implementation
+# in cudnn or mkldnn, etc.  Both thnn_ and slow_ convolutions fall
+# into this bucket.
+#
+# The difference between these two designations, is that thnn_ refers
+# to a convolution that is still written in the "legacy" style; that is,
+# C code in the THNN/ or THCUNN/ directory.  A slow_ convolution is
+# one that is written in the native style: modern C++.  Algorithmically,
+# these are the same thing, but we give them different prefixes to
+# make the operational distinction clear.
 
-- func: conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1) -> Tensor
+- func: slow_conv_transpose2d.out(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: conv_transpose2d_cpu
-    CUDA: conv_transpose2d_cuda
+    CPU: slow_conv_transpose2d_out_cpu
+    CUDA: slow_conv_transpose2d_out_cuda
 
-- func: conv_transpose2d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1) -> Tensor
   python_module: nn
   dispatch:
-    CPU: conv_transpose2d_backward_out_cpu
-    CUDA: conv_transpose2d_backward_out_cuda
+    CPU: slow_conv_transpose2d_cpu
+    CUDA: slow_conv_transpose2d_cuda
 
-- func: conv_transpose2d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+- func: slow_conv_transpose2d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
-    CPU: conv_transpose2d_backward_cpu
-    CUDA: conv_transpose2d_backward_cuda
+    CPU: slow_conv_transpose2d_backward_out_cpu
+    CUDA: slow_conv_transpose2d_backward_out_cuda
 
-- func: conv_transpose3d.out(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
+- func: slow_conv_transpose2d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
   dispatch:
-    CPU: conv_transpose3d_out_cpu
-    CUDA: conv_transpose3d_out_cuda
+    CPU: slow_conv_transpose2d_backward_cpu
+    CUDA: slow_conv_transpose2d_backward_cuda
 
-- func: conv_transpose3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1) -> Tensor
+- func: slow_conv_transpose3d.out(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: conv_transpose3d_cpu
-    CUDA: conv_transpose3d_cuda
+    CPU: slow_conv_transpose3d_out_cpu
+    CUDA: slow_conv_transpose3d_out_cuda
 
-- func: conv_transpose3d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv_transpose3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1) -> Tensor
   python_module: nn
   dispatch:
-    CPU: conv_transpose3d_backward_out_cpu
-    CUDA: conv_transpose3d_backward_out_cuda
+    CPU: slow_conv_transpose3d_cpu
+    CUDA: slow_conv_transpose3d_cuda
 
-- func: conv_transpose3d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+- func: slow_conv_transpose3d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
-    CPU: conv_transpose3d_backward_cpu
-    CUDA: conv_transpose3d_backward_cuda
+    CPU: slow_conv_transpose3d_backward_out_cpu
+    CUDA: slow_conv_transpose3d_backward_out_cuda
+
+- func: slow_conv_transpose3d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+  python_module: nn
+  dispatch:
+    CPU: slow_conv_transpose3d_backward_cpu
+    CUDA: slow_conv_transpose3d_backward_cuda
 
 - func: thnn_conv2d.out(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -5576,29 +5598,29 @@
   dispatch:
     CPU: legacy::cpu::_thnn_conv3d_backward
 
-- func: conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor
+- func: slow_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor
   python_module: nn
   dispatch:
-    CPU: conv_dilated2d_cpu
-    CUDA: conv_dilated2d_cuda
+    CPU: slow_conv_dilated2d_cpu
+    CUDA: slow_conv_dilated2d_cuda
 
-- func: conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+- func: slow_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
   dispatch:
-    CPU: conv_dilated2d_backward_cpu
-    CUDA: conv_dilated2d_backward_cuda
+    CPU: slow_conv_dilated2d_backward_cpu
+    CUDA: slow_conv_dilated2d_backward_cuda
 
-- func: conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1) -> Tensor
+- func: slow_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1) -> Tensor
   python_module: nn
   dispatch:
-    CPU: conv_dilated3d_cpu
-    CUDA: conv_dilated3d_cuda
+    CPU: slow_conv_dilated3d_cpu
+    CUDA: slow_conv_dilated3d_cuda
 
-- func: conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+- func: slow_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
   dispatch:
-    CPU: conv_dilated3d_backward_cpu
-    CUDA: conv_dilated3d_backward_cuda
+    CPU: slow_conv_dilated3d_backward_cpu
+    CUDA: slow_conv_dilated3d_backward_cuda
 
 - func: col2im.out(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
