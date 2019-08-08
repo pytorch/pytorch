@@ -247,8 +247,13 @@ struct PythonPrintPass {
   std::vector<c10::NamedTypePtr>& deps_table_;
   // Helper to avoid duplicating class types
   void registerDependency(const c10::NamedTypePtr& type) {
-    if (std::find(deps_table_.cbegin(), deps_table_.cend(), type) ==
-        deps_table_.cend()) {
+    // Need to do actual equality comparison, not a pointer equality.
+    auto it = std::find_if(
+        deps_table_.cbegin(),
+        deps_table_.cend(),
+        [&](const c10::NamedTypePtr dep) { return *dep == *type; });
+
+    if (it == deps_table_.cend()) {
       deps_table_.push_back(type);
     }
   }
@@ -1038,6 +1043,23 @@ struct PythonPrintPass {
         registerDependency(fn);
 
         stmt << fn->name()->qualifiedName() << "(";
+        for (size_t i = 1; i < node->inputs().size(); i++) {
+          stmt << useOf(node->inputs()[i]) << ", ";
+        }
+        stmt << ")";
+      } break;
+      case prim::CallMethod: {
+        const auto& self = node->inputs().at(0);
+        const auto& selfType = self->type()->expect<ClassType>();
+        const auto& methodName = node->s(attr::name);
+        const auto method = selfType->getMethod(node->s(attr::name));
+        registerDependency(selfType);
+
+        TORCH_INTERNAL_ASSERT(
+            method->qualname() ==
+            QualifiedName(selfType->name()->qualifiedName(), methodName));
+
+        stmt << useOf(self) << "." << methodName << "(";
         for (size_t i = 1; i < node->inputs().size(); i++) {
           stmt << useOf(node->inputs()[i]) << ", ";
         }

@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/inplace_check.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
@@ -548,6 +549,9 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
+
+    // Phase 0. Inline functions.
+    // Inline(*opt_graph);
 
     // Phase 1. Specialize to input definedness (this is very important for
     //          gradient graphs), and run required passes to bring the graph

@@ -177,17 +177,6 @@ struct SourceImporter {
     resolver_ = std::make_shared<SourceResolver>(cu_, version_, tensor_table_);
   }
 
-  void checkVersionNumber() {
-    // note: this cannot be called in the constructor because it may throw
-    if (version_ > CURRENT_OP_VERSION_SET) {
-      throw ErrorReport(p_.lexer().cur().range)
-          << "Attempting to load a script generated from a newer version of "
-          << "PyTorch. Maximum supported TorchScript version is "
-          << CURRENT_OP_VERSION_SET
-          << " but the script being loaded is version " << version_;
-    }
-  }
-
   void import(const std::string& qualifier) {
     checkVersionNumber();
     auto& L = p_.lexer();
@@ -195,150 +184,24 @@ struct SourceImporter {
     while (L.cur().kind != TK_EOF) {
       parseImportsAndDoCallback();
 
-      auto parsed_treeref = p_.parseClassLike();
-      if (parsed_treeref->kind() == TK_CLASS_DEF) {
-        auto class_def = ClassDef(parsed_treeref);
-        bool is_module = class_def.superclass().present();
-        if (is_module &&
-            Var(class_def.superclass().get()).name().name() != "Module") {
-          throw ErrorReport(class_def.range())
-              << "Torchscript does not support class inheritance.";
-        }
-        const auto qualified_classname =
-            QualifiedName(QualifiedName(qualifier), class_def.name().name());
-        auto class_type = ClassType::create(
-            c10::QualifiedName(qualified_classname), cu_, is_module);
-
-        std::vector<Def> methods;
-        std::vector<ResolverPtr> resolvers;
-        std::vector<Assign> attributes;
-
-        // Module-specific: which attrs are parameters?
-        std::unordered_set<std::string> parameter_names;
-        // Process statements, splitting things into attribute and method
-        // definitions.
-        for (const auto& statement : class_def.body()) {
-          switch (statement.kind()) {
-            case TK_ASSIGN: {
-              const auto assign = Assign(statement);
-              switch (assign.lhs().kind()) {
-                case TK_VAR: {
-                  const auto name = Var(assign.lhs()).name().name();
-                  if (name == "__parameters__") {
-                    // Populate the module parameter list. This is a field that
-                    // looks like:
-                    //   __parameters__ = ["foo", "bar", "baz"]
-                    // which tells us which attributes are module parameters.
-                    TORCH_INTERNAL_ASSERT(
-                        is_module,
-                        "Assignments in class body only "
-                        "supported on modules right now");
-                    const auto param_list =
-                        ListLiteral(assign.rhs().get()).inputs();
-                    for (const auto& param : param_list) {
-                      parameter_names.insert(StringLiteral(param).text());
-                    }
-                  } else if (name == "__annotations__") {
-                    // This is to initialize the annotations dict, just ignore.
-                    continue;
-                  } else {
-                    // This is a regular attribute assignment, of the form:
-                    //   foo : Tensor
-                    attributes.push_back(assign);
-                  }
-                } break;
-                case TK_SUBSCRIPT: {
-                  // This is a special attribute assignment where the attribute
-                  // is not a valid python, identifier. Looks like:
-                  //    __annotations__["0"] = Tensor
-                  const auto lhs = Subscript(assign.lhs());
-                  TORCH_INTERNAL_ASSERT(
-                      Var(lhs.value()).name().name() == "__annotations__");
-                  TORCH_INTERNAL_ASSERT(lhs.subscript_exprs().size() == 1);
-                  attributes.push_back(assign);
-                } break;
-                default: {
-                  TORCH_INTERNAL_ASSERT(
-                      false,
-                      "Unexpected statement kind in module metadata: ",
-                      kindToString(statement.kind()));
-                }
-              }
-            } break;
-            case TK_DEF: {
-              methods.emplace_back(Def(statement));
-              resolvers.push_back(resolver_);
-            } break;
-            default: {
-              TORCH_INTERNAL_ASSERT(
-                  false,
-                  "Unexpected statement kind in class body: ",
-                  kindToString(statement.kind()));
-            }
-          }
-        }
-
-        // Populate class attributes
-        ScriptTypeParser type_parser(resolver_);
-        for (const auto& assign : attributes) {
-          switch (assign.lhs().kind()) {
-            case TK_VAR: {
-              const auto name = Var(assign.lhs()).name().name();
-              TORCH_INTERNAL_ASSERT(name != "__parameters__");
-              const auto type =
-                  type_parser.parseTypeFromExpr(assign.type().get());
-              const bool is_parameter = parameter_names.count(name);
-              class_type->addAttribute(name, type, is_parameter);
-            } break;
-            case TK_SUBSCRIPT: {
-              const auto name =
-                  StringLiteral(Subscript(assign.lhs()).subscript_exprs()[0])
-                      .text();
-              const auto type =
-                  type_parser.parseTypeFromExpr(assign.rhs().get());
-              const bool is_parameter = parameter_names.count(name);
-              class_type->addAttribute(name, type, is_parameter);
-            }
-          }
-        }
-
-        cu_->register_type(class_type);
-        const auto self = SimpleSelf(class_type);
-        cu_->define(qualified_classname, methods, resolvers, &self);
-      } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
-        auto named_tuple_def = NamedTupleDef(parsed_treeref);
-
-        auto qualified_name =
-            c10::QualifiedName(qualifier + "." + named_tuple_def.name().name());
-
-        std::vector<std::string> field_names;
-        std::vector<TypePtr> field_types;
-
-        for (const auto& name_ident : named_tuple_def.fields()) {
-          field_names.push_back(name_ident.name());
-        }
-
-        ScriptTypeParser type_parser(resolver_);
-        for (const auto& maybe_type_expr : named_tuple_def.type_exprs()) {
-          if (maybe_type_expr.present()) {
-            field_types.push_back(
-                type_parser.parseTypeFromExpr(maybe_type_expr.get()));
-          } else {
-            field_types.push_back(TensorType::get());
-          }
-        }
-
-        auto tt = TupleType::create(
-            field_types,
-            qualified_name,
-            TupleType::namedTupleSchemaFromNamesAndTypes(
-                qualified_name, field_names, field_types));
-        cu_->register_type(tt);
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            false,
-            "Got an unrecognized type from "
-            "parseClassLike");
+      auto tk = L.cur();
+      auto kind = tk.kind;
+      switch (kind) {
+        case TK_CLASS_DEF: {
+          auto parsed_treeref = p_.parseClassLike();
+          importClass(qualifier, ClassDef(parsed_treeref));
+        } break;
+        case TK_NAMED_TUPLE_DEF: {
+          auto parsed_treeref = p_.parseClassLike();
+          importNamedTuple(qualifier, NamedTupleDef(parsed_treeref));
+        } break;
+        case TK_DEF: {
+          auto parsed_treeref = p_.parseFunction(/*is_method=*/false);
+          importFunction(qualifier, Def(parsed_treeref));
+        } break;
+        default:
+          throw ErrorReport(L.cur().range)
+              << "Unexpected token in code import: " << kindToString(kind);
       }
     }
   }
@@ -357,6 +220,163 @@ struct SourceImporter {
       resolvers.emplace_back(resolver_);
     }
     cu_->define(prefix, definitions, resolvers, self);
+  }
+
+ private:
+  void importFunction(const std::string& qualifier, const Def& def) {
+    std::vector<Def> definitions{def};
+    std::vector<ResolverPtr> resolvers{resolver_};
+    cu_->define(qualifier, definitions, resolvers, nullptr);
+  }
+
+  void importClass(const std::string& qualifier, const ClassDef& class_def) {
+    bool is_module = class_def.superclass().present();
+    if (is_module &&
+        Var(class_def.superclass().get()).name().name() != "Module") {
+      throw ErrorReport(class_def.range())
+          << "Torchscript does not support class inheritance.";
+    }
+    const auto qualified_classname =
+        QualifiedName(QualifiedName(qualifier), class_def.name().name());
+    auto class_type = ClassType::create(
+        c10::QualifiedName(qualified_classname), cu_, is_module);
+
+    std::vector<Def> methods;
+    std::vector<ResolverPtr> resolvers;
+    std::vector<Assign> attributes;
+
+    // Module-specific: which attrs are parameters?
+    std::unordered_set<std::string> parameter_names;
+    // Process statements, splitting things into attribute and method
+    // definitions.
+    for (const auto& statement : class_def.body()) {
+      switch (statement.kind()) {
+        case TK_ASSIGN: {
+          const auto assign = Assign(statement);
+          switch (assign.lhs().kind()) {
+            case TK_VAR: {
+              const auto name = Var(assign.lhs()).name().name();
+              if (name == "__parameters__") {
+                // Populate the module parameter list. This is a field that
+                // looks like:
+                //   __parameters__ = ["foo", "bar", "baz"]
+                // which tells us which attributes are module parameters.
+                TORCH_INTERNAL_ASSERT(
+                    is_module,
+                    "Assignments in class body only "
+                    "supported on modules right now");
+                const auto param_list =
+                    ListLiteral(assign.rhs().get()).inputs();
+                for (const auto& param : param_list) {
+                  parameter_names.insert(StringLiteral(param).text());
+                }
+              } else if (name == "__annotations__") {
+                // This is to initialize the annotations dict, just ignore.
+                continue;
+              } else {
+                // This is a regular attribute assignment, of the form:
+                //   foo : Tensor
+                attributes.push_back(assign);
+              }
+            } break;
+            case TK_SUBSCRIPT: {
+              // This is a special attribute assignment where the attribute
+              // is not a valid python, identifier. Looks like:
+              //    __annotations__["0"] = Tensor
+              const auto lhs = Subscript(assign.lhs());
+              TORCH_INTERNAL_ASSERT(
+                  Var(lhs.value()).name().name() == "__annotations__");
+              TORCH_INTERNAL_ASSERT(lhs.subscript_exprs().size() == 1);
+              attributes.push_back(assign);
+            } break;
+            default: {
+              TORCH_INTERNAL_ASSERT(
+                  false,
+                  "Unexpected statement kind in module metadata: ",
+                  kindToString(statement.kind()));
+            }
+          }
+        } break;
+        case TK_DEF: {
+          methods.emplace_back(Def(statement));
+          resolvers.push_back(resolver_);
+        } break;
+        default: {
+          TORCH_INTERNAL_ASSERT(
+              false,
+              "Unexpected statement kind in class body: ",
+              kindToString(statement.kind()));
+        }
+      }
+    }
+
+    // Populate class attributes
+    ScriptTypeParser type_parser(resolver_);
+    for (const auto& assign : attributes) {
+      switch (assign.lhs().kind()) {
+        case TK_VAR: {
+          const auto name = Var(assign.lhs()).name().name();
+          TORCH_INTERNAL_ASSERT(name != "__parameters__");
+          const auto type = type_parser.parseTypeFromExpr(assign.type().get());
+          const bool is_parameter = parameter_names.count(name);
+          class_type->addAttribute(name, type, is_parameter);
+        } break;
+        case TK_SUBSCRIPT: {
+          const auto name =
+              StringLiteral(Subscript(assign.lhs()).subscript_exprs()[0])
+                  .text();
+          const auto type = type_parser.parseTypeFromExpr(assign.rhs().get());
+          const bool is_parameter = parameter_names.count(name);
+          class_type->addAttribute(name, type, is_parameter);
+        }
+      }
+    }
+
+    cu_->register_type(class_type);
+    const auto self = SimpleSelf(class_type);
+    cu_->define(qualified_classname, methods, resolvers, &self);
+  }
+
+  void importNamedTuple(
+      const std::string& qualifier,
+      const NamedTupleDef& named_tuple_def) {
+    auto qualified_name =
+        c10::QualifiedName(qualifier + "." + named_tuple_def.name().name());
+
+    std::vector<std::string> field_names;
+    std::vector<TypePtr> field_types;
+
+    for (const auto& name_ident : named_tuple_def.fields()) {
+      field_names.push_back(name_ident.name());
+    }
+
+    ScriptTypeParser type_parser(resolver_);
+    for (const auto& maybe_type_expr : named_tuple_def.type_exprs()) {
+      if (maybe_type_expr.present()) {
+        field_types.push_back(
+            type_parser.parseTypeFromExpr(maybe_type_expr.get()));
+      } else {
+        field_types.push_back(TensorType::get());
+      }
+    }
+
+    auto tt = TupleType::create(
+        field_types,
+        qualified_name,
+        TupleType::namedTupleSchemaFromNamesAndTypes(
+            qualified_name, field_names, field_types));
+    cu_->register_type(tt);
+  }
+
+  void checkVersionNumber() {
+    // note: this cannot be called in the constructor because it may throw
+    if (version_ > CURRENT_OP_VERSION_SET) {
+      throw ErrorReport(p_.lexer().cur().range)
+          << "Attempting to load a script generated from a newer version of "
+          << "PyTorch. Maximum supported TorchScript version is "
+          << CURRENT_OP_VERSION_SET
+          << " but the script being loaded is version " << version_;
+    }
   }
 
   size_t parseVersionNumber() {
@@ -399,7 +419,6 @@ struct SourceImporter {
     }
   }
 
- private:
   Parser p_;
   size_t version_;
   std::shared_ptr<CompilationUnit> cu_;

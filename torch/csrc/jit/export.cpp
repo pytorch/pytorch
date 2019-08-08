@@ -681,8 +681,8 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
 // python print the type and add to the converted_types_. Recursively
 // python print all classes that this class depends on.
 void ScriptModuleSerializer::convertNamedType(
-    const c10::NamedTypePtr& class_type) {
-  if (converted_types_.contains(class_type)) {
+    const c10::NamedTypePtr& type) {
+  if (converted_types_.contains(type)) {
     return;
   }
 
@@ -692,7 +692,7 @@ void ScriptModuleSerializer::convertNamedType(
   PythonPrint(
       source_stream,
       source_ranges,
-      class_type,
+      type,
       tensor_table_,
       deps,
       /*enforce_importable=*/true);
@@ -703,7 +703,7 @@ void ScriptModuleSerializer::convertNamedType(
   // Insert *after* we've traversed the dependencies. This ensures that any
   // given class will appear after its dependencies in the order.
   TypeInfo info{source_stream.str(), std::move(source_ranges)};
-  converted_types_.insert(class_type, std::move(info));
+  converted_types_.insert(type, std::move(info));
 }
 
 void ScriptModuleSerializer::convertModel(
