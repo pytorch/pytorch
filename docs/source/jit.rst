@@ -100,6 +100,155 @@ Example::
 
     my_script_module = torch.jit.script(MyScriptModule())
 
+Migrating to PyTorch 1.2 Recursive Scripting API
+------------------------------------------------
+This section details the changes to TorchScript in PyTorch 1.2. If you are new to TorchScript you can
+skip this section.
+
+Overview
+~~~~~~~~
+There are two main changes to the TorchScript API with 1.2.
+
+1. ``torch.jit.script`` will now attempt to recursively compile functions,
+methods, and classes that it encounters. Once you call ``torch.jit.script``,
+compilation is "opt-out", rather than "opt-in".
+
+2. ``torch.jit.script(nn_module_obj)`` is now the preferred way to create
+``ScriptModule``\s, instead of inheriting from ``torch.jit.ScriptModule``.
+These changes combine to provide a simpler, easier-to-use API for converting
+your ``nn.Module``\s into ``ScriptModule``\s, ready to be optimized and executed in a
+non-Python environment.
+
+The new usage looks like this::
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super(Model, self).__init__()
+            self.conv1 = nn.Conv2d(1, 20, 5)
+            self.conv2 = nn.Conv2d(20, 20, 5)
+
+        def forward(self, x):
+        x = F.relu(self.conv1(x))
+        return F.relu(self.conv2(x))
+
+    my_model = Model()
+    my_scripted_model = torch.jit.script(my_model)
+
+  * The module's ``forward`` is compiled by default. Methods called from ``forward`` are lazily compiled in the order they are used in ``forward``.
+  * To compile a method other than ``forward`` that is not called from ``forward``, add ``@torch.jit.export``
+  * To stop the compiler from compiling a method and leave it as a call to Python, add ``@torch.jit.ignore``
+  * Most attribute types can be inferred, so ``torch.jit.Attribute`` is not necessary. For empty container types, annotate their types using `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
+  * Constants can be marked with a ``Final`` class annotation instead of adding the name of the member to ``__constants__``
+
+As a result of these changes, the following items are considered deprecated and should not appear in new code:
+  * The ``@torch.jit.script_method`` decorator
+  * Classes that inherit from ``torch.jit.ScriptModule``
+  * The ``torch.jit.Attribute`` wrapper class
+  * The ``__constants__`` array
+
+Modules
+~~~~~~~
+When passed to the ``torch.jit.script`` function, a ``torch.nn.Module``\'s data is copied to a ``ScriptModule`` and the TorchScript compiler compiles the module. The module's ``forward`` is compiled by default. Methods called from ``forward`` are lazily compiled in the order they are used in ``forward``, as we as any ``@torch.jit.export`` methods.
+
+``@torch.jit.export``
+^^^^^^^^^^^^^^^^^^^^^
+The export decorator marks a method as an entry point into a module. The TorchScript compile will compile the decorated method and recursively compile anything it calls.
+
+``@torch.jit.ignore``
+^^^^^^^^^^^^^^^^^^^^^
+The ignore decorator makes a method opaque to the TorchScript compiler. The function will not be compiled and will be left as an upcall to Python which cannot be exported. Pre-PyTorch 1.2 the ``@ignore`` decorator was used to make a function or method callable from code that is exported. To get this functionality back, use ``@torch.jit.export(drop_on_export=True)``. ``@torch.jit.ignore`` is equivalent to ``@torch.jit.ignore(drop_on_export=False)``.
+
+Functions
+~~~~~~~~~
+Functions don't change much, they can be marked with ``@torch.jit.ignore`` if needed.
+
+Examples::
+
+    # Same behavior as pre-PyTorch 1.2
+    @torch.jit.script
+    def some_fn():
+        return 2
+
+    # Marks a function as ignored, if nothing
+    # ever calls it then this has no effect
+    @torch.jit.ignore
+    def some_fn2():
+        return 2
+
+    # Doesn't do anything, this function is already
+    # the main entry point
+    @torch.jit.export
+    def some_fn3():
+        return 2
+
+Script Classes
+~~~~~~~~~~~~~~
+Everything in a user defined class is exported by default, functions can be marked with ``@torch.jit.ignore`` if needed.
+
+Attributes
+~~~~~~~~~~
+The TorchScript compiler needs to know the types of module attributes. Most types can be inferred from the value of the member. Empty lists and dicts cannot have their types inferred and must have their types annotated with `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
+
+Example (old API)::
+
+    class MyModule(torch.jit.ScriptModule):
+        def __init__(self):
+            self.my_dict = torch.jit.Attribute({}, Dict[str, int])
+            self.my_int = torch.jit.Attribute(20, int)
+
+    m = MyModule()
+
+Example (new API)::
+
+    class MyModule(torch.nn.Module):
+        my_dict: Dict[str, int]
+
+        def __init__(self):
+            # This type cannot be inferred and must be specified
+            self.my_dict = {}
+
+            # The attribute type here is inferred to be `int`
+            self.my_int = 20
+
+    m = torch.jit.script(MyModule())
+
+Python 2
+^^^^^^^^
+If you are stuck on Python 2 and cannot use the class annotation syntax, you can use the ``__annotations__`` class member to directly apply type annotations.
+
+Example::
+
+    class MyModule(torch.jit.ScriptModule):
+        __annotations__ = {'my_dict': Dict[str, int]}
+
+        def __init__(self):
+            self.my_dict = {}
+            self.my_int = 20
+
+Constants
+~~~~~~~~~
+The ``Final`` type constructor can be used to mark members as constant. If members are not marked constant, they will be copied to the resulting ``ScriptModule`` as an attribute. Using ``Final`` opens opportunities for optimization if the value is known to be fixed and gives additional type safety.
+
+Example (old API)::
+
+    class MyModule(torch.jit.ScriptModule):
+        __constants__ = ['my_constant']
+
+        def __init__(self):
+            self.my_constant = 2
+
+    m = MyModule()
+
+Example (new API)::
+
+    class MyModule(torch.nn.Module):
+        my_constant: Final[int]
+
+        def __init__(self):
+            self.my_constant = 2
+
+    m = torch.jit.script(MyModule())
+
 
 TorchScript Language Reference
 -------------------------------
