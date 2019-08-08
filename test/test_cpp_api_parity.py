@@ -9,8 +9,29 @@ from common_nn import module_tests
 import torch.utils.cpp_extension
 from cpp_api_parity import sample_module
 
+
 torch_nn_has_parity = ['Linear']
 
+'''
+yf225 TODO:
+This probably won't be sufficient for a lot of tests. There are the following cases:
+* CUDA modules
+    * Solution: We will generate two tests for each module_variant: "cpu" and "coda"
+* multiple inputs
+    * Solution: We will specify the C++ input arguments (in string format? or typed tuple and parse?) in the param dict
+* modules that expect certain properties of their inputs.
+    * Solution: We will have an input_fn lambda that returns a tuple of input arguments
+'''
+
+module_tests_extra_params = {
+    'Linear': dict(
+        cpp_constructor_args='(10, 8)',
+    )
+}
+
+cpp_module_forward_arg_declarations = {
+    'Linear': [('const Tensor&', 'input')],  # yf225 TODO: use named tuple?
+}
 
 class TestCppApiParity(common.TestCase):
     def setUp(self):
@@ -69,13 +90,16 @@ void ${module_variant_name}_test_init(const std::string& saved_module_path) {
 
 void ${module_variant_name}_test_forward(
     const std::string& saved_module_path,
-    torch::Tensor input,
-    torch::Tensor python_output) {
+    torch::Tensor python_output,
+    ${input_arg_declarations}
+    ) {
   ${module_qualified_name} module${cpp_constructor_args};
   torch::load(module, saved_module_path);
 
   torch::manual_seed(2);
-  auto cpp_output = module(input);
+  auto cpp_output = module(
+    ${input_args}
+  );
 
   TORCH_CHECK(
     cpp_output.sizes().vec() == python_output.sizes().vec() &&
@@ -111,10 +135,15 @@ void ${module_variant_name}_test_forward(
         functions = []
         for module_name in module_names:
             for test_params in test_params_map[module_name]:
+                input_arg_declarations_list = cpp_module_forward_arg_declarations[module_name]
+                input_arg_declarations = ',\n'.join([arg_type + ' ' + arg_name for arg_type, arg_name in input_arg_declarations_list])
+                input_args = ',\n'.join([arg_name for _, arg_name in input_arg_declarations_list])
                 cpp_source += TORCH_NN_MODULE_WRAPPER.substitute(
                     module_variant_name=test_params['module_variant_name'],
                     module_qualified_name=test_params['cpp_namespace'] + test_params['module_name'],
-                    cpp_constructor_args=test_params['cpp_constructor_args'])
+                    cpp_constructor_args=test_params['cpp_constructor_args'],
+                    input_arg_declarations=input_arg_declarations,
+                    input_args=input_args)
                 for method in torch_nn_test_methods:
                     functions.append(test_params['module_variant_name'] + '_test_' + method)
 
@@ -128,20 +157,27 @@ void ${module_variant_name}_test_forward(
 
         def test_method(method_name, test_params):
             expect_error = test_params['expect_error']
-            input_size = test_params['input_size']
+            input_size = test_params.get('input_size', None)
+            input_fn = test_params.get('input_fn', None)
             python_module_class = test_params['python_module_class']
             python_constructor_args = test_params['python_constructor_args']
             module_variant_name = test_params['module_variant_name']
             test_name = module_variant_name + '_test_' + method_name
-            example_input = torch.randn(input_size)
+            if input_size:
+                example_inputs = torch.randn(input_size)
+            elif input_fn:
+                example_inputs = input_fn()
+            else:
+                # yf225 TODO improve this err msg!
+                raise Exception
             with common.freeze_rng_state():
                 torch.manual_seed(2)
                 module = python_module_class(*python_constructor_args)
                 if method_name == 'forward':
                     torch.manual_seed(2)
-                    python_output = module(example_input)
+                    python_output = module(*example_inputs)
                 # We use JIT tracing to transfer Python module state to C++
-                traced_script_module = torch.jit.trace(module, example_input)
+                traced_script_module = torch.jit.trace(module, example_inputs)
                 # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
                 # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
                 # close the file after creation and try to remove it manually
@@ -152,7 +188,7 @@ void ${module_variant_name}_test_forward(
                     if method_name == 'init':
                         args = (f.name, )
                     elif method_name == 'forward':
-                        args = (f.name, example_input, python_output)
+                        args = (f.name, python_output, *example_inputs)
                     if expect_error:
                         with self.assertRaisesRegex(RuntimeError, 'Parity test failed'):
                             getattr(cpp_module, test_name)(*args)
