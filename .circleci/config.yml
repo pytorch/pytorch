@@ -2983,7 +2983,7 @@ workflows:
       - binary_linux_manywheel_2.7mu_cpu_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.7m_cu100_devtoolset7_build:
+      - binary_linux_manywheel_3.7m_cu101_devtoolset7_build:
           requires:
             - setup
       - binary_linux_conda_2.7_cpu_devtoolset7_build:
@@ -3010,10 +3010,10 @@ workflows:
           requires:
             - setup
             - binary_linux_manywheel_2.7mu_cpu_devtoolset7_build
-      - binary_linux_manywheel_3.7m_cu100_devtoolset7_test:
+      - binary_linux_manywheel_3.7m_cu101_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.7m_cu100_devtoolset7_build
+            - binary_linux_manywheel_3.7m_cu101_devtoolset7_build
       - binary_linux_conda_2.7_cpu_devtoolset7_test:
           requires:
             - setup
