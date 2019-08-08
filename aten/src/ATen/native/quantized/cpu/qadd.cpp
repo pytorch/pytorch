@@ -6,7 +6,8 @@
 
 #include <algorithm>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 namespace {
 
 inline Tensor requantize_into_int32(Tensor qa) {
@@ -66,3 +67,4 @@ static auto registry = c10::RegisterOperators()
       .kernel<QAdd</*ReLUFused=*/true>>(QuantizedCPUTensorId()));
 }  // namespace
 }}  // namespace at::native
+
