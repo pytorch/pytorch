@@ -12960,6 +12960,35 @@ a")
 
             FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
 
+    def test_isinstance_metacompile(self):
+        @torch.jit.script
+        def test_primitive_type(x):
+            # type: (int) -> int
+            if isinstance(x, int):
+                return x + 1
+            else:
+                return x - 1
+
+        self.assertEqual(test_primitive_type(1), 2)
+        with self.assertRaisesRegex(Exception, "Expected a value of type"):
+            test_primitive_type(1.5)
+
+        _MyNamedTuple = namedtuple('_MyNamedTuple', ['value'])
+
+        @torch.jit.script
+        def test_non_primitive_types(x):
+            # type: (_MyNamedTuple) -> Tensor
+            if isinstance(1, _MyNamedTuple):
+                return 10
+
+            if isinstance(x, _MyNamedTuple):
+                return x.value + 1
+            else:
+                return 1
+
+        out = test_non_primitive_types(_MyNamedTuple(value=torch.tensor(5.0)))
+        self.assertEqual(out, torch.tensor(6.0))
+
     @unittest.skipIf(True, "Removing weak script")
     def test_overloading(self):
         @torch._jit_internal.weak_module
