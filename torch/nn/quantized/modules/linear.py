@@ -150,8 +150,8 @@ class Linear(torch.nn.Module):
         self.zero_point = int(state_dict[prefix + 'zero_point'])
         state_dict.pop(prefix + 'zero_point')
 
-        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                      missing_keys, unexpected_keys, error_msgs)
+        super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                  missing_keys, unexpected_keys, error_msgs)
 
     # Function rather than property to make sure that JIT serialization doesn't
     # register this as an attribute
