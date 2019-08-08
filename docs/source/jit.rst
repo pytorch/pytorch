@@ -19,17 +19,16 @@ for performance and multi-threading reasons.
 Creating TorchScript Code
 --------------------------
 
-.. autofunction:: script
+.. autofunction:: script(obj, optimize=None)
 
-.. autofunction:: trace
+.. autofunction:: trace(func, example_inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
 
-.. autoclass:: ScriptModule
+.. autoclass:: ScriptModule(optimize=None)
     :members:
 
 .. autofunction:: save
 
 .. autofunction:: load
-
 
 
 Mixing Tracing and Scripting
