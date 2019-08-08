@@ -739,11 +739,6 @@ Break and Continue
 Return
     ``return a, b``
 
-    .. note::
-        TorchScript allows returns in the following circumstances:
-           1. At the end of a function
-           2. In an if-statement where <true> and <false> both return
-           3. In an if-statement where <true> returns and <false> is empty (an early return)
 
 Variable Resolution
 ~~~~~~~~~~~~~~~~~~~
