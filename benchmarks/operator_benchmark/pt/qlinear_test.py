@@ -47,8 +47,8 @@ class QLinearBenchmark(op_bench.TorchBenchmarkBase):
         self.input = qX
         self.qlinear = nnq.Linear(IN, OUT)
         self.qlinear.weight = qW
-        self.qlinear.scale = scale
-        self.qlinear.zero_point = zero_point
+        self.qlinear.scale = torch.tensor([scale], dtype=torch.double)
+        self.qlinear.zero_point = torch.tensor([zero_point], dtype=torch.int)
         self.set_module_name("QLinear")
 
     def forward(self):
