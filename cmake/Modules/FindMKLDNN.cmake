@@ -97,6 +97,7 @@ IF(MKL_FOUND)
   SET(MKL_cmake_included TRUE)
   # Does not override if there's already value set, e.g. TBB
   SET(MKLDNN_THREADING "OMP:COMP" CACHE STRING "")
+  set(HAVE_MKL TRUE)
 ENDIF(MKL_FOUND)
 
 MESSAGE(STATUS "MKLDNN_THREADING = ${MKLDNN_THREADING}")
