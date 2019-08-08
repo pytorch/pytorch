@@ -1707,6 +1707,11 @@ class _TestTorchMixin(object):
             expected = torch.zeros(2, 3, device=device).bool()
             self.assertEqual(res, expected)
 
+            # bfloat16
+            m1 = torch.tensor([1., 2.], dtype=torch.bfloat16)
+            m2 = torch.tensor([3., 4.], dtype=torch.bfloat16)
+            self.assertEqual(m1 + m2, torch.tensor([4., 6.], dtype=torch.bfloat16))
+
     def test_bool_sub(self):
         for device in torch.testing.get_all_device_types():
             m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=device)
@@ -1723,6 +1728,19 @@ class _TestTorchMixin(object):
                                    r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
                                    r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
                                    lambda: m2 - 1)
+
+    def test_sub(self):
+        for dtype in torch.testing.get_all_dtypes():
+            m1 = torch.tensor([2.34, 4.44], dtype=dtype)
+            m2 = torch.tensor([1.23, 2.33], dtype=dtype)
+
+            if (dtype == torch.half or dtype == torch.bool):
+                self.assertRaises(RuntimeError, lambda: m1 - m2)
+            elif (dtype == torch.bfloat16):
+                # bfloat16 has a lower precision so we have to have a separate check for it
+                self.assertEqual(m1 - m2, torch.tensor([1.11, 2.11], dtype=dtype), 0.01)
+            else:
+                self.assertEqual(m1 - m2, torch.tensor([1.11, 2.11], dtype=dtype))
 
     def test_csub(self):
         # with a tensor
@@ -1849,6 +1867,11 @@ class _TestTorchMixin(object):
             a2 = torch.tensor([True, False, True, False], dtype=torch.bool, device=device)
             self.assertEqual(a1 * a2, torch.tensor([True, False, False, False], dtype=torch.bool, device=device))
 
+            if device == 'cpu':
+                a1 = torch.tensor([0.1, 0.1], dtype=torch.bfloat16, device=device)
+                a2 = torch.tensor([1.1, 0.1], dtype=torch.bfloat16, device=device)
+                self.assertEqual(a1 * a2, torch.tensor([0.11, 0.01], dtype=torch.bfloat16, device=device), 0.01)
+
     def test_div(self):
         m1 = torch.randn(10, 10)
         res1 = m1.clone()
@@ -1857,6 +1880,10 @@ class _TestTorchMixin(object):
         for i in range(m1.size(0)):
             res2[i, 3] = res2[i, 3] / 2
         self.assertEqual(res1, res2)
+
+        a1 = torch.tensor([4.2, 6.2], dtype=torch.bfloat16)
+        a2 = torch.tensor([2., 2.], dtype=torch.bfloat16)
+        self.assertEqual(a1 / a2, torch.tensor([2.1, 3.1], dtype=torch.bfloat16), 0.01)
 
     def test_floordiv(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
