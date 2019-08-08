@@ -296,6 +296,10 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         checkQuantized(model)
 
 
+@unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+                 'Quantization requires FBGEMM. FBGEMM does not play'
+                 ' well with UBSAN at the moment, so we skip the test if'
+                 ' we are in a UBSAN environment.')
 class FusionTest(QuantizationTestCase):
     def test_fuse_module_train(self):
         model = ModelForFusion(default_qat_qconfig)
