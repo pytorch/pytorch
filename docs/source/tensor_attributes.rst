@@ -36,6 +36,7 @@ can be used, which returns ``True`` if the data type is a floating point data ty
 
 When the dtypes of inputs to an arithmetic operation (`add`, `sub`, `div`, `mul`) differ, we promote
 by finding the minimum dtype that satisfies the following rules:
+
 * If the type of a scalar operand is of a higher category than tensor operands
   (where floating > integral > boolean), we promote to a type with sufficient size to hold
   all scalar operands of that category.
