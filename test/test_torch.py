@@ -1775,6 +1775,13 @@ class _TestTorchMixin(object):
             res_neg_op = -a.clone()
             self.assertEqual(res_neg_op, res_add)
 
+            # bool
+            self.assertRaisesRegex(
+                RuntimeError,
+                r"Negation, the `\-` operator, on a bool tensor is not supported. "
+                r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                lambda: - cast(torch.tensor([False, True])))
+
     def test_neg(self):
         self._test_neg(self, lambda t: t)
 
@@ -9079,7 +9086,6 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.zeros(0).expand((0,)), torch.zeros(0))
 
     def test_repeat(self):
-
         initial_shape = (8, 4)
         tensor = torch.rand(*initial_shape)
 
@@ -9094,6 +9100,9 @@ class _TestTorchMixin(object):
         result = tensor.repeat(torchSize)
         self.assertEqual(result.size(), target, 'Error in repeat using result and LongStorage')
         self.assertEqual(result.mean(0).view(8, 4), tensor, 'Error in repeat (not equal)')
+
+        zeroDimTarget = torch.Size([24, 0])
+        self.assertEqual(tensor.repeat((3, 0)).size(), zeroDimTarget, "Error when calling with 0 repeats")
 
     def test_repeat_interleave(self):
         x = torch.tensor([0, 1, 2, 3])
@@ -12407,13 +12416,33 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(nhwc.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(nhwc, x)
 
+    def test_memory_format_preserved_after_permute(self):
+        x = torch.randn(10, 3, 32, 32)
+        nhwc = x.contiguous(memory_format=torch.channels_last)
+        y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
+        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
+
+    def test_memory_format_contiguous_returns_same_tensor_if_already_satisfies(self):
+        x = torch.randn(10, 32, 32, 3).permute(0, 3, 1, 2)
+        alias = x.contiguous(memory_format=torch.channels_last)
+        alias.fill_(7)
+        self.assertEqual(x, alias)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_memory_format_permute_cuda(self):
-        x = torch.randn(10, 3, 32, 32)
-        nhwc = x.contiguous(memory_format=torch.channels_last).cuda()
+        x = torch.randn(10, 3, 32, 32).cuda()
+        nhwc = x.contiguous(memory_format=torch.channels_last)
         y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
-        self.assertFalse(y.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_memory_format_empty_like_cuda(self):
+        x = torch.randn(10, 3, 32, 32).cuda()
+        self._test_memory_format_empty_like(x)
+
+    def test_memory_format_empty_like_cpu(self):
+        x = torch.randn(10, 3, 32, 32)
+        self._test_memory_format_empty_like(x)
 
     def _test_memory_format_empty_like(self, x):
         nhwc = x.contiguous(memory_format=torch.channels_last)
@@ -12447,15 +12476,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             x = torch.empty((3, 3), memory_format=torch.channels_last)
         x = torch.empty((3, 3, 3, 3), memory_format=torch.channels_last)
         self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
-
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_memory_format_empty_like_cuda(self):
-        x = torch.randn(10, 3, 32, 32).cuda()
-        self._test_memory_format_empty_like(x)
-
-    def test_memory_format_empty_like_cpu(self):
-        x = torch.randn(10, 3, 32, 32)
-        self._test_memory_format_empty_like(x)
 
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
