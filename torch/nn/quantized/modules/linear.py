@@ -111,7 +111,7 @@ class Linear(torch.nn.Module):
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8)
 
-        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
+        self.set_weight(qweight)
         self.scale = 1.0
         self.zero_point = 0
 
@@ -125,9 +125,8 @@ class Linear(torch.nn.Module):
     # outside the process in which they were created, rather they should be derived
     # from the QTensor weight.
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super()._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'weight'] = torch.ops.quantized.fbgemm_linear_unpack(
-            self._packed_weight)
+        super(Linear, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'weight'] = self.weight()
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
         if self.bias is not None:
@@ -138,15 +137,19 @@ class Linear(torch.nn.Module):
     # weight into its packed format for use by the FBGEMM ops.
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(state_dict[prefix + 'weight'])
+        self.set_weight(state_dict[prefix + 'weight'])
+        state_dict.pop(prefix + 'weight')
+
         if prefix + 'bias' in state_dict:
             self.bias.copy_(state_dict[prefix + 'bias'])
             state_dict.pop(prefix + 'bias')
-        state_dict.pop(prefix + 'weight')
+
         self.scale = float(state_dict[prefix + 'scale'])
         state_dict.pop(prefix + 'scale')
+
         self.zero_point = int(state_dict[prefix + 'zero_point'])
         state_dict.pop(prefix + 'zero_point')
+
         super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                       missing_keys, unexpected_keys, error_msgs)
 
@@ -185,7 +188,7 @@ class Linear(torch.nn.Module):
         else:
             qbias = None
         qlinear = Linear(mod.in_features, mod.out_features)
-        qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
+        qlinear.set_weight(qweight)
         qlinear.bias = qbias
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)
