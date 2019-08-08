@@ -114,3 +114,6 @@
 	path = third_party/tbb
 	url = https://github.com/01org/tbb
 	branch = tbb_2018
+[submodule "android/libs/fbjni"]
+	path = android/libs/fbjni
+	url = https://github.com/IvanKobzarev/fbjni.git
