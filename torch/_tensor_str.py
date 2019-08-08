@@ -310,4 +310,7 @@ def _str(self):
     elif self.requires_grad:
         suffixes.append('requires_grad=True')
 
+    if torch._C._BUILD_NAMEDTENSOR and self.has_names():
+        suffixes.append('names={}'.format(self.names))
+
     return _add_suffixes(prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse)
