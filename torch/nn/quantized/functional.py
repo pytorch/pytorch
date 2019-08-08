@@ -17,11 +17,11 @@ def relu(input, inplace=False):
     :class:`~torch.nn.ReLU` for more details.
     """
     if not input.is_quantized:
-      raise ValueError("Input to 'quantized.relu' must be quantized!")
+        raise ValueError("Input to 'quantized.relu' must be quantized!")
     if inplace:
-      return torch.relu_(input)
+        return torch.relu_(input)
     else:
-      return torch.relu(input)
+        return torch.relu(input)
 
 def linear(input, weight, bias=None, scale=None, zero_point=None):
     # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
