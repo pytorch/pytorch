@@ -8892,7 +8892,6 @@ class _TestTorchMixin(object):
         a = np.array(x, copy=False)
         b = np.array(y, copy=False)
         expected = np.matmul(a, b)
-        self.assertTrue(expected.flags['C_CONTIGUOUS'])
 
         ans = torch.matmul(x, y)
         self.assertTrue(ans.is_contiguous())
@@ -11170,7 +11169,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             x = get_castable_tensor((sz1, sz2), tp)
             y = x.numpy()
             check2d(x, y)
-            self.assertTrue(y.flags['C_CONTIGUOUS'])
 
             # with storage offset
             xm = get_castable_tensor((sz1 * 2, sz2), tp)
@@ -11178,13 +11176,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             y = x.numpy()
             self.assertTrue(x.storage_offset() > 0)
             check2d(x, y)
-            self.assertTrue(y.flags['C_CONTIGUOUS'])
 
             # non-contiguous 2D
             x = get_castable_tensor((sz2, sz1), tp).t()
             y = x.numpy()
             check2d(x, y)
-            self.assertFalse(y.flags['C_CONTIGUOUS'])
 
             # with storage offset
             xm = get_castable_tensor((sz2 * 2, sz1), tp)
