@@ -242,7 +242,7 @@ class StrideSampler(Sampler):
         assert isinstance(sampler, Sampler), 'sampler must be an instance of `Sampler` class'
         assert current_stride >= 0, 'current_stride must be >= 0'
         assert total_strides >= 0, 'total_strides must be >= 0'
-        assert current_stride < total_strides, 'current_stride must < total_strides'
+        assert current_stride <= total_strides, 'current_stride must be <= total_strides'
         self.sampler = sampler
         self.current_stride = current_stride
         self.total_strides = total_strides
@@ -266,5 +266,5 @@ class StrideSampler(Sampler):
         to prevent sampling the same indices in different workers
         """
         assert current_stride >= 0, 'current_stride must be >= 0'
-        assert current_stride < self.total_strides, 'current_stride must < total_strides'
+        assert current_stride == 0 or current_stride < self.total_strides, 'current_stride must < total_strides'
         self.current_stride = current_stride

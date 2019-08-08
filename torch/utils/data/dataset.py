@@ -1,11 +1,10 @@
 import bisect
 import warnings
-import itertools
-import random
+import numpy
 
 from torch._utils import _accumulate
 from torch import randperm
-from torch.utils.data import Sampler, BatchSampler, StrideSampler
+from torch.utils.data import StrideSampler
 from torch.utils.data._utils.worker import get_worker_info
 
 
@@ -272,14 +271,22 @@ class ChunkDataReader(object):
     Chunks can be files, contents of folder, pieces lines
     of a text file, etc
 
-    The reading login must be implemented inside `__call__` method
+    In a distributed setup, each worker would draw different indices
+    by feeding their `worker_id` into the chunk sampler, which is a
+    `StrideSampler` implementation.
+
+    The reading logic must be implemented inside `__call__` method
     """
 
     def __init__(self):
         pass
 
     def __call__(self, idx):
-        r"""Returns a [possibly empty] list"""
+        r"""Returns `tuple(data, target)`
+
+        `data` and `target` can be either `None` or `numpy.array() and
+        `StopIteration` must be raised when there is no more data to be read.
+        """
         raise NotImplementedError
 
 
@@ -307,7 +314,8 @@ class ChunkDataset(IterableDataset):
 
         # Internal state
         self._chunk_sampler_iter = iter(self.chunk_sampler)
-        self._cache = []
+        self._data_cache = []
+        self._target_cache = []
 
     def __iter__(self):
         return self
@@ -318,27 +326,62 @@ class ChunkDataset(IterableDataset):
     def __next__(self):
         r"""Returns a batch or raises exception when exhausted"""
 
-        if len(self._cache) < self.batch_size:
-            new_chunk = self.chunk_reader(next(self._chunk_sampler_iter))
-            self._cache = list(itertools.chain(self._cache, new_chunk))
+        cache_size = 0
+        if len(self._data_cache) > 0:
+            cache_size = len(self._data_cache)
+        elif len(self._target_cache) > 0:
+            cache_size = len(self._target_cache)
+
+        if (cache_size < self.batch_size):
+            new_chunk = None
+            try:
+                new_chunk = self.chunk_reader(next(self._chunk_sampler_iter))
+                assert isinstance(new_chunk, tuple), "Chunk data reader must return a `tuple(data, target)`"
+            except StopIteration:
+                pass
+
+            if new_chunk and cache_size > 0:
+                if new_chunk[0] is not None:
+                    self._data_cache = numpy.concatenate((self._data_cache, new_chunk[0]))
+                if new_chunk[1] is not None:
+                    self._target_cache = numpy.concatenate((self._target_cache, new_chunk[1]))
+            elif new_chunk:
+                if new_chunk[0] is not None:
+                    self._data_cache = new_chunk[0]
+                if new_chunk[1] is not None:
+                    self._target_cache = new_chunk[1]
+            elif not new_chunk and cache_size == 0:
+                raise StopIteration
+
+
             if self.shuffle_cache:
-                random.shuffle(self._cache)
+                numpy.random.shuffle(self._data_cache)
+                numpy.random.shuffle(self._target_cache)
 
-        if not self._cache:
-            raise StopIteration
 
-        batch = self._cache[:self.batch_size]
-        self._cache = self._cache[self.batch_size:]
-
+        if len(self._data_cache) > 0 and len(self._target_cache) > 0:
+            batch = self._data_cache[:self.batch_size], self._target_cache[:self.batch_size]
+            self._data_cache = self._data_cache[self.batch_size:]
+            self._target_cache = self._target_cache[self.batch_size:]
+        elif len(self._data_cache) > 0:
+            batch = self._data_cache[:self.batch_size], None
+            self._data_cache = self._data_cache[self.batch_size:]
+        else:
+            batch = None, self._target_cache[:self.batch_size]
+            self._target_cache = self._target_cache[self.batch_size:]
         return batch
 
     def reset(self):
-        r"""Resets internal state
+        r"""Resets internal state of ChunkDataset
 
-        Typically will be used before a new epoch starts.
+        Typically will be used before a new epoch starts or
+        during worker initialization process.
         """
-        worker_id = get_worker_info().id
-        # print('ChunkDataset.reset({})'.format(worker_id))
+        worker_id = 0
+        try:
+            worker_id = get_worker_info().id
+        except Exception:
+            pass
         self.chunk_sampler.reset(worker_id)
         self._chunk_sampler_iter = iter(self.chunk_sampler)
 
