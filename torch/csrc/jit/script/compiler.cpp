@@ -1280,18 +1280,44 @@ struct to_ir {
     }
   }
 
+  bool isIsInstanceCall(const Expr& expr) {
+    if (expr.kind() != TK_APPLY) {
+      return false;
+    }
+    auto callee = Apply(expr).callee();
+    return callee.kind() == TK_VAR && Var(callee).name().name() == "isinstance";
+  }
+
+  bool isPotentialNoneCheck(const Expr& expr) {
+    return expr.kind() == TK_IS || expr.kind() == TK_ISNOT;
+  }
+
   void emitIf(const If& stmt) {
-    // NOTE: emitIf checks on If stmt condition to see if the cond AST kind ==
-    // is/is not, for such cases we do meta programming and disable emitting the
+    // NOTE: emitIf checks on If stmt condition to see if the cond AST is
+    // a potential none check with is/is not, or an isinstance check.
+    // for such cases we do meta programming and disable emitting the
     // corresponding branches
     Expr cond = stmt.cond();
+    bool isinstance_call = isIsInstanceCall(cond);
+    bool potential_none_check = !isinstance_call && isPotentialNoneCheck(cond);
 
-    if (cond.kind() != TK_IS && cond.kind() != TK_ISNOT) {
-      // emit normal IF stmt for cases except TK_IS and TK_ISNOT
+    if (!isinstance_call && !potential_none_check) {
+      // emit normal IF stmt for cases except isinstance & none checks
       Value* cond_value = emitCond(cond);
-      emitIfElseBlocks(cond_value, stmt);
-      return;
+      return emitIfElseBlocks(cond_value, stmt);
     }
+
+    if (isinstance_call) {
+      auto is_instance_result = emitSugaredExpr(cond, 1);
+      auto ivalue = toIValue(is_instance_result->asValue(cond.range(), method));
+      TORCH_INTERNAL_ASSERT(ivalue); // no support for runtime checks
+      if (ivalue->toBool()) {
+        return emitStatements(stmt.trueBranch());
+      } else {
+        return emitStatements(stmt.falseBranch());
+      }
+    }
+
     // meta programming on AST for is/is not cases and emit branches base on the
     // possible output of cond
     auto cond_op = BinOp(cond);
