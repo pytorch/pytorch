@@ -1,5 +1,5 @@
 TorchScript
-============
+===========
 
 .. contents:: :local:
 
@@ -1314,10 +1314,9 @@ Unsupported ``torch.nn`` Modules  ::
 
     torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss
     torch.nn.modules.normalization.CrossMapLRN2d
-    torch.nn.modules.fold.Fold
-    torch.nn.modules.fold.Unfold
-    torch.nn.modules.rnn.GRU
     torch.nn.modules.rnn.RNN
 
 
-.. automodule:: torch.jit.supported_ops
+See :ref:`builtin-functions` for a full reference of supported functions
+
+
