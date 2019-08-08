@@ -288,7 +288,7 @@ def main():
     if options.diff:
         line_filters = [get_changed_lines(options.diff, f) for f in files]
 
-    print(run_clang_tidy(options, line_filters, files))
+    print(run_clang_tidy(options, line_filters, files), file=sys.stderr)
 
 
 if __name__ == "__main__":
