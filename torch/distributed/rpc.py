@@ -68,7 +68,7 @@ def sync_rpc():
 
 
 # TODO: add a context managet to wrap init_rpc and join_rpc
-def init_rpc(name, backend='pg'):
+def init_rpc(name, backend='pg', num_send_recv_threads=None):
     r"""
     Initialize the local RPC agent which immediately makes the current process
     ready to send and receive RPCs. The caller needs to make sure the specified
@@ -94,7 +94,7 @@ def init_rpc(name, backend='pg'):
         # TODO: issue #23232
         names = _collect_worker_names(name, group)
         name_dict = {names[r] : r for r in range(len(names))}
-        _agent = ProcessGroupAgent(name, name_dict, group)
+        _agent = ProcessGroupAgent(name, name_dict, group, num_send_recv_threads)
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)
 

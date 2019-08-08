@@ -83,7 +83,6 @@ TIMEOUT_OVERRIDE = {}
 def get_timeout(test_id):
     return TIMEOUT_OVERRIDE.get(test_id.split('.')[-1], TIMEOUT_DEFAULT)
 
-
 class MultiProcessTestCase(TestCase):
     MAIN_PROCESS_RANK = -1
 
@@ -96,7 +95,7 @@ class MultiProcessTestCase(TestCase):
         @wraps(fn)
         def wrapper(self):
             if self.rank == self.MAIN_PROCESS_RANK:
-                self._join_processes(fn)
+                self._join_processes()
             else:
                 fn(self)
         return wrapper
@@ -137,7 +136,7 @@ class MultiProcessTestCase(TestCase):
         getattr(self, self.id().split(".")[2])()
         sys.exit(0)
 
-    def _join_processes(self, fn):
+    def _join_processes(self):
         timeout = get_timeout(self.id())
         start_time = time.time()
         for p in self.processes:
