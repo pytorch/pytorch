@@ -18,7 +18,7 @@ def _collect_worker_names(name, group):
 
     # collect name length
     ws = get_world_size(group)
-    name_bytes = name if sys.version_info < (3, 0) else bytes(name, 'utf8')
+    name_bytes = bytes(name) if sys.version_info < (3, 0) else bytes(name, 'utf8')
     name_bytes = list(array.array(str('B'), name_bytes))
     name_len = len(name_bytes)
     len_input = torch.ones(1, dtype=torch.int64) * name_len
