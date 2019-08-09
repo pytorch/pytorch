@@ -26,6 +26,14 @@ class TestNamedTensor(TestCase):
     def test_trivial(self):
         pass
 
+    # TODO(rzou): Some form of this check should be added to self.assertEqual.
+    # Right now I don't know what it should look like.
+    def assertTensorDataAndNamesEqual(self, x, y):
+        self.assertEqual(x.names, y.names)
+        unnamed_x = x.set_names(None)
+        unnamed_y = y.set_names(None)
+        self.assertEqual(unnamed_x, unnamed_y)
+
     def _test_factory(self, factory, device):
         x = factory([], device=device)
         self.assertEqual(x.names, ())
@@ -67,9 +75,6 @@ class TestNamedTensor(TestCase):
                 'with duplicate names unless they are tagged and have different tags'):
             x = factory(2, 1, 1, names=('C.in', 'H', 'C'), device=device)
 
-
-    def test_empty(self):
-        self._test_factory(torch.empty, 'cpu')
 
     def test_has_names(self):
         unnamed = torch.empty(2, 3)
@@ -115,6 +120,20 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
             tensor.set_names_(['N', 'N'])
 
+    def test_set_names(self):
+        tensor = torch.empty(1, 1, names=('N', 'C'))
+
+        self.assertEqual(tensor.set_names(None).names, (None, None))
+        self.assertEqual(tensor.set_names(['H', 'W']).names, ('H', 'W'))
+
+        # Check that we didn't modify tensor.names
+        self.assertEqual(tensor.names, ('N', 'C'))
+
+        with self.assertRaisesRegex(RuntimeError, 'Number of names'):
+            tensor.set_names(['N', 'C', 'W'])
+        with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
+            tensor.set_names(['N', 'N'])
+
     def test_set_names_property(self):
         tensor = torch.empty(1, 1, names=('N', 'C'))
 
@@ -129,9 +148,38 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
             tensor.names = ['N', 'N']
 
-    @unittest.skipIf(not TEST_CUDA, 'no CUDA')
-    def test_empty_cuda(self):
-        self._test_factory(torch.empty, 'cuda')
+    def test_factory_edge_cases(self):
+        for device in torch.testing.get_all_device_types():
+            self._test_factory(torch.empty, device)
+
+    def test_factory_coverage(self):
+        def _test(factory, device):
+            names = ('N', 'T', 'D')
+
+            torch.manual_seed(0)
+            result = factory(1, 2, 3, names=names, device=device)
+
+            torch.manual_seed(0)
+            expected = factory(1, 2, 3, device=device).set_names_(names)
+
+            self.assertTensorDataAndNamesEqual(result, expected)
+
+        supported = [
+            torch.ones,
+            torch.rand,
+            torch.randn,
+            torch.zeros,
+        ]
+
+        for op, device in itertools.product(supported, torch.testing.get_all_device_types()):
+            _test(op, device)
+
+        # Test torch.full
+        for device in torch.testing.get_all_device_types():
+            names = ('N', 'T', 'D')
+            result = torch.full([1, 2, 3], 2, names=names, device=device)
+            expected = torch.full([1, 2, 3], 2, device=device).set_names_(names)
+            self.assertTensorDataAndNamesEqual(result, expected)
 
     def test_size(self):
         t = torch.empty(2, 3, 5, names=('N', None, 'C'))
@@ -310,6 +358,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('clamp_min', -2),
             fn_method_and_inplace('clamp_max', 2),
             method('cauchy_'),
+            method('clone'),
             fn_method_and_inplace('cos'),
             fn_method_and_inplace('cosh'),
             fn_method_and_inplace('digamma'),
@@ -369,6 +418,9 @@ class TestNamedTensor(TestCase):
 
             # views
             method('narrow', 0, 0, 1),
+
+            # creation functions
+            fn('empty_like')
         ]
         tests = flatten(tests)
 
