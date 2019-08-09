@@ -7296,9 +7296,11 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @skipIfRocm
     def test_batchnorm_cudnn_nhwc(self):
-        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda", requires_grad=True).contiguous(memory_format=torch.channels_last)
+        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda", requires_grad=True)
+        input = input.contiguous(memory_format=torch.channels_last)
         input.retain_grad()
-        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda").contiguous(memory_format=torch.channels_last)
+        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
+        grad = grad.contiguous(memory_format=torch.channels_last)
         bn = nn.BatchNorm2d(8).cuda().float()
         bn.weight.data.uniform_()
         bn.bias.data.uniform_()
@@ -8714,9 +8716,11 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @skipIfRocm
     def test_conv_cudnn_nhwc(self):
-        input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device="cuda", requires_grad=True).contiguous(memory_format=torch.channels_last)
+        input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device="cuda", requires_grad=True)
+        input = input.contiguous(memory_format=torch.channels_last)
         input.retain_grad()
-        grad = torch.rand(2, 4, 2, 2, dtype=torch.float32, device="cuda").contiguous(memory_format=torch.channels_last)
+        grad = torch.rand(2, 4, 2, 2, dtype=torch.float32, device="cuda")
+        grad = grad.contiguous(memory_format=torch.channels_last)
         conv = nn.Conv2d(8, 4, 3).cuda().float()
 
         ref_input = input.detach().clone().contiguous().requires_grad_(True)
