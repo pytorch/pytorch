@@ -29,6 +29,12 @@ public:
     });
   }
 
+  DispatchTableEntry lookupKernel(TensorTypeId dispatchKey) const {
+    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) {
+      return dispatchTable.lookup(dispatchKey);
+    });
+  }
+
   void prepareForDeregistration();
 
   RegistrationHandleRAII registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel);
