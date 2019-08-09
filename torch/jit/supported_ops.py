@@ -45,7 +45,6 @@ def _list_supported_ops():
     mod = torch.nn.functional
     name = mod.__name__
     for elem in dir(torch.nn.functional):
-        # weak script functions
         attr = getattr(mod, elem)
         if not inspect.isfunction(attr) or hidden(elem[0]):
             # Ignore non-functions and internal methods
@@ -55,8 +54,8 @@ def _list_supported_ops():
             # Ignore functions from outside torch.nn.functional
             continue
 
-        # compile weak script fn, get schema
         try:
+            # compile fn, get schema
             scripted = torch.jit.script(attr)
             schema = scripted.schema
             functions.append(emit_schema(name, elem, schema))
