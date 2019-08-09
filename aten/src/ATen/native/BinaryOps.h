@@ -14,5 +14,6 @@ DECLARE_DISPATCH(binary_fn_alpha, add_stub);
 DECLARE_DISPATCH(binary_fn_alpha, sub_stub);
 DECLARE_DISPATCH(binary_fn, mul_stub);
 DECLARE_DISPATCH(binary_fn, div_stub);
+DECLARE_DISPATCH(binary_fn, atan2_stub);
 
 }} // namespace at::native
