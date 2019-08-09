@@ -29,7 +29,7 @@ import inspect
 import pickle
 
 # These are imported so users can access them from the `torch.jit` module
-from torch._jit_internal import Final  # noqa: F401
+from torch._jit_internal import Final, _overload  # noqa: F401
 from torch._jit_internal import ignore, export  # noqa: F401
 
 if sys.version_info[0] > 2:
@@ -2116,24 +2116,11 @@ def _get_script_class(name):
                            "Did you forget to import it?".format(name))
     return _script_classes[name]
 
-# qualified_name => list[(overload decl, overload default args)]
-_overloaded_fns = {}
+# overloads are registered in _jit_internal and compiled here so that _overload
+# can be used in nn/functional.py without an import cycle
 
 # qualified name => list[compiled fns]
 _compiled_overloaded_fns = {}
-
-def _overload(func):
-    qual_name = _qualified_name(func)
-    global _overloaded_fns
-    fn_overload_list = _overloaded_fns.get(qual_name)
-    if fn_overload_list is None:
-        fn_overload_list = []
-        _overloaded_fns[qual_name] = fn_overload_list
-    signature = torch.jit.annotations.get_signature(func)
-    if signature is None:
-        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {obj}").format(func)
-    fn_overload_list.append((torch.jit.get_jit_def(func).decl(), get_default_args(func)))
-    return func
 
 def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
     impl_ast = torch.jit.get_jit_def(impl_fn)
@@ -2141,6 +2128,12 @@ def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_
     _rcb = _gen_rcb(impl_fn, _frames_up)
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
+
+def _get_overload_decl_and_defaults(func):
+    signature = torch.jit.annotations.get_signature(func)
+    if signature is None:
+        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {obj}").format(func)
+    return (torch.jit.get_jit_def(func).decl(), get_default_args(func))
 
 def _get_overloads(obj):
     # check for cached compiled fns
@@ -2151,8 +2144,7 @@ def _get_overloads(obj):
         return compiled_overloads
 
     # check for not yet compiled overloads
-    global _overloaded_fns
-    overloads = _overloaded_fns.get(qual_name, None)
+    overloads = _jit_internal._get_fn_overloads(qual_name)
     if overloads is None:
         return None
     compiled_fns = []
@@ -2160,20 +2152,21 @@ def _get_overloads(obj):
     # This is more complicated because you can have a default arg with a type
     # incompatible with a type of parameter in an overload, and other validation.
     # This is still an internal api so for now use defaults from overload
-    for overload_decl, overload_defaults in overloads:
+    for overload_fn in overloads:
+        overload_decl, overload_defaults = _get_overload_decl_and_defaults(overload_fn)
         compiled_fn = _compile_function_with_overload(qual_name, obj, overload_decl, overload_defaults)
         compiled_fns.append(compiled_fn)
 
     # cache compilation, remove information stored to do compilation
     _compiled_overloaded_fns[qual_name] = compiled_fns
-    del _overloaded_fns[qual_name]
+    _jit_internal._clear_fn_overloads(qual_name)
     return compiled_fns
 
 def _check_directly_compile_overloaded(obj):
     qual_name = _qualified_name(obj)
     global _compiled_overloaded_fns
     global _overloaded_fns
-    if qual_name in _compiled_overloaded_fns or qual_name in _overloaded_fns:
+    if qual_name in _compiled_overloaded_fns or _jit_internal._get_fn_overloads(qual_name):
         raise RuntimeError("Function {} cannot be directly compiled because it"
                            " is overloaded. It must be used in a context of a function"
                            " where its inputs can determine which overload to call.".format(qual_name))
