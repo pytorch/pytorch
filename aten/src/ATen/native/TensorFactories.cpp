@@ -121,16 +121,12 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
 Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
-    const TensorOptions& options,
-    optional<MemoryFormat> optional_memory_format) {
-  if (!names.has_value()) {
-    return at::empty(size, options, optional_memory_format);
-  }
+    const TensorOptions& options) {
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
   TORCH_CHECK(options.backend() == Backend::CPU || options.backend() == Backend::CUDA,
       "NYI: named tensors only support CPU and CUDA tensors");
-  auto result = at::empty(size, options, optional_memory_format);
+  auto result = at::empty(size, options);
   internal_set_names_inplace(result, names);
   return result;
 }
@@ -229,11 +225,7 @@ Tensor empty_like(
                                        use_memory_format);
   }
 
-#ifdef BUILD_NAMEDTENSOR
-  return at::empty(self.sizes(), self.names(), options, use_memory_format);
-#else
   return at::empty(self.sizes(), options, use_memory_format);
-#endif
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -841,69 +833,6 @@ Tensor clone(const Tensor& src) {
   self.copy_(src);
   return self;
 }
-
-#ifdef BUILD_NAMEDTENSOR
-// ~~~~~~~~~~~~~~~~~~~~~~~~~ named tensor overloads ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// In the short term, these exist.
-// In the long term, we should move DimnameList into TensorOptions to avoid
-// having these overloads.
-
-Tensor full(
-    IntArrayRef size,
-    Scalar fill_value,
-    optional<DimnameList> names,
-    const TensorOptions& options) {
-  auto result = at::empty(size, names, options);
-  return result.fill_(fill_value);
-}
-
-Tensor ones(
-    IntArrayRef size,
-    optional<DimnameList> names,
-    const TensorOptions& options) {
-  return native::full(size, /*fill_value=*/1, names, options);
-}
-
-Tensor zeros(
-    IntArrayRef size,
-    optional<DimnameList> names,
-    const TensorOptions& options) {
-  return native::full(size, /*fill_value=*/0, names, options);
-}
-
-Tensor randn(
-    IntArrayRef size,
-    optional<DimnameList> names,
-    const TensorOptions& options) {
-  return native::randn(size, nullptr, names, options);
-}
-
-Tensor randn(
-    IntArrayRef size,
-    Generator* generator,
-    optional<DimnameList> names,
-    const TensorOptions& options) {
-  auto result = at::empty(size, names, options);
-  return result.normal_(0, 1, generator);
-}
-
-Tensor rand(
-    IntArrayRef size,
-    optional<DimnameList> names,
-    const TensorOptions& options) {
-  return native::rand(size, nullptr, names, options);
-}
-
-Tensor rand(
-    IntArrayRef size,
-    Generator* generator,
-    optional<DimnameList> names,
-    const TensorOptions& options) {
-  auto result = at::empty(size, names, options);
-  return result.uniform_(0, 1, generator);
-}
-
-#endif
 
 } // namespace native
 } // namespace at
