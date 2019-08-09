@@ -11,6 +11,6 @@ pthreadpool_t mobile_threadpool() {
   return reinterpret_cast<pthreadpool_t>(thread_pool.get());
 #else
   return nullptr;
-}
 #endif
+}
 } // namespace caffe2
