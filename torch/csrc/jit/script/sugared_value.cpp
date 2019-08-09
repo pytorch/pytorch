@@ -74,6 +74,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
         "shape",
         "is_cuda",
         "is_mkldnn",
+        "is_quantized",
         "requires_grad",
     };
     if (fields.count(field)) {
