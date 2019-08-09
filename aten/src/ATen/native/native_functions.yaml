@@ -1113,13 +1113,19 @@
   dispatch:
     MkldnnCPU: mkldnn_linear
 
+- func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
+
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
 - func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)
 
 - func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
 
+- func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+
 - func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+
+- func: fbgemm_pack_quantized_matrix(Tensor input) -> Tensor
 
 - func: fbgemm_pack_quantized_matrix(Tensor input, int K, int N) -> Tensor
 
@@ -1735,6 +1741,7 @@
     CPU: relu_
     CUDA: relu_
     MkldnnCPU: mkldnn_relu_
+    QuantizedCPU: quantized_relu_
 
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
@@ -3746,21 +3753,12 @@
 - func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
 
 - func: addcmul.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: addcmul_cpu_out
-    CUDA: legacy::cuda::_th_addcmul_out
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
-  dispatch:
-    CPU: addcmul_cpu
-    CUDA: legacy::cuda::_th_addcmul
 
 - func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: addcmul_cpu_
-    CUDA: legacy::cuda::_th_addcmul_
 
 - func: addcdiv.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
