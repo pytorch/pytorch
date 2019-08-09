@@ -1769,40 +1769,6 @@
         - THTensor* self
 ]]
 [[
-  name: _th_atan2
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  cname: atan2
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: other fallback
-    - THTensor* other
-]]
-[[
-  name: _th_atan2_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  cname: atan2
-  variants: function
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - arg: THTensor* self
-      broadcast: other fallback inplace
-    - THTensor* other
-]]
-[[
   name: _th_pow
   cname: pow
   variants:
