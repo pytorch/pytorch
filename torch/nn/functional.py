@@ -14,47 +14,6 @@ from . import grad  # noqa: F401
 from . import _VF
 from .._jit_internal import boolean_dispatch, List, _overload
 
-
-conv1d = _add_docstr(torch.conv1d, r"""
-conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
-
-Applies a 1D convolution over an input signal composed of several input
-planes.
-
-See :class:`~torch.nn.Conv1d` for details and output shape.
-
-.. include:: cudnn_deterministic.rst
-
-Args:
-    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
-    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kW)`
-    bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
-    stride: the stride of the convolving kernel. Can be a single number or
-      a one-element tuple `(sW,)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
-      single number or a one-element tuple `(padW,)`. Default: 0
-    dilation: the spacing between kernel elements. Can be a single number or
-      a one-element tuple `(dW,)`. Default: 1
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
-      the number of groups. Default: 1
-
-Examples::
-
-    >>> filters = torch.randn(33, 16, 3)
-    >>> inputs = torch.randn(20, 16, 50)
-    >>> F.conv1d(inputs, filters)
-""")
-
-@_overload
-def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], BroadcastingList4[int], BroadcastingList2[int], int) -> Tensor
-    pass
-
-@_overload
-def conv2d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], str, BroadcastingList2[int], int) -> Tensor
-    pass
-
 def _compute_padding_same(input_size, dim, weight, stride, dilation):
     # type: (List[int], int, Tensor, List[int], List[int]) -> int
     # When calculating convolutions, we can examine each dimension independently
@@ -69,6 +28,64 @@ def _compute_padding_same(input_size, dim, weight, stride, dilation):
     # the effective filter size. Padding is equal to the difference
     total_padding = max(0, last_start + effective_filter_size - input_size)
     return total_padding
+
+@_overload
+def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], BroadcastingList2[int], BroadcastingList1[int], int) -> Tensor
+    pass
+
+@_overload
+def conv1d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1):
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], str, BroadcastingList1[int], int) -> Tensor
+    pass
+
+def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+    r"""
+    conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+
+    Applies a 1D convolution over an input signal composed of several input
+    planes.
+
+    See :class:`~torch.nn.Conv1d` for details and output shape.
+
+    .. include:: cudnn_deterministic.rst
+
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
+        weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kW)`
+        bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
+        stride: the stride of the convolving kernel. Can be a single number or
+        a one-element tuple `(sW,)`. Default: 1
+        padding: implicit paddings on both sides of the input. Can be a
+        single number or a one-element tuple `(padW,)`. Default: 0
+        dilation: the spacing between kernel elements. Can be a single number or
+        a one-element tuple `(dW,)`. Default: 1
+        groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
+        the number of groups. Default: 1
+
+    Examples::
+
+        >>> filters = torch.randn(33, 16, 3)
+        >>> inputs = torch.randn(20, 16, 50)
+        >>> F.conv1d(inputs, filters)
+    """
+    if isinstance(padding, str):
+        padding_rows = _compute_padding_same(input.size(), 0, weight, stride, dilation)
+        final_padding = [padding_rows//2, (padding_rows+1)//2]
+        return torch.conv2d(input, weight, bias, stride, final_padding, dilation, groups)
+    else:
+        return torch.conv2d(input, weight, bias, stride, padding, dilation, groups)
+
+@_overload
+def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], BroadcastingList4[int], BroadcastingList2[int], int) -> Tensor
+    pass
+
+@_overload
+def conv2d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1):
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], str, BroadcastingList2[int], int) -> Tensor
+    pass
+
 
 def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
     r"""
@@ -110,36 +127,59 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
     else:
         return torch.conv2d(input, weight, bias, stride, padding, dilation, groups)
 
+@_overload
+def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int], BroadcastingList6[int], BroadcastingList2[int], int) -> Tensor
+    pass
 
-conv3d = _add_docstr(torch.conv3d, r"""
-conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+@_overload
+def conv3d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1):
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int], str, BroadcastingList3[int], int) -> Tensor
+    pass
 
-Applies a 3D convolution over an input image composed of several input
-planes.
 
-See :class:`~torch.nn.Conv3d` for details and output shape.
+def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+    r"""
+    conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
-.. include:: cudnn_deterministic.rst
+    Applies a 3D convolution over an input image composed of several input
+    planes.
 
-Args:
-    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
-    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kT , kH , kW)`
-    bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
-    stride: the stride of the convolving kernel. Can be a single number or a
-      tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`. Default: 0
-    dilation: the spacing between kernel elements. Can be a single number or
-      a tuple `(dT, dH, dW)`. Default: 1
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
-      the number of groups. Default: 1
+    See :class:`~torch.nn.Conv3d` for details and output shape.
 
-Examples::
+    .. include:: cudnn_deterministic.rst
 
-    >>> filters = torch.randn(33, 16, 3, 3, 3)
-    >>> inputs = torch.randn(20, 16, 50, 10, 20)
-    >>> F.conv3d(inputs, filters)
-""")  # noqa: E501
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
+        weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kT , kH , kW)`
+        bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
+        stride: the stride of the convolving kernel. Can be a single number or a
+        tuple `(sT, sH, sW)`. Default: 1
+        padding: implicit paddings on both sides of the input. Can be a
+        single number or a tuple `(padT, padH, padW)`. Default: 0
+        dilation: the spacing between kernel elements. Can be a single number or
+        a tuple `(dT, dH, dW)`. Default: 1
+        groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
+        the number of groups. Default: 1
+
+    Examples::
+
+        >>> filters = torch.randn(33, 16, 3, 3, 3)
+        >>> inputs = torch.randn(20, 16, 50, 10, 20)
+        >>> F.conv3d(inputs, filters)
+    """
+    if isinstance(padding, str):
+        padding_calc = [_compute_padding_same(input.size(), 0, weight, stride, dilation),
+                        _compute_padding_same(input.size(), 1, weight, stride, dilation)
+                        _compute_padding_same(input.size(), 2, weight, stride, dilation)
+                        ]
+        final_padding = [padding_calc[0]//2, (padding_calc[0]+1)//2,
+                        padding_calc[1]//2, (padding_calc[1]+1)//2,
+                        padding_calc[2]//2, (padding_calc[2]+1)//2,
+        ]
+        return torch.conv2d(input, weight, bias, stride, final_padding, dilation, groups)
+    else:
+        return torch.conv2d(input, weight, bias, stride, padding, dilation, groups)
 
 conv_transpose1d = _add_docstr(torch.conv_transpose1d, r"""
 conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
