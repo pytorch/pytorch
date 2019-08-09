@@ -2390,7 +2390,7 @@ class _TestTorchMixin(object):
             for exp in exps:
                 t = typecast(tensor)
                 e = exp if isinstance(exp, int) else typecast(exp)
-                self._check_against_np(self, t, e)
+                _TestTorchMixin._check_against_np(self, t, e)
 
     @staticmethod
     def _test_short_pow(self, cast):
@@ -2401,7 +2401,7 @@ class _TestTorchMixin(object):
         exps = [0, 1, 2, 5, cast(torch.ShortTensor(3, 3).random_(0, 10))]
 
         for exp in exps:
-            self._check_against_np(self, tensor, exp)
+            _TestTorchMixin._check_against_np(self, tensor, exp)
 
     @staticmethod
     def _test_byte_pow(self, cast):
@@ -2412,7 +2412,7 @@ class _TestTorchMixin(object):
         exps = [0, 1, 2, 5, cast(torch.ByteTensor(3, 3).random_(0, 10))]
 
         for exp in exps:
-            self._check_against_np(self, tensor, exp)
+            _TestTorchMixin._check_against_np(self, tensor, exp)
 
     def test_int_pow(self):
         self._test_int_pow(self, lambda x: x)
