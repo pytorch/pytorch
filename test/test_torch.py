@@ -2406,12 +2406,24 @@ class _TestTorchMixin(object):
             _TestTorchMixin._check_against_np(self, tensor, exp)
 
     @staticmethod
+    def _test_ubyte_pow(self, cast):
+        if not TEST_NUMPY:
+            return
+
+        tensor = cast(torch.tensor((3, 3), dtype=torch.uint8).random_(0, 4))
+        exps = [0, 1, 2, 5,
+                cast(torch.tensor((3, 3), dtype=torch.uint8).random_(0, 10))]
+
+        for exp in exps:
+            _TestTorchMixin._check_against_np(self, tensor, exp)
+
+    @staticmethod
     def _test_byte_pow(self, cast):
         if not TEST_NUMPY:
             return
 
-        tensor = cast(torch.tensor((3, 3), dtype=torch.int8).random_(0, 4))
-        exps = [0, 1, 2, 5,
+        tensor = cast(torch.tensor((3, 3), dtype=torch.int8).random_(-3, 4))
+        exps = [0, 1, 2, 4,
                 cast(torch.tensor((3, 3), dtype=torch.int8).random_(0, 10))]
 
         for exp in exps:
@@ -2421,6 +2433,7 @@ class _TestTorchMixin(object):
         self._test_int_pow(self, lambda x: x)
         self._test_short_pow(self, lambda x: x)
         self._test_byte_pow(self, lambda x: x)
+        self._test_ubyte_pow(self, lambda x: x)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_tensor_pow_neg_ints(self):

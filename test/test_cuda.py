@@ -2588,6 +2588,7 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_int_pow(self, lambda x: x.cuda())
         _TestTorchMixin._test_short_pow(self, lambda x: x.cuda())
         _TestTorchMixin._test_byte_pow(self, lambda x: x.cuda())
+        _TestTorchMixin._test_ubyte_pow(self, lambda x: x.cuda())
 
     def test_remainder_overflow(self):
         _TestTorchMixin._test_remainder_overflow(self, dtype=torch.int64, device='cuda')
