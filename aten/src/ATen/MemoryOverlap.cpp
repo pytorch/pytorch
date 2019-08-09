@@ -39,16 +39,18 @@ MemOverlapStatus get_overlap_status(const Tensor& a, const Tensor& b) {
 }
 
 MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
-  const auto a_begin = static_cast<char*>(a->data());
-  const auto a_end = a_begin + a->numel() * a->itemsize();
-  const auto b_begin = static_cast<char*>(b->data());
-  const auto b_end = b_begin + b->numel() * b->itemsize();
+  if (a->is_contiguous() && b->is_contiguous() && a->storage().data() == b->storage().data()) {
+    const auto a_begin = static_cast<char*>(a->data());
+    const auto a_end = a_begin + a->numel() * a->itemsize();
+    const auto b_begin = static_cast<char*>(b->data());
+    const auto b_end = b_begin + b->numel() * b->itemsize();
 
-  if (a_begin == b_begin && a_end == b_end) {
-    return MemOverlapStatus::FULL;
-  }
-  if (a_begin < b_end && b_begin < a_end) {
-    return MemOverlapStatus::PARTIAL;
+    if (a_begin == b_begin && a_end == b_end) {
+      return MemOverlapStatus::FULL;
+    }
+    if (a_begin < b_end && b_begin < a_end) {
+      return MemOverlapStatus::PARTIAL;
+    }
   }
   return MemOverlapStatus::NO;
 }
