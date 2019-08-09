@@ -121,16 +121,15 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
 Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
-    const TensorOptions& options,
-    optional<MemoryFormat> optional_memory_format) {
+    const TensorOptions& options) {
   if (!names.has_value()) {
-    return at::empty(size, options, optional_memory_format);
+    return at::empty(size, options);
   }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
   TORCH_CHECK(options.backend() == Backend::CPU || options.backend() == Backend::CUDA,
       "NYI: named tensors only support CPU and CUDA tensors");
-  auto result = at::empty(size, options, optional_memory_format);
+  auto result = at::empty(size, options);
   internal_set_names_inplace(result, names);
   return result;
 }
@@ -229,11 +228,7 @@ Tensor empty_like(
                                        use_memory_format);
   }
 
-#ifdef BUILD_NAMEDTENSOR
-  return at::empty(self.sizes(), self.names(), options, use_memory_format);
-#else
   return at::empty(self.sizes(), options, use_memory_format);
-#endif
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
