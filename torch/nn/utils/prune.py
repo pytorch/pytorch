@@ -114,7 +114,7 @@ class BasePruningMethod(ABC):
             # the previous one.
             method = cls(*args, **kwargs)  # new pruning
             # Have the pruning method remember what tensor it's been applied to
-            setattr(method, "_tensor_name", name)
+            method._tensor_name = name
 
             # combine `methods` with `old_method`, if `old_method` exists
             if old_method is not None:  # meaning that there was a hook
@@ -218,10 +218,10 @@ class PruningContainer(BasePruningMethod):
     def __init__(self, *args):
         self._pruning_methods = tuple()
         if not isinstance(args, Iterable):  # only 1 item
-            setattr(self, "_tensor_name", args._tensor_name)
+            self._tensor_name = args._tensor_name
             self.add_pruning_method(args)
         elif len(args) == 1:  # only 1 item in a tuple
-            setattr(self, "_tensor_name", args[0]._tensor_name)
+            self._tensor_name = args[0]._tensor_name
             self.add_pruning_method(args[0])
         else:  # manual construction from list or other iterable (or no args)
             for method in args:
@@ -1120,7 +1120,7 @@ def is_pruned(module):
 
 def _validate_pruning_amount_init(amount):
     """Validation helper to check the range of amount at init.
-    
+
     Args:
         amount (int or float): quantity of parameters to prune.
             If float, should be between 0.0 and 1.0 and represent the
@@ -1161,7 +1161,7 @@ def _validate_pruning_amount_init(amount):
 def _validate_pruning_amount(amount, tensor_size):
     """Validation helper to check that the amount of parameters to prune
     is meaningful wrt to the size of the data (`tensor_size`).
-    
+
     Args:
         amount (int or float): quantity of parameters to prune.
             If float, should be between 0.0 and 1.0 and represent the
@@ -1188,7 +1188,7 @@ def _validate_pruning_amount(amount, tensor_size):
 def _validate_structured_pruning(t):
     """Validation helper to check that the tensor to be pruned is multi-
     dimensional, such that the concept of "channels" is well-defined.
-    
+
     Args:
         t (torch.Tensor): tensor representing the parameter to prune
 

@@ -27,7 +27,7 @@ import torch.nn.functional as F
 import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
 from torch.nn.utils import (clip_grad_norm_, clip_grad_value_)
-import  torch.nn.utils.prune as prune
+import torch.nn.utils.prune as prune
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
@@ -2004,7 +2004,7 @@ class TestNN(NNTestCase):
         """
         # fixturize test
         # TODO: add other modules
-        modules = [nn.Linear(5, 7), nn.Conv3d(2,2,2)]
+        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
         names = ['weight', 'bias']
 
         for m in modules:
@@ -2036,14 +2036,15 @@ class TestNN(NNTestCase):
         """
         # fixturize test
         # TODO: add other modules
-        modules = [nn.Linear(5, 7), nn.Conv3d(2,2,2)]
+        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
         names = ['weight', 'bias']
 
         for m in modules:
             for name in names:
                 with self.subTest(m=m, name=name):
 
-                    original_tensor = getattr(m, name) # tensor prior to pruning
+                    # tensor prior to pruning
+                    original_tensor = getattr(m, name)
                     prune.random_unstructured(m, name=name, amount=0.1)
                     self.assertEqual(
                         original_tensor,
@@ -2056,14 +2057,14 @@ class TestNN(NNTestCase):
         """
         # fixturize test
         # TODO: add other modules
-        modules = [nn.Linear(5, 7), nn.Conv3d(2,2,2)]
+        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
         names = ['weight', 'bias']
 
         for m in modules:
             for name in names:
                 with self.subTest(m=m, name=name):
-
-                    original_tensor = getattr(m, name) # tensor prior to pruning
+                    # tensor prior to pruning
+                    original_tensor = getattr(m, name) 
                     prune.random_unstructured(m, name=name, amount=0.1)
                     # weight = weight_orig * weight_mask
                     self.assertEqual(
@@ -2135,7 +2136,7 @@ class TestNN(NNTestCase):
         # with mask of 1s, output should be identical to no mask
         y_postpruning = m(input_)
         self.assertEqual(y_prepruning, y_postpruning)
-        
+
         # with mask of 1s, grad should be identical to no mask
         y_postpruning.sum().backward()
         self.assertEqual(old_grad_weight, m.weight_orig.grad)
@@ -2199,7 +2200,7 @@ class TestNN(NNTestCase):
         self.assertEqual(yhat[0, 0], m.weight_orig[0, 3] + m.bias[0])
         self.assertEqual(yhat[0, 1], m.weight_orig[1, 0] + m.bias[1])
 
-    def test_remove_pruning(self):
+    def test_remove_pruning_forward(self):
         """Remove pruning and check forward is unchanged from previous 
         pruned state.
         """
@@ -2241,7 +2242,7 @@ class TestNN(NNTestCase):
         self.assertEqual(tensor_id, id(list(m.parameters())[0]))
 
     def test_random_pruning_pickle(self):
-        modules = [nn.Linear(5, 7), nn.Conv3d(2 ,2, 2)]
+        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
         names = ['weight', 'bias']
 
         for m in modules:
@@ -2253,7 +2254,7 @@ class TestNN(NNTestCase):
 
     def test_multiple_pruning_calls(self):
         # if you call pruning twice, the hook becomes a PruningContainer
-        m = nn.Conv3d(2 ,2, 2)
+        m = nn.Conv3d(2, 2, 2)
         prune.l1_unstructured(m, name='weight', amount=0.1)
         weight_mask0 = m.weight_mask  # save it for later sanity check
 
@@ -2411,8 +2412,8 @@ class TestNN(NNTestCase):
         # check that 1 column is fully prune, the others are left untouched
         remaining_axes = [_ for _ in range(len(t.shape)) if _ != AXIS]
         per_column_sums = sorted(
-            torch.sum(computed_mask == 0, axis=remaining_axes
-        ))
+            torch.sum(computed_mask == 0, axis=remaining_axes)
+        )
         assert per_column_sums == [0, 20]
 
 
@@ -2444,7 +2445,7 @@ class TestNN(NNTestCase):
         """`prune.remove` removes the hook and the reparametrization
         and makes the pruning final in the original parameter.
         """
-        modules = [nn.Linear(5, 7), nn.Conv3d(2,2,2)]
+        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
         names = ['weight', 'bias']
 
         for m in modules:
@@ -2470,7 +2471,7 @@ class TestNN(NNTestCase):
     def test_remove_pruning_exception(self):
         """Removing from an unpruned tensor throws an assertion error
         """
-        modules = [nn.Linear(5, 7), nn.Conv3d(2,2,2)]
+        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
         names = ['weight', 'bias']
 
         for m in modules:
@@ -2547,7 +2548,7 @@ class TestNN(NNTestCase):
         The try/except statement in `apply` should handle rolling back 
         to the previous state before pruning began.
         """
-        modules = [nn.Linear(5, 7), nn.Conv3d(2,2,2)]
+        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
         names = ['weight', 'bias']
 
         for m in modules:
