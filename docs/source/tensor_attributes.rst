@@ -36,13 +36,14 @@ can be used, which returns ``True`` if the data type is a floating point data ty
 
 When the dtypes of inputs to an arithmetic operation (`add`, `sub`, `div`, `mul`) differ, we promote
 by finding the minimum dtype that satisfies the following rules:
-  * If the type of a scalar operand is of a higher category than tensor operands
+
+* If the type of a scalar operand is of a higher category than tensor operands
   (where floating > integral > boolean), we promote to a type with sufficient size to hold
   all scalar operands of that category.
-  * If a zero-dimension tensor operand has a higher category than dimensioned operands,
+* If a zero-dimension tensor operand has a higher category than dimensioned operands,
   we promote to a type with sufficient size and category to hold all zero-dim tensor operands of
   that category.
-  * If there are no higher-category zero-dim operands, we promote to a type with sufficient size
+* If there are no higher-category zero-dim operands, we promote to a type with sufficient size
   and category to hold all dimensioned operands.
 
 A floating point scalar operand has dtype `torch.get_default_dtype()` and an integral
