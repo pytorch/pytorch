@@ -50,12 +50,12 @@ public:
 
     // internal-only for registering stack based kernels
     Options&& kernel(TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator) && {
-      return std::move(*this).kernel(dispatch_key, kernel_func, std::move(cache_creator), nullptr);
+      return std::move(*this).kernel(dispatch_key, kernel_func, std::move(cache_creator), nullptr, nullptr);
     }
 
     // internal-only for registering stack based catch-all kernels
     Options&& catchAllKernel(KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator) && {
-      return std::move(*this).kernel(c10::nullopt, kernel_func, std::move(cache_creator), nullptr);
+      return std::move(*this).kernel(c10::nullopt, kernel_func, std::move(cache_creator), nullptr, nullptr);
     }
 
     /**
@@ -259,11 +259,12 @@ public:
     }
 
   private:
-    Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
+    Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, void* unboxed_kernel_func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
       config.dispatch_key = dispatch_key;
       config.kernel_func = kernel_func;
       config.cache_creator_func = std::move(cache_creator);
+      config.unboxed_kernel_func = unboxed_kernel_func;
       config.inferred_function_schema = std::move(inferred_function_schema);
       kernels.push_back(std::move(config));
       return std::move(*this);
@@ -273,8 +274,9 @@ public:
     Options&& kernelFunctor(c10::optional<TensorTypeId>&& dispatch_key, ConstructorParameters&&... constructorParameters) && {
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        &detail::wrap_kernel_functor<KernelFunctor, AllowDeprecatedTypes>::call,
+        &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes>::call,
         detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
+        reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
         detail::FunctionSchemaInferer<KernelFunctor>()()
       );
     }
@@ -288,12 +290,14 @@ public:
         : dispatch_key(c10::nullopt)
         , kernel_func(nullptr)
         , cache_creator_func(nullptr)
+        , unboxed_kernel_func(nullptr)
         , inferred_function_schema(nullptr)
       {}
 
       c10::optional<TensorTypeId> dispatch_key;
       KernelFunction* kernel_func;
       KernelCacheCreatorFunction cache_creator_func;
+      void* unboxed_kernel_func; // can be nullptr, not all kernels have this
       std::unique_ptr<FunctionSchema> inferred_function_schema;
     };
 

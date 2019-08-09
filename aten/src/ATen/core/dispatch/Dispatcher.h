@@ -39,13 +39,24 @@ public:
     return (*kernel_)(stack, cache_.get());
   }
 
+  template<class Result, class... Args>
+  Result callUnboxed(Args... args) const {
+    // TODO Should we box and call the boxed kernel instead of failing?
+    TORCH_CHECK(nullptr != unboxed_kernel_, "Tried to call OpKernel::callUnboxed() for a kernel that doesn't have an unboxed version.");
+
+    using OpSignature = Result (c10::KernelCache*, Args...);
+    OpSignature* kernel = reinterpret_cast<OpSignature*>(unboxed_kernel_);
+    return (*kernel)(cache_.get(), std::forward<Args>(args)...);
+  }
+
 private:
-  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator)
-  : kernel_(kernel), cache_(cache_creator()) {}
+  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator, void* unboxed_kernel)
+  : kernel_(kernel), cache_(cache_creator()), unboxed_kernel_(unboxed_kernel) {}
   friend class Dispatcher;
 
   KernelFunction* kernel_;
   std::unique_ptr<c10::KernelCache> cache_;
+  void* unboxed_kernel_; // can be nullptr, not all kernels have this
 };
 
 /**
@@ -116,7 +127,7 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
+  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func, void* unboxed_kernel_func);
 
   /**
    * Register a fallback kernel for an operator.
@@ -126,12 +137,19 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
+  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func, void* unboxed_kernel_func);
 
   /**
    * Perform a dynamic dispatch and get the kernel for an operator.
    */
   OpKernel lookup(const OperatorHandle& op, const Stack* stack) const;
+
+  /**
+   * Perform a dynamic dispatch and get the kernel for an operator.
+   */
+  // TODO Remove lookup(TensorTypeId) and instead have a lookup based on
+  // the (unboxed?) arguments the operator is to be called with.
+  OpKernel lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const;
 
   /**
    * Add a listener that gets called whenever a new op is registered or an existing
@@ -200,7 +218,13 @@ private:
 inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(stack);
-  return OpKernel(kernel.kernel_func, kernel.cache_creator_func);
+  return OpKernel(kernel.kernel_func, kernel.cache_creator_func, kernel.unboxed_kernel_func);
+}
+
+inline OpKernel Dispatcher::lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(dispatchKey);
+  return OpKernel(kernel.kernel_func, kernel.cache_creator_func, kernel.unboxed_kernel_func);
 }
 
 } // namespace c10
