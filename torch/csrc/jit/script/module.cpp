@@ -281,6 +281,21 @@ void Module::clone_method(
   copied->setSchema(std::move(schema));
 }
 
+void Module::clone_method(const Module& orig, const std::string& name) {
+  std::unordered_map<TypePtr, TypePtr> type_remap;
+  std::vector<std::pair<Module, Module>> to_scan = {{orig, *this}};
+  while (!to_scan.empty()) {
+    auto entry = to_scan.back();
+    to_scan.pop_back();
+    type_remap[entry.first.module_object()->type()] =
+        entry.second.module_object()->type();
+    for (Slot s : entry.first.get_module_slots()) {
+      to_scan.emplace_back(s.to_module(), entry.second.get_module(s.name()));
+    }
+  }
+  return clone_method(orig, orig.get_method(name).function(), type_remap);
+}
+
 Module Module::clone() const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
   return clone_impl(type_remap);
@@ -315,21 +330,6 @@ Module Module::clone_impl(
     r.clone_method(*this, *fn, type_remap);
   }
   return r;
-}
-
-void Module::clone_method(const Module& orig, const std::string& name) {
-  std::unordered_map<TypePtr, TypePtr> type_remap;
-  std::vector<std::pair<Module, Module>> to_scan = {{orig, *this}};
-  while (!to_scan.empty()) {
-    auto entry = to_scan.back();
-    to_scan.pop_back();
-    type_remap[entry.first.module_object()->type()] =
-        entry.second.module_object()->type();
-    for (Slot s : entry.first.get_module_slots()) {
-      to_scan.emplace_back(s.to_module(), entry.second.get_module(s.name()));
-    }
-  }
-  return clone_method(orig, orig.get_method(name).function(), type_remap);
 }
 
 void Module::train(bool on) {
