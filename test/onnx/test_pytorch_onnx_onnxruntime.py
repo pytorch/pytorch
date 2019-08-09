@@ -298,7 +298,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), x)
 
     # NOTE: Supported in onnxruntime master, enable this after 0.5 release.
-    @skipIfUnsupportedOpsetVersion([10])
+    @skipIfUnsupportedOpsetVersion([10, 11])
     def test_interpolate_output_size(self):
         class MyModel(torch.nn.Module):
             def forward(self, x):
@@ -307,7 +307,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), x)
 
     # NOTE: Supported in onnxruntime master, enable this after 0.5 release.
-    @skipIfUnsupportedOpsetVersion([10])
+    @skipIfUnsupportedOpsetVersion([10, 11])
     def test_interpolate_upsample(self):
         class MyModel(torch.nn.Module):
             def forward(self, x):
@@ -397,7 +397,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(IndexSelectScalerIndexModel(base), (x, index_offset))
 
     # TODO: enable for opset 10 when ONNXRuntime version will be updated
-    @skipIfUnsupportedOpsetVersion([10])
+    @skipIfUnsupportedOpsetVersion([10, 11])
     def test_topk(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
