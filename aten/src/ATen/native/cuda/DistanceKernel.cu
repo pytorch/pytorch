@@ -201,6 +201,9 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 template <typename scalar_t, typename F>
 __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t * x1, const scalar_t * x2,
     const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m, const int64_t r_size, const int64_t l1_size, const int64_t l2_size) {
+  if (threadIdx.x > m) {
+    return;
+  }
   const int64_t l = blockIdx.x / r_size;
   const int64_t k = blockIdx.x % r_size;
   const int64_t i = k / r2;
@@ -230,7 +233,7 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
   const dim3 grid(result.numel());
-  const dim3 block(std::min((int64_t)forward_threads, ((m - 1) / WARP_SIZE + 1) * WARP_SIZE));
+  const dim3 block(forward_threads);
 
   AT_DISPATCH_FLOATING_TYPES(x1.scalar_type(), "cdist_cuda", [&] {
     if (p == 0.0) {
