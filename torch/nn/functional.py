@@ -48,11 +48,12 @@ Examples::
 @_overload
 def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
     # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], BroadcastingList4[int], BroadcastingList2[int], int) -> Tensor
-    ...
+    pass
+
 @_overload
 def conv2d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1):
     # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], str, BroadcastingList2[int], int) -> Tensor
-    ...
+    pass
 
 def _compute_padding_same(input_size, dim, weight, stride, dilation):
     # type: (List[int], int, Tensor, List[int], List[int]) -> int
