@@ -8,9 +8,7 @@ from .linear import Linear
 from .linear import Quantize
 from .linear import DeQuantize
 
-from .wrapper_module import make_wrapper
-from .wrapper_module import Add, Cat
-from .wrapper_module import QuantizedAdd, QuantizedCat
+from .functional_modules import FloatFunctional, QFunctional
 
 __all__ = [
     'Conv2d',
@@ -20,9 +18,6 @@ __all__ = [
     'Quantize',
     'ReLU',
     # Wrapper modules
-    'make_wrapper',
-    'Add',
-    'Cat',
-    'QuantizedAdd',
-    'QuantizedCat',
+    'FloatFunctional',
+    'QFunctional',
 ]

@@ -300,7 +300,7 @@ class ScriptabilityTest(QuantizationTestCase):
         self.assertEqual(traced_model(x), model_under_test(x))
 
         qmodel_under_test = ModForWrapping(quantized=True)
-        qmodel_under_test.from_float(model_under_test)
+        qmodel_under_test = qmodel_under_test.from_float(model_under_test)
         x = torch.quantize_linear(x.to(torch.float), scale=1.0, zero_point=0,
                                   dtype=torch.qint32)
         traced_model = torch.jit.trace(qmodel_under_test, x, check_trace=False)
@@ -313,7 +313,7 @@ class ScriptabilityTest(QuantizationTestCase):
         self.assertEqual(scripted_model(x), model_under_test(x))
 
         qmodel_under_test = ModForWrapping(quantized=True)
-        qmodel_under_test.from_float(model_under_test)
+        qmodel_under_test = qmodel_under_test.from_float(model_under_test)
         x = torch.quantize_linear(x.to(torch.float), scale=1.0, zero_point=0,
                                   dtype=torch.qint32)
         scripted_model = torch.jit.script(qmodel_under_test)

@@ -70,7 +70,10 @@ def add_observer(module, skip_list=DEFAULT_SKIP_LIST):
             forward_hooks
     """
     for child in module.children():
-        add_observer(child)
+        if type(child) == nnq.FloatFunctional:
+            child.observer = module.qconfig.activation()
+        else:
+            add_observer(child)
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
