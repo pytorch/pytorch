@@ -2,7 +2,7 @@
 #include <torch/csrc/jit/source_range_serialization_impl.h>
 
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/pickler.h>
 
 namespace torch {
 namespace jit {
@@ -83,22 +83,23 @@ c10::IValue SourceRangeSerializer::serialize_source(
 }
 
 SourceRangePickler::SourceRangePickler()
-    : srs(new SourceRangeSerializer()) {}
+    : p(new Pickler()), srs(new SourceRangeSerializer()) {}
 
-std::vector<char> SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
-  std::vector<c10::IValue> ivalues;
+void SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
+  p->protocol();
+  p->startTuple();
   for (const auto& range : ranges) {
     std::vector<c10::IValue> row_elems{(int64_t)range.bytes,
                                        srs->serialize(range.range)};
-    ivalues.emplace_back(c10::ivalue::Tuple::create(std::move(row_elems)));
+    p->pushIValue(c10::ivalue::Tuple::create(std::move(row_elems)));
   }
-  std::vector<at::Tensor> table;
-  auto ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
-  auto result = jit::pickle(ivalue, &table);
-  TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
-  return result;
+  p->endTuple();
+  p->stop();
 }
 
+const std::vector<char>& SourceRangePickler::get_data() {
+  return p->stack();
+}
 
 ConcreteSourceRangeUnpickler::ConcreteSourceRangeUnpickler(
     at::DataPtr&& data,
@@ -113,9 +114,8 @@ void ConcreteSourceRangeUnpickler::unpickle() {
     return;
   }
 
-  auto ivalues = jit::unpickle(reinterpret_cast<const char*>(data.get()), size)
-                     .toTuple()
-                     ->elements();
+  Unpickler up(data.get(), size, nullptr, nullptr);
+  auto ivalues = up.parse_ivalue_list();
 
   unpickled_records = std::make_shared<SourceRangeRecords>();
   for (auto& val : ivalues) {

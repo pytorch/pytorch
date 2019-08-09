@@ -240,7 +240,6 @@ static std::vector<at::Tensor> loadTensors(const std::vector<Slot>& slots) {
   }
   return result;
 }
-
 std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_graph() {
   auto result = lower_graph(owner().module_object(), *graph());
   return std::make_pair(result.first, loadTensors(result.second));

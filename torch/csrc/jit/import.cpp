@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/import_export_helpers.h>
 #include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/jit/source_range_serialization.h>
 #include <torch/csrc/jit/source_range_serialization_impl.h>
@@ -75,7 +75,7 @@ class ScriptModuleDeserializer final {
   script::Module convertModule(const torch::ModuleDef& module_def);
 
   void loadTensorTable(torch::ModelDef* model_def);
-  IValue loadPickleArchive(const std::string& name);
+  std::vector<IValue> loadPickleArchive(const std::string& name);
   void importCallback(const std::string& qualifier);
   void moduleSetState(const script::Module& module, IValue state);
 
@@ -142,12 +142,8 @@ script::Module ScriptModuleDeserializer::deserialize(
   }
 
   loadTensorTable(&model_def);
-  if (model_def.proto_version() == 2) {
-    auto list = loadPickleArchive("attributes.pkl").toGenericList();
-    pickled_ivalues_.insert(pickled_ivalues_.end(), list.begin(), list.end());
-  } else if (model_def.proto_version() >= 3) {
-    pickled_ivalues_ =
-        loadPickleArchive("attributes.pkl").toTuple()->elements();
+  if (model_def.proto_version() >= 2) {
+    pickled_ivalues_ = loadPickleArchive("attributes.pkl");
   }
 
   return convertModule(module_def);
@@ -160,12 +156,12 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
   }
 }
 
-IValue ScriptModuleDeserializer::loadPickleArchive(const std::string& name) {
+std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::string& name) {
   at::DataPtr attributes_ptr;
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) = reader_->getRecord(name);
-  auto ivalue = unpickle(
-      reinterpret_cast<const char*>(attributes_ptr.get()),
+  Unpickler unpickler(
+      attributes_ptr.get(),
       attributes_size,
       &tensor_table_,
       [&](const c10::QualifiedName& qn) {
@@ -173,7 +169,7 @@ IValue ScriptModuleDeserializer::loadPickleArchive(const std::string& name) {
         return c10::StrongTypePtr(
             compilation_unit_, compilation_unit_->get_class(qn));
       });
-  return ivalue;
+  return unpickler.parse_ivalue_list();
 }
 
 at::Tensor ScriptModuleDeserializer::loadTensor(
