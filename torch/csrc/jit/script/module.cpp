@@ -29,7 +29,7 @@ static ModulePtr create_module_object(
     class_name = cu->mangle(class_name);
   }
   auto cls = ClassType::create(std::move(class_name), cu, /*is_module=*/true);
-  cu->register_class(cls);
+  cu->register_type(cls);
   return c10::ivalue::Object::create(
       c10::StrongTypePtr(std::move(cu), std::move(cls)), 0);
 }
@@ -243,10 +243,6 @@ static std::vector<at::Tensor> loadTensors(const std::vector<Slot>& slots) {
 std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_graph() {
   auto result = lower_graph(owner().module_object(), *graph());
   return std::make_pair(result.first, loadTensors(result.second));
-}
-
-static void clearMethods(c10::ivalue::Object* self) {
-  self->compilation_unit()->drop_all_functions();
 }
 
 void Module::define(const std::string& src, const ResolverPtr& resolver) {

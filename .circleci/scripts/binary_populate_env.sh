@@ -52,10 +52,10 @@ fi
 
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
-if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu100" ]]; then
-  export PYTORCH_BUILD_VERSION="1.2.0.dev$DATE"
+if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu100" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
+  export PYTORCH_BUILD_VERSION="1.3.0.dev$DATE"
 else
-  export PYTORCH_BUILD_VERSION="1.2.0.dev$DATE+$DESIRED_CUDA"
+  export PYTORCH_BUILD_VERSION="1.3.0.dev$DATE+$DESIRED_CUDA"
 fi
 export PYTORCH_BUILD_NUMBER=1
 
@@ -72,12 +72,13 @@ export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
 export DESIRED_DEVTOOLSET="$DESIRED_DEVTOOLSET"
 
 export DATE="$DATE"
-export NIGHTLIES_DATE_PREAMBLE=1.2.0.dev
+export NIGHTLIES_DATE_PREAMBLE=1.3.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
 
-export TORCH_PACKAGE_NAME='torch-nightly'
+# TODO: We don't need this anymore IIUC
+export TORCH_PACKAGE_NAME='torch'
 export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
 
 export USE_FBGEMM=1
