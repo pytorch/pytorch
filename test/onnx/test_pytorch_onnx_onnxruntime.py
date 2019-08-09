@@ -419,6 +419,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModule(), x)
 
     @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedOpsetVersion([11])
     def test_topk_script(self):
         class MyModuleDynamic(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -698,6 +699,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
 
+    @skipIfUnsupportedOpsetVersion([11])
     def test_sort(self):
         class SortModel(torch.nn.Module):
             def __init__(self, dim):
