@@ -18,21 +18,11 @@ class CAFFE2_API ThreadLocalDebugInfoBase {
   virtual ~ThreadLocalDebugInfoBase() {}
 };
 
-namespace internal {
-CAFFE2_API extern thread_local std::shared_ptr<ThreadLocalDebugInfoBase> debug_info;
-}
-
-inline std::shared_ptr<ThreadLocalDebugInfoBase> getThreadLocalDebugInfo() noexcept {
-  return internal::debug_info;
-}
+CAFFE2_API std::shared_ptr<ThreadLocalDebugInfoBase> getThreadLocalDebugInfo() noexcept;
 
 // Sets debug information, returns the previously set thread local debug information
-inline std::shared_ptr<ThreadLocalDebugInfoBase> setThreadLocalDebugInfo(
-    std::shared_ptr<ThreadLocalDebugInfoBase> info) noexcept {
-  auto ret = std::move(internal::debug_info);
-  internal::debug_info = std::move(info);
-  return ret;
-}
+CAFFE2_API std::shared_ptr<ThreadLocalDebugInfoBase> setThreadLocalDebugInfo(
+    std::shared_ptr<ThreadLocalDebugInfoBase> info) noexcept;
 
 class CAFFE2_API DebugInfoGuard {
  public:
