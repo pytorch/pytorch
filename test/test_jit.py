@@ -7175,6 +7175,7 @@ a")
         # This can cause issues in check-trace if not handled correctly in
         # `aten::isclose()`.
         torch.set_default_tensor_type('torch.FloatTensor')
+
         def foobar():
             x = -10000.0
             result = x * torch.ones(1, dtype=torch.float)
