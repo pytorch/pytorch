@@ -90,10 +90,6 @@ __device__ static inline scalar_t reduce_agg(scalar_t agg) {
     F::agg(agg, WARP_SHFL_DOWN(agg, offset));
   }
 
-  /*if (blockDim.x == warpSize) {
-    return agg;
-  }*/
-
   __shared__ scalar_t shared[forward_threads];
   int lane = threadIdx.x % warpSize;
   int warp_id = threadIdx.x / warpSize;
