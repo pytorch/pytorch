@@ -641,9 +641,29 @@ void expectCallsConcatUnboxed(TensorTypeId type_id) {
   EXPECT_EQ("123", result);
 }
 
+void expectCannotCallConcatBoxed(TensorTypeId type_id) {
+  // assert that schema and cpu kernel are present
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
+  ASSERT_TRUE(op.has_value());
+  expectThrows<c10::Error>(
+    [&] {callOp(*op, dummyTensor(type_id), "1", "2", 3);},
+    "Tried to call OpKernel::call() for a kernel that doesn't have an boxed version."
+  );
+}
+
 TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", RegisterOperators::options().kernel<decltype(concatKernel), &concatKernel>(TensorType1()));
   expectCallsConcatUnboxed(TensorType1());
+}
+
+TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegisteredUnboxedOnly_thenCanBeCalledUnboxed) {
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", RegisterOperators::options().impl_unboxedOnlyKernel<decltype(concatKernel), &concatKernel>(TensorType1()));
+  expectCallsConcatUnboxed(TensorType1());
+}
+
+TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegisteredUnboxedOnly_thenCannotBeCalledBoxed) {
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", RegisterOperators::options().impl_unboxedOnlyKernel<decltype(concatKernel), &concatKernel>(TensorType1()));
+  expectCannotCallConcatBoxed(TensorType1());
 }
 
 std::tuple<int64_t, Tensor> kernelForSchemaInference(Tensor arg1, int64_t arg2, const c10::List<Tensor>& arg3) {
