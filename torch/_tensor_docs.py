@@ -1896,6 +1896,14 @@ reciprocal_() -> Tensor
 In-place version of :meth:`~Tensor.reciprocal`
 """)
 
+add_docstr_all('record_stream',
+               r"""
+record_stream(stream)
+
+Ensures that the memory of which this tensor is not reused before the given
+stream completes work.
+""")
+
 add_docstr_all('remainder',
                r"""
 remainder(divisor) -> Tensor
