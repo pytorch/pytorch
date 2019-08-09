@@ -12,7 +12,7 @@ static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRA
 // table deregisters it in the destructor.
 class RegisterOperators::OperatorRegistrar final {
 public:
-  explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<TensorTypeId> dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction&& cache_creator, void* unboxed_kernel)
+  explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<TensorTypeId> dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction&& cache_creator, void* unboxed_kernel, void* unboxed_autograd_kernel)
   : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt) {
     // either both, kernel and cache_creator, or none must be set.
     TORCH_INTERNAL_ASSERT((kernel != nullptr || unboxed_kernel != nullptr) == static_cast<bool>(cache_creator));
@@ -23,6 +23,10 @@ public:
       } else {
         kernel_registration_handle_ = Dispatcher::singleton().registerCatchallKernel(op_.opHandle(), kernel, std::move(cache_creator), unboxed_kernel);
       }
+    }
+
+    if (unboxed_autograd_kernel != nullptr) {
+      unboxed_autograd_kernel_registration_handle_ = Dispatcher::singleton().registerUnboxedAutogradKernel(op_.opHandle(), unboxed_autograd_kernel);
     }
   }
 
@@ -36,6 +40,7 @@ public:
 private:
   c10::SchemaRegistrationHandleRAII op_;
   c10::optional<RegistrationHandleRAII> kernel_registration_handle_;
+  c10::optional<RegistrationHandleRAII> unboxed_autograd_kernel_registration_handle_;
 };
 
 void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNameStr, Options&& options) {
@@ -146,10 +151,10 @@ void RegisterOperators::registerOp_(FunctionSchema&& schema, Options&& options) 
   auto operatorOptions = makeOperatorOptions_(options);
 
   if (0 == options.kernels.size()) {
-    registerSchemaOnly_(std::move(schema), std::move(operatorOptions));
+    registerSchemaOnly_(std::move(schema), std::move(operatorOptions), options.unboxedAutogradKernel_);
   } else {
     for (auto& kernel : options.kernels) {
-      registerSchemaAndKernel_(schema, std::move(kernel), std::move(operatorOptions));
+      registerSchemaAndKernel_(schema, std::move(kernel), std::move(operatorOptions), options.unboxedAutogradKernel_);
     }
   }
 
@@ -164,14 +169,14 @@ OperatorOptions RegisterOperators::makeOperatorOptions_(const RegisterOperators:
   return result;
 }
 
-void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel, OperatorOptions&& operatorOptions) {
+void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel, OperatorOptions&& operatorOptions, void* unboxedAutogradKernel) {
   TORCH_INTERNAL_ASSERT((kernel.kernel_func != nullptr || kernel.unboxed_kernel_func != nullptr) && static_cast<bool>(kernel.cache_creator_func), "Kernel must be set");
 
-  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), kernel.dispatch_key, kernel.kernel_func, std::move(kernel.cache_creator_func), kernel.unboxed_kernel_func);
+  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), kernel.dispatch_key, kernel.kernel_func, std::move(kernel.cache_creator_func), kernel.unboxed_kernel_func, unboxedAutogradKernel);
 }
 
-void RegisterOperators::registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& operatorOptions) {
-  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), c10::nullopt, nullptr, nullptr, nullptr);
+void RegisterOperators::registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& operatorOptions, void* unboxedAutogradKernel) {
+  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), c10::nullopt, nullptr, nullptr, nullptr, unboxedAutogradKernel);
 }
 
 RegisterOperators::RegisterOperators() = default;

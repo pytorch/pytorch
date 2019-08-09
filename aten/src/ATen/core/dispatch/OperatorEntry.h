@@ -35,10 +35,16 @@ public:
     });
   }
 
+  void* lookupUnboxedAutogradKernel() const {
+    return currentUnboxedAutogradKernel_;
+  }
+
   void prepareForDeregistration();
 
   RegistrationHandleRAII registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel);
   RegistrationHandleRAII registerCatchallKernel(DispatchTableEntry kernel);
+
+  RegistrationHandleRAII registerUnboxedAutogradKernel(void* kernel_func);
 
   const OperatorOptions& options() {
     return options_;
@@ -47,6 +53,7 @@ public:
 private:
   void deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTableEntry>::iterator kernel);
   void deregisterCatchallKernel_(std::list<DispatchTableEntry>::iterator kernel);
+  void deregisterUnboxedAutogradKernel_(std::list<void*>::iterator kernel);
 
   FunctionSchema schema_;
 
@@ -81,19 +88,50 @@ private:
   // Analogous invariants for kernels_.is_right().
   // The empty state (i.e. no kernels registered) is represented as an empty
   // map with kernels_.is_left().
+  //
+  // Why do we do that?
+  // -----
+  // We mostly do this to enable Jupyter notebooks where a cell registering
+  // a kernel could be executed multiple times and the later execution
+  // should overwrite the earlier one. Note that this still fails when the
+  // function schema changed between the executions, but it works as long
+  // as the function schema didn't change. A better solution would be to
+  // unload the old extension library from the Jupyter cell when the cell is
+  // re-ececuted and then only allow one kernel here, i.e. error if a kernel
+  // is already registered, but that's a lot of effort to implement and
+  // currently not high-pri.
   c10::either<
     ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>, // dispatched kernels
     std::list<DispatchTableEntry> // catch-all kernels
   > kernels_;
-  std::mutex kernelsMutex_; // protects kernels_
+
+  // unboxedAutogradKernels_ stores all autograd kernels registered for this op.
+  // An autograd kernel has the same signature as the main op kernel and
+  // internally re-dispatches to call the actual kernel.
+  // Autograd kernels are unboxed currently. We are planning to move this
+  // towards a system where ops register autograd wrappers (i.e. functions that
+  // do some wrapping code and get a pointer to the actual kernel) instead of
+  // autograd functions.
+  // This is a list because, similar to kernels_, multiple libraries could
+  // be loaded that register autograd kernels for the same op. The list is
+  // ordered by registration time descendingly, i.e. newer registrations are
+  // before older registrations and the list head is the autograd kernel
+  // which is currently used.
+  // See the comment for kernels_ above for an explanation for why we do this.
+  std::list<void*> unboxedAutogradKernels_;
+  std::atomic<void*> currentUnboxedAutogradKernel_;
 
   // Some metadata about the operator
   OperatorOptions options_;
+
+  std::mutex kernelsMutex_; // protects kernels_
+  std::mutex unboxedAutogradKernelsMutex_; // protects unboxedAutogradKernels_
 
   // This function re-establishes the invariant that dispatchTable
   // contains the front element from the kernels list for a given dispatch key.
   void updateDispatchTable_(TensorTypeId dispatch_key);
   void updateCatchallDispatchTable_();
+  void updateCurrentUnboxedAutogradKernel_();
 };
 
 }
