@@ -47,11 +47,11 @@ Examples::
 
 @_overload
 def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList4[int], BroadcastingList4[int], BroadcastingList4[int], int) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], BroadcastingList4[int], BroadcastingList2[int], int) -> Tensor
     ...
 @_overload
 def conv2d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList4[int], str, BroadcastingList4[int], int) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], str, BroadcastingList2[int], int) -> Tensor
     ...
 
 def _compute_padding_same(input_size, dim, weight, stride, dilation):
@@ -100,8 +100,6 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
         >>> inputs = torch.randn(1,4,5,5)
         >>> F.conv2d(inputs, filters, padding=1)
     """
-    stride = _pair(stride)
-    dilation = _pair(dilation)
     if isinstance(padding, str):
         padding_rows = _compute_padding_same(input.size(), 0, weight, stride, dilation)
         padding_cols = _compute_padding_same(input.size(), 1, weight, stride, dilation)
@@ -109,7 +107,6 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
                         padding_cols//2, (padding_cols+1)//2]
         return torch.conv2d(input, weight, bias, stride, final_padding, dilation, groups)
     else:
-        padding = _pair(padding)
         return torch.conv2d(input, weight, bias, stride, padding, dilation, groups)
 
 
