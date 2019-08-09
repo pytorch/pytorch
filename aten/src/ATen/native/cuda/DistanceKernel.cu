@@ -90,6 +90,10 @@ __device__ static inline scalar_t reduce_agg(scalar_t agg) {
     F::agg(agg, WARP_SHFL_DOWN(agg, offset));
   }
 
+  /*if (blockDim.x == warpSize) {
+    return agg;
+  }*/
+
   __shared__ scalar_t shared[forward_threads];
   int lane = threadIdx.x % warpSize;
   int warp_id = threadIdx.x / warpSize;
@@ -121,7 +125,7 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   const scalar_t * const end = start + m;
   const scalar_t * a = start + threadIdx.x;
   const scalar_t * b = self + j * m + threadIdx.x;
-  /*scalar_t agg = 0.0;
+  scalar_t agg = 0.0;
   for (; a < end; a += stride, b += stride) {
     F::inc(agg, std::abs(*a - *b), p);
   }
@@ -129,11 +133,6 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   agg = reduce_agg<scalar_t, F>(agg);
   if (threadIdx.x == 0) {
     result[k] = F::finish(agg, p);
-  }*/
-
-  scalar_t agg = std::abs(*a - *b);
-  if (threadIdx.x == 0) {
-    result[k] = reduce_agg<scalar_t, F>(agg);
   }
 }
 
@@ -237,7 +236,8 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
   const dim3 grid(result.numel());
-  const dim3 block(std::min((int64_t)forward_threads, ((m - 1) / WARP_SIZE + 1) * WARP_SIZE));
+  //const dim3 block(std::min((int64_t)forward_threads, ((m - 1) / WARP_SIZE + 1) * WARP_SIZE));
+  const dim3 block(forward_threads);
 
   AT_DISPATCH_FLOATING_TYPES(x1.scalar_type(), "cdist_cuda", [&] {
     if (p == 0.0) {
