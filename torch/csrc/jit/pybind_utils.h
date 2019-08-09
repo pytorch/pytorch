@@ -99,7 +99,7 @@ inline MatchTypeReturn tryToInferType(py::handle input) {
     if (tensor.is_mkldnn()) {
       // mkldnn tensor as opaque tensor doesn't have strides, so we can
       // not create a CompleteTensorType
-      return MatchTypeReturn(DimensionedTensorType::create(tensor));
+      return MatchTypeReturn(ProfiledTensorType::create(tensor));
     }
 
     // TODO: maybe unshape this type if this is used for script instead of
@@ -323,7 +323,6 @@ inline IValue toIValue(
   switch (type->kind()) {
     case TypeKind::TensorType:
     case TypeKind::AutogradZeroTensorType:
-    case TypeKind::DimensionedTensorType:
     case TypeKind::ProfiledTensorType:
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
@@ -401,7 +400,6 @@ inline IValue toIValue(
             }
             return repeated;
           }
-        case TypeKind::DimensionedTensorType:
         case TypeKind::ProfiledTensorType:
         case TypeKind::TensorType:
           return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));

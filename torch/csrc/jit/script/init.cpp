@@ -274,8 +274,8 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
 
 static TypePtr getTensorType(const at::Tensor& t, const TypeKind type_kind) {
   switch (type_kind) {
-    case TypeKind::DimensionedTensorType:
-      return DimensionedTensorType::create(t);
+    case TypeKind::ProfiledTensorType:
+      return ProfiledTensorType::create(t);
     case TypeKind::CompleteTensorType: {
       auto scalar_type = t.scalar_type();
       auto sizes = t.sizes();
@@ -283,7 +283,7 @@ static TypePtr getTensorType(const at::Tensor& t, const TypeKind type_kind) {
     }
     default:
       throw std::runtime_error(
-          "Attempted to call getTensorType for type kind other than DimensionedTensorType or CompleteTensorType.");
+          "Attempted to call getTensorType for type kind other than ProfiledTensorType or CompleteTensorType.");
   }
 }
 
@@ -310,7 +310,7 @@ static TupleTypePtr getTupleTensorType(
 static void setInputTensorTypes(
     Graph& g,
     const Stack& stack,
-    const TypeKind type_kind = TypeKind::DimensionedTensorType) {
+    const TypeKind type_kind = TypeKind::ProfiledTensorType) {
   at::ArrayRef<Value*> input_values = g.inputs();
   auto s_iter = stack.begin();
   for (auto v : input_values) {
@@ -343,8 +343,7 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
     bool propagate = true) {
   auto retval = graph.copy();
   if (propagate) {
-    setInputTensorTypes(
-        *retval, fmap<IValue>(inputs), TypeKind::DimensionedTensorType);
+    setInputTensorTypes(*retval, fmap<IValue>(inputs), TypeKind::ProfiledTensorType);
     PropagateInputShapes(retval);
   }
   setInputTensorTypes(
