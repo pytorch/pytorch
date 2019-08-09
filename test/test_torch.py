@@ -29,7 +29,7 @@ from common_methods_invocations import tri_tests_args, run_additional_tri_tests,
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, pytorchtest
+    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, torchtest
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -100,7 +100,7 @@ class BytesIOContext(io.BytesIO):
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
-class _TestTorchMixin(pytorchtest):
+class _TestTorchMixin(torchtest):
     def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True):
         float_types = [torch.double,
                        torch.float]
@@ -2858,7 +2858,7 @@ class _TestTorchMixin(pytorchtest):
                             self.assertEqual(std1, std2)
                             self.assertEqual(mean1, mean2)
 
-    @pytorchtest.test_all_device_types()
+    @torchtest.test_all_device_types()
     def test_var_mean_some_dims(self, device):
         sizes = (4, 6, 7, 5, 3)
         dims = len(sizes)
@@ -2875,7 +2875,7 @@ class _TestTorchMixin(pytorchtest):
                         self.assertEqual(var1, var2)
                         self.assertEqual(mean1, mean2)
 
-    @pytorchtest.test_all_device_types()
+    @torchtest.test_all_device_types()
     def test_zeros_like(self, device):
         expected = torch.zeros((100, 100,), device=device)
 
@@ -3511,7 +3511,7 @@ class _TestTorchMixin(pytorchtest):
             x[1] = True
             self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool))
 
-    @pytorchtest.test_all_device_types()
+    @torchtest.test_all_device_types()
     def test_unfold_all_devices_and_dtypes(self, device):
         for dt in torch.testing.get_all_dtypes():
             if dt == torch.bfloat16:

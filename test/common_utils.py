@@ -208,22 +208,22 @@ def skipIfRocm(fn):
 
 
 
-def _test_function(fn ,device):
+def _test_function(fn, device):
     def run_test_function(self):
         return fn(self, device)
     return run_test_function
 
 
-class pytorchtest():
+class torchtest():
     """Allows to generate and run per-device unittests.
 
     This decorator class allows to generate and run per-device unittest.
 
     Example:
 
-    class _TestTorchMixin(pytorchtest):
+    class _TestTorchMixin(torchtest):
 
-        @pytorchtest.test_all_device_types()
+        @torchtest.test_all_device_types()
         def test_zeros_like(self, device):
             expected = torch.zeros((100, 100,), device=device)
 
@@ -233,7 +233,7 @@ class pytorchtest():
         test_zeros_like_cpu (__main__.TestTorch) ... ok
         test_zeros_like_cuda (__main__.TestTorch) ... ok
 
-    To work properly, test class should be inherited from the `pytorchtest`.
+    To work properly, test class should be inherited from `torchtest`.
     test_all_device_types decorator does not guarantee proper functionality in
     combination with other decorators.
 
