@@ -1632,6 +1632,27 @@ class _TestTorchMixin(object):
         res2 = x1.sum(axis=(0, 2), keepdims=True)
         self.assertEqual(res1, res2)
 
+    def test_addcdiv(self):
+        def _test_addcdiv(a, alpha, b, c):
+            actual = torch.addcdiv(a, alpha, b, c)
+            expected = a + (alpha * b) / c
+            self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
+        def non_zero_rand(size, dtype, device):
+            if dtype.is_floating_point:
+                a = torch.rand(size=size, dtype=dtype, device=device)
+            elif dtype == torch.uint8:
+                a = torch.randint(1, 5, size=size, dtype=dtype, device=device)
+            else:
+                a = torch.randint(-5, 5, size=size, dtype=dtype, device=device)
+            return a + (a == 0).type(dtype)
+        for device in torch.testing.get_all_device_types():
+            for dtype in torch.testing.get_all_math_dtypes(device):
+                _test_addcdiv(
+                    non_zero_rand((2, 2), dtype=dtype, device=device),
+                    0.5,
+                    non_zero_rand((2, 2), dtype=dtype, device=device),
+                    non_zero_rand((2, 2), dtype=dtype, device=device))
+
     def test_add(self):
         for device in torch.testing.get_all_device_types():
             # [res] torch.add([res,] tensor1, tensor2)
@@ -1707,6 +1728,11 @@ class _TestTorchMixin(object):
             expected = torch.zeros(2, 3, device=device).bool()
             self.assertEqual(res, expected)
 
+            # bfloat16
+            m1 = torch.tensor([1., 2.], dtype=torch.bfloat16)
+            m2 = torch.tensor([3., 4.], dtype=torch.bfloat16)
+            self.assertEqual(m1 + m2, torch.tensor([4., 6.], dtype=torch.bfloat16))
+
     def test_bool_sub(self):
         for device in torch.testing.get_all_device_types():
             m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=device)
@@ -1723,6 +1749,19 @@ class _TestTorchMixin(object):
                                    r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
                                    r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
                                    lambda: m2 - 1)
+
+    def test_sub(self):
+        for dtype in torch.testing.get_all_dtypes():
+            m1 = torch.tensor([2.34, 4.44], dtype=dtype)
+            m2 = torch.tensor([1.23, 2.33], dtype=dtype)
+
+            if (dtype == torch.half or dtype == torch.bool):
+                self.assertRaises(RuntimeError, lambda: m1 - m2)
+            elif (dtype == torch.bfloat16):
+                # bfloat16 has a lower precision so we have to have a separate check for it
+                self.assertEqual(m1 - m2, torch.tensor([1.11, 2.11], dtype=dtype), 0.01)
+            else:
+                self.assertEqual(m1 - m2, torch.tensor([1.11, 2.11], dtype=dtype))
 
     def test_csub(self):
         # with a tensor
@@ -1849,6 +1888,11 @@ class _TestTorchMixin(object):
             a2 = torch.tensor([True, False, True, False], dtype=torch.bool, device=device)
             self.assertEqual(a1 * a2, torch.tensor([True, False, False, False], dtype=torch.bool, device=device))
 
+            if device == 'cpu':
+                a1 = torch.tensor([0.1, 0.1], dtype=torch.bfloat16, device=device)
+                a2 = torch.tensor([1.1, 0.1], dtype=torch.bfloat16, device=device)
+                self.assertEqual(a1 * a2, torch.tensor([0.11, 0.01], dtype=torch.bfloat16, device=device), 0.01)
+
     def test_div(self):
         m1 = torch.randn(10, 10)
         res1 = m1.clone()
@@ -1857,6 +1901,10 @@ class _TestTorchMixin(object):
         for i in range(m1.size(0)):
             res2[i, 3] = res2[i, 3] / 2
         self.assertEqual(res1, res2)
+
+        a1 = torch.tensor([4.2, 6.2], dtype=torch.bfloat16)
+        a2 = torch.tensor([2., 2.], dtype=torch.bfloat16)
+        self.assertEqual(a1 / a2, torch.tensor([2.1, 3.1], dtype=torch.bfloat16), 0.01)
 
     def test_floordiv(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
@@ -4022,6 +4070,27 @@ class _TestTorchMixin(object):
             pass
         with mp.Pool(1) as pool:
             self.assertTrue(pool.map(method, [arg]))
+
+    def test_addcmul(self):
+        def rand_tensor(size, dtype, device):
+            if dtype.is_floating_point:
+                return torch.rand(size=size, dtype=dtype, device=device)
+            if dtype == torch.uint8:
+                return torch.randint(1, 5, size=size, dtype=dtype, device=device)
+            else:
+                return torch.randint(-5, 5, size=size, dtype=dtype, device=device)
+        for device in torch.testing.get_all_device_types():
+            for dtype in torch.testing.get_all_math_dtypes(device):
+                a = rand_tensor((2, 2), dtype=dtype, device=device)
+                b = rand_tensor((2, 2), dtype=dtype, device=device)
+                c = rand_tensor((2, 2), dtype=dtype, device=device)
+                if dtype.is_floating_point:
+                    alpha = 0.1
+                else:
+                    alpha = 3
+                actual = torch.addcmul(a, alpha, b, c)
+                expected = a + alpha * b * c
+                self.assertTrue(torch.allclose(expected, actual))
 
     @staticmethod
     def _test_multinomial_invalid_probs(probs):
@@ -7859,6 +7928,40 @@ class _TestTorchMixin(object):
         t = torch.from_numpy(np.empty((0, 4)))
         t[:, 1::2] *= 1
 
+    def test_atan2(self):
+        def _test_atan2_with_size(size, device):
+            a = torch.rand(size=size, device=device, dtype=torch.double)
+            b = torch.rand(size=size, device=device, dtype=torch.double)
+            actual = a.atan2(b)
+            x = a.view(-1)
+            y = b.view(-1)
+            expected = torch.tensor([math.atan2(x[i].item(), y[i].item()) for i in range(x.numel())],
+                                    device=device, dtype=torch.double)
+            self.assertTrue(torch.allclose(expected, actual.view(-1), rtol=0, atol=0.02))
+        for device in torch.testing.get_all_device_types():
+            _test_atan2_with_size((2, 2), device)
+            _test_atan2_with_size((3, 3), device)
+            _test_atan2_with_size((5, 5), device)
+
+    def test_atan2_edgecases(self):
+        def _test_atan2(x, y, expected, device, dtype):
+            expected_tensor = torch.tensor([expected], dtype=dtype, device=device)
+            x_tensor = torch.tensor([x], dtype=dtype, device=device)
+            y_tensor = torch.tensor([y], dtype=dtype, device=device)
+            actual = torch.atan2(y_tensor, x_tensor)
+            self.assertTrue(torch.allclose(expected_tensor, actual, rtol=0, atol=0.02))
+        for device in torch.testing.get_all_device_types():
+            for dtype in [torch.float, torch.double]:
+                _test_atan2(0, 0, 0, device, dtype)
+                _test_atan2(0, 1, math.pi / 2, device, dtype)
+                _test_atan2(0, -1, math.pi / -2, device, dtype)
+                _test_atan2(-1, 0, math.pi, device, dtype)
+                _test_atan2(1, 0, 0, device, dtype)
+                _test_atan2(-1, -1, math.pi * -3 / 4 , device, dtype)
+                _test_atan2(1, 1, math.pi / 4 , device, dtype)
+                _test_atan2(1, -1, math.pi / -4 , device, dtype)
+                _test_atan2(-1, 1, math.pi * 3 / 4 , device, dtype)
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_newaxis_numpy_comparison(self):
         def run_test(tensor, *idx):
@@ -8888,7 +8991,6 @@ class _TestTorchMixin(object):
         a = np.array(x, copy=False)
         b = np.array(y, copy=False)
         expected = np.matmul(a, b)
-        self.assertTrue(expected.flags['C_CONTIGUOUS'])
 
         ans = torch.matmul(x, y)
         self.assertTrue(ans.is_contiguous())
@@ -9083,7 +9185,6 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.zeros(0).expand((0,)), torch.zeros(0))
 
     def test_repeat(self):
-
         initial_shape = (8, 4)
         tensor = torch.rand(*initial_shape)
 
@@ -9098,6 +9199,9 @@ class _TestTorchMixin(object):
         result = tensor.repeat(torchSize)
         self.assertEqual(result.size(), target, 'Error in repeat using result and LongStorage')
         self.assertEqual(result.mean(0).view(8, 4), tensor, 'Error in repeat (not equal)')
+
+        zeroDimTarget = torch.Size([24, 0])
+        self.assertEqual(tensor.repeat((3, 0)).size(), zeroDimTarget, "Error when calling with 0 repeats")
 
     def test_repeat_interleave(self):
         x = torch.tensor([0, 1, 2, 3])
