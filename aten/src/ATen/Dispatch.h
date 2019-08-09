@@ -131,7 +131,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     switch (_st) {                                                                                        \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)                                   \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)                                     \
-      AT_PRIVATE_CASE_TYPE(SCALARTYPE, decltype(::detail::ScalarTypeToCType<SCALARTYPE>::t), __VA_ARGS__) \
+      AT_PRIVATE_CASE_TYPE(SCALARTYPE,                                                                    \
+          decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE>::t), __VA_ARGS__)                           \
       default:                                                                                            \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                                   \
     }                                                                                                     \
