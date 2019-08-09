@@ -12558,6 +12558,25 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
 
+    def test_binary_op_input_output_overlap(self):
+        sz = 3
+        data = torch.randn(3 * sz)
+        for i in range(len(data) - sz):
+            for j in range(len(data) - sz):
+                for k in range(len(data) - sz):
+                    a = data[i:i+sz]
+                    a_exp = a.clone()
+                    b = data[j:j+sz]
+                    b_exp = b.clone()
+                    c = data[k:k+sz]
+                    c_exp = c.clone()
+                    torch.add(a_exp, b_exp, out=c_exp)
+                    try:
+                        torch.add(a, b, out=c)
+                        self.assertEqual(c_exp, c)
+                    except RuntimeError:
+                        pass
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
