@@ -7907,6 +7907,40 @@ class _TestTorchMixin(object):
         t = torch.from_numpy(np.empty((0, 4)))
         t[:, 1::2] *= 1
 
+    def test_atan2(self):
+        def _test_atan2_with_size(size, device):
+            a = torch.rand(size=size, device=device, dtype=torch.double)
+            b = torch.rand(size=size, device=device, dtype=torch.double)
+            actual = a.atan2(b)
+            x = a.view(-1)
+            y = b.view(-1)
+            expected = torch.tensor([math.atan2(x[i].item(), y[i].item()) for i in range(x.numel())],
+                                    device=device, dtype=torch.double)
+            self.assertTrue(torch.allclose(expected, actual.view(-1), rtol=0, atol=0.02))
+        for device in torch.testing.get_all_device_types():
+            _test_atan2_with_size((2, 2), device)
+            _test_atan2_with_size((3, 3), device)
+            _test_atan2_with_size((5, 5), device)
+
+    def test_atan2_edgecases(self):
+        def _test_atan2(x, y, expected, device, dtype):
+            expected_tensor = torch.tensor([expected], dtype=dtype, device=device)
+            x_tensor = torch.tensor([x], dtype=dtype, device=device)
+            y_tensor = torch.tensor([y], dtype=dtype, device=device)
+            actual = torch.atan2(y_tensor, x_tensor)
+            self.assertTrue(torch.allclose(expected_tensor, actual, rtol=0, atol=0.02))
+        for device in torch.testing.get_all_device_types():
+            for dtype in [torch.float, torch.double]:
+                _test_atan2(0, 0, 0, device, dtype)
+                _test_atan2(0, 1, math.pi / 2, device, dtype)
+                _test_atan2(0, -1, math.pi / -2, device, dtype)
+                _test_atan2(-1, 0, math.pi, device, dtype)
+                _test_atan2(1, 0, 0, device, dtype)
+                _test_atan2(-1, -1, math.pi * -3 / 4 , device, dtype)
+                _test_atan2(1, 1, math.pi / 4 , device, dtype)
+                _test_atan2(1, -1, math.pi / -4 , device, dtype)
+                _test_atan2(-1, 1, math.pi * 3 / 4 , device, dtype)
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_newaxis_numpy_comparison(self):
         def run_test(tensor, *idx):
