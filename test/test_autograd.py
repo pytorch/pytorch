@@ -2697,50 +2697,6 @@ class TestAutograd(TestCase):
     #     #_test_cdist_for_size((2, 3, 5))
     #     #_test_cdist_for_size((1, 2, 3))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    def test_cdist_if_same(self):
-        b = torch.tensor([[1.00819670773727, -0.23274465960590035], [0.273863044005079, -2.2174871734580344]], device="cuda", dtype=torch.double)
-
-        a1 = torch.tensor([[-0.5395296959073186, 0.5430548566466279], [0.3984313831572419, 0.43216598546432766]], device="cuda", dtype=torch.double)
-        r1 = torch.tensor([[2.323525916507748, 3.573934655805952], [1.2746759986751819, 2.7742215354870017]], device="cuda", dtype=torch.double)
-
-        self.assertTrue(torch.allclose(r1, torch.cdist(a1, b)))
-
-        a2 = torch.tensor([[-0.5395276959073185, 0.5430538566466279], [0.3984313831572419, 0.43216598546432766]], device="cuda", dtype=torch.double)
-        r2 = torch.tensor([[2.3235239165077477, 3.5739326558059523], [1.2746759986751819, 2.7742215354870017]], device="cuda", dtype=torch.double)
-
-        self.assertTrue(torch.allclose(r2, torch.cdist(a2, b)))
-
-        a3 = torch.tensor([[-0.5395286959073186, 0.5430538566466279], [0.3984313831572419, 0.43216598546432766]], device="cuda", dtype=torch.double)
-        r3 = torch.tensor([[2.3235239032287867, 3.5739327021316356], [1.2746759986751819, 2.7742215354870017]], device="cuda", dtype=torch.double)
-
-        self.assertTrue(torch.allclose(r3, torch.cdist(a3, b)))
-
-        a4 = torch.tensor([[-0.5395286959073186, 0.5430558566466279], [0.3984313831572419, 0.43216598546432766]], device="cuda", dtype=torch.double)
-        r4 = torch.tensor([[2.323525929786709, 3.5739348478988475], [1.2746759986751819, 2.7742215354870017]], device="cuda", dtype=torch.double)
-
-        self.assertTrue(torch.allclose(r4, torch.cdist(a4, b)))
-
-        a5 = torch.tensor([[-0.5395286959073186, 0.5430548566466279], [0.39843038315724194, 0.43216598546432766]], device="cuda", dtype=torch.double)
-        r5 = torch.tensor([[2.323524916507748, 3.573933655805952], [1.2746769986751818, 2.774220535487002]], device="cuda", dtype=torch.double)
-
-        self.assertTrue(torch.allclose(r5, torch.cdist(a5, b)))
-
-        a6 = torch.tensor([[-0.5395286959073186, 0.5430548566466279], [0.3984323831572419, 0.43216598546432766]], device="cuda", dtype=torch.double)
-        r6 = torch.tensor([[2.323524916507748, 3.573933655805952], [1.274674998675182, 2.774222535487002]], device="cuda", dtype=torch.double)
-
-        self.assertTrue(torch.allclose(r6, torch.cdist(a6, b)))
-
-        a7 = torch.tensor([[-0.5395286959073186, 0.5430548566466279], [0.3984313831572419, 0.4321649854643277]], device="cuda", dtype=torch.double)
-        r7 = torch.tensor([[2.323524916507748, 3.573933655805952], [1.2746749853962207, 2.7742205818126853]], device="cuda", dtype=torch.double)
-
-        self.assertTrue(torch.allclose(r7, torch.cdist(a7, b)))
-
-        a8 = torch.tensor([[-0.5395286959073186, 0.5430548566466279], [0.3984313831572419, 0.43216698546432764]], device="cuda", dtype=torch.double)
-        r8 = torch.tensor([[2.323524916507748, 3.573933655805952], [1.2746769523494983, 2.774222489161318]], device="cuda", dtype=torch.double)
-
-        self.assertTrue(torch.allclose(r8, torch.cdist(a8, b)))
-
     # def test_cdist_gpu_2(self):
     #     def _test_cdist_for_size(sizes):
     #         devices = [] if not torch.cuda.is_available() else ['cuda']
