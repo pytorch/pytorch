@@ -70,17 +70,17 @@ def add_observer(module, skip_list=DEFAULT_SKIP_LIST):
             forward_hooks
     """
     for child in module.children():
-        if type(child) == nnq.FloatFunctional:
-            child.observer = module.qconfig.activation()
-        else:
-            add_observer(child)
+        add_observer(child)
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
        len(module._modules) == 0 and type(module) not in skip_list:
         # observer and hook will be gone after we swap the module
-        module.add_module('observer', module.qconfig.activation())
+        if type(module) == nnq.FloatFunctional:
+            module.observer = module.qconfig.activation()
+        else:
+            module.add_module('observer', module.qconfig.activation())
         module.register_forward_hook(_observer_forward_hook)
 
 class QuantWrapper(nn.Module):

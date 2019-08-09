@@ -293,31 +293,30 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
 
 
 class ScriptabilityTest(QuantizationTestCase):
-    def test_wrapper_traceable(self):
-        model_under_test = ModForWrapping()
-        x = torch.rand(10)
-        traced_model = torch.jit.trace(model_under_test, x, check_trace=False)
-        self.assertEqual(traced_model(x), model_under_test(x))
+    def setUp(self):
+        self.model_under_test = ModForWrapping(quantized=False)
+        self.qmodel_under_test = ModForWrapping(quantized=True)
+        self.qmodel_under_test = self.qmodel_under_test.from_float(
+            self.model_under_test)
+        self.x = torch.rand(10)
+        self.qx = torch.quantize_linear(self.x.to(torch.float), scale=1.0,
+                                        zero_point=0, dtype=torch.qint32)
 
-        qmodel_under_test = ModForWrapping(quantized=True)
-        qmodel_under_test = qmodel_under_test.from_float(model_under_test)
-        x = torch.quantize_linear(x.to(torch.float), scale=1.0, zero_point=0,
-                                  dtype=torch.qint32)
-        traced_model = torch.jit.trace(qmodel_under_test, x, check_trace=False)
-        self.assertEqual(traced_model(x), qmodel_under_test(x))
+    def test_quantized(self):
+        qtraced_model = torch.jit.trace(self.qmodel_under_test, self.qx,
+                                        check_trace=False)
+        self.assertEqual(qtraced_model(self.qx), self.qmodel_under_test(self.qx))
 
-    def test_wrapper_scriptable(self):
-        model_under_test = ModForWrapping()
-        x = torch.rand(10)
-        scripted_model = torch.jit.script(model_under_test)
-        self.assertEqual(scripted_model(x), model_under_test(x))
+        qscripted_model = torch.jit.script(self.qmodel_under_test)
+        self.assertEqual(qscripted_model(self.qx), self.qmodel_under_test(self.qx))
 
-        qmodel_under_test = ModForWrapping(quantized=True)
-        qmodel_under_test = qmodel_under_test.from_float(model_under_test)
-        x = torch.quantize_linear(x.to(torch.float), scale=1.0, zero_point=0,
-                                  dtype=torch.qint32)
-        scripted_model = torch.jit.script(qmodel_under_test)
-        self.assertEqual(scripted_model(x), qmodel_under_test(x))
+    def test_float(self):
+        traced_model = torch.jit.trace(self.model_under_test, self.x,
+                                       check_trace=False)
+        self.assertEqual(traced_model(self.x), self.model_under_test(self.x))
+
+        scripted_model = torch.jit.script(self.model_under_test)
+        self.assertEqual(scripted_model(self.x), self.model_under_test(self.x))
 
 
 class FusionTest(QuantizationTestCase):
