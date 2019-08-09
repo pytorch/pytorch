@@ -210,7 +210,7 @@ struct SourceImporter {
 
         auto class_type =
             ClassType::create(c10::QualifiedName(qualified_classname), owner);
-        owner->register_class(class_type);
+        owner->register_type(class_type);
         const auto self = SimpleSelf(class_type);
         owner->define(qualified_classname, definitions, resolvers, &self);
       } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
@@ -240,7 +240,7 @@ struct SourceImporter {
             field_types,
             qualified_name,
             TupleType::namedTupleSchemaFromNamesAndTypes(qualified_name, field_names, field_types));
-        owner->register_class(tt);
+        owner->register_type(tt);
       } else {
         TORCH_INTERNAL_ASSERT(
             false,
@@ -298,7 +298,7 @@ struct SourceImporter {
       imports.push_back(str);
     }
 
-    // Call the callback to actually compile them
+    // Call theregister_typectually compile them
     for (const auto& import : imports) {
       if (import_callback_) {
         import_callback_(import);
