@@ -4,7 +4,7 @@ import inspect
 import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
-    BroadcastingList3, BroadcastingList4, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
+    BroadcastingList3, BroadcastingList4, BroadcastingList6, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType
@@ -34,8 +34,11 @@ _eval_env = {
     'List': List,
     'Dict': Dict,
     'Optional': Optional,
+    'BroadcastingList1': BroadcastingList1,
     'BroadcastingList2': BroadcastingList2,
-    'BroadcastingList4': BroadcastingList4
+    'BroadcastingList3': BroadcastingList3,
+    'BroadcastingList4': BroadcastingList4,
+    'BroadcastingList6': BroadcastingList6
 }
 
 

@@ -72,9 +72,9 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
     if isinstance(padding, str):
         padding_rows = _compute_padding_same(input.size(), 0, weight, stride, dilation)
         final_padding = [padding_rows//2, (padding_rows+1)//2]
-        return torch.conv2d(input, weight, bias, stride, final_padding, dilation, groups)
+        return torch.conv1d(input, weight, bias, stride, final_padding, dilation, groups)
     else:
-        return torch.conv2d(input, weight, bias, stride, padding, dilation, groups)
+        return torch.conv1d(input, weight, bias, stride, padding, dilation, groups)
 
 @_overload
 def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
@@ -170,16 +170,16 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
     """
     if isinstance(padding, str):
         padding_calc = [_compute_padding_same(input.size(), 0, weight, stride, dilation),
-                        _compute_padding_same(input.size(), 1, weight, stride, dilation)
+                        _compute_padding_same(input.size(), 1, weight, stride, dilation),
                         _compute_padding_same(input.size(), 2, weight, stride, dilation)
                         ]
         final_padding = [padding_calc[0]//2, (padding_calc[0]+1)//2,
                         padding_calc[1]//2, (padding_calc[1]+1)//2,
                         padding_calc[2]//2, (padding_calc[2]+1)//2,
         ]
-        return torch.conv2d(input, weight, bias, stride, final_padding, dilation, groups)
+        return torch.conv3d(input, weight, bias, stride, final_padding, dilation, groups)
     else:
-        return torch.conv2d(input, weight, bias, stride, padding, dilation, groups)
+        return torch.conv3d(input, weight, bias, stride, padding, dilation, groups)
 
 conv_transpose1d = _add_docstr(torch.conv_transpose1d, r"""
 conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
