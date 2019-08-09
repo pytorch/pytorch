@@ -1332,7 +1332,7 @@ inline TypePtr CompleteTensorType::fromBoolType() {
   return CompleteTensorType::create(at::kLong, at::kCPU, {});
 }
 
-inline c10::optional<c10::ScalarType> optionalScalarTypeFromJitType(const c10::TypePtr & type) {
+inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
   if (type == FloatType::get()) {
     return at::ScalarType::Double;
   } else if (type == IntType::get()) {
@@ -1344,7 +1344,7 @@ inline c10::optional<c10::ScalarType> optionalScalarTypeFromJitType(const c10::T
 }
 
 inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
-  auto result = optionalScalarTypeFromJitType(type);
+  auto result = tryScalarTypeFromJitType(type);
   AT_ASSERTM(
       result,
       "Add new condition, expected Float, Int, or Bool but got",

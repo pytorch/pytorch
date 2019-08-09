@@ -53,6 +53,9 @@ bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol,
 
 Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   // TODO: use bitwise operator overloads once we add them
+
+  TORCH_CHECK(self.scalar_type() == other.scalar_type(), self.scalar_type(), " did not match ", other.scalar_type())
+
   auto actual_error = (self - other).abs();
   auto max_error = atol + rtol * other.abs();
 
@@ -60,7 +63,9 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   // tensors.
   // Specifically, if other is an int tensor, multiplying by rtol results in
   // float tensor.
-  if (!isFloatingType(actual_error.scalar_type())) {
+  // It is also possible for parameters to be 'wrapped_number's, in which case
+  // max_error could be promoted to double when actual error is still a float.
+  if (actual_error.scalar_type() != max_error.scalar_type()) {
     actual_error = actual_error.to(max_error.scalar_type());
   }
 

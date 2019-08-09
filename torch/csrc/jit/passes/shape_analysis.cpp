@@ -211,12 +211,11 @@ class ShapePropagator {
     }
   }
 
-  // Promotes result types for arithmetic operations using new type promotion logic.
-  // See tensor_attributes.rst for details.
-  // This function handles the dimmed and zero-dim case, not the `wrapped-number`
-  // case. Wrapped number is handled separately because jit explicitly matches
-  // on the `Scalar other` signature.
-  c10::optional<c10::ScalarType> getPromotedTypeForArithmeticOp(Node *node) {
+  // Promotes result types for arithmetic operations on Tensor operands using
+  // new type promotion logic. See tensor_attributes.rst for details.
+  // This doesn't handle the case of arithmetic ops with Scalar arguments (when
+  // `Tensor.getUnsafeTensorImpl()->is_wrapped_nubmer()` would return true)
+  c10::ScalarType getPromotedTypeForArithmeticOp(Node *node) {
     c10::ScalarType dimmed = c10::ScalarType::Undefined;
     c10::ScalarType zerodim = c10::ScalarType::Undefined;
     // binary arithmetic ops, more than 2 args is alpha.
@@ -865,9 +864,7 @@ class ShapePropagator {
                   gatherTensorTypes<DimensionedTensorType>(node)) {
             AT_ASSERT(maybe_tensor_types->size() >= 2);
             auto dtype = getPromotedTypeForArithmeticOp(node);
-            if (dtype) {
-              return {broadcast(*maybe_tensor_types, *dtype)};
-            }
+            return {broadcast(*maybe_tensor_types, dtype)};
           }
           return {};
         }};
@@ -943,13 +940,14 @@ class ShapePropagator {
             if (auto maybe_tensor_types =
                     gatherTensorTypes<DimensionedTensorType>(node)) {
               auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
-              auto second_scalar_type = optionalScalarTypeFromJitType(node->inputs()[1]->type());
+              auto second_scalar_type = tryScalarTypeFromJitType(node->inputs()[1]->type());
               if (!second_scalar_type) {
                 return {};
               }
               if (isIntegralType(first_scalar_type) && isFloatingType(*second_scalar_type) )
               {
-                auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
+                //auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
+                auto default_dtype = at::ScalarType::Float;
                 return {broadcast(*maybe_tensor_types, default_dtype)};
               }
               if (c10::ScalarType::Bool == first_scalar_type &&
