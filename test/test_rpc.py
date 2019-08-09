@@ -113,6 +113,7 @@ class RpcTest(MultiProcessTestCase):
     @_wrap_with_rpc
     def test_callback(self):
         outer = {'ret': None}
+
         def callback(fm):
             ret = fm.get()
             self.assertEqual(ret, torch.ones(n, n) * 2)
@@ -133,6 +134,7 @@ class RpcTest(MultiProcessTestCase):
     @_wrap_with_rpc
     def test_multi_callback(self):
         outer = {'ret': 0}
+
         def callback1(fm):
             ret = fm.get()
             self.assertEqual(ret, torch.ones(n, n) * 2)
