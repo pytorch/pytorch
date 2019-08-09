@@ -1632,6 +1632,29 @@ class _TestTorchMixin(object):
         res2 = x1.sum(axis=(0, 2), keepdims=True)
         self.assertEqual(res1, res2)
 
+    def test_addcdiv(self):
+        def _test_addcdiv(a, alpha, b, c):
+            actual = torch.addcdiv(a, alpha, b, c)
+            expected = a + (alpha * b) / c
+            self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
+
+        def non_zero_rand(size, dtype, device):
+            if dtype.is_floating_point:
+                a = torch.rand(size=size, dtype=dtype, device=device)
+            elif dtype == torch.uint8:
+                a = torch.randint(1, 5, size=size, dtype=dtype, device=device)
+            else:
+                a = torch.randint(-5, 5, size=size, dtype=dtype, device=device)
+            return a + (a == 0).type(dtype)
+
+        for device in torch.testing.get_all_device_types():
+            for dtype in torch.testing.get_all_math_dtypes(device):
+                _test_addcdiv(
+                    non_zero_rand((2, 2), dtype=dtype, device=device),
+                    0.5,
+                    non_zero_rand((2, 2), dtype=dtype, device=device),
+                    non_zero_rand((2, 2), dtype=dtype, device=device))
+
     def test_add(self):
         for device in torch.testing.get_all_device_types():
             # [res] torch.add([res,] tensor1, tensor2)
@@ -2646,10 +2669,16 @@ class _TestTorchMixin(object):
             aRes = torch.cumsum(a, 0)
             bRes = torch.cumsum(b, 0)
             self.assertEqual(aRes, bRes)
+            self.assertEqual(aRes, torch.tensor([[1, 0, 1],
+                                                 [1, 0, 1],
+                                                 [2, 1, 2]]))
 
             aRes = torch.cumsum(a, 1)
             bRes = torch.cumsum(b, 1)
             self.assertEqual(aRes, bRes)
+            self.assertEqual(aRes, torch.tensor([[1, 1, 2],
+                                                 [0, 0, 0],
+                                                 [1, 2, 3]]))
 
     def test_cumprod(self):
         for d in torch.testing.get_all_device_types():
@@ -2666,10 +2695,16 @@ class _TestTorchMixin(object):
             aRes = torch.cumprod(a, 0)
             bRes = torch.cumprod(b, 0)
             self.assertEqual(aRes, bRes)
+            self.assertEqual(aRes, torch.tensor([[1, 0, 1],
+                                                 [0, 0, 0],
+                                                 [0, 0, 0]]))
 
             aRes = torch.cumprod(a, 1)
             bRes = torch.cumprod(b, 1)
             self.assertEqual(aRes, bRes)
+            self.assertEqual(aRes, torch.tensor([[1, 0, 0],
+                                                 [0, 0, 0],
+                                                 [1, 1, 1]]))
 
     def _test_reduce_integer_upcast(self, fn, has_out=True):
         shape = (3, 4, 5)
@@ -4635,33 +4670,58 @@ class _TestTorchMixin(object):
         torch.zeros(5, 6).copy_(torch.zeros(6))
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))
 
-    def test_randperm(self):
-        # Test core functionality. Ensure both integer and floating-point numbers are tested.
-        for dtype in (torch.long, torch.half):
-            _RNGState = torch.get_rng_state()
-            res1 = torch.randperm(100)
-            res2 = torch.empty(0, dtype=dtype)
-            torch.set_rng_state(_RNGState)
-            torch.randperm(100, out=res2)
-            self.assertEqual(res1, res2)
+    @staticmethod
+    def _test_randperm(self, device):
+        if device == 'cpu':
+            rng_device = None
+        else:
+            rng_device = [0]
+
+        # Test core functionality. On CUDA, for small n, randperm is offloaded to CPU instead. For large n, randperm is
+        # executed on GPU.
+        for n in (100, 50000, 100000):
+            # Ensure both integer and floating-point numbers are tested. Half follows an execution path that is
+            # different from others on CUDA.
+            for dtype in (torch.long, torch.half, torch.float):
+                if n > 2049 and dtype == torch.half:  # Large n for torch.half will raise an exception, do not test here.
+                    continue
+                with torch.random.fork_rng(devices=rng_device):
+                    res1 = torch.randperm(n, dtype=dtype, device=device)
+                res2 = torch.empty(0, dtype=dtype, device=device)
+                torch.randperm(n, out=res2, dtype=dtype, device=device)
+                self.assertEqual(res1, res2, 0)
 
         # Default type is long
-        self.assertIsInstance(torch.randperm(100), torch.LongTensor)
+        for n in (100, 10000):
+            self.assertEqual(torch.randperm(n, device=device).dtype, torch.long)
 
         # randperm of 0 elements is an empty tensor
         res1 = torch.randperm(0)
-        res2 = torch.LongTensor(5)
+        res2 = torch.tensor(5, dtype=dtype, device=device)
         torch.randperm(0, out=res2)
         self.assertEqual(res1.numel(), 0)
         self.assertEqual(res2.numel(), 0)
 
         # Test exceptions when n is too large for a floating point type
-        for res, small_n, large_n in ((torch.HalfTensor(), 2**11 + 1, 2**11 + 2),
-                                      (torch.FloatTensor(), 2**24 + 1, 2**24 + 2),
-                                      (torch.DoubleTensor(), 2**25,  # 2**53 + 1 is too large to run
-                                       2**53 + 2)):
+        for dtype, small_n, large_n in ((torch.half, 2**11 + 1, 2**11 + 2),
+                                        (torch.float, 2**24 + 1, 2**24 + 2),
+                                        (torch.double, 2**25,  # 2**53 + 1 is too large to run
+                                         2**53 + 2)):
+            res = torch.empty(0, dtype=dtype, device=device)
             torch.randperm(small_n, out=res)  # No exception expected
-            self.assertRaises(RuntimeError, lambda: torch.randperm(large_n, out=res))
+            self.assertRaises(RuntimeError, lambda: torch.randperm(large_n, out=res, device=device))
+
+        # Test non-contiguous tensors
+        for n in (4, 5, 6, 10, 20):
+            non_contiguous_tensor = torch.zeros((2, 3), dtype=torch.long, device=device).t()
+            self.assertFalse(non_contiguous_tensor.is_contiguous())
+            with torch.random.fork_rng(devices=rng_device):
+                res = torch.randperm(n, dtype=torch.long, device=device)
+            torch.randperm(n, out=non_contiguous_tensor)
+            self.assertEqual(non_contiguous_tensor, res)
+
+    def test_randperm(self):
+        self._test_randperm(self, 'cpu')
 
     def test_random(self):
         # This test is flaky with p<=(2/(ub-lb))^200=6e-36
@@ -7907,6 +7967,40 @@ class _TestTorchMixin(object):
         t = torch.from_numpy(np.empty((0, 4)))
         t[:, 1::2] *= 1
 
+    def test_atan2(self):
+        def _test_atan2_with_size(size, device):
+            a = torch.rand(size=size, device=device, dtype=torch.double)
+            b = torch.rand(size=size, device=device, dtype=torch.double)
+            actual = a.atan2(b)
+            x = a.view(-1)
+            y = b.view(-1)
+            expected = torch.tensor([math.atan2(x[i].item(), y[i].item()) for i in range(x.numel())],
+                                    device=device, dtype=torch.double)
+            self.assertTrue(torch.allclose(expected, actual.view(-1), rtol=0, atol=0.02))
+        for device in torch.testing.get_all_device_types():
+            _test_atan2_with_size((2, 2), device)
+            _test_atan2_with_size((3, 3), device)
+            _test_atan2_with_size((5, 5), device)
+
+    def test_atan2_edgecases(self):
+        def _test_atan2(x, y, expected, device, dtype):
+            expected_tensor = torch.tensor([expected], dtype=dtype, device=device)
+            x_tensor = torch.tensor([x], dtype=dtype, device=device)
+            y_tensor = torch.tensor([y], dtype=dtype, device=device)
+            actual = torch.atan2(y_tensor, x_tensor)
+            self.assertTrue(torch.allclose(expected_tensor, actual, rtol=0, atol=0.02))
+        for device in torch.testing.get_all_device_types():
+            for dtype in [torch.float, torch.double]:
+                _test_atan2(0, 0, 0, device, dtype)
+                _test_atan2(0, 1, math.pi / 2, device, dtype)
+                _test_atan2(0, -1, math.pi / -2, device, dtype)
+                _test_atan2(-1, 0, math.pi, device, dtype)
+                _test_atan2(1, 0, 0, device, dtype)
+                _test_atan2(-1, -1, math.pi * -3 / 4 , device, dtype)
+                _test_atan2(1, 1, math.pi / 4 , device, dtype)
+                _test_atan2(1, -1, math.pi / -4 , device, dtype)
+                _test_atan2(-1, 1, math.pi * 3 / 4 , device, dtype)
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_newaxis_numpy_comparison(self):
         def run_test(tensor, *idx):
@@ -8936,7 +9030,6 @@ class _TestTorchMixin(object):
         a = np.array(x, copy=False)
         b = np.array(y, copy=False)
         expected = np.matmul(a, b)
-        self.assertTrue(expected.flags['C_CONTIGUOUS'])
 
         ans = torch.matmul(x, y)
         self.assertTrue(ans.is_contiguous())
