@@ -16,6 +16,15 @@ static ModulePtr create_module_object(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle = false) {
+  // XXX: This is a temporary hack so that module names cannot clash with
+  // builtins like `torch`. Delete this with the new serialization format.
+  std::vector<std::string> new_class_name{"__module__"};
+  new_class_name.insert(
+      new_class_name.end(),
+      class_name.atoms().begin(),
+      class_name.atoms().end());
+  class_name = c10::QualifiedName(std::move(new_class_name));
+
   if (shouldMangle && cu->get_class(class_name) != nullptr) {
     class_name = cu->mangle(class_name);
   }
@@ -234,10 +243,6 @@ static std::vector<at::Tensor> loadTensors(const std::vector<Slot>& slots) {
 std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_graph() {
   auto result = lower_graph(owner().module_object(), *graph());
   return std::make_pair(result.first, loadTensors(result.second));
-}
-
-static void clearMethods(c10::ivalue::Object* self) {
-  self->compilation_unit()->drop_all_functions();
 }
 
 void Module::define(const std::string& src, const ResolverPtr& resolver) {

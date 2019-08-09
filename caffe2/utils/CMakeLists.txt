@@ -23,6 +23,7 @@ if (NOT MSVC)
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
           utils/threadpool/pthreadpool.cc
           utils/threadpool/pthreadpool_impl.cc
+          utils/threadpool/ThreadPoolMobile.cc
           )
 endif()
 
