@@ -4,7 +4,10 @@ import torch
 from torch.nn.modules.module import Module
 from torch.nn.modules.linear import Linear as NNLinear
 
-from typing import Optional
+try:
+    from typing import Optional
+except ImportError:
+    from torch._jit_internal import Optional
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor
