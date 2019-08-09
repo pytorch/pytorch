@@ -156,6 +156,8 @@ class Linear(torch.nn.Module):
         if prefix + 'bias' in state_dict:
             self.bias.copy_(state_dict[prefix + 'bias'])
             state_dict.pop(prefix + 'bias')
+        else:
+            self.bias = None
 
         self.scale = float(state_dict[prefix + 'scale'])
         state_dict.pop(prefix + 'scale')
