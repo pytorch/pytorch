@@ -1690,19 +1690,23 @@ struct to_ir {
     // Get the idx to augment
     const auto subscriptExprs = lhs.subscript_exprs();
     const TypePtr type = sliceable->type();
-    TypePtr elemType = nullptr;
+    if (subscriptExprs.size() != 1) {
+      throw ErrorReport(subscriptExprs)
+          << "Sliced expression not yet supported for " << type->python_str()
+          << " augmented assignment. "
+          << "File a bug if you want this";
+    }
 
+    TypePtr elemType = nullptr;
     if (const ListTypePtr listType = type->cast<ListType>()) {
       elemType = listType->getElementType();
     } else if (const DictTypePtr dictType = type->cast<DictType>()) {
       elemType = dictType->getKeyType();
     }
 
-    if (subscriptExprs.size() != 1 || elemType == nullptr) {
-      throw ErrorReport(subscriptExprs)
-          << "Sliced expression not yet supported for " << type->python_str()
-          << " augmented assignment. "
-          << "File a bug if you want this";
+    if (elemType == nullptr) {
+      throw ErrorReport(lhs)
+          << type->python_str() << " does not support augmented assignment.";
     }
     const auto idxValue = emitExpr(subscriptExprs[0]);
     const auto containerArg =

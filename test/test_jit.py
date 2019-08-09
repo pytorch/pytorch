@@ -10163,6 +10163,14 @@ a")
 
             self.checkScript(star_code, (), name='star_tuple_assign')
 
+        def subscript_tuple_augmented_assign(a):
+            # type: (Tuple[int, int]) -> Tuple[int, int]
+            a[0] += 1
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, 'does not support augmented assign'):
+            scripted_aug_assign = torch.jit.script(subscript_tuple_augmented_assign)
+
 
     def test_multi_reduction(self):
         with self.assertRaisesRegex(
@@ -13754,6 +13762,16 @@ a")
 
         self.checkScript(fn, ((3, 4),))
         self.checkScript(fn, ())
+
+    def test_named_tuple_redefine(self):
+        _1 = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
+        _2 = namedtuple('GoogLeNetOutputs', ['different'])
+
+        with self.assertRaisesRegex(RuntimeError, r'redefine'):
+            @torch.jit.script
+            def foo(x, y):
+                # type: (_1, _2) -> _1
+                return x
 
     def test_named_tuple_py2(self):
         _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
