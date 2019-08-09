@@ -195,6 +195,18 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
 
+    def test_arithmetic(self):
+        class ArithmeticModule(torch.nn.Module):
+            def forward(self, x):
+                x = x + 2
+                x = x - 4
+                x = x * 6
+                x = x / 8
+                return x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(ArithmeticModule(), x)
+
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):

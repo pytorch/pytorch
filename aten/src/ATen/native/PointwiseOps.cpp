@@ -13,7 +13,7 @@
 namespace at {
 namespace native {
 
-Tensor addcmul_cpu(
+Tensor addcmul(
     const Tensor& self,
     const Tensor& tensor1,
     const Tensor& tensor2,
@@ -22,7 +22,7 @@ Tensor addcmul_cpu(
   return at::addcmul_out(result, self, tensor1, tensor2, value);
 }
 
-Tensor& addcmul_cpu_(
+Tensor& addcmul_(
     Tensor& self,
     const Tensor& tensor1,
     const Tensor& tensor2,
@@ -30,7 +30,7 @@ Tensor& addcmul_cpu_(
   return at::addcmul_out(self, self, tensor1, tensor2, value);
 }
 
-Tensor& addcmul_cpu_out(
+Tensor& addcmul_out(
     Tensor& result,
     const Tensor& self,
     const Tensor& tensor1,
@@ -43,7 +43,7 @@ Tensor& addcmul_cpu_out(
   iter.add_input(tensor1);
   iter.add_input(tensor2);
   iter.build();
-  addcmul_stub(kCPU, iter, value);
+  addcmul_stub(iter.device_type(), iter, value);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
 #endif
