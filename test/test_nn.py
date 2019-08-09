@@ -4,7 +4,7 @@ import sys
 import random
 import string
 import unittest
-from unittest import mock
+import mock
 import itertools
 import warnings
 import pickle
