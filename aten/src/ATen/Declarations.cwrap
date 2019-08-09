@@ -2322,6 +2322,38 @@
     - THTensor* batch2
 ]]
 [[
+  name: _th_addcdiv
+  cname: addcdiv
+  variants:
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - arg: THTensor* self
+      broadcast: tensor1,tensor2 fallback
+    - arg: real value
+      default: AS_REAL(1)
+      kwarg_only: True
+    - THTensor* tensor1
+    - THTensor* tensor2
+]]
+[[
+  name: _th_addcdiv_
+  cname: addcdiv
+  variants: function
+  return: argument 0
+  arguments:
+    - THTensor* self
+    - arg: THTensor* self
+      broadcast: tensor1,tensor2 inplace fallback
+    - arg: real value
+      default: AS_REAL(1)
+      kwarg_only: True
+    - THTensor* tensor1
+    - THTensor* tensor2
+]]
+[[
   name: _th_gels
   cname: gels
   types:

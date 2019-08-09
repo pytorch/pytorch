@@ -261,7 +261,6 @@ class CMake:
             'USE_CUDA': USE_CUDA,
             'USE_DISTRIBUTED': USE_DISTRIBUTED,
             'USE_NUMPY': USE_NUMPY,
-            'USE_SYSTEM_EIGEN_INSTALL': 'OFF'
         })
 
         # Options starting with CMAKE_
