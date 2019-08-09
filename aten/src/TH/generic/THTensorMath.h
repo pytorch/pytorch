@@ -176,7 +176,6 @@ TH_API void THTensor_(asin)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(sinh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(tan)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(atan)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty);
 TH_API void THTensor_(tanh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erf)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erfc)(THTensor *r_, THTensor *t);
