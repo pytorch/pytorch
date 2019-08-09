@@ -2547,26 +2547,6 @@ class _TestTorchMixin(object):
             self.assertEqual(expected, actual2.numpy())
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    def test_int_scalar_pow_neg_ints_tensor(self):
-        ints = [torch.iinfo(torch.int).min,
-                -3, -2, -1, 0, 1, 2, 3,
-                torch.iinfo(torch.int).max]
-        neg_ints = [torch.iinfo(torch.int).min, -3, -2, -1]
-
-        tensor = torch.tensor(ints, dtype=torch.int32)
-        nparr = np.array(ints, dtype=np.int32)
-        out = torch.empty_like(tensor)
-        for base in neg_ints:
-            self.assertRaisesRegex(
-                ValueError,
-                "Integers to negative integer powers are not allowed.",
-                lambda: np.power(base, nparr))
-            # Despite that Numpy raises error, we are not able
-            # to check all tensor values' signs.
-            torch.pow(base, tensor)
-            torch.pow(base, tensor, out=out)
-
-    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_float_scalar_pow_float_tensor(self):
         def assertEqual(x, y):
             self.assertEqual(np.nan_to_num(x), np.nan_to_num(y), allow_inf=True)
