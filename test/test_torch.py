@@ -1637,7 +1637,7 @@ class _TestTorchMixin(object):
             actual = torch.addcdiv(a, alpha, b, c)
             expected = a + (alpha * b) / c
             self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
-            
+
         def non_zero_rand(size, dtype, device):
             if dtype.is_floating_point:
                 a = torch.rand(size=size, dtype=dtype, device=device)
