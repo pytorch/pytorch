@@ -11,9 +11,6 @@
 namespace torch {
 namespace jit {
 
-using ClassResolver =
-    std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
-
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class OpCode : char {
   MARK = '(',
@@ -125,10 +122,10 @@ class Pickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
  public:
-  Pickler(
-      std::function<void(const char*, size_t)> writer,
-      std::vector<at::Tensor>* tensor_table = nullptr)
-      : writer_(writer), tensor_table_(tensor_table) {}
+  Pickler(std::vector<at::Tensor>* tensor_table = nullptr)
+      : tensor_table_(tensor_table) {}
+
+  const std::vector<char>& stack();
 
   // Push protocol onto the stack
   void protocol();
@@ -189,11 +186,8 @@ class Pickler {
   template <typename T>
   void push(typename std::common_type<T>::type value) {
     const char* begin = reinterpret_cast<const char*>(&value);
-    writer_(begin, sizeof(T));
+    stack_.insert(stack_.end(), begin, begin + sizeof(T));
   }
-
-  // Stream to write binary data to
-  std::function<void(const char*, size_t)> writer_;
 
   // Stack of opcodes/data
   std::vector<char> stack_;
@@ -234,28 +228,31 @@ class Unpickler {
 
  public:
   Unpickler(
-      std::function<void(char*, size_t)> reader,
-      std::function<bool()> bounds_checker,
+      const void* data,
+      size_t size,
       const std::vector<at::Tensor>* tensor_table,
-      ClassResolver class_resolver)
-      : reader_(reader),
-        bounds_checker_(bounds_checker),
+      std::function<c10::StrongTypePtr(const c10::QualifiedName&)>
+          class_resolver)
+      : bytes_(static_cast<const uint8_t*>(data)),
+        end_ptr_(bytes_ + size),
         tensor_table_(tensor_table),
-        class_resolver_(std::move(class_resolver)) {}
+        class_resolver_(class_resolver) {}
 
-  IValue parse_ivalue();
+  std::vector<IValue> parse_ivalue_list();
 
  private:
   // No arguments ensures that a template arugment must be specified
   // so that the number of bytes read / type read is explicit
   template <typename T>
   T read() {
+    TORCH_CHECK(
+        bytes_ + sizeof(T) <= end_ptr_,
+        "Unpickler overran buffer while reading a value");
     T item;
-    reader_(reinterpret_cast<char*>(&item), sizeof(item));
+    std::memcpy(&item, bytes_, sizeof(T));
+    bytes_ += sizeof(T);
     return item;
   }
-
-  std::string readBytes(size_t num_bytes);
 
   double readFloat();
   OpCode readInstruction();
@@ -265,24 +262,18 @@ class Unpickler {
   void setInput(size_t memo_id);
   void run();
 
-  // Returns a pointer to the number of bytes requested. This should state-fully
-  // remember how many bytes have been read
-  std::function<void(char*, size_t)>  reader_;
-
-  // Check if the stream has gone past its size
-  std::function<bool()> bounds_checker_;
-
   std::vector<IValue> stack_;
-
   // globals are represented on the stack as IValue integer indices
   // into this list
   std::vector<std::function<void(void)>> globals_;
   std::vector<IValue> memo_table_;
   std::vector<size_t> marks_;
+  const uint8_t* bytes_;
+  const uint8_t* end_ptr_;
   const std::vector<at::Tensor>* tensor_table_;
 
   // optionally nullptr, needs to be present for creating classes
-  ClassResolver class_resolver_;
+  std::function<c10::StrongTypePtr(const c10::QualifiedName&)> class_resolver_;
   IValue empty_tuple_;
 };
 
