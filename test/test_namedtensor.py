@@ -76,6 +76,9 @@ class TestNamedTensor(TestCase):
             x = factory(2, 1, 1, names=('C.in', 'H', 'C'), device=device)
 
 
+    def test_empty(self):
+        self._test_factory(torch.empty, 'cpu')
+
     def test_has_names(self):
         unnamed = torch.empty(2, 3)
         none_named = torch.empty(2, 3, names=(None, None))
@@ -148,38 +151,9 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
             tensor.names = ['N', 'N']
 
-    def test_factory_edge_cases(self):
-        for device in torch.testing.get_all_device_types():
-            self._test_factory(torch.empty, device)
-
-    def test_factory_coverage(self):
-        def _test(factory, device):
-            names = ('N', 'T', 'D')
-
-            torch.manual_seed(0)
-            result = factory(1, 2, 3, names=names, device=device)
-
-            torch.manual_seed(0)
-            expected = factory(1, 2, 3, device=device).set_names_(names)
-
-            self.assertTensorDataAndNamesEqual(result, expected)
-
-        supported = [
-            torch.ones,
-            torch.rand,
-            torch.randn,
-            torch.zeros,
-        ]
-
-        for op, device in itertools.product(supported, torch.testing.get_all_device_types()):
-            _test(op, device)
-
-        # Test torch.full
-        for device in torch.testing.get_all_device_types():
-            names = ('N', 'T', 'D')
-            result = torch.full([1, 2, 3], 2, names=names, device=device)
-            expected = torch.full([1, 2, 3], 2, device=device).set_names_(names)
-            self.assertTensorDataAndNamesEqual(result, expected)
+    @unittest.skipIf(not TEST_CUDA, 'no CUDA')
+    def test_empty_cuda(self):
+        self._test_factory(torch.empty, 'cuda')
 
     def test_size(self):
         t = torch.empty(2, 3, 5, names=('N', None, 'C'))
