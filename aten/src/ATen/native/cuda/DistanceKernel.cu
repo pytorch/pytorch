@@ -121,7 +121,7 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   const scalar_t * const end = start + m;
   const scalar_t * a = start + threadIdx.x;
   const scalar_t * b = self + j * m + threadIdx.x;
-  scalar_t agg = 0.0;
+  /*scalar_t agg = 0.0;
   for (; a < end; a += stride, b += stride) {
     F::inc(agg, std::abs(*a - *b), p);
   }
@@ -129,6 +129,11 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   agg = reduce_agg<scalar_t, F>(agg);
   if (threadIdx.x == 0) {
     result[k] = F::finish(agg, p);
+  }*/
+
+  scalar_t agg = std::abs(*a - *b);
+  if (threadIdx.x == 0) {
+    result[k] = reduce_agg<scalar_t, F>(agg);
   }
 }
 
