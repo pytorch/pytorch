@@ -214,13 +214,13 @@ DEFAULT_MODULE_MAPPING = {
     nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
-    # Wrapped modules:
-    nnq.UnaryWrapper: nnq.QuantizedUnaryWrapper,
-    nnq.BinaryWrapper: nnq.QuantizedBinaryWrapper,
     # QAT modules:
     qat.Linear: nnq.Linear,
     qat.Conv2d: nnq.Conv2d,
 }
+
+# Update the mappings with the wrapper modules.
+# DEFAULT_MODULE_MAPPING.update(wrapper_module._FLOAT_MODULES)
 
 # Map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPING = {

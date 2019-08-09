@@ -1,70 +1,97 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 import torch
 from torch._ops import ops
 from torch.nn import Module
 
-_FLOAT_MODULES = {
-    torch.add: ops.quantized.add,
-    torch.cat: ops.quantized.cat
-}
+# Forward declaration. Module mappings are added with every class below
+_FLOAT_MODULES = {}
+
+r"""Instantiates a wrapper for the operation.
+
+Args:
+    operation: One of the supported operations. See note below.
+    quantized: Flag indicating that quantized wrapper is expected.
+
+Returns:
+    Instantiated module.
+"""
+def make_wrapper(operation, quantized=False):
+    wrappers = {
+        torch.add: (Add, QuantizedAdd),
+        torch.cat: (Cat, QuantizedCat),
+    }
+    if quantized:
+        return wrappers[operation][1]()
+    else:
+        return wrappers[operation][0]()
 
 
-"""Wrappes unary operators."""
-class UnaryWrapper(Module):
-    def __init__(self, operation):
-        super(UnaryWrapper, self).__init__()
-        self.operation = operation
-
-    def forward(self, x):
-        return self.operation(x)
-
-
-"""Wrappes binary operators."""
-class BinaryWrapper(UnaryWrapper):
-    def __init__(self, operation):
-        super(BinaryWrapper, self).__init__(operation)
-
-    def forward(self, x, y):
-        return self.operation(x, y)
-
-
-"""Wraps unary operators (quantized)."""
-class QuantizedUnaryWrapper(Module):
-    def __init__(self, operation):
-        super(WrapperModule, self).__init__()
-        self.operation = operation
+class _BaseQuantizedWrapper(Module):
+    def __init__(self):
+        super(_BaseQuantizedWrapper, self).__init__()
         self.register_buffer('scale', torch.tensor([1.0], dtype=torch.double))
         self.register_buffer('zero_point', torch.tensor([0], dtype=torch.long))
 
-    def forward(self, x):
-        return self.operation(x, scale=self.scale, zero_point=self.zero_point)
-
     @classmethod
     def from_float(cls, mod, qconfig=None):
+        assert(_FLOAT_MODULES.get(type(mod), None) is not None), \
+            "I don't know what to do with " + mod.__class___.__name__
         assert (hasattr(mod, 'observer')), \
             "Input float module must have observer attached"
-        assert (type(mod) == WrapperModule), \
-            "nnq.QuantizedWrapperModule.from_float only works for " \
-            + "nnq.WrapperModule"
-        qoperation = _FLOAT_MODULES.get(mod.operation, None)
-        assert (qoperation is not None), "No quantized operation for " \
-            + type(mode.operation)
+        assert (cls == _FLOAT_MODULES.get(type(mod))), \
+            str(cls) + ".from_float only works for its non-quantized module " \
+            + "got " + str(type(mod)) + " instead."
 
         scale, zero_point = mod.observer.calculate_qparams()[:2]
-        mod = cls(qoperation)
-        mod.scale = torch.tensor(scale, dtype=torch.double)
-        mod.zero_point = torch.tensor(zero_point, dtype=torch.long)
-        return mod
+        new_mod = cls()
+        new_mod.scale = torch.tensor(scale, dtype=torch.double)
+        new_mod.zero_point = torch.tensor(zero_point, dtype=torch.long)
+        return new_mod
 
 
-"""Wraps binary operators (quantized)."""
-class QuantizedBinaryWrapper(QuantizedUnaryWrapper):
-    def __init__(self, operation):
-        super(QuantizedBinaryWrapper, self).__init__(operation)
+class Add(Module):
+    def __init__(self):
+        super(Add, self).__init__()
 
     def forward(self, x, y):
-        return self.operation(x, y, scale=self.scale, zero_point=self.zero_point)
+        # type: (Tensor, Tensor) -> Tensor
+        return torch.add(x, y)
+
+
+class Cat(Module):
+    def __init__(self):
+        super(Cat, self).__init__()
+
+    def forward(self, x, axis=None):
+        # type: (List[Tensor], Optional[int]) -> Tensor
+        if axis is None:
+            axis = 0
+        return torch.cat(x, axis)
+
+
+class QuantizedAdd(_BaseQuantizedWrapper):
+    def __init__(self):
+        super(QuantizedAdd, self).__init__()
+
+    def forward(self, x, y):
+        # type (Tensor, Tensor) -> Tensor
+        scale = float(self.scale)
+        zero_point = int(self.zero_point)
+        return ops.quantized.add(x, y, scale=scale, zero_point=zero_point)
+
+_FLOAT_MODULES[Add] = QuantizedAdd
+
+
+class QuantizedCat(_BaseQuantizedWrapper):
+    def __init__(self):
+        super(QuantizedCat, self).__init__()
+
+    def forward(self, x, axis=None):
+        # type: (List[Tensor], Optional[int]) -> Tensor
+        if axis is None:
+            axis = 0
+        scale = float(self.scale.item())
+        zero_point = int(self.zero_point.item())
+        return ops.quantized.cat(x, axis, scale=scale, zero_point=zero_point)
+
+_FLOAT_MODULES[Cat] = QuantizedCat
