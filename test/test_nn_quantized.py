@@ -9,7 +9,8 @@ import torch.nn._intrinsic.quantized as nnq_fused
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
 from torch.nn._intrinsic.quantized import ConvReLU2d
-from common_utils import TestCase, run_tests, tempfile
+from common_utils import run_tests, tempfile
+from common_quantization import QuantizationTestCase
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -22,7 +23,7 @@ test please see `caffe2/test/test_quantized.py`.
 '''
 
 
-class FunctionalAPITest(TestCase):
+class FunctionalAPITest(QuantizationTestCase):
     def test_relu_api(self):
         X = torch.arange(-5, 5, dtype=torch.float)
         scale = 2.0
@@ -33,7 +34,7 @@ class FunctionalAPITest(TestCase):
         self.assertEqual(qY, qY_hat)
 
 
-class ModuleAPITest(TestCase):
+class ModuleAPITest(QuantizationTestCase):
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -113,6 +114,9 @@ class ModuleAPITest(TestCase):
         # self.assertEqual(qLinear.bias, loaded.bias)
         # self.assertEqual(qLinear.scale, loaded.scale)
         # self.assertEqual(qLinear.zero_point, loaded.zero_point)
+
+        # Test JIT
+        self.checkScriptable(qlinear, zip([X_q], [Z_ref]))
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
@@ -211,6 +215,9 @@ class ModuleAPITest(TestCase):
         self.assertEqual(result_reference, result_under_test,
                          message="Tensors are not equal.")
 
+        # JIT testing
+        self.checkScriptable(conv_under_test, zip([qX], [result_reference]))
+
     def test_pool_api(self):
         """Tests the correctness of the pool module.
 
@@ -234,6 +241,9 @@ class ModuleAPITest(TestCase):
         pool_under_test = torch.nn.quantized.MaxPool2d(**kwargs)
         qX_hat = pool_under_test(qX)
         self.assertEqual(qX_expect, qX_hat)
+
+        # JIT Testing
+        self.checkScriptable(pool_under_test, zip([X], [qX_expect]))
 
 if __name__ == '__main__':
     run_tests()

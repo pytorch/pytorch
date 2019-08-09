@@ -10,6 +10,12 @@ cmake_policy(SET CMP0025 NEW)
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
+if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+  set(LINUX TRUE)
+else()
+  set(LINUX FALSE)
+endif()
+
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
 set(CMAKE_CXX_STANDARD 11)
@@ -121,7 +127,9 @@ cmake_dependent_option(
     "USE_NCCL" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
-option(USE_NUMA "Use NUMA (only available on Linux)" ON)
+cmake_dependent_option(
+    USE_NUMA "Use NUMA. Only available on Linux." ON
+    "LINUX" OFF)
 cmake_dependent_option(
     USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on." OFF
     "USE_CUDA" OFF)
@@ -166,7 +174,9 @@ option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside t
 # When generating debug symbols, CMake default to use the flag /Zi.
 # However, it is not compatible with sccache. So we rewrite it off.
 # But some users don't use sccache; this override is for them.
-option(MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON)
+cmake_dependent_option(
+  MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON
+  "MSVC" OFF)
 
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 
@@ -174,6 +184,8 @@ set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to bu
 # 1. Replace /Zi and /ZI with /Z7
 # 2. Switch off incremental linking in debug builds
 if (MSVC)
+  string(APPEND CMAKE_C_FLAGS " /EHa")
+  string(APPEND CMAKE_CXX_FLAGS " /EHa")
   if(MSVC_Z7_OVERRIDE)
     foreach(flag_var
         CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
@@ -217,6 +229,7 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(BUILD_CAFFE2_OPS OFF)
   set(USE_DISTRIBUTED OFF)
   set(FEATURE_TORCH_MOBILE ON)
+  set(NO_API ON)
 endif()
 
 if (BUILD_ATEN_ONLY)
