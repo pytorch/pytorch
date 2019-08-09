@@ -7294,6 +7294,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm
     def test_batchnorm_cudnn_nhwc(self):
         input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda", requires_grad=True).contiguous(memory_format=torch.channels_last)
         input.retain_grad()
@@ -8711,6 +8712,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm
     def test_conv_cudnn_nhwc(self):
         input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device="cuda", requires_grad=True).contiguous(memory_format=torch.channels_last)
         input.retain_grad()
