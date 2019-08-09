@@ -93,6 +93,7 @@ class Linear(torch.nn.Module):
         >>> print(output.size())
         torch.Size([128, 30])
     """
+
     def __init__(self, in_features, out_features, bias_=True):
         super(Linear, self).__init__()
         # We don't muck around with buffers or attributes or anything here
@@ -117,6 +118,45 @@ class Linear(torch.nn.Module):
     def forward(self, x):
         return torch.ops.quantized.fbgemm_linear(
             x, self._packed_weight, self.bias, self.scale, self.zero_point)
+
+    # ===== Serialization methods =====
+    # The special consideration here is that we have to unpack the weights into their
+    # regular QTensor form for serialization. Packed weights should not live
+    # outside the process in which they were created, rather they should be derived
+    # from the QTensor weight.
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'weight'] = torch.ops.quantized.fbgemm_linear_unpack(
+            self._packed_weight)
+        destination[prefix + 'scale'] = torch.tensor(self.scale)
+        destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
+        if self.bias is not None:
+            destination[prefix + 'bias'] = self.bias
+
+    # ===== Deserialization methods =====
+    # Counterpart to the serialization methods, we must pack the serialized QTensor
+    # weight into its packed format for use by the FBGEMM ops.
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(state_dict[prefix + 'weight'])
+        if prefix + 'bias' in state_dict:
+            self.bias.copy_(state_dict[prefix + 'bias'])
+            state_dict.pop(prefix + 'bias')
+        state_dict.pop(prefix + 'weight')
+        self.scale = float(state_dict[prefix + 'scale'])
+        state_dict.pop(prefix + 'scale')
+        self.zero_point = int(state_dict[prefix + 'zero_point'])
+        state_dict.pop(prefix + 'zero_point')
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
+
+    # Function rather than property to make sure that JIT serialization doesn't
+    # register this as an attribute
+    def weight(self):
+        return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+
+    def set_weight(self, w):
+        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
 
     @staticmethod
     def from_float(mod):
