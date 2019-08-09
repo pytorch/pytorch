@@ -71,11 +71,21 @@ def get_cmake_cache_variables_from_file(cmake_cache_file):
             # Blank or comment line, skip
             continue
 
-        # Space can also be part of variable name and value
-        matched = re.match(r'(\S.*):\s*([a-zA-Z_-][a-zA-Z0-9_-]*)\s*=\s*(.*)', line)
+        # Almost any character can be part of variable name and value. As a practical matter, we assume the type must be
+        # valid if it were a C variable name. It should match the following kinds of strings:
+        #
+        #   USE_CUDA:BOOL=ON
+        #   "USE_CUDA":BOOL=ON
+        #   USE_CUDA=ON
+        #   USE_CUDA:=ON
+        #   Intel(R) MKL-DNN_SOURCE_DIR:STATIC=/path/to/pytorch/third_party/ideep/mkl-dnn
+        #   "OpenMP_COMPILE_RESULT_CXX_openmp:experimental":INTERNAL=FALSE
+        matched = re.match(r'("?)(.+?)\1(?::\s*([a-zA-Z_-][a-zA-Z0-9_-]*)?)?\s*=\s*(.*)', line)
         if matched is None:  # Illegal line
             raise ValueError('Unexpected line {} in {}: {}'.format(i, repr(cmake_cache_file), line))
-        variable, type_, value = matched.groups()
+        _, variable, type_, value = matched.groups()
+        if type_ is None:
+            type_ = ''
         if type_.upper() in ('INTERNAL', 'STATIC'):
             # CMake internal variable, do not touch
             continue
