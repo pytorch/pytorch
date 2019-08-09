@@ -8991,7 +8991,6 @@ class _TestTorchMixin(object):
         a = np.array(x, copy=False)
         b = np.array(y, copy=False)
         expected = np.matmul(a, b)
-        self.assertTrue(expected.flags['C_CONTIGUOUS'])
 
         ans = torch.matmul(x, y)
         self.assertTrue(ans.is_contiguous())
