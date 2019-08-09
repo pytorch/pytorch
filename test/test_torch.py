@@ -2367,7 +2367,7 @@ class _TestTorchMixin(object):
     def _check_against_np(self, tensor, exp):
         tensor_np = tensor.cpu().numpy()
         exp_np = exp if isinstance(exp, int) else exp.cpu().numpy()
-        expected = torch.LongTensor(tensor_np ** exp_np).type_as(tensor)
+        expected = torch.tensor(tensor_np ** exp_np, dtype=tensor.dtype)
         self.assertEqual(torch.pow(tensor, exp), expected)
         self.assertEqual(tensor.pow(exp), torch.pow(tensor, exp))
 
@@ -2383,8 +2383,9 @@ class _TestTorchMixin(object):
         if not IS_WINDOWS:
             typecasts.append(lambda x: x.int())
 
-        tensor = cast(torch.LongTensor(3, 3).random_(-10, 10))
-        exps = [0, 1, 2, 5, cast(torch.LongTensor(3, 3).random_(0, 10))]
+        tensor = cast(torch.tensor((3, 3), dtype=torch.int64).random_(-10, 10))
+        exps = [0, 1, 2, 5,
+                cast(torch.tensor((3, 3), dtype=torch.int64).random_(0, 10))]
 
         for typecast in typecasts:
             for exp in exps:
@@ -2397,8 +2398,9 @@ class _TestTorchMixin(object):
         if not TEST_NUMPY:
             return
 
-        tensor = cast(torch.ShortTensor(3, 3).random_(-5, 5))
-        exps = [0, 1, 2, 5, cast(torch.ShortTensor(3, 3).random_(0, 10))]
+        tensor = cast(torch.tensor((3, 3), dtype=torch.int16).random_(-5, 5))
+        exps = [0, 1, 2, 5,
+                cast(torch.tensor((3, 3), dtype=torch.int16).random_(0, 10))]
 
         for exp in exps:
             _TestTorchMixin._check_against_np(self, tensor, exp)
@@ -2408,8 +2410,9 @@ class _TestTorchMixin(object):
         if not TEST_NUMPY:
             return
 
-        tensor = cast(torch.ByteTensor(3, 3).random_(0, 4))
-        exps = [0, 1, 2, 5, cast(torch.ByteTensor(3, 3).random_(0, 10))]
+        tensor = cast(torch.tensor((3, 3), dtype=torch.int8).random_(0, 4))
+        exps = [0, 1, 2, 5,
+                cast(torch.tensor((3, 3), dtype=torch.int8).random_(0, 10))]
 
         for exp in exps:
             _TestTorchMixin._check_against_np(self, tensor, exp)
