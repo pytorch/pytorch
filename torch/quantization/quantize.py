@@ -222,9 +222,6 @@ DEFAULT_MODULE_MAPPING = {
     qat.Conv2d: nnq.Conv2d,
 }
 
-# Update the mappings with the wrapper modules.
-# DEFAULT_MODULE_MAPPING.update(wrapper_module._FLOAT_MODULES)
-
 # Map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPING = {
     nn.Linear: qat.Linear,

@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch.nn as nn
 import torch
 from functools import partial
-from typing import Optional
 
 class Observer(nn.Module):
     r"""Default Observer Module
@@ -17,10 +16,6 @@ class Observer(nn.Module):
     that computes the quantization parameters given the collected statistics.
     TODO: Maybe add an abstract Observer class that enforces these rules?
     """
-
-    __annotations__ = {'min_val': Optional[torch.Tensor],
-                       'max_val': Optional[torch.Tensor]}
-
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine):
         super(Observer, self).__init__()
         self.dtype = dtype
