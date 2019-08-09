@@ -31,7 +31,6 @@ class ReLU(NNReLU):
     """
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(inplace)
-        assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
 
     def forward(self, input):
         return F.relu(input)

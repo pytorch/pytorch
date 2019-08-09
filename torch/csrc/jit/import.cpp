@@ -150,7 +150,6 @@ script::Module ScriptModuleDeserializer::deserialize(
     const auto& module_def = model_def.main_module();
     return LEGACY_convertModule(module_def);
   } else {
-    // TODO: getstate/setstate
     at::DataPtr pickle_ptr;
     size_t pickle_size;
     std::tie(pickle_ptr, pickle_size) = reader_->getRecord("data.pkl");
@@ -290,12 +289,15 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   size_t size;
   std::tie(data, size) = reader_->getRecord(path);
 
-  at::DataPtr debug_data;
-  size_t debug_size;
-  std::tie(debug_data, debug_size) = reader_->getRecord(path + ".debug_pkl");
+  std::shared_ptr<ConcreteSourceRangeUnpickler> gen_ranges = nullptr;
+  if (proto_version_ >= 6) {
+    at::DataPtr debug_data;
+    size_t debug_size;
+    std::tie(debug_data, debug_size) = reader_->getRecord(path + ".debug_pkl");
 
-  auto gen_ranges = std::make_shared<ConcreteSourceRangeUnpickler>(
-      std::move(debug_data), debug_size);
+    gen_ranges = std::make_shared<ConcreteSourceRangeUnpickler>(
+        std::move(debug_data), debug_size);
+  }
 
   auto src = std::make_shared<Source>(
       std::string(static_cast<const char*>(data.get()), size),
