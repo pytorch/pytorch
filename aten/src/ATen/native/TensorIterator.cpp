@@ -35,7 +35,7 @@ void TensorIterator::reorder_dimensions() {
       }
       int64_t stride0 = operands_[arg].stride_bytes[dim0];
       int64_t stride1 = operands_[arg].stride_bytes[dim1];
-      if (operands_[arg].is_output) {
+      if (is_reduction_ && operands_[arg].is_output) {
         // move reduced dimensions to the front
         if ((stride0 == 0) != (stride1 == 0)) {
           return stride1 == 0 ? 1 : -1;
