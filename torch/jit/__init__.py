@@ -1,4 +1,5 @@
-import torch
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch._C
 import torch._jit_internal as _jit_internal
 import torch.backends.cudnn as cudnn
