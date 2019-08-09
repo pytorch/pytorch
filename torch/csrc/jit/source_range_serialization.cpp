@@ -113,7 +113,9 @@ void ConcreteSourceRangeUnpickler::unpickle() {
     return;
   }
 
-  auto ivalues = jit::unpickle(reinterpret_cast<const char*>(data.get()), size);
+  auto ivalues = jit::unpickle(reinterpret_cast<const char*>(data.get()), size)
+                     .toTuple()
+                     ->elements();
 
   unpickled_records = std::make_shared<SourceRangeRecords>();
   for (auto& val : ivalues) {

@@ -44,7 +44,7 @@ TORCH_API std::vector<char> pickle(
 /// size and consumes it.
 ///
 /// See `jit::pickle` for more details.
-TORCH_API void pickle_stream(
+TORCH_API void pickle(
     std::function<void(const char* data_start, size_t data_len)> writer,
     const IValue& ivalue,
     std::vector<at::Tensor>* tensor_table = nullptr);
@@ -57,7 +57,7 @@ TORCH_API void pickle_stream(
 /// file)
 ///
 /// See `torch::pickle` for details.
-TORCH_API std::vector<IValue> unpickle(
+TORCH_API IValue unpickle(
     std::function<const char*(size_t)> reader,
     std::function<bool()> bounds_chcker,
     std::vector<at::Tensor>* tensor_table = nullptr,
@@ -69,18 +69,11 @@ TORCH_API std::vector<IValue> unpickle(
 /// `class_resolver` function must be provided.
 ///
 /// See `torch::pickle` for details.
-TORCH_API std::vector<IValue> unpickle(
+TORCH_API IValue unpickle(
     const char* data,
     size_t size,
     std::vector<at::Tensor>* tensor_table = nullptr,
     ClassResolver class_resolver = nullptr);
-
-
-
-// TORCH_API std::vector<IValue> unpickle(
-//     std::istream& in,
-//     std::vector<at::Tensor>* tensor_table = nullptr,
-//     ClassResolver class_resolver = nullptr);
 
 } // namespace jit
 } // namespace torch

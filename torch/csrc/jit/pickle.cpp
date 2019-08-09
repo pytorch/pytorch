@@ -7,7 +7,7 @@
 namespace torch {
 namespace jit {
 
-void pickle_stream(
+void pickle(
     std::function<void(const char*, size_t)> writer,
     const IValue& ivalue,
     std::vector<at::Tensor>* tensor_table) {
@@ -35,7 +35,7 @@ std::vector<char> pickle(
     std::vector<at::Tensor>* tensor_table) {
   std::vector<char> data;
 
-  pickle_stream(
+  pickle(
       [&](const char* bytes, size_t len) {
         data.insert(data.end(), bytes, bytes + len);
       },
@@ -45,8 +45,8 @@ std::vector<char> pickle(
   return data;
 }
 
-std::vector<IValue> unpickle(
-    std::function<const char*(size_t)> reader,
+IValue unpickle(
+    std::function<void(char*, size_t)> reader,
     std::function<bool()> bounds_checker,
     std::vector<at::Tensor>* tensor_table,
     ClassResolver class_resolver) {
@@ -55,20 +55,21 @@ std::vector<IValue> unpickle(
       std::move(bounds_checker),
       tensor_table,
       std::move(class_resolver));
-  return unpickler.parse_ivalue_list();
+  return unpickler.parse_ivalue();
 }
 
-std::vector<IValue> unpickle(
+IValue unpickle(
     const char* data,
     size_t size,
     std::vector<at::Tensor>* tensor_table,
     ClassResolver class_resolver) {
   size_t bytes_read = 0;
   return unpickle(
-      [&](size_t len) {
-        const char* to_read = data + bytes_read;
+      [&](char* buffer, size_t len) {
+        // Copy len bytes into buffer
+        const char* start = data + bytes_read;
+        std::memcpy(buffer, start, len);
         bytes_read += len;
-        return to_read;
       },
       [&]() {
         return bytes_read < size;

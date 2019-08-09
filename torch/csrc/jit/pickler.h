@@ -234,7 +234,7 @@ class Unpickler {
 
  public:
   Unpickler(
-      std::function<const char*(size_t)> reader,
+      std::function<void(char*, size_t)> reader,
       std::function<bool()> bounds_checker,
       const std::vector<at::Tensor>* tensor_table,
       ClassResolver class_resolver)
@@ -243,7 +243,7 @@ class Unpickler {
         tensor_table_(tensor_table),
         class_resolver_(std::move(class_resolver)) {}
 
-  std::vector<IValue> parse_ivalue_list();
+  IValue parse_ivalue();
 
  private:
   // No arguments ensures that a template arugment must be specified
@@ -251,9 +251,7 @@ class Unpickler {
   template <typename T>
   T read() {
     T item;
-    size_t len = sizeof(item);
-    const char* data = reader_(len);
-    std::copy(data, data + len, reinterpret_cast<char*>(&item));
+    reader_(reinterpret_cast<char*>(&item), sizeof(item));
     return item;
   }
 
@@ -269,7 +267,7 @@ class Unpickler {
 
   // Returns a pointer to the number of bytes requested. This should state-fully
   // remember how many bytes have been read
-  std::function<const char*(size_t)> reader_;
+  std::function<void(char*, size_t)>  reader_;
 
   // Check if the stream has gone past its size
   std::function<bool()> bounds_checker_;

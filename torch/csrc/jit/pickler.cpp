@@ -489,23 +489,14 @@ void Pickler::pushTuple(const IValue& ivalue) {
   push<OpCode>(OpCode::TUPLE);
 }
 
-std::vector<IValue> Unpickler::parse_ivalue_list() {
+IValue Unpickler::parse_ivalue() {
   run();
   TORCH_CHECK(
       stack_.size() == 1,
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
 
-  auto value = stack_[0];
-  if (value.isGenericList()) {
-    // TODO [unpickler refactor]
-    return value.toGenericListRef().vec();
-  }
-  // TODO: return the value itself, don't unwrap it
-  if (value.isTuple()) {
-    return value.toTuple()->elements();
-  }
-  return {value};
+  return stack_[0];
 }
 
 double Unpickler::readFloat() {
@@ -782,8 +773,10 @@ OpCode Unpickler::readInstruction() {
 
 // Read a number of bytes from the input stream
 std::string Unpickler::readBytes(size_t length) {
-  const char* data = reader_(length);
-  return std::string(data, length);
+  std::string data(length, 0);
+  // This is fine since C++11 has contiguous strings
+  reader_(&data[0], length);
+  return data;
 }
 
 // Pop all the list items off of the stack and append them to the list at
