@@ -10,7 +10,7 @@
 #include <torch/csrc/jit/import_export_helpers.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/source_range_serialization.h>
 
 #include <caffe2/core/types.h>
@@ -784,16 +784,8 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
 void ScriptModuleSerializer::writePickleArchive(
     const std::string& name,
     const std::vector<IValue>& ivalues) {
-  Pickler pickler(&tensor_table_);
-  pickler.protocol();
-  pickler.startTuple();
-  for (const IValue& ivalue : ivalues) {
-    pickler.pushIValue(ivalue);
-  }
-  pickler.endTuple();
-  pickler.stop();
-  writer_.writeRecord(name, pickler.stack().data(), pickler.stack().size(),
-                      /*compress=*/true);
+  auto data = pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table_);
+  writer_.writeRecord(name, data.data(), data.size(), /*compress=*/true);
 }
 
 void ScriptModuleSerializer::convertModule(
@@ -878,8 +870,7 @@ void ScriptModuleSerializer::convertModule(
         module_def->mutable_torchscript_debug_arena();
 
     SourceRangePickler source_range_pickler;
-    source_range_pickler.pickle(source_ranges);
-    const auto& range_data = source_range_pickler.get_data();
+    const auto& range_data = source_range_pickler.pickle(source_ranges);
     std::stringstream debug_filename;
     debug_filename << "debug/" << module_name.str() << ".pkl";
     writer_.writeRecord(
