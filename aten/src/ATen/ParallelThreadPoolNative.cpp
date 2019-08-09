@@ -68,11 +68,15 @@ int get_num_interop_threads() {
 }
 
 void launch(std::function<void()> func) {
-  auto debug_info = getThreadLocalDebugInfo();
-  auto fn = [func, debug_info]() {
-    DebugInfoGuard guard(std::move(debug_info));
-    func();
-  };
+  auto fn = std::bind([](
+    std::function<void()> f, std::shared_ptr<ThreadLocalDebugInfoBase> info) {
+      DebugInfoGuard guard(std::move(info));
+      f();
+    },
+    std::move(func),
+    getThreadLocalDebugInfo()
+  );
+
 #if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
   intraop_launch(fn);
 #else
