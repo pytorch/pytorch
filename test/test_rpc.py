@@ -220,19 +220,36 @@ class RpcTest(MultiProcessTestCase):
             self.assertEqual(ret, torch.ones(n, n) * 2)
 
     @_wrap_with_rpc
-    def test_sync_rpc(self):
+    def test_wait_all_rpc(self):
         dstRank = (self.rank + 1) % self.world_size
         for i in range(20):
-            dist.sync_rpc()
+            dist.wait_all_rpc()
             n = i + self.rank + 1
             ret1 = dist.rpc(
                 "worker%d" % dstRank,
                 torch.add,
                 args=(torch.ones(n, n), torch.ones(n, n)),
             )
-            dist.sync_rpc()
+            dist.wait_all_rpc()
             ret2 = dist.rpc("worker%d" % dstRank, torch.add, args=(torch.ones(n, n), 2))
-            dist.sync_rpc()
+            dist.wait_all_rpc()
+            self.assertEqual(ret1, torch.ones(n, n) * 2)
+            self.assertEqual(ret2, torch.ones(n, n) * 3)
+
+    @_wrap_with_rpc
+    def test_wait_self_rpc(self):
+        dstRank = (self.rank + 1) % self.world_size
+        for i in range(20):
+            dist.wait_self_rpc()
+            n = i + self.rank + 1
+            ret1 = dist.rpc(
+                "worker%d" % dstRank,
+                torch.add,
+                args=(torch.ones(n, n), torch.ones(n, n)),
+            )
+            dist.wait_self_rpc()
+            ret2 = dist.rpc("worker%d" % dstRank, torch.add, args=(torch.ones(n, n), 2))
+            dist.wait_self_rpc()
             self.assertEqual(ret1, torch.ones(n, n) * 2)
             self.assertEqual(ret2, torch.ones(n, n) * 3)
 

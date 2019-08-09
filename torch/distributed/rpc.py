@@ -53,7 +53,7 @@ def join_rpc():
         _agent = None
 
 
-def sync_rpc():
+def wait_all_rpc():
     r"""
     Block until all local and remote RPC processes reach this method and finish
     sending all pending RPCs. As this method synchronizes at the process
@@ -64,7 +64,20 @@ def sync_rpc():
         raise RuntimeError("RPC has not been initialized. "
                            "Call init_rpc(name) first.")
 
-    _agent.sync()
+    _agent.wait_all()
+
+
+def wait_self_rpc():
+    r"""
+    Block until all local request Futures have been responded.
+    As this method synchronizes at the process level, if multiple threads
+    are spawned, only one of them should call this method at a time.
+    """
+    if _agent is None:
+        raise RuntimeError("RPC has not been initialized. "
+                           "Call init_rpc(name) first.")
+
+    _agent.wait_self()
 
 
 # TODO: add a context managet to wrap init_rpc and join_rpc

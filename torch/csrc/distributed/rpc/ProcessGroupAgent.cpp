@@ -92,7 +92,7 @@ void ProcessGroupAgent::join() {
   //    feed it a message or kill the thread.
   // 2. A GLOO process cannot send message to itself. (there is an ongoing
   //    effort to fix this problem).
-  sync();
+  waitAll();
   int dst = (pg_->getRank() + 1) % pg_->getSize();
   enqueueSend(RpcWork(dst, Message({}, {}, MessageType::SHUTDOWN)));
   threadPool_.waitWorkComplete();
@@ -101,17 +101,51 @@ void ProcessGroupAgent::join() {
   PythonRpcHandler::cleanUp();
 }
 
-void ProcessGroupAgent::sync() {
-  // Block until all processes wants to sync. This is necessary before acquiring
-  // the lock below, because other processes might not enter sync() until it
-  // gets some response from this RpcAgent.
+void ProcessGroupAgent::waitAll() {
+  // Intuitively, waitAll is like all workers in the same communication world
+  // reaching a consensus that they all want to stop talking to others,
+  // so that, on exiting waitAll, the communication world will be
+  // like brand new without any pending Rpc work.
+
+  // A message can be in one of these states,
+  //   1. A worker calls send, putting a req message queue A.
+  //   2. The req message is popped and sent to wire.
+  //   3. The req message is received from wire and put into queue B.
+  //   4. The req message is popped and processed, a rep message is put
+  //      into queue B.
+  //   6. The rep message is popped and sent to wire.
+  //   7. The rep message is received from wire and put into queue A.
+  //   8. The rep is popped, marking the request future as complete.
+
+  // The assumptions of this solution are
+  //   1. Only one thread calls send, waitAll, join.
+  //   2. The state of a message only transfers in one-way.
+  //   3. Every worker has only limited work, so there is always a time that
+  //      on worker add a message in state 1.
+
+  // waitAll achieves this goal by waiting for the state space reducing,
+  // {12345678}, to {2345678}, to {345678}, to {45678}, ..., and eventually
+  // to an empty state space, {}.
+
+  // Assuming the state of a message can keep tranfering in best effort, this
+  // is to wait for the state space to collapse to an empty state space, {}.
+  // Note that the lifetime of a request Future span from state 1 to state 8,
+  // so exsitence of any Future in futures_ map is equivalent to exsitence
+  // of any message in the communication world, except for the TERMINATION
+  // message, which is not inserted into the futures_ map and does not
+  // ask for ACK or response.
+  waitSelf();
+
+  // This is to ensure no worker will add send work to their own thread pool
+  // queue before the shared goal is achived, elliminating the possibility of
+  // adding a message in state 1. Otherwise, a quick peer could exit waitAll
+  // and send again, disrruping the assumption when others are calling wait.
   pg_->barrier()->wait();
-  // Wait until the all send works are done.
-  // NB: There might be additional send works inserted while waiting.
-  threadPool_.waitWorkComplete();
-  // Use another barrier in case different RpcAgent handles different amounts of
-  // workloads.
-  pg_->barrier()->wait();
+}
+
+void ProcessGroupAgent::waitSelf() {
+    std::unique_lock<std::mutex> lock{futureMutex_};
+    futureDecreaseCV_.wait(lock, [&](){return futures_.empty();});
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
@@ -180,6 +214,7 @@ void ProcessGroupAgent::enqueueRecv(RpcWork work) {
           futures_[id]->markCompleted(std::move(work.message_));
           futures_.erase(id);
         }
+        futureDecreaseCV_.notify_one();
       } else {
         AT_ERROR("unrecognized message type ", work.message_.type());
       }

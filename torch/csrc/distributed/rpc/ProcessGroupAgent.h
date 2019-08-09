@@ -36,7 +36,9 @@ class ProcessGroupAgent : public RpcAgent {
 
   void join() override;
 
-  void sync() override;
+  void waitAll() override;
+
+  void waitSelf() override;
 
  private:
   // put SendWork into a queue and notify the sendLoop thread
@@ -66,6 +68,7 @@ class ProcessGroupAgent : public RpcAgent {
   ThreadPool threadPool_;
   std::unordered_map<int64_t, std::shared_ptr<FutureMessage>> futures_;
   std::mutex futureMutex_;
+  std::condition_variable futureDecreaseCV_;
 };
 
 }

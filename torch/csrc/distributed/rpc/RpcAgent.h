@@ -55,7 +55,10 @@ class RpcAgent {
 
   // Synchronize the this process with other RpcAgent processes. Block until all
   // RpcAgents reach this method and send all pending messages.
-  virtual void sync() = 0;
+  virtual void waitAll() = 0;
+
+  // Wait for all futures produced by calling send are responded.
+  virtual void waitSelf() = 0;
 
  protected:
   const std::string workerName_;
