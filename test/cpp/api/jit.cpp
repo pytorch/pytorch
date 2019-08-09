@@ -119,10 +119,9 @@ TEST(TorchScriptTest, TestPickle) {
   std::vector<at::Tensor> tensor_table;
   auto data = torch::jit::pickle(float_value, &tensor_table);
 
-  std::vector<torch::IValue> ivalues =
-      torch::jit::unpickle(data.data(), data.size());
+  torch::IValue ivalue = torch::jit::unpickle(data.data(), data.size());
 
-  double diff = ivalues.at(0).toDouble() - float_value.toDouble();
+  double diff = ivalue.toDouble() - float_value.toDouble();
   double eps = 0.0001;
   ASSERT_TRUE(diff < eps && diff > -eps);
 }
