@@ -595,5 +595,28 @@ void THCTensor_(cfmod)(THCState *state, THCTensor *self, THCTensor *src1, THCTen
   }
 }
 
+void THCTensor_(addcdiv)(THCState *state, THCTensor *self_, THCTensor *t, scalar_t value, THCTensor *src1, THCTensor *src2)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, self_, t, src1, src2));
+  if(self_ != t)
+  {
+    THCTensor_(resizeAs)(state, self_, t);
+    THCTensor_(copy)(state, self_, t);
+  }
+  else
+  {
+    THArgCheck(THCTensor_(nElement)(state, self_) == THCTensor_(nElement)(state, src1),
+               1, "sizes do not match");
+  }
+  THArgCheck(THCTensor_(nElement)(state, src1) == THCTensor_(nElement)(state, src2),
+             3, "sizes do not match");
+
+  if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self_, src1, src2, TensorAddCDivOp<scalar_t>(value))) {
+    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
 #endif
 #endif
