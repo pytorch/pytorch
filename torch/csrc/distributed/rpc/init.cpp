@@ -9,6 +9,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/types.h>
+#include <pybind11/functional.h>
 
 
 namespace torch {
@@ -41,7 +42,26 @@ PyObject* rpc_init(PyObject* /* unused */) {
           [&](FutureMessage& fut) {
             return to_py_obj(fut.wait());
           },
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def("get",
+          [&](FutureMessage& fut) {
+            auto ret = c10::optional<py::object>();
+            if (fut.message().has_value()) {
+              ret = to_py_obj(fut.message().value());
+            }
+            return ret;
+          },
+          py::call_guard<py::gil_scoped_release>())
+      .def("then",
+          // Python Callback taking a FutureMessage& instead of py::object of
+          // the return value, because we do not want to force the Message to
+          // py::object convertion if not necessary.
+          [&](FutureMessage& fut,
+              const std::function<void(FutureMessage&)> cb) -> FutureMessage& {
+            fut.addCallback(wrap_callback(fut, cb));
+            // return FutureMessage here to support chaining multiple then().
+            return fut;
+          });
 
   auto processGroupAgent =
       shared_ptr_class_<ProcessGroupAgent>(

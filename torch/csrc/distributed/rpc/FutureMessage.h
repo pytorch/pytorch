@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/Message.h>
 
 namespace torch {
@@ -13,14 +14,16 @@ namespace rpc {
 struct TORCH_API FutureMessage final {
 
  public:
-  using Callback = std::function<void(const Message&)>;
+  // Keep cb the same as ivalue::Future to make it easy for future merge after
+  // we made Message an IValue type.
+  using Callback = std::function<void(void)>;
 
   // TODO: add a get() API that returns immediately with an optional Message
   // object.
   const Message& wait();
   void markCompleted(Message message);
   void markCompleted();
-  const Message& message();
+  const c10::optional<Message>& message();
   bool completed() const;
 
   // If completed() the callback will be invoked in-place.
@@ -35,7 +38,7 @@ struct TORCH_API FutureMessage final {
   std::condition_variable finished_cv_;
   std::vector<Callback> callbacks;
   // TODO: make message_ an optional field, and get rid of UNKNOWN message type
-  Message message_;
+  c10::optional<Message> message_;
 };
 
 }

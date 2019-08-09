@@ -18,6 +18,13 @@ py::object to_py_obj(const Message& message) {
   }
 }
 
+FutureMessage::Callback wrap_callback(
+    FutureMessage& fut, const std::function<void(FutureMessage&)> py_cb) {
+  return [py_cb, &fut]() {
+    py_cb(fut);
+  };
+}
+
 std::shared_ptr<FutureMessage> py_rpc(
     RpcAgent& agent,
     const std::string& dstName,

@@ -122,6 +122,27 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         completed, the return value of ``func`` on ``args`` and ``kwargs`` can
         be retrieved from the ``FutureMessage`` object.
 
+        1. ``FutureMessage.wait()``
+
+        Blocks until the asynchronous RPC call finishes and returns the return
+        value of the RPC.
+
+        2. ``FutureMessage.get()``
+
+        Returns a ``c10::optional`` object of the return value, where the value
+        will be presented if the asynchronous RPC call finishes.
+
+        3. ``FutureMessage.then(callback(fm))``
+
+        Registers a callback to the ``FutureMessage``, which will be fired on
+        RPC completion. Multiple callbacks can be chained together, and will be
+        invoked in order, e.g., ``FutureMessage.then(cb1).then(cb2)``. Instead
+        of taking RPC return value, the callback takes a reference of the
+        ``FutureMessage``, and the RPC return value can be retrieved from it
+        using the ``get()`` API. This design avoids converting the RPC response
+        into a Python object when not necessary.
+
+
     Example::
 
         Synchronous example:
@@ -148,6 +169,30 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         >>> fut1 = dist.rpc("worker1", torch.add, args=(torch.ones(2), 3), async_call=True)
         >>> fut2 = dist.rpc("worker1", torch.add, args=(torch.ones(2), 2), async_call=True)
         >>> result = fut1.wait() + fut2.wait()
+        >>> dist.join_rpc()
+
+        One worker 1:
+        >>> import torch.distributed as dist
+        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
+        >>> dist.init_rpc("worker1")
+        >>> dist.join_rpc()
+
+        Asynchronous with callback example.
+
+        On worker 0:
+        >>> import torch.distributed as dist
+        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
+        >>> dist.init_rpc("worker0")
+        >>>
+        >>> def callback1(fm):
+        >>>   ret = fm.get()
+        >>>
+        >>> def callback2(fm):
+        >>>   pass
+        >>>
+        >>> fut = dist.rpc("worker1", torch.add, args=(torch.ones(2), 3), async_call=True)
+        >>> fut.then(callback1).then(callback2)
+        >>> fut.wait()
         >>> dist.join_rpc()
 
         One worker 1:

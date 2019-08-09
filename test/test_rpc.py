@@ -110,5 +110,51 @@ class RpcTest(MultiProcessTestCase):
         # it's safe to call join_rpc() multiple times
         dist.join_rpc()
 
+    @_wrap_with_rpc
+    def test_callback(self):
+        outer = {'ret': None}
+        def callback(fm):
+            ret = fm.get()
+            self.assertEqual(ret, torch.ones(n, n) * 2)
+            outer['ret'] = ret.clone()
+
+        n = self.rank + 1
+        dstRank = n % self.world_size
+        fut = dist.rpc('worker%d' % dstRank,
+                       torch.add,
+                       args=(torch.ones(n, n), torch.ones(n, n)),
+                       async_call=True)
+
+        fut.then(callback)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+        self.assertEqual(outer['ret'], torch.ones(n, n) * 2)
+
+    @_wrap_with_rpc
+    def test_multi_callback(self):
+        outer = {'ret': 0}
+        def callback1(fm):
+            ret = fm.get()
+            self.assertEqual(ret, torch.ones(n, n) * 2)
+            outer['ret'] = outer['ret'] + 1
+
+        def callback2(fm):
+            ret = fm.get()
+            self.assertEqual(ret, torch.ones(n, n) * 2)
+            outer['ret'] = outer['ret'] * 2
+
+        n = self.rank + 1
+        dstRank = n % self.world_size
+        fut = dist.rpc('worker%d' % dstRank,
+                       torch.add,
+                       args=(torch.ones(n, n), torch.ones(n, n)),
+                       async_call=True)
+
+        fut.then(callback1).then(callback2)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+        self.assertEqual(outer['ret'], (0 + 1) * 2)
+
+
 if __name__ == '__main__':
     run_tests()
