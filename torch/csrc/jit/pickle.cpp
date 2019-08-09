@@ -48,7 +48,7 @@ std::vector<char> pickle(
 IValue unpickle(
     std::function<void(char*, size_t)> reader,
     std::function<bool()> bounds_checker,
-    std::vector<at::Tensor>* tensor_table,
+    const std::vector<at::Tensor>* tensor_table,
     ClassResolver class_resolver) {
   Unpickler unpickler(
       std::move(reader),
@@ -61,7 +61,7 @@ IValue unpickle(
 IValue unpickle(
     const char* data,
     size_t size,
-    std::vector<at::Tensor>* tensor_table,
+    const std::vector<at::Tensor>* tensor_table,
     ClassResolver class_resolver) {
   size_t bytes_read = 0;
   return unpickle(
