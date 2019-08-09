@@ -9,7 +9,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
@@ -86,7 +86,7 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
     throw std::runtime_error(
         "Cannot input a tensor of dimension other than 0 as a scalar argument");
   }
-  if (toInt && !isIntegralType(t.scalar_type())) {
+  if (toInt && !isIntegralType(t.scalar_type(), /*includeBool=*/false)) {
     std::stringstream ss;
     ss << "Cannot input a tensor of type " << t.scalar_type()
        << " as an integral argument";
@@ -625,19 +625,14 @@ RegisterOperators reg(
          "aten::save(t item, str filename) -> ()",
          [](Stack& stack) {
            auto filename = pop(stack).toStringRef();
-           auto value = pop(stack);
+           auto ivalue = pop(stack);
 
            // Pickle the tensor
-           Pickler p;
-           p.torchSaveStart();
-           p.protocol();
-           p.pushIValue(value);
-           p.stop();
-           p.torchSaveStop();
+           auto data = pickle({ivalue});
 
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);
-           output.write(p.stack().data(), p.stack().size());
+           output.write(data.data(), data.size());
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -2788,6 +2783,7 @@ RegisterOperators reg2({
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("float"),
+    CREATE_DICT_OPS("Tensor"),
 #undef CREATE_DICT_OPS
 
     Operator(

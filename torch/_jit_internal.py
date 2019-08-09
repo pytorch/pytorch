@@ -4,6 +4,8 @@ can be used in other places in torch/ (namely torch.nn) without running into
 circular dependency problems
 """
 
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import inspect
 import weakref
 import torch._C
@@ -252,6 +254,29 @@ def _parameter_list(parameter_names_fn):
 
     return decorator
 
+
+# overloading registration
+# overloads get registered in this file, and compiled in torch/jit/__init__.py
+# so that they can be imported in nn/functional.py without an import cycle
+
+# qualified_name => list[overload_functions]
+_overloaded_fns = {}  # noqa: T484
+
+def _overload(func):
+    qual_name = _qualified_name(func)
+    global _overloaded_fns
+    fn_overload_list = _overloaded_fns.get(qual_name)
+    if fn_overload_list is None:
+        fn_overload_list = []
+        _overloaded_fns[qual_name] = fn_overload_list
+    fn_overload_list.append(func)
+    return func
+
+def _get_fn_overloads(qual_name):
+    return _overloaded_fns.get(qual_name)
+
+def _clear_fn_overloads(qual_name):
+    del _overloaded_fns[qual_name]
 
 try:
     import typing
