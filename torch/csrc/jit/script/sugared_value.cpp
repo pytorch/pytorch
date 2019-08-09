@@ -73,6 +73,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
         "device",
         "shape",
         "is_cuda",
+        "is_sparse",
         "is_mkldnn",
         "requires_grad",
     };
