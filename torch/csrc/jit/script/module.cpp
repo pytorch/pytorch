@@ -298,7 +298,7 @@ Module Module::clone_impl(
   for (Slot s : get_slots()) {
     if (s.is_module()) {
       const Module& orig = s.to_module();
-      Module cloned = std::move(orig.clone_impl(type_remap));
+      Module cloned = orig.clone_impl(type_remap);
       type_remap[orig.type()] = cloned.type();
       r.set_or_add_slot(
           s.name(),
