@@ -705,9 +705,9 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
 
     valid_names = set()
     if input_names is not None:
-        valid_names.add(x for x in input_names)
+        [valid_names.add(x) for x in input_names]
     if output_names is not None:
-        valid_names.add(x for x in output_names)
+        [valid_names.add(x) for x in output_names]
 
     # If dynamic axes are provided as a list rather than dictionary, they should
     # first get converted to a dictionary in expected format. If desired axes names
