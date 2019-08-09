@@ -7,11 +7,8 @@ import torch
 import sys
 
 
-def namedtensor_enabled():
-    return '-DBUILD_NAMEDTENSOR' in torch.__config__.show()
-
 skipIfNamedTensorDisabled = \
-    unittest.skipIf(not namedtensor_enabled(),
+    unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
                     'PyTorch not compiled with namedtensor support')
 
 def pass_name_to_python_arg_parser(name):
@@ -73,6 +70,29 @@ class TestNamedTensor(TestCase):
 
     def test_empty(self):
         self._test_factory(torch.empty, 'cpu')
+
+    def test_has_names(self):
+        unnamed = torch.empty(2, 3)
+        none_named = torch.empty(2, 3, names=(None, None))
+        partially_named = torch.empty(2, 3, names=('N', None))
+        fully_named = torch.empty(2, 3, names=('N', 'C'))
+
+        self.assertFalse(unnamed.has_names())
+        self.assertFalse(none_named.has_names())
+        self.assertTrue(partially_named.has_names())
+        self.assertTrue(fully_named.has_names())
+
+    def test_repr(self):
+        named_tensor = torch.zeros(2, 3).set_names_(['N', 'C'])
+        expected = "tensor([[0., 0., 0.],\n        [0., 0., 0.]], names=('N', 'C'))"
+        self.assertEqual(repr(named_tensor), expected)
+
+        unnamed_tensor = torch.zeros(2, 3)
+        expected = "tensor([[0., 0., 0.],\n        [0., 0., 0.]])"
+        self.assertEqual(repr(unnamed_tensor), expected)
+
+        none_named_tensor = torch.zeros(2, 3).set_names_([None, None])
+        self.assertEqual(repr(none_named_tensor), expected)
 
     def test_copy_transpose(self):
         # This type of copy is special-cased and therefore needs its own test
@@ -171,6 +191,7 @@ class TestNamedTensor(TestCase):
         tensor.data_ptr()
         tensor.ndim
         tensor.item()
+        tensor.type()
 
     def test_split_fns_propagates_names(self):
         fns = [
@@ -234,7 +255,10 @@ class TestNamedTensor(TestCase):
             )
 
         tests = [
+            fn_method_and_inplace('add'),
+            fn_method_and_inplace('div'),
             fn_method_and_inplace('mul'),
+            fn_method_and_inplace('sub'),
             method('copy_'),
         ]
         tests = flatten(tests)
@@ -250,6 +274,9 @@ class TestNamedTensor(TestCase):
             out = testcase.lambd(tensor)
             self.assertEqual(out.names, tensor.names,
                              message=testcase.name)
+
+        def fn(name, *args, **kwargs):
+            return [Function(name, lambda t: getattr(torch, name)(t, *args, **kwargs))]
 
         def method(name, *args, **kwargs):
             return [Function(name, lambda t: getattr(t, name)(*args, **kwargs))]
@@ -323,6 +350,22 @@ class TestNamedTensor(TestCase):
             method('zero_'),
             method('fill_', 1),
             method('fill_', torch.tensor(3.14)),
+
+            # conversions
+            method('to', dtype=torch.long),
+            method('to', device='cpu'),
+            method('to', torch.empty([])),
+            method('bool'),
+            method('byte'),
+            method('char'),
+            method('cpu'),
+            method('double'),
+            method('float'),
+            method('long'),
+            method('half'),
+            method('int'),
+            method('short'),
+            method('type', dtype=torch.long),
 
             # views
             method('narrow', 0, 0, 1),

@@ -111,7 +111,7 @@ class UnsupportedNodeError(NotSupportedError):
                                       offending_node.col_offset + range_len)
         feature_name = pretty_node_names.get(node_type, node_type.__name__)
         msg = "{} aren't supported".format(feature_name)
-        super(NotSupportedError, self).__init__(source_range, msg)
+        super(UnsupportedNodeError, self).__init__(source_range, msg)
 
 
 class FrontendTypeError(FrontendError):
@@ -211,10 +211,16 @@ _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments
 
 
 def build_param_list(ctx, py_args, self_name):
-    if py_args.vararg is not None or py_args.kwarg is not None:
-        raise ValueError(_vararg_kwarg_err)
+    if py_args.kwarg is not None:
+        expr = py_args.kwarg
+        ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
+        raise NotSupportedError(ctx_range, _vararg_kwarg_err)
+    if py_args.vararg is not None:
+        expr = py_args.vararg
+        ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
+        raise NotSupportedError(ctx_range, _vararg_kwarg_err)
     if not PY2 and py_args.kw_defaults:
-        raise ValueError(_vararg_kwarg_err)
+        raise NotSupportedError(ctx_range, _vararg_kwarg_err)
     result = [build_param(ctx, arg, self_name, False) for arg in py_args.args]
     if not PY2:
         result += [build_params(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
@@ -407,6 +413,7 @@ class ExprBuilder(Builder):
         ast.Is: 'is',
         ast.IsNot: 'is not',
         ast.In: 'in',
+        ast.NotIn: 'not in',
     }
 
     @staticmethod
@@ -435,6 +442,8 @@ class ExprBuilder(Builder):
         for kw in expr.keywords:
             kw_expr = build_expr(ctx, kw.value)
             # XXX: we could do a better job at figuring out the range for the name here
+            if not kw.arg:
+                raise NotSupportedError(kw_expr.range(), 'keyword-arg expansion is not supported')
             kwargs.append(Attribute(Ident(kw_expr.range(), kw.arg), kw_expr))
         return Apply(func, args, kwargs)
 
@@ -525,10 +534,18 @@ class ExprBuilder(Builder):
         for lhs, op_, rhs in zip(operands, expr.ops, operands[1:]):
             op = type(op_)
             op_token = ExprBuilder.cmpop_map.get(op)
+            r = ctx.make_raw_range(lhs.range().end, rhs.range().start)
             if op_token is None:
-                err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
-                raise NotSupportedError(err_range, "unsupported comparison operator: " + op.__name__)
-            cmp_expr = BinOp(op_token, lhs, rhs)
+                raise NotSupportedError(r, "unsupported comparison operator: " + op.__name__)
+
+            if op == ast.NotIn:
+                # NB: `not in` is just `not( in )`, so we don't introduce new tree view
+                # but just make it a nested call in our tree view structure
+                in_expr = BinOp('in', lhs, rhs)
+                cmp_expr = UnaryOp(r, 'not', in_expr)
+            else:
+                cmp_expr = BinOp(op_token, lhs, rhs)
+
             if result is None:
                 result = cmp_expr
             else:
