@@ -1,7 +1,7 @@
 import math
-import torch
 import os
 from distutils.util import strtobool
+import torch
 from .optimizer import Optimizer
 from ..hub import _check_module_exists
 
@@ -12,7 +12,8 @@ if not strtobool(os.environ.get('NO_NUMBA', 'n')) and _check_module_exists("numb
     NUMBA_CUDA_EXIST = numba.cuda.is_available()
 
     @numba.cuda.jit()
-    def numba_cuda_kernel(param, grad, exp_avg, exp_avg_sq, beta1, beta2, step_size, bias_correction2, eps):
+    def numba_cuda_kernel(param, grad, exp_avg, exp_avg_sq, beta1, 
+                          beta2, step_size, bias_correction2, eps):
         i = numba.cuda.grid(1)
         if i >= param.size:
             return
@@ -84,7 +85,8 @@ class Adam(Optimizer):
                 grad = param.grad.data
                 p = param.data
                 if grad.is_sparse:
-                    raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
+                    raise RuntimeError('Adam does not support sparse gradients,' 
+                                       'please consider SparseAdam instead')
                 amsgrad = group['amsgrad']
 
                 state = self.state[param]
@@ -118,8 +120,10 @@ class Adam(Optimizer):
                     numba_grad = numba.cuda.as_cuda_array(grad.flatten())
                     numba_exp_avg = numba.cuda.as_cuda_array(exp_avg.flatten())
                     numba_exp_avg_sq = numba.cuda.as_cuda_array(exp_avg_sq.flatten())
-                    blockspergrid = (p.data.numel() + (NUMBA_CUDA_THREAD_PER_BLOCK - 1)) // NUMBA_CUDA_THREAD_PER_BLOCK
-                    numba_cuda_kernel[blockspergrid, NUMBA_CUDA_THREAD_PER_BLOCK](numba_param, numba_grad, numba_exp_avg, numba_exp_avg_sq, beta1, beta2, step_size, bias_correction2, eps)
+                    blockspergrid = math.ceil(p.data.numel() / NUMBA_CUDA_THREAD_PER_BLOCK)
+                    numba_cuda_kernel[blockspergrid, NUMBA_CUDA_THREAD_PER_BLOCK] \
+                        (numba_param, numba_grad, numba_exp_avg, numba_exp_avg_sq, \
+                         beta1, beta2, step_size, bias_correction2, eps)
                 else:
                     # Decay the first and second moment running average coefficient
                     exp_avg.mul_(beta1).add_(1 - beta1, grad)
