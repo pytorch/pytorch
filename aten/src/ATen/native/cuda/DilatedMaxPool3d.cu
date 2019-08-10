@@ -50,11 +50,10 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
     while(wStart < 0)
       wStart += dilationW;
 
-    int index = 0;
-    int maxIndex = -1;
+    int maxIndex =  tStart * iheight * iwidth + hStart * iwidth + wStart;
     inputData += slice * itime * iheight * iwidth;
 
-    scalar_t max = THCNumerics<scalar_t>::min();
+    scalar_t max = at::numeric_limits<scalar_t>::lower_bound(); // -Infinity
 
     for (int t = tStart; t < tEnd; t += dilationT)
     {
@@ -62,7 +61,7 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
       {
         for (int w = wStart; w < wEnd; w += dilationW)
         {
-          index = t * iheight * iwidth + h * iwidth + w;
+          int index = t * iheight * iwidth + h * iwidth + w;
           scalar_t val = inputData[index];
 
           if ((max < val) || THCNumerics<scalar_t>::isnan(val))

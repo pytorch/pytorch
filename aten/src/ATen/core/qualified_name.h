@@ -35,7 +35,7 @@ struct QualifiedName {
     cacheAccessors();
   }
 
-  /* implicit */ QualifiedName(const std::vector<std::string>& atoms) {
+  explicit QualifiedName(std::vector<std::string> atoms) {
     for (const auto& atom : atoms) {
       TORCH_CHECK(!atom.empty(), "Atom cannot be empty");
       TORCH_CHECK(
@@ -90,6 +90,10 @@ struct QualifiedName {
   // The base name, like "baz"
   const std::string& name() const {
     return name_;
+  }
+
+  const std::vector<std::string>& atoms() const {
+    return atoms_;
   }
 
   bool operator==(const QualifiedName& other) const {

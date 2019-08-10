@@ -552,13 +552,17 @@ class TestCase(expecttest.TestCase):
             prec = self.precision
 
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
-            self.assertEqual(x.item(), y, prec, message, allow_inf)
+            self.assertEqual(x.item(), y, prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
-            self.assertEqual(x, y.item(), prec, message, allow_inf)
+            self.assertEqual(x, y.item(), prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
-            self.assertEqual(x.item(), y, prec, message, allow_inf)
+            self.assertEqual(x.item(), y, prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
-            self.assertEqual(x, y.item(), prec, message, allow_inf)
+            self.assertEqual(x, y.item(), prec=prec, message=message,
+                             allow_inf=allow_inf)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
@@ -602,10 +606,16 @@ class TestCase(expecttest.TestCase):
                 assertTensorsEqual(x._indices(), y._indices())
                 assertTensorsEqual(x._values(), y._values())
             elif x.is_quantized and y.is_quantized:
-                self.assertEqual(x.qscheme(), y.qscheme())
-                self.assertEqual(x.q_scale(), y.q_scale())
-                self.assertEqual(x.q_zero_point(), y.q_zero_point())
-                self.assertEqual(x.int_repr(), y.int_repr())
+                self.assertEqual(x.qscheme(), y.qscheme(), prec=prec,
+                                 message=message, allow_inf=allow_inf)
+                self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
+                                 message=message, allow_inf=allow_inf)
+                self.assertEqual(x.q_zero_point(), y.q_zero_point(),
+                                 prec=prec, message=message,
+                                 allow_inf=allow_inf)
+                self.assertEqual(x.int_repr().to(torch.int32),
+                                 y.int_repr().to(torch.int32), prec=prec,
+                                 message=message, allow_inf=allow_inf)
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
@@ -614,15 +624,21 @@ class TestCase(expecttest.TestCase):
             super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
-                self.assertEqual(x.items(), y.items())
+                self.assertEqual(x.items(), y.items(), prec=prec,
+                                 message=message, allow_inf=allow_inf)
             else:
-                self.assertEqual(set(x.keys()), set(y.keys()))
+                self.assertEqual(set(x.keys()), set(y.keys()), prec=prec,
+                                 message=message, allow_inf=allow_inf)
                 key_list = list(x.keys())
-                self.assertEqual([x[k] for k in key_list], [y[k] for k in key_list])
+                self.assertEqual([x[k] for k in key_list],
+                                 [y[k] for k in key_list],
+                                 prec=prec, message=message,
+                                 allow_inf=allow_inf)
         elif is_iterable(x) and is_iterable(y):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
-                self.assertEqual(x_, y_, prec, message)
+                self.assertEqual(x_, y_, prec=prec, message=message,
+                                 allow_inf=allow_inf)
         elif isinstance(x, bool) and isinstance(y, bool):
             super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
@@ -933,30 +949,35 @@ def random_square_matrix_of_rank(l, rank):
 
 def random_symmetric_matrix(l, *batches):
     A = torch.randn(*(batches + (l, l)))
-    for i in range(l):
-        for j in range(i):
-            A[..., i, j] = A[..., j, i]
+    A = (A + A.transpose(-2, -1)).div_(2)
     return A
 
 
-def random_symmetric_psd_matrix(l):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1))
+def random_symmetric_psd_matrix(l, *batches):
+    A = torch.randn(*(batches + (l, l)))
+    return torch.matmul(A, A.transpose(-2, -1))
 
 
 def random_symmetric_pd_matrix(l, *batches):
     A = torch.randn(*(batches + (l, l)))
-    return A.matmul(A.transpose(-2, -1)) + torch.eye(l) * 1e-5
+    return torch.matmul(A, A.transpose(-2, -1)) + torch.eye(l) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     u, s, v = A.svd()
-    s[s < min_singular_value] = min_singular_value
-    A = u.mm(torch.diag(s)).mm(v.t())
-    det = A.det().item()
+    s.clamp_(min=min_singular_value)
+    A = torch.matmul(u, torch.matmul(torch.diag_embed(s), v.transpose(-2, -1)))
+    det = A.det()
     if sign is not None:
-        if (det < 0) ^ (sign < 0):
-            A[0, :].neg_()
+        if A.dim() == 2:
+            det = det.item()
+            if (det < 0) ^ (sign < 0):
+                A[0, :].neg_()
+        else:
+            cond = ((det < 0) ^ (sign < 0)).nonzero()
+            if cond.size(0) > 0:
+                for i in range(cond.size(0)):
+                    A[list(cond[i])][0, :].neg_()
     return A
 
 

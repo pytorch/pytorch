@@ -87,20 +87,20 @@ class BenchmarkRunner(object):
                 print("# {}".format(test_case.test_config.test_name))
         elif self.args.list_ops:
             print("# List of Operators to run:")
-            if self.args.operator is None:
+            if self.args.operators is None:
                 ops = set(test_case.op_bench.module_name()
                           for _, test_case in BENCHMARK_TESTER.items())
                 for op in ops: 
                     print("# {}".format(op))
             else:
-                print("# {}".format(self.args.operator))
+                print("# {}".format(self.args.operators))
 
     def _print_perf_result(self, reported_run_time_us, test_case):
         if self.args.ai_pep_format:
             # Output for AI-PEP
             test_name = '_'.join([test_case.framework, test_case.test_config.test_name])
             for run in range(self.num_runs): 
-                print("Caffe2Observer " + json.dumps(
+                print("{}Observer ".format(test_case.framework) + json.dumps(
                     {
                         "type": test_name,
                         "metric": "latency",
@@ -200,12 +200,14 @@ class BenchmarkRunner(object):
         op_test_config = test_case.test_config
 
         if self.args.framework:
-            frameworks = benchmark_utils.get_requested_frameworks(self.args.framework)
+            frameworks = benchmark_utils.process_arg_list(self.args.framework)
+
+        operators = benchmark_utils.process_arg_list(self.args.operators) if self.args.operators else None
 
         # Filter framework, operator, test_name, tag, forward_only
         if (self._check_keep(op_test_config.test_name, self.args.test_name) and
             self._check_keep(op_test_config.tag, self.args.tag_filter) and
-            self._check_keep(test_case.op_bench.module_name(), self.args.operator) and
+            self._check_keep_list(test_case.op_bench.module_name(), operators) and
             self._check_keep_list(test_case.framework, frameworks) and
                 (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only)):
             return True

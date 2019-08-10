@@ -26,12 +26,12 @@ static Dimname dimnameFromString(const std::string& str) {
 
 TEST(NamedTensorTest, isNamed) {
   auto tensor = at::zeros({3, 2, 5, 7});
-  ASSERT_FALSE(tensor.is_named());
+  ASSERT_FALSE(tensor.has_names());
 
   tensor = at::zeros({3, 2, 5, 7});
   tensor.unsafeGetTensorImpl()->set_named_tensor_meta(
       make_unique<NamedTensorMeta>(tensor.dim()));
-  ASSERT_FALSE(tensor.is_named());
+  ASSERT_FALSE(tensor.has_names());
 
   tensor = at::zeros({3, 2, 5, 7});
   auto N = dimnameFromString("N");
@@ -41,7 +41,7 @@ TEST(NamedTensorTest, isNamed) {
   std::vector<Dimname> names = { N, C, H, W };
   tensor.unsafeGetTensorImpl()->set_named_tensor_meta(
       make_unique<NamedTensorMeta>(names));
-  ASSERT_TRUE(tensor.is_named());
+  ASSERT_TRUE(tensor.has_names());
 }
 
 static bool dimnames_equal(at::DimnameList names, at::DimnameList other) {
@@ -74,7 +74,7 @@ TEST(NamedTensorTest, attachMetadata) {
 
   // Test dropping metadata
   tensor.unsafeGetTensorImpl()->set_named_tensor_meta(nullptr);
-  ASSERT_FALSE(tensor.is_named());
+  ASSERT_FALSE(tensor.has_names());
 }
 
 TEST(NamedTensorTest, internalSetNamesInplace) {
@@ -84,7 +84,7 @@ TEST(NamedTensorTest, internalSetNamesInplace) {
   auto H = dimnameFromString("H");
   auto W = dimnameFromString("W");
   std::vector<Dimname> names = { N, C, H, W };
-  ASSERT_FALSE(tensor.is_named());
+  ASSERT_FALSE(tensor.has_names());
 
   // Set names
   at::internal_set_names_inplace(tensor, names);
