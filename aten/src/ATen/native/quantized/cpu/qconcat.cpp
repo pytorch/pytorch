@@ -78,24 +78,23 @@ class QCatOut final : public torch::OperatorKernel {
   }
 };
 
-static auto registry =
-    torch::RegisterOperators()
-        .op("quantized::cat(Tensor[] qx, int dim, float? scale, int? zero_point)"
-            " -> Tensor",
-            torch::RegisterOperators::options().kernel<QCat<false>>(
-                QuantizedCPUTensorId()))
-        .op("quantized::cat_relu(Tensor[] qx, int dim, float? scale, int? zero_point)"
-            " -> Tensor",
-            torch::RegisterOperators::options().kernel<QCat<true>>(
-                QuantizedCPUTensorId()))
-        .op("quantized::cat_out(Tensor[] qx, int dim, Tensor out)"
-            " -> Tensor",
-            torch::RegisterOperators::options().kernel<QCatOut<false>>(
-                QuantizedCPUTensorId()))
-        .op("quantized::cat_relu_out(Tensor[] qx, int dim, Tensor out)"
-            " -> Tensor",
-            torch::RegisterOperators::options().kernel<QCatOut<true>>(
-                QuantizedCPUTensorId()));
+static auto registry = torch::RegisterOperators()
+  .op("quantized::cat(Tensor[] qx, int dim, float? scale, int? zero_point)"
+      " -> Tensor",
+      torch::RegisterOperators::options().kernel<QCat<false>>(
+          QuantizedCPUTensorId()))
+  .op("quantized::cat_relu(Tensor[] qx, int dim, float? scale, int? zero_point)"
+      " -> Tensor",
+      torch::RegisterOperators::options().kernel<QCat<true>>(
+          QuantizedCPUTensorId()))
+  .op("quantized::cat_out(Tensor[] qx, int dim, Tensor out)"
+      " -> Tensor",
+      torch::RegisterOperators::options().kernel<QCatOut<false>>(
+          QuantizedCPUTensorId()))
+  .op("quantized::cat_relu_out(Tensor[] qx, int dim, Tensor out)"
+      " -> Tensor",
+      torch::RegisterOperators::options().kernel<QCatOut<true>>(
+          QuantizedCPUTensorId()));
 
 } // namespace
 } // namespace native

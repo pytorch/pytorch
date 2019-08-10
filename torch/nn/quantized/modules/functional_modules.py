@@ -16,21 +16,21 @@ class FloatFunctional(torch.nn.Module):
         self.op_name = op_name
 
     def forward(self, x):
-        raise RuntimeError("FloatFunctional is not intended to use the "\
-            "'forward'. Please use the underlying operation")
+        raise RuntimeError("FloatFunctional is not intended to use the " +
+                           "'forward'. Please use the underlying operation")
 
     def add(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
         assert self.op_name == 'add', \
-               "Running add while initialized as {}".format(self.op_name)
-        r = torch.add(x,y)
+            "Running add while initialized as {}".format(self.op_name)
+        r = torch.add(x, y)
         self.observer(r)
         return r
 
     def cat(self, x, dim=None):
         # type: (List[Tensor], Optional[int]) -> Tensor
         assert self.op_name == 'cat', \
-               "Running cat while initialized as {}".format(self.op_name)
+            "Running cat while initialized as {}".format(self.op_name)
         if dim is None:
             dim = 0
         r = torch.cat(x, dim=dim)
@@ -46,20 +46,20 @@ class QFunctional(torch.nn.Module):
         self.op_name = op_name
 
     def forward(self, x):
-        raise RuntimeError("WFunctional is not intended to use the "\
-            "'forward'. Please use the underlying operation")
+        raise RuntimeError("WFunctional is not intended to use the " +
+                           "'forward'. Please use the underlying operation")
 
     def add(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
         assert self.op_name == 'add', \
-               "Running add while initialized as {}".format(self.op_name)
+            "Running add while initialized as {}".format(self.op_name)
         return ops.quantized.add(x, y, scale=self.scale,
                                  zero_point=self.zero_point)
 
     def cat(self, x, dim=None):
         # type: (List[Tensor], Optional[int]) -> Tensor
         assert self.op_name == 'cat', \
-               "Running cat while initialized as {}".format(self.op_name)
+            "Running cat while initialized as {}".format(self.op_name)
         if dim is None:
             dim = 0
         return ops.quantized.cat(x, scale=self.scale,
