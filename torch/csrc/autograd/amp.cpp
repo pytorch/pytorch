@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/amp.h>
 
+// Maybe these should go in ATen/native/amp.cpp?
 namespace torch {
 namespace autograd {
 namespace amp {
@@ -8,19 +9,19 @@ namespace {
   float loss_scale = 1.0;
 }
 
-bool getGradScalingEnabled() {
+bool Amp::is_grad_scaling_enabled() {
   return enabled;
 }
 
-void setGradScalingEnabled(bool new_enabled) {
+void Amp::set_grad_scaling_enabled(bool new_enabled) {
   enabled = new_enabled;
 }
 
-float getGradScale() {
+float Amp::get_grad_scale() {
   return loss_scale;
 }
 
-void setGradScale(float new_scale) {
+void Amp::set_grad_scale(float new_scale) {
   loss_scale = new_scale;
 }
 } // namespace torch

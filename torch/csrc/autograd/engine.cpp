@@ -405,10 +405,10 @@ static void maybe_scale(variable_list& inputs) {
   // the user passes a reference to the _same_ gradient for _several_ different outputs OR
   // the user is setting up for a double-backward with force-fed gradients (here called "inputs") that themselves require grad.
   // Both issues could be resolved by making the mul below out-of-place and autograd-exposed.
-  if(amp::getGradScalingEnabled()) {
+  if(amp::Amp::is_grad_scaling_enabled()) {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     for(int i = 0; i < inputs.size(); i++)
-      inputs[i].mul_(amp::getGradScale());
+      inputs[i].mul_(amp::Amp::get_grad_scale());
   }
 }
 
@@ -416,23 +416,23 @@ static void maybe_scale(variable_list& inputs) {
 static variable_list maybe_unscale(bool is_leaf_accumulator, variable_list inputs) {
   // We can't be sure someone else isn't referencing this gradient.  Play it safe for now, using out-of-place ops even
   // if we aren't setting up for a double-backward.
-  if(is_leaf_accumulator && amp::getGradScalingEnabled())
+  if(is_leaf_accumulator && amp::Amp::is_grad_scaling_enabled())
   {
     for(int i = 0; i < inputs.size(); i++)
-      inputs[i] = inputs[i]/amp::getGradScale();
+      inputs[i] = inputs[i]/amp::Amp::get_grad_scale();
   }
   // If we can be sure no one else is referencing this gradient, we can do the following:
   // if(GradMode::is_enabled())
-  //   if(is_leaf_accumulator && amp::getGradScalingEnabled())
+  //   if(is_leaf_accumulator && amp::get_grad_scaling_enabled())
   //   {
   //     for(int i = 0; i < inputs.size(); i++)
-  //       inputs[i] = inputs[i]/amp::getGradScale();
+  //       inputs[i] = inputs[i]/amp::get_grad_scale();
   //   }
   //   else
   //   {
   //     at::AutoNonVariableTypeMode non_var_type_mode(true);
   //     for(auto& input : inputs)
-  //       input.div_(amp::getGradScale());
+  //       input.div_(amp::get_grad_scale());
   //   }
   return inputs;
 }
