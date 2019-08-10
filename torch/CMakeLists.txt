@@ -60,6 +60,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/api/src/python/init.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/init.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/init.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/python_amp.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/python_anomaly_mode.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/python_cpp_function.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/python_engine.cpp

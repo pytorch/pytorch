@@ -357,6 +357,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/autograd/functions/basic_ops.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/amp.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/record_function.cpp
