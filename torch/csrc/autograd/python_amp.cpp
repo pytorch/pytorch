@@ -1,6 +1,6 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/autograd/python_amp.h>
-#include <torch/csrc/autograd/amp.h>
+#include <torch/csrc/autograd/amp_mode.h>
 #include <torch/csrc/Exceptions.h>
 
 #include <ATen/ATen.h>
@@ -27,7 +27,7 @@ namespace amp {
 static PyObject* THPAmp_getGradScalingEnabled(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   // Py_RETURN* may be multiline macros (involving increfs) so we need braces.
-  if(Amp::is_grad_scaling_enabled()) {
+  if(AmpMode::is_grad_scaling_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -46,14 +46,14 @@ static PyObject* THPAmp_setGradScalingEnabled(PyObject* self, PyObject* arg) {
   if(!PyBool_Check(arg)) {
     throw torch::TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
   }
-  Amp::set_grad_scaling_enabled(arg == Py_True);
+  AmpMode::set_grad_scaling_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPAmp_getGradScale(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
-  return PyFloat_FromDouble(Amp::get_grad_scale());
+  return PyFloat_FromDouble(AmpMode::get_grad_scale());
   END_HANDLE_TH_ERRORS
 }
 
@@ -65,7 +65,7 @@ PyObject* THPAmp_setGradScale(PyObject* self, PyObject* arg) {
   if(!PyFloat_Check(arg)) {
     throw torch::TypeError("enabled must be a float (got %s)", Py_TYPE(arg)->tp_name);
   }
-  Amp::set_grad_scale(PyFloat_AsDouble(arg));
+  AmpMode::set_grad_scale(PyFloat_AsDouble(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
