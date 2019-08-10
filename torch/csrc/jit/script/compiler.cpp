@@ -1683,6 +1683,49 @@ struct to_ir {
     }
   }
 
+  void emitAugAssignmentGeneric(
+      const AugAssign& stmt,
+      const Subscript& lhs,
+      Value* sliceable) {
+    // Get the idx to augment
+    const auto subscriptExprs = lhs.subscript_exprs();
+    const TypePtr type = sliceable->type();
+    if (subscriptExprs.size() != 1) {
+      throw ErrorReport(subscriptExprs)
+          << "Sliced expression not yet supported for " << type->python_str()
+          << " augmented assignment. "
+          << "File a bug if you want this";
+    }
+
+    TypePtr elemType = nullptr;
+    if (const ListTypePtr listType = type->cast<ListType>()) {
+      elemType = listType->getElementType();
+    } else if (const DictTypePtr dictType = type->cast<DictType>()) {
+      elemType = dictType->getKeyType();
+    }
+
+    if (elemType == nullptr) {
+      throw ErrorReport(lhs)
+          << type->python_str() << " does not support augmented assignment.";
+    }
+    const auto idxValue = emitExpr(subscriptExprs[0]);
+    const auto containerArg =
+        NamedValue(lhs.value().range(), type->str(), sliceable);
+    const auto idxArg = NamedValue(subscriptExprs.range(), "idx", idxValue);
+    const auto valueArg =
+        NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
+
+    const auto getItem = graph->insert(
+        aten::__getitem__, {containerArg, idxArg}, {}, stmt.range());
+    const auto augmentedItem = graph->insert(
+        getAugOp(stmt, elemType), {getItem, valueArg}, {}, stmt.range());
+    graph->insert(
+        aten::_set_item,
+        {containerArg, idxArg, augmentedItem},
+        {},
+        stmt.range());
+  }
+
   void emitAugAssignmentToSubscript(const AugAssign& stmt) {
     // Process the base list value
     const auto lhs = Subscript(stmt.lhs());
@@ -1733,35 +1776,7 @@ struct to_ir {
             stmt.range());
       }
     } else {
-      // Otherwise, it should be a list.  Lower this expression into:
-      //     list.set_item(get_item(idx).add_(value))
-      // similar to how Python handles things.
-      const auto listType = sliceable->type()->cast<ListType>();
-      AT_ASSERT(listType != nullptr);
-
-      auto elementType = listType->getElementType();
-
-      // Get the idx to augment
-      const auto subscriptExprs = lhs.subscript_exprs();
-      if (subscriptExprs.size() != 1) {
-        throw ErrorReport(subscriptExprs)
-            << "Sliced expression not yet supported for"
-            << " subscripted list augmented assignment. "
-            << "File a bug if you want this";
-      }
-      const auto idxValue = emitExpr(subscriptExprs[0]);
-
-      const auto listArg = NamedValue(lhs.value().range(), "list", sliceable);
-      const auto idxArg = NamedValue(subscriptExprs.range(), "idx", idxValue);
-      const auto valueArg =
-          NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
-
-      const auto getItem =
-          graph->insert(aten::__getitem__, {listArg, idxArg}, {}, stmt.range());
-      const auto augmentedItem = graph->insert(
-          getAugOp(stmt, elementType), {getItem, valueArg}, {}, stmt.range());
-      graph->insert(
-          aten::_set_item, {listArg, idxArg, augmentedItem}, {}, stmt.range());
+      emitAugAssignmentGeneric(stmt, lhs, sliceable);
     }
   }
 
