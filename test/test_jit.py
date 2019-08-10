@@ -7157,7 +7157,6 @@ a")
                         if dtype == torch.float64:
                             dtype = torch.float32
                     expect = self._dtype_to_expect(dtype, dim)
-                    inferred_output = next(graph.outputs())
 
                     check = FileCheck()
                     if dim >= 0:
