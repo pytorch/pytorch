@@ -113,8 +113,7 @@ class Conv2d(torch.nn.Module):
         destination[prefix + 'weight'] = self.weight()
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
-        if self.bias is not None:
-            destination[prefix + 'bias'] = self.bias
+        destination[prefix + 'bias'] = self.bias
 
     @torch.jit.export
     def __getstate__(self):
@@ -143,11 +142,9 @@ class Conv2d(torch.nn.Module):
         self.set_weight(state_dict[prefix + 'weight'])
         state_dict.pop(prefix + 'weight')
 
-        if prefix + 'bias' in state_dict:
-            self.bias.copy_(state_dict[prefix + 'bias'])
-            state_dict.pop(prefix + 'bias')
-        else:
-            self.bias = None
+        self.bias = state_dict[prefix + 'bias']
+        state_dict.pop(prefix + 'bias')
+
 
         self.scale = float(state_dict[prefix + 'scale'])
         state_dict.pop(prefix + 'scale')
