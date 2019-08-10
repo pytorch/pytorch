@@ -483,6 +483,7 @@ binary_linux_build: &binary_linux_build
         elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
           retry apt-get update
           retry apt-get -y install expect moreutils zip openssl
+          export PATH=/opt/conda/bin:$PATH
           conda install -y -c eumetsat expect
           conda install -y cmake
         fi
