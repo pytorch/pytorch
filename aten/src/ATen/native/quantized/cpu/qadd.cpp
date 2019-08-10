@@ -20,7 +20,6 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
   int64_t other_zero_point = other.q_zero_point();
   double other_scale = other.q_scale();
 
-  // Requantize a and b into int32.
   auto iter = TensorIterator::binary_op(out, self, other);
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qadd", [&]() {
     cpu_kernel(iter, [&](scalar_t a, scalar_t b) -> scalar_t {
