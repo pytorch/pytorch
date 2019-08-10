@@ -9,7 +9,7 @@ import torch.nn._intrinsic.quantized as nnq_fused
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
 from torch.nn._intrinsic.quantized import ConvReLU2d
-from common_utils import run_tests  # , tempfile
+from common_utils import run_tests, tempfile
 from common_quantization import QuantizationTestCase
 from hypothesis import given
 from hypothesis import strategies as st
@@ -46,7 +46,6 @@ class ModuleAPITest(QuantizationTestCase):
         """test API functionality for nn.quantized.linear and nn._intrinsic.quantized.linear_relu"""
         W = torch.rand(out_features, in_features).float()
         W_q = torch.quantize_linear(W, 0.1, 4, torch.qint8)
-        W_pack = torch.ops.quantized.fbgemm_linear_prepack(W_q)
         X = torch.rand(batch_size, in_features).float()
         X_q = torch.quantize_linear(X, 0.2, 10, torch.quint8)
         B = torch.rand(out_features).float() if use_bias else None
@@ -57,10 +56,14 @@ class ModuleAPITest(QuantizationTestCase):
             qlinear = nnq_fused.LinearReLU(in_features, out_features)
         else:
             qlinear = nnq.Linear(in_features, out_features)
-        qlinear._packed_weight = W_pack
+        qlinear.set_weight(W_q)
+        # Simple round-trip test to ensure weight()/set_weight() API
+        self.assertEqual(qlinear.weight(), W_q)
+        W_pack = qlinear._packed_weight
         qlinear.bias = B_q if use_bias else None
-        qlinear.scale = scale
-        qlinear.zero_point = zero_point
+
+        qlinear.scale = float(scale)
+        qlinear.zero_point = int(zero_point)
         Z_q = qlinear(X_q)
         # Check if the module implementation matches calling the
         # ops directly
@@ -71,53 +74,52 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(Z_ref, Z_q)
 
         # Test serialization of quantized Linear Module using state_dict
-        # TODO: temporary removal. Will be added back in subsequent PR in stack
-        # model_dict = qlinear.state_dict()
-        # # self.assertEqual(model_dict['weight'], W_q)
-        # if use_bias:
-        #     self.assertEqual(model_dict['bias'], B_q)
-        # with tempfile.NamedTemporaryFile() as f:
-        #     torch.save(model_dict, f)
-        #     f.seek(0)
-        #     loaded_dict = torch.load(f)
-        # for key in model_dict:
-        #     self.assertEqual(model_dict[key], loaded_dict[key])
-        # if use_fused:
-        #     loaded_qlinear = nnq_fused.LinearReLU(in_features, out_features)
-        # else:
-        #     loaded_qlinear = nnq.Linear(in_features, out_features)
-        # loaded_qlinear.load_state_dict(loaded_dict)
 
-        # linear_unpack = torch.ops.quantized.fbgemm_linear_unpack
-        # self.assertEqual(linear_unpack(qlinear._packed_weight),
-        #                  linear_unpack(loaded_qlinear._packed_weight))
-        # if use_bias:
-        #     self.assertEqual(qlinear.bias, loaded_qlinear.bias)
-        # self.assertEqual(qlinear.scale, loaded_qlinear.scale)
-        # self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
-        # self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
-        # self.assertTrue(hasattr(qlinear, '_packed_weight'))
-        # self.assertTrue(hasattr(loaded_qlinear, '_packed_weight'))
-        # self.assertTrue(hasattr(qlinear, 'weight'))
-        # self.assertTrue(hasattr(loaded_qlinear, 'weight'))
-        # self.assertEqual(qlinear.weight, loaded_qlinear.weight)
-        # self.assertEqual(qlinear.weight, torch.ops.quantized.fbgemm_linear_unpack(qlinear._packed_weight))
-        # Z_q2 = qlinear(X_q)
-        # self.assertEqual(Z_q, Z_q2)
+        model_dict = qlinear.state_dict()
+        self.assertEqual(model_dict['weight'], W_q)
+        if use_bias:
+            self.assertEqual(model_dict['bias'], B_q)
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(model_dict, f)
+            f.seek(0)
+            loaded_dict = torch.load(f)
+        for key in model_dict:
+            self.assertEqual(model_dict[key], loaded_dict[key])
+        if use_fused:
+            loaded_qlinear = nnq_fused.LinearReLU(in_features, out_features)
+        else:
+            loaded_qlinear = nnq.Linear(in_features, out_features)
+        loaded_qlinear.load_state_dict(loaded_dict)
 
-        # test serialization of module directly - will add this later
-        # with tempfile.NamedTemporaryFile() as f:
-        #     torch.save(qLinear, f)
-        #     f.seek(0)
-        #     loaded = torch.load(f)
-        # state = qLinear.__getstate__()
-        # compareUnpackedWeight(qLinear._packed_weight, loaded._packed_weight)
-        # self.assertEqual(qLinear.bias, loaded.bias)
-        # self.assertEqual(qLinear.scale, loaded.scale)
-        # self.assertEqual(qLinear.zero_point, loaded.zero_point)
+        linear_unpack = torch.ops.quantized.fbgemm_linear_unpack
+        self.assertEqual(linear_unpack(qlinear._packed_weight),
+                         linear_unpack(loaded_qlinear._packed_weight))
+        if use_bias:
+            self.assertEqual(qlinear.bias, loaded_qlinear.bias)
+        self.assertEqual(qlinear.scale, loaded_qlinear.scale)
+        self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
+        self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
+        self.assertTrue(hasattr(qlinear, '_packed_weight'))
+        self.assertTrue(hasattr(loaded_qlinear, '_packed_weight'))
+        self.assertTrue(hasattr(qlinear, 'weight'))
+        self.assertTrue(hasattr(loaded_qlinear, 'weight'))
+        self.assertEqual(qlinear.weight(), loaded_qlinear.weight())
+        self.assertEqual(qlinear.weight(), torch.ops.quantized.fbgemm_linear_unpack(qlinear._packed_weight))
+        Z_q2 = qlinear(X_q)
+        self.assertEqual(Z_q, Z_q2)
+
+        # test serialization of module directly
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(qlinear, f)
+            f.seek(0)
+            loaded = torch.load(f)
+        self.assertEqual(qlinear._packed_weight, loaded._packed_weight)
+        self.assertEqual(qlinear.bias, loaded.bias)
+        self.assertEqual(qlinear.scale, loaded.scale)
+        self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
-        # TODO: temporary removal. Will be added back in subsequent PR in stack
+        # TODO: Temporary removal. Will be added back in subsequent diff in stack
         # self.checkScriptable(qlinear, zip([X_q], [Z_ref]))
 
     def test_quant_dequant_api(self):
