@@ -221,12 +221,13 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
 }
 
 void Pickler::pushIValue(const IValue& ivalue) {
-  bool isMutableType = ivalue.isPtrType() && !ivalue.isString() && !ivalue.isTuple();
+  bool shouldMemoizeByPointer =
+    ivalue.isPtrType() && !ivalue.isString() && ivalue.use_count() > 1;
 
   // Mutable ivalues are memoized by pointer equality, which we handle at this outer
   // granularity.  Immutable ivalues are memoized by value equality which is handled in
   // the type-specific handlers inside pushIValueImpl.
-  if (isMutableType) {
+  if (shouldMemoizeByPointer) {
     const void* ptr = ivalue.internalToPointer();
     TORCH_CHECK(
         ptr != nullptr,
