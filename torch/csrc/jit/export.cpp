@@ -511,6 +511,8 @@ class ScriptModuleSerializer {
       const script::Module& module,
       const script::ExtraFilesMap& extra_files = script::ExtraFilesMap());
 
+  virtual ~ScriptModuleSerializer() {}
+
  protected:
   virtual void convertModel(
       const script::Module& module,
