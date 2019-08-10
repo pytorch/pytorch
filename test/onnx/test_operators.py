@@ -218,7 +218,8 @@ class TestOperators(TestCase):
     def test_params_onnx_irv4(self):
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
         y = nn.Parameter(torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True))
-        self.assertONNX(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))), x, params=(y, ))
+        self.assertONNX(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))), x, params=(y, ),
+                        keep_initializers_as_inputs=False)
 
     def test_symbolic_mismatch(self):
         class MyFun(Function):
@@ -246,7 +247,7 @@ class TestOperators(TestCase):
 
     def test_batchnorm_onnx_irv4(self):
         x = torch.ones(2, 2, 2, 2, requires_grad=True)
-        self.assertONNX(nn.BatchNorm2d(2), x)
+        self.assertONNX(nn.BatchNorm2d(2), x, keep_initializers_as_inputs=False)
 
     def test_batchnorm_1d(self):
         x = torch.ones(2, 2, requires_grad=True)
@@ -262,7 +263,7 @@ class TestOperators(TestCase):
 
     def test_conv_onnx_irv4(self):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
-        self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x)
+        self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x, keep_initializers_as_inputs=False)
 
     def test_conv_variable_length(self):
         x = torch.ones(5, 3, 6, 6, requires_grad=True)
