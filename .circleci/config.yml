@@ -1840,7 +1840,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
     docker:
-      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-without-deps_build:
@@ -1848,7 +1848,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
     docker:
-      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-with-deps_build:
@@ -1856,7 +1856,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
     docker:
-      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-without-deps_build:
@@ -1864,7 +1864,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
     docker:
-      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-with-deps_build:
@@ -1872,7 +1872,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
     docker:
-      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-without-deps_build:
@@ -1880,7 +1880,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
     docker:
-      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-with-deps_build:
@@ -1888,7 +1888,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
     docker:
-      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-without-deps_build:
@@ -1896,7 +1896,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
     docker:
-      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-with-deps_build:
@@ -1904,7 +1904,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
     docker:
-      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-without-deps_build:
@@ -1912,7 +1912,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
     docker:
-      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-with-deps_build:
@@ -1920,7 +1920,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
     docker:
-      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_build
 
   binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-without-deps_build:
@@ -1928,7 +1928,7 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
     docker:
-      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      - image: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_build
 
   binary_macos_wheel_2.7_cpu_build:
@@ -2283,35 +2283,35 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_test
 
   binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_test
 
   binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_test
 
   binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *binary_linux_test
 
   binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
@@ -2320,7 +2320,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
@@ -2329,7 +2329,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
@@ -2338,7 +2338,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
@@ -2347,7 +2347,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
@@ -2356,7 +2356,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
@@ -2365,7 +2365,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
@@ -2374,7 +2374,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
@@ -3031,35 +3031,35 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *smoke_linux_test
 
   smoke_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *smoke_linux_test
 
   smoke_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *smoke_linux_test
 
   smoke_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
     <<: *smoke_linux_test
 
   smoke_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
@@ -3068,7 +3068,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
@@ -3077,7 +3077,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
@@ -3086,7 +3086,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
@@ -3095,7 +3095,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
@@ -3104,7 +3104,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
@@ -3113,7 +3113,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
@@ -3122,7 +3122,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
-      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:2"
+      DOCKER_IMAGE: "yf225/tmp-binary-docker-image-ubuntu16.04:3"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
