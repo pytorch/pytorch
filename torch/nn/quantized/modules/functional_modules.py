@@ -7,7 +7,33 @@ _VALID_OP_NAMES = {
     'cat'
 }
 
+
 class FloatFunctional(torch.nn.Module):
+    r"""State collector class for float operatitons.
+
+    The instance of this class can be used instead of the ``torch.`` prefix for
+    some operations. See example usage below.
+
+    .. note::
+
+        This class does not provide a ``forward`` hook. Instead, you must use
+        one of the underlying functions (e.g. ``add``).
+
+    Args:
+        op_name(str): The name of the operation this wrapper is bound to.
+                      See below for valid options.
+
+    .. Examples::
+
+        >>> f_add = FloatFunctional('add')
+        >>> a = torch.tensor(3.0)
+        >>> b = torch.tensor(4.0)
+        >>> f_add.add(a, b)  # Equivalent to ``torch.add(3, 4)
+
+    Valid operation names:
+        - add
+        - cat
+    """
     def __init__(self, op_name):
         super(FloatFunctional, self).__init__()
         if op_name not in _VALID_OP_NAMES:
@@ -19,14 +45,17 @@ class FloatFunctional(torch.nn.Module):
         raise RuntimeError("FloatFunctional is not intended to use the " +
                            "'forward'. Please use the underlying operation")
 
+    r"""Operation equivalent to ``torch.add``"""
     def add(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
         assert self.op_name == 'add', \
             "Running add while initialized as {}".format(self.op_name)
         r = torch.add(x, y)
+        # TODO: Fix for QAT.
         self.observer(r)
         return r
 
+    r"""Operation equivalent to ``torch.cat``"""
     def cat(self, x, dim=None):
         # type: (List[Tensor], Optional[int]) -> Tensor
         assert self.op_name == 'cat', \
@@ -39,6 +68,32 @@ class FloatFunctional(torch.nn.Module):
 
 
 class QFunctional(torch.nn.Module):
+    r"""Wrapper class for quantized operatitons.
+
+    The instance of this class can be used instead of the
+    ``torch.ops.quantized`` prefix. See example usage below.
+
+    .. note::
+
+        This class does not provide a ``forward`` hook. Instead, you must use
+        one of the underlying functions (e.g. ``add``).
+
+    Args:
+        op_name(str): The name of the operation this wrapper is bound to.
+                      See below for valid options.
+
+    .. Examples::
+
+        >>> q_add = QFunctional('add')
+        >>> a = torch.quantize_linear(torch.tensor(3.0), 1.0, 0, torch.qint32)
+        >>> b = torch.quantize_linear(torch.tensor(4.0), 1.0, 0, torch.qint32)
+        >>> q_add.add(a, b)  # Equivalent to ``torch.ops.quantized.add(3, 4)
+
+    Valid operation names:
+        - add
+        - cat
+
+    """
     def __init__(self, op_name):
         super(QFunctional, self).__init__()
         if op_name not in _VALID_OP_NAMES:
@@ -46,9 +101,10 @@ class QFunctional(torch.nn.Module):
         self.op_name = op_name
 
     def forward(self, x):
-        raise RuntimeError("WFunctional is not intended to use the " +
+        raise RuntimeError("Functional is not intended to use the " +
                            "'forward'. Please use the underlying operation")
 
+    r"""Operation equivalent to ``torch.ops.quantized.add``"""
     def add(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
         assert self.op_name == 'add', \
@@ -56,14 +112,13 @@ class QFunctional(torch.nn.Module):
         return ops.quantized.add(x, y, scale=self.scale,
                                  zero_point=self.zero_point)
 
-    def cat(self, x, dim=None):
-        # type: (List[Tensor], Optional[int]) -> Tensor
+    r"""Operation equivalent to ``torch.ops.quantized.cat``"""
+    def cat(self, x, dim=0):
+        # type: (List[Tensor], int) -> Tensor
         assert self.op_name == 'cat', \
             "Running cat while initialized as {}".format(self.op_name)
-        if dim is None:
-            dim = 0
         return ops.quantized.cat(x, scale=self.scale,
-                                 zero_point=self.zero_point, dim=dim)
+                                 zero_point=self.zero_point, axis=dim)
 
     @classmethod
     def from_float(cls, mod):
