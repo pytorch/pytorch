@@ -10,26 +10,22 @@ namespace at {
 namespace native {
 namespace {
 
-inline Tensor requantize_into_int32(Tensor qa) {
-  if (qa.scalar_type() == kQInt32 && qa.q_scale() == 1.0 &&
-      qa.q_zero_point() == 0) {
-    return qa;
-  }
-  const auto a = qa.dequantize();
-  return at::quantize_linear(a, /*scale=*/1.0, /*zero_point=*/0, kQInt32);;
-}
-
 // Note: out is assumed to be the same size as self and other.
 template <bool ReLUFused = false>
 Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
-  long zero_point = out.q_zero_point();
+  int64_t zero_point = out.q_zero_point();
   double scale = out.q_scale();
+  int64_t self_zero_point = self.q_zero_point();
+  double self_scale = self.q_scale();
+  int64_t other_zero_point = other.q_zero_point();
+  double other_scale = other.q_scale();
+
   // Requantize a and b into int32.
   auto iter = TensorIterator::binary_op(out, self, other);
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qadd", [&]() {
     cpu_kernel(iter, [&](scalar_t a, scalar_t b) -> scalar_t {
-      const auto da = at::dequantize_val(self.q_scale(), self.q_zero_point(), a);
-      const auto db = at::dequantize_val(other.q_scale(), other.q_zero_point(), b);
+      const auto da = at::dequantize_val(self_scale, self_zero_point, a);
+      const auto db = at::dequantize_val(other_scale, other_zero_point, b);
       float c = da + db;
       if (ReLUFused) {
         c = std::max<float>(c, 0.0);
@@ -43,7 +39,7 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
 template <bool ReLUFused = false>
 class QAdd final : public c10::OperatorKernel {
  public:
-  Tensor operator()(at::Tensor qa, at::Tensor qb,
+  Tensor operator()(Tensor qa, Tensor qb,
                     double scale, int64_t zero_point) {
     TORCH_CHECK(qa.numel() == qb.numel(),
                 "Add operands must be the same size!");

@@ -379,9 +379,10 @@ void AliasDb::analyzeImpl(Node* node) {
       "Special cases should be handled already if we're here.");
 
   if (node->kind().is_aten() || node->kind().is_prim()) {
-    // TODO This assert is only introduced to check that we don't break the
-    // current code base. Remove this later to allow aten:: and prim:: ops to
-    // use other alias analysis kinds.
+    // TODO There is nothing in the system that relies on aten:: and prim::
+    // ops using AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::INTERNAL_SPECIAL_CASE,
+    // but this is the intended behavior for all current ops and a good error check.
+    // We can consider lifting this constraint later if we have a use case for it.
     TORCH_INTERNAL_ASSERT(
         analysis == AliasAnalysisKind::FROM_SCHEMA,
         "aten:: and prim:: operators should use AliasAnalysisKind::FROM_SCHEMA but ",
@@ -417,15 +418,6 @@ void AliasDb::analyzeImpl(Node* node) {
       analysis == AliasAnalysisKind::FROM_SCHEMA,
       "AliasAnalysisKind::CONSERVATIVE/PURE/INTERNAL_SPECIAL_CASE should already have been handled above");
   const auto& schema = node->schema();
-
-  // TODO This assert is only introduced to check that we don't break the
-  // current code base. Remove this later to allow other ops to use
-  // AliasAnalysisKind::FROM_SCHEMA
-  TORCH_INTERNAL_ASSERT(
-      node->kind().is_prim() || node->kind().is_aten(),
-      "The current code base should only have AliasAnalysisKind::FROM_SCHEMA for aten:: and prim:: ops but we found it for ",
-      node->kind().toDisplayString(),
-      ". We want to open this up though.");
 
   // Bind the schema's "formal" alias annotation to the actual values those
   // schema arguments represent
