@@ -24,7 +24,6 @@ export PACKAGE_TYPE="${configs[0]}"
 export DESIRED_PYTHON="${configs[1]}"
 export DESIRED_CUDA="${configs[2]}"
 export DESIRED_DEVTOOLSET="${configs[3]:-}"
-export CXX_ABI_VARIANT="${CXX_ABI_VARIANT:-}"
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
   export BUILD_PYTHONLESS=1
 fi
@@ -43,7 +42,7 @@ fi
 # option, so the upload was redirected to nightly/devtoolset7 to avoid
 # conflicts with other binaries (there shouldn't be any conflicts). Now we are
 # making devtoolset7 the default.
-if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' || "$CXX_ABI_VARIANT" == 'cxx11-abi' || "$(uname)" == 'Darwin' ]]; then
+if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' || "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* || "$(uname)" == 'Darwin' ]]; then
   export PIP_UPLOAD_FOLDER='nightly/'
 else
   # On linux machines, this shouldn't actually be called anymore. This is just
@@ -69,7 +68,6 @@ export PACKAGE_TYPE="$PACKAGE_TYPE"
 export DESIRED_PYTHON="$DESIRED_PYTHON"
 export DESIRED_CUDA="$DESIRED_CUDA"
 export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
-export CXX_ABI_VARIANT="$CXX_ABI_VARIANT"
 export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
 export DESIRED_DEVTOOLSET="$DESIRED_DEVTOOLSET"
 
