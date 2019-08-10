@@ -4,7 +4,7 @@ import torch
 from torch.nn.modules.module import Module
 from torch.nn.modules.linear import Linear as NNLinear
 
-from torch._jit_internal import Optional
+from torch._jit_internal import Optional, Tuple
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor
@@ -94,19 +94,21 @@ class Linear(torch.nn.Module):
         torch.Size([128, 30])
     """
 
+    __annotations__ = {'bias' : Optional[torch.Tensor]}
+
     def __init__(self, in_features, out_features, bias_=True):
         super(Linear, self).__init__()
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
+        # Serialization logic is explicitly handled in the below serialization and
+        # deserialization modules
         self.in_features = in_features
         self.out_features = out_features
         if bias_:
-            self.bias = torch.jit.annotate(
-                Optional[torch.Tensor],
-                torch._empty_affine_quantized(
-                    [out_features], scale=1, zero_point=0, dtype=torch.qint32))
+            self.bias = torch._empty_affine_quantized(
+                [out_features], scale=1, zero_point=0, dtype=torch.qint32)
         else:
-            self.bias = torch.jit.annotate(Optional[torch.Tensor], None)
+            self.bias = None
 
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8)
@@ -132,6 +134,17 @@ class Linear(torch.nn.Module):
         if self.bias is not None:
             destination[prefix + 'bias'] = self.bias
 
+    @torch.jit.export
+    def __getstate__(self):
+        return (
+            self.in_features,
+            self.out_features,
+            self.bias,
+            self.weight(),
+            self.scale,
+            self.zero_point
+        )
+
     # ===== Deserialization methods =====
     # Counterpart to the serialization methods, we must pack the serialized QTensor
     # weight into its packed format for use by the FBGEMM ops.
@@ -152,6 +165,16 @@ class Linear(torch.nn.Module):
 
         super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                   missing_keys, unexpected_keys, error_msgs)
+
+    @torch.jit.export
+    def __setstate__(self, state):
+        # type: (Tuple[int, int, torch.Tensor, torch.Tensor, float, int]) -> None
+        self.in_features = state[0]
+        self.out_features = state[1]
+        self.bias = state[2]
+        self.set_weight(state[3])
+        self.scale = state[4]
+        self.zero_point = state[5]
 
     # Function rather than property to make sure that JIT serialization doesn't
     # register this as an attribute
