@@ -3195,11 +3195,14 @@ def multi_head_attention_forward(query,                           # type: Tensor
         assert bias_k is None
         assert bias_v is None
 
-    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim)
+    q = q.transpose(0, 1).contiguous()
     if k is not None:
-        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        k = k.contiguous().view(-1, bsz * num_heads, head_dim)
+        k = k.transpose(0, 1).contiguous()
     if v is not None:
-        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        v = v.contiguous().view(-1, bsz * num_heads, head_dim)
+        v = v.transpose(0, 1).contiguous()
 
     if static_k is not None:
         assert static_k.size(0) == bsz * num_heads
@@ -3231,7 +3234,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
                                                dtype=key_padding_mask.dtype,
                                                device=key_padding_mask.device)], dim=1)
 
-    attn_output_weights = torch.bmm(q, k.transpose(1, 2))
+    attn_output_weights = torch.bmm(q, k.transpose(1, 2).contiguous())
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
 
     if attn_mask is not None:
