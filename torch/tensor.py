@@ -423,10 +423,9 @@ class Tensor(torch._C._TensorBase):
             element (Tensor or scalar): element to be checked
                 for presence in current tensor"
         """
-        if isinstance(element, (torch.Tensor, Number)):
-            return (element == self).any().item()
-        raise NotImplementedError
-        return False
+        if not isinstance(element, (torch.Tensor, Number)):
+            raise NotImplementedError
+        return (element == self).any().item()
 
     @property
     def __cuda_array_interface__(self):
