@@ -1,8 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
-from ...modules.module import Module
-from ...modules.linear import Linear as NNLinear
+from torch.nn.modules.module import Module
+from torch.nn.modules.linear import Linear as NNLinear
+
+from torch._jit_internal import Optional, Tuple
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor
@@ -31,8 +33,8 @@ class Quantize(Module):
         self._dtype = out_dtype
 
     def forward(self, X):
-        return torch.quantize_linear(X, self._scale.item(),
-                                     self._zero_point.item(), self._dtype)
+        return torch.quantize_linear(X, float(self._scale),
+                                     int(self._zero_point), self._dtype)
 
     @staticmethod
     def from_float(mod):
@@ -65,7 +67,7 @@ class DeQuantize(Module):
     def from_float(mod):
         return DeQuantize()
 
-class Linear(NNLinear):
+class Linear(torch.nn.Module):
     r"""
     A quantized linear module with quantized tensor as inputs and outputs.
     We adopt the same interface as `torch.nn.Linear`, please see
@@ -91,63 +93,97 @@ class Linear(NNLinear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    __constants__ = ['bias', 'in_features', 'out_features']
 
-    def __init__(self, in_features, out_features, bias=True):
-        super(Linear, self).__init__(in_features, out_features, bias)
-        if bias:
-            del self.bias
-            qbias = torch._empty_affine_quantized(
+    __annotations__ = {'bias' : Optional[torch.Tensor]}
+
+    def __init__(self, in_features, out_features, bias_=True):
+        super(Linear, self).__init__()
+        # We don't muck around with buffers or attributes or anything here
+        # to keep the module simple. *everything* is simply a Python attribute.
+        # Serialization logic is explicitly handled in the below serialization and
+        # deserialization modules
+        self.in_features = in_features
+        self.out_features = out_features
+        if bias_:
+            self.bias = torch._empty_affine_quantized(
                 [out_features], scale=1, zero_point=0, dtype=torch.qint32)
-            self.register_buffer('bias', qbias)
         else:
-            self.register_buffer('bias', None)
-        del self.weight
+            self.bias = None
+
         qweight = torch._empty_affine_quantized(
-            [out_features, in_features], scale=1, zero_point=0,
-            dtype=torch.qint8)
-        self.register_buffer('_packed_weight',
-                             torch.ops.quantized.fbgemm_linear_prepack(qweight))
-        self.register_buffer('scale',
-                             torch.tensor([1.0], dtype=torch.double))
-        self.register_buffer('zero_point',
-                             torch.tensor([0], dtype=torch.long))
+            [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8)
 
-    @property
-    def weight(self):
-        return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
-
-    @weight.setter
-    def weight(self, w):
-        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
+        self.set_weight(qweight)
+        self.scale = 1.0
+        self.zero_point = 0
 
     def forward(self, x):
-        # Note that we can handle self.bias == None case.
-        Y_q = torch.ops.quantized.fbgemm_linear(
-            x, self._packed_weight,
-            self.bias,
-            self.scale,
-            self.zero_point)
-        return Y_q
+        return torch.ops.quantized.fbgemm_linear(
+            x, self._packed_weight, self.bias, self.scale, self.zero_point)
 
+    # ===== Serialization methods =====
+    # The special consideration here is that we have to unpack the weights into their
+    # regular QTensor form for serialization. Packed weights should not live
+    # outside the process in which they were created, rather they should be derived
+    # from the QTensor weight.
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super()._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'weight'] = torch.ops.quantized.fbgemm_linear_unpack(destination[prefix + '_packed_weight'])
-        destination.pop(prefix + '_packed_weight')
+        super(Linear, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'weight'] = self.weight()
+        destination[prefix + 'scale'] = torch.tensor(self.scale)
+        destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
+        if self.bias is not None:
+            destination[prefix + 'bias'] = self.bias
 
+    @torch.jit.export
+    def __getstate__(self):
+        return (
+            self.in_features,
+            self.out_features,
+            self.bias,
+            self.weight(),
+            self.scale,
+            self.zero_point
+        )
+
+    # ===== Deserialization methods =====
+    # Counterpart to the serialization methods, we must pack the serialized QTensor
+    # weight into its packed format for use by the FBGEMM ops.
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(state_dict[prefix + 'weight'])
+        self.set_weight(state_dict[prefix + 'weight'])
+        state_dict.pop(prefix + 'weight')
+
         if prefix + 'bias' in state_dict:
             self.bias.copy_(state_dict[prefix + 'bias'])
             state_dict.pop(prefix + 'bias')
-        state_dict.pop(prefix + 'weight')
-        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                      missing_keys, unexpected_keys, error_msgs)
-        return
 
-    # TODO: support initializing from quantization parameters when Quantizer is
-    # exposed in python
+        self.scale = float(state_dict[prefix + 'scale'])
+        state_dict.pop(prefix + 'scale')
+
+        self.zero_point = int(state_dict[prefix + 'zero_point'])
+        state_dict.pop(prefix + 'zero_point')
+
+        super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                  missing_keys, unexpected_keys, error_msgs)
+
+    @torch.jit.export
+    def __setstate__(self, state):
+        # type: (Tuple[int, int, torch.Tensor, torch.Tensor, float, int]) -> None
+        self.in_features = state[0]
+        self.out_features = state[1]
+        self.bias = state[2]
+        self.set_weight(state[3])
+        self.scale = state[4]
+        self.zero_point = state[5]
+
+    # Function rather than property to make sure that JIT serialization doesn't
+    # register this as an attribute
+    def weight(self):
+        return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+
+    def set_weight(self, w):
+        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
+
     @staticmethod
     def from_float(mod):
         r"""Create a quantized module from a float module or qparams_dict
@@ -170,10 +206,13 @@ class Linear(NNLinear):
         wt_scale, wt_zp = weight_observer.calculate_qparams()
         bias_scale = (wt_scale * act_scale).float()
         qweight = torch.quantize_linear(mod.weight.float(), wt_scale, wt_zp.long().item(), torch.qint8)
-        qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
+        if mod.bias is not None:
+            qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
+        else:
+            qbias = None
         qlinear = Linear(mod.in_features, mod.out_features)
-        qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
+        qlinear.set_weight(qweight)
         qlinear.bias = qbias
-        qlinear.scale = torch.tensor([act_scale], dtype=torch.double)
-        qlinear.zero_point = torch.tensor([act_zp], dtype=torch.long)
+        qlinear.scale = float(act_scale)
+        qlinear.zero_point = int(act_zp)
         return qlinear
