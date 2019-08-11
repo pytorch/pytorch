@@ -150,18 +150,11 @@ struct PythonResolver : public Resolver {
           qualifiedName,
           TupleType::namedTupleSchemaFromNamesAndTypes(
               qualifiedName, fields, annotations));
-      if (auto type = get_python_cu()->get_type(qualifiedName)) {
-        TORCH_CHECK(
-            type->isSubtypeOf(tt),
-            "Can't to redefine NamedTuple: ",
-            tt->python_str());
-            return type;
-      }
-
-      get_python_cu()->register_type(tt);
+      get_python_cu()->register_class(tt);
       return tt;
     }
-    return get_python_cu()->get_type(qualifiedName);
+
+    return get_python_cu()->get_class(qualifiedName);
   }
 
  private:
@@ -783,7 +776,7 @@ void initJitScriptBindings(PyObject* module) {
         auto cu = get_python_cu();
         const auto classname = c10::QualifiedName(qualifiedName);
         auto classType = ClassType::create(classname, cu);
-        cu->register_type(classType);
+        cu->register_class(classType);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.body()) {
