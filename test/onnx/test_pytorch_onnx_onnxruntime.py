@@ -744,6 +744,14 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    def test_rsqrt(self):
+        class RsqrtModel(torch.nn.Module):
+            def forward(self, x):
+                return x.rsqrt()
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(RsqrtModel(), x)
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)

@@ -163,6 +163,10 @@ def sqrt(g, self):
     return g.op("Sqrt", self)
 
 
+def rsqrt(g, self):
+    return div(g, g.op("Constant", value_t=torch.tensor(1.)), sqrt(g, self))
+
+
 def tanh(g, self):
     return g.op("Tanh", self)
 
