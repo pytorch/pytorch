@@ -52,6 +52,10 @@ const char* getClassName(PicklerClass cls) {
   }
 }
 
+const std::vector<char>& Pickler::stack() {
+  return stack_;
+}
+
 void Pickler::protocol() {
   push<OpCode>(OpCode::PROTO);
   push<uint8_t>(PROTOCOL_VERSION);
@@ -85,7 +89,6 @@ void Pickler::torchSaveStop() {
     push<uint32_t>(key.size());
     pushBytes(key);
   }
-
   push<OpCode>(OpCode::TUPLE);
   stop();
 
@@ -93,7 +96,7 @@ void Pickler::torchSaveStop() {
   for (const auto& data : tensor_data_) {
     // first dump size
     push<size_t>(data.numel());
-    writer_(data.data(), data.sizeInBytes());
+    stack_.insert(stack_.end(), data.data(), data.data() + data.sizeInBytes());
   }
 }
 
@@ -301,7 +304,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
 }
 
 void Pickler::pushBytes(const std::string& string) {
-  writer_(string.data(), string.size());
+  stack_.insert(stack_.end(), string.begin(), string.end());
 }
 
 void Pickler::pushGlobal(
@@ -489,45 +492,49 @@ void Pickler::pushTuple(const IValue& ivalue) {
   push<OpCode>(OpCode::TUPLE);
 }
 
-IValue Unpickler::parse_ivalue() {
+std::vector<IValue> Unpickler::parse_ivalue_list() {
   run();
   TORCH_CHECK(
       stack_.size() == 1,
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
 
-  return stack_[0];
+  auto value = stack_[0];
+  if (value.isGenericList()) {
+    // TODO [unpickler refactor]
+    return value.toGenericListRef().vec();
+  }
+  return value.toTuple()->elements();
 }
 
 double Unpickler::readFloat() {
   AT_ASSERT(sizeof(double) == 8);
-  double big_endian = read<double>();
-  double little_endian;
+  AT_ASSERT(bytes_ + 8 < end_ptr_);
+  double result;
 
   // Pickle floats are big endian, so reverse the bytes
-  auto big_endian_ptr = reinterpret_cast<const char*>(&big_endian);
   std::reverse_copy(
-      big_endian_ptr,
-      big_endian_ptr + sizeof(big_endian),
-      reinterpret_cast<char*>(&little_endian));
+      reinterpret_cast<const char*>(bytes_),
+      reinterpret_cast<const char*>(bytes_ + 8),
+      reinterpret_cast<char*>(&result));
 
-  return little_endian;
+  bytes_ += 8;
+  return result;
 }
 
 void Unpickler::run() {
   // Expect a PROTO opcode and protocol number at the start of blob
-  auto opcode = readOpCode();
   TORCH_CHECK(
-      opcode == OpCode::PROTO,
+      readOpCode() == OpCode::PROTO,
       "Expected PROTO opcode at the start"
-      " of pickle archive, found ", int(static_cast<uint8_t>(opcode)));
+      " of pickle archive");
   uint8_t protocol = read<uint8_t>();
   TORCH_CHECK(
       protocol == 2,
       "Only Pickle protocol 2 is supported, found protocol = ",
       protocol);
 
-  while (bounds_checker_()) {
+  while (bytes_ < end_ptr_) {
     OpCode opcode = readInstruction();
     if (opcode == OpCode::STOP) {
       return;
@@ -620,12 +627,15 @@ OpCode Unpickler::readInstruction() {
     case OpCode::LONG1: {
       // Only read LONG1s with 8 as the length
       uint8_t length = read<uint8_t>();
-      TORCH_CHECK(length == 8, "Expected length to be 8, got ", int(length));
+      AT_ASSERT(length == 8);
       stack_.emplace_back(int64_t(read<int64_t>()));
     } break;
     case OpCode::BINUNICODE: {
       uint32_t length = read<uint32_t>();
-      stack_.emplace_back(readBytes(length));
+      const char* characters = reinterpret_cast<const char*>(bytes_);
+      AT_ASSERT(bytes_ + length < end_ptr_);
+      bytes_ += length;
+      stack_.emplace_back(std::string(characters, /*n=*/length));
     } break;
     case OpCode::BINFLOAT:
       stack_.emplace_back(readFloat());
@@ -695,10 +705,6 @@ OpCode Unpickler::readInstruction() {
           stack_.pop_back();
           switch (pickler_class) {
             case PicklerClass::TENSOR:
-              TORCH_CHECK(
-                  tensor_table_,
-                  "Found a tensor table reference but Pickler"
-                  " has no tensor table\n");
               stack_.emplace_back(tensor_table_->at(data.toInt()));
               break;
             case PicklerClass::INTLIST:
@@ -766,21 +772,13 @@ OpCode Unpickler::readInstruction() {
           "Unknown opcode for unpickling at ",
           reinterpret_cast<void*>(opcode),
           ": ",
-          int(static_cast<uint8_t>(opcode)));
+          static_cast<uint8_t>(opcode));
   }
   return opcode;
 }
 
-// Read a number of bytes from the input stream
-std::string Unpickler::readBytes(size_t length) {
-  std::string data(length, 0);
-  // This is fine since C++11 has contiguous strings
-  reader_(&data[0], length);
-  return data;
-}
-
-// Pop all the list items off of the stack and append them to the list at
-// the corresponding MARK
+// Pop all the list items off of the stack and append them to the list at the
+// corresponding MARK
 void Unpickler::readList() {
   size_t start = marks_.back();
   marks_.pop_back();
@@ -831,24 +829,33 @@ inline bool is_valid_python_id_char(char c) {
 
 // Read a newline terminated string
 std::string Unpickler::readString() {
-  std::stringstream ss;
+  const char* chars = reinterpret_cast<const char*>(bytes_);
+  const char* char_end_ptr = reinterpret_cast<const char*>(end_ptr_);
+  size_t n = 0;
   while (true) {
-    char c = read<char>();
+    char c = chars[n];
     if (c == '\n') {
       break;
     }
-
-    ss << c;
 
     // Simple check just in case there is no terminating '\n'
     TORCH_CHECK(
         is_valid_python_id_char(c),
         "Found character '",
-        int(uint8_t(c)),
-        "' in string, ",
+        uint8_t(c),
+        "' in string, "
         "strings must be qualified Python identifiers");
+
+    // Increment after to exclude newline from string
+    ++n;
+    TORCH_CHECK(
+        chars + n < char_end_ptr,
+        "Unpickler overran buffer while reading a string (expected a newline)");
   }
-  return ss.str();
+
+  // Increment by string length + newline char
+  bytes_ += n + 1;
+  return std::string(chars, n);
 }
 
 OpCode Unpickler::readOpCode() {

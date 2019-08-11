@@ -9,7 +9,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
@@ -625,14 +625,19 @@ RegisterOperators reg(
          "aten::save(t item, str filename) -> ()",
          [](Stack& stack) {
            auto filename = pop(stack).toStringRef();
-           auto ivalue = pop(stack);
+           auto value = pop(stack);
 
            // Pickle the tensor
-           auto data = pickle({ivalue});
+           Pickler p;
+           p.torchSaveStart();
+           p.protocol();
+           p.pushIValue(value);
+           p.stop();
+           p.torchSaveStop();
 
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);
-           output.write(data.data(), data.size());
+           output.write(p.stack().data(), p.stack().size());
            return 0;
          },
          aliasAnalysisFromSchema()),
