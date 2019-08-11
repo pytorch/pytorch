@@ -465,8 +465,6 @@ binary_linux_build: &binary_linux_build
   - attach_workspace:
       at: ~/workspace
   - run:
-      <<: *should_run_job
-  - run:
       <<: *binary_checkout
   - run:
       <<: *binary_populate_env
@@ -989,10 +987,10 @@ jobs:
       - image: circleci/python:3.7.3
     steps:
       - checkout
-      - run:
-          name: Ensure config is up to date
-          command: ./ensure-consistency.py
-          working_directory: .circleci
+      # - run:
+      #     name: Ensure config is up to date
+      #     command: ./ensure-consistency.py
+      #     working_directory: .circleci
       - run:
           name: Save commit message
           command: git log --format='%B' -n 1 HEAD > .circleci/scripts/COMMIT_MSG
@@ -2986,7 +2984,7 @@ workflows:
       - binary_linux_manywheel_3.7m_cu100_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_2.7_cpu_devtoolset7_build:
+      - binary_linux_conda_3.7_cpu_devtoolset7_build:
           requires:
             - setup
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
@@ -3014,10 +3012,10 @@ workflows:
           requires:
             - setup
             - binary_linux_manywheel_3.7m_cu100_devtoolset7_build
-      - binary_linux_conda_2.7_cpu_devtoolset7_test:
+      - binary_linux_conda_3.7_cpu_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_2.7_cpu_devtoolset7_build
+            - binary_linux_conda_3.7_cpu_devtoolset7_build
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3.6_cu90_devtoolset7_test:
       #     requires:
