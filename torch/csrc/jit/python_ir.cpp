@@ -624,8 +624,11 @@ void initPythonIRBindings(PyObject* module_) {
       .def("kind", [](const Type& t) { return typeKindToString(t.kind()); })
       .def(
           "dim",
-          [](const Type& t) {
-            return t.expect<DimensionedTensorType>()->dim();
+          [](Type& t) {
+            auto vshape =
+                ProfiledTensorType::create(t.shared_from_this())->sizes();
+            return vshape.size() ? py::cast(*vshape.size())
+                                 : py::cast<py::none>(Py_None);
           })
       .def(
           "sizes",
@@ -642,7 +645,9 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "scalarType",
           [](Type& t) {
-            return toString(t.expect<DimensionedTensorType>()->scalarType());
+            auto scalar_type =
+                ProfiledTensorType::create(t.shared_from_this())->scalarType();
+            return (scalar_type) ? toString(*scalar_type) : nullptr;
           })
       .def(
           "__eq__",

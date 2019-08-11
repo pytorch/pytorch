@@ -9,7 +9,8 @@ import torch.nn._intrinsic.quantized as nnq_fused
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
 from torch.nn._intrinsic.quantized import ConvReLU2d
-from common_utils import TestCase, run_tests, tempfile
+from common_utils import run_tests, tempfile
+from common_quantization import QuantizationTestCase
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -22,7 +23,7 @@ test please see `caffe2/test/test_quantized.py`.
 '''
 
 
-class FunctionalAPITest(TestCase):
+class FunctionalAPITest(QuantizationTestCase):
     def test_relu_api(self):
         X = torch.arange(-5, 5, dtype=torch.float)
         scale = 2.0
@@ -33,7 +34,7 @@ class FunctionalAPITest(TestCase):
         self.assertEqual(qY, qY_hat)
 
 
-class ModuleAPITest(TestCase):
+class ModuleAPITest(QuantizationTestCase):
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -45,7 +46,6 @@ class ModuleAPITest(TestCase):
         """test API functionality for nn.quantized.linear and nn._intrinsic.quantized.linear_relu"""
         W = torch.rand(out_features, in_features).float()
         W_q = torch.quantize_linear(W, 0.1, 4, torch.qint8)
-        W_pack = torch.ops.quantized.fbgemm_linear_prepack(W_q)
         X = torch.rand(batch_size, in_features).float()
         X_q = torch.quantize_linear(X, 0.2, 10, torch.quint8)
         B = torch.rand(out_features).float() if use_bias else None
@@ -56,10 +56,14 @@ class ModuleAPITest(TestCase):
             qlinear = nnq_fused.LinearReLU(in_features, out_features)
         else:
             qlinear = nnq.Linear(in_features, out_features)
-        qlinear._packed_weight = W_pack
+        qlinear.set_weight(W_q)
+        # Simple round-trip test to ensure weight()/set_weight() API
+        self.assertEqual(qlinear.weight(), W_q)
+        W_pack = qlinear._packed_weight
         qlinear.bias = B_q if use_bias else None
-        qlinear.scale = torch.tensor([scale], dtype=torch.double)
-        qlinear.zero_point = torch.tensor([zero_point], dtype=torch.long)
+
+        qlinear.scale = float(scale)
+        qlinear.zero_point = int(zero_point)
         Z_q = qlinear(X_q)
         # Check if the module implementation matches calling the
         # ops directly
@@ -70,6 +74,7 @@ class ModuleAPITest(TestCase):
         self.assertEqual(Z_ref, Z_q)
 
         # Test serialization of quantized Linear Module using state_dict
+
         model_dict = qlinear.state_dict()
         self.assertEqual(model_dict['weight'], W_q)
         if use_bias:
@@ -98,21 +103,25 @@ class ModuleAPITest(TestCase):
         self.assertTrue(hasattr(loaded_qlinear, '_packed_weight'))
         self.assertTrue(hasattr(qlinear, 'weight'))
         self.assertTrue(hasattr(loaded_qlinear, 'weight'))
-        self.assertEqual(qlinear.weight, loaded_qlinear.weight)
-        self.assertEqual(qlinear.weight, torch.ops.quantized.fbgemm_linear_unpack(qlinear._packed_weight))
+        self.assertEqual(qlinear.weight(), loaded_qlinear.weight())
+        self.assertEqual(qlinear.weight(), torch.ops.quantized.fbgemm_linear_unpack(qlinear._packed_weight))
         Z_q2 = qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
-        # test serialization of module directly - will add this later
-        # with tempfile.NamedTemporaryFile() as f:
-        #     torch.save(qLinear, f)
-        #     f.seek(0)
-        #     loaded = torch.load(f)
-        # state = qLinear.__getstate__()
-        # compareUnpackedWeight(qLinear._packed_weight, loaded._packed_weight)
-        # self.assertEqual(qLinear.bias, loaded.bias)
-        # self.assertEqual(qLinear.scale, loaded.scale)
-        # self.assertEqual(qLinear.zero_point, loaded.zero_point)
+        # test serialization of module directly
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(qlinear, f)
+            f.seek(0)
+            loaded = torch.load(f)
+        # This check is disabled pending an issue in PyTorch serialization:
+        # https://github.com/pytorch/pytorch/issues/24045
+        # self.assertEqual(qlinear.weight(), loaded.weight())
+        self.assertEqual(qlinear.bias, loaded.bias)
+        self.assertEqual(qlinear.scale, loaded.scale)
+        self.assertEqual(qlinear.zero_point, loaded.zero_point)
+
+        # Test JIT
+        self.checkScriptable(qlinear, zip([X_q], [Z_ref]), check_save_load=True)
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
@@ -211,6 +220,9 @@ class ModuleAPITest(TestCase):
         self.assertEqual(result_reference, result_under_test,
                          message="Tensors are not equal.")
 
+        # JIT testing
+        self.checkScriptable(conv_under_test, zip([qX], [result_reference]))
+
     def test_pool_api(self):
         """Tests the correctness of the pool module.
 
@@ -234,6 +246,9 @@ class ModuleAPITest(TestCase):
         pool_under_test = torch.nn.quantized.MaxPool2d(**kwargs)
         qX_hat = pool_under_test(qX)
         self.assertEqual(qX_expect, qX_hat)
+
+        # JIT Testing
+        self.checkScriptable(pool_under_test, zip([X], [qX_expect]))
 
 if __name__ == '__main__':
     run_tests()

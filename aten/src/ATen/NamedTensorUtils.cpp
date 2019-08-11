@@ -108,13 +108,13 @@ static std::vector<Dimname> unify_from_right(DimnameList names, DimnameList othe
   auto other_it = other_names.rbegin();
   auto result_it = result.rbegin();
   while (names_it != names.rend() || other_it != other_names.rend()) {
-    // TODO(zou3519): Don't support tagged names for now. They're a little weird.
-    if (names_it->is_tagged() || other_it->is_tagged()) {
-      TORCH_INTERNAL_ASSERT("unify_from_right: NYI: tagged names.");
-    }
-
     const auto& name = names_it == names.rend() ? wildcard : *names_it;
     const auto& other_name = other_it == other_names.rend() ? wildcard : *other_it;
+
+    // TODO(zou3519): Don't support tagged names for now. They're a little weird.
+    if (name.is_tagged() || other_name.is_tagged()) {
+      TORCH_INTERNAL_ASSERT("unify_from_right: NYI: tagged names.");
+    }
 
     // Step 1: Check that the names match
     const auto maybeName = unify(name, other_name);
@@ -124,7 +124,7 @@ static std::vector<Dimname> unify_from_right(DimnameList names, DimnameList othe
     *result_it = *maybeName;
 
     // Step 2: Check that the names are not misaligned
-    if (!names_it->is_normal() || !other_it->is_normal()) {
+    if (!name.is_normal() || !other_name.is_normal()) {
       // Let: N = max(len(names), len(other_names))
       //      K = # of special names among names and other_names.
       // This search (including the outer loop) is O(N*K) but typically # of dims is small.

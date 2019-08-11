@@ -86,7 +86,7 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
     throw std::runtime_error(
         "Cannot input a tensor of dimension other than 0 as a scalar argument");
   }
-  if (toInt && !isIntegralType(t.scalar_type())) {
+  if (toInt && !isIntegralType(t.scalar_type(), /*includeBool=*/false)) {
     std::stringstream ss;
     ss << "Cannot input a tensor of type " << t.scalar_type()
        << " as an integral argument";
@@ -568,6 +568,19 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::grad(Tensor a) -> Tensor(*)",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.grad());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::data(Tensor(b) a) -> Tensor(b)",
+         noop,
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_cuda(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
@@ -577,11 +590,29 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::is_sparse(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_sparse());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_mkldnn(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_mkldnn());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::is_quantized(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_quantized());
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -1759,7 +1790,13 @@ int listSort(Stack& stack) {
   bool reverse = pop(stack).toBool();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   std::sort(list.begin(), list.end(), [reverse](const T& a, const T& b) {
-    return (a < b) ^ reverse;
+    // FBCode errors without this check - "strict weak ordering"
+    // TODO: remove when possible, since it just slows down
+    // sorting and doesn't do anything useful
+    if (a == b) {
+      return false;
+    }
+    return (a < b) != reverse;
   });
   return 0;
 }
@@ -1783,6 +1820,10 @@ int listCopyAndSort(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
   auto list_copied = list.copy();
   std::sort(list_copied.begin(), list_copied.end(), [](const T& a, const T& b) {
+    // "strict weak ordering" issue - see other sort
+    if (a == b) {
+      return false;
+    }
     return a < b;
   });
   push(stack, list_copied);
@@ -1831,7 +1872,15 @@ int dictLen(Stack& stack) {
 
 template <unsigned int Index, typename Elem>
 c10::List<Elem> makeListForDictKeysOrValues(
+    const std::pair<c10::optional<TypePtr>, c10::optional<TypePtr>>& types,
     const std::vector<std::pair<IValue, IValue>>& order) {
+  TORCH_INTERNAL_ASSERT(
+      (!std::get<Index>(types).has_value())
+      || (*std::get<Index>(types) == getTypePtr<Elem>()),
+      "Type mismatch when trying to get a List of keys/values from Dict. ",
+      "Type in Dict is ", toString(*std::get<Index>(types)),
+      ". Type in List is ", toString(getTypePtr<Elem>()),
+      ". Index is ", c10::guts::to_string(Index));
   c10::List<Elem> values;
   values.reserve(order.size());
   for (const auto& item : order) {
@@ -1842,8 +1891,12 @@ c10::List<Elem> makeListForDictKeysOrValues(
 
 template <unsigned int Index>
 c10::impl::GenericList makeGenericListForDictKeysOrValues(
+    const std::pair<c10::optional<TypePtr>, c10::optional<TypePtr>>& types,
     const std::vector<std::pair<IValue, IValue>>& order) {
-  auto values = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto type = std::get<Index>(types);
+  auto values = type.has_value()
+    ? c10::impl::GenericList(*type)
+    : c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   values.reserve(order.size());
   for (const auto& item : order) {
     values.push_back(std::get<Index>(item));
@@ -1855,17 +1908,19 @@ template <unsigned int Index>
 Operation dictKeysOrValues(const Node* n) {
   auto outputType = n->output()->type()->expect<ListType>();
   return [=](Stack& stack) -> int {
-    const auto& order = iterationOrder(pop(stack).toGenericDict());
+    auto dict = pop(stack).toGenericDict();
+    const auto& order = iterationOrder(dict);
+    const auto types = std::make_pair(dict._keyType(), dict._valueType());
     if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
-      push(stack, makeListForDictKeysOrValues<Index, at::Tensor>(order));
+      push(stack, makeListForDictKeysOrValues<Index, at::Tensor>(types, order));
     } else if (outputType->getElementType() == IntType::get()) {
-      push(stack, makeListForDictKeysOrValues<Index, int64_t>(order));
+      push(stack, makeListForDictKeysOrValues<Index, int64_t>(types, order));
     } else if (outputType->getElementType() == FloatType::get()) {
-      push(stack, makeListForDictKeysOrValues<Index, double>(order));
+      push(stack, makeListForDictKeysOrValues<Index, double>(types, order));
     } else if (outputType->getElementType() == BoolType::get()) {
-      push(stack, makeListForDictKeysOrValues<Index, bool>(order));
+      push(stack, makeListForDictKeysOrValues<Index, bool>(types, order));
     } else {
-      push(stack, makeGenericListForDictKeysOrValues<Index>(order));
+      push(stack, makeGenericListForDictKeysOrValues<Index>(types, order));
     }
     return 0;
   };
@@ -1989,7 +2044,11 @@ int dictUpdate(Stack& stack) {
 
 int dictItems(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  auto items = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+  auto key_type = dict._keyType();
+  auto value_type = dict._valueType();
+  auto items = (key_type.has_value() && value_type.has_value())
+      ? c10::impl::GenericList(TupleType::create({*key_type, *value_type}))
+      : c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   items.reserve(dict.size());
   for (const auto& item : iterationOrder(dict)) {
     items.emplace_back(c10::ivalue::Tuple::create({item.first, item.second}));
@@ -2760,6 +2819,7 @@ RegisterOperators reg2({
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("float"),
+    CREATE_DICT_OPS("Tensor"),
 #undef CREATE_DICT_OPS
 
     Operator(
@@ -2885,16 +2945,14 @@ Operation sort_op(
         g_list.begin(),
         g_list.end(),
         [lt_func, reverse, &sort_stack](IValue a, IValue b) -> bool {
-          // FBCode errors without this check - "strict weak ordering"
-          // TODO: remove when possible, since it just slows down
-          // sorting and doesn't do anything useful
+          // "strict weak ordering" issue - see other sort
           if (a.isSameIdentity(b)) {
             return false;
           }
           sort_stack.push_back(a);
           sort_stack.push_back(b);
           lt_func->run(sort_stack);
-          return pop(sort_stack).toBool() ^ reverse;
+          return pop(sort_stack).toBool() != reverse;
         });
     if (copy_return_list) {
       push(stack, g_list);

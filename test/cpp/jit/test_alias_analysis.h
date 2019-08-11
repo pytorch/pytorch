@@ -539,6 +539,51 @@ void testWriteTracking() {
     ASSERT_TRUE(aliasDb.writesToAlias(
         writingNode, std::unordered_set<const Value*>{aAlias}));
   }
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph(%x: Tensor):
+    %b : (Tensor) = aten::relu_(%x)
+    return (%b)
+    )IR",
+        &*graph);
+    auto node_iter = graph->block()->nodes().begin();
+    auto relu = *node_iter;
+    AliasDb aliasDb(graph);
+    AT_ASSERT(aliasDb.isMutable(relu));
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph(%x: Tensor, %y : Tensor):
+    %b : (Tensor) = aten::mul(%x, %y)
+    return (%b)
+    )IR",
+        &*graph);
+    auto node_iter = graph->block()->nodes().begin();
+    auto mul = *node_iter;
+    AliasDb aliasDb(graph);
+    AT_ASSERT(!aliasDb.isMutable(mul));
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(
+        R"IR(
+  graph(%x: Tensor, %y : Tensor):
+    %c1 : int = prim::Constant[value=1]()
+    %b : (Tensor) = aten::add_(%x, %y, %c1)
+    return (%b)
+    )IR",
+        &*graph,
+        vmap);
+    auto add = vmap["b"]->node();
+    AliasDb aliasDb(graph);
+    AT_ASSERT(aliasDb.hasWriters(add));
+    AT_ASSERT(aliasDb.isMutable(add));
+  }
 }
 
 void testContainerAliasing() {
@@ -1097,13 +1142,13 @@ void testAliasRegistration() {
   }
   {
     auto registry = torch::RegisterOperators().op(
-        "aten::rand6(Tensor arg1) -> Tensor",
+        "foo::rand6(Tensor arg1) -> Tensor",
         torch::RegisterOperators::options()
             .catchAllKernel([](at::Tensor) -> at::Tensor {
               return at::rand({2, 2});
             })
             .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
-    const auto rand_op = Symbol::fromQualString("aten::rand6");
+    const auto rand_op = Symbol::fromQualString("foo::rand6");
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
     auto b = graph->insert(rand_op, {a});
@@ -1114,11 +1159,12 @@ void testAliasRegistration() {
   }
   {
     auto registry = torch::RegisterOperators().op(
-        "aten::rand7(Tensor(a) arg1) -> Tensor(a)",
+        "foo::rand7(Tensor(a) arg1) -> Tensor(a)",
         torch::RegisterOperators::options()
             .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
             .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
-    const auto rand_op = Symbol::fromQualString("aten::rand7");
+    const auto rand_op = Symbol::fromQualString("foo::rand7");
+
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
     auto b = graph->insert(rand_op, {a});
@@ -1128,11 +1174,11 @@ void testAliasRegistration() {
   }
   {
     auto registry = torch::RegisterOperators().op(
-        "aten::rand8(Tensor(a) arg1) -> Tensor(b)",
+        "foo::rand8(Tensor(a) arg1) -> Tensor(b)",
         torch::RegisterOperators::options()
             .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
             .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
-    const auto rand_op = Symbol::fromQualString("aten::rand8");
+    const auto rand_op = Symbol::fromQualString("foo::rand8");
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
     auto b = graph->insert(rand_op, {a});

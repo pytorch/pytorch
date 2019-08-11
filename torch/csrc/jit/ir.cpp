@@ -904,10 +904,12 @@ bool Node::hasSideEffects() const {
         " doesn't have one either. We don't know if this op has side effects.");
     return false;
   }
+
   if (kind_.is_prim() || kind_.is_aten()) {
-    // TODO This assert is only introduced to check that we don't break the
-    // current code base. Remove this later to allow other ops to use
-    // AliasAnalysisKind::FROM_SCHEMA
+    // TODO There is nothing in the system that relies on aten:: and prim::
+    // ops using AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::INTERNAL_SPECIAL_CASE,
+    // but this is the intended behavior for all current ops and a good error check.
+    // We can consider lifting this constraint later if we have a use case for it.
     TORCH_INTERNAL_ASSERT(
         op->aliasAnalysisKind() == AliasAnalysisKind::INTERNAL_SPECIAL_CASE ||
             op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA,
@@ -916,6 +918,7 @@ bool Node::hasSideEffects() const {
         " has ",
         toString(op->aliasAnalysisKind()));
   }
+
   switch (op->aliasAnalysisKind()) {
     case AliasAnalysisKind::PURE:
       return false;
@@ -1576,10 +1579,47 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
 }
 
 std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    Graph& callee) {
+  WithInsertPoint guard(to_replace);
+  auto new_outputs =
+      insertGraph(*to_replace->owningGraph(), callee, to_replace->inputs());
+  const auto& old_outputs = to_replace->outputs();
+
+  AT_ASSERT(new_outputs.size() == old_outputs.size());
+  for (size_t i = 0; i < old_outputs.size(); ++i) {
+    if (old_outputs[i]->hasDebugName()) {
+      new_outputs[i]->setDebugName(old_outputs[i]->debugName());
+    }
+    old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
+  }
+  to_replace->destroy();
+
+  return new_outputs;
+}
+
+std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
+  std::vector<Value*> new_outputs;
+  if (outputs.size() != 1 || outputs.at(0)->type()->kind() != TupleType::Kind) {
+    return outputs;
+  }
+
+  auto tup = outputs[0];
+  for (Value* v : createTupleUnpack(tup)) {
+    new_outputs.emplace_back(v);
+  }
+  // if this was a peephole tuple unpack we can just get rid of
+  // the tuple construct here and prevent needing DCE
+  if (tup->node()->kind() == prim::TupleConstruct && !tup->node()->hasUses()) {
+    tup->node()->destroy();
+  }
+  return new_outputs;
+}
+
+std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
-    ArrayRef<Value*> inputs,
-    bool unpack_outputs) {
+    ArrayRef<Value*> inputs) {
   std::unordered_map<Value*, Value*> value_map;
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   AT_ASSERT(callee.inputs().size() == inputs.size());
@@ -1596,21 +1636,6 @@ std::vector<Value*> inlineCallTo(
   std::vector<Value*> outputs;
   for (auto* output : callee.outputs()) {
     outputs.push_back(value_map_func(output));
-  }
-
-  if (unpack_outputs && outputs.size() == 1 &&
-      callee.outputs().at(0)->type()->kind() == TupleType::Kind) {
-    auto tup = outputs[0];
-    outputs.clear();
-    for (Value* v : createTupleUnpack(tup)) {
-      outputs.emplace_back(v);
-    }
-    // if this was a peephole tuple unpack we can just get rid of
-    // the tuple construct here and prevent needing DCE
-    if (tup->node()->kind() == prim::TupleConstruct &&
-        !tup->node()->hasUses()) {
-      tup->node()->destroy();
-    }
   }
 
   return outputs;

@@ -14,20 +14,39 @@ namespace script {
 
 static ModulePtr create_module_object(
     c10::QualifiedName class_name,
-    std::shared_ptr<CompilationUnit> cu) {
+    std::shared_ptr<CompilationUnit> cu,
+    bool shouldMangle = false) {
+  // XXX: This is a temporary hack so that module names cannot clash with
+  // builtins like `torch`. Delete this with the new serialization format.
+  std::vector<std::string> new_class_name{"__module__"};
+  new_class_name.insert(
+      new_class_name.end(),
+      class_name.atoms().begin(),
+      class_name.atoms().end());
+  class_name = c10::QualifiedName(std::move(new_class_name));
+
+  if (shouldMangle && cu->get_class(class_name) != nullptr) {
+    class_name = cu->mangle(class_name);
+  }
   auto cls = ClassType::create(std::move(class_name), cu, /*is_module=*/true);
+  cu->register_type(cls);
   return c10::ivalue::Object::create(
       c10::StrongTypePtr(std::move(cu), std::move(cls)), 0);
 }
 
 Module::Module(c10::QualifiedName class_name)
-    : module_value_(create_module_object( std::move(class_name), std::make_shared<CompilationUnit>())) {}
+    : module_value_(create_module_object(
+          std::move(class_name),
+          std::make_shared<CompilationUnit>())) {}
 
 Module::Module(
     c10::QualifiedName class_name,
-    std::shared_ptr<CompilationUnit> cu)
-    : module_value_(
-          create_module_object(std::move(class_name), std::move(cu))) {}
+    std::shared_ptr<CompilationUnit> cu,
+    bool shouldMangle)
+    : module_value_(create_module_object(
+          std::move(class_name),
+          std::move(cu),
+          shouldMangle)) {}
 
 ModulePtr Module::module_object() const {
   if (!module_value_) {
@@ -226,45 +245,15 @@ std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_grap
   return std::make_pair(result.first, loadTensors(result.second));
 }
 
-static void clearMethods(c10::ivalue::Object* self) {
-  self->compilation_unit()->drop_all_functions();
-}
-
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
   const auto self = SimpleSelf(type());
   class_compilation_unit()->define(
       name(), src, resolver ? resolver : script::nativeResolver(), &self);
 }
 
-void Module::copy_into(
-    const ModuleLookup& module_lookup,
-    // translate current module singleton type to new module
-    // singleton type.
-    std::unordered_map<TypePtr, TypePtr>& type_remap,
-    std::vector<std::string> names) const {
-  auto curr = module_lookup(names);
-  type_remap[module_object()->type()] = curr.module_object()->type();
-
-  for (Slot s : curr.get_slots()) {
-    if (s.is_module()) {
-      names.push_back(s.name());
-      // Submodules must be translated first, otherwise parameter_remap entries
-      // will not be filled in for methods of this module.
-      s.to_module().copy_into(module_lookup, type_remap, names);
-      names.pop_back();
-    } else {
-      curr.set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
-    }
-  }
-
-  for (auto& fn : class_compilation_unit()->get_functions()) {
-    curr.clone_method(*this, fn->qualname(), type_remap);
-  }
-}
-
 void Module::clone_method(
     const Module& orig,
-    const QualifiedName& orig_method_name,
+    const Function& method,
     const std::unordered_map<TypePtr, TypePtr>& type_remap) {
   // type remapping - when we copy method implementations from one module
   // singleton to another, we need to update the types of the self arguments
@@ -282,14 +271,13 @@ void Module::clone_method(
       return in;
     return it->second;
   };
-  const Function& fn =
-      orig.class_compilation_unit()->get_function(orig_method_name);
-  auto graph = fn.graph()->copy();
+  auto graph = method.graph()->copy();
   graph->remapTypes(type_remap_fn);
-  auto schema = fn.getSchema().cloneWithRemappedTypes(type_remap_fn);
-  const auto this_method_name = getNameForMethod(orig_method_name.name());
+  auto schema = method.getSchema().cloneWithRemappedTypes(type_remap_fn);
+  const auto this_method_name = getNameForMethod(method.name());
   auto copied =
       class_compilation_unit()->create_function(this_method_name, graph);
+  type()->addMethod(copied);
   copied->setSchema(std::move(schema));
 }
 
@@ -305,8 +293,43 @@ void Module::clone_method(const Module& orig, const std::string& name) {
       to_scan.emplace_back(s.to_module(), entry.second.get_module(s.name()));
     }
   }
-  const auto orig_method_name = QualifiedName(orig.name(), name);
-  return clone_method(orig, orig_method_name, type_remap);
+  return clone_method(orig, orig.get_method(name).function(), type_remap);
+}
+
+Module Module::clone() const {
+  std::unordered_map<TypePtr, TypePtr> type_remap;
+  return clone_impl(type_remap);
+}
+
+Module Module::clone_impl(
+    std::unordered_map<TypePtr, TypePtr>& type_remap) const {
+  // Create a new module_object in the same compilation unit.
+  // The name is the same as for the original module, but it'll be mangled.
+  // The class type is also created from scratch.
+  Module r(name(), class_compilation_unit(), true);
+  type_remap[type()] = r.type();
+
+  // Copy slots. If a slot is a module - recursively clone it.
+  for (Slot s : get_slots()) {
+    if (s.is_module()) {
+      const Module& orig = s.to_module();
+      Module cloned = orig.clone_impl(type_remap);
+      type_remap[orig.type()] = cloned.type();
+      r.set_or_add_slot(
+          s.name(),
+          type_remap.at(s.type()),
+          cloned.module_object(),
+          s.entity_type());
+    } else {
+      r.set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
+    }
+  }
+
+  // Clone methods remapping the types to the cloned ones.
+  for (auto& fn : type()->methods()) {
+    r.clone_method(*this, *fn, type_remap);
+  }
+  return r;
 }
 
 void Module::train(bool on) {

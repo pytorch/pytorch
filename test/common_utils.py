@@ -613,7 +613,8 @@ class TestCase(expecttest.TestCase):
                 self.assertEqual(x.q_zero_point(), y.q_zero_point(),
                                  prec=prec, message=message,
                                  allow_inf=allow_inf)
-                self.assertEqual(x.int_repr(), y.int_repr(), prec=prec,
+                self.assertEqual(x.int_repr().to(torch.int32),
+                                 y.int_repr().to(torch.int32), prec=prec,
                                  message=message, allow_inf=allow_inf)
             else:
                 assertTensorsEqual(x, y)
@@ -948,30 +949,35 @@ def random_square_matrix_of_rank(l, rank):
 
 def random_symmetric_matrix(l, *batches):
     A = torch.randn(*(batches + (l, l)))
-    for i in range(l):
-        for j in range(i):
-            A[..., i, j] = A[..., j, i]
+    A = (A + A.transpose(-2, -1)).div_(2)
     return A
 
 
-def random_symmetric_psd_matrix(l):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1))
+def random_symmetric_psd_matrix(l, *batches):
+    A = torch.randn(*(batches + (l, l)))
+    return torch.matmul(A, A.transpose(-2, -1))
 
 
 def random_symmetric_pd_matrix(l, *batches):
     A = torch.randn(*(batches + (l, l)))
-    return A.matmul(A.transpose(-2, -1)) + torch.eye(l) * 1e-5
+    return torch.matmul(A, A.transpose(-2, -1)) + torch.eye(l) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     u, s, v = A.svd()
-    s[s < min_singular_value] = min_singular_value
-    A = u.mm(torch.diag(s)).mm(v.t())
-    det = A.det().item()
+    s.clamp_(min=min_singular_value)
+    A = torch.matmul(u, torch.matmul(torch.diag_embed(s), v.transpose(-2, -1)))
+    det = A.det()
     if sign is not None:
-        if (det < 0) ^ (sign < 0):
-            A[0, :].neg_()
+        if A.dim() == 2:
+            det = det.item()
+            if (det < 0) ^ (sign < 0):
+                A[0, :].neg_()
+        else:
+            cond = ((det < 0) ^ (sign < 0)).nonzero()
+            if cond.size(0) > 0:
+                for i in range(cond.size(0)):
+                    A[list(cond[i])][0, :].neg_()
     return A
 
 

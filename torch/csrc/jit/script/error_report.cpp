@@ -33,7 +33,7 @@ void ErrorReport::CallStack::pop_function() {
   calls.pop_back();
 }
 
-C10_EXPORT const char* ErrorReport::what() const noexcept {
+const char* ErrorReport::what() const noexcept {
   std::stringstream msg;
   msg << "\n" << ss.str();
   if (context) {
@@ -44,6 +44,7 @@ C10_EXPORT const char* ErrorReport::what() const noexcept {
   }
 
   if (calls.size() > 0) {
+    msg << "\n";
     for (auto it = calls.rbegin(); it != calls.rend() - 1; ++it) {
       msg << "'" << it->fn_name
           << "' is being compiled since it was called from '"
@@ -52,6 +53,7 @@ C10_EXPORT const char* ErrorReport::what() const noexcept {
         msg << "<no range>\n";
       } else {
         it->caller_range->highlight(msg);
+        msg << "\n";
       }
     }
   }
