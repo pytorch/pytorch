@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 # Torch
 from torch._six import PY2
 from torch.autograd import Variable
