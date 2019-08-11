@@ -37,8 +37,7 @@ namespace torch {
 /// \endrst
 template <typename Value, typename... SaveToArgs>
 void save(const Value& value, SaveToArgs&&... args) {
-  serialize::OutputArchive archive(
-      std::make_shared<jit::script::CompilationUnit>());
+  serialize::OutputArchive archive;
   archive << value;
   archive.save_to(std::forward<SaveToArgs>(args)...);
 }
@@ -63,8 +62,7 @@ void save(const Value& value, SaveToArgs&&... args) {
 /// \endrst
 template <typename... SaveToArgs>
 void save(const std::vector<torch::Tensor>& tensor_vec, SaveToArgs&&... args) {
-  serialize::OutputArchive archive(
-      std::make_shared<jit::script::CompilationUnit>());
+  serialize::OutputArchive archive;
   for (size_t i = 0; i < tensor_vec.size(); i++) {
     auto& value = tensor_vec[i];
     archive.write(std::to_string(i), value);

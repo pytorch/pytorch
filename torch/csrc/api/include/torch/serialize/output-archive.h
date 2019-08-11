@@ -25,7 +25,8 @@ namespace torch {
 namespace serialize {
 class TORCH_API OutputArchive final {
  public:
-  explicit OutputArchive(std::shared_ptr<jit::script::CompilationUnit> cu);
+  /// Default-constructs the `OutputArchive`.
+  OutputArchive();
 
   // Move is allowed.
   OutputArchive(OutputArchive&&) = default;
@@ -34,10 +35,6 @@ class TORCH_API OutputArchive final {
   // Copy is disallowed.
   OutputArchive(OutputArchive&) = delete;
   OutputArchive& operator=(OutputArchive&) = delete;
-
-  std::shared_ptr<jit::script::CompilationUnit> compilation_unit() const {
-    return cu_;
-  }
 
   /// Writes a `(key, tensor)` pair to the `OutputArchive`, and marks it as
   /// being or not being a buffer (non-differentiable tensor).
@@ -67,7 +64,6 @@ class TORCH_API OutputArchive final {
   }
 
  private:
-  std::shared_ptr<jit::script::CompilationUnit> cu_;
   jit::script::Module module_;
 };
 } // namespace serialize
