@@ -309,8 +309,12 @@ struct TORCH_API Module {
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
-  // Create a deep copy of this module.
-  Module clone() const;
+  void copy_into(
+      const ModuleLookup& module_lookup,
+      // translate current module singleton type to new module
+      // singleton type.
+      std::unordered_map<TypePtr, TypePtr>& type_remap,
+      std::vector<std::string> names = {}) const;
 
   void clone_method(const Module& orig, const std::string& name);
 
@@ -354,8 +358,6 @@ struct TORCH_API Module {
   }
 
  private:
-  Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
-
   void clone_method(
       const Module& orig,
       const Function& method,
