@@ -21,9 +21,16 @@ namespace {
 }
 
 // Should this be thread local, or global and mutexed?
-Tensor _get_amp_overflow_state() {
-  if(!amp_overflow_state.defined())
+Tensor _amp_overflow_state(const Tensor & new_state) {
+  if(new_state.defined())
+  {
+    TORCH_CHECK(new_state.is_cuda(), "Overflow state must be a CUDA tensor.");
+    TORCH_CHECK(new_state.numel() == 1, "Overflow state must be a 1-element tensor.");
+    TORCH_CHECK(new_state.scalar_type() == at::ScalarType::Int, "Overflow state must be an int tensor.");
+    amp_overflow_state = new_state;
+  } else if(!amp_overflow_state.defined())
     amp_overflow_state = at::zeros({1}, at::device(kCUDA).dtype(kInt).is_variable(true));
+
   return amp_overflow_state;
 }
 

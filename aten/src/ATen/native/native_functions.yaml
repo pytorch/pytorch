@@ -1766,7 +1766,7 @@
     CPU: gelu_backward_cpu
     CUDA: gelu_backward_cuda
 
-- func: _get_amp_overflow_state() -> Tensor
+- func: _amp_overflow_state(Tensor? new_state=None) -> Tensor
   variants: function
 
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
