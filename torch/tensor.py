@@ -425,7 +425,8 @@ class Tensor(torch._C._TensorBase):
         """
         if isinstance(element, (torch.Tensor, Number)):
             return (element == self).any().item()
-        return NotImplemented
+        raise NotImplementedError
+        return False
 
     @property
     def __cuda_array_interface__(self):
