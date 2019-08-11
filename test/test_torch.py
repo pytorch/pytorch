@@ -1632,27 +1632,6 @@ class _TestTorchMixin(object):
         res2 = x1.sum(axis=(0, 2), keepdims=True)
         self.assertEqual(res1, res2)
 
-    def test_addcdiv(self):
-        def _test_addcdiv(a, alpha, b, c):
-            actual = torch.addcdiv(a, alpha, b, c)
-            expected = a + (alpha * b) / c
-            self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
-        def non_zero_rand(size, dtype, device):
-            if dtype.is_floating_point:
-                a = torch.rand(size=size, dtype=dtype, device=device)
-            elif dtype == torch.uint8:
-                a = torch.randint(1, 5, size=size, dtype=dtype, device=device)
-            else:
-                a = torch.randint(-5, 5, size=size, dtype=dtype, device=device)
-            return a + (a == 0).type(dtype)
-        for device in torch.testing.get_all_device_types():
-            for dtype in torch.testing.get_all_math_dtypes(device):
-                _test_addcdiv(
-                    non_zero_rand((2, 2), dtype=dtype, device=device),
-                    0.5,
-                    non_zero_rand((2, 2), dtype=dtype, device=device),
-                    non_zero_rand((2, 2), dtype=dtype, device=device))
-
     def test_add(self):
         for device in torch.testing.get_all_device_types():
             # [res] torch.add([res,] tensor1, tensor2)
