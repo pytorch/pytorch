@@ -1,6 +1,5 @@
 import torch
-
-from torch._jit_internal import Tuple, Optional, List
+from typing import Tuple, Optional, List  # noqa: F401
 
 from torch import Tensor  # noqa
 from torch.nn import _VF

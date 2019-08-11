@@ -1,10 +1,8 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
-from torch.nn.modules.module import Module
-from torch.nn.modules.linear import Linear as NNLinear
-
-from torch._jit_internal import Optional
+from ...modules.module import Module
+from ...modules.linear import Linear as NNLinear
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor
@@ -67,7 +65,7 @@ class DeQuantize(Module):
     def from_float(mod):
         return DeQuantize()
 
-class Linear(torch.nn.Module):
+class Linear(NNLinear):
     r"""
     A quantized linear module with quantized tensor as inputs and outputs.
     We adopt the same interface as `torch.nn.Linear`, please see
@@ -93,31 +91,63 @@ class Linear(torch.nn.Module):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    def __init__(self, in_features, out_features, bias_=True):
-        super(Linear, self).__init__()
-        # We don't muck around with buffers or attributes or anything here
-        # to keep the module simple. *everything* is simply a Python attribute.
-        self.in_features = in_features
-        self.out_features = out_features
-        if bias_:
-            self.bias = torch.jit.annotate(
-                Optional[torch.Tensor],
-                torch._empty_affine_quantized(
-                    [out_features], scale=1, zero_point=0, dtype=torch.qint32))
+    __constants__ = ['bias', 'in_features', 'out_features']
+
+    def __init__(self, in_features, out_features, bias=True):
+        super(Linear, self).__init__(in_features, out_features, bias)
+        if bias:
+            del self.bias
+            qbias = torch._empty_affine_quantized(
+                [out_features], scale=1, zero_point=0, dtype=torch.qint32)
+            self.register_buffer('bias', qbias)
         else:
-            self.bias = torch.jit.annotate(Optional[torch.Tensor], None)
-
+            self.register_buffer('bias', None)
+        del self.weight
         qweight = torch._empty_affine_quantized(
-            [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8)
+            [out_features, in_features], scale=1, zero_point=0,
+            dtype=torch.qint8)
+        self.register_buffer('_packed_weight',
+                             torch.ops.quantized.fbgemm_linear_prepack(qweight))
+        self.register_buffer('scale',
+                             torch.tensor([1.0], dtype=torch.double))
+        self.register_buffer('zero_point',
+                             torch.tensor([0], dtype=torch.long))
 
-        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
-        self.scale = 1.0
-        self.zero_point = 0
+    @property
+    def weight(self):
+        return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+
+    @weight.setter
+    def weight(self, w):
+        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
 
     def forward(self, x):
-        return torch.ops.quantized.fbgemm_linear(
-            x, self._packed_weight, self.bias, self.scale, self.zero_point)
+        # Note that we can handle self.bias == None case.
+        Y_q = torch.ops.quantized.fbgemm_linear(
+            x, self._packed_weight,
+            self.bias,
+            float(self.scale),
+            int(self.zero_point))
+        return Y_q
 
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'weight'] = torch.ops.quantized.fbgemm_linear_unpack(destination[prefix + '_packed_weight'])
+        destination.pop(prefix + '_packed_weight')
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(state_dict[prefix + 'weight'])
+        if prefix + 'bias' in state_dict:
+            self.bias.copy_(state_dict[prefix + 'bias'])
+            state_dict.pop(prefix + 'bias')
+        state_dict.pop(prefix + 'weight')
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
+        return
+
+    # TODO: support initializing from quantization parameters when Quantizer is
+    # exposed in python
     @staticmethod
     def from_float(mod):
         r"""Create a quantized module from a float module or qparams_dict
@@ -140,13 +170,10 @@ class Linear(torch.nn.Module):
         wt_scale, wt_zp = weight_observer.calculate_qparams()
         bias_scale = (wt_scale * act_scale).float()
         qweight = torch.quantize_linear(mod.weight.float(), wt_scale, wt_zp.long().item(), torch.qint8)
-        if mod.bias is not None:
-            qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
-        else:
-            qbias = None
+        qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
         qlinear = Linear(mod.in_features, mod.out_features)
         qlinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(qweight)
         qlinear.bias = qbias
-        qlinear.scale = float(act_scale)
-        qlinear.zero_point = int(act_zp)
+        qlinear.scale = torch.tensor([act_scale], dtype=torch.double)
+        qlinear.zero_point = torch.tensor([act_zp], dtype=torch.long)
         return qlinear
