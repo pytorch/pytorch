@@ -12,6 +12,13 @@
 
 
 template <typename T>
+struct TensorATan2Op {
+  __device__ __forceinline__ void operator()(T* out, T* a, T* b) {
+    *out = THCNumerics<T>::atan2(*a, *b);
+  }
+};
+
+template <typename T>
 struct TensorSigmoidOp {
   __device__ __forceinline__ void operator()(T* out, T* in) const {
     T one = (T) 1.0;
