@@ -36,9 +36,6 @@ public:
    * Call the operator kernel with the given arguments.
    */
   void call(Stack* stack) const {
-    // TODO Make boxed kernels mandatory and remove this check
-    TORCH_CHECK(nullptr != kernel_, "Tried to call OpKernel::call() for a kernel that doesn't have an boxed version.");
-
     return (*kernel_)(stack, cache_.get());
   }
 
@@ -57,7 +54,7 @@ private:
   : kernel_(kernel), cache_(cache_creator()), unboxed_kernel_(unboxed_kernel) {}
   friend class Dispatcher;
 
-  KernelFunction* kernel_; // can be nullptr, not all kernels have this
+  KernelFunction* kernel_;
   std::unique_ptr<c10::KernelCache> cache_;
   void* unboxed_kernel_; // can be nullptr, not all kernels have this
 };
