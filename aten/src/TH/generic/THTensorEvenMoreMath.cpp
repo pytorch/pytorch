@@ -222,12 +222,22 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
 
+  auto src_size0 = THTensor_sizeLegacyNoScalars(src, 0);
+  ptrdiff_t rowsize = src_size0 == 0 ? 1 : THTensor_(nElement)(src) / src_size0;
+
+  auto omp_threshold = TH_OMP_OVERHEAD_THRESHOLD;
+  if (src->dim() > 1) {
+    omp_threshold = TH_OMP_OVERHEAD_THRESHOLD / rowsize;
+  }
+
+  if(!THTensor_(isContiguous)(src) && (numel > omp_threshold)) {
+    src = THTensor_(newContiguous)(src);
+  }
+
   if (dim == 0 && THTensor_(isContiguous)(src) && THTensor_(isContiguous)(tensor))
   {
     tensor_data = tensor->data<scalar_t>();
     src_data = src->data<scalar_t>();
-    auto src_size0 = THTensor_sizeLegacyNoScalars(src, 0);
-    ptrdiff_t rowsize = src_size0 == 0 ? 1 : THTensor_(nElement)(src) / src_size0;
 
     // check that the indices are within range
     int64_t max = src_size0 - 1;
@@ -242,14 +252,14 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
     // ubsan. So we skip copying at all when every slice to copy is empty.
     if (rowsize > 0) {
       if (src->dim() <= 1) {
-        at::parallel_for(0, numel, TH_OMP_OVERHEAD_THRESHOLD,
+        at::parallel_for(0, numel, omp_threshold,
             [&](int64_t start, int64_t end) {
           for (auto i = start; i < end; i++) {
             tensor_data[i] = src_data[index_data[i]];
           }
         });
       } else {
-        at::parallel_for(0, numel, TH_OMP_OVERHEAD_THRESHOLD / rowsize,
+        at::parallel_for(0, numel, omp_threshold,
             [&](int64_t start, int64_t end) {
           for (auto i = start; i < end; i++) {
             memcpy(
@@ -280,6 +290,10 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       c10::raw::intrusive_ptr::decref(tSlice);
       c10::raw::intrusive_ptr::decref(sSlice);
     }
+  }
+
+  if(!THTensor_(isContiguous)(src) && (numel > omp_threshold)) {
+    c10::raw::intrusive_ptr::decref(src);
   }
 
   THLongTensor_free(index);
