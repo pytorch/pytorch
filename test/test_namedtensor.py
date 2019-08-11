@@ -26,14 +26,6 @@ class TestNamedTensor(TestCase):
     def test_trivial(self):
         pass
 
-    # TODO(rzou): Some form of this check should be added to self.assertEqual.
-    # Right now I don't know what it should look like.
-    def assertTensorDataAndNamesEqual(self, x, y):
-        self.assertEqual(x.names, y.names)
-        unnamed_x = x.set_names(None)
-        unnamed_y = y.set_names(None)
-        self.assertEqual(unnamed_x, unnamed_y)
-
     def _test_factory(self, factory, device):
         x = factory([], device=device)
         self.assertEqual(x.names, ())
