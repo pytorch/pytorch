@@ -3886,7 +3886,7 @@ class _TestTorchMixin(object):
                 self.assertEqual(naive_eye, res1)
 
                 # Check eye_out outputs
-                res2 = torch.Tensor().to(device=device, dtype=dtype)
+                res2 = torch.empty(0, device=device, dtype=dtype)
                 torch.eye(n, m, out=res2)
                 self.assertEqual(res1, res2)
 
