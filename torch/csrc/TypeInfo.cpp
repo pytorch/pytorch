@@ -84,12 +84,7 @@ PyObject* THPIInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   TORCH_CHECK(r.idx == 0, "Not a type");
 
   at::ScalarType scalar_type = r.scalartype(0);
-  if (scalar_type == at::ScalarType::Bool) {
-    return PyErr_Format(
-        PyExc_TypeError,
-        "torch.bool is not supported by torch.iinfo");
-  }
-  if (!at::isIntegralType(scalar_type, /*includeBool=*/false) && !at::isQIntType(scalar_type)) {
+  if (!at::isIntegralType(scalar_type) && !at::isQIntType(scalar_type)) {
     return PyErr_Format(
         PyExc_TypeError,
         "torch.iinfo() requires an integer input type. Use torch.finfo to handle '%s'",
@@ -146,7 +141,7 @@ static PyObject* THPFInfo_min(THPFInfo* self, void*) {
 }
 
 static PyObject* THPIInfo_max(THPFInfo* self, void*) {
-  if (at::isIntegralType(self->type, /*includeBool=*/false)) {
+  if (at::isIntegralType(self->type)) {
     return AT_DISPATCH_INTEGRAL_TYPES(self->type, "max", [] {
       return THPUtils_packInt64(std::numeric_limits<scalar_t>::max());
     });
@@ -158,7 +153,7 @@ static PyObject* THPIInfo_max(THPFInfo* self, void*) {
 }
 
 static PyObject* THPIInfo_min(THPFInfo* self, void*) {
-  if (at::isIntegralType(self->type, /*includeBool=*/false)) {
+  if (at::isIntegralType(self->type)) {
     return AT_DISPATCH_INTEGRAL_TYPES(self->type, "min", [] {
       return THPUtils_packInt64(std::numeric_limits<scalar_t>::lowest());
     });
