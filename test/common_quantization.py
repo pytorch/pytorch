@@ -119,12 +119,12 @@ class QuantizationTestCase(TestCase):
 
     # calib_data follows the same schema as calib_data for
     # test_only_eval_fn, i.e. (input iterable, output iterable)
-    def checkScriptable(self, orig_mod, calib_data, check_save_load=False):
+    def checkScriptable(self, orig_mod, calib_data):
         scripted = torch.jit.script(orig_mod)
-        self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
+        self._checkScriptable(orig_mod, scripted, calib_data)
 
     # Call this twice: once for a scripted module and once for a traced module
-    def _checkScriptable(self, orig_mod, script_mod, calib_data, check_save_load):
+    def _checkScriptable(self, orig_mod, script_mod, calib_data):
         self._checkModuleCorrectnessAgainstOrig(orig_mod, script_mod, calib_data)
 
         # Test save/load
@@ -132,12 +132,11 @@ class QuantizationTestCase(TestCase):
         torch.jit.save(script_mod, buffer)
 
         buffer.seek(0)
-        loaded_mod = torch.jit.load(buffer)
+        torch.jit.load(buffer)
 
         # Pending __get_state_ and __set_state__ support
         # See tracking task https://github.com/pytorch/pytorch/issues/23984
-        if check_save_load:
-            self._checkModuleCorrectnessAgainstOrig(orig_mod, loaded_mod, calib_data)
+        # self._checkModuleCorrectnessAgainstOrig(orig_mod, loaded_mod, calib_data)
 
     def _checkModuleCorrectnessAgainstOrig(self, orig_mod, test_mod, calib_data):
         for (inp, _) in calib_data:
