@@ -1157,6 +1157,19 @@ for k, v in sym_help.cast_pytorch_to_onnx.items():
     globals()[name] = parse_args('v', 'i')(partial(sym_help._cast_func_template, v))
 
 
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
+    return g.op("ConstantOfShape", sizes,
+                value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+
+
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+    shape = g.op("Shape", input)
+    return g.op("ConstantOfShape", shape,
+                value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+
+
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
