@@ -1,3 +1,7 @@
+#pragma once
+
+#include <c10/macros/Macros.h>
+
 namespace at {
 
 // C++ API should mirror Python API.
