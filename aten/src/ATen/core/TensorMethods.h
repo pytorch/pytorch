@@ -909,6 +909,14 @@ inline Tensor Tensor::var(IntArrayRef dim, bool unbiased, bool keepdim) const {
     static auto table = globalATenDispatch().getOpTable("aten::var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor");
     return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, unbiased, keepdim);
 }
+inline std::tuple<Tensor,Tensor> Tensor::var_mean(bool unbiased) const {
+    static auto table = globalATenDispatch().getOpTable("aten::var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)");
+    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, unbiased);
+}
+inline std::tuple<Tensor,Tensor> Tensor::var_mean(IntArrayRef dim, bool unbiased, bool keepdim) const {
+    static auto table = globalATenDispatch().getOpTable("aten::var_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)");
+    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, IntArrayRef, bool, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, unbiased, keepdim);
+}
 inline Tensor Tensor::view_as(const Tensor & other) const {
     static auto table = globalATenDispatch().getOpTable("aten::view_as(Tensor self, Tensor other) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, other);
