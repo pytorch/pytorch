@@ -259,23 +259,23 @@ class TestQuantizedOps(TestCase):
                                               min_side=1, max_side=10),
                        qparams=hu.qparams()),
            num=st.integers(1, 4),
-           axis=st.integers(1, 4),
+           dim=st.integers(1, 4),
            relu=st.booleans())
-    def test_cat(self, X, num, axis, relu):
+    def test_cat(self, X, num, dim, relu):
         tensors_q = []
         tensors_ref = []
         X, (scale, zero_point, torch_type) = X
-        assume(axis < X.ndim)
+        assume(dim < X.ndim)
         X = torch.from_numpy(X)
         new_shape = np.array(X.shape)
-        new_shape[axis] = 0
+        new_shape[dim] = 0
         for idx in range(num):
             tensors_q.append(torch.quantize_linear(X, scale, zero_point,
                                                    torch_type))
             tensors_ref.append(X)
-            new_shape[axis] += tensors_ref[-1].shape[axis]
+            new_shape[dim] += tensors_ref[-1].shape[dim]
 
-        cat_ref = torch.cat(tensors_ref, axis=axis)
+        cat_ref = torch.cat(tensors_ref, dim=dim)
         cat_ref = torch.quantize_linear(cat_ref, scale, zero_point, torch_type)
         cat_ref = cat_ref.dequantize()
 
@@ -287,7 +287,7 @@ class TestQuantizedOps(TestCase):
             q_cat_op = torch.ops.quantized.cat
             q_cat_out_op = torch.ops.quantized.cat_out
 
-        cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
+        cat_q = q_cat_op(tensors_q, dim=dim, scale=scale,
                          zero_point=zero_point)
         cat_q = cat_q.dequantize()
         np.testing.assert_equal(cat_ref.numpy(), cat_q.numpy())
@@ -295,7 +295,7 @@ class TestQuantizedOps(TestCase):
         cat_q_out = torch._empty_affine_quantized(
             list(new_shape), scale=scale,
             zero_point=zero_point, dtype=torch_type)
-        q_cat_out_op(tensors_q, axis=axis, out=cat_q_out)
+        q_cat_out_op(tensors_q, dim=dim, out=cat_q_out)
         cat_q_out = cat_q_out.dequantize()
         np.testing.assert_equal(cat_ref.numpy(), cat_q_out.numpy())
 
@@ -308,7 +308,7 @@ class TestQuantizedOps(TestCase):
         tensors_q[0] = torch.quantize_linear_per_channel(
             X, scales, zero_points, axis=[ch_axis], dtype=torch_type)
         with self.assertRaisesRegex(RuntimeError, "supported.*cat"):
-            cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
+            cat_q = q_cat_op(tensors_q, dim=ch_axis, scale=scale,
                              zero_point=zero_point)
 
 @unittest.skipIf(
