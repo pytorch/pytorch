@@ -338,14 +338,11 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
     inputs.emplace_back(all_inputs[i].toTensor());
   }
 
-  // Determines device to dispatch to.
+  // Determines device to dispatch to. If there's a device mismatch in the
+  // inputs, we use the fallback (which should give a nice error message).
   at::Device device = inputs.at(0).device();
-  // If there's a device mismatch in the inputs or if one of the input is a
-  // sparse tensor, we use the fallback (which should give a nice error
-  // message).
   for (const auto& t : at::TensorList(inputs).slice(1)) {
-    // Sparse tensor could not by supported by CUDA fusion, so we bail out.
-    if (t.device() != device || t.is_sparse()) {
+    if (t.device() != device) {
       return false;
     }
   }
@@ -363,9 +360,8 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   if (!maybe_map_size)
     return false;
   if (spec.hasRandom()) {
-    bool hasBroadcast = shouldExpandArgs(spec, inputs, *maybe_map_size);
-    if (hasBroadcast)
-      return false;
+      bool hasBroadcast = shouldExpandArgs(spec,inputs, *maybe_map_size);
+      if (hasBroadcast) return false;
   }
   expandArgs(spec, inputs, *maybe_map_size, /*dry_run=*/false);
 
