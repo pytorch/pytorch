@@ -39,9 +39,7 @@ git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-# yf225 TODO: why doesn't this work?
-# git clone -q https://github.com/yf225/builder.git -b cpp_new_abi "$BUILDER_ROOT"
-git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
+git clone -q https://github.com/yf225/builder.git -b cpp_new_abi "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
 git --no-pager log --max-count 1
