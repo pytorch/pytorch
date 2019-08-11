@@ -1543,7 +1543,7 @@ if _enabled:
         """
         def __init__(self, optimize=None, _qualified_name=None, _compilation_unit=None, _cpp_module=None):
             if _qualified_name is None:
-                _qualified_name = type(self).__name__
+                _qualified_name = _jit_internal._qualified_name(self.__class__)
             if _compilation_unit is None:
                 _compilation_unit = _python_cu
             if optimize is not None:
