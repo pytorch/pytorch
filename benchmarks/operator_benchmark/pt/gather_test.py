@@ -14,6 +14,7 @@ import numpy
 configs = op_bench.config_list(
     attrs=[
         [4, 4, 0],
+        [128, 128, 1],
         [256, 256, 1],
     ],
     attr_names=["M", "N", "dim"],
