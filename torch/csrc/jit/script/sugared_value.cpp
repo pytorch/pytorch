@@ -71,9 +71,13 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     static const std::unordered_set<std::string> fields = {
         "dtype",
         "device",
+        "grad",
+        "data",
         "shape",
         "is_cuda",
+        "is_sparse",
         "is_mkldnn",
+        "is_quantized",
         "requires_grad",
     };
     if (fields.count(field)) {
