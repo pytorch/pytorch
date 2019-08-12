@@ -12700,7 +12700,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(e1, e2)
 
     def test_function_unwrap_message(self):
-        self.assertRaisesRegex(RuntimeError, ' call to _th_lt', lambda: torch.ones(1, dtype=torch.float) < torch.ones(1, dtype=torch.double))
+        self.assertRaisesRegex(RuntimeError, ' call to _th_lt',
+                               lambda: torch.ones(1, dtype=torch.float) < torch.ones(1, dtype=torch.double))
 
 
 # Functions to test negative dimension wrapping
