@@ -279,34 +279,44 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
   const py::object& pyModule_;
 };
 
+static TypePtr getTensorType(const at::Tensor& t, bool complete) {
+  auto r = ProfiledTensorType::create(t);
+  if (!complete) {
+    r = r->dimensionedOnly();
+  }
+  return r;
+}
+
 static TupleTypePtr getTupleTensorType(
     const Stack::const_iterator& s_iter,
     const Stack::const_iterator& s_iter_end,
-    const TypePtr& tupleType) {
+    const TypePtr& tupleType,
+    bool complete) {
   AT_ASSERT(tupleType->kind() == TupleType::Kind);
   AT_ASSERT(s_iter != s_iter_end);
 
   std::vector<TypePtr> types;
   for (const auto& subType : tupleType->containedTypes()) {
     if (subType->kind() == TupleType::Kind) {
-      types.push_back(getTupleTensorType(s_iter + 1, s_iter_end, subType));
+      types.push_back(
+          getTupleTensorType(s_iter + 1, s_iter_end, subType, complete));
     } else {
-      types.push_back(ProfiledTensorType::create(s_iter->toTensor()));
+      types.push_back(getTensorType(s_iter->toTensor(), complete));
     }
   }
   return TupleType::create(types);
 }
 
-static void setInputTensorTypes(Graph& g, const Stack& stack) {
+static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
   at::ArrayRef<Value*> input_values = g.inputs();
   auto s_iter = stack.begin();
   for (auto v : input_values) {
     AT_ASSERT(s_iter != stack.end());
     if (v->type()->kind() == TupleType::Kind) {
       AT_ASSERT(v->node()->kind() == prim::Param);
-      v->setType(getTupleTensorType(s_iter, stack.end(), v->type()));
+      v->setType(getTupleTensorType(s_iter, stack.end(), v->type(), complete));
     } else {
-      v->setType(ProfiledTensorType::create(s_iter->toTensor()));
+      v->setType(getTensorType(s_iter->toTensor(), complete));
       s_iter++;
     }
   }
@@ -318,7 +328,7 @@ static std::shared_ptr<Graph> _propagate_shapes(
     bool with_grad = false) {
   Stack stack(inputs.begin(), inputs.end());
   auto retval = graph.copy();
-  setInputTensorTypes(*retval, stack);
+  setInputTensorTypes(*retval, stack, /*complete=*/false);
   PropagateInputShapes(retval);
   return retval;
 }
@@ -329,7 +339,7 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
     bool with_grad = false,
     bool propagate = true) {
   auto retval = graph.copy();
-  setInputTensorTypes(*retval, fmap<IValue>(inputs));
+  setInputTensorTypes(*retval, fmap<IValue>(inputs), /*complete=*/true);
   if (propagate) {
     PropagateInputShapes(retval);
   }
