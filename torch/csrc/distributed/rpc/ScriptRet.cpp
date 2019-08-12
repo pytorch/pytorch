@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/ScriptRet.h>
+#include <torch/csrc/jit/pickle.h>
 
 namespace torch {
 namespace distributed {
@@ -19,30 +20,17 @@ const at::IValue& ScriptRet::value() {
 
 Message ScriptRet::toMessage() {
   std::vector<torch::Tensor> tensor_table;
-  Pickler pickler(&tensor_table);
-
-  pickler.protocol();
-  pickler.startTuple();
-  pickler.pushIValue(value_);
-  pickler.endTuple();
-  pickler.stop();
-
-  auto payload = pickler.stack();
+  auto payload = jit::pickle(value_, &tensor_table);;
   return Message(std::move(payload),
                  std::move(tensor_table),
                  MessageType::SCRIPT_RET);
 }
 
 ScriptRet ScriptRet::fromMessage(const Message& message) {
-  auto payload = static_cast<const void*>(message.payload().data());
+  auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
-  Unpickler unpickler(payload, payload_size, &message.tensors(), nullptr);
-
-  auto values = unpickler.parse_ivalue_list();
-  AT_ASSERT(values.size() == 1, "Return value of a builtin operator or a "
-      "TorchScript function should be a single IValue, got a vector of size ",
-      values.size());
-  return ScriptRet(std::move(values.front()));
+  auto value = jit::unpickle(payload, payload_size, &message.tensors());
+  return ScriptRet(std::move(value));
 }
 
 } // namespace rpc
