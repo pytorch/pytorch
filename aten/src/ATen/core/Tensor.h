@@ -360,6 +360,9 @@ class CAFFE2_API Tensor {
   #ifdef BUILD_NAMEDTENSOR
   Tensor & set_names_(c10::optional<DimnameList> names) const;
   #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor set_names(c10::optional<DimnameList> names) const;
+  #endif
   Tensor abs() const;
   Tensor & abs_() const;
   Tensor acos() const;
