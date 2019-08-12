@@ -117,6 +117,25 @@ class Conv2d(torch.nn.Module):
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
         destination[prefix + 'bias'] = self.bias
 
+    @torch.jit.export
+    def __getstate__(self):
+        return (
+            self.in_channels,
+            self.out_channels,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
+            self.transposed,
+            self.output_padding,
+            self.groups,
+            self.padding_mode,
+            self.weight(),
+            self.bias,
+            self.scale,
+            self.zero_point,
+        )
+
     # ===== Deserialization methods =====
     # Counterpart to the serialization methods, we must pack the serialized QTensor
     # weight into its packed format for use by the FBGEMM ops.
@@ -137,6 +156,24 @@ class Conv2d(torch.nn.Module):
 
         super(Conv2d, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                   missing_keys, unexpected_keys, error_msgs)
+
+    @torch.jit.export
+    def __setstate__(self, state):
+        # type: (Tuple[int, int, Tuple[int, int], Tuple[int, int], Tuple[int, int], Tuple[int, int], bool, int, int, str, Tensor, Optional[Tensor], float, int])  # noqa
+        self.in_channels = state[0]
+        self.out_channels = state[1]
+        self.kernel_size = state[2]
+        self.stride = state[3]
+        self.padding = state[4]
+        self.dilation = state[5]
+        self.transposed = state[6]
+        self.output_padding = state[7]
+        self.groups = state[8]
+        self.padding_mode = state[9]
+        self.set_weight(state[10])
+        self.bias = state[11]
+        self.scale = state[12]
+        self.zero_point = state[13]
 
     @classmethod
     def from_float(cls, mod):
