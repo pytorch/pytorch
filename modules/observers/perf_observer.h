@@ -10,15 +10,12 @@
 
 namespace caffe2 {
 
+double getClockTimeMilliseconds();
 
 class CAFFE2_OBSERVER_API PerfNetObserver : public NetObserver {
  public:
   explicit PerfNetObserver(NetBase* subject_);
   virtual ~PerfNetObserver();
-
-  caffe2::Timer& getTimer() {
-    return timer_;
-  }
 
  private:
   void Start() override;
@@ -37,7 +34,8 @@ class CAFFE2_OBSERVER_API PerfNetObserver : public NetObserver {
   std::unordered_map<const OperatorBase*, const ObserverBase<OperatorBase>*>
       observerMap_;
 
-  caffe2::Timer timer_;
+  double wallMilliseconds_;
+  double cpuMilliseconds_;
 };
 
 class PerfOperatorObserver : public ObserverBase<OperatorBase> {
@@ -45,7 +43,8 @@ class PerfOperatorObserver : public ObserverBase<OperatorBase> {
   PerfOperatorObserver(OperatorBase* op, PerfNetObserver* netObserver);
   virtual ~PerfOperatorObserver();
 
-  double getMilliseconds() const;
+  double getWallMilliseconds() const;
+  double getCpuMilliseconds() const;
   std::vector<TensorShape> getTensorShapes() const;
 
  private:
@@ -60,7 +59,8 @@ class PerfOperatorObserver : public ObserverBase<OperatorBase> {
   // without storing inside the operator observer. Each field is memory
   // costly here and a raw pointer is a cheapest sholution
   PerfNetObserver* netObserver_;
-  double milliseconds_;
+  double wallMilliseconds_;
+  double cpuMilliseconds_;
   std::vector<TensorShape> tensor_shapes_;
 };
 } // namespace caffe2
