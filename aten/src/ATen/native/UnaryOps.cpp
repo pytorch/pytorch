@@ -62,9 +62,7 @@ Tensor logical_not(const Tensor& self) {
 }
 
 Tensor& logical_not_(Tensor& self) {
-  auto iter = TensorIterator::unary_op(self, self, /*check_internal_overlap=*/true);
-  logical_not_stub(iter.device_type(), iter);
-  return self;
+  return at::logical_not_out(self, self);
 }
 
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
