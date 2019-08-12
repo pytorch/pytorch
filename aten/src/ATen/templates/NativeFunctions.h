@@ -4,8 +4,8 @@
 
 #include <ATen/Context.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/TensorOptions.h>
 #include <ATen/core/Reduction.h>
+#include <ATen/core/TensorOptions.h>
 
 #include <array>
 #include <functional>
