@@ -201,9 +201,6 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 template <typename scalar_t, typename F>
 __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t * x1, const scalar_t * x2,
     const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m, const int64_t r_size, const int64_t l1_size, const int64_t l2_size) {
-  if (threadIdx.x > m) {
-    return;
-  }
   const int64_t l = blockIdx.x / r_size;
   const int64_t k = blockIdx.x % r_size;
   const int64_t i = k / r2;
