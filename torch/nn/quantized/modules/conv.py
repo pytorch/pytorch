@@ -105,6 +105,39 @@ class Conv2d(torch.nn.Module):
                                              self.scale, self.zero_point)
         return output.permute([0, 3, 1, 2])
 
+    # ===== Serialization methods =====
+    # The special consideration here is that we have to unpack the weights into their
+    # regular QTensor form for serialization. Packed weights should not live
+    # outside the process in which they were created, rather they should be derived
+    # from the QTensor weight.
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(Conv2d, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'weight'] = self.weight()
+        destination[prefix + 'scale'] = torch.tensor(self.scale)
+        destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
+        destination[prefix + 'bias'] = self.bias
+
+    # ===== Deserialization methods =====
+    # Counterpart to the serialization methods, we must pack the serialized QTensor
+    # weight into its packed format for use by the FBGEMM ops.
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        self.set_weight(state_dict[prefix + 'weight'])
+        state_dict.pop(prefix + 'weight')
+
+        self.bias = state_dict[prefix + 'bias']
+        state_dict.pop(prefix + 'bias')
+
+
+        self.scale = float(state_dict[prefix + 'scale'])
+        state_dict.pop(prefix + 'scale')
+
+        self.zero_point = int(state_dict[prefix + 'zero_point'])
+        state_dict.pop(prefix + 'zero_point')
+
+        super(Conv2d, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                  missing_keys, unexpected_keys, error_msgs)
+
     @classmethod
     def from_float(cls, mod):
         r"""Creates a quantized module from a float module or qparams_dict.
