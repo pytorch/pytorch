@@ -225,7 +225,6 @@ class _TestTorchMixin(object):
                        'to_dense',
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
-                       'set_names',  # BUILD_NAMEDTENSOR only
                        'set_names_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
                        )
@@ -1633,6 +1632,29 @@ class _TestTorchMixin(object):
         res2 = x1.sum(axis=(0, 2), keepdims=True)
         self.assertEqual(res1, res2)
 
+    def test_addcdiv(self):
+        def _test_addcdiv(a, alpha, b, c):
+            actual = torch.addcdiv(a, alpha, b, c)
+            expected = a + (alpha * b) / c
+            self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
+
+        def non_zero_rand(size, dtype, device):
+            if dtype.is_floating_point:
+                a = torch.rand(size=size, dtype=dtype, device=device)
+            elif dtype == torch.uint8:
+                a = torch.randint(1, 5, size=size, dtype=dtype, device=device)
+            else:
+                a = torch.randint(-5, 5, size=size, dtype=dtype, device=device)
+            return a + (a == 0).type(dtype)
+
+        for device in torch.testing.get_all_device_types():
+            for dtype in torch.testing.get_all_math_dtypes(device):
+                _test_addcdiv(
+                    non_zero_rand((2, 2), dtype=dtype, device=device),
+                    0.5,
+                    non_zero_rand((2, 2), dtype=dtype, device=device),
+                    non_zero_rand((2, 2), dtype=dtype, device=device))
+
     def test_add(self):
         for device in torch.testing.get_all_device_types():
             # [res] torch.add([res,] tensor1, tensor2)
@@ -2647,10 +2669,16 @@ class _TestTorchMixin(object):
             aRes = torch.cumsum(a, 0)
             bRes = torch.cumsum(b, 0)
             self.assertEqual(aRes, bRes)
+            self.assertEqual(aRes, torch.tensor([[1, 0, 1],
+                                                 [1, 0, 1],
+                                                 [2, 1, 2]]))
 
             aRes = torch.cumsum(a, 1)
             bRes = torch.cumsum(b, 1)
             self.assertEqual(aRes, bRes)
+            self.assertEqual(aRes, torch.tensor([[1, 1, 2],
+                                                 [0, 0, 0],
+                                                 [1, 2, 3]]))
 
     def test_cumprod(self):
         for d in torch.testing.get_all_device_types():
@@ -2667,10 +2695,16 @@ class _TestTorchMixin(object):
             aRes = torch.cumprod(a, 0)
             bRes = torch.cumprod(b, 0)
             self.assertEqual(aRes, bRes)
+            self.assertEqual(aRes, torch.tensor([[1, 0, 1],
+                                                 [0, 0, 0],
+                                                 [0, 0, 0]]))
 
             aRes = torch.cumprod(a, 1)
             bRes = torch.cumprod(b, 1)
             self.assertEqual(aRes, bRes)
+            self.assertEqual(aRes, torch.tensor([[1, 0, 0],
+                                                 [0, 0, 0],
+                                                 [1, 1, 1]]))
 
     def _test_reduce_integer_upcast(self, fn, has_out=True):
         shape = (3, 4, 5)
