@@ -8,12 +8,12 @@ from __future__ import unicode_literals
 
 import torch
 from torch._ops import ops
-from torch.nn.modules.conv import _ConvNd
 from torch.nn import Conv2d as NNConv2d
 from torch.nn.modules.utils import _pair
 
+from torch._jit_internal import Optional
 
-class Conv2d(_ConvNd):
+class Conv2d(torch.nn.Module):
     r"""Applies a 2D convolution over a quantized input signal composed of
     several quantized input planes.
 
@@ -49,58 +49,49 @@ class Conv2d(_ConvNd):
         >>> output = m(input)
 
     """
+
     __FLOAT_MODULE = NNConv2d
+    __annotations__ = {'bias' : Optional[torch.Tensor]}
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=True, padding_mode='zeros'):
+        super(Conv2d, self).__init__()
         if padding_mode != 'zeros':
             raise NotImplementedError(
-                "Currently only zero-padding is supported!")
-        stride = _pair(stride)
-        padding = _pair(padding)
-        dilation = _pair(dilation)
-        kernel_size = _pair(kernel_size)
-        transposed = False
-        output_padding = _pair(0)
-        super(Conv2d, self).__init__(in_channels=in_channels,
-                                     out_channels=out_channels,
-                                     kernel_size=kernel_size,
-                                     stride=stride,
-                                     padding=padding,
-                                     dilation=dilation,
-                                     transposed=transposed,
-                                     output_padding=output_padding,
-                                     groups=groups,
-                                     bias=True,
-                                     padding_mode=padding_mode)
-        del self.weight
-        del self.bias
-
+                "Currently only zero-padding is supported by quantized conv")
+        if in_channels % groups != 0:
+            raise ValueError('in_channels must be divisible by groups')
+        if out_channels % groups != 0:
+            raise ValueError('out_channels must be divisible by groups')
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = _pair(stride)
+        self.padding = _pair(padding)
+        self.dilation = _pair(dilation)
+        self.transposed = False
+        self.output_padding = 0
+        self.groups = groups
+        self.padding_mode = padding_mode
         qweight = torch._empty_affine_quantized(
             [out_channels, kernel_size[0], kernel_size[1],
              in_channels // self.groups],
             scale=1, zero_point=0, dtype=torch.qint8)
-        qbias = torch._empty_affine_quantized([out_channels],
-                                              scale=1, zero_point=0,
-                                              dtype=torch.qint32)
-        self.register_buffer('_packed_weight', torch.ops.quantized.fbgemm_conv_prepack(qweight.permute([0, 2, 3, 1]),
-                             self.stride, self.padding, self.dilation, self.groups))
-        self.register_buffer('bias', qbias)
-        self.register_buffer('scale', torch.tensor([1.0], dtype=torch.double))
-        self.register_buffer('zero_point', torch.tensor([0], dtype=torch.long))
+        self.set_weight(qweight)
+        self.bias = torch._empty_affine_quantized([out_channels],
+                                                  scale=1, zero_point=0,
+                                                  dtype=torch.qint32)
+        self.scale = 1.0
+        self.zero_point = 0
 
-    @property
+    def set_weight(self, w):
+        self._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(
+            w.permute([0, 2, 3, 1]), self.stride, self.padding, self.dilation, self.groups)
+
     def weight(self):
-        return torch.ops.quantized.fbgemm_conv_unpack(self._packed_weight).permute([0, 3, 1, 2])
-
-    @weight.setter
-    def weight(self, w):
-        self._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(w.permute([0, 2, 3, 1]),
-                                                                      self.stride,
-                                                                      self.padding,
-                                                                      self.dilation,
-                                                                      self.groups)
+        return torch.ops.quantized.fbgemm_conv_unpack(
+            self._packed_weight).permute([0, 3, 1, 2])
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -111,9 +102,8 @@ class Conv2d(_ConvNd):
                                              self._packed_weight, self.bias,
                                              self.stride, self.padding,
                                              self.dilation, self.groups,
-                                             float(self.scale), int(self.zero_point))
+                                             self.scale, self.zero_point)
         return output.permute([0, 3, 1, 2])
-
 
     @classmethod
     def from_float(cls, mod):
@@ -145,15 +135,11 @@ class Conv2d(_ConvNd):
         qconv = Conv2d(mod.in_channels, mod.out_channels, mod.kernel_size,
                        mod.stride, mod.padding, mod.dilation, mod.groups,
                        mod.bias is not None, mod.padding_mode)
-        qconv._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(qweight,
-                                                                       qconv.stride,
-                                                                       qconv.padding,
-                                                                       qconv.dilation,
-                                                                       qconv.groups)
+        qconv.set_weight(qweight)
         if mod.bias is not None:
             qconv.bias = torch.quantize_linear(mod.bias, bias_scale, 0, torch.qint32)
         else:
             qconv.bias = None
-        qconv.scale = torch.tensor([act_scale], dtype=torch.double)
-        qconv.zero_point = torch.tensor([act_zp], dtype=torch.long)
+        qconv.scale = float(act_scale)
+        qconv.zero_point = int(act_zp)
         return qconv
