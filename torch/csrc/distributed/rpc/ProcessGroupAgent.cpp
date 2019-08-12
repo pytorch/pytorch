@@ -59,7 +59,7 @@ ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
     std::unordered_map<std::string, int> nameMap,
     std::shared_ptr<c10d::ProcessGroup> pg)
-    : RpcAgent(std::move(workerName), processRequestBlocking),
+    : RpcAgent(std::move(workerName), pg->getRank(), processRequestBlocking),
       nameMap_(std::move(nameMap)),
       stop_(false),
       pg_(std::move(pg)),
@@ -73,12 +73,16 @@ ProcessGroupAgent::ProcessGroupAgent(
       "Resolved worker rank ", workerRankIter -> second,
       " does not match ProcessGroup rank ", pg_->getRank());
 
-  names_.resize(nameMap_.size());
-  for (auto& entry : nameMap_) {
-    names_[entry.second] = entry.first;
-  }
   sendThread_ = std::thread(&ProcessGroupAgent::sendLoop, this);
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
+}
+
+uint64_t ProcessGroupAgent::getId(const std::string& workerName) {
+  auto idIter = nameMap_.find(workerName);
+  TORCH_CHECK(idIter != nameMap_.end(),
+      "Unknown destination worker ", workerName);
+
+  return idIter->second;
 }
 
 void ProcessGroupAgent::join() {
@@ -117,14 +121,9 @@ void ProcessGroupAgent::sync() {
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
-    const std::string& to, Message&& message) {
-
-  auto dstRankIter = nameMap_.find(to);
-  TORCH_CHECK(dstRankIter != nameMap_.end(), "Unknown destination worker ", to);
-
-  const int dstRank = dstRankIter -> second;
-  TORCH_CHECK(dstRank != pg_->getRank(), "ProcessGroupAgent does not support "
-    "making RPC calls to self.")
+    uint64_t to, Message&& message) {
+  TORCH_CHECK(to != (uint64_t)pg_->getRank(),
+      "ProcessGroupAgent does not support making RPC calls to self.")
 
   auto requestId = nextId();
   auto future = std::make_shared<FutureMessage>();
@@ -138,7 +137,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     future->markCompleted();
   }
 
-  enqueue(SendWork(dstRank, std::move(message)));
+  enqueue(SendWork(to, std::move(message)));
   return future;
 }
 
@@ -206,7 +205,7 @@ void ProcessGroupAgent::listenLoop() {
     Message message = deserialize(ss);
 
     if (message.isRequest()) {
-      cb_(names_[srcRank], std::move(message), *this);
+      cb_(srcRank, std::move(message), *this);
     } else if (message.isResponse()) {
       auto id = message.id();
       {

@@ -49,6 +49,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(py::init<std::string,
                         std::unordered_map<std::string, int>,
                         std::shared_ptr<::c10d::ProcessGroup>>())
+          .def("get_id",
+               &ProcessGroupAgent::getId,
+               py::call_guard<py::gil_scoped_release>())
           .def("join",
                &ProcessGroupAgent::join,
                py::call_guard<py::gil_scoped_release>())
@@ -58,11 +61,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def("invoke_rpc", [](
       RpcAgent& agent,
-      const std::string& dstName,
+      uint64_t dst,
       const std::string& opName,
       const py::args& args,
       const py::kwargs& kwargs) {
-    return py_rpc(agent, dstName, opName, args, kwargs);
+    return py_rpc(agent, dst, opName, args, kwargs);
   });
 
   Py_RETURN_TRUE;

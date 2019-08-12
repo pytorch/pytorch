@@ -10,8 +10,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-void processRequestBlocking(
-    const std::string& from, Message&& message, RpcAgent& agent);
+void processRequestBlocking(uint64_t from, Message&& message, RpcAgent& agent);
 
 } // rpc
 } // distributed
