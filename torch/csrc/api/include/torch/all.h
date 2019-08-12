@@ -5,6 +5,7 @@
 #include <torch/jit.h>
 #include <torch/nn.h>
 #include <torch/optim.h>
+#include <torch/random.h>
 #include <torch/serialize.h>
 #include <torch/types.h>
 #include <torch/utils.h>
