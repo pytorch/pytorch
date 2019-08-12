@@ -17,7 +17,7 @@ using at::manual_seed;
 Tensor get_rng_state(torch::Device device = torch::Device(torch::kCPU)) {
   auto& default_generator = torch::globalContext().defaultGenerator(device);
 
-  auto tensor = torch::empty({0}, torch::Device(torch::kCPU).dtype(torch::kByte));
+  auto tensor = torch::empty({0}, torch::device(torch::kCPU).dtype(torch::kByte));
   if (default_generator.device().type() == torch::kCPU) {
     THByteTensor_getRNGState(default_generator, (THByteTensor*)(tensor.unsafeGetTensorImpl()));
   } else {
