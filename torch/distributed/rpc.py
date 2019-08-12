@@ -9,6 +9,12 @@ import torch
 _agent = None
 
 
+def _check_initialized():
+    if _agent is None:
+        raise RuntimeError("RPC has not been initialized. "
+                           "Call init_rpc(name) first.")
+
+
 def _collect_worker_names(name, group):
     from . import all_gather
     from . import get_world_size
@@ -57,10 +63,7 @@ def sync_rpc():
     level, if multiple threads are spawned, only one of them should call this
     method at a time.
     """
-    if _agent is None:
-        raise RuntimeError("RPC has not been initialized. "
-                           "Call init_rpc(name) first.")
-
+    _check_initialized()
     _agent.sync()
 
 
@@ -96,6 +99,11 @@ def init_rpc(name, backend='pg'):
         raise RuntimeError("Unrecognized RPC backend ", backend)
 
 
+def get_id(workerName):
+    _check_initialized()
+    return _agent.get_id(workerName)
+
+
 def rpc(to, func, args=None, kwargs=None, async_call=False):
     r"""
     Make an RPC call to run function ``func`` on worker ``to``. By default, it
@@ -104,7 +112,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
     thread-safe.
 
     Arguments:
-        to (str): name of the destination worker.
+        to (int or str): id or name of the destination worker.
         func (callable): a builtin function (e.g., ``torch.add``).
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
@@ -156,9 +164,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         >>> dist.init_rpc("worker1")
         >>> dist.join_rpc()
     """
-    if _agent is None:
-        raise RuntimeError("RPC has not been initialized. "
-                           "Call init_rpc(name) first.")
+    _check_initialized()
 
     qualified_name = torch.jit._find_builtin(func)
     if qualified_name is None:
@@ -166,6 +172,8 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
+    if isinstance(to, str):
+        to = _agent.get_id(to)
     fut = invoke_rpc(_agent, to, qualified_name, *args, **kwargs)
 
     if async_call:

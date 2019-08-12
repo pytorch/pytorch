@@ -18,7 +18,7 @@ py::object to_py_obj(const Message& message);
 
 std::shared_ptr<FutureMessage> py_rpc(
     RpcAgent& agent,
-    const std::string& dstName,
+    uint64_t dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs);

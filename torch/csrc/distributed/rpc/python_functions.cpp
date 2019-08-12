@@ -20,7 +20,7 @@ py::object to_py_obj(const Message& message) {
 
 std::shared_ptr<FutureMessage> py_rpc(
     RpcAgent& agent,
-    const std::string& dstName,
+    uint64_t dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
@@ -34,8 +34,7 @@ std::shared_ptr<FutureMessage> py_rpc(
         Stack stack = torch::jit::createStackForSchema(
             op->schema(), args, kwargs, c10::nullopt);
 
-        return agent.send(
-            dstName, ScriptCall(op, std::move(stack)).toMessage());
+        return agent.send(dst, ScriptCall(op, std::move(stack)).toMessage());
       } catch (std::runtime_error) {}
     }
   }

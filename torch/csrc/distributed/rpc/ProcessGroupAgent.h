@@ -34,7 +34,9 @@ class ProcessGroupAgent : public RpcAgent {
   // SendWork object, and put the SendWork into a queue. Another thread will
   // consume SendWork from the queue and send it out.
   std::shared_ptr<FutureMessage> send(
-      const std::string& to, Message&& message) override;
+      uint64_t to, Message&& message) override;
+
+  uint64_t getId(const std::string& workerName) override;
 
   void join() override;
 
@@ -59,7 +61,6 @@ class ProcessGroupAgent : public RpcAgent {
   std::atomic<int64_t> nextId_;
   // names_[rank] stores the name of the corresponding worker, use this vector
   // to get worker name from rank and pass it to the RequestCallback.
-  std::vector<std::string> names_;
   std::deque<SendWork> sendQueue_;
   std::mutex sendQueueMutex_;
   std::condition_variable workProduceCV_;
