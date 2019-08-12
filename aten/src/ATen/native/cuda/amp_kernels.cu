@@ -22,7 +22,7 @@ Tensor _amp_unscale_inf_check_cuda(const Tensor & scaled_grad, double scale) {
 
   auto unscaled_grad = at::empty_like(scaled_grad);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "prelu_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(scaled_grad.scalar_type(), "prelu_cuda", [&] {
     float rscale = 1.f/scale;
     // Not a huge fan of how this is architected, gotta move some things around.
     int* amp_overflow = at::native::_amp_overflow_state(Tensor{}).data<int>();
