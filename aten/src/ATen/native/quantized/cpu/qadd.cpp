@@ -64,10 +64,7 @@ template <bool ReLUFused = false>
 class QAddOut final : public c10::OperatorKernel {
  public:
   Tensor operator()(at::Tensor qa, at::Tensor qb, at::Tensor out) {
-    TORCH_CHECK(qa.numel() == qb.numel(),
-                "Add operands must be the same size!");
-    TORCH_CHECK(qa.scalar_type() == qb.scalar_type(),
-                "Add operands should have same data type.");
+    check_inputs(qa, qb);
     return _add_out<ReLUFused>(out, qa, qb);
   }
 };
