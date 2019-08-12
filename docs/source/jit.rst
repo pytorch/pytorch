@@ -23,6 +23,11 @@ This makes it possible to train models in PyTorch using familiar tools in Python
 the model via TorchScript to a production environment where Python programs may be disadvantageous.
 for performance and multi-threading reasons.
 
+For a gentle introduction to TorchScript, see the `Introduction to TorchScript <https://pytorch.org/tutorials/beginner/Intro_to_TorchScript_tutorial.html>`_ tutorial.
+
+For an end-to-end example of converting a PyTorch model to TorchScript and running it in C++, see the
+`Loading a PyTorch Model in C++ <https://pytorch.org/tutorials/advanced/cpp_export.html>`_ tutorial.
+
 Creating TorchScript Code
 --------------------------
 
