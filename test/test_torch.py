@@ -1888,7 +1888,7 @@ class _TestTorchMixin(object):
         for dtype in [torch.bool] + torch.testing.get_all_math_dtypes(device):
             expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
             for other_dtype in [torch.bool] + torch.testing.get_all_math_dtypes(device):
-                a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)	
+                a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
                 b = torch.tensor([1, 0, 0, 10], dtype=other_dtype, device=device)
                 # new tensor
                 self.assertEqual(expected_res.bool(), a.logical_xor(b))
