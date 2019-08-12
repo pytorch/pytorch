@@ -39,7 +39,10 @@ MemOverlapStatus get_overlap_status(const Tensor& a, const Tensor& b) {
 }
 
 MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
-  if (a->is_contiguous() && b->is_contiguous() && a->storage().data() == b->storage().data()) {
+  if (!a->is_contiguous() || !b->is_contiguous()) {
+    return MemOverlapStatus::TOO_HARD;
+  }
+  if (a->storage().data() == b->storage().data()) {
     const auto a_begin = static_cast<char*>(a->data());
     const auto a_end = a_begin + a->numel() * a->itemsize();
     const auto b_begin = static_cast<char*>(b->data());

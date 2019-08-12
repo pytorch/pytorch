@@ -12702,21 +12702,67 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_binary_op_input_output_overlap(self):
         sz = 3
         data = torch.randn(3 * sz)
-        for i in range(len(data) - sz):
-            for j in range(len(data) - sz):
-                for k in range(len(data) - sz):
-                    a = data[i:i + sz]
-                    a_exp = a.clone()
-                    b = data[j:j + sz]
-                    b_exp = b.clone()
-                    c = data[k:k + sz]
-                    c_exp = c.clone()
-                    torch.add(a_exp, b_exp, out=c_exp)
-                    try:
-                        torch.add(a, b, out=c)
-                        self.assertEqual(c_exp, c)
-                    except RuntimeError:
-                        pass
+
+        # c is identical to a and b:
+        c = data[0:sz]
+        c_exp = c.clone()
+        a = data[0:sz]
+        b = data[0:sz]
+        c_exp = a + b
+        torch.add(a, b, out=c)
+        self.assertEqual(c_exp, c)
+
+        # c, a and b are independent:
+        c = data[0:sz]
+        c_exp = c.clone()
+        a = data[sz:2 * sz]
+        b = data[2 * sz:3 * sz]
+        c_exp = a + b
+        torch.add(a, b, out=c)
+        self.assertEqual(c_exp, c)
+
+        # c and a are identical but b is independent:
+        c = data[0:sz]
+        c_exp = c.clone()
+        a = data[0:sz]
+        b = data[2 * sz:3 * sz]
+        c_exp = a + b
+        torch.add(a, b, out=c)
+        self.assertEqual(c_exp, c)
+
+        # c and b are identical but a is independent:
+        c = data[0:sz]
+        c_exp = c.clone()
+        a = data[sz:2 * sz]
+        b = data[0:sz]
+        c_exp = a + b
+        torch.add(a, b, out=c)
+        self.assertEqual(c_exp, c)
+
+        # a and b have a partial overlap but c is independent:
+        c = data[0:sz]
+        c_exp = c.clone()
+        a = data[sz:2 * sz]
+        b = data[sz + 1:2 * sz + 1]
+        c_exp = a + b
+        torch.add(a, b, out=c)
+        self.assertEqual(c_exp, c)
+
+        # c has partial overlap with a:
+        c = data[0:sz]
+        c_exp = c.clone()
+        a = data[1:sz + 1]
+        b = data[2 * sz:3 * sz]
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.add(a, b, out=c)
+
+        # c has partial overlap with b:
+        c = data[0:sz]
+        c_exp = c.clone()
+        a = data[0:sz]
+        b = data[2:sz + 2]
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.add(a, b, out=c)
 
 # Functions to test negative dimension wrapping
 METHOD = 1

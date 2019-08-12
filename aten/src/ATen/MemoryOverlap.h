@@ -13,7 +13,7 @@ namespace at {
 // NB: Please update the python test for these if you renumber them.
 enum class MemOverlap { NO, YES, TOO_HARD };
 
-enum class MemOverlapStatus { FULL, PARTIAL, NO };
+enum class MemOverlapStatus { FULL, PARTIAL, NO, TOO_HARD };
 
 CAFFE2_API MemOverlap has_internal_overlap(const Tensor& t);
 CAFFE2_API MemOverlap has_internal_overlap(TensorImpl* t);
