@@ -7,7 +7,7 @@
 
 #include "Functions.h"
 #include <ATen/Utils.h>
-#include <c10/core/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/SparseTensorUtils.h>
@@ -1196,7 +1196,7 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //
 //           stride[k] > \sum_{ i > k } (size[i] - 1) * stride[i]
 //
-//      That is equivalent to, after reording the dimensions so strides are
+//      That is equivalent to, after reordering the dimensions so strides are
 //      in decreasing order, checking that stride of each dimension is larger
 //      than the maximum memory offset in a slice at that dimension.
 //

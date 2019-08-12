@@ -797,7 +797,7 @@ const std::vector<std::string> functions = {
             other_size = other.size()
             def backward(grad_output):
                 grad_self = (grad_output * condition.type_as(grad_output))._grad_sum_to_size(self_size)
-                grad_other = (grad_output * (1 - condition).type_as(grad_output))._grad_sum_to_size(other_size)
+                grad_other = (grad_output * (condition.bitwise_not()).type_as(grad_output))._grad_sum_to_size(other_size)
                 return None, grad_self, grad_other
 
             return torch.where(condition, self, other), backward
@@ -1306,6 +1306,22 @@ const std::vector<std::string> functions = {
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
 
+        def clamp(self,
+                min: Optional[number],
+                max: Optional[number]):
+            def backward(grad_output):
+                if min is not None and max is not None:
+                    mask = ((self >= float(min)) * (self <= float(max))).type_as(self)
+                    return grad_output * mask, None, None
+                elif min is not None:
+                    mask = (self >= float(min)).type_as(self)
+                    return grad_output * mask, None, None
+                elif max is not None:
+                    mask = (self <= float(max)).type_as(self)
+                    return grad_output * mask, None, None
+                else: #min is None and max is None
+                    return grad_output, None, None
+            return torch.clamp(self, min=min, max=max), backward
       )"};
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 

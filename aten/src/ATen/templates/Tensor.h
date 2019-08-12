@@ -8,6 +8,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorAccessor.h>
+#include <ATen/core/TensorOptions.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
@@ -21,9 +22,6 @@
 
 namespace caffe2 {
 class Tensor;
-}
-namespace c10{
-struct TensorOptions;
 }
 namespace at {
 struct Generator;
@@ -182,6 +180,13 @@ class CAFFE2_API Tensor {
   }
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     return impl_->is_contiguous(memory_format);
+  }
+
+  at::MemoryFormat suggest_memory_format() const {
+    if (impl_->is_strides_like_channels_last()) {
+      return at::MemoryFormat::ChannelsLast;
+    }
+    return at::MemoryFormat::Contiguous;
   }
 
   // Total bytes consumed by the "view" of elements of the array.  Does not

@@ -45,6 +45,7 @@ const char* ErrorReport::what() const noexcept {
   if (error_stack.size() > 0) {
     for (auto it = error_stack.rbegin(); it != error_stack.rend() - 1; ++it) {
       auto callee = it + 1;
+
       msg << "'" << it->fn_name
           << "' is being compiled since it was called from '" << callee->fn_name
           << "'\n";

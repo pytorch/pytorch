@@ -30,17 +30,14 @@ namespace {
    Julien, November 12th 2013
 */
 
-constexpr int64_t MAX_LEVELS = 300;
-constexpr int64_t M_SMALL = 10; // Limit for small subfiles
-
 template <typename scalar_t, typename Comp, typename Fn>
 void quick_select_template(
     TensorAccessor<scalar_t, 1> arr,
     int64_t k,
     Comp gt_or_nan,
     Fn swap_fn) {
-  int64_t P, L, R, i, j, swap;
-  scalar_t rswap, piv;
+  int64_t P, L, R, i, j;
+  scalar_t piv;
   L = 0;
   R = arr.size(0) - 1;
 

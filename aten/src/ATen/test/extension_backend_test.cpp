@@ -26,7 +26,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(empty({5, 5}, at::kMSNPU));
   globalATenDispatch().registerOp(
     Backend::MSNPU,
-    "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+    "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
     &empty_override);
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
@@ -42,7 +42,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(add(a, b));
   globalATenDispatch().registerOp(
     Backend::MSNPU,
-    "aten::add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
+    "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
     &add_override);
   add(a, b);
   ASSERT_EQ(test_int, 2);
@@ -55,7 +55,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(
     globalATenDispatch().registerOp(
       Backend::MSNPU,
-      "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
       &empty_override)
   );
 }

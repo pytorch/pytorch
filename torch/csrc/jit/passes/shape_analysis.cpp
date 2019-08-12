@@ -39,7 +39,7 @@ bool isValidArgumentForRunning(Value* v) {
   if (toIValue(v))
     return true;
   if (CompleteTensorTypePtr tt = v->type()->cast<CompleteTensorType>()) {
-    return !at::isIntegralType(tt->scalarType());
+    return !at::isIntegralType(tt->scalarType(), /*includeBool=*/false);
   }
   return v->type()->isSubtypeOf(FloatType::get());
 }
@@ -959,7 +959,7 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, 0)->toScalarType(at::kByte)};
+            return {broadcast(*maybe_tensor_types, 0)->toScalarType(at::kBool)};
           }
           return {};
         }};

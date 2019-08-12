@@ -7,11 +7,8 @@ import torch
 import sys
 
 
-def namedtensor_enabled():
-    return '-DBUILD_NAMEDTENSOR' in torch.__config__.show()
-
 skipIfNamedTensorDisabled = \
-    unittest.skipIf(not namedtensor_enabled(),
+    unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
                     'PyTorch not compiled with namedtensor support')
 
 def pass_name_to_python_arg_parser(name):
@@ -84,6 +81,18 @@ class TestNamedTensor(TestCase):
         self.assertFalse(none_named.has_names())
         self.assertTrue(partially_named.has_names())
         self.assertTrue(fully_named.has_names())
+
+    def test_repr(self):
+        named_tensor = torch.zeros(2, 3).set_names_(['N', 'C'])
+        expected = "tensor([[0., 0., 0.],\n        [0., 0., 0.]], names=('N', 'C'))"
+        self.assertEqual(repr(named_tensor), expected)
+
+        unnamed_tensor = torch.zeros(2, 3)
+        expected = "tensor([[0., 0., 0.],\n        [0., 0., 0.]])"
+        self.assertEqual(repr(unnamed_tensor), expected)
+
+        none_named_tensor = torch.zeros(2, 3).set_names_([None, None])
+        self.assertEqual(repr(none_named_tensor), expected)
 
     def test_copy_transpose(self):
         # This type of copy is special-cased and therefore needs its own test
@@ -300,7 +309,6 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('clamp', -1, 1),
             fn_method_and_inplace('clamp_min', -2),
             fn_method_and_inplace('clamp_max', 2),
-            method('clone'),
             method('cauchy_'),
             fn_method_and_inplace('cos'),
             fn_method_and_inplace('cosh'),
