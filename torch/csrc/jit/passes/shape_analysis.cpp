@@ -39,7 +39,7 @@ bool isValidArgumentForRunning(Value* v) {
   if (toIValue(v))
     return true;
   if (CompleteTensorTypePtr tt = v->type()->cast<CompleteTensorType>()) {
-    return !at::isIntegralType(tt->scalarType());
+    return !at::isIntegralType(tt->scalarType(), /*includeBool=*/false);
   }
   return v->type()->isSubtypeOf(FloatType::get());
 }
@@ -448,8 +448,8 @@ class ShapePropagator {
         default_device = inp->toDevice();
       }
     }
-    node->output()->setType(
-        ProfiledTensorType::create(default_type, default_device, dims, true));
+    node->output()->setType(ProfiledTensorType::create(
+        default_type, default_device, dims, /*requires_grad=*/c10::nullopt));
   }
 
   // returns whether any such values were found
@@ -520,11 +520,11 @@ class ShapePropagator {
         TypePtr typ = node->input()->type();
         if (typ->isSubtypeOf(IntType::get()) ||
             typ->isSubtypeOf(BoolType::get())) {
-          node->output()->setType(
-              ProfiledTensorType::create(at::kLong, at::kCPU, 0, true));
+          node->output()->setType(ProfiledTensorType::create(
+              at::kLong, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
         } else if (node->input()->type()->isSubtypeOf(FloatType::get())) {
-          node->output()->setType(
-              ProfiledTensorType::create(at::kDouble, at::kCPU, 0, true));
+          node->output()->setType(ProfiledTensorType::create(
+              at::kDouble, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
         }
         return;
       }
@@ -685,7 +685,10 @@ class ShapePropagator {
         }
       }
       return ProfiledTensorType::create(
-          any_type->scalarType(), any_type->device(), max_dims, true);
+          any_type->scalarType(),
+          any_type->device(),
+          max_dims,
+          /*requires_grad=*/c10::nullopt);
     };
 
     using type_vec_t = std::vector<ProfiledTensorTypePtr>;
@@ -1286,7 +1289,8 @@ class ShapePropagator {
           (maybe_dtype_option->isNone() ? at::kDouble
                                         : maybe_dtype_option->toScalarType());
 
-      return {ProfiledTensorType::create(dtype, device, dim, true)};
+      return {ProfiledTensorType::create(
+          dtype, device, dim, /*requires_grad=*/c10::nullopt)};
     };
 
     // Requirements:
@@ -1600,8 +1604,11 @@ class ShapePropagator {
                 default_device = inp->toDevice();
               }
             }
-            node->output()->setType(
-            ProfiledTensorType::create(default_type, default_device, type->dim(), true));
+            node->output()->setType(ProfiledTensorType::create(
+                default_type,
+                default_device,
+                type->dim(),
+                /*requires_grad=*/c10::nullopt));
           }
         }
         return nullptr;

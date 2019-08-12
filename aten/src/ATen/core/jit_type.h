@@ -551,15 +551,6 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
         scalar_type, device, sizes, strides, requires_grad));
   }
 
-  static ProfiledTensorTypePtr create(ProfiledTensorTypePtr pttp) {
-    return ProfiledTensorTypePtr(new ProfiledTensorType(
-        pttp->scalarType(),
-        pttp->device(),
-        pttp->sizes(),
-        pttp->strides(),
-        pttp->requiresGrad()));
-  }
-
   static ProfiledTensorTypePtr create(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
@@ -896,12 +887,13 @@ struct CAFFE2_API DictType : public Type {
       case TypeKind::IntType:
       case TypeKind::FloatType:
       case TypeKind::StringType:
+      case TypeKind::TensorType:
         return DictTypePtr(new DictType(key, value));
       default:
         AT_ERROR(
             "Cannot create dict for key type '",
             key->str(),
-            "', only int, float, and string keys are supported");
+            "', only int, float, Tensor and string keys are supported");
     }
   }
 

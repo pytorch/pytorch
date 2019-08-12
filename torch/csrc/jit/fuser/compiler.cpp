@@ -204,6 +204,9 @@ std::shared_ptr<FusedKernel> compileKernel(
   for (size_t i = 0; i < input_desc.size(); i++) {
     const auto& desc = input_desc[i];
 
+    // TODO: can't get rid of this use of ProfiledTensorType
+    // until we switch to ProfilingGraphExecutor, so we don't have to
+    // run PropagateInputShapes below
     graph->inputs()[i]->setType(ProfiledTensorType::create(
         desc.scalar_type,
         device,
