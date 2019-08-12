@@ -74,6 +74,11 @@ class Adam(Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+
+        # In order to reduce Numba overhead, we save the device arrays 
+        # between calls to `step()` in `_nbstate`.
+        self._nbstate = getattr(self, '_nbstate', {})
+
         loss = None
         if closure is not None:
             loss = closure()
@@ -102,17 +107,16 @@ class Adam(Optimizer):
                         # Maintains max of all exp. moving avg. of sq. grad. values
                         state['max_exp_avg_sq'] = torch.zeros_like(p)
                     elif NUMBA_CUDA_EXIST and numba.cuda.is_cuda_array(p.data):
-                        state['numba_param'] = numba.cuda.as_cuda_array(p.flatten())
-                        state['numba_grad'] = numba.cuda.as_cuda_array(grad.flatten())
-                        state['numba_exp_avg'] = numba.cuda.as_cuda_array(state['exp_avg'].flatten())
-                        state['numba_exp_avg_sq'] = numba.cuda.as_cuda_array(state['exp_avg_sq'].flatten())
-                        state['blockspergrid'] = math.ceil(p.data.numel() / NUMBA_CUDA_THREAD_PER_BLOCK)
+                        self._nbstate[param] = {
+                            'param': numba.cuda.as_cuda_array(p.data.flatten()),
+                            'grad': numba.cuda.as_cuda_array(grad.flatten()),
+                            'exp_avg': numba.cuda.as_cuda_array(state['exp_avg'].data.flatten()),
+                            'exp_avg_sq': numba.cuda.as_cuda_array(state['exp_avg_sq'].data.flatten()),
+                            'blockspergrid': math.ceil(p.data.numel() / NUMBA_CUDA_THREAD_PER_BLOCK)
+                        }
 
                 eps = group['eps']
                 beta1, beta2 = group['betas']
-                exp_avg = state['exp_avg'].data
-                exp_avg_sq = state['exp_avg_sq'].data
-
                 state['step'] += 1
                 bias_correction1 = 1 - beta1 ** state['step']
                 bias_correction2 = math.sqrt(1 - beta2 ** state['step'])
@@ -121,15 +125,14 @@ class Adam(Optimizer):
                 if group['weight_decay'] != 0:
                     grad.add_(group['weight_decay'], p.data)
 
-                if 'numba_param' in state:
-                    numba_param = state['numba_param'] 
-                    numba_grad = state['numba_grad'] 
-                    numba_exp_avg = state['numba_exp_avg'] 
-                    numba_exp_avg_sq = state['numba_exp_avg_sq'] 
-                    numba_cuda_kernel[state['blockspergrid'], NUMBA_CUDA_THREAD_PER_BLOCK]  \
-                        (state['numba_param'], state['numba_grad'], state['numba_exp_avg'], \
-                         state['numba_exp_avg_sq'], beta1, beta2, step_size, bias_correction2, eps)           
-                else:
+                if param in self._nbstate:
+                    s = self._nbstate[param]
+                    numba_cuda_kernel[s['blockspergrid'], NUMBA_CUDA_THREAD_PER_BLOCK]  \
+                        (s['param'], s['grad'], s['exp_avg'], s['exp_avg_sq'], beta1, 
+                        beta2, step_size, bias_correction2, eps)           
+                else:                    
+                    exp_avg = state['exp_avg'].data
+                    exp_avg_sq = state['exp_avg_sq'].data
                     # Decay the first and second moment running average coefficient
                     exp_avg.mul_(beta1).add_(1 - beta1, grad)
                     exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
