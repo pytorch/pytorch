@@ -43,13 +43,13 @@ private:
     return typeMetaFor(t.scalar_type());
   }
   TypeMeta typeMetaFor(at::ScalarType st) {
-    #define DEFINE_CASE(ctype,aten_name,_) \
+    #define DEFINE_CASE(ctype,aten_name) \
       case at::k##aten_name: \
         return TypeMeta::Make<ctype>();
     switch(st) {
       AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, DEFINE_CASE)
-      default:
-        CAFFE_THROW("Unknown ATen Type");
+    default:
+      CAFFE_THROW("Unknown ATen Type");
     }
     #undef DEFINE_CASE
   }
@@ -134,7 +134,7 @@ private:
 
   void assignTo(Tensor* dst, at::ScalarType scalar_type, at::Scalar scalar) {
     switch(scalar_type) {
-      #define DEFINE_CASE(ctype,aten_name,_1) \
+      #define DEFINE_CASE(ctype,aten_name) \
         case at::k##aten_name: { \
           auto value = extract<ctype>(scalar); \
           assignToValue<ctype>(dst, at::convert<ctype,decltype(value)>(value)); \
