@@ -540,6 +540,22 @@ class TestJit(JitTestCase):
 
         test_device()
 
+    def test_attrs(self):
+        def foo(x):
+            return (
+                # x.dtype, TODO: dtype long -> instance conversion
+                x.device,
+                x.shape,
+                x.is_cuda,
+                x.is_mkldnn,
+                x.is_quantized,
+                x.requires_grad
+            )
+
+        scripted = torch.jit.script(foo)
+        x = torch.rand(3, 4)
+        self.assertEqual(scripted(x), foo(x))
+
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
         y = torch.tensor([0], dtype=torch.int64)
@@ -2093,21 +2109,28 @@ graph(%Ra, %Rb):
         ten = torch.rand(3, 3)
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
 
-    def test_sparse_tensors_error(self):
+    @suppress_warnings
+    def test_sparse_tensors(self):
         @torch.jit.ignore
         def get_sparse():
             return torch.sparse.FloatTensor(2, 3)
 
         @torch.jit.script
-        def sparse(input):
+        def test_is_sparse(input):
+            # type: (Tensor) -> bool
+            return input.is_sparse
+
+        script_out_is_sparse = test_is_sparse(get_sparse())
+        script_out_is_dense = test_is_sparse(torch.randn(2, 3))
+        self.assertEqual(script_out_is_sparse, True)
+        self.assertEqual(script_out_is_dense, False)
+
+        def test_basic_sparse(input):
             output = get_sparse()
             return output, input
 
-        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
-            sparse(get_sparse())
-
-        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
-            sparse(torch.tensor([1]))
+        self.checkScript(test_basic_sparse, (get_sparse(),))
+        self.checkScript(test_basic_sparse, (torch.tensor([1]),))
 
     def test_tuple_specialization(self):
         @torch.jit.script
@@ -3375,6 +3398,7 @@ def foo(x):
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
+    @unittest.skipIf(IS_SANDCASTLE, "[serialization forward compat]")
     def test_file_line_save_load(self):
         class Scripted(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -3443,6 +3467,7 @@ def foo(xyz):
             loaded = self.getExportImportCopy(ft)
             loaded()
 
+    @unittest.skipIf(IS_SANDCASTLE, "[serialization forward compat]")
     def test_serialized_source_ranges_dont_jitter(self):
         class FooTest3(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -3545,14 +3570,29 @@ def foo(xyz):
         self.checkScript(f, (x,))
 
     def test_tensor_grad(self):
-        x = torch.tensor(1.0, requires_grad=True)
-        y = torch.tensor(1.0, requires_grad=False)
+        x = torch.randn(3, 4, requires_grad=True)
+        y = torch.randn(3, 4, requires_grad=False)
 
-        def f(x):
+        def f_requires_grad(x):
             return x.requires_grad
 
-        self.checkScript(f, (x,))
-        self.checkScript(f, (y,))
+        self.checkScript(f_requires_grad, (x,))
+        self.checkScript(f_requires_grad, (y,))
+
+        def f_grad(x):
+            return x.grad
+
+        x.sum().backward()
+        self.checkScript(f_grad, (x,))
+        self.checkScript(f_grad, (y,))
+
+    def test_tensor_data(self):
+        x = torch.randn(3, 4)
+
+        def f_data(x):
+            return x.data
+
+        self.checkScript(f_data, (x,))
 
     def test_tensor_dtype(self):
         x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
@@ -10160,6 +10200,14 @@ a")
 
             self.checkScript(star_code, (), name='star_tuple_assign')
 
+        def subscript_tuple_augmented_assign(a):
+            # type: (Tuple[int, int]) -> Tuple[int, int]
+            a[0] += 1
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, 'does not support augmented assign'):
+            scripted_aug_assign = torch.jit.script(subscript_tuple_augmented_assign)
+
 
     def test_multi_reduction(self):
         with self.assertRaisesRegex(
@@ -13682,7 +13730,8 @@ a")
     def test_script_scope(self):
         scripted = torch.jit.script(torch.nn.functional.pad)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
+    # [serialization forward compat]
+    @unittest.skipIf(IS_SANDCASTLE or IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -13917,6 +13966,21 @@ a")
 
         self.checkScript(test_not_in_dict, ({"hello": 1, "world": 2}, ))
         self.checkScript(test_not_in_dict, ({"world": 2}, ))
+
+        def test_dict_tensor_key(a, t):
+            # type: (Dict[Tensor, int], Tensor) -> bool
+            if t in a:
+                return True
+            else:
+                return False
+
+        inp1 = torch.tensor(3)
+        inp2 = torch.tensor(5)
+        dict_a = {inp1: 1, inp2: 3}
+        self.checkScript(test_dict_tensor_key, (dict_a, torch.tensor(4)))
+        self.checkScript(test_dict_tensor_key, (dict_a, torch.tensor(3)))
+        self.checkScript(test_dict_tensor_key, (dict_a, inp1))
+        self.checkScript(test_dict_tensor_key, (dict_a, inp2))
 
     def test_get_set_state_with_tensors(self):
         class M(torch.nn.Module):
@@ -17486,6 +17550,26 @@ class TestDict(JitTestCase):
 
         self.checkScript(update, (self.dict(), self.dict()))
         self.checkScript(update, (self.dict(), self.dict2()))
+
+    def test_aug_assign(self):
+        def aug_assign_dict_tensor(a):
+            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+            a['a'] += 1
+            a['b'] -= 12
+            a['c'] *= 122
+            a['c'] /= 2
+            return a
+
+        def aug_assign_dict_prim(a):
+            # type: (Dict[str, float]) -> Dict[str, float]
+            a['a'] += 3.4
+            a['b'] -= 2.4
+            a['c'] *= 3.0
+            a['c'] /= 2.0
+            return a
+
+        self.checkScript(aug_assign_dict_tensor, (self.dict(),))
+        self.checkScript(aug_assign_dict_prim, ({'a': 3.0, 'b': 2.0, 'c': 4.0},))
 
     def test_popitem(self):
         @torch.jit.script
