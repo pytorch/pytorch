@@ -8,6 +8,7 @@ from __future__ import unicode_literals
 
 import torch
 from torch._ops import ops
+from torch.nn import Conv2d as NNConv2d
 from torch.nn.modules.utils import _pair
 
 from torch._jit_internal import Optional
@@ -49,6 +50,7 @@ class Conv2d(torch.nn.Module):
 
     """
 
+    __FLOAT_MODULE = NNConv2d
     __annotations__ = {'bias' : Optional[torch.Tensor]}
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
