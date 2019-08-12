@@ -23,16 +23,12 @@ void bitwise_not_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-template <typename self_t>
-void logical_not_kernel_cuda_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_not_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(self_t a) -> scalar_t { return static_cast<scalar_t>(!a); });
-  });
-}
-
 static void logical_not_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_not_cuda", [&]() {
-    logical_not_kernel_cuda_impl<scalar_t>(iter);
+    using self_t = scalar_t;
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_not_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(self_t a) -> scalar_t { return static_cast<scalar_t>(!a); });
+    });
   });
 }
 
