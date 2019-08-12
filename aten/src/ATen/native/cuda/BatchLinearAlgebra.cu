@@ -1064,13 +1064,16 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
   auto b_data = b.data<scalar_t>();
   magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
+  magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
 
-  if (b.dim() == 2) {
+  // batch_size == 1 implies that:
+  // 1. the RHS and LHS tensors have 2 dimensions, or
+  // 2. the RHS and LHS tensors have more than 2 dimensions but all batch dimensions are 1
+  if (batch_size == 1) {
     magmaTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_data, n, b_data, n);
   } else {
     auto A_mat_stride = matrixStride(A);
     auto b_mat_stride = matrixStride(b);
-    magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
 
     scalar_t** A_array;
     scalar_t** b_array;
