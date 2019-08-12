@@ -16,15 +16,11 @@ static ModulePtr create_module_object(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle = false) {
-  // XXX: This is a temporary hack so that module names cannot clash with
-  // builtins like `torch`. Delete this with the new serialization format.
-  std::vector<std::string> new_class_name{"__module__"};
-  new_class_name.insert(
-      new_class_name.end(),
-      class_name.atoms().begin(),
-      class_name.atoms().end());
-  class_name = c10::QualifiedName(std::move(new_class_name));
-
+  // If the name is unqualified, prepend a `__torch__`, similar to what Python
+  // does with `__main__` for top-level code.
+  if (class_name.prefix().empty()) {
+    class_name = c10::QualifiedName("__torch__", class_name.name());
+  }
   if (shouldMangle && cu->get_class(class_name) != nullptr) {
     class_name = cu->mangle(class_name);
   }
@@ -52,7 +48,8 @@ ModulePtr Module::module_object() const {
   if (!module_value_) {
     // User has created a Model without assigning it to something already
     // loaded. This is done in tests, and when using the .define method.
-    module_value_ = create_module_object("__main__", std::make_shared<CompilationUnit>());
+    module_value_ =
+        create_module_object("Module", std::make_shared<CompilationUnit>());
   }
   return module_value_;
 }
