@@ -13,12 +13,12 @@ struct Call {
 };
 
 struct CAFFE2_API ErrorReport : public std::exception {
-  ErrorReport(const ErrorReport& e);
+  CAFFE2_API ErrorReport(const ErrorReport& e);
 
-  ErrorReport();
-  explicit ErrorReport(SourceRange r);
-  explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
-  explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
+  CAFFE2_API ErrorReport();
+  explicit CAFFE2_API ErrorReport(SourceRange r);
+  explicit CAFFE2_API ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
+  explicit CAFFE2_API ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
 
   const char* what() const noexcept override;
 
@@ -26,8 +26,8 @@ struct CAFFE2_API ErrorReport : public std::exception {
     // These functions are used to report why a function was being compiled
     // (i.e. what was the call stack of user functions at compilation time that
     // led to this error)
-    CallStack(const std::string& name);
-    ~CallStack();
+    CAFFE2_API CallStack(const std::string& name);
+    CAFFE2_API ~CallStack();
 
     // Change the range that is relevant for the current function (i.e. after
     // each successful expression compilation, change it to the next expression)
