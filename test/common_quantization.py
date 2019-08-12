@@ -130,7 +130,7 @@ class QuantizationTestCase(TestCase):
         #
         # Once that's resolved we can remove `check_trace=False`
         traced = torch.jit.trace(orig_mod, calib_data[0][0], check_trace=False)
-        self._checkScriptable(orig_mod, traced, calib_data)
+        self._checkScriptable(orig_mod, traced, calib_data, check_save_load)
 
     # Call this twice: once for a scripted module and once for a traced module
     def _checkScriptable(self, orig_mod, script_mod, calib_data, check_save_load):

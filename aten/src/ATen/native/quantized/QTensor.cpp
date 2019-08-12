@@ -151,5 +151,27 @@ Tensor quantized_clone(const Tensor& self) {
   return dst;
 }
 
+bool quantized_equal(const Tensor& self, const Tensor& other) {
+  if (self.q_scale() != other.q_scale()) {
+    return false;
+  }
+  if (self.q_zero_point() != other.q_zero_point()) {
+    return false;
+  }
+  if (self.sizes() != other.sizes()) {
+    return false;
+  }
+  if (self.element_size() != other.element_size()) {
+    return false;
+  }
+
+  auto self_contig = self.contiguous();
+  auto other_contig = other.contiguous();
+
+  void *self_data = self_contig.data_ptr();
+  void *other_data = other_contig.data_ptr();
+  return 0 == memcmp(self_data, other_data, self.numel() * self.element_size());
+}
+
 } // namespace native
 } // namespace at

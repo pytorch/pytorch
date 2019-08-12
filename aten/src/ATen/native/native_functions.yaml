@@ -4183,6 +4183,7 @@
   dispatch:
     CPU: legacy::cpu::_th_equal
     CUDA: legacy::cuda::_th_equal
+    QuantizedCPU: quantized_equal
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

@@ -105,7 +105,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertTrue(hasattr(loaded_qlinear, 'weight'))
         self.assertEqual(qlinear.weight(), loaded_qlinear.weight())
         self.assertEqual(qlinear.weight(), torch.ops.quantized.fbgemm_linear_unpack(qlinear._packed_weight))
-        Z_q2 = qlinear(X_q)
+        Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
         # test serialization of module directly
@@ -182,10 +182,10 @@ class ModuleAPITest(QuantizationTestCase):
                                      groups=g,
                                      bias=use_bias,
                                      padding_mode='zeros')
-        conv_under_test.weight = qw
+        conv_under_test.set_weight(qw)
         conv_under_test.bias = qb
-        conv_under_test.scale = torch.tensor([scale], dtype=torch.double)
-        conv_under_test.zero_point = torch.tensor([zero_point], dtype=torch.long)
+        conv_under_test.scale = scale
+        conv_under_test.zero_point = zero_point
 
         # Test members
         self.assertTrue(hasattr(conv_under_test, '_packed_weight'))
@@ -193,7 +193,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertTrue(hasattr(conv_under_test, 'zero_point'))
 
         # Test properties
-        self.assertEqual(qw, conv_under_test.weight)
+        self.assertEqual(qw, conv_under_test.weight())
         self.assertEqual(qb, conv_under_test.bias)
         self.assertEqual(scale, conv_under_test.scale)
         self.assertEqual(zero_point, conv_under_test.zero_point)
@@ -220,8 +220,64 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(result_reference, result_under_test,
                          message="Tensors are not equal.")
 
+        # Test serialization of quantized Conv Module using state_dict
+        model_dict = conv_under_test.state_dict()
+        self.assertEqual(model_dict['weight'], qw)
+        if use_bias:
+            self.assertEqual(model_dict['bias'], qb)
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(model_dict, f)
+            f.seek(0)
+            loaded_dict = torch.load(f)
+        for key in model_dict:
+            self.assertEqual(loaded_dict[key], model_dict[key])
+        if use_fused:
+            loaded_conv_under_test = ConvReLU2d(in_channels=iC,
+                                                out_channels=oC,
+                                                kernel_size=(kH, kW),
+                                                stride=1,
+                                                padding=0,
+                                                dilation=1,
+                                                groups=g,
+                                                bias=use_bias,
+                                                padding_mode='zeros')
+        else:
+            loaded_conv_under_test = Conv2d(in_channels=iC,
+                                            out_channels=oC,
+                                            kernel_size=(kH, kW),
+                                            stride=1,
+                                            padding=0,
+                                            dilation=1,
+                                            groups=g,
+                                            bias=use_bias,
+                                            padding_mode='zeros')
+        loaded_conv_under_test.load_state_dict(loaded_dict)
+        self.assertEqual(loaded_conv_under_test.weight(), conv_under_test.weight())
+        if use_bias:
+            self.assertEqual(loaded_conv_under_test.bias, conv_under_test.bias)
+        self.assertEqual(loaded_conv_under_test.scale, conv_under_test.scale)
+        self.assertEqual(loaded_conv_under_test.zero_point, conv_under_test.zero_point)
+        self.assertTrue(dir(loaded_conv_under_test) == dir(conv_under_test))
+        self.assertTrue(hasattr(conv_under_test, '_packed_weight'))
+        self.assertTrue(hasattr(loaded_conv_under_test, '_packed_weight'))
+        self.assertTrue(hasattr(conv_under_test, 'weight'))
+        self.assertTrue(hasattr(loaded_conv_under_test, 'weight'))
+        self.assertEqual(loaded_conv_under_test.weight(), conv_under_test.weight())
+        self.assertEqual(loaded_conv_under_test.weight(), qw)
+        loaded_result = loaded_conv_under_test(qX)
+        self.assertEqual(loaded_result, result_reference)
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(conv_under_test, f)
+            f.seek(0)
+            loaded_conv = torch.load(f)
+
+        self.assertEqual(conv_under_test.bias, loaded_conv.bias)
+        self.assertEqual(conv_under_test.scale, loaded_conv.scale)
+        self.assertEqual(conv_under_test.zero_point, loaded_conv.zero_point)
+
         # JIT testing
-        self.checkScriptable(conv_under_test, list(zip([qX], [result_reference])))
+        self.checkScriptable(conv_under_test, list(zip([qX], [result_reference])), check_save_load=True)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.
