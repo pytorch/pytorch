@@ -605,12 +605,8 @@ class ScriptModuleSerializer2 : public ScriptModuleSerializer {
     // Serialize all code info.
     convertClass(module.type());
     // Then pickle the module
-    Pickler pickler(&tensor_table_);
-    pickler.protocol();
-    pickler.pushIValue(module.module_object());
-    pickler.stop();
-    writer_.writeRecord(
-        "data.pkl", pickler.stack().data(), pickler.stack().size());
+    auto data = pickle(module.module_object(), &tensor_table_);
+    writer_.writeRecord("data.pkl", data.data(), data.size());
 
     writeTensorTable(model_def);
     writeLibs(model_def);
@@ -671,8 +667,7 @@ class ScriptModuleSerializer2 : public ScriptModuleSerializer {
       std::stringstream debugFilename;
       debugFilename << filename << ".debug_pkl";
       SourceRangePickler source_range_pickler;
-      source_range_pickler.pickle(debugInfo);
-      const auto& range_data = source_range_pickler.get_data();
+      const auto& range_data = source_range_pickler.pickle(debugInfo);
 
       writer_.writeRecord(
           debugFilename.str(),
