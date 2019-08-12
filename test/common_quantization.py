@@ -52,6 +52,7 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
             optimizer.zero_grad()
             output = model(data)
             loss = loss_fn(output, target)
+            loss.backward()
             optimizer.step()
             train_loss += loss.item()
             _, predicted = torch.max(output, 1)
