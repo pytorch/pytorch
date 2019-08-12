@@ -31,8 +31,8 @@ class Quantize(Module):
         self._dtype = out_dtype
 
     def forward(self, X):
-        return torch.quantize_linear(X, self._scale.item(),
-                                     self._zero_point.item(), self._dtype)
+        return torch.quantize_linear(X, float(self._scale),
+                                     int(self._zero_point), self._dtype)
 
     @staticmethod
     def from_float(mod):
@@ -126,8 +126,8 @@ class Linear(NNLinear):
         Y_q = torch.ops.quantized.fbgemm_linear(
             x, self._packed_weight,
             self.bias,
-            self.scale,
-            self.zero_point)
+            float(self.scale),
+            int(self.zero_point))
         return Y_q
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):

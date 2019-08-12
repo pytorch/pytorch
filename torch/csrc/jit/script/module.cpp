@@ -29,7 +29,7 @@ static ModulePtr create_module_object(
     class_name = cu->mangle(class_name);
   }
   auto cls = ClassType::create(std::move(class_name), cu, /*is_module=*/true);
-  cu->register_class(cls);
+  cu->register_type(cls);
   return c10::ivalue::Object::create(
       c10::StrongTypePtr(std::move(cu), std::move(cls)), 0);
 }
