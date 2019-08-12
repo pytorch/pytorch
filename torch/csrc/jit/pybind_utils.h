@@ -93,9 +93,6 @@ inline MatchTypeReturn tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
     auto tensor = py::cast<at::Tensor>(input);
-    if (tensor.is_sparse()) {
-      return MatchTypeReturn("Sparse tensors not supported");
-    }
     if (tensor.is_mkldnn()) {
       // mkldnn tensor as opaque tensor doesn't have strides, so we can
       // not create a CompleteTensorType
@@ -328,7 +325,11 @@ inline IValue toIValue(
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
-        AT_ERROR("sparse tensors not supported");
+        AT_WARN(
+            "Using sparse tensors in TorchScript is experimental. Many optimization "
+            "pathways have not been thoroughly tested with sparse tensors. Please "
+            "include the fact that the network is running sparse tensors in any bug "
+            "reports submitted.");
       }
       return var;
     }
@@ -539,7 +540,11 @@ inline py::object toPyObject(IValue&& ivalue) {
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.is_sparse()) {
-      AT_ERROR("sparse tensors not supported");
+      AT_WARN(
+          "Using sparse tensors in TorchScript is experimental. Many optimization "
+          "pathways have not been thoroughly tested with sparse tensors. Please "
+          "include the fact that the network is running sparse tensors in any bug "
+          "reports submitted.");
     }
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
