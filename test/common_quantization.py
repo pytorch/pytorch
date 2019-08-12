@@ -7,12 +7,22 @@ r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
 
+import hypothesis
+import io
 import torch
 import torch.nn.quantized as nnq
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, QConfig, default_observer, default_weight_observer, \
     default_qat_qconfig
+
+# Disable deadline testing if this version of hypthesis supports it, otherwise
+# just return the original function
+def no_deadline(fn):
+    try:
+        return hypothesis.settings(deadline=None)(fn)
+    except hypothesis.errors.InvalidArgument:
+        return fn
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -107,6 +117,33 @@ class QuantizationTestCase(TestCase):
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
 
+    # calib_data follows the same schema as calib_data for
+    # test_only_eval_fn, i.e. (input iterable, output iterable)
+    def checkScriptable(self, orig_mod, calib_data, check_save_load=False):
+        scripted = torch.jit.script(orig_mod)
+        self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
+
+    # Call this twice: once for a scripted module and once for a traced module
+    def _checkScriptable(self, orig_mod, script_mod, calib_data, check_save_load):
+        self._checkModuleCorrectnessAgainstOrig(orig_mod, script_mod, calib_data)
+
+        # Test save/load
+        buffer = io.BytesIO()
+        torch.jit.save(script_mod, buffer)
+
+        buffer.seek(0)
+        loaded_mod = torch.jit.load(buffer)
+
+        # Pending __get_state_ and __set_state__ support
+        # See tracking task https://github.com/pytorch/pytorch/issues/23984
+        if check_save_load:
+            self._checkModuleCorrectnessAgainstOrig(orig_mod, loaded_mod, calib_data)
+
+    def _checkModuleCorrectnessAgainstOrig(self, orig_mod, test_mod, calib_data):
+        for (inp, _) in calib_data:
+            ref_output = orig_mod(inp)
+            scripted_output = test_mod(inp)
+            self.assertEqual(scripted_output, ref_output)
 
 # Below are a series of neural net models to use in testing quantization
 class SingleLayerLinearModel(torch.nn.Module):
