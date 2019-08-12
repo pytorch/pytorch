@@ -2543,8 +2543,8 @@ add_docstr(torch.logical_not,
            r"""
 logical_not(input, out=None) -> Tensor
 
-Computes the element-wise logical NOT of the given input tensor. The output tensor always have the bool dtype. If the
-input tensor is not a bool tensor, zeros are treated as ``False`` and non-zeros are treated as ``True``.
+Computes the element-wise logical NOT of the given input tensor. If not specified, the output tensor will have the bool
+dtype. If the input tensor is not a bool tensor, zeros are treated as ``False`` and non-zeros are treated as ``True``.
 
 Args:
     {input}
