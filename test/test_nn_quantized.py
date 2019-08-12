@@ -277,7 +277,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(conv_under_test.zero_point, loaded_conv.zero_point)
 
         # JIT testing
-        self.checkScriptable(conv_under_test, zip([qX], [result_reference]))
+        self.checkScriptable(conv_under_test, zip([qX], [result_reference]), check_save_load=True)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.
