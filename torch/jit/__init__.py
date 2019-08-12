@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import torch._C
 from torch.autograd import Variable, function
 from torch.serialization import validate_cuda_device
@@ -1545,7 +1543,7 @@ if _enabled:
         """
         def __init__(self, optimize=None, _qualified_name=None, _compilation_unit=None, _cpp_module=None):
             if _qualified_name is None:
-                _qualified_name = type(self).__name__
+                _qualified_name = _jit_internal._qualified_name(self.__class__)
             if _compilation_unit is None:
                 _compilation_unit = _python_cu
             if optimize is not None:
@@ -1664,17 +1662,7 @@ if _enabled:
             self._c._define(self, lang, rcb)
 
         def copy(self):
-            m = ScriptModule()
-
-            def module_lookup(names):
-                curr = m
-                for name in names:
-                    if not hasattr(curr, name):
-                        setattr(curr, name, ScriptModule())
-                    curr = getattr(curr, name)
-                return curr._c
-            self._c._copy_into(module_lookup, {}, [])
-            return m
+            return ScriptModule(_cpp_module=self._c._clone())
 
         def __getstate__(self):
             raise pickle.PickleError(

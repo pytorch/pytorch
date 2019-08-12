@@ -157,6 +157,8 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
     return "module";
   }
 
+  Value* asValue(const SourceRange& loc, Function& m) override;
+
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
