@@ -2,12 +2,6 @@ import torch
 from torch._ops import ops
 
 
-_VALID_OP_NAMES = {
-    'add',
-    'cat'
-}
-
-
 class FloatFunctional(torch.nn.Module):
     r"""State collector class for float operatitons.
 
@@ -19,13 +13,9 @@ class FloatFunctional(torch.nn.Module):
         This class does not provide a ``forward`` hook. Instead, you must use
         one of the underlying functions (e.g. ``add``).
 
-    Args:
-        op_name(str): The name of the operation this wrapper is bound to.
-                      See below for valid options.
-
     .. Examples::
 
-        >>> f_add = FloatFunctional('add')
+        >>> f_add = FloatFunctional()
         >>> a = torch.tensor(3.0)
         >>> b = torch.tensor(4.0)
         >>> f_add.add(a, b)  # Equivalent to ``torch.add(3, 4)
@@ -34,12 +24,9 @@ class FloatFunctional(torch.nn.Module):
         - add
         - cat
     """
-    def __init__(self, op_name):
+    def __init__(self):
         super(FloatFunctional, self).__init__()
-        if op_name not in _VALID_OP_NAMES:
-            raise NotImplementedError("{} not supported.".format(op_name))
         self.observer = torch.nn.Identity()
-        self.op_name = op_name
 
     def forward(self, x):
         raise RuntimeError("FloatFunctional is not intended to use the " +
@@ -48,20 +35,14 @@ class FloatFunctional(torch.nn.Module):
     r"""Operation equivalent to ``torch.add``"""
     def add(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
-        assert self.op_name == 'add', \
-            "Running add while initialized as {}".format(self.op_name)
         r = torch.add(x, y)
         # TODO: Fix for QAT.
         self.observer(r)
         return r
 
     r"""Operation equivalent to ``torch.cat``"""
-    def cat(self, x, dim=None):
-        # type: (List[Tensor], Optional[int]) -> Tensor
-        assert self.op_name == 'cat', \
-            "Running cat while initialized as {}".format(self.op_name)
-        if dim is None:
-            dim = 0
+    def cat(self, x, dim=0):
+        # type: (List[Tensor], int) -> Tensor
         r = torch.cat(x, dim=dim)
         self.observer(r)
         return r
@@ -78,10 +59,6 @@ class QFunctional(torch.nn.Module):
         This class does not provide a ``forward`` hook. Instead, you must use
         one of the underlying functions (e.g. ``add``).
 
-    Args:
-        op_name(str): The name of the operation this wrapper is bound to.
-                      See below for valid options.
-
     .. Examples::
 
         >>> q_add = QFunctional('add')
@@ -94,11 +71,8 @@ class QFunctional(torch.nn.Module):
         - cat
 
     """
-    def __init__(self, op_name):
+    def __init__(self):
         super(QFunctional, self).__init__()
-        if op_name not in _VALID_OP_NAMES:
-            raise NotImplementedError("{} not supported.".format(op_name))
-        self.op_name = op_name
 
     def forward(self, x):
         raise RuntimeError("Functional is not intended to use the " +
@@ -106,17 +80,12 @@ class QFunctional(torch.nn.Module):
 
     r"""Operation equivalent to ``torch.ops.quantized.add``"""
     def add(self, x, y):
-        # type: (Tensor, Tensor) -> Tensor
-        assert self.op_name == 'add', \
-            "Running add while initialized as {}".format(self.op_name)
         return ops.quantized.add(x, y, scale=self.scale,
                                  zero_point=self.zero_point)
 
     r"""Operation equivalent to ``torch.ops.quantized.cat``"""
     def cat(self, x, dim=0):
         # type: (List[Tensor], int) -> Tensor
-        assert self.op_name == 'cat', \
-            "Running cat while initialized as {}".format(self.op_name)
         return ops.quantized.cat(x, scale=self.scale,
                                  zero_point=self.zero_point, axis=dim)
 
@@ -125,7 +94,7 @@ class QFunctional(torch.nn.Module):
         assert type(mod) == FloatFunctional,\
             "QFunctional.from_float expects an instance of FloatFunctional"
         scale, zero_point = mod.observer.calculate_qparams()[:2]
-        new_mod = QFunctional(mod.op_name)
+        new_mod = QFunctional()
         new_mod.scale = scale
         new_mod.zero_point = zero_point
         return new_mod
