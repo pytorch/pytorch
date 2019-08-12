@@ -1470,12 +1470,14 @@ if _enabled:
                 traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
 
             .. note::
-                Tracing a standalone function will construct a ``torch._C.Function``
-                Tracing ``nn.Module``s ``forward`` will construct a ``ScriptModule``
+                Tracing a standalone function will construct a ``torch._C.Function``, but
+                tracing an ``nn.Module``\s ``forward`` will construct a ``ScriptModule``
 
             Example (tracing an existing module)::
 
                 import torch
+                import torch.nn as nn
+
                 class Net(nn.Module):
                     def __init__(self):
                         super(Net, self).__init__()
@@ -1492,21 +1494,22 @@ if _enabled:
                 example_weight = torch.rand(1, 1, 3, 3)
                 example_forward_input = torch.rand(1, 1, 3, 3)
 
+                inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
+
                 # all three trace calls below are equivalent
                 # and construct `ScriptModule` with a single `forward` method
-                module = torch.jit.trace(n.forward, example_forward_input) # produces ScriptModule with `forward`
-                module = torch.jit.trace(n, example_forward_input) # produces ScriptModule with `forward`
-                module = torch.jit.trace_module(n, inputs) # produces ScriptModule with `forward`
+                module = torch.jit.trace(n.forward, example_forward_input)
+                module = torch.jit.trace(n, example_forward_input)
+                module = torch.jit.trace_module(n, inputs)
 
-                inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
                 # trace_module produces `ScriptModule` with two methods:
                 # `forward` and `weighted_kernel_sum`
-                module = torch.jit.trace_module(n, inputs, True, True)
+                module = torch.jit.trace_module(n, inputs)
+
 
             .. note::
 
-                * The first three trace/trace_module calls are equivalent and return ``ScriptModule``
-                with a single ``forward`` method.
+                * The first three trace/trace_module calls are equivalent and return ``ScriptModule`` with a single ``forward`` method.
                 * The last ``trace_module`` call produces a ``ScriptModule`` with two methods.
 
                 Tracing only records operations done when the given function is run on the given
