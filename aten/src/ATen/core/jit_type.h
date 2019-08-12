@@ -842,12 +842,13 @@ struct CAFFE2_API DictType : public Type {
       case TypeKind::IntType:
       case TypeKind::FloatType:
       case TypeKind::StringType:
+      case TypeKind::TensorType:
         return DictTypePtr(new DictType(key, value));
       default:
         AT_ERROR(
             "Cannot create dict for key type '",
             key->str(),
-            "', only int, float, and string keys are supported");
+            "', only int, float, Tensor and string keys are supported");
     }
   }
 
