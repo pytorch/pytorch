@@ -984,7 +984,7 @@ def index_select(g, self, dim, index):
     if not sym_help._is_value(index_const):
         # Index is a constant scalar. Make it a size 1 constant tensor.
         index = g.op("Constant", value_t=torch.LongTensor([index_const]))
-    elif index_dim:
+    elif index_dim is not None:
         if index_dim == 0:
             # Index is a scalar. Reshape it to a size 1 tensor. 
             index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
@@ -1819,7 +1819,7 @@ def index(g, self, index):
             return index_select(g, self, adv_idx_indices[0], indices[adv_idx_indices[0]])
         else:
             rank = self.type().dim()
-            if not rank:
+            if rank is None:
                 raise NotImplementedError("Unsupported aten::index operator of advanced indexing on tensor of unknown rank, " +
                                           "try turning on shape and type propagate during export: " +
                                           "torch.onnx._export(..., propagate=True).")
