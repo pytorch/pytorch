@@ -44,7 +44,7 @@ namespace native {
   inline Tensor tensor(T value) {                                             \
     return native::tensor(ArrayRef<T>(value));                                \
   }
-AT_FORALL_SCALAR_TYPES_AND_BOOL(TENSOR)
+AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, TENSOR)
 #undef TENSOR
 
 ${native_function_declarations}
