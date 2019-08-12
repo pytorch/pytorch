@@ -683,7 +683,7 @@ def trace(func,
           _module_class=None,
           _compilation_unit=_python_cu):
     """
-    Trace a function and return an executable ``ScriptModule`` or ``torch.jit._C.Function``
+    Trace a function and return an executable ``ScriptModule`` or ``torch._C.Function``
     that will be optimized using just-in-time compilation.
 
     .. warning::
@@ -749,9 +749,10 @@ def trace(func,
         example_weight = torch.rand(1, 1, 3, 3)
         example_forward_input = torch.rand(1, 1, 3, 3)
         n = Net()
+
         # the following two calls are equivalent
-        module = torch.jit.trace_module(n, example_forward_input)
-        module = torch.jit.trace_module(n.forward, example_forward_input)
+        module = module = torch.jit.trace_module(n, {'forward': example_forward_input})
+        module = torch.jit.trace(n, example_forward_input)
 
     """
     if not _enabled:
