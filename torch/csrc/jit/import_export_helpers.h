@@ -13,13 +13,13 @@ namespace ImportExportHelpers {
 //
 // Qualifier is like: foo.bar.baz
 // Returns: libs/foo/bar/baz.py
-std::string qualifierToPath(const std::string& qualifier);
+std::string qualifierToPath(const std::string& qualifier, size_t proto_version);
 
 // Convert a source file path to a class type's qualifier name.
 //
 // Path is like: libs/foo/bar/baz.py
 // Returns: foo.bar.baz
-std::string pathToQualifier(const std::string& classPath);
+std::string pathToQualifier(const std::string& classPath, size_t proto_version);
 
 } // namespace ImportExportHelpers
 } // namespace jit
