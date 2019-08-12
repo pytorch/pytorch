@@ -1,3 +1,6 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+
 r"""
 `torch.distributed.launch` is a module that spawns up multiple distributed
 training processes on each of the training nodes.
@@ -16,7 +19,7 @@ aggregated communication bandwidth.
 In both cases of single-node distributed training or multi-node distributed
 training, this utility will launch the given number of processes per node
 (``--nproc_per_node``). If used for GPU training, this number needs to be less
-or euqal to the number of GPUs on the current system (``nproc_per_node``),
+or equal to the number of GPUs on the current system (``nproc_per_node``),
 and each process will be operating on a single GPU from *GPU 0 to
 GPU (nproc_per_node - 1)*.
 
@@ -190,7 +193,6 @@ def parse_args():
     parser.add_argument('training_script_args', nargs=REMAINDER)
     return parser.parse_args()
 
-
 def main():
     args = parse_args()
 
@@ -204,6 +206,15 @@ def main():
     current_env["WORLD_SIZE"] = str(dist_world_size)
 
     processes = []
+
+    if 'OMP_NUM_THREADS' not in os.environ and args.nproc_per_node > 1:
+        current_env["OMP_NUM_THREADS"] = str(1)
+        print("*****************************************\n"
+              "Setting OMP_NUM_THREADS environment variable for each process "
+              "to be {} in default, to avoid your system being overloaded, "
+              "please further tune the variable for optimal performance in "
+              "your application as needed. \n"
+              "*****************************************".format(current_env["OMP_NUM_THREADS"]))
 
     for local_rank in range(0, args.nproc_per_node):
         # each process's rank
@@ -228,7 +239,7 @@ def main():
         process.wait()
         if process.returncode != 0:
             raise subprocess.CalledProcessError(returncode=process.returncode,
-                                                cmd=process.args)
+                                                cmd=cmd)
 
 
 if __name__ == "__main__":

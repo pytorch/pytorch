@@ -93,9 +93,13 @@ struct ConstantTableValue : public SugaredValue {
     if (offset < 0 || size_t(offset) >= constants_.size()) {
       throw ErrorReport(loc) << "constant index " << offset
                              << " is out of bounds (constant table has "
-                             << constants_.size() << " entries).";
+                             << constants_.size() << " entries)";
     }
     Value* value = m.graph()->insertConstant(constants_[offset], nullptr, loc);
+
+    // specializing tensor type on compilation messes up typing relations
+    value->setType(unshapedType(value->type()));
+
     return std::make_shared<SimpleValue>(value);
   }
 
@@ -107,16 +111,16 @@ struct ConstantTableValue : public SugaredValue {
 // constants.
 struct SourceResolver : public Resolver {
   explicit SourceResolver(
-      const CompilationUnit& lib_cu,
+      std::shared_ptr<CompilationUnit> cu,
       size_t version,
-      const std::vector<at::Tensor>& constant_table)
-      : lib_cu_(lib_cu) {
+      const std::vector<at::Tensor>& tensor_table)
+      : cu_(std::move(cu)) {
     env_ = {
         {"torch", std::make_shared<BuiltinModule>("aten", version)},
         {"ops", std::make_shared<OpsValue>(version)},
         // Constants present in the model. Used to resolve "CONSTANTS.n" to the
         // actual value
-        {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
+        {"CONSTANTS", std::make_shared<ConstantTableValue>(tensor_table)},
         {"fork", std::make_shared<ForkValue>()},
         {"annotate", std::make_shared<AnnotateValue>()},
         {"uninitialized", std::make_shared<UninitializedValue>()},
@@ -140,74 +144,163 @@ struct SourceResolver : public Resolver {
 
     if (name == "__torch__") {
       return std::make_shared<ClassNamespaceValue>(
-          c10::QualifiedName(name), lib_cu_);
+          c10::QualifiedName(name), *cu_);
     }
     return nullptr;
   }
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
-    return lib_cu_.get_type(c10::QualifiedName(name));
+    return cu_->get_type(c10::QualifiedName(name));
   }
 
  private:
   // Compilation unit to look classes up in
-  const CompilationUnit& lib_cu_;
+  std::shared_ptr<CompilationUnit> cu_;
   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
 };
 
 struct SourceImporter {
   SourceImporter(
-      const CompilationUnit& lib_cu,
+      const std::shared_ptr<CompilationUnit> cu,
       const std::shared_ptr<Source>& src,
-      const std::vector<at::Tensor>& constant_table,
+      const std::vector<at::Tensor>& tensor_table,
       const std::function<void(const std::string&)>& import_callback)
       : p_(src),
-        lib_cu_(lib_cu),
+        cu_(cu),
         import_callback_(import_callback),
-        constant_table_(constant_table) {
+        tensor_table_(tensor_table) {
     version_ = parseVersionNumber();
-    resolver_ =
-        std::make_shared<SourceResolver>(lib_cu_, version_, constant_table_);
+    resolver_ = std::make_shared<SourceResolver>(cu_, version_, tensor_table_);
   }
 
   void checkVersionNumber() {
     // note: this cannot be called in the constructor because it may throw
     if (version_ > CURRENT_OP_VERSION_SET) {
       throw ErrorReport(p_.lexer().cur().range)
-          << "Attempting to load a script generated from a newer version of PyTorch. Maximum supported TorchScript version is "
+          << "Attempting to load a script generated from a newer version of "
+          << "PyTorch. Maximum supported TorchScript version is "
           << CURRENT_OP_VERSION_SET
-          << " but the script being loaded is version " << version_ << ".";
+          << " but the script being loaded is version " << version_;
     }
   }
 
-  void importLibs(CompilationUnit& owner, const std::string& class_qualifier) {
+  void importLibs(std::shared_ptr<CompilationUnit> owner, const std::string& class_qualifier) {
     checkVersionNumber();
     auto& L = p_.lexer();
 
     while (L.cur().kind != TK_EOF) {
       parseImportsAndDoCallback();
 
-      std::vector<Def> definitions;
-      std::vector<ResolverPtr> resolvers;
       auto parsed_treeref = p_.parseClassLike();
       if (parsed_treeref->kind() == TK_CLASS_DEF) {
         auto class_def = ClassDef(parsed_treeref);
-        for (const auto& method_def : class_def.defs()) {
-          definitions.emplace_back(method_def);
-          resolvers.emplace_back(resolver_);
+        bool is_module = class_def.superclass().present();
+        if (is_module &&
+            Var(class_def.superclass().get()).name().name() != "Module") {
+          throw ErrorReport(class_def.range())
+              << "Torchscript does not support class inheritance.";
+        }
+        const auto qualified_classname = QualifiedName(
+            QualifiedName(class_qualifier), class_def.name().name());
+        auto class_type = ClassType::create(
+            c10::QualifiedName(qualified_classname), owner, is_module);
+
+        std::vector<Def> methods;
+        std::vector<ResolverPtr> resolvers;
+        std::vector<Assign> attributes;
+
+        // Module-specific: which attrs are parameters?
+        std::unordered_set<std::string> parameter_names;
+        // Process statements, splitting things into attribute and method
+        // definitions.
+        for (const auto& statement : class_def.body()) {
+          switch (statement.kind()) {
+            case TK_ASSIGN: {
+              const auto assign = Assign(statement);
+              switch (assign.lhs().kind()) {
+                case TK_VAR: {
+                  const auto name = Var(assign.lhs()).name().name();
+                  if (name == "__parameters__") {
+                    // Populate the module parameter list. This is a field that
+                    // looks like:
+                    //   __parameters__ = ["foo", "bar", "baz"]
+                    // which tells us which attributes are module parameters.
+                    TORCH_INTERNAL_ASSERT(
+                        is_module,
+                        "Assignments in class body only "
+                        "supported on modules right now");
+                    const auto param_list =
+                        ListLiteral(assign.rhs().get()).inputs();
+                    for (const auto& param : param_list) {
+                      parameter_names.insert(StringLiteral(param).text());
+                    }
+                  } else if (name == "__annotations__") {
+                    // This is to initialize the annotations dict, just ignore.
+                    continue;
+                  } else {
+                    // This is a regular attribute assignment, of the form:
+                    //   foo : Tensor
+                    attributes.push_back(assign);
+                  }
+                } break;
+                case TK_SUBSCRIPT: {
+                  // This is a special attribute assignment where the attribute
+                  // is not a valid python, identifier. Looks like:
+                  //    __annotations__["0"] = Tensor
+                  const auto lhs = Subscript(assign.lhs());
+                  TORCH_INTERNAL_ASSERT(
+                      Var(lhs.value()).name().name() == "__annotations__");
+                  TORCH_INTERNAL_ASSERT(lhs.subscript_exprs().size() == 1);
+                  attributes.push_back(assign);
+                } break;
+                default: {
+                  TORCH_INTERNAL_ASSERT(
+                      false,
+                      "Unexpected statement kind in module metadata: ",
+                      kindToString(statement.kind()));
+                }
+              }
+            } break;
+            case TK_DEF: {
+              methods.emplace_back(Def(statement));
+              resolvers.push_back(resolver_);
+            } break;
+            default: {
+              TORCH_INTERNAL_ASSERT(
+                  false,
+                  "Unexpected statement kind in class body: ",
+                  kindToString(statement.kind()));
+            }
+          }
         }
 
-        auto cu = std::make_shared<CompilationUnit>();
-        const auto qualified_classname =
-            class_qualifier + "." + class_def.name().name();
-        auto class_type =
-            ClassType::create(c10::QualifiedName(qualified_classname), cu);
-        owner.register_class(class_type);
-        auto self = [&](Value* v) {
-          v->setType(class_type);
-          return std::make_shared<SimpleValue>(v);
-        };
-        cu->define(definitions, resolvers, self);
+        // Populate class attributes
+        ScriptTypeParser type_parser(resolver_);
+        for (const auto& assign : attributes) {
+          switch (assign.lhs().kind()) {
+            case TK_VAR: {
+              const auto name = Var(assign.lhs()).name().name();
+              TORCH_INTERNAL_ASSERT(name != "__parameters__");
+              const auto type =
+                  type_parser.parseTypeFromExpr(assign.type().get());
+              const bool is_parameter = parameter_names.count(name);
+              class_type->addAttribute(name, type, is_parameter);
+            } break;
+            case TK_SUBSCRIPT: {
+              const auto name =
+                  StringLiteral(Subscript(assign.lhs()).subscript_exprs()[0])
+                      .text();
+              const auto type =
+                  type_parser.parseTypeFromExpr(assign.rhs().get());
+              const bool is_parameter = parameter_names.count(name);
+              class_type->addAttribute(name, type, is_parameter);
+            }
+          }
+        }
+
+        owner->register_type(class_type);
+        const auto self = SimpleSelf(class_type);
+        owner->define(qualified_classname, methods, resolvers, &self);
       } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
         auto named_tuple_def = NamedTupleDef(parsed_treeref);
 
@@ -234,8 +327,9 @@ struct SourceImporter {
         auto tt = TupleType::create(
             field_types,
             qualified_name,
-            TupleType::namedTupleSchemaFromNamesAndTypes(qualified_name, field_names, field_types));
-        owner.register_class(tt);
+            TupleType::namedTupleSchemaFromNamesAndTypes(
+                qualified_name, field_names, field_types));
+        owner->register_type(tt);
       } else {
         TORCH_INTERNAL_ASSERT(
             false,
@@ -245,7 +339,9 @@ struct SourceImporter {
     }
   }
 
-  void importFunctions(CompilationUnit& cu, const Self& self) {
+  void importFunctions(
+      const c10::optional<c10::QualifiedName>& prefix,
+      const Self* self) {
     checkVersionNumber();
     parseImportsAndDoCallback();
 
@@ -256,7 +352,7 @@ struct SourceImporter {
       definitions.emplace_back(def);
       resolvers.emplace_back(resolver_);
     }
-    cu.define(definitions, resolvers, self);
+    cu_->define(prefix, definitions, resolvers, self);
   }
 
   size_t parseVersionNumber() {
@@ -291,7 +387,7 @@ struct SourceImporter {
       imports.push_back(str);
     }
 
-    // Call the callback to actually compile them
+    // Call theregister_typectually compile them
     for (const auto& import : imports) {
       if (import_callback_) {
         import_callback_(import);
@@ -302,52 +398,47 @@ struct SourceImporter {
  private:
   Parser p_;
   size_t version_;
-  const CompilationUnit& lib_cu_;
+  std::shared_ptr<CompilationUnit> cu_;
   const std::function<void(const std::string&)>& import_callback_;
-  const std::vector<at::Tensor>& constant_table_;
+  const std::vector<at::Tensor>& tensor_table_;
   std::shared_ptr<SourceResolver> resolver_;
 };
 
 void import_functions(
-    const CompilationUnit& lib_cu,
-    CompilationUnit& cu,
+    const c10::optional<c10::QualifiedName>& prefix,
+    std::shared_ptr<CompilationUnit> cu,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& constant_table,
-    const Self& self,
+    const std::vector<at::Tensor>& tensor_table,
+    const Self* self,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(lib_cu, src, constant_table, import_callback);
-  importer.importFunctions(cu, self);
+  SourceImporter importer(std::move(cu), src, tensor_table, import_callback);
+  importer.importFunctions(prefix, self);
 }
 
-void import_methods(
-    const CompilationUnit& lib_cu,
-    const std::shared_ptr<Module>& mod,
+void LEGACY_import_methods(
+    const Module& mod,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const std::function<void(const std::string&)>& import_callback) {
-  auto self = [&](Value* v) {
-    v->setType(mod->module_object()->type());
-    return std::make_shared<SimpleValue>(v);
-  };
+  auto self = SimpleSelf(mod.type());
   import_functions(
-      lib_cu,
-      *mod->module_object()->type()->compilation_unit(),
+      mod.name(),
+      mod.class_compilation_unit(),
       src,
       constant_table,
-      self,
+      &self,
       import_callback);
 }
 
 void import_libs(
-    CompilationUnit& lib_cu,
+    std::shared_ptr<CompilationUnit> cu,
     const std::string& class_qualifier,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& constant_table,
+    const std::vector<at::Tensor>& tensor_table,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(lib_cu, src, constant_table, import_callback);
-  importer.importLibs(lib_cu, class_qualifier);
+  SourceImporter importer(cu, src, tensor_table, import_callback);
+  importer.importLibs(cu, class_qualifier);
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch

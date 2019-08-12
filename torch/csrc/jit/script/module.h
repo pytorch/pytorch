@@ -52,13 +52,15 @@ using ModulePtr = c10::intrusive_ptr<c10::ivalue::Object>;
 // classes use python method naming conventions
 
 struct Module;
-struct slot_list;
 
-using ModuleLookup =
-    std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
+template <typename T>
+struct slot_list_impl;
+using slot_list = slot_list_impl<Slot>;
+using module_list = slot_list_impl<Module>;
+using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 
 struct TORCH_API Method {
-  Method(ModulePtr owner, std::shared_ptr<Function> function);
+  Method(ModulePtr owner, Function* function);
 
   // the module that contains this method.
   Module owner() const;
@@ -102,33 +104,35 @@ struct TORCH_API Method {
   // Underlying unbound function
   // This is the _lowered_ function and is different than the
   // first-class function in class_compilation_unit()
-  std::shared_ptr<Function> function_;
+  Function* function_;
 };
-static void clearMethods(c10::ivalue::Object* self) {
-  self->type()->compilation_unit()->drop_all_functions();
-}
 
 struct TORCH_API Module {
-  Module(std::string class_name)
-      : module_value_(c10::ivalue::Object::create(
-            ClassType::create(
-                QualifiedName(std::move(class_name)),
-                std::make_shared<CompilationUnit>(),
-                /*is_module=*/true),
-            0,
-            clearMethods)) {}
-  Module() : Module("$Module") {}
+  explicit Module(c10::QualifiedName class_name);
+  Module(
+      c10::QualifiedName,
+      std::shared_ptr<CompilationUnit> cu,
+      bool shouldMangle = false);
+  // module_value_ null and will be lazily initialized if is needed
+  Module() {}
   Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
   ~Module() {}
 
-  // note this doesn't change the flags of existing methods just ones
-  // added afterward.
+  const c10::QualifiedName& name() const {
+    return *module_object()->type()->qualified_name_obj();
+  }
+
   void set_optimized(bool o) {
-    class_compilation_unit()->set_optimized(o);
+    AT_WARN(
+        "Module::set_optimized() is deprecated and has no effect. "
+        "Please use setGraphExecutorOptimize()");
   }
 
   bool is_optimized() const {
-    return class_compilation_unit()->is_optimized();
+    AT_WARN(
+        "Module::is_optimized() is deprecated and always returns true. "
+        "Please use getGraphExecutorOptimize()");
+    return true;
   }
 
   IValue forward(std::vector<IValue> inputs) {
@@ -159,11 +163,9 @@ struct TORCH_API Module {
       IValue ivalue) {
     set_or_add_slot(name, type, ivalue, EntityType::ATTRIBUTE);
   }
-  void register_module(
-      const std::string& name,
-      std::shared_ptr<Module> module) {
+  void register_module(const std::string& name, const Module& module) {
     set_or_add_slot(
-        name, module->type(), module->module_object(), EntityType::MODULE);
+        name, module.type(), module.module_object(), EntityType::MODULE);
   }
 
   void set_parameter(const std::string& name, at::Tensor v) {
@@ -192,12 +194,12 @@ struct TORCH_API Module {
     AT_ERROR("Method '", name, "' is not defined.");
   }
 
-  std::shared_ptr<Module> get_module(const std::string& name) const {
+  Module get_module(const std::string& name) const {
     auto obj = get_slot(name, EntityType::MODULE).value().toObject();
-    return std::make_shared<Module>(obj);
+    return Module(obj);
   }
 
-  std::vector<std::shared_ptr<Module>> get_modules() const;
+  module_list get_modules() const;
   slot_list get_slots() const;
   slot_list get_parameters() const;
   slot_list get_attributes() const;
@@ -205,8 +207,8 @@ struct TORCH_API Module {
 
   const std::vector<Method> get_methods() const {
     return fmap(
-        class_compilation_unit()->get_functions(),
-        [&](const std::shared_ptr<Function>& func) {
+        type()->methods(),
+        [&](Function* func) {
           return Method(module_object(), func);
         });
   }
@@ -224,25 +226,23 @@ struct TORCH_API Module {
     }
     return c10::nullopt;
   }
-  std::shared_ptr<Module> find_module(const std::string& name) const {
+  c10::optional<Module> find_module(const std::string& name) const {
     if (auto slot = find_slot(name, EntityType::MODULE)) {
-      return std::make_shared<Module>(slot->value().toObject());
-    }
-    return nullptr;
-  }
-  c10::optional<Method> find_method(const std::string& name) const {
-    if (const std::shared_ptr<Function>& fn =
-            class_compilation_unit()->find_function(name)) {
-      return Method(module_object(), fn);
+      return Module(slot->value().toObject());
     }
     return c10::nullopt;
   }
-  void apply(std::function<void(Module&)> fn) {
-    for (auto& submod : get_modules()) {
-      submod->apply(fn);
+  c10::optional<Method> find_method(const std::string& basename) const {
+    for (Function* fn : type()->methods()) {
+      if (fn->name() == basename) {
+        return Method(module_object(), fn);
+      }
+
     }
-    fn(*this);
+    return c10::nullopt;
   }
+  void apply(const std::function<void(Module&)>& fn);
+
   /// Enables "training" mode.
   void train(bool on = true);
   /// Calls train(false) to enable "eval" mode.
@@ -303,28 +303,19 @@ struct TORCH_API Module {
 
   void save(
       std::ostream& out,
-      const ExtraFilesMap& extra_files = ExtraFilesMap());
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
   void save(
       const std::string& filename,
-      const ExtraFilesMap& extra_files = ExtraFilesMap());
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
-  void copy_into(
-      const ModuleLookup& module_lookup,
-      // translate current module singleton type to new module
-      // singleton type.
-      std::unordered_map<TypePtr, TypePtr>& type_remap,
-      std::vector<std::string> names = {}) const;
-
-  void clone_method(
-      const Module& orig,
-      const std::string& name,
-      const std::unordered_map<TypePtr, TypePtr>& type_remap);
+  // Create a deep copy of this module.
+  Module clone() const;
 
   void clone_method(const Module& orig, const std::string& name);
 
   at::optional<EntityType> kind_of(const std::string& name) const {
-    if (auto fn = class_compilation_unit()->find_function(name)) {
+    if (find_method(name)) {
       return EntityType::METHOD;
     }
     if (auto offset = type()->findAttributeSlot(name)) {
@@ -333,17 +324,13 @@ struct TORCH_API Module {
     return c10::nullopt;
   }
 
-  ModulePtr module_object() const {
-    return module_value_;
-  }
+  ModulePtr module_object() const;
+
   ClassTypePtr type() const {
     return module_object()->type();
   }
-  std::shared_ptr<CompilationUnit> class_compilation_unit() {
-    return module_object()->type()->compilation_unit();
-  }
-  std::shared_ptr<const CompilationUnit> class_compilation_unit() const {
-    return module_object()->type()->compilation_unit();
+  std::shared_ptr<CompilationUnit> class_compilation_unit() const {
+    return module_object()->compilation_unit();
   }
 
   // so that C++ users can easily add methods
@@ -367,6 +354,16 @@ struct TORCH_API Module {
   }
 
  private:
+  Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
+
+  void clone_method(
+      const Module& orig,
+      const Function& method,
+      const std::unordered_map<TypePtr, TypePtr>& type_remap);
+
+  c10::QualifiedName getNameForMethod(std::string basename) const {
+    return QualifiedName(name(), basename);
+  }
   static const char* toString(EntityType t) {
     switch (t) {
       case EntityType::MODULE:
@@ -433,7 +430,8 @@ struct TORCH_API Module {
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 
-  ModulePtr module_value_;
+  // mutable be we lazily initialize in module_object.
+  mutable ModulePtr module_value_;
 };
 
 // this iterator for the slot list defined below has a position in the list i_
@@ -441,24 +439,25 @@ struct TORCH_API Module {
 // restricts iteration to only the slots of module_ that
 // have EntityType *type_. This allows it to return, e.g.
 // only the parameter slots.
-struct TORCH_API slot_iterator {
-  slot_iterator(Module module, c10::optional<EntityType> type, size_t i)
+// The template parameter allows us to use the same implementation for a list
+// that returns Module via template specialization of the operator* method.
+template <typename T>
+struct TORCH_API slot_iterator_impl {
+  slot_iterator_impl(Module module, c10::optional<EntityType> type, size_t i)
       : module_(module), type_(type), i_(i) {
     advance_to_valid();
   }
-  Slot operator*() const {
-    return module_.get_slot(i_);
+  T operator*() const;
+  T operator->() const {
+    return **this;
   }
-  Slot operator->() const {
-    return module_.get_slot(i_);
-  }
-  slot_iterator& operator++() {
+  slot_iterator_impl& operator++() {
     ++i_;
     advance_to_valid();
     return *this;
   }
-  slot_iterator operator++(int) {
-    slot_iterator old = *this;
+  slot_iterator_impl operator++(int) {
+    slot_iterator_impl old = *this;
     ++(*this);
     return old;
   }
@@ -474,10 +473,26 @@ struct TORCH_API slot_iterator {
   c10::optional<EntityType> type_;
   size_t i_;
 
-  friend inline bool operator!=(const slot_iterator& a, const slot_iterator& b);
+  template <typename TT>
+  friend inline bool operator!=(
+      const slot_iterator_impl<TT>& a,
+      const slot_iterator_impl<TT>& b);
 };
 
-inline bool operator!=(const slot_iterator& a, const slot_iterator& b) {
+template <>
+inline Slot slot_iterator_impl<Slot>::operator*() const {
+  return module_.get_slot(i_);
+}
+
+template <>
+inline Module slot_iterator_impl<Module>::operator*() const {
+  return Module(module_.get_slot(i_).to_module());
+}
+
+template <typename T>
+inline bool operator!=(
+    const slot_iterator_impl<T>& a,
+    const slot_iterator_impl<T>& b) {
   return a.i_ != b.i_;
 }
 
@@ -485,14 +500,15 @@ inline bool operator!=(const slot_iterator& a, const slot_iterator& b) {
 // submodules contained in the module. It is abstract because
 // they are not stored directly in std::vectors but inside the
 // module's IValue object itself.
-struct TORCH_API slot_list {
-  using iterator = slot_iterator;
-  using const_iterator = slot_iterator;
-  slot_iterator begin() const {
-    return slot_iterator(module_, type_, 0);
+template <typename T>
+struct TORCH_API slot_list_impl {
+  using iterator = slot_iterator_impl<T>;
+  using const_iterator = slot_iterator_impl<T>;
+  slot_iterator_impl<T> begin() const {
+    return slot_iterator_impl<T>(module_, type_, 0);
   }
-  slot_iterator end() const {
-    return slot_iterator(module_, type_, module_.num_slots());
+  slot_iterator_impl<T> end() const {
+    return slot_iterator_impl<T>(module_, type_, module_.num_slots());
   }
   size_t size() const {
     if (!size_) {
@@ -505,7 +521,7 @@ struct TORCH_API slot_list {
   }
 
  private:
-  slot_list(Module module, c10::optional<EntityType> type)
+  slot_list_impl(Module module, c10::optional<EntityType> type)
       : module_(std::move(module)), type_(type) {
     if (!type_) {
       size_ = module_.num_slots();

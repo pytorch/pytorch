@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 from test_pytorch_common import TestCase, run_tests, flatten
 
 import torch
@@ -218,7 +220,7 @@ class TestOperators(TestCase):
             def symbolic(g, x):
                 # The inside of this function should never be invoked, because
                 # we will fail due to an argument mismatch first.
-                assert False
+                raise AssertionError()
 
             @staticmethod
             def forward(ctx, x, y):
@@ -355,15 +357,35 @@ class TestOperators(TestCase):
 
     def test_reduced_mean_keepdim(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.mean(x, dim=2, keepdim=True), x)
+        self.assertONNX(lambda x: torch.mean(x, dim=(2, 3), keepdim=True), x)
+
+    def test_mean_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::mean',
+                                   lambda x: torch.mean(x, dtype=torch.double), x)
+
+    def test_reduced_mean_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::mean',
+                                   lambda x: torch.mean(x, dim=0, dtype=torch.double), x)
 
     def test_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.sum(x), x)
 
+    def test_sum_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::sum',
+                                   lambda x: torch.sum(x, dtype=torch.double), x)
+
+    def test_reduced_sum_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::sum',
+                                   lambda x: torch.sum(x, dim=0, dtype=torch.double), x)
+
     def test_reduced_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.sum(x, dim=2), x)
+        self.assertONNX(lambda x: torch.sum(x, dim=(1, 2)), x)
 
     def test_reduced_sum_keepdim(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -380,6 +402,16 @@ class TestOperators(TestCase):
     def test_reduced_prod_keepdim(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.prod(x, dim=2, keepdim=True), x)
+
+    def test_prod_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::prod',
+                                   lambda x: torch.prod(x, dtype=torch.double), x)
+
+    def test_reduced_prod_dtype(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNXRaisesRegex(RuntimeError, 'Couldn\'t export operator aten::prod',
+                                   lambda x: torch.prod(x, dim=0, dtype=torch.double), x)
 
     def test_sqrt(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -495,7 +527,11 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, requires_grad=True)
         self.assertONNX(lambda x: x.repeat(1, 2, 3, 4), x)
 
-    def test_norm(self):
+    def test_norm_p1(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x.norm(p=1, dim=2), (x))
+
+    def test_norm_p2(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
@@ -596,6 +632,11 @@ class TestOperators(TestCase):
         y = torch.randn(2, 3).float()
         self.assertONNX(lambda x, y: x + y, (x, y), opset_version=10)
 
+    def test_std(self):
+        x = torch.randn(2, 3, 4).float()
+        y = torch.randn(2, 3, 4).float()
+        self.assertONNX(lambda x: torch.std(x, dim=(0, 1), unbiased=True, keepdim=True), x)
+
     def test_retain_param_name_disabled(self):
         class MyModule(Module):
             def __init__(self):
@@ -636,6 +677,16 @@ class TestOperators(TestCase):
         anchors = torch.ones(A, 4, dtype=torch.float32)
         inputs = (scores, bbox_deltas, im_info, anchors)
         self.assertONNX(model, inputs)
+
+    def test_layer_norm_aten(self):
+        model = torch.nn.LayerNorm([10, 10])
+        x = torch.randn(20, 5, 10, 10)
+        self.assertONNX(model, x,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+
+    def test_frobenius_norm(self):
+        x = torch.randn(2, 3, 4).float()
+        self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
 
 
 if __name__ == '__main__':

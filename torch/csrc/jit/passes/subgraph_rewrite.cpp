@@ -26,10 +26,9 @@ void SubgraphRewriter::RegisterRewritePattern(
   patterns_.push_back(d);
 }
 
-std::shared_ptr<script::Module> SubgraphRewriter::runOnModule(
-    std::shared_ptr<script::Module> module) {
+script::Module SubgraphRewriter::runOnModule(const script::Module& module) {
   nodes_to_delete_.clear();
-  for (const auto& m : module->get_methods()) {
+  for (const auto& m : module.get_methods()) {
     auto g = m.function().graph();
     runOnGraph(g);
   }
@@ -82,7 +81,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // new ones.
     WithInsertPoint insert_point(match.anchor);
     std::vector<Value*> new_outputs =
-        inlineCallTo(*graph, replacement_graph, inputs);
+        insertGraph(*graph, replacement_graph, inputs);
 
     // Record all planned rewritings
     AT_ASSERT(outputs.size() == new_outputs.size());
@@ -122,8 +121,7 @@ bool SubgraphRewriter::overlapsWithPreviousMatches(const Match* match) {
   return false;
 }
 
-std::shared_ptr<script::Module> PatternBasedRewrite(
-    std::shared_ptr<script::Module>& module) {
+script::Module PatternBasedRewrite(const script::Module& module) {
   // TODO: Deep-copy the module
   SubgraphRewriter subgraph_rewriter;
   subgraph_rewriter.RegisterDefaultPatterns();

@@ -12,7 +12,7 @@ from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from . import _VF
-from .._jit_internal import weak_script, List
+from .._jit_internal import boolean_dispatch, List
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
@@ -253,7 +253,7 @@ Examples::
 
 
 avg_pool2d = _add_docstr(torch._C._nn.avg_pool2d, r"""
-avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
+avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None) -> Tensor
 
 Applies 2D average-pooling operation in :math:`kH \times kW` regions by step size
 :math:`sH \times sW` steps. The number of output features is equal to the number of
@@ -273,10 +273,12 @@ Args:
         to compute the output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
         averaging calculation. Default: ``True``
+    divisor_override: if specified, it will be used as divisor, otherwise
+         size of the pooling region will be used. Default: None
 """)
 
 avg_pool3d = _add_docstr(torch._C._nn.avg_pool3d, r"""
-avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
+avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None) -> Tensor
 
 Applies 3D average-pooling operation in :math:`kT \times kH \times kW` regions by step
 size :math:`sT \times sH \times sW` steps. The number of output features is equal to
@@ -296,10 +298,11 @@ Args:
         to compute the output shape
     count_include_pad: when True, will include the zero-padding in the
         averaging calculation
+    divisor_override: if specified, it will be used as divisor, otherwise
+        size of the pooling region will be used. Default: None
 """)
 
 
-@weak_script
 def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
                                        output_ratio=None, return_indices=False,
                                        _random_samples=None):
@@ -337,7 +340,8 @@ def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
         raise ValueError("fractional_max_pool2d requires specifying either "
                          "an output_size or an output_ratio")
     if output_size is None:
-        _output_ratio = _pair(torch.jit._unwrap_optional(output_ratio))
+        assert output_ratio is not None
+        _output_ratio = _pair(output_ratio)
         output_size = [int(input.size(2) * _output_ratio[0]),
                        int(input.size(3) * _output_ratio[1])]
 
@@ -346,7 +350,6 @@ def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
     return torch._C._nn.fractional_max_pool2d(input, kernel_size, output_size, _random_samples)
 
 
-@weak_script
 def _fractional_max_pool2d(input, kernel_size, output_size=None,
                            output_ratio=None, return_indices=False,
                            _random_samples=None):
@@ -355,7 +358,7 @@ def _fractional_max_pool2d(input, kernel_size, output_size=None,
                                               output_ratio, return_indices,
                                               _random_samples)[0]
 
-fractional_max_pool2d = torch._jit_internal.boolean_dispatch(
+fractional_max_pool2d = boolean_dispatch(
     arg_name='return_indices',
     arg_index=4,
     default=False,
@@ -365,7 +368,6 @@ fractional_max_pool2d = torch._jit_internal.boolean_dispatch(
     func_name='fractional_max_pool2d')
 
 
-@weak_script
 def fractional_max_pool3d_with_indices(input, kernel_size, output_size=None,
                                        output_ratio=None, return_indices=False,
                                        _random_samples=None):
@@ -404,7 +406,8 @@ def fractional_max_pool3d_with_indices(input, kernel_size, output_size=None,
         raise ValueError("fractional_max_pool3d requires specifying either "
                          "an output_size or an output_ratio")
     if output_size is None:
-        _output_ratio = _triple(torch.jit._unwrap_optional(output_ratio))
+        assert output_ratio is not None
+        _output_ratio = _triple(output_ratio)
         output_size = [int(input.size(2) * _output_ratio[0]),
                        int(input.size(3) * _output_ratio[1]),
                        int(input.size(4) * _output_ratio[2])]
@@ -414,7 +417,6 @@ def fractional_max_pool3d_with_indices(input, kernel_size, output_size=None,
     return torch._C._nn.fractional_max_pool3d(input, kernel_size, output_size, _random_samples)
 
 
-@weak_script
 def _fractional_max_pool3d(input, kernel_size, output_size=None,
                            output_ratio=None, return_indices=False,
                            _random_samples=None):
@@ -423,7 +425,7 @@ def _fractional_max_pool3d(input, kernel_size, output_size=None,
                                               output_ratio, return_indices,
                                               _random_samples)[0]
 
-fractional_max_pool3d = torch._jit_internal.boolean_dispatch(
+fractional_max_pool3d = boolean_dispatch(
     arg_name='return_indices',
     arg_index=4,
     default=False,
@@ -433,7 +435,6 @@ fractional_max_pool3d = torch._jit_internal.boolean_dispatch(
     func_name='fractional_max_pool3d')
 
 
-@weak_script
 def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
                             dilation=1, ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tuple[Tensor, Tensor]  # noqa
@@ -448,7 +449,6 @@ def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
         input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-@weak_script
 def _max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tensor  # noqa
@@ -457,7 +457,7 @@ def _max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
     return torch.max_pool1d(
         input, kernel_size, stride, padding, dilation, ceil_mode)
 
-max_pool1d = torch._jit_internal.boolean_dispatch(
+max_pool1d = boolean_dispatch(
     arg_name='return_indices',
     arg_index=6,
     default=False,
@@ -467,7 +467,6 @@ max_pool1d = torch._jit_internal.boolean_dispatch(
     func_name='max_pool1d')
 
 
-@weak_script
 def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation=1,
                             ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], BroadcastingList2[int], bool, bool) -> Tuple[Tensor, Tensor]  # noqa
@@ -481,7 +480,6 @@ def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation
     return torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-@weak_script
 def _max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], BroadcastingList2[int], bool, bool) -> Tensor  # noqa
@@ -490,7 +488,7 @@ def _max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
     return torch.max_pool2d(
         input, kernel_size, stride, padding, dilation, ceil_mode)
 
-max_pool2d = torch._jit_internal.boolean_dispatch(
+max_pool2d = boolean_dispatch(
     arg_name='return_indices',
     arg_index=6,
     default=False,
@@ -500,7 +498,6 @@ max_pool2d = torch._jit_internal.boolean_dispatch(
     func_name='max_pool2d')
 
 
-@weak_script
 def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
                             dilation=1, ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], BroadcastingList3[int], bool, bool) -> Tuple[Tensor, Tensor]  # noqa
@@ -515,7 +512,6 @@ def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
         input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-@weak_script
 def _max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], BroadcastingList3[int], bool, bool) -> Tensor  # noqa
@@ -524,7 +520,7 @@ def _max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
     return torch.max_pool3d(
         input, kernel_size, stride, padding, dilation, ceil_mode)
 
-max_pool3d = torch._jit_internal.boolean_dispatch(
+max_pool3d = boolean_dispatch(
     arg_name='return_indices',
     arg_index=6,
     default=False,
@@ -534,7 +530,6 @@ max_pool3d = torch._jit_internal.boolean_dispatch(
     func_name='max_pool3d')
 
 
-@weak_script
 def _unpool_output_size(input, kernel_size, stride, padding, output_size):
     # type: (Tensor, List[int], List[int], List[int], Optional[List[int]]) -> List[int]
     input_size = input.size()
@@ -564,7 +559,6 @@ def _unpool_output_size(input, kernel_size, stride, padding, output_size):
     return ret
 
 
-@weak_script
 def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
     # type: (Tensor, Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], Optional[BroadcastingList1[int]]) -> Tensor  # noqa
@@ -588,7 +582,6 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
                                      output_size).squeeze(3)
 
 
-@weak_script
 def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
     # type: (Tensor, Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], Optional[BroadcastingList2[int]]) -> Tensor  # noqa
@@ -607,7 +600,6 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
     return torch._C._nn.max_unpool2d(input, indices, output_size)
 
 
-@weak_script
 def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
     # type: (Tensor, Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], Optional[BroadcastingList3[int]]) -> Tensor  # noqa
@@ -627,7 +619,6 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
         input, indices, output_size, _stride, padding)
 
 
-@weak_script
 def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     # type: (Tensor, float, int, Optional[BroadcastingList2[int]], bool) -> Tensor
     r"""Applies a 2D power-average pooling over an input signal composed of
@@ -645,7 +636,6 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1. / norm_type)
 
 
-@weak_script
 def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     # type: (Tensor, float, int, Optional[BroadcastingList1[int]], bool) -> Tensor
     r"""Applies a 1D power-average pooling over an input signal composed of
@@ -662,7 +652,6 @@ def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1. / norm_type)
 
 
-@weak_script
 def adaptive_max_pool1d_with_indices(input, output_size, return_indices=False):
     # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 1D adaptive max pooling over an input signal composed of
@@ -677,12 +666,11 @@ def adaptive_max_pool1d_with_indices(input, output_size, return_indices=False):
     return torch.adaptive_max_pool1d(input, output_size)
 
 
-@weak_script
 def _adaptive_max_pool1d(input, output_size, return_indices=False):
     # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
     return adaptive_max_pool1d_with_indices(input, output_size)[0]
 
-adaptive_max_pool1d = torch._jit_internal.boolean_dispatch(
+adaptive_max_pool1d = boolean_dispatch(
     arg_name='return_indices',
     arg_index=2,
     default=False,
@@ -692,7 +680,6 @@ adaptive_max_pool1d = torch._jit_internal.boolean_dispatch(
     func_name='adaptive_max_pool1d')
 
 
-@weak_script
 def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
     # type: (Tensor, BroadcastingList2[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 2D adaptive max pooling over an input signal composed of
@@ -709,12 +696,11 @@ def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
     return torch._C._nn.adaptive_max_pool2d(input, output_size)
 
 
-@weak_script
 def _adaptive_max_pool2d(input, output_size, return_indices=False):
     # type: (Tensor, BroadcastingList2[int], bool) -> Tensor
     return adaptive_max_pool2d_with_indices(input, output_size)[0]
 
-adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
+adaptive_max_pool2d = boolean_dispatch(
     arg_name='return_indices',
     arg_index=2,
     default=False,
@@ -724,7 +710,6 @@ adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
     func_name='adaptive_max_pool2d')
 
 
-@weak_script
 def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
     # type: (Tensor, BroadcastingList3[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 3D adaptive max pooling over an input signal composed of
@@ -741,12 +726,11 @@ def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
     return torch._C._nn.adaptive_max_pool3d(input, output_size)
 
 
-@weak_script
 def _adaptive_max_pool3d(input, output_size, return_indices=False):
     # type: (Tensor, BroadcastingList3[int], bool) -> Tensor
     return adaptive_max_pool3d_with_indices(input, output_size)[0]
 
-adaptive_max_pool3d = torch._jit_internal.boolean_dispatch(
+adaptive_max_pool3d = boolean_dispatch(
     arg_name='return_indices',
     arg_index=2,
     default=False,
@@ -769,7 +753,6 @@ Args:
 """)
 
 
-@weak_script
 def adaptive_avg_pool2d(input, output_size):
     # type: (Tensor, BroadcastingList2[int]) -> Tensor
     r"""
@@ -786,7 +769,6 @@ def adaptive_avg_pool2d(input, output_size):
     return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
 
-@weak_script
 def adaptive_avg_pool3d(input, output_size):
     # type: (Tensor, BroadcastingList3[int]) -> Tensor
     r"""
@@ -804,7 +786,6 @@ def adaptive_avg_pool3d(input, output_size):
 
 
 # Activation functions
-@weak_script
 def dropout(input, p=0.5, training=True, inplace=False):
     # type: (Tensor, float, bool, bool) -> Tensor
     r"""
@@ -827,7 +808,6 @@ def dropout(input, p=0.5, training=True, inplace=False):
             else _VF.dropout(input, p, training))
 
 
-@weak_script
 def alpha_dropout(input, p=0.5, training=False, inplace=False):
     # type: (Tensor, float, bool, bool) -> Tensor
     r"""Applies alpha dropout to the input.
@@ -842,7 +822,6 @@ def alpha_dropout(input, p=0.5, training=False, inplace=False):
             else _VF.alpha_dropout(input, p, training))
 
 
-@weak_script
 def dropout2d(input, p=0.5, training=True, inplace=False):
     # type: (Tensor, float, bool, bool) -> Tensor
     r"""
@@ -867,7 +846,6 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
             else _VF.feature_dropout(input, p, training))
 
 
-@weak_script
 def dropout3d(input, p=0.5, training=True, inplace=False):
     # type: (Tensor, float, bool, bool) -> Tensor
     r"""
@@ -894,7 +872,6 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
             else _VF.feature_dropout(input, p, training))
 
 
-@weak_script
 def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
     # type: (Tensor, float, bool, bool) -> Tensor
     if p < 0. or p > 1.:
@@ -905,7 +882,6 @@ def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
             else _VF.feature_alpha_dropout(input, p, training))
 
 
-@weak_script
 def threshold(input, threshold, value, inplace=False):
     # type: (Tensor, float, float, bool) -> Tensor
     r"""Thresholds each element of the input Tensor.
@@ -926,7 +902,6 @@ In-place version of :func:`~threshold`.
 """)
 
 
-@weak_script
 def relu(input, inplace=False):
     # type: (Tensor, bool) -> Tensor
     r"""relu(input, inplace=False) -> Tensor
@@ -948,7 +923,6 @@ In-place version of :func:`~relu`.
 """)
 
 
-@weak_script
 def glu(input, dim=-1):
     # type: (Tensor, int) -> Tensor
     r"""
@@ -973,7 +947,6 @@ def glu(input, dim=-1):
     return torch._C._nn.glu(input, dim)
 
 
-@weak_script
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
     # type: (Tensor, float, float, bool) -> Tensor
     r"""
@@ -996,7 +969,6 @@ In-place version of :func:`~hardtanh`.
 """)
 
 
-@weak_script
 def relu6(input, inplace=False):
     # type: (Tensor, bool) -> Tensor
     r"""relu6(input, inplace=False) -> Tensor
@@ -1008,7 +980,6 @@ def relu6(input, inplace=False):
     return hardtanh(input, 0., 6., inplace)
 
 
-@weak_script
 def elu(input, alpha=1., inplace=False):
     # type: (Tensor, float, bool) -> Tensor
     r"""Applies element-wise,
@@ -1030,7 +1001,6 @@ In-place version of :func:`~elu`.
 """)
 
 
-@weak_script
 def selu(input, inplace=False):
     # type: (Tensor, bool) -> Tensor
     r"""selu(input, inplace=False) -> Tensor
@@ -1056,7 +1026,6 @@ In-place version of :func:`~selu`.
 """)
 
 
-@weak_script
 def celu(input, alpha=1., inplace=False):
     # type: (Tensor, float, bool) -> Tensor
     r"""celu(input, alpha=1., inplace=False) -> Tensor
@@ -1079,7 +1048,6 @@ In-place version of :func:`~celu`.
 """)
 
 
-@weak_script
 def leaky_relu(input, negative_slope=0.01, inplace=False):
     # type: (Tensor, float, bool) -> Tensor
     r"""
@@ -1104,7 +1072,6 @@ In-place version of :func:`~leaky_relu`.
 """)
 
 
-@weak_script
 def prelu(input, weight):
     # type: (Tensor, Tensor) -> Tensor
     r"""prelu(input, weight) -> Tensor
@@ -1118,7 +1085,6 @@ def prelu(input, weight):
     return torch.prelu(input, weight)
 
 
-@weak_script
 def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
     # type: (Tensor, float, float, bool, bool) -> Tensor
     r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Tensor
@@ -1148,7 +1114,6 @@ Applies element-wise :math:`\text{LogSigmoid}(x_i) = \log \left(\frac{1}{1 + \ex
 See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
-@weak_script
 def gelu(input):
     r"""gelu(input) -> Tensor
 
@@ -1162,7 +1127,6 @@ def gelu(input):
     return torch._C._nn.gelu(input)
 
 
-@weak_script
 def hardshrink(input, lambd=0.5):
     # type: (Tensor, float) -> Tensor
     r"""
@@ -1175,7 +1139,6 @@ def hardshrink(input, lambd=0.5):
     return torch.hardshrink(input, lambd)
 
 
-@weak_script
 def tanhshrink(input):
     r"""tanhshrink(input) -> Tensor
 
@@ -1186,7 +1149,6 @@ def tanhshrink(input):
     return input - input.tanh()
 
 
-@weak_script
 def softsign(input):
     r"""softsign(input) -> Tensor
 
@@ -1202,7 +1164,6 @@ softplus(input, beta=1, threshold=20) -> Tensor
 """)
 
 
-@weak_script
 def _get_softmax_dim(name, ndim, stacklevel):
     # type: (str, int, int) -> int
     warnings.warn("Implicit dimension choice for {} has been deprecated. "
@@ -1214,7 +1175,6 @@ def _get_softmax_dim(name, ndim, stacklevel):
     return ret
 
 
-@weak_script
 def softmin(input, dim=None, _stacklevel=3, dtype=None):
     # type: (Tensor, Optional[int], int, Optional[int]) -> Tensor
     r"""Applies a softmin function.
@@ -1240,7 +1200,6 @@ def softmin(input, dim=None, _stacklevel=3, dtype=None):
     return ret
 
 
-@weak_script
 def softmax(input, dim=None, _stacklevel=3, dtype=None):
     # type: (Tensor, Optional[int], int, Optional[int]) -> Tensor
     r"""Applies a softmax function.
@@ -1276,7 +1235,6 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
     return ret
 
 
-@weak_script
 def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     # type: (Tensor, float, bool, float, int) -> Tensor
     r"""
@@ -1337,7 +1295,6 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     return ret
 
 
-@weak_script
 def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
     # type: (Tensor, Optional[int], int, Optional[int]) -> Tensor
     r"""Applies a softmax followed by a logarithm.
@@ -1373,7 +1330,6 @@ See :class:`~torch.nn.Softshrink` for more details.
 """)
 
 
-@weak_script
 def tanh(input):
     r"""tanh(input) -> Tensor
 
@@ -1386,7 +1342,6 @@ def tanh(input):
     return input.tanh()
 
 
-@weak_script
 def sigmoid(input):
     r"""sigmoid(input) -> Tensor
 
@@ -1398,7 +1353,6 @@ def sigmoid(input):
     return input.sigmoid()
 
 
-@weak_script
 def linear(input, weight, bias=None):
     # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
@@ -1423,7 +1377,6 @@ def linear(input, weight, bias=None):
     return ret
 
 
-@weak_script
 def bilinear(input1, input2, weight, bias=None):
     # type: (Tensor, Tensor, Tensor, Optional[Tensor]) -> Tensor
     return torch.bilinear(input1, input2, weight, bias)
@@ -1435,7 +1388,6 @@ def _no_grad_embedding_renorm_(weight, input, max_norm, norm_type):
         torch.embedding_renorm_(weight, input, max_norm, norm_type)
 
 
-@weak_script
 def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
               scale_grad_by_freq=False, sparse=False):
     # type: (Tensor, Tensor, Optional[int], Optional[float], float, bool, bool) -> Tensor
@@ -1517,7 +1469,6 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
 
 
-@weak_script
 def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                   scale_grad_by_freq=False, mode='mean', sparse=False,
                   per_sample_weights=None):
@@ -1621,7 +1572,6 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     elif input.dim() == 1:
         if offsets is None:
             raise ValueError("offsets has to be a 1D Tensor but got None")
-        offsets = torch.jit._unwrap_optional(offsets)
         if offsets.dim() != 1:
             raise ValueError("offsets has to be a 1D Tensor")
         if int(offsets[0]) != 0:
@@ -1635,7 +1585,6 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     else:
         raise ValueError("input has to be 1D or 2D Tensor,"
                          " but got Tensor of dimension {}".format(input.dim()))
-    offsets = torch.jit._unwrap_optional(offsets)  # TODO remove when exception control flow logic
     if mode == 'sum':
         mode_enum = 0
     elif mode == 'mean':
@@ -1650,7 +1599,6 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
             raise ValueError("max mode does not support sparse weights")
 
     else:
-        mode_enum = -1  # TODO when exception control flow logic
         raise ValueError("mode has to be one of sum, mean or max")
 
     if max_norm is not None:
@@ -1677,7 +1625,6 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     return ret
 
 
-@weak_script
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
     # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor  # noqa
@@ -1709,7 +1656,6 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     )
 
 
-@weak_script
 def instance_norm(input, running_mean=None, running_var=None, weight=None,
                   bias=None, use_input_stats=True, momentum=0.1, eps=1e-5):
     # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor  # noqa
@@ -1725,7 +1671,6 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     )
 
 
-@weak_script
 def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
     # type: (Tensor, List[int], Optional[Tensor], Optional[Tensor], float) -> Tensor
     r"""Applies Layer Normalization for last certain number of dimensions.
@@ -1736,7 +1681,6 @@ def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
                             torch.backends.cudnn.enabled)
 
 
-@weak_script
 def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
     # type: (Tensor, int, Optional[Tensor], Optional[Tensor], float) -> Tensor
     r"""Applies Group Normalization for last certain number of dimensions.
@@ -1747,7 +1691,6 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
                             torch.backends.cudnn.enabled)
 
 
-@weak_script
 def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1.):
     # type: (Tensor, int, float, float, float) -> Tensor
     r"""Applies local response normalization over an input signal composed of
@@ -1776,7 +1719,6 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1.):
 
 # loss
 
-@weak_script
 def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
              reduction='mean', zero_infinity=False):
     # type: (Tensor, Tensor, Tensor, Tensor, int, str, bool) -> Tensor
@@ -1824,7 +1766,6 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
                           zero_infinity)
 
 
-@weak_script
 def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
              reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], int, Optional[bool], str) -> Tensor
@@ -1903,7 +1844,6 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
     return ret
 
 
-@weak_script
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=None, eps=1e-8,
                      reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, bool, bool, Optional[bool], float, Optional[bool], str) -> Tensor
@@ -1949,7 +1889,6 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     return ret
 
 
-@weak_script
 def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""The `Kullback-Leibler divergence`_ Loss.
@@ -2007,7 +1946,6 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
     return reduced
 
 
-@weak_script
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
                   reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], int, Optional[bool], str) -> Tensor
@@ -2056,7 +1994,6 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
     return nll_loss(log_softmax(input, 1), target, weight, None, ignore_index, None, reduction)
 
 
-@weak_script
 def binary_cross_entropy(input, target, weight=None, size_average=None,
                          reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
@@ -2113,7 +2050,6 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         input, target, weight, reduction_enum)
 
 
-@weak_script
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=None,
                                      reduce=None, reduction='mean', pos_weight=None):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str, Optional[Tensor]) -> Tensor
@@ -2174,14 +2110,12 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
         return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
-@weak_script
 def _smooth_l1_loss(input, target):
     # type: (Tensor, Tensor) -> Tensor
     t = torch.abs(input - target)
     return torch.where(t < 1, 0.5 * t ** 2, t - 0.5)
 
 
-@weak_script
 def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""Function that uses a squared term if the absolute
@@ -2206,7 +2140,6 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
     return ret
 
 
-@weak_script
 def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
@@ -2232,7 +2165,6 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     return ret
 
 
-@weak_script
 def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
@@ -2258,7 +2190,6 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     return ret
 
 
-@weak_script
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,
                         reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Tensor, float, Optional[bool], Optional[bool], str) -> Tensor
@@ -2276,7 +2207,6 @@ def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,
     return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
 
 
-@weak_script
 def hinge_embedding_loss(input, target, margin=1.0, size_average=None,
                          reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, float, Optional[bool], Optional[bool], str) -> Tensor
@@ -2291,7 +2221,6 @@ def hinge_embedding_loss(input, target, margin=1.0, size_average=None,
     return torch.hinge_embedding_loss(input, target, margin, reduction_enum)
 
 
-@weak_script
 def multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
@@ -2305,7 +2234,6 @@ def multilabel_margin_loss(input, target, size_average=None, reduce=None, reduct
     return torch._C._nn.multilabel_margin_loss(input, target, reduction_enum)
 
 
-@weak_script
 def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
@@ -2319,7 +2247,6 @@ def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='m
     return torch._C._nn.soft_margin_loss(input, target, reduction_enum)
 
 
-@weak_script
 def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
                                 reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
@@ -2349,7 +2276,6 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     return ret
 
 
-@weak_script
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
                           reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Tensor, float, Optional[bool], Optional[bool], str) -> Tensor
@@ -2364,7 +2290,6 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
     return torch.cosine_embedding_loss(input1, input2, target, margin, reduction_enum)
 
 
-@weak_script
 def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=None,
                       reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, int, float, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
@@ -2436,13 +2361,20 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             ``'trilinear'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
-            If set to ``False``, the input and output tensors are aligned by the
-            center points of their corner pixels. If set to ``True``, the input and
-            output tensors are aligned by the corner points of their corner
-            pixels, and the interpolation uses edge value padding for out-of-boundary values.
-            This only has effect when :attr:`mode` is ``'linear'``,
-            ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
+            If set to ``True``, the input and output tensors are aligned by the
+            center points of their corner pixels, preserving the values at the corner pixels.
+            If set to ``False``, the input and output tensors are aligned by the corner
+            points of their corner pixels, and the interpolation uses edge value padding
+            for out-of-boundary values, making this operation *independent* of input size
+            when :attr:`scale_factor` is kept the same. This only has an effect when :attr:`mode`
+            is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
             Default: ``False``
+
+    .. note::
+        With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
+        negative values or values greater than 255 for images.
+        Explicitly call ``result.clamp(min=0, max=255)`` if you want to reduce the overshoot
+        when displaying the image.
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2483,13 +2415,20 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             ``'trilinear'`` | ``'area'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
-            If set to ``False``, the input and output tensors are aligned by the
-            center points of their corner pixels. If set to ``True``, the input and
-            output tensors are aligned by the corner points of their corner
-            pixels, and the interpolation uses edge value padding for out-of-boundary values.
-            This only has effect when :attr:`mode` is ``'linear'``,
-            ``'bilinear'``, ``'bicubic'``, or ``'trilinear'``.
+            If set to ``True``, the input and output tensors are aligned by the
+            center points of their corner pixels, preserving the values at the corner pixels.
+            If set to ``False``, the input and output tensors are aligned by the corner
+            points of their corner pixels, and the interpolation uses edge value padding
+            for out-of-boundary values, making this operation *independent* of input size
+            when :attr:`scale_factor` is kept the same. This only has an effect when :attr:`mode`
+            is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
             Default: ``False``
+
+    .. note::
+        With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
+        negative values or values greater than 255 for images.
+        Explicitly call ``result.clamp(min=0, max=255)`` if you want to reduce the overshoot
+        when displaying the image.
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2635,7 +2574,6 @@ GRID_SAMPLE_PADDING_MODES = {
 }
 
 
-@weak_script
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     # type: (Tensor, Tensor, str, str) -> Tensor
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
@@ -2717,7 +2655,6 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum)
 
 
-@weak_script
 def affine_grid(theta, size):
     # type: (Tensor, List[int]) -> Tensor
     r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`.
@@ -2735,7 +2672,6 @@ def affine_grid(theta, size):
     return vision.affine_grid_generator(theta, size)
 
 
-@weak_script
 def pad(input, pad, mode='constant', value=0):
     # type: (Tensor, List[int], str, float) -> Tensor
     r"""Pads tensor.
@@ -2796,55 +2732,47 @@ def pad(input, pad, mode='constant', value=0):
     assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
     assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
-        ret = _VF.constant_pad_nd(input, pad, value)
+        return _VF.constant_pad_nd(input, pad, value)
     else:
         assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
         if input.dim() == 3:
             assert len(pad) == 2, '3D tensors expect 2 values for padding'
             if mode == 'reflect':
-                ret = torch._C._nn.reflection_pad1d(input, pad)
+                return torch._C._nn.reflection_pad1d(input, pad)
             elif mode == 'replicate':
-                ret = torch._C._nn.replication_pad1d(input, pad)
+                return torch._C._nn.replication_pad1d(input, pad)
             elif mode == 'circular':
-                ret = _pad_circular(input, pad)
+                return _pad_circular(input, pad)
             else:
-                ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
 
         elif input.dim() == 4:
             assert len(pad) == 4, '4D tensors expect 4 values for padding'
             if mode == 'reflect':
-                ret = torch._C._nn.reflection_pad2d(input, pad)
+                return torch._C._nn.reflection_pad2d(input, pad)
             elif mode == 'replicate':
-                ret = torch._C._nn.replication_pad2d(input, pad)
+                return torch._C._nn.replication_pad2d(input, pad)
             elif mode == 'circular':
-                ret = _pad_circular(input, pad)
+                return _pad_circular(input, pad)
             else:
-                ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
 
         elif input.dim() == 5:
             assert len(pad) == 6, '5D tensors expect 6 values for padding'
             if mode == 'reflect':
-                ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
             elif mode == 'replicate':
-                ret = torch._C._nn.replication_pad3d(input, pad)
+                return torch._C._nn.replication_pad3d(input, pad)
             elif mode == 'circular':
-                ret = _pad_circular(input, pad)
+                return _pad_circular(input, pad)
             else:
-                ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
         else:
-            ret = input  # TODO: remove this when jit raise supports control flow
             raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
-
-    return ret
 
 # distance
 
 
-@weak_script
 def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
     # type: (Tensor, Tensor, float, float, bool) -> Tensor
     r"""
@@ -2906,7 +2834,7 @@ Example::
 
 
 one_hot = _add_docstr(torch._C._nn.one_hot, r"""
-one_hot(tensor, num_classes=0) -> LongTensor
+one_hot(tensor, num_classes=-1) -> LongTensor
 
 Takes LongTensor with index values of shape ``(*)`` and returns a tensor
 of shape ``(*, num_classes)`` that have zeros everywhere except where the
@@ -2952,7 +2880,6 @@ Examples:
 """)
 
 
-@weak_script
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False, size_average=None,
                         reduce=None, reduction="mean"):
     # type: (Tensor, Tensor, Tensor, float, float, float, bool, Optional[bool], Optional[bool], str) -> Tensor
@@ -2967,7 +2894,6 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
                                      swap, reduction_enum)
 
 
-@weak_script
 def normalize(input, p=2, dim=1, eps=1e-12, out=None):
     # type: (Tensor, float, int, float, Optional[Tensor]) -> Tensor
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.
@@ -2990,18 +2916,16 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
     """
     if out is None:
         denom = input.norm(p, dim, True).clamp_min(eps).expand_as(input)
-        ret = input / denom
+        return input / denom
     else:
         denom = input.norm(p, dim, True).clamp_min(eps).expand_as(input)
-        ret = torch.div(input, denom, out=out)
-    return ret
+        return torch.div(input, denom, out=out)
 
 
 def assert_int_or_pair(arg, arg_name, message):
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 
-@weak_script
 def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
     # type: (Tensor, BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int]) -> Tensor  # noqa
     r"""Extracts sliding local blocks from an batched input tensor.
@@ -3028,15 +2952,12 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        ret = torch._C._nn.im2col(input, _pair(kernel_size),
-                                  _pair(dilation), _pair(padding), _pair(stride))
+        return torch._C._nn.im2col(input, _pair(kernel_size),
+                                   _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
-        ret = input  # TODO: remove when jit supports exception control flow
-    return ret
 
 
-@weak_script
 def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
     # type: (Tensor, BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int]) -> Tensor  # noqa
     r"""Combines an array of sliding local blocks into a large containing
@@ -3056,15 +2977,12 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        ret = torch._C._nn.col2im(input, _pair(output_size), _pair(kernel_size),
-                                  _pair(dilation), _pair(padding), _pair(stride))
+        return torch._C._nn.col2im(input, _pair(output_size), _pair(kernel_size),
+                                   _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
-        ret = input  # TODO: remove when jit supports exception control flow
-    return ret
 
 
-@weak_script
 def _pad_circular(input, padding):
     # type: (Tensor, List[int]) -> Tensor
     """
@@ -3090,24 +3008,29 @@ def _pad_circular(input, padding):
     return input
 
 
-@weak_script
-def multi_head_attention_forward(query,                  # type: Tensor
-                                 key,                    # type: Tensor
-                                 value,                  # type: Tensor
-                                 embed_dim_to_check,     # type: int
-                                 num_heads,              # type: int
-                                 in_proj_weight,         # type: Tensor
-                                 in_proj_bias,           # type: Tensor
-                                 bias_k,                 # type: Optional[Tensor]
-                                 bias_v,                 # type: Optional[Tensor]
-                                 add_zero_attn,          # type: bool
-                                 dropout_p,              # type: float
-                                 out_proj_weight,        # type: Tensor
-                                 out_proj_bias,          # type: Tensor
-                                 training=True,          # type: bool
-                                 key_padding_mask=None,  # type: Optional[Tensor]
-                                 need_weights=True,      # type: bool
-                                 attn_mask=None          # type: Optional[Tensor]
+def multi_head_attention_forward(query,                           # type: Tensor
+                                 key,                             # type: Tensor
+                                 value,                           # type: Tensor
+                                 embed_dim_to_check,              # type: int
+                                 num_heads,                       # type: int
+                                 in_proj_weight,                  # type: Tensor
+                                 in_proj_bias,                    # type: Tensor
+                                 bias_k,                          # type: Optional[Tensor]
+                                 bias_v,                          # type: Optional[Tensor]
+                                 add_zero_attn,                   # type: bool
+                                 dropout_p,                       # type: float
+                                 out_proj_weight,                 # type: Tensor
+                                 out_proj_bias,                   # type: Tensor
+                                 training=True,                   # type: bool
+                                 key_padding_mask=None,           # type: Optional[Tensor]
+                                 need_weights=True,               # type: bool
+                                 attn_mask=None,                  # type: Optional[Tensor]
+                                 use_separate_proj_weight=False,  # type: bool
+                                 q_proj_weight=None,              # type: Optional[Tensor]
+                                 k_proj_weight=None,              # type: Optional[Tensor]
+                                 v_proj_weight=None,              # type: Optional[Tensor]
+                                 static_k=None,                   # type: Optional[Tensor]
+                                 static_v=None                    # type: Optional[Tensor]
                                  ):
     # type: (...) -> Tuple[Tensor, Optional[Tensor]]
     r"""
@@ -3124,9 +3047,16 @@ def multi_head_attention_forward(query,                  # type: Tensor
         out_proj_weight, out_proj_bias: the output projection weight and bias.
         training: apply dropout if is ``True``.
         key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention.
+            be ignored by the attention. This is an binary mask. When the value is True,
+            the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
-        attn_mask: mask that prevents attention to certain positions.
+        attn_mask: mask that prevents attention to certain positions. This is an additive mask
+            (i.e. the values will be added to the attention layer).
+        use_separate_proj_weight: the function accept the proj. weights for query, key,
+            and value in differnt forms. If false, in_proj_weight will be used, which is
+            a combination of q_proj_weight, k_proj_weight, v_proj_weight.
+        q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
+        static_k, static_v: static key and value used for attention operators.
 
 
     Shape:
@@ -3139,6 +3069,10 @@ def multi_head_attention_forward(query,                  # type: Tensor
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
         - attn_mask: :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
+        - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
+          N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
+        - static_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
+          N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
 
         Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
@@ -3159,73 +3093,104 @@ def multi_head_attention_forward(query,                  # type: Tensor
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = float(head_dim) ** -0.5
 
-    if qkv_same:
-        # self-attention
-        q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
+    if use_separate_proj_weight is not True:
+        if qkv_same:
+            # self-attention
+            q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
 
-    elif kv_same:
-        # encoder-decoder attention
-        _b = in_proj_bias
-        _start = 0
-        _end = embed_dim
-        _w = in_proj_weight[_start:_end, :]
-        if _b is not None:
-            _b = _b[_start:_end]
-        q = linear(query, _w, _b)
+        elif kv_same:
+            # encoder-decoder attention
+            # This is inline in_proj function with in_proj_weight and in_proj_bias
+            _b = in_proj_bias
+            _start = 0
+            _end = embed_dim
+            _w = in_proj_weight[_start:_end, :]
+            if _b is not None:
+                _b = _b[_start:_end]
+            q = linear(query, _w, _b)
 
-        if key is None:
-            assert value is None
-            k = None
-            v = None
+            if key is None:
+                assert value is None
+                k = None
+                v = None
+            else:
+
+                # This is inline in_proj function with in_proj_weight and in_proj_bias
+                _b = in_proj_bias
+                _start = embed_dim
+                _end = None
+                _w = in_proj_weight[_start:, :]
+                if _b is not None:
+                    _b = _b[_start:]
+                k, v = linear(key, _w, _b).chunk(2, dim=-1)
+
         else:
+            # This is inline in_proj function with in_proj_weight and in_proj_bias
+            _b = in_proj_bias
+            _start = 0
+            _end = embed_dim
+            _w = in_proj_weight[_start:_end, :]
+            if _b is not None:
+                _b = _b[_start:_end]
+            q = linear(query, _w, _b)
 
+            # This is inline in_proj function with in_proj_weight and in_proj_bias
             _b = in_proj_bias
             _start = embed_dim
+            _end = embed_dim * 2
+            _w = in_proj_weight[_start:_end, :]
+            if _b is not None:
+                _b = _b[_start:_end]
+            k = linear(key, _w, _b)
+
+            # This is inline in_proj function with in_proj_weight and in_proj_bias
+            _b = in_proj_bias
+            _start = embed_dim * 2
             _end = None
             _w = in_proj_weight[_start:, :]
             if _b is not None:
                 _b = _b[_start:]
-            k, v = linear(key, _w, _b).chunk(2, dim=-1)
-
+            v = linear(value, _w, _b)
     else:
-        _b = in_proj_bias
-        _start = 0
-        _end = embed_dim
-        _w = in_proj_weight[_start:_end, :]
-        if _b is not None:
-            _b = _b[_start:_end]
-        q = linear(query, _w, _b)
+        q_proj_weight_non_opt = torch.jit._unwrap_optional(q_proj_weight)
+        len1, len2 = q_proj_weight_non_opt.size()
+        assert len1 == embed_dim and len2 == query.size(-1)
 
-        _b = in_proj_bias
-        _start = embed_dim
-        _end = embed_dim * 2
-        _w = in_proj_weight[_start:_end, :]
-        if _b is not None:
-            _b = _b[_start:_end]
-        k = linear(key, _w, _b)
+        k_proj_weight_non_opt = torch.jit._unwrap_optional(k_proj_weight)
+        len1, len2 = k_proj_weight_non_opt.size()
+        assert len1 == embed_dim and len2 == key.size(-1)
 
-        _b = in_proj_bias
-        _start = embed_dim * 2
-        _end = None
-        _w = in_proj_weight[_start:, :]
-        if _b is not None:
-            _b = _b[_start:]
-        v = linear(value, _w, _b)
-    q *= scaling
+        v_proj_weight_non_opt = torch.jit._unwrap_optional(v_proj_weight)
+        len1, len2 = v_proj_weight_non_opt.size()
+        assert len1 == embed_dim and len2 == value.size(-1)
+
+        if in_proj_bias is not None:
+            q = linear(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim])
+            k = linear(key, k_proj_weight_non_opt, in_proj_bias[embed_dim:(embed_dim * 2)])
+            v = linear(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2):])
+        else:
+            q = linear(query, q_proj_weight_non_opt, in_proj_bias)
+            k = linear(key, k_proj_weight_non_opt, in_proj_bias)
+            v = linear(value, v_proj_weight_non_opt, in_proj_bias)
+    q = q * scaling
 
     if bias_k is not None and bias_v is not None:
-        k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
-        v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
-        if attn_mask is not None:
-            attn_mask = torch.cat([attn_mask,
-                                  torch.zeros((attn_mask.size(0), 1),
-                                              dtype=attn_mask.dtype,
-                                              device=attn_mask.device)], dim=1)
-        if key_padding_mask is not None:
-            key_padding_mask = torch.cat(
-                [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
-                                               dtype=key_padding_mask.dtype,
-                                               device=key_padding_mask.device)], dim=1)
+        if static_k is None and static_v is None:
+            k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
+            v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
+            if attn_mask is not None:
+                attn_mask = torch.cat([attn_mask,
+                                      torch.zeros((attn_mask.size(0), 1),
+                                                  dtype=attn_mask.dtype,
+                                                  device=attn_mask.device)], dim=1)
+            if key_padding_mask is not None:
+                key_padding_mask = torch.cat(
+                    [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
+                                                   dtype=key_padding_mask.dtype,
+                                                   device=key_padding_mask.device)], dim=1)
+        else:
+            assert static_k is None, "bias cannot be added to static key."
+            assert static_v is None, "bias cannot be added to static value."
     else:
         assert bias_k is None
         assert bias_v is None
@@ -3235,6 +3200,16 @@ def multi_head_attention_forward(query,                  # type: Tensor
         k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
     if v is not None:
         v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+
+    if static_k is not None:
+        assert static_k.size(0) == bsz * num_heads
+        assert static_k.size(2) == head_dim
+        k = static_k
+
+    if static_v is not None:
+        assert static_v.size(0) == bsz * num_heads
+        assert static_v.size(2) == head_dim
+        v = static_v
 
     src_len = k.size(1)
 

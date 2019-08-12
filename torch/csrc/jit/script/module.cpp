@@ -12,6 +12,48 @@ namespace torch {
 namespace jit {
 namespace script {
 
+static ModulePtr create_module_object(
+    c10::QualifiedName class_name,
+    std::shared_ptr<CompilationUnit> cu,
+    bool shouldMangle = false) {
+  // If the name is unqualified, prepend a `__torch__`, similar to what Python
+  // does with `__main__` for top-level code.
+  if (class_name.prefix().empty()) {
+    class_name = c10::QualifiedName("__torch__", class_name.name());
+  }
+  if (shouldMangle && cu->get_class(class_name) != nullptr) {
+    class_name = cu->mangle(class_name);
+  }
+  auto cls = ClassType::create(std::move(class_name), cu, /*is_module=*/true);
+  cu->register_type(cls);
+  return c10::ivalue::Object::create(
+      c10::StrongTypePtr(std::move(cu), std::move(cls)), 0);
+}
+
+Module::Module(c10::QualifiedName class_name)
+    : module_value_(create_module_object(
+          std::move(class_name),
+          std::make_shared<CompilationUnit>())) {}
+
+Module::Module(
+    c10::QualifiedName class_name,
+    std::shared_ptr<CompilationUnit> cu,
+    bool shouldMangle)
+    : module_value_(create_module_object(
+          std::move(class_name),
+          std::move(cu),
+          shouldMangle)) {}
+
+ModulePtr Module::module_object() const {
+  if (!module_value_) {
+    // User has created a Model without assigning it to something already
+    // loaded. This is done in tests, and when using the .define method.
+    module_value_ =
+        create_module_object("Module", std::make_shared<CompilationUnit>());
+  }
+  return module_value_;
+}
+
 // first class mode runs models as first class objects,
 // and does not force inlining everywhere. This is experimental
 // as we bring up the system since it will degrade performance
@@ -34,14 +76,21 @@ void Module::to(at::Device device, bool non_blocking) {
   to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
 }
 
-void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) {
+void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
+#ifndef C10_MOBILE
   ExportModule(*this, out, extra_files);
+#else
+  AT_ERROR("Saving module is not supported on mobile.");
+#endif
 }
 
-void Module::save(
-    const std::string& filename,
-    const ExtraFilesMap& extra_files) {
+void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
+    const {
+#ifndef C10_MOBILE
   ExportModule(*this, filename, extra_files);
+#else
+  AT_ERROR("Saving module is not supported on mobile.");
+#endif
 }
 
 void module_state_to(
@@ -64,8 +113,8 @@ void Module::to_impl(
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   // First call `to()` on every child module.
-  for (auto& child : get_modules()) {
-    child->to_impl(device, dtype, non_blocking);
+  for (Module child : get_modules()) {
+    child.to_impl(device, dtype, non_blocking);
   }
   // Then convert every of our parameters.
   for (Slot parameter : get_parameters()) {
@@ -164,8 +213,8 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
-Method::Method(ModulePtr owner, std::shared_ptr<Function> function)
-    : owner_(std::move(owner)), function_(std::move(function)) {}
+Method::Method(ModulePtr owner, Function* function)
+    : owner_(std::move(owner)), function_(function) {}
 
 Module Method::owner() const {
   return Module(owner_);
@@ -194,41 +243,14 @@ std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_grap
 }
 
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
+  const auto self = SimpleSelf(type());
   class_compilation_unit()->define(
-      src,
-      resolver ? resolver : script::nativeResolver(),
-      simpleSelf(module_object()->type()));
-}
-
-void Module::copy_into(
-    const ModuleLookup& module_lookup,
-    // translate current module singleton type to new module
-    // singleton type.
-    std::unordered_map<TypePtr, TypePtr>& type_remap,
-    std::vector<std::string> names) const {
-  auto curr = module_lookup(names);
-  type_remap[module_object()->type()] = curr->module_object()->type();
-
-  for (Slot s : curr->get_slots()) {
-    if (s.is_module()) {
-      names.push_back(s.name());
-      // Submodules must be translated first, otherwise parameter_remap entries
-      // will not be filled in for methods of this module.
-      s.to_module().copy_into(module_lookup, type_remap, names);
-      names.pop_back();
-    } else {
-      curr->set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
-    }
-  }
-
-  for (auto& fn : class_compilation_unit()->get_functions()) {
-    curr->clone_method(*this, fn->name(), type_remap);
-  }
+      name(), src, resolver ? resolver : script::nativeResolver(), &self);
 }
 
 void Module::clone_method(
     const Module& orig,
-    const std::string& name,
+    const Function& method,
     const std::unordered_map<TypePtr, TypePtr>& type_remap) {
   // type remapping - when we copy method implementations from one module
   // singleton to another, we need to update the types of the self arguments
@@ -246,11 +268,13 @@ void Module::clone_method(
       return in;
     return it->second;
   };
-  const Function& fn = orig.class_compilation_unit()->get_function(name);
-  auto graph = fn.graph()->copy();
+  auto graph = method.graph()->copy();
   graph->remapTypes(type_remap_fn);
-  auto schema = fn.getSchema().cloneWithRemappedTypes(type_remap_fn);
-  auto copied = class_compilation_unit()->create_function(fn.name(), graph);
+  auto schema = method.getSchema().cloneWithRemappedTypes(type_remap_fn);
+  const auto this_method_name = getNameForMethod(method.name());
+  auto copied =
+      class_compilation_unit()->create_function(this_method_name, graph);
+  type()->addMethod(copied);
   copied->setSchema(std::move(schema));
 }
 
@@ -263,15 +287,51 @@ void Module::clone_method(const Module& orig, const std::string& name) {
     type_remap[entry.first.module_object()->type()] =
         entry.second.module_object()->type();
     for (Slot s : entry.first.get_module_slots()) {
-      to_scan.emplace_back(s.to_module(), *entry.second.get_module(s.name()));
+      to_scan.emplace_back(s.to_module(), entry.second.get_module(s.name()));
     }
   }
-  return clone_method(orig, name, type_remap);
+  return clone_method(orig, orig.get_method(name).function(), type_remap);
+}
+
+Module Module::clone() const {
+  std::unordered_map<TypePtr, TypePtr> type_remap;
+  return clone_impl(type_remap);
+}
+
+Module Module::clone_impl(
+    std::unordered_map<TypePtr, TypePtr>& type_remap) const {
+  // Create a new module_object in the same compilation unit.
+  // The name is the same as for the original module, but it'll be mangled.
+  // The class type is also created from scratch.
+  Module r(name(), class_compilation_unit(), true);
+  type_remap[type()] = r.type();
+
+  // Copy slots. If a slot is a module - recursively clone it.
+  for (Slot s : get_slots()) {
+    if (s.is_module()) {
+      const Module& orig = s.to_module();
+      Module cloned = orig.clone_impl(type_remap);
+      type_remap[orig.type()] = cloned.type();
+      r.set_or_add_slot(
+          s.name(),
+          type_remap.at(s.type()),
+          cloned.module_object(),
+          s.entity_type());
+    } else {
+      r.set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
+    }
+  }
+
+  // Clone methods remapping the types to the cloned ones.
+  for (auto& fn : type()->methods()) {
+    r.clone_method(*this, *fn, type_remap);
+  }
+  return r;
 }
 
 void Module::train(bool on) {
-  for (auto& submod : get_modules()) {
-    submod->train(on);
+  for (auto submod : get_modules()) {
+    submod.train(on);
   }
   if (auto slot = find_attribute("training")) {
     slot->setValue(on);
@@ -293,7 +353,8 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
 
   // Create a bare object with correct number of slots
   const size_t numAttrs = classType->numAttributes();
-  auto obj = c10::ivalue::Object::create(classType, numAttrs);
+  auto obj = c10::ivalue::Object::create(
+      c10::StrongTypePtr(class_compilation_unit(), classType), numAttrs);
 
   // Invoke the `__init__()` of the class with the arguments provided.
   Stack stackWithSelf = {obj};
@@ -327,14 +388,15 @@ Module Slot::to_module() const {
   return Module(value().toObject());
 }
 
-std::vector<std::shared_ptr<Module>> Module::get_modules() const {
-  std::vector<std::shared_ptr<Module>> result;
-  for (Slot s : get_slots()) {
-    if (s.is_module()) {
-      result.push_back(std::make_shared<Module>(s.to_module()));
-    }
+module_list Module::get_modules() const {
+  return module_list(*this, EntityType::MODULE);
+}
+
+void Module::apply(const std::function<void(Module&)>& fn) {
+  for (auto submod : get_modules()) {
+    submod.apply(fn);
   }
-  return result;
+  fn(*this);
 }
 
 } // namespace script

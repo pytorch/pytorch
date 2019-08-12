@@ -1,5 +1,5 @@
 #include <ATen/native/mkldnn/Utils.h>
-#include <THNN/generic/pooling_shape.h>
+#include <ATen/native/Pool.h>
 
 namespace at { namespace native {
 

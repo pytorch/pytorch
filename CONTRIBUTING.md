@@ -243,18 +243,27 @@ only interested in a specific component.
   Caffe2 operators.
 
 On the initial build, you can also speed things up with the environment
-variables `DEBUG` and `NO_CUDA`.
+variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `USE_FBGEMM`, `USE_NNPACK` and `USE_QNNPACK`.
 
 - `DEBUG=1` will enable debug builds (-g -O0)
 - `REL_WITH_DEB_INFO=1` will enable debug symbols with optimizations (-g -O3)
-- `NO_CUDA=1` will disable compiling CUDA (in case you are developing on something not CUDA related), to save compile time.
+- `USE_DISTRIBUTED=0` will disable distributed (c10d, gloo, mpi, etc.) build.
+- `USE_MKLDNN=0` will disable using MKL-DNN.
+- `USE_CUDA=0` will disable compiling CUDA (in case you are developing on something not CUDA related), to save compile time.
+- `BUILD_TEST=0` will disable building C++ test binaries.
+- `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
+- `USE_NNPACK=0` will disable compiling with NNPACK.
+- `USE_QNNPACK=0` will disable QNNPACK build (quantized 8-bit operators).
 
 For example:
 ```bash
-NO_CUDA=1 DEBUG=1 python setup.py develop
+DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 python setup.py develop
 ```
 
-Make sure you continue to pass these flags on subsequent builds.
+For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
+options passed for the first time will persist; please run `ccmake build/`, run
+`cmake-gui build/`, or directly edit `build/CMakeCache.txt` to adapt build
+options.
 
 ### Code completion and IDE support
 
@@ -548,7 +557,8 @@ which is in PyTorch's `requirements.txt`.
 
 ### Pre-commit Tidy/Linting Hook
 
-We use clang-tidy and flake8 (installed with flake-mypy) to perform additional
+We use clang-tidy and flake8 (installed with flake8-bugbear,
+flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
 formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 

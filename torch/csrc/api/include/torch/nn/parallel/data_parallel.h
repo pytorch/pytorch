@@ -14,7 +14,7 @@
 
 #include <ATen/Device.h>
 #include <ATen/Parallel.h>
-#include <c10/core/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 #include <c10/util/Exception.h>
 
 #include <cstddef>
@@ -61,7 +61,7 @@ namespace {
 
 // Autograd function for the replicate step in data parallel. This is only used
 // in data parallel, and should not be exposed as a user API.
-struct ReduceAdd : public autograd::Function {
+struct ReduceAdd : public autograd::Node {
   explicit ReduceAdd(const at::Device& destination_device)
       : destination_device_(destination_device) {};
   ~ReduceAdd() override {}

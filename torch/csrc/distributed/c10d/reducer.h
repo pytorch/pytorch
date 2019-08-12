@@ -21,9 +21,9 @@ class Reducer {
   // variables list for **a single replica** (i.e. `variables[0]`).
   explicit Reducer(
       std::vector<std::vector<torch::autograd::Variable>> replicas,
-      std::vector<std::vector<bool>> expect_sparse_gradients,
       std::vector<std::vector<size_t>> bucket_indices,
-      std::shared_ptr<c10d::ProcessGroup> process_group);
+      std::shared_ptr<c10d::ProcessGroup> process_group,
+      std::vector<std::vector<bool>> expect_sparse_gradients);
 
   ~Reducer() noexcept(false);
 
@@ -51,30 +51,37 @@ class Reducer {
   // Forward declaration.
   struct Bucket;
 
+  // Locates a specific variable by replica index and variable index.
+  struct VariableIndex {
+    size_t replica_index;
+    size_t variable_index;
+  };
+
   std::mutex mutex_;
   std::vector<std::vector<torch::autograd::Variable>> replicas_;
-  std::vector<std::vector<bool>> expect_sparse_gradients_;
   std::shared_ptr<c10d::ProcessGroup> process_group_;
+  std::vector<std::vector<bool>> expect_sparse_gradients_;
 
-  std::vector<std::vector<std::shared_ptr<torch::autograd::Function>>>
+  std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
       grad_accumulators_;
-  std::unordered_map<torch::autograd::Function*, std::tuple<int, int>> func_;
-  std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Function>>>
+  std::unordered_map<torch::autograd::Node*, VariableIndex> func_;
+  std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
 
   bool expect_autograd_hooks_;
   bool require_finalize_;
-  bool has_marked_unused_parameters_;
   size_t next_bucket_;
 
-  void mark_variable_ready_dense(size_t replica_index, size_t variable_index);
+  bool has_marked_unused_parameters_;
+  std::vector<VariableIndex> unused_parameters_;
 
-  void mark_variable_ready_sparse(size_t replica_index, size_t variable_index);
+  void mark_variable_ready_dense(VariableIndex index);
 
-  void mark_variable_ready(
-      size_t replica_index,
-      size_t variable_index,
-      bool called_from_autograd = false);
+  void mark_variable_ready_sparse(VariableIndex index);
+
+  void mark_variable_ready(VariableIndex index);
+
+  void autograd_hook(VariableIndex index);
 
   void mark_bucket_ready(size_t bucket_index);
 

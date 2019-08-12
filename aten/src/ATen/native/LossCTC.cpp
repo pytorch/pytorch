@@ -147,12 +147,17 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
         }
       }
       // the likelihood is the the sum of the last two alphas, eq (8), the loss is the negative log likelihood
-      scalar_t l1 = log_alpha_a[input_length-1][target_length*2];
-      scalar_t l2 = log_alpha_a[input_length-1][target_length*2-1];
-      scalar_t m = std::max(l1, l2);
-      m = ((m == neginf) ? 0 : m);
-      scalar_t log_likelihood = std::log(std::exp(l1-m)+std::exp(l2-m))+m;
-      neg_log_likelihood_a[b] = -log_likelihood;
+      if (target_length == 0) {
+        // if the target is empty then there is no preceding BLANK state and hence there is no path to merge
+        neg_log_likelihood_a[b] = -log_alpha_a[input_length-1][0];
+      } else {
+        scalar_t l1 = log_alpha_a[input_length-1][target_length*2];
+        scalar_t l2 = log_alpha_a[input_length-1][target_length*2-1];
+        scalar_t m = std::max(l1, l2);
+        m = ((m == neginf) ? 0 : m);
+        scalar_t log_likelihood = std::log(std::exp(l1-m)+std::exp(l2-m))+m;
+        neg_log_likelihood_a[b] = -log_likelihood;
+      }
     }
   });
 
@@ -359,7 +364,9 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef inpu
 
   Tensor res;
   if (use_cudnn) {
-    res = std::get<0>(at::_cudnn_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK, ctx.deterministicCuDNN(), zero_infinity));
+    // non-deterministic ctc loss on cudnn disabled due to inconsistent results
+    // see: https://github.com/pytorch/pytorch/issues/21680
+    res = std::get<0>(at::_cudnn_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK, /*deterministic=*/true, zero_infinity));
   } else {
     res = std::get<0>(at::_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK, zero_infinity));
     if (zero_infinity) {
@@ -367,7 +374,8 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef inpu
     }
   }
   if (reduction == Reduction::Mean) {
-    auto target_lengths_t = at::tensor(target_lengths, res.options());
+    auto target_lengths_t =
+        at::tensor(target_lengths, res.options()).clamp_min(1);
     return (res / target_lengths_t).mean();
   } else if (reduction == Reduction::Sum) {
     return res.sum();
@@ -377,8 +385,8 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef inpu
 
 // Convenience function accepting Tensors
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
-  TORCH_CHECK(isIntegralType(input_lengths.scalar_type()), "input_lenghts must be integral");
-  TORCH_CHECK(isIntegralType(target_lengths.scalar_type()), "target_lenghts must be integral");
+  TORCH_CHECK(isIntegralType(input_lengths.scalar_type(), /*includeBool=*/false), "input_lenghts must be integral");
+  TORCH_CHECK(isIntegralType(target_lengths.scalar_type(), /*includeBool=*/false), "target_lengths must be integral");
 
   Tensor ilc = input_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
   Tensor tlc = target_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();

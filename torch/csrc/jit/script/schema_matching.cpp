@@ -517,7 +517,7 @@ Value* emitBuiltinCall(
         return emitBuiltinNode(*matched_schema, loc, graph, name);
       }
     }
-    for (const std::shared_ptr<Function>& method : builtin_functions) {
+    for (const auto method : builtin_functions) {
       method->ensure_defined();
       if (auto result = tryMatchSchema(
               method->getSchema(),
@@ -530,7 +530,7 @@ Value* emitBuiltinCall(
               allow_conversions)) {
         // we inline builtin calls because they are normally very small
         // wrappers and are not useful for keeping around to debug
-        return inlineCallTo(graph, *method->graph(), result->inputs).at(0);
+        return insertGraph(graph, *method->graph(), result->inputs).at(0);
       }
     }
   }

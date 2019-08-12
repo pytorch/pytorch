@@ -41,6 +41,7 @@ TYPE_MAP = {
     'std::string': 'str',
     'Scalar': 'Scalar',
     'MemoryFormat': 'MemoryFormat',
+    'MemoryFormat?': 'MemoryFormat?',
     'QScheme': 'QScheme',
     'Scalar?': 'Scalar?',
     'Tensor': 'Tensor',
@@ -99,6 +100,7 @@ FROM_IVALUE = {
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
     'MemoryFormat': '{}.toMemoryFormat()',
+    'MemoryFormat?': '{}.toOptional<c10::MemoryFormat>()',
     'QScheme': '{}.toQScheme()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
@@ -166,12 +168,20 @@ CONSTRUCTOR = CodeTemplate("""\
 OPERATOR = CodeTemplate("""\
 Operator(
     "${signature}",
-    ${op}
+    ${op},
+    atenOperatorOptions()
 ),
 """)
 
 
-blacklisted_types = {'Storage', 'DimnameList?', 'ConstQuantizerPtr'}
+blacklisted_types = {
+    'Storage',
+    'DimnameList?',
+    'ConstQuantizerPtr',
+    'Dimname',
+    'DimnameList',
+}
+
 default_only_types = {'Generator'}
 
 
@@ -336,6 +346,7 @@ def gen_jit_dispatch(declarations, out, template_path):
     tensor_impl_methods = [{
         'name': name,
         'api_name': name,
+        'overload_name': '',
         'method_of': ['Tensor'],
         'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
@@ -518,7 +529,8 @@ def signature(decl, should_match_schema=True):
             return '{} {}'.format(jit_type_of(r), r['field_name']) if 'field_name' in r else jit_type_of(r)
         ret_list = '({})'.format(', '.join(type_maybe_field(r) for r in decl['returns']))
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
-    constructed_string = 'aten::{}({}) -> {}'.format(name, arg_list, ret_list)
+    overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
+    constructed_string = 'aten::{}{}({}) -> {}'.format(name, overload_name, arg_list, ret_list)
     return match_signature(decl, constructed_string, should_match_schema)
 
 

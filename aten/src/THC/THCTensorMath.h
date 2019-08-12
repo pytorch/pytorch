@@ -49,6 +49,9 @@
 #include <THC/generic/THCTensorMathScan.h>
 #include <THC/THCGenerateAllTypes.h>
 
+#include <THC/generic/THCTensorMathScan.h>
+#include <THC/THCGenerateBoolType.h>
+
 #include <THC/generic/THCTensorMasked.h>
 #include <THC/THCGenerateAllTypes.h>
 
@@ -57,6 +60,9 @@
 
 #include <THC/generic/THCTensorScatterGather.h>
 #include <THC/THCGenerateAllTypes.h>
+
+#include <THC/generic/THCTensorScatterGather.h>
+#include <THC/THCGenerateBoolType.h>
 
 #include <THC/generic/THCTensorIndex.h>
 #include <THC/THCGenerateAllTypes.h>

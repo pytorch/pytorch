@@ -3,16 +3,22 @@
 #include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/Tensor.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
+class CustomClassHolder : public c10::intrusive_ptr_target {};
 struct Function;
+namespace script {
+struct CompilationUnit;
+}
 } // namespace jit
 } // namespace torch
 namespace c10 {
 template<class Key, class Value> class Dict;
 template<class T> class List;
 struct IValue;
+struct ClassType;
 namespace ivalue {
 struct Tuple;
 struct Future;
@@ -45,8 +51,10 @@ struct Object;
   _(GenericDict) \
   _(Future) \
   _(Device) \
+  _(Object) \
   _(Uninitialized) \
-  _(Object)
+  _(Capsule) \
+
 
 struct CAFFE2_API IValue final {
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
@@ -144,6 +152,14 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<caffe2::Blob> toBlob() &&;
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
 
+  // Capsule
+  IValue(intrusive_ptr<torch::jit::CustomClassHolder> blob);
+  bool isCapsule() const {
+    return Tag::Capsule == tag;
+  }
+  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() &&;
+  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() const &;
+
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
   bool isTuple() const { return Tag::Tuple == tag; }
@@ -239,6 +255,9 @@ struct CAFFE2_API IValue final {
 
   //TensorList
   IValue(c10::List<at::Tensor> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
   IValue(std::vector<at::Tensor> v);
   bool isTensorList() const { return Tag::TensorList == tag; }
   c10::List<at::Tensor> toTensorList() &&;
@@ -246,10 +265,6 @@ struct CAFFE2_API IValue final {
   c10::ArrayRef<at::Tensor> toTensorListRef() const;
 
   //GenericList
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
-  /// \endcond
-  IValue(std::vector<IValue> v);
   IValue(c10::List<IValue> v);
   bool isGenericList() const { return Tag::GenericList == tag; }
   c10::List<IValue> toGenericList() &&;
@@ -547,6 +562,40 @@ private:
   bool is_intrusive_ptr;
 };
 
+// An owning pointer to a Class. Just a pair of shared_ptrs to the class type
+// and its owning CU, so that the class type is guaranteed to stay alive as long
+// as we hold this object.
+struct StrongTypePtr {
+  StrongTypePtr(
+      std::shared_ptr<torch::jit::script::CompilationUnit> cu,
+      std::shared_ptr<ClassType> type)
+      : cu_(std::move(cu)), type_(type) {
+    TORCH_INTERNAL_ASSERT(cu_);
+    TORCH_INTERNAL_ASSERT(type_);
+  }
+  std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
+  std::shared_ptr<ClassType> type_;
+};
+
+TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();
+template<typename T>
+c10::StrongTypePtr getCustomClassType() {
+  auto tmap = c10::getCustomClassTypeMap();
+  auto res = tmap.find(typeid(T).name());
+  if (res == tmap.end()) {
+    throw c10::Error("Can't find class id in custom class type map", "");
+  }
+  return res->second;
+}
+
+template<typename T>
+inline bool isCustomClassRegistered() {
+  auto tmap = c10::getCustomClassTypeMap();
+  return tmap.find(typeid(T).name()) != tmap.end();
+}
+
+TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
+getClassConverter();
 }
 
 #include <ATen/core/ivalue_inl.h>
