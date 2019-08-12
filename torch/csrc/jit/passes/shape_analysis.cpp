@@ -39,7 +39,7 @@ bool isValidArgumentForRunning(Value* v) {
   if (toIValue(v))
     return true;
   if (CompleteTensorTypePtr tt = v->type()->cast<CompleteTensorType>()) {
-    return !at::isIntegralType(tt->scalarType());
+    return !at::isIntegralType(tt->scalarType(), /*includeBool=*/false);
   }
   return v->type()->isSubtypeOf(FloatType::get());
 }
