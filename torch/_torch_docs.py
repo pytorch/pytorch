@@ -2555,9 +2555,15 @@ Example::
     >>> torch.logical_not(torch.tensor([True, False]))
     tensor([ False,  True])
     >>> torch.logical_not(torch.tensor([0, 1, -10], dtype=torch.int8))
-    tensor([ True, False,  False])
-    >>> torch.logical_not(torch.tensor([0, 1, -10], dtype=torch.double))
-    tensor([ False,  True,  True])
+    tensor([ True, False, False])
+    >>> torch.logical_not(torch.tensor([0., 1., -10.], dtype=torch.double))
+    tensor([ True, False, False])
+    >>> torch.logical_not(torch.tensor([0., 1., -10.], dtype=torch.double), out=torch.empty(0, dtype=torch.bool))
+    tensor([ True, False, False])
+    >>> torch.logical_not(torch.tensor([0., 1., -10.], dtype=torch.double), out=torch.empty(0, dtype=torch.int16))
+    tensor([1, 0, 0], dtype=torch.int16)
+    >>> torch.logical_not(torch.tensor([0., 1., -10.], dtype=torch.double), out=torch.empty(0, dtype=torch.double))
+    tensor([1., 0., 0.], dtype=torch.float64)
 """.format(**common_args))
 
 add_docstr(torch.logical_xor,
