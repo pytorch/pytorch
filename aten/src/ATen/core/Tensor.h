@@ -578,7 +578,13 @@ class CAFFE2_API Tensor {
   Tensor tanh() const;
   Tensor & tanh_() const;
   Tensor transpose(int64_t dim0, int64_t dim1) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor transpose(Dimname dim0, Dimname dim1) const;
+  #endif
   Tensor & transpose_(int64_t dim0, int64_t dim1) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & transpose_(Dimname dim0, Dimname dim1) const;
+  #endif
   Tensor flip(IntArrayRef dims) const;
   Tensor roll(IntArrayRef shifts, IntArrayRef dims={}) const;
   Tensor rot90(int64_t k=1, IntArrayRef dims={0,1}) const;
