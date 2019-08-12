@@ -542,7 +542,7 @@ at::Tensor _convolution(
   // Temporarily put it above as this is the most generic version,
   // could potentially move to the end of function if XLA doesn't handle
   // it.
-  if (input.device() == at::kXLA) {
+  if (input.device().type() == c10::DeviceType::MSNPU) {
     return at::convolution_generic(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
   }
 
