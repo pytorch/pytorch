@@ -4,7 +4,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/Functions.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 #include <torch/cuda.h>
 
