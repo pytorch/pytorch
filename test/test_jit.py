@@ -15929,6 +15929,13 @@ additional_module_tests = [
         'constructor_args': (S, S),
         'input_size': (S, S),
     },
+    {
+        'module_name': 'MultiheadAttention',
+        'constructor_args': (128, 8),
+        'input_size': (10, 8, 128),
+        'extra_args': (torch.randn(10, 8, 128), torch.randn(10, 8, 128)),
+        'slowTest': True
+    }
 ]
 
 
@@ -16216,6 +16223,9 @@ def add_nn_module_test(*args, **kwargs):
 
         # Check against Python module as reference
         check_against_reference(self, create_script_module, create_nn_module, f_args_variable, no_grad=no_grad)
+
+    if kwargs.get('slowTest', False):
+        do_test = slowTest(do_test)
 
     post_add_test(test_name, (), do_test, TestJitGeneratedModule)
 
