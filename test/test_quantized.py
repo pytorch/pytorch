@@ -742,20 +742,19 @@ class TestQNNPackOps(TestCase):
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams(dtypes=torch.quint8,
                                           zero_point_min=0,
-                                          zero_point_max=0)))
-    def test_qnnpack_add(self, A):
+                                          zero_point_max=0)),
+           scale_C=st.sampled_from([0.001, 0.0821, 0.67, 7]),)
+    def test_qnnpack_add(self, A, scale_C):
         A_temp = A
         A, (scale_A, zero_point_A, torch_type) = A_temp
         B, (scale_B, zero_point_B, torch_type) = A_temp
         A = torch.from_numpy(A)
         B = torch.from_numpy(B)
-        scale_A = 3.0
-        zero_point_A = 7
-        scale_B = 5.0
-        zero_point_B = 127
 
-        scale_C = 0.5
-        zero_point_C = 5
+        assume(scale_A // scale_C >= 2**-14)
+        assume(scale_A // scale_C < 2**8)
+
+        zero_point_C = 127
 
         qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point_A,
                                    dtype=torch.quint8)

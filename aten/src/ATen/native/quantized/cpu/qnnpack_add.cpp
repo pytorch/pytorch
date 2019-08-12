@@ -33,11 +33,9 @@ class QNNPACKAdd final : public torch::OperatorKernel {
 
     initQNNPACK();
 
-    qnnp_operator_t qnnpackOperator_{nullptr};
+    qnnp_operator_t qnnpack_operator{nullptr};
 
-    size_t volume = qa_contig.numel();
-
-    size_t num_elems = volume / qa_contig.size(0);
+    size_t num_elems = qa_contig.numel() / qa_contig.size(0);
 
     const qnnp_status createStatus = qnnp_create_add_nc_q8(
         num_elems /* input size */,
@@ -50,15 +48,18 @@ class QNNPACKAdd final : public torch::OperatorKernel {
         std::numeric_limits<uint8_t>::min() /* output min */,
         std::numeric_limits<uint8_t>::max() /* output max */,
         0 /* flags */,
-        &qnnpackOperator_);
+        &qnnpack_operator);
 
     TORCH_INTERNAL_ASSERT(
         createStatus == qnnp_status_success,
         "failed to create QNNPACK Add operator");
-    TORCH_INTERNAL_ASSERT(qnnpackOperator_ != nullptr);
+    TORCH_INTERNAL_ASSERT(qnnpack_operator != nullptr);
+
+    std::unique_ptr<qnnp_operator, QnnpackOperatorDeleter> qnnpack_uniq_ptr(
+        qnnpack_operator);
 
     const qnnp_status setupStatus = qnnp_setup_add_nc_q8(
-        qnnpackOperator_ /* add op */,
+        qnnpack_operator /* add op */,
         qa_contig.size(0) /* batch size */,
         (uint8_t*)qa_contig.data<c10::quint8>() /* a data */,
         num_elems /* A stride */,
@@ -71,7 +72,7 @@ class QNNPACKAdd final : public torch::OperatorKernel {
         "failed to setup QNNPACK Add operator");
 
     const qnnp_status runStatus =
-        qnnp_run_operator(qnnpackOperator_, nullptr /* thread pool */);
+        qnnp_run_operator(qnnpack_operator, nullptr /* thread pool */);
 
     TORCH_INTERNAL_ASSERT(
         runStatus == qnnp_status_success, "failed to run QNNPACK Add operator");

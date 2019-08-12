@@ -9,7 +9,7 @@ namespace at {
 namespace native {
 namespace {
 
-class QNNPACKMaxPool final : public torch::OperatorKernel {
+class QNNPACKMaxPool2D final : public torch::OperatorKernel {
  public:
 #ifdef USE_QNNPACK
   Tensor operator()(
@@ -46,10 +46,10 @@ class QNNPACKMaxPool final : public torch::OperatorKernel {
     initQNNPACK();
     const auto scale = input_contig.q_scale();
     const auto zero_point = input_contig.q_zero_point();
-    qnnp_operator_t qnnpackOperator_{nullptr};
+    qnnp_operator_t qnnpack_operator{nullptr};
 
-    int64_t padL = padding[0];
-    int64_t padT = padding[1];
+    int64_t padH = padding[0];
+    int64_t padW = padding[1];
     int64_t kH = kernel_size[0];
     int64_t kW = kernel_size[1];
     int64_t strideH = stride[0];
@@ -71,10 +71,10 @@ class QNNPACKMaxPool final : public torch::OperatorKernel {
     int64_t inC = input_contig.size(3);
 
     const qnnp_status createStatus = qnnp_create_max_pooling2d_nhwc_u8(
-        padT /* input_padding_top */,
-        padL /* input_padding_right */,
-        padT /* input_padding_bottom */,
-        padL /* input_padding_left */,
+        padH /* input_padding_top */,
+        padW /* input_padding_right */,
+        padH /* input_padding_bottom */,
+        padW /* input_padding_left */,
         kH /* pooling height */,
         kW /* pooling width */,
         strideH /* stride height */,
@@ -85,28 +85,34 @@ class QNNPACKMaxPool final : public torch::OperatorKernel {
         std::numeric_limits<uint8_t>::min() /* output min */,
         std::numeric_limits<uint8_t>::max() /* output max */,
         0 /* flags */,
-        &qnnpackOperator_);
+        &qnnpack_operator);
     TORCH_INTERNAL_ASSERT(
         createStatus == qnnp_status_success,
         "failed to create QNNPACK MaxPool operator");
-    TORCH_INTERNAL_ASSERT(qnnpackOperator_ != nullptr);
+    TORCH_INTERNAL_ASSERT(qnnpack_operator != nullptr);
 
     int64_t outC = inC;
     int64_t outH =
-        pooling_output_shape(inH, kH, padT, strideH, dilationH, false);
+        pooling_output_shape(inH, kH, padH, strideH, dilationH, false);
     int64_t outW =
-        pooling_output_shape(inW, kW, padL, strideW, dilationW, false);
+        pooling_output_shape(inW, kW, padW, strideW, dilationW, false);
 
     TORCH_CHECK(
         outH > 0 && outW > 0,
         "qnnpack_maxpool(): the resulting output Tensor size should be >= 0");
 
+    std::unique_ptr<qnnp_operator, QnnpackOperatorDeleter> qnnpack_uniq_ptr(
+        qnnpack_operator);
+
     // NHWC output
-    std::vector<int64_t> outSizes{batch_size, outH, outW, outC};
     qy = at::_empty_affine_quantized(
-        outSizes, at::device(kCPU).dtype(kQUInt8), scale, zero_point);
+        {batch_size, outH, outW, outC},
+        at::device(kCPU).dtype(kQUInt8),
+        scale,
+        zero_point);
+
     const qnnp_status setupStatus = qnnp_setup_max_pooling2d_nhwc_u8(
-        qnnpackOperator_ /* max pooling */,
+        qnnpack_operator /* max pooling */,
         batch_size /* batch size */,
         inH /* input height */,
         inW /* input width */,
@@ -120,7 +126,7 @@ class QNNPACKMaxPool final : public torch::OperatorKernel {
         "failed to setup QNNPACK MaxPool operator");
 
     const qnnp_status runStatus =
-        qnnp_run_operator(qnnpackOperator_, nullptr /* thread pool */);
+        qnnp_run_operator(qnnpack_operator, nullptr /* thread pool */);
     TORCH_INTERNAL_ASSERT(
         runStatus == qnnp_status_success,
         "failed to run QNNPACK MaxPool operator");
@@ -138,7 +144,7 @@ class QNNPACKMaxPool final : public torch::OperatorKernel {
 
 static auto registry = torch::RegisterOperators().op(
     "quantized::qnnpack_maxpool2d",
-    torch::RegisterOperators::options().kernel<QNNPACKMaxPool>(
+    torch::RegisterOperators::options().kernel<QNNPACKMaxPool2D>(
         QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
