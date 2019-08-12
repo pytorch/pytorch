@@ -15,14 +15,14 @@ using at::manual_seed;
 // yf225 TODO: Question: how to implement for CUDA?
 
 Tensor get_rng_state(torch::Device device = torch::Device(torch::kCPU)) {
-  auto& default_generator = torch::globalContext().defaultGenerator(device);
+  at::Generator* default_generator = torch::globalContext().defaultGenerator(device);
 
   auto tensor = torch::empty({0}, torch::device(torch::kCPU).dtype(torch::kByte));
-  if (default_generator.device().type() == torch::kCPU) {
+  if (default_generator->device().type() == torch::kCPU) {
     THByteTensor_getRNGState(default_generator, (THByteTensor*)(tensor.unsafeGetTensorImpl()));
   } else {
 #ifdef USE_CUDA
-    TORCH_INTERNAL_ASSERT(default_generator.device().type() == torch::kCUDA);
+    TORCH_INTERNAL_ASSERT(default_generator->device().type() == torch::kCUDA);
     THCRandom_getRNGState(default_generator, (THByteTensor*)(tensor.unsafeGetTensorImpl()));
 #else
     TORCH_INTERNAL_ASSERT(false, "libtorch not compiled with CUDA");
@@ -33,7 +33,7 @@ Tensor get_rng_state(torch::Device device = torch::Device(torch::kCPU)) {
 
 void set_rng_state(Tensor new_state, torch::Device device = torch::Device(torch::kCPU)) {
   auto tensor = new_state.clone();
-  auto& default_generator = torch::globalContext().defaultGenerator(device);
+  at::Generator* default_generator = torch::globalContext().defaultGenerator(device);
 
   if (tensor.layout() != kStrided || tensor.device().type() != kCPU || tensor.scalar_type() != kByte) {
     auto type_name = torch::utils::type_to_string(tensor.type());
