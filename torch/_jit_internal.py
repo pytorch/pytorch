@@ -4,8 +4,6 @@ can be used in other places in torch/ (namely torch.nn) without running into
 circular dependency problems
 """
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import inspect
 import weakref
 import torch._C
