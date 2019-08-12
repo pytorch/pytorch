@@ -687,13 +687,36 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
     return copy;
   }
 
+  ProfiledTensorTypePtr withSizesStrides(
+      at::IntArrayRef sizes,
+      at::IntArrayRef strides) const {
+    auto cloned = clone();
+    cloned->sizes_ = VaryingShape(sizes);
+    cloned->strides_ = VaryingStrides(strides);
+    return cloned;
+  }
+
+  ProfiledTensorTypePtr withSizes(at::IntArrayRef sizes) const {
+    return withSizesStrides(
+        sizes, contiguousStridesOf(sizes));
+  }
+
   ProfiledTensorTypePtr dimensionedOnly() const {
     auto copy = clone();
     copy->sizes_ = VaryingShape(sizes().size());
     copy->strides_ = VaryingShape(sizes().size());
     return copy;
   }
-  
+
+  ProfiledTensorTypePtr contiguous() const {
+    auto cloned = clone();
+    if (auto concrete_sizes = sizes().concrete_sizes()) {
+      cloned->strides_ = VaryingShape(contiguousStridesOf(*concrete_sizes));
+    } else  {
+      cloned->strides_ = VaryingShape(sizes().size());
+    }
+    return cloned;
+  }
 
   ProfiledTensorTypePtr merge(ProfiledTensorTypePtr other) {
     auto scalar_type = merge_primitive(scalarType(), other->scalarType());

@@ -312,7 +312,7 @@ inline IValue toIValue(
   switch (type->kind()) {
     case TypeKind::TensorType:
     case TypeKind::AutogradZeroTensorType:
-    case TypeKind::ProfiledTensorType:
+    case TypeKind::ProfiledTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
         AT_WARN(

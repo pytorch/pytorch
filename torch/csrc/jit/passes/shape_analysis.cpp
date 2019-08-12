@@ -1771,17 +1771,19 @@ class ShapePropagator {
     } else if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
       auto lhs_type = tensor_types.at(0);
       auto rhs_type = tensor_types.at(1);
+      auto lhs_sizes = lhs_type->sizes().concrete_sizes().value();
+      auto rhs_sizes = rhs_type->sizes().concrete_sizes().value();
       SHAPE_ASSERT(
-          lhs_type->sizes().size() == 2 && rhs_type->sizes().size() == 2);
+          *lhs_type->sizes().size() == 2 && *rhs_type->sizes().size() == 2);
       node->output()->setType(ProfiledTensorType::createContiguous(
-          lhs_type->scalarType(),
-          lhs_type->device(),
-          at::IntArrayRef{lhs_type->sizes().at(0), rhs_type->sizes().at(1)}));
+          *lhs_type->scalarType(),
+          *lhs_type->device(),
+          at::IntArrayRef{lhs_sizes[0], rhs_sizes[1]}));
       return true;
     } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
       auto tp = tensor_types.at(0);
-      auto sizes = tp->sizes();
-      auto strides = tp->strides();
+      auto sizes = tp->sizes().concrete_sizes().value();
+      auto strides = tp->strides().concrete_sizes().value();
       SHAPE_ASSERT(sizes.size() == 2);
       std::swap(sizes.at(0), sizes.at(1));
       std::swap(strides.at(0), strides.at(1));
@@ -1792,12 +1794,13 @@ class ShapePropagator {
             "aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
             /*const_inputs=*/{attr::dim, attr::length})) {
       auto tp = tensor_types.at(0);
-      auto sizes = tp->sizes();
+      auto sizes = tp->sizes().concrete_sizes().value();
       int64_t dim = node->get<int64_t>(attr::dim).value();
       int64_t length = node->get<int64_t>(attr::length).value();
       SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
       sizes.at(dim) = length;
-      node->output()->setType(tp->withSizesStrides(sizes, tp->strides()));
+      node->output()->setType(
+          tp->withSizesStrides(sizes, tp->strides().concrete_sizes().value()));
       return true;
     } else if (node->matches("aten::sum(Tensor self, *, int? dtype) -> Tensor")) {
       node->output()->setType(tensor_types.at(0)->withSizes({}));
@@ -1806,7 +1809,7 @@ class ShapePropagator {
                    "aten::sum(Tensor self, int[] dim, bool keepdim, *, int? dtype) -> Tensor",
                    /*const_inputs=*/{attr::dim, attr::keepdim})) {
       auto& tp = tensor_types.at(0);
-      auto sizes = tp->sizes();
+      auto sizes = tp->sizes().concrete_sizes().value();
       auto dims = node->get<c10::List<int64_t>>(attr::dim).value();
       bool keepdim = node->get<bool>(attr::keepdim).value();
       std::reverse(dims.begin(), dims.end());
@@ -1824,8 +1827,8 @@ class ShapePropagator {
                    "aten::squeeze(Tensor self, int dim) -> Tensor",
                    /*const_inputs=*/attr::dim)) {
       auto& tp = tensor_types.at(0);
-      auto sizes = tp->sizes();
-      auto strides = tp->strides();
+      auto sizes = tp->sizes().concrete_sizes().value();
+      auto strides = tp->strides().concrete_sizes().value();
       int64_t dim = wrapDim(node->get<int64_t>(attr::dim).value(), sizes);
       SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
       if (sizes.at(dim) == 1) {
@@ -1838,8 +1841,8 @@ class ShapePropagator {
                    "aten::unsqueeze(Tensor self, int dim) -> Tensor",
                    /*const_inputs=*/attr::dim)) {
       auto& tp = tensor_types.at(0);
-      auto sizes = tp->sizes();
-      auto strides = tp->strides();
+      auto sizes = tp->sizes().concrete_sizes().value();
+      auto strides = tp->strides().concrete_sizes().value();
       int64_t dim = wrapDim(node->get<int64_t>(attr::dim).value(), sizes);
       SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) <= sizes.size());
       int64_t new_stride = dim >= static_cast<int64_t>(sizes.size())
@@ -1870,7 +1873,7 @@ class ShapePropagator {
       if (inferred) {
         SHAPE_ASSERT(size_product != 0);
         size_t numel = 1;
-        for (int64_t s : tensor_types.at(0)->sizes())
+        for (int64_t s : tensor_types.at(0)->sizes().concrete_sizes().value())
           numel *= s;
         int64_t inferred_size = numel / size_product;
         sizes[inferred_idx] = inferred_size;
@@ -1884,8 +1887,8 @@ class ShapePropagator {
         node->output()->setType(node->namedInput(attr::self)->type());
       } else {
         // This will be a copy, so the result will be contiguous
-        node->output()->setType(
-            tensor_types.at(1)->withSizes(tensor_types.at(0)->sizes()));
+        node->output()->setType(tensor_types.at(1)->withSizes(
+            tensor_types.at(0)->sizes().concrete_sizes().value()));
       }
       return true;
     } else if (
@@ -1895,9 +1898,10 @@ class ShapePropagator {
       auto tp = tensor_types.at(0);
       std::vector<int64_t> sizes, strides;
       std::tie(sizes, strides) = at::inferExpandGeometry(
-          tp->sizes(),
-          tp->strides(),
-          c10::impl::toVector(node->get<c10::List<int64_t>>(attr::size).value()));
+          tp->sizes().concrete_sizes().value(),
+          tp->strides().concrete_sizes().value(),
+          c10::impl::toVector(
+              node->get<c10::List<int64_t>>(attr::size).value()));
       node->output()->setType(tp->withSizesStrides(sizes, strides));
       return true;
     } else if (
@@ -1907,26 +1911,26 @@ class ShapePropagator {
       auto ten = tensor_types.at(0);
       auto index = tensor_types.at(1);
       int64_t dim = node->get<int64_t>(attr::dim).value();
-      SHAPE_ASSERT(index->sizes().size() == 1);
+      SHAPE_ASSERT(*index->sizes().size() == 1);
       SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < ten->sizes().size());
-      std::vector<int64_t> sizes = ten->sizes();
-      sizes[dim] = index->sizes()[0];
+      std::vector<int64_t> sizes = ten->sizes().concrete_sizes().value();
+      sizes[dim] = index->sizes()[0].value();
       node->output()->setType(ten->withSizes(sizes));
       return true;
     } else if (node->matches(
                    "aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]",
                    /*const_inputs=*/{attr::chunks, attr::dim})) {
       auto input_type = tensor_types.at(0);
-      auto sizes = input_type->sizes();
-      const auto& strides = input_type->strides();
+      auto sizes = input_type->sizes().concrete_sizes().value();
+      auto strides = input_type->strides().concrete_sizes().value();
       int64_t dim = node->get<int64_t>(attr::dim).value();
       int64_t chunks = node->get<int64_t>(attr::chunks).value();
       sizes[dim] /= chunks;
       for (Value* output : node->outputs()) {
         output->setType(input_type->withSizesStrides(sizes, strides));
       }
-      if (input_type->sizes().at(dim) % chunks != 0) {
-        sizes[dim] = input_type->sizes().at(dim) % chunks;
+      if (*input_type->sizes()[dim] % chunks != 0) {
+        sizes[dim] = *input_type->sizes()[dim] % chunks;
         node->outputs().back()->setType(
             input_type->withSizesStrides(sizes, strides));
       }
@@ -1934,10 +1938,10 @@ class ShapePropagator {
     } else if (node->kind() == ::c10::onnx::Shape) {
       SHAPE_ASSERT(node->inputs().size() == 1 && node->outputs().size() == 1);
       std::vector<int64_t> dim_vec = {
-          (int64_t)tensor_types.at(0)->sizes().size()};
+          (int64_t)*tensor_types.at(0)->sizes().size()};
       at::IntArrayRef dims(dim_vec);
       node->output()->setType(
-          ProfiledTensorType::create(at::kLong, at::kCPU, dims));
+          ProfiledTensorType::createContiguous(at::kLong, at::kCPU, dims));
       return true;
     } else if (node->kind() == ::c10::onnx::Reshape) {
       setUnshapedType(node);

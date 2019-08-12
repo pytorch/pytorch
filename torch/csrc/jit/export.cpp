@@ -220,6 +220,9 @@ void EncoderBase::EncodeValueInfo(
   std::string name = n->debugName();
   v->set_name(name);
   if (ProfiledTensorTypePtr node_type = n->type()->cast<ProfiledTensorType>()) {
+    if (!node_type->isComplete()) {
+      return;
+    }
     onnx::TypeProto* t = v->mutable_type();
     onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
     onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
