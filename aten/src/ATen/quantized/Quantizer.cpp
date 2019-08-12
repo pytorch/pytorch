@@ -7,6 +7,8 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/core/Tensor.h>
 
+#include <typeinfo>
+
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
 #endif
@@ -112,6 +114,16 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
 }
 
 template <typename T>
+inline float dequantize_val(double scale, int64_t zero_point, T value) {
+  fbgemm::TensorQuantizationParams qparams = {
+    .scale = static_cast<float>(scale),
+    .zero_point = static_cast<int32_t>(zero_point)
+  };
+  return fbgemm::Dequantize<typename T::underlying>(value.val_, qparams);
+
+}
+
+template <typename T>
 Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
   auto fn_name = "dequantize_tensor";
   checkFloatCPUTensor(fn_name, rtensor);
@@ -129,7 +141,7 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
                               /*qparams=*/qparams);
   return rtensor;
 }
-#else
+#else  // USE_FBGEMM
 
 template <typename T>
 T quantize_val(double scale, int64_t zero_point, float value) {
@@ -165,6 +177,13 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
 }
 
 template <typename T>
+CAFFE2_API float dequantize_val(double scale, int64_t zero_point, T value) {
+  // We need to convert the qint8 value to float to ensure the subtraction
+  // subexpression returns a float
+  return (static_cast<float>(value.val_) - zero_point) * scale;
+}
+
+template <typename T>
 Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
   auto fn_name = "dequantize_tensor";
   checkFloatCPUTensor(fn_name, rtensor);
@@ -173,23 +192,43 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
   const auto* qd = qtensor.data<T>();
   float* rd = rtensor.data<float>();
   for (auto i = 0; i < qtensor.numel(); ++i) {
-    // We need to convert the qint8 value to float to ensure the subtraction
-    // subexpression returns a float
-    rd[i] = (static_cast<float>(qd[i].val_) - zero_point) * scale;
+    rd[i] = dequantize_val<T>(scale, zero_point, qd[i]);
   }
   return rtensor;
 }
-#endif
+#endif  // USE_FBGEMM
+
+template <typename SRC_T, typename DST_T>
+DST_T requantize_val(double src_scale, int64_t src_zero_point,
+                     double dst_scale, int64_t dst_zero_point,
+                     SRC_T src) {
+  const auto dq = dequantize_val<SRC_T>(src_scale, src_zero_point, src);
+  return quantize_val<DST_T>(dst_scale, dst_zero_point, dq);
+}
+
 template CAFFE2_API qint8 quantize_val<qint8>(double scale, int64_t zero_point, float value);
 template CAFFE2_API quint8 quantize_val<quint8>(double scale, int64_t zero_point, float value);
 template CAFFE2_API qint32 quantize_val<qint32>(double scale, int64_t zero_point, float value);
 template CAFFE2_API Tensor quantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 template CAFFE2_API Tensor quantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 template CAFFE2_API Tensor quantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+
+template CAFFE2_API float dequantize_val<qint8>(double scale, int64_t zero_point, qint8 value);
+template CAFFE2_API float dequantize_val<quint8>(double scale, int64_t zero_point, quint8 value);
+template CAFFE2_API float dequantize_val<qint32>(double scale, int64_t zero_point, qint32 value);
 template CAFFE2_API Tensor dequantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 template CAFFE2_API Tensor dequantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 template CAFFE2_API Tensor dequantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 
+template CAFFE2_API qint8 requantize_val<qint8, qint8>(double, int64_t, double, int64_t, qint8);
+template CAFFE2_API quint8 requantize_val<qint8, quint8>(double, int64_t, double, int64_t, qint8);
+template CAFFE2_API qint32 requantize_val<qint8, qint32>(double, int64_t, double, int64_t, qint8);
+template CAFFE2_API qint8 requantize_val<quint8, qint8>(double, int64_t, double, int64_t, quint8);
+template CAFFE2_API quint8 requantize_val<quint8, quint8>(double, int64_t, double, int64_t, quint8);
+template CAFFE2_API qint32 requantize_val<quint8, qint32>(double, int64_t, double, int64_t, quint8);
+template CAFFE2_API qint8 requantize_val<qint32, qint8>(double, int64_t, double, int64_t, qint32);
+template CAFFE2_API quint8 requantize_val<qint32, quint8>(double, int64_t, double, int64_t, qint32);
+template CAFFE2_API qint32 requantize_val<qint32, qint32>(double, int64_t, double, int64_t, qint32);
 
 // TODO: add fbgemm for per channel
 template <typename T>
