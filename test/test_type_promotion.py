@@ -33,17 +33,17 @@ class TestTypePromotion(TestCase):
         self.assertEqual(int_tensor, three)
         self.assertEqual(int_tensor.dtype, torch.int32)
 
+        bool_tensor = torch.tensor([1, 1, 1], dtype=torch.bool)
         uint8_tensor = torch.tensor([1, 1, 1], dtype=torch.uint8)
-        half_tensor = torch.tensor([1, 1, 1], dtype=torch.half)
-        # uint8 is unsigned, half is signed.
-        self.assertRaisesRegex(RuntimeError, "can't be cast to", lambda: uint8_tensor.add_(half_tensor))
+        # We treat bool as a separate category, which means uint8 cannot cast to bool.
+        self.assertRaisesRegex(RuntimeError, "can't be cast to", lambda: bool_tensor.add_(uint8_tensor))
 
-        # We allow demotion from signed to unsigned, unlike numpy, because we
-        # don't want the performance penalty of inspecting scalar values, and
-        # because we don't want 'signed' to be considered a distinct 'category'
+        # We allow demotion from signed to unsigned, unlike numpy, because:
+        # * We don't want the performance penalty of inspecting scalar values.
+        # * We don't want 'signed' to be considered a distinct 'category'
         # in promotion rules.
-        # If signed were a distinct category, uint16_tensor + 5 would result in
-        # a long_tensor, which is not what we want.
+        # We don't want signed to be a separate category because if it was,
+        # uint16_tensor + 5 would result in a long_tensor, which is not what we want.
         int16_tensor = torch.tensor([1, 1, 1], dtype=torch.int16)
         uint8_tensor *= int16_tensor
 
@@ -103,13 +103,15 @@ class TestTypePromotion(TestCase):
         self.assertEqual((a + other).dtype, torch.float32)
 
     def test_half(self):
-        if(self.device == 'cpu'):
-            raise unittest.SkipTest('add_cpu not implemented for Half')
         half = torch.tensor(5.5, dtype=torch.float16, device=self.device)
-        self.assertEqual((half + 2.2).dtype, torch.float16)
-        self.assertEqual((half + 100000).dtype, torch.float16)  # inf
-        default_tensor = torch.tensor(100000.0, device=self.device)
-        self.assertEqual((half + default_tensor).dtype, torch.get_default_dtype())
+        if(self.device == 'cpu'):
+            self.assertRaisesRegex(RuntimeError, "not implemented for 'Half'",
+                                   lambda: half + 2.2)
+        else:
+            self.assertEqual((half + 2.2).dtype, torch.float16)
+            self.assertEqual((half + 100000).dtype, torch.float16)  # inf
+            default_tensor = torch.tensor(100000.0, device=self.device)
+            self.assertEqual((half + default_tensor).dtype, torch.get_default_dtype())
 
     def test_alternate_result(self):
         f = torch.tensor([1, 1, 1, 1], dtype=torch.float, device=self.device)
