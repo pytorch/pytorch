@@ -12,15 +12,15 @@ if not strtobool(os.environ.get('NO_NUMBA', 'n')) and _check_module_exists("numb
     NUMBA_CUDA_EXIST = numba.cuda.is_available()
 
     @numba.cuda.jit()
-    def numba_cuda_kernel(param, grad, exp_avg, exp_avg_sq, beta1, 
-                          beta2, step_size, bias_correction2, eps, 
+    def numba_cuda_kernel(param, grad, exp_avg, exp_avg_sq, beta1,
+                          beta2, step_size, bias_correction2, eps,
                           weight_decay):
         i = numba.cuda.grid(1)
         if i >= param.size:
             return
 
         exp_avg[i] = exp_avg[i] * beta1 + (1 - beta1) * grad[i]
-        exp_avg_sq[i] = exp_avg_sq[i] * beta2 + (1 - beta2) * grad[i]*grad[i]
+        exp_avg_sq[i] = exp_avg_sq[i] * beta2 + (1 - beta2) * grad[i] * grad[i]
 
         denom = math.sqrt(exp_avg_sq[i]) / bias_correction2 + eps
         param[i] *= weight_decay
@@ -81,7 +81,7 @@ class AdamW(Optimizer):
                 and returns the loss.
         """
 
-        # In order to reduce Numba overhead, we save the device arrays 
+        # In order to reduce Numba overhead, we save the device arrays
         # between calls to `step()` in `_nbstate`.
         self._nbstate = getattr(self, '_nbstate', {})
 
@@ -98,7 +98,7 @@ class AdamW(Optimizer):
                 grad = param.grad.data
                 p = param.data
                 if grad.is_sparse:
-                    raise RuntimeError('Adam does not support sparse gradients,' 
+                    raise RuntimeError('Adam does not support sparse gradients,'
                                        'please consider SparseAdam instead')
                 amsgrad = group['amsgrad']
 
@@ -119,7 +119,8 @@ class AdamW(Optimizer):
                             'param': numba.cuda.as_cuda_array(p.data.flatten()),
                             'grad': numba.cuda.as_cuda_array(grad.flatten()),
                             'exp_avg': numba.cuda.as_cuda_array(state['exp_avg'].data.flatten()),
-                            'exp_avg_sq': numba.cuda.as_cuda_array(state['exp_avg_sq'].data.flatten()),
+                            'exp_avg_sq': numba.cuda.as_cuda_array(state['exp_avg_sq']
+                                                                   .data.flatten()),
                             'blockspergrid': math.ceil(p.data.numel() / NUMBA_CUDA_THREAD_PER_BLOCK)
                         }
 
@@ -134,10 +135,16 @@ class AdamW(Optimizer):
 
                 if param in self._nbstate:
                     s = self._nbstate[param]
-                    numba_cuda_kernel[s['blockspergrid'], NUMBA_CUDA_THREAD_PER_BLOCK]  \
-                        (s['param'], s['grad'], s['exp_avg'], s['exp_avg_sq'], beta1, 
-                        beta2, step_size, bias_correction2, eps, weight_decay)
-                else:                                   
+                    numba_cuda_kernel[s['blockspergrid'],
+                                      NUMBA_CUDA_THREAD_PER_BLOCK](s['param'],
+                                                                   s['grad'],
+                                                                   s['exp_avg'],
+                                                                   s['exp_avg_sq'],
+                                                                   beta1, beta2,
+                                                                   step_size,
+                                                                   bias_correction2,
+                                                                   eps, weight_decay)
+                else:
                     exp_avg = state['exp_avg'].data
                     exp_avg_sq = state['exp_avg_sq'].data
                     # Decay the first and second moment running average coefficient
@@ -153,8 +160,8 @@ class AdamW(Optimizer):
                         denom = (exp_avg_sq.sqrt() / bias_correction2).add_(eps)
 
                     # Perform stepweight decay
-                    p.data.mul_(weight_decay)                        
-                    
+                    p.data.mul_(weight_decay)
+
                     p.data.addcdiv_(-step_size, exp_avg, denom)
 
         return loss
