@@ -416,10 +416,12 @@ static void maybe_scale(variable_list& inputs) {
 static variable_list maybe_unscale(bool is_leaf_accumulator, variable_list inputs) {
   // We can't be sure someone else isn't referencing this gradient.  Play it safe for now, using out-of-place ops even
   // if we aren't setting up for a double-backward.
+  // Note that unscaling IS autograd-exposed here in case someone is setting up a double-backward.
   if(is_leaf_accumulator && AmpMode::is_grad_scaling_enabled())
   {
     for(int i = 0; i < inputs.size(); i++)
-      inputs[i] = inputs[i]/AmpMode::get_grad_scale();
+      inputs[i] = at::_amp_unscale_inf_check(inputs[i], AmpMode::get_grad_scale());
+      // inputs[i] = inputs[i]/AmpMode::get_grad_scale();
   }
   // If we can be sure no one else is referencing this gradient, we can do the following:
   // if(GradMode::is_enabled())

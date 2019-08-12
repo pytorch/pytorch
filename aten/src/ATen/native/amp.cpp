@@ -11,6 +11,7 @@
 namespace at {
 namespace native {
 namespace {
+  // Should these be thread local, or global and mutexed?
   float loss_scale;
   std::unordered_map<TensorImpl*, Tensor&> cached_leaf_casts;
   // Alternative, if we want to make absolutely sure the cached Tensors stay alive:
@@ -20,7 +21,6 @@ namespace {
   // torch::Tensor amp_overflow_state;
 }
 
-// Should this be thread local, or global and mutexed?
 Tensor _amp_overflow_state(const Tensor & new_state) {
   if(new_state.defined())
   {

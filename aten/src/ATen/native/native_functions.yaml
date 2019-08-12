@@ -1766,9 +1766,6 @@
     CPU: gelu_backward_cpu
     CUDA: gelu_backward_cuda
 
-- func: _amp_overflow_state(Tensor? new_state=None) -> Tensor
-  variants: function
-
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   variants: function, method
   dispatch:
@@ -4309,6 +4306,18 @@
   dispatch:
     CPU: legacy::cpu::_th_addmm_
     CUDA: legacy::cuda::_th_addmm_
+
+# Do I need (a!) here?
+- func: _amp_overflow_state(Tensor? new_state=None) -> Tensor
+  variants: function
+
+# Only support out-of-place version for now
+# Need scale to be an argument so it can be saved for double-backward.
+# Should I have named_guard False here?
+- func: _amp_unscale_inf_check(Tensor scaled_grad, float scale) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _amp_unscale_inf_check_cuda
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:

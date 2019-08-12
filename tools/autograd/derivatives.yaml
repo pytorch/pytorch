@@ -126,6 +126,9 @@
   mat1: mm_mat1_backward(grad, mat2, mat1, alpha)
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
 
+- name: _amp_unscale_inf_check(Tensor scaled_grad, float scale) -> Tensor
+  scaled_grad: "(scale == 1.0) ? grad : grad / scale"
+
 - name: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
   sparse: _sparse_addmm_sparse_backward(grad, sparse, dense, alpha)
