@@ -34,6 +34,7 @@ class TestUtilityFuns(TestCase):
     def test_validate_dynamic_axes_invalid_input_output_name(self):
         import warnings
         with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             utils._validate_dynamic_axes({'input1': {}, 'output': {},
                                          'invalid_name1': {}, 'invalid_name2': {}},
                                           None, ['input1', 'input2'], ['output'])
