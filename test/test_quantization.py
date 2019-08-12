@@ -310,8 +310,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
                  ' we are in a UBSAN environment.')
 class FusionTest(QuantizationTestCase):
     def test_fuse_module_train(self):
-        model = ModelForFusion(default_qat_qconfig)
-        model.train()
+        model = ModelForFusion(default_qat_qconfig).train()
         fuse_modules(model, [['conv1', 'bn1', 'relu1'],
                              ['sub1.conv', 'sub1.bn']])
         self.assertEqual(type(model.conv1), nni.ConvBnReLU2d,
@@ -340,7 +339,7 @@ class FusionTest(QuantizationTestCase):
             self.assertEqual(type(model.sub1.bn), nn.Identity)
             self.assertEqual(type(model.sub2.conv), nn.Conv2d)
             self.assertEqual(type(model.sub2.relu), nn.ReLU)
-            test_only_train_fn(model, self.img_data)
+
         checkQAT(model)
         test_only_train_fn(model, self.img_data)
         convert(model)
