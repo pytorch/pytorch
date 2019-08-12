@@ -1,5 +1,12 @@
 TorchScript
-============
+===========
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Builtin Functions
+   :hidden:
+
+   torch.jit.supported_ops <jit_builtin_functions>
 
 .. contents:: :local:
 
@@ -19,17 +26,16 @@ for performance and multi-threading reasons.
 Creating TorchScript Code
 --------------------------
 
-.. autofunction:: script
+.. autofunction:: script(obj, optimize=None)
 
-.. autofunction:: trace
+.. autofunction:: trace(func, example_inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
 
-.. autoclass:: ScriptModule
+.. autoclass:: ScriptModule(optimize=None)
     :members:
 
 .. autofunction:: save
 
 .. autofunction:: load
-
 
 
 Mixing Tracing and Scripting
@@ -739,11 +745,6 @@ Break and Continue
 Return
     ``return a, b``
 
-    .. note::
-        TorchScript allows returns in the following circumstances:
-           1. At the end of a function
-           2. In an if-statement where <true> and <false> both return
-           3. In an if-statement where <true> returns and <false> is empty (an early return)
 
 Variable Resolution
 ~~~~~~~~~~~~~~~~~~~
@@ -1206,6 +1207,24 @@ Tracer Warnings
         traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
         print(traced.graph)
 
+Builtin Functions
+~~~~~~~~~~~~~~~~~
+
+TorchScript supports a subset of the builtin tensor and neural network
+functions that PyTorch provides. Most methods on Tensor as well as functions in
+the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
+modules from ``torch.nn`` are supported in TorchScript, excluding those in the
+table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
+
+Unsupported ``torch.nn`` Modules  ::
+
+    torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss
+    torch.nn.modules.normalization.CrossMapLRN2d
+    torch.nn.modules.rnn.RNN
+
+
+See :ref:`builtin-functions` for a full reference of supported functions
+
 
 Frequently Asked Questions
 --------------------------
@@ -1301,23 +1320,3 @@ Q: I would like to trace module's method but I keep getting this error:
         module = torch.jit.trace_module(n, inputs)
 
 
-Builtin Functions
-~~~~~~~~~~~~~~~~~
-
-TorchScript supports a subset of the builtin tensor and neural network
-functions that PyTorch provides. Most methods on Tensor as well as functions in
-the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
-modules from ``torch.nn`` are supported in TorchScript, excluding those in the
-table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
-
-Unsupported ``torch.nn`` Modules  ::
-
-    torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss
-    torch.nn.modules.normalization.CrossMapLRN2d
-    torch.nn.modules.fold.Fold
-    torch.nn.modules.fold.Unfold
-    torch.nn.modules.rnn.GRU
-    torch.nn.modules.rnn.RNN
-
-
-.. automodule:: torch.jit.supported_ops
