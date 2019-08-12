@@ -10,6 +10,18 @@ namespace at {
 namespace native {
 namespace {
 
+inline void check_inputs(const Tensor& qa, const Tensor& qb) {
+  TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
+              qa.qscheme() == kPerTensorSymmetric,
+              "Only per tensor quantization is suuported in Add.");
+  TORCH_CHECK(qa.qscheme() == qb.qscheme(),
+              "Both inputs to Add must have the same quantization shceme.");
+  TORCH_CHECK(qa.numel() == qb.numel(),
+              "Add operands must be the same size!");
+  TORCH_CHECK(qa.scalar_type() == qb.scalar_type(),
+              "Add operands should have same data type.");
+}
+
 // Note: out is assumed to be the same size as self and other.
 // Note: Addition is only supported when self, other, out are of the same dtype.
 template <bool ReLUFused = false>
@@ -41,10 +53,7 @@ class QAdd final : public c10::OperatorKernel {
  public:
   Tensor operator()(Tensor qa, Tensor qb,
                     double scale, int64_t zero_point) {
-    TORCH_CHECK(qa.numel() == qb.numel(),
-                "Add operands must be the same size!");
-    TORCH_CHECK(qa.scalar_type() == qb.scalar_type(),
-                "Add operands should have same data type.");
+    check_inputs(qa, qb);
     auto qc = at::_empty_affine_quantized(qa.sizes(),
       at::device(kCPU).dtype(qa.scalar_type()), scale, zero_point);
     return _add_out<ReLUFused>(qc, qa, qb);
