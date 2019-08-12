@@ -513,17 +513,7 @@ add_docstr_all('logical_not_',
                r"""
 logical_not_() -> Tensor
 
-In-place version of :meth:`~Tensor.logical_not`, except that it always returns a tensor with the same dtype instead of
-bool.
-
-Example::
-
-    >>> torch.tensor([True, False]).logical_not_()
-    tensor([False,  True])
-    >>> torch.tensor([0, 1, -10], dtype=torch.int8).logical_not_()
-    tensor([1, 0, 0], dtype=torch.int8)
-    >>> torch.tensor([0, 1, -10], dtype=torch.double).logical_not_()
-    tensor([1., 0., 0.], dtype=torch.float64)
+In-place version of :meth:`~Tensor.logical_not`
 """)
 
 add_docstr_all('logical_xor',

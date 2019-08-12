@@ -63,12 +63,11 @@ Tensor logical_not(const Tensor& self) {
 
 Tensor& logical_not_(Tensor& self) {
   auto iter = TensorIterator::unary_op(self, self, /*check_internal_overlap=*/true);
-  logical_not_inplace_stub(iter.device_type(), iter);
+  logical_not_stub(iter.device_type(), iter);
   return self;
 }
 
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
-  TORCH_CHECK(result.scalar_type() == kBool, "The output tensor of logical_not must be a bool tensor.");
   TensorIterator iter;
   iter.dont_compute_common_dtype();
   iter.check_and_add_output(result);
@@ -258,7 +257,6 @@ DEFINE_DISPATCH(log10_stub);
 DEFINE_DISPATCH(log1p_stub);
 DEFINE_DISPATCH(log2_stub);
 DEFINE_DISPATCH(logical_not_stub);
-DEFINE_DISPATCH(logical_not_inplace_stub);
 DEFINE_DISPATCH(neg_stub);
 DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);

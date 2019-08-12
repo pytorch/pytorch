@@ -1867,15 +1867,15 @@ class _TestTorchMixin(object):
             a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
             # new tensor
             self.assertEqual(expected_res.bool(), a.logical_not())
-            # out
+            # out is bool
             b = torch.empty(0, dtype=torch.bool, device=device)
             torch.logical_not(a, out=b)
             self.assertEqual(expected_res.bool(), b)
-            # out is not bool
-            b = torch.empty(0, dtype=torch.uint8, device=device)
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"The output tensor of logical_not must be a bool tensor\."):
+            # out has a dtype other than bool
+            for out_dtype in torch.testing.get_all_math_dtypes(device):
+                b = torch.empty(0, dtype=out_dtype, device=device)
                 torch.logical_not(a, out=b)
+                self.assertEqual(expected_res.bool(), b.bool())
             # in-place
             a.logical_not_()
             self.assertEqual(expected_res, a)
