@@ -311,6 +311,34 @@ class TestQuantizedOps(TestCase):
             cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
                              zero_point=zero_point)
 
+    """Tests the correctness of the quantized equal op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()),
+           X2=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                        qparams=hu.qparams()))
+    def test_equal(self, X, X2):
+        X, X_params = X
+        (scale, zero_point, torch_type) = X_params
+        X2, X2_params = X2
+        (scale2, zero_point2, torch_type2) = X2_params
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
+                                   dtype=torch_type)
+        X2 = torch.from_numpy(X2)
+        qX2 = torch.quantize_linear(X2, scale=scale2, zero_point=zero_point2,
+                                    dtype=torch_type2)
+
+        def equal_ref(X, params, X2, params2):
+            if params != params2:
+                return False
+            if (X != X2).any():
+                return False
+            return True
+
+        self.assertEqual(qX.equal(qX), equal_ref(X, X_params, X, X_params))
+        self.assertEqual(qX.equal(qX2), equal_ref(X, X_params, X2, X2_params))
+
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
     " Quantized Linear requires FBGEMM. FBGEMM does not play"
