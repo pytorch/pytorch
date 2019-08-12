@@ -284,8 +284,11 @@ class ChunkDataReader(object):
     def __call__(self, idx):
         r"""Returns `tuple(data, target)`
 
-        `data` and `target` can be either `None` or `numpy.array() and
-        `StopIteration` must be raised when there is no more data to be read.
+        If `data` and `target` contain tensors, numpy arrays, numbers,
+        dicts or lists, the default collate function can be implicitly used.
+        Otherwise, a custom `collate_fn` must be provided to `DataLoader`
+
+        When no more data is available, `StopIteration` must be raised.
         """
         raise NotImplementedError
 
@@ -298,24 +301,30 @@ class ChunkDataset(IterableDataset):
 
     ``ChunkDataset`` extends ``IterableDataset`` because the
     size of the dataset is unknown .
+
+    Arguments:
+        chunk_sampler (StrideSampler): Sampler used to split dataset in multiple chunks.
+                                       Typically used to split data amongst dataloader workers
+        chunk_reader (ChunkDataReader): Specialized reader
+        shuffle_cache (bool): Setting `True` forces shuffling of the internal chunk cache
     """
 
-    def __init__(self, chunk_sampler, chunk_reader, batch_size, shuffle_cache=True):
+    def __init__(self, chunk_sampler, chunk_reader, shuffle_cache=True):
         super(ChunkDataset, self).__init__()
         assert isinstance(chunk_sampler, StrideSampler), 'sampler must be a `StrideSampler`'
         assert callable(chunk_reader), 'chunk_reader must be `callable()` and return a container with data'
-        assert isinstance(batch_size, int), 'batch_size must be a `int`'
         assert isinstance(shuffle_cache, bool), 'shuffle_cache must be a `bool`'
 
         self.chunk_sampler = chunk_sampler
         self.chunk_reader = chunk_reader
-        self.batch_size = batch_size
         self.shuffle_cache = shuffle_cache
 
         # Internal state
         self._chunk_sampler_iter = iter(self.chunk_sampler)
-        self._data_cache = []
-        self._target_cache = []
+        self._data_cache = numpy.array([])
+        self._target_cache = numpy.array([])
+        self._batch_size = 1
+        self._min_cache = 1000
 
     def __iter__(self):
         return self
@@ -332,7 +341,7 @@ class ChunkDataset(IterableDataset):
         elif len(self._target_cache) > 0:
             cache_size = len(self._target_cache)
 
-        if (cache_size < self.batch_size):
+        if (cache_size < self._min_cache):
             new_chunk = None
             try:
                 new_chunk = self.chunk_reader(next(self._chunk_sampler_iter))
@@ -353,22 +362,22 @@ class ChunkDataset(IterableDataset):
             elif not new_chunk and cache_size == 0:
                 raise StopIteration
 
-
             if self.shuffle_cache:
                 numpy.random.shuffle(self._data_cache)
                 numpy.random.shuffle(self._target_cache)
 
 
         if len(self._data_cache) > 0 and len(self._target_cache) > 0:
-            batch = self._data_cache[:self.batch_size], self._target_cache[:self.batch_size]
-            self._data_cache = self._data_cache[self.batch_size:]
-            self._target_cache = self._target_cache[self.batch_size:]
+            batch = self._data_cache[:self._batch_size], self._target_cache[:self._batch_size]
+            self._data_cache = self._data_cache[self._batch_size:]
+            self._target_cache = self._target_cache[self._batch_size:]
         elif len(self._data_cache) > 0:
-            batch = self._data_cache[:self.batch_size], None
-            self._data_cache = self._data_cache[self.batch_size:]
+            batch = self._data_cache[:self._batch_size], None
+            self._data_cache = self._data_cache[self._batch_size:]
         else:
-            batch = None, self._target_cache[:self.batch_size]
-            self._target_cache = self._target_cache[self.batch_size:]
+            batch = None, self._target_cache[:self._batch_size]
+            self._target_cache = self._target_cache[self._batch_size:]
+
         return batch
 
     def reset(self):
