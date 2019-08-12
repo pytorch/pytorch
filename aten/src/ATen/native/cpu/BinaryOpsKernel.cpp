@@ -81,20 +81,27 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
-void logical_xor_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(1), "logical_xor_cpu", [&]() {
+template <class self_t, class other_t>
+void logical_xor_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(0), "logical_xor_cpu", [&]() {
     cpu_kernel(iter,
-      [](scalar_t a, scalar_t b) -> bool {
-        return (!a) != (!b);
+      [](self_t a, other_t b) -> scalar_t {
+        return static_cast<scalar_t>((!a) != (!b));
     });
   });
 }
 
-void logical_xor_inplace_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(), "logical_xor_cpu", [&]() {
-    cpu_kernel(iter,
-      [](scalar_t a, scalar_t b) -> scalar_t {
-        return static_cast<scalar_t>((!a) != (!b));
+void logical_xor_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(1), "logical_xor_cpu", [&]() {
+    using self_t = scalar_t;
+    AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(2), "logical_xor_cpu", [&]() {
+      using other_t = scalar_t;
+      AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(0), "logical_xor_cpu", [&]() {
+        cpu_kernel(iter,
+          [](self_t a, other_t b) -> scalar_t {
+            return static_cast<scalar_t>((!a) != (!b));
+        });
+      });
     });
   });
 }
@@ -108,6 +115,5 @@ REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
-REGISTER_DISPATCH(logical_xor_inplace_stub, &logical_xor_inplace_kernel);
 
 }} // namespace at::native

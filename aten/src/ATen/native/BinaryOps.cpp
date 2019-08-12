@@ -15,7 +15,6 @@ DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(logical_xor_stub);
-DEFINE_DISPATCH(logical_xor_inplace_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
@@ -216,9 +215,6 @@ Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
 }
 
 Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(result.scalar_type() == kBool, "The output tensor of logical_xor must be a bool tensor.");
-  TORCH_CHECK(self.scalar_type() == other.scalar_type(),
-              "The two input tensors of logical_xor must have the same dtype.");
   TensorIterator iter;
   iter.dont_compute_common_dtype();
   iter.check_and_add_output(result);
@@ -236,9 +232,7 @@ Tensor logical_xor(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& logical_xor_(Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(self, self, other, /*check_internal_overlap=*/true);
-  logical_xor_inplace_stub(iter.device_type(), iter);
-  return self;
+  return at::logical_xor_out(self, self, other);
 }
 
 }

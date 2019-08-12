@@ -71,17 +71,15 @@ void atan2_kernel_cuda(TensorIterator& iter) {
 }
 
 void logical_xor_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_xor_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
-      return (!a) != (!b);
-    });
-  });
-}
-
-void logical_xor_inplace_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(), "logical_xor_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return static_cast<scalar_t>((!a) != (!b));
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_xor_cpu", [&]() {
+    using self_t = scalar_t;
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(2), "logical_xor_cpu", [&]() {
+      using other_t = scalar_t;
+      AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_xor_cuda", [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(self_t a, other_t b) -> scalar_t {
+          return static_cast<scalar_t>((!a) != (!b));
+        });
+      });
     });
   });
 }
@@ -92,6 +90,5 @@ REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
 REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel_cuda);
-REGISTER_DISPATCH(logical_xor_inplace_stub, &logical_xor_inplace_kernel_cuda);
 
 }} // namespace at::native
