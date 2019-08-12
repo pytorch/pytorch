@@ -562,7 +562,7 @@ at::Tensor _convolution(
             input, weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
       } else {
-          output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
+        output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
       }
   } else if (params.use_cudnn(input)) {
     TORCH_CHECK(input.type() == weight.type(),
