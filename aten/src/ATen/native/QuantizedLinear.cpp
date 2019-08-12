@@ -25,7 +25,7 @@ namespace caffe2 {
 CAFFE_KNOWN_TYPE(fbgemm::PackBMatrix<int8_t>);
 CAFFE_KNOWN_TYPE(fbgemm::PackedGemmMatrixFP16);
 #endif // USE_FBGEMM
-}
+} // namespace caffe2
 
 namespace at {
 namespace native {
@@ -255,14 +255,13 @@ bool fbgemm_is_cpu_supported() {
   return fbgemm::fbgemmSupportedCPU();
 }
 
-Tensor fbgemm_pack_quantized_matrix(
-    const Tensor& weight,
-    int64_t K,
-    int64_t N) {
+Tensor fbgemm_pack_quantized_matrix(const Tensor& weight) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
+  int64_t K = weight.size(1);
+  int64_t N = weight.size(0);
   auto weight_contig = weight.contiguous();
   auto contiguous_ptr = weight_contig.data<int8_t>();
   auto ptr = guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
@@ -276,8 +275,18 @@ Tensor fbgemm_pack_quantized_matrix(
   return cpp_custom_type_hack::create(std::move(ptr), weight.options());
 }
 
-float raw_uint16_to_fp16(unsigned short value)
-{
+Tensor fbgemm_pack_quantized_matrix(
+    const Tensor& weight,
+    int64_t K,
+    int64_t N) {
+  TORCH_WARN(
+      "fbgemm_pack_quantized_matrix(weight, K, N) will be deprecated soon."
+      "Please use fbgemm_pack_quantized_matrix(weight) instead.");
+
+  return at::native::fbgemm_pack_quantized_matrix(weight);
+}
+
+float raw_uint16_to_fp16(unsigned short value) {
   // Convert raw 16 bits half precision floating point number
   // to single precision floating point number.
   unsigned short sign_bits = value >> 15;
@@ -309,7 +318,7 @@ bool check_and_saturate(T* element, T MAX) {
 // number will be saturated to max or min representable values by FP16.
 void handle_weights_saturation(float* weight, int64_t length) {
   float FP16_MAX = raw_uint16_to_fp16(0x7BFF);
-  bool  found_out_of_range = false;
+  bool found_out_of_range = false;
 
   for (int i = 0; i < length; ++i) {
     if (check_and_saturate<float>(&weight[i], FP16_MAX)) {
@@ -322,8 +331,7 @@ void handle_weights_saturation(float* weight, int64_t length) {
   }
 }
 
-Tensor fbgemm_pack_gemm_matrix_fp16(
-    const Tensor& weight ) {
+Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -334,7 +342,7 @@ Tensor fbgemm_pack_gemm_matrix_fp16(
   Tensor weight_contig = weight.contiguous();
   auto weight_contig_ptr = weight_contig.data<float>();
 
-  handle_weights_saturation(weight_contig_ptr, K*N);
+  handle_weights_saturation(weight_contig_ptr, K * N);
 
   // TODO(mingzhe09088):
   // Consider using a functor here in PackedGemmMatrixFP16
@@ -344,11 +352,7 @@ Tensor fbgemm_pack_gemm_matrix_fp16(
   // within this translation unit. It might be very problematic if that tensor
   // flows across dll boundaries.
   auto ptr = guts::make_unique<fbgemm::PackedGemmMatrixFP16>(
-      fbgemm::matrix_op_t::Transpose,
-      K,
-      N,
-      1,
-      weight_contig_ptr);
+      fbgemm::matrix_op_t::Transpose, K, N, 1, weight_contig_ptr);
   return cpp_custom_type_hack::create(std::move(ptr), weight.options());
 }
 
@@ -451,10 +455,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
       false, "This PyTorch installation was not built with FBGEMM operators");
 }
 
-Tensor fbgemm_pack_quantized_matrix(
-    const Tensor& /*input*/,
-    int64_t /*K*/,
-    int64_t /*N*/) {
+Tensor fbgemm_pack_quantized_matrix(const Tensor& /*input*/) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -462,8 +463,22 @@ Tensor fbgemm_pack_quantized_matrix(
       false, "This PyTorch installation was not built with FBGEMM operators");
 }
 
-Tensor fbgemm_pack_gemm_matrix_fp16(
-    const Tensor& weight) {
+Tensor fbgemm_pack_quantized_matrix(
+    const Tensor& /*input*/,
+    int64_t /*K*/,
+    int64_t /*N*/) {
+  TORCH_WARN(
+      "fbgemm_pack_quantized_matrix(weight, K, N) will be deprecated soon."
+      "Please use fbgemm_pack_quantized_matrix(weight) instead.");
+
+  // We make a strong guarantee that models using these operators will have the
+  // same numerics across different machines. Therefore, we do not provide a
+  // fallback path and rather fail loudly if we cannot run FBGEMM.
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+}
+
+Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -502,5 +517,5 @@ bool fbgemm_is_cpu_supported() {
 }
 
 #endif // USE_FBGEMM
-}
+} // namespace native
 } // namespace at
