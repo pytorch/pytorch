@@ -2,8 +2,8 @@ import math
 import os
 from distutils.util import strtobool
 import torch
-from .optimizer import Optimizer
-from ..hub import _check_module_exists
+from torch.optim.optimizer import Optimizer
+from torch.hub import _check_module_exists
 
 NUMBA_CUDA_EXIST = False
 NUMBA_CUDA_THREAD_PER_BLOCK = 512
