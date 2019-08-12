@@ -239,6 +239,7 @@ class Unpickler {
         class_resolver_(class_resolver) {}
 
   std::vector<IValue> parse_ivalue_list();
+  IValue parseModule();
 
  private:
   // No arguments ensures that a template arugment must be specified

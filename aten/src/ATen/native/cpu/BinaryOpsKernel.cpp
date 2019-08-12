@@ -60,7 +60,7 @@ void mul_kernel(TensorIterator& iter) {
 }
 
 void div_kernel(TensorIterator& iter) {
-  if (isIntegralType(iter.dtype())) {
+  if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
     // There's no SIMD integer division, so don't try to vectorize it.
     // TODO: if the divisor is a scalar, rewrite as multiplication by a constant.
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "div_cpu", [&]() {
