@@ -225,6 +225,7 @@ class _TestTorchMixin(object):
                        'to_dense',
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
+                       'set_names',  # BUILD_NAMEDTENSOR only
                        'set_names_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
                        )
