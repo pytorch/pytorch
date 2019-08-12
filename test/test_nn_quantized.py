@@ -182,10 +182,10 @@ class ModuleAPITest(QuantizationTestCase):
                                      groups=g,
                                      bias=use_bias,
                                      padding_mode='zeros')
-        conv_under_test.weight = qw
+        conv_under_test.set_weight(qw)
         conv_under_test.bias = qb
-        conv_under_test.scale = torch.tensor([scale], dtype=torch.double)
-        conv_under_test.zero_point = torch.tensor([zero_point], dtype=torch.long)
+        conv_under_test.scale = scale
+        conv_under_test.zero_point = zero_point
 
         # Test members
         self.assertTrue(hasattr(conv_under_test, '_packed_weight'))
@@ -193,7 +193,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertTrue(hasattr(conv_under_test, 'zero_point'))
 
         # Test properties
-        self.assertEqual(qw, conv_under_test.weight)
+        self.assertEqual(qw, conv_under_test.weight())
         self.assertEqual(qb, conv_under_test.bias)
         self.assertEqual(scale, conv_under_test.scale)
         self.assertEqual(zero_point, conv_under_test.zero_point)
