@@ -393,23 +393,6 @@ struct TensorMinValueOp {
 };
 
 template <typename T>
-struct TensorAddCDivOp {
-  TensorAddCDivOp(T v) : val(v) {}
-
-  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = THCNumerics<T>::add(
-      *out,
-      THCNumerics<T>::mul(
-        val,
-        THCNumerics<T>::div(*in1, *in2)
-      )
-    );
-  }
-
-  T val;
-};
-
-template <typename T>
 struct TensorLShiftOp {
   __device__ __forceinline__ void
   operator()(T* out, T* in) {

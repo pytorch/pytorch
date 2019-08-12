@@ -50,12 +50,12 @@ public:
 
     // internal-only for registering stack based kernels
     Options&& kernel(TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator) && {
-      return std::move(*this).kernel(dispatch_key, kernel_func, std::move(cache_creator), nullptr);
+      return std::move(*this).kernel(dispatch_key, kernel_func, std::move(cache_creator), nullptr, nullptr);
     }
 
     // internal-only for registering stack based catch-all kernels
     Options&& catchAllKernel(KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator) && {
-      return std::move(*this).kernel(c10::nullopt, kernel_func, std::move(cache_creator), nullptr);
+      return std::move(*this).kernel(c10::nullopt, kernel_func, std::move(cache_creator), nullptr, nullptr);
     }
 
     /**
@@ -165,6 +165,7 @@ public:
     // enable_if: only enable it if FuncType is actually a function
     guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> kernel(TensorTypeId dispatch_key) && {
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernelFunctor<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
     }
@@ -186,8 +187,29 @@ public:
     // enable_if: only enable it if FuncType is actually a function
     guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> catchAllKernel() && {
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernelFunctor<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
+    }
+
+    // TODO Remove impl_unboxedOnlyKernel once all of aten can generate boxed kernels
+    template<class FuncType, FuncType* kernel_func>
+    // enable_if: only enable it if FuncType is actually a function
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyKernel(TensorTypeId dispatch_key) && {
+      static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
+
+      return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
+    }
+
+    // TODO Remove impl_unboxedOnlyCatchAllKernel once all of aten can generate boxed kernels
+    template<class FuncType, FuncType* kernel_func>
+    // enable_if: only enable it if FuncType is actually a function
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyCatchAllKernel() && {
+      static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
+
+      return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
     }
 
     /**
@@ -258,12 +280,22 @@ public:
       return std::move(*this);
     }
 
+    template<class Result, class... Args>
+    Options&& impl_unboxedAutogradKernel(Result (*kernel)(Args...)) && {
+      // TODO Infer and check schema
+      TORCH_CHECK(kernel != nullptr, "Kernel function pointer cannot be nullptr");
+      TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "You can only call impl_unboxedAutogradKernel() once per operator registration.");
+      unboxedAutogradKernel_ = reinterpret_cast<void*>(kernel);
+      return std::move(*this);
+    }
+
   private:
-    Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
+    Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, void* unboxed_kernel_func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
       config.dispatch_key = dispatch_key;
       config.kernel_func = kernel_func;
       config.cache_creator_func = std::move(cache_creator);
+      config.unboxed_kernel_func = unboxed_kernel_func;
       config.inferred_function_schema = std::move(inferred_function_schema);
       kernels.push_back(std::move(config));
       return std::move(*this);
@@ -273,8 +305,20 @@ public:
     Options&& kernelFunctor(c10::optional<TensorTypeId>&& dispatch_key, ConstructorParameters&&... constructorParameters) && {
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        &detail::wrap_kernel_functor<KernelFunctor, AllowDeprecatedTypes>::call,
+        &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes>::call,
         detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
+        reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
+        detail::FunctionSchemaInferer<KernelFunctor>()()
+      );
+    }
+
+    template<class KernelFunctor, class... ConstructorParameters>
+    Options&& kernelFunctorUnboxedOnly(c10::optional<TensorTypeId>&& dispatch_key, ConstructorParameters&&... constructorParameters) && {
+      return std::move(*this).kernel(
+        std::move(dispatch_key),
+        nullptr,
+        detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
+        reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
         detail::FunctionSchemaInferer<KernelFunctor>()()
       );
     }
@@ -288,17 +332,20 @@ public:
         : dispatch_key(c10::nullopt)
         , kernel_func(nullptr)
         , cache_creator_func(nullptr)
+        , unboxed_kernel_func(nullptr)
         , inferred_function_schema(nullptr)
       {}
 
       c10::optional<TensorTypeId> dispatch_key;
-      KernelFunction* kernel_func;
+      KernelFunction* kernel_func; // can be nullptr, not all kernels have this
       KernelCacheCreatorFunction cache_creator_func;
+      void* unboxed_kernel_func; // can be nullptr, not all kernels have this
       std::unique_ptr<FunctionSchema> inferred_function_schema;
     };
 
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;
+    void* unboxedAutogradKernel_; // can be nullptr, not all kernels have this
     friend class RegisterOperators;
   };
 
@@ -416,8 +463,8 @@ private:
   static c10::FunctionSchema inferSchemaFromKernels_(const std::string& opNameStr, const Options& options);
   void checkNoDuplicateKernels_(const FunctionSchema& schema, const Options& options);
   void registerOp_(FunctionSchema&& schema, Options&& options);
-  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options);
-  void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options);
+  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options, void* unboxedAutogradKernel);
+  void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options, void* unboxedAutogradKernel);
   static OperatorOptions makeOperatorOptions_(const Options& options);
 
   class OperatorRegistrar;
