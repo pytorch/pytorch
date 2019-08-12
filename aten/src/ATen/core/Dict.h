@@ -6,6 +6,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/Optional.h>
+#include <ATen/core/Tensor.h>
 
 namespace c10 {
 struct IValue;
@@ -20,7 +21,8 @@ using valid_dict_key_types = guts::typelist::typelist<
   int64_t,
   std::string,
   double,
-  bool
+  bool,
+  at::Tensor
 >;
 }
 

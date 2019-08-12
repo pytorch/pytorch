@@ -72,10 +72,7 @@ class ScriptModuleDeserializer final {
       const torch::TensorDef& tensor_proto,
       std::unordered_map<std::string, at::Storage>& storageMap);
 
-  script::Module convertModule(const torch::ModuleDef& module_def);
-
   void loadTensorTable(torch::ModelDef* model_def);
-  std::vector<IValue> loadPickleArchive(const std::string& name);
   void importCallback(const std::string& qualifier);
   void moduleSetState(const script::Module& module, IValue state);
 
@@ -86,9 +83,12 @@ class ScriptModuleDeserializer final {
   std::vector<std::string> moduleStack_;
 
   std::vector<at::Tensor> tensor_table_;
-  std::vector<IValue> pickled_ivalues_;
-
   std::unordered_set<std::string> imported_libs_;
+
+  std::vector<IValue> LEGACY_loadPickleArchive(const std::string& name);
+  script::Module LEGACY_convertModule(const torch::ModuleDef& module_def);
+  std::vector<IValue> LEGACY_pickled_ivalues_;
+  size_t proto_version_;
 };
 
 script::Module ScriptModuleDeserializer::deserialize(
@@ -126,8 +126,7 @@ script::Module ScriptModuleDeserializer::deserialize(
       model_def.ParseFromString(binary_string),
       "JSON transcoder produced invalid protobuf output.");
   device_ = device;
-
-  const auto& module_def = model_def.main_module();
+  proto_version_ = model_def.proto_version();
 
   // Load extra files.
   for (const auto& kv : extra_files) {
@@ -142,21 +141,33 @@ script::Module ScriptModuleDeserializer::deserialize(
   }
 
   loadTensorTable(&model_def);
-  if (model_def.proto_version() >= 2) {
-    pickled_ivalues_ = loadPickleArchive("attributes.pkl");
-  }
 
-  return convertModule(module_def);
+  if (proto_version_ < 6) {
+    if (proto_version_ >= 2) {
+      LEGACY_pickled_ivalues_ = LEGACY_loadPickleArchive("attributes.pkl");
+    }
+    moduleStack_.push_back("__torch__");
+    const auto& module_def = model_def.main_module();
+    return LEGACY_convertModule(module_def);
+  } else {
+    at::DataPtr pickle_ptr;
+    size_t pickle_size;
+    std::tie(pickle_ptr, pickle_size) = reader_->getRecord("data.pkl");
+    Unpickler unpickler(
+        pickle_ptr.get(),
+        pickle_size,
+        &tensor_table_,
+        [&](const c10::QualifiedName& qn) {
+          importCallback(qn.prefix());
+          return c10::StrongTypePtr(
+              compilation_unit_, compilation_unit_->get_class(qn));
+        });
+    return script::Module(unpickler.parseModule().toObject());
+  }
 }
 
-void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
-  std::unordered_map<std::string, at::Storage> storageMap;
-  for (const torch::TensorDef& tensor : model_def->tensors()) {
-    tensor_table_.emplace_back(loadTensor(tensor, storageMap));
-  }
-}
-
-std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::string& name) {
+std::vector<IValue> ScriptModuleDeserializer::LEGACY_loadPickleArchive(
+    const std::string& name) {
   at::DataPtr attributes_ptr;
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) = reader_->getRecord(name);
@@ -170,6 +181,13 @@ std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::strin
             compilation_unit_, compilation_unit_->get_class(qn));
       });
   return unpickler.parse_ivalue_list();
+}
+
+void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
+  std::unordered_map<std::string, at::Storage> storageMap;
+  for (const torch::TensorDef& tensor : model_def->tensors()) {
+    tensor_table_.emplace_back(loadTensor(tensor, storageMap));
+  }
 }
 
 at::Tensor ScriptModuleDeserializer::loadTensor(
@@ -265,12 +283,28 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   imported_libs_.insert(qualifier);
   std::function<void(const std::string&)> import_callback =
       [this](const std::string& qualifier) { importCallback(qualifier); };
-  const std::string path = ImportExportHelpers::qualifierToPath(qualifier);
+  const std::string path =
+      ImportExportHelpers::qualifierToPath(qualifier, proto_version_);
   at::DataPtr data;
   size_t size;
   std::tie(data, size) = reader_->getRecord(path);
+
+  std::shared_ptr<ConcreteSourceRangeUnpickler> gen_ranges = nullptr;
+  if (proto_version_ >= 6) {
+    at::DataPtr debug_data;
+    size_t debug_size;
+    std::tie(debug_data, debug_size) = reader_->getRecord(path + ".debug_pkl");
+
+    gen_ranges = std::make_shared<ConcreteSourceRangeUnpickler>(
+        std::move(debug_data), debug_size);
+  }
+
   auto src = std::make_shared<Source>(
-      std::string(static_cast<const char*>(data.get()), size), path, 0);
+      std::string(static_cast<const char*>(data.get()), size),
+      path,
+      1,
+      gen_ranges);
+
   script::import_libs(
       compilation_unit_, qualifier, src, tensor_table_, import_callback);
 }
@@ -301,7 +335,7 @@ void ScriptModuleDeserializer::moduleSetState(
   }
 }
 
-script::Module ScriptModuleDeserializer::convertModule(
+script::Module ScriptModuleDeserializer::LEGACY_convertModule(
     const torch::ModuleDef& module_def) {
   // HACK: The current model exporter can create module_defs with invalid Python
   // identifiers as names (they contain `.`)
@@ -314,7 +348,7 @@ script::Module ScriptModuleDeserializer::convertModule(
       script::Module(c10::QualifiedName(moduleStack_), compilation_unit_);
   for (int i = 0; i < module_def.submodules_size(); ++i) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
-    auto submodule = convertModule(sub_def);
+    auto submodule = LEGACY_convertModule(sub_def);
     module.register_module(sub_def.name(), submodule);
   }
   for (int i = 0; i < module_def.parameters_size(); ++i) {
@@ -340,7 +374,7 @@ script::Module ScriptModuleDeserializer::convertModule(
       // attribute has no value in the table, set it to None for now. After
       // __getstate__, check that all the attributes that are not Optional
       // can't be None
-      ivalue = pickled_ivalues_.at(attr_def.id());
+      ivalue = LEGACY_pickled_ivalues_.at(attr_def.id());
     }
 
     module.register_attribute(
@@ -374,12 +408,13 @@ script::Module ScriptModuleDeserializer::convertModule(
 
     std::function<void(const std::string&)> import_callback =
         [&, this](const std::string& qualifier) { importCallback(qualifier); };
-    script::import_methods(module, src, tensor_table_, import_callback);
+    script::LEGACY_import_methods(module, src, tensor_table_, import_callback);
   }
 
   if (module_def.has_get_state_attribute_id()) {
     moduleSetState(
-        module, pickled_ivalues_.at(module_def.get_state_attribute_id()));
+        module,
+        LEGACY_pickled_ivalues_.at(module_def.get_state_attribute_id()));
   }
 
   for (const auto& slot : module.get_attributes()) {
@@ -402,7 +437,6 @@ script::Module ScriptModuleDeserializer::convertModule(
   }
   return module;
 }
-
 } // namespace
 
 script::Module import_ir_module(
@@ -411,8 +445,7 @@ script::Module import_ir_module(
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(&in);
-  ScriptModuleDeserializer deserializer(
-      std::move(cu), std::move(reader));
+  ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
 }
 
@@ -422,8 +455,7 @@ script::Module import_ir_module(
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(filename);
-  ScriptModuleDeserializer deserializer(
-      std::move(cu), std::move(reader));
+  ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
 }
 
@@ -433,8 +465,7 @@ script::Module import_ir_module(
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  ScriptModuleDeserializer deserializer(
-      std::move(cu), std::move(reader));
+  ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
 }
 
@@ -463,8 +494,7 @@ script::Module load(
     script::ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   auto cu = std::make_shared<script::CompilationUnit>();
-  ScriptModuleDeserializer deserializer(
-      std::move(cu), std::move(reader));
+  ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
 }
 
