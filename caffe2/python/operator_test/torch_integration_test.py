@@ -446,6 +446,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             pooled_h=3,
             pooled_w=3,
             sampling_ratio=0,
+            aligned=False,
         )
         torch.testing.assert_allclose(roi_feature_ref, roi_feature.cpu())
 
