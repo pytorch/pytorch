@@ -92,6 +92,8 @@ class Adam(Optimizer):
             for param in group['params']:
                 if param.grad is None:
                     continue
+
+                # Perform optimization step
                 grad = param.grad.data
                 p = param.data
                 if grad.is_sparse:
@@ -123,6 +125,7 @@ class Adam(Optimizer):
                 weight_decay = group['weight_decay']
                 eps = group['eps']
                 beta1, beta2 = group['betas']
+
                 state['step'] += 1
                 bias_correction1 = 1 - beta1 ** state['step']
                 bias_correction2 = math.sqrt(1 - beta2 ** state['step'])
