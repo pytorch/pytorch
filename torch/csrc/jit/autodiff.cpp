@@ -55,7 +55,6 @@ bool isDifferentiable(Node* n) {
       "aten::mul(Tensor self, Scalar other) -> Tensor",
       "aten::div(Tensor self, Scalar other) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
-      "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
       "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
       "aten::lt(Tensor self, Scalar other) -> Tensor",
       "aten::le(Tensor self, Scalar other) -> Tensor",
@@ -282,37 +281,6 @@ class GradientHelper {
                    "aten::div(Tensor self, Scalar other) -> Tensor")) {
       return {grads.at(0) / inputs.at(1), nullptr};
 
-    } else if (
-        node->matches(
-            "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor")) {
-      // handle the case that min/max is None
-      Value* min = inputs.at(1);
-      bool min_must_be_none = min->mustBeNone();
-      Value* max = inputs.at(2);
-      bool max_must_be_none = max->mustBeNone();
-      // XXX - this formula is wrong when min or max are not stricly a constant
-      // None but may be None dynamically. In this case an internal compiler
-      // error will get thrown when trying to generate expressions involving the
-      // values of min/max
-      if (!min_must_be_none && !max_must_be_none) {
-        return {grads.at(0) *
-                    (1 - (inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0))) *
-                    (1 - (inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))),
-                nullptr,
-                nullptr};
-      } else if (max_must_be_none) {
-        return {grads.at(0) *
-                    (1 - (inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0))),
-                nullptr,
-                nullptr};
-      } else if (min_must_be_none) {
-        return {grads.at(0) *
-                    (1 - (inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))),
-                nullptr,
-                nullptr};
-      } else {
-        return {grads.at(0), nullptr, nullptr};
-      }
     } else if (
         node->matches(
             "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor")) {
