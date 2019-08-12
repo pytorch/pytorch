@@ -392,6 +392,8 @@ class CAFFE2_API Tensor {
   Tensor bincount(const Tensor & weights={}, int64_t minlength=0) const;
   Tensor bitwise_not() const;
   Tensor & bitwise_not_() const;
+  Tensor logical_not() const;
+  Tensor & logical_not_() const;
   Tensor bmm(const Tensor & mat2) const;
   Tensor ceil() const;
   Tensor & ceil_() const;
