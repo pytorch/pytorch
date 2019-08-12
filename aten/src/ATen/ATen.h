@@ -17,13 +17,13 @@
 #include <ATen/Tensor.h>
 #include <ATen/TensorGeometry.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/TensorOptions.h>
 #include <ATen/Version.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
 #include <c10/core/Layout.h>
 #include <ATen/core/Scalar.h>
 #include <c10/core/Storage.h>
-#include <c10/core/TensorOptions.h>
 #include <ATen/core/Reduction.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/ATenDispatch.h>
