@@ -242,7 +242,7 @@ def generate_type_hints(fname, decls, is_tensor=False):
         render_kw_only_separator = True  # whether we add a '*' if we see a keyword only argument
         python_args = []
 
-        has_tensor_options = 'TensorOptions' in [a['dynamic_type'] for a in decl['arguments']]
+        has_tensor_options = 'TensorOptions' in (a['dynamic_type'] for a in decl['arguments'])
 
         for a in decl['arguments']:
             if a['dynamic_type'] != 'TensorOptions':
