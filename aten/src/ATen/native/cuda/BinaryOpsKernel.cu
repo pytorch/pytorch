@@ -27,7 +27,7 @@ static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
 }
 
 void div_kernel_cuda(TensorIterator& iter) {
-  if (!isIntegralType(iter.dtype()) && iter.is_cpu_scalar(2)) {
+  if (!isIntegralType(iter.dtype(), /*includeBool*/ false) && iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division.
