@@ -13,10 +13,15 @@ if not strtobool(os.environ.get('NO_NUMBA', 'n')) and _check_module_exists("numb
 
     @numba.cuda.jit()
     def numba_cuda_kernel(param, grad, exp_avg, exp_avg_sq, beta1, 
-                          beta2, step_size, bias_correction2, eps):
+                          beta2, step_size, bias_correction2, eps, 
+                          weight_decay):
         i = numba.cuda.grid(1)
         if i >= param.size:
             return
+
+        if weight_decay != 0:
+            grad[i] += weight_decay * param[i]            
+
         exp_avg[i] = exp_avg[i] * beta1 + (1 - beta1) * grad[i]
         exp_avg_sq[i] = exp_avg_sq[i] * beta2 + (1 - beta2) * grad[i]*grad[i]
 
@@ -115,6 +120,7 @@ class Adam(Optimizer):
                             'blockspergrid': math.ceil(p.data.numel() / NUMBA_CUDA_THREAD_PER_BLOCK)
                         }
 
+                weight_decay = group['weight_decay']
                 eps = group['eps']
                 beta1, beta2 = group['betas']
                 state['step'] += 1
@@ -122,15 +128,14 @@ class Adam(Optimizer):
                 bias_correction2 = math.sqrt(1 - beta2 ** state['step'])
                 step_size = group['lr'] / bias_correction1
 
-                if group['weight_decay'] != 0:
-                    grad.add_(group['weight_decay'], p.data)
-
                 if param in self._nbstate:
                     s = self._nbstate[param]
                     numba_cuda_kernel[s['blockspergrid'], NUMBA_CUDA_THREAD_PER_BLOCK]  \
                         (s['param'], s['grad'], s['exp_avg'], s['exp_avg_sq'], beta1, 
-                        beta2, step_size, bias_correction2, eps)           
-                else:                    
+                        beta2, step_size, bias_correction2, eps, weight_decay)           
+                else:         
+                    if weight_decay != 0:
+                        grad.add_(weight_decay, p.data)                               
                     exp_avg = state['exp_avg'].data
                     exp_avg_sq = state['exp_avg_sq'].data
                     # Decay the first and second moment running average coefficient
