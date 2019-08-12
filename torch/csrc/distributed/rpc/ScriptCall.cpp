@@ -75,7 +75,7 @@ ScriptCall ScriptCall::fromMessage(const Message& message) {
 
     const std::string& str_schema = values.back().toStringRef();
     // extract symbol from the schema
-    auto str_symbol = str_schema.substr(0, str_schema.find('('));
+    auto str_symbol = str_schema.substr(0, std::min(str_schema.find('('), str_schema.find('.')));
     auto symbol = at::Symbol::fromQualString(str_symbol);
     auto op = matchOperator(symbol, str_schema);
     // remove str_schema from values
