@@ -26,12 +26,12 @@ for performance and multi-threading reasons.
 Creating TorchScript Code
 --------------------------
 
-.. autofunction:: script(obj, optimize=None)
+.. autoclass:: ScriptModule()
+    :members:
+
+.. autofunction:: script(obj)
 
 .. autofunction:: trace(func, example_inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
-
-.. autoclass:: ScriptModule(optimize=None)
-    :members:
 
 .. autofunction:: save
 
@@ -260,7 +260,7 @@ TorchScript Language Reference
 -------------------------------
 
 TorchScript is a statically typed subset of Python that can either be written directly (using
-the ``@torch.jit.script`` decorator) or generated automatically from Python code via
+the :func:`@torch.jit.script <torch.jit.script>` decorator) or generated automatically from Python code via
 tracing. When using tracing, code is automatically converted into this subset of
 Python by recording only the actual operators on tensors and simply executing and
 discarding the other surrounding Python code.
@@ -400,6 +400,7 @@ Example::
     return x
 
 .. _TorchScript Class:
+.. _TorchScript Classes:
 
 TorchScript Classes
 ^^^^^^^^^^^^^^^^^^^
