@@ -101,6 +101,12 @@ class Adam(Optimizer):
                     if amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
                         state['max_exp_avg_sq'] = torch.zeros_like(p)
+                    elif NUMBA_CUDA_EXIST and numba.cuda.is_cuda_array(p.data):
+                        state['numba_param'] = numba.cuda.as_cuda_array(p.flatten())
+                        state['numba_grad'] = numba.cuda.as_cuda_array(grad.flatten())
+                        state['numba_exp_avg'] = numba.cuda.as_cuda_array(state['exp_avg'].flatten())
+                        state['numba_exp_avg_sq'] = numba.cuda.as_cuda_array(state['exp_avg_sq'].flatten())
+                        state['blockspergrid'] = math.ceil(p.data.numel() / NUMBA_CUDA_THREAD_PER_BLOCK)
 
                 eps = group['eps']
                 beta1, beta2 = group['betas']
@@ -115,15 +121,14 @@ class Adam(Optimizer):
                 if group['weight_decay'] != 0:
                     grad.add_(group['weight_decay'], p.data)
 
-                if NUMBA_CUDA_EXIST and numba.cuda.is_cuda_array(p.data) and not amsgrad:
-                    numba_param = numba.cuda.as_cuda_array(p.flatten())
-                    numba_grad = numba.cuda.as_cuda_array(grad.flatten())
-                    numba_exp_avg = numba.cuda.as_cuda_array(exp_avg.flatten())
-                    numba_exp_avg_sq = numba.cuda.as_cuda_array(exp_avg_sq.flatten())
-                    blockspergrid = math.ceil(p.data.numel() / NUMBA_CUDA_THREAD_PER_BLOCK)
-                    numba_cuda_kernel[blockspergrid, NUMBA_CUDA_THREAD_PER_BLOCK] \
-                        (numba_param, numba_grad, numba_exp_avg, numba_exp_avg_sq, \
-                         beta1, beta2, step_size, bias_correction2, eps)
+                if 'numba_param' in state:
+                    numba_param = state['numba_param'] 
+                    numba_grad = state['numba_grad'] 
+                    numba_exp_avg = state['numba_exp_avg'] 
+                    numba_exp_avg_sq = state['numba_exp_avg_sq'] 
+                    numba_cuda_kernel[state['blockspergrid'], NUMBA_CUDA_THREAD_PER_BLOCK]  \
+                        (state['numba_param'], state['numba_grad'], state['numba_exp_avg'], \
+                         state['numba_exp_avg_sq'], beta1, beta2, step_size, bias_correction2, eps)           
                 else:
                     # Decay the first and second moment running average coefficient
                     exp_avg.mul_(beta1).add_(1 - beta1, grad)
