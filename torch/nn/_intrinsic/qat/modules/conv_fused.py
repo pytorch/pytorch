@@ -152,7 +152,7 @@ class ConvBn2d(nn.Conv2d):
             cls._FLOAT_MODULE.__name__
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert mod.qconfig, 'Input float module must has valid qconfig'
+            assert mod.qconfig, 'Input float module must have a valid qconfig'
             qconfig = mod.qconfig
         conv, bn = mod[0], mod[1]
         qat_convbn = cls(conv.in_channels, conv.out_channels, conv.kernel_size,

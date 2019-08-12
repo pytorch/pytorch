@@ -43,7 +43,7 @@ class Linear(nn.Linear):
             cls._FLOAT_MODULE.__name__
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert mod.qconfig, 'Input float module must has valid qconfig'
+            assert mod.qconfig, 'Input float module must have a valid qconfig'
             qconfig = mod.qconfig
         qat_linear = cls(mod.in_features, mod.out_features, bias=mod.bias is not None, qconfig=qconfig)
         qat_linear.weight = mod.weight
