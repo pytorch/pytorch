@@ -247,6 +247,16 @@ struct PythonPrintPass {
   std::vector<c10::NamedTypePtr>& deps_table_;
   // Helper to avoid duplicating class types
   void registerDependency(const c10::NamedTypePtr& type) {
+    if (legacy_module_printing_) {
+      // we serialize module classes separately.
+      // Including them in the class table as well will cause the code
+      // to get imported twice.
+      if (auto classType = type->cast<ClassType>()) {
+        if (classType->is_module()) {
+          return;
+        }
+      }
+    }
     if (std::find(deps_table_.cbegin(), deps_table_.cend(), type) ==
         deps_table_.cend()) {
       deps_table_.push_back(type);
@@ -274,6 +284,8 @@ struct PythonPrintPass {
 
   // used method names
   std::unordered_set<std::string> used_method_names_;
+
+  bool legacy_module_printing_;
 
   // scanValue, scanNode, scanBlock:
   // decide if it is safe to omit the output of a temporary variable,
@@ -1167,12 +1179,14 @@ struct PythonPrintPass {
       std::vector<at::Tensor>& tensor_table,
       std::vector<c10::NamedTypePtr>& deps_table,
       bool enforce_importable,
-      bool is_method)
+      bool is_method,
+      bool legacy_module_printing)
       : body_(&source_range_stack_),
         tensor_table_(tensor_table),
         deps_table_(deps_table),
         enforce_importable_(enforce_importable),
-        is_method_(is_method) {
+        is_method_(is_method),
+        legacy_module_printing_(legacy_module_printing) {
     TORCH_INTERNAL_ASSERT(deps_table.empty());
   }
 
@@ -1234,16 +1248,20 @@ struct PythonPrintPass {
   void printClass(const c10::NamedTypePtr& type) {
     if (auto classType = type->cast<ClassType>()) {
       bool is_module = classType->is_module();
+      if (legacy_module_printing_) {
+        is_module = false;
+      }
       body_ << "class " << classType->name()->name();
       if (is_module) {
         body_ << "(Module)";
       }
+
       body_ << ":\n";
       {
         const auto guard = WithIndented();
         // For modules, we need to print special information about the module's
         // attributes and parameters.
-        if (classType->is_module()) {
+        if (is_module) {
           printModuleMetadata(classType);
         }
         // TODO fields
@@ -1293,7 +1311,12 @@ void PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, deps_table, enforce_importable, is_method);
+  PythonPrintPass pp(
+      tensor_table,
+      deps_table,
+      enforce_importable,
+      is_method,
+      /*legacy_module_printing=*/false);
   pp.printFunction(func);
   pp.print(out, source_ranges_out);
 }
@@ -1305,7 +1328,29 @@ void PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, deps_table, enforce_importable, true);
+  PythonPrintPass pp(
+      tensor_table,
+      deps_table,
+      enforce_importable,
+      /*is_method=*/true,
+      /*legacy_module_printing=*/false);
+  pp.printClass(classType);
+  pp.print(out, source_ranges_out);
+}
+
+void LEGACY_PythonPrint(
+    std::ostream& out,
+    SourceRangeRecords& source_ranges_out,
+    const c10::NamedTypePtr& classType,
+    std::vector<at::Tensor>& tensor_table,
+    std::vector<c10::NamedTypePtr>& deps_table,
+    bool enforce_importable) {
+  PythonPrintPass pp(
+      tensor_table,
+      deps_table,
+      enforce_importable,
+      /*is_method=*/true,
+      /*legacy_module_printing=*/true);
   pp.printClass(classType);
   pp.print(out, source_ranges_out);
 }
@@ -1318,7 +1363,11 @@ void LEGACY_PythonPrint(
     std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable) {
   PythonPrintPass pp(
-      tensor_table, deps_table, enforce_importable, /*is_method=*/true);
+      tensor_table,
+      deps_table,
+      enforce_importable,
+      /*is_method=*/true,
+      /*legacy_module_printing=*/true);
   pp.LEGACY_printModuleMethods(module);
   pp.print(out, source_ranges_out);
 }

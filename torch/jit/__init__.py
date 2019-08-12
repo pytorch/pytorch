@@ -29,7 +29,7 @@ import inspect
 import pickle
 
 # These are imported so users can access them from the `torch.jit` module
-from torch._jit_internal import Final  # noqa: F401
+from torch._jit_internal import Final, _overload  # noqa: F401
 from torch._jit_internal import ignore, export  # noqa: F401
 
 if sys.version_info[0] > 2:
@@ -1451,6 +1451,7 @@ if _enabled:
             and we run the function, recording the operations performed on all the tensors.
             * The resulting recording of a standalone function produces ``torch._C.Function``.
             * The resulting recording of ``forward`` function of ``nn.Module`` or ``nn.Module`` produces ``ScriptModule``.
+
             This module also contains any parameters that the original
             module had as well.
 
@@ -1500,6 +1501,7 @@ if _enabled:
                 * The first three trace/trace_module calls are equivalent and return ``ScriptModule``
                 with a single ``forward`` method.
                 * The last ``trace_module`` call produces a ``ScriptModule`` with two methods.
+
                 Tracing only records operations done when the given function is run on the given
                 tensors. Therefore, the returned ``ScriptModule`` will always run the same traced
                 graph on any input. This has some important implications when your module is
@@ -1654,17 +1656,7 @@ if _enabled:
             self._c._define(self, lang, rcb)
 
         def copy(self):
-            m = ScriptModule()
-
-            def module_lookup(names):
-                curr = m
-                for name in names:
-                    if not hasattr(curr, name):
-                        setattr(curr, name, ScriptModule())
-                    curr = getattr(curr, name)
-                return curr._c
-            self._c._copy_into(module_lookup, {}, [])
-            return m
+            return ScriptModule(_cpp_module=self._c._clone())
 
         def __getstate__(self):
             raise pickle.PickleError(
@@ -1982,14 +1974,81 @@ class _ConstSequential(_ConstModuleList):
         """)
 
 
+def _unwrap_optional(x):
+    assert x is not None, "Unwrapping null optional"
+    return x
+
 _builtin_table = None
 
 _modules_containing_builtins = (torch, torch._C._nn)
 
-
-def _unwrap_optional(x):
-    assert x is not None, "Unwrapping null optional"
-    return x
+_builtin_ops = [
+    # Pairs of (function, op_name)
+    (_list_with_default, "aten::list_with_default"),
+    (_pair, "aten::_pair"),
+    (_quadruple, "aten::_quadruple"),
+    (_single, "aten::_single"),
+    (_triple, "aten::_triple"),
+    (_unwrap_optional, "aten::_unwrap_optional"),
+    (_wait, 'aten::wait'),
+    (cudnn.is_acceptable, "aten::cudnn_is_acceptable"),
+    (math.ceil, "aten::ceil"),
+    (math.copysign, "aten::copysign"),
+    (math.erf, "aten::erf"),
+    (math.erfc, "aten::erfc"),
+    (math.exp, "aten::exp"),
+    (math.expm1, "aten::expm1"),
+    (math.fabs, "aten::fabs"),
+    (math.floor, "aten::floor"),
+    (math.gamma, "aten::gamma"),
+    (math.lgamma, "aten::lgamma"),
+    (math.log, "aten::log"),
+    (math.log10, "aten::log10"),
+    (math.log1p, "aten::log1p"),
+    (math.pow, "aten::pow"),
+    (math.sqrt, "aten::sqrt"),
+    (math.isnan, "aten::isnan"),
+    (math.asinh, "aten::asinh"),
+    (math.atanh, "aten::atanh"),
+    (math.cosh, "aten::cosh"),
+    (math.sinh, "aten::sinh"),
+    (math.tanh, "aten::tanh"),
+    (math.acos, "aten::acos"),
+    (math.asin, "aten::asin"),
+    (math.atan, "aten::atan"),
+    (math.atan2, "aten::atan2"),
+    (math.cos, "aten::cos"),
+    (math.sin, "aten::sin"),
+    (math.tan, "aten::tan"),
+    (math.asinh, "aten::asinh"),
+    (math.atanh, "aten::atanh"),
+    (math.acosh, "aten::acosh"),
+    (math.sinh, "aten::sinh"),
+    (math.cosh, "aten::cosh"),
+    (math.tanh, "aten::tanh"),
+    (math.fmod, "aten::fmod"),
+    (math.modf, "aten::modf"),
+    (math.factorial, "aten::factorial"),
+    (math.frexp, "aten::frexp"),
+    (math.isnan, "aten::isnan"),
+    (math.isinf, "aten::isinf"),
+    (math.degrees, "aten::degrees"),
+    (math.radians, "aten::radians"),
+    (math.ldexp, "aten::ldexp"),
+    (torch._C._infer_size, "aten::_infer_size"),
+    (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
+    (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
+    (torch.nn.functional.interpolate, "aten::__interpolate"),
+    (torch.nn.functional.upsample_bilinear, "aten::__upsample_bilinear"),
+    (torch.nn.functional.upsample_nearest, "aten::__upsample_nearest"),
+    (torch.nn.functional.upsample, "aten::__upsample"),
+    (torch.nn.init._no_grad_fill_, "aten::_no_grad_fill_"),
+    (torch.nn.init._no_grad_normal_, "aten::_no_grad_normal_"),
+    (torch.nn.init._no_grad_uniform_, "aten::_no_grad_uniform_"),
+    (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
+    (torch._C._get_tracing_state, "aten::_get_tracing_state"),
+    (warnings.warn, "aten::warn"),
+]
 
 
 # lazily built to ensure the correct initialization order
@@ -2007,75 +2066,7 @@ def _get_builtin_table():
     for mod in _modules_containing_builtins:
         register_all(mod)
 
-    builtin_ops = [
-        # Pairs of (function, op_name)
-        (_list_with_default, "aten::list_with_default"),
-        (_pair, "aten::_pair"),
-        (_quadruple, "aten::_quadruple"),
-        (_single, "aten::_single"),
-        (_triple, "aten::_triple"),
-        (_unwrap_optional, "aten::_unwrap_optional"),
-        (_wait, 'aten::wait'),
-        (cudnn.is_acceptable, "aten::cudnn_is_acceptable"),
-        (math.ceil, "aten::ceil"),
-        (math.copysign, "aten::copysign"),
-        (math.erf, "aten::erf"),
-        (math.erfc, "aten::erfc"),
-        (math.exp, "aten::exp"),
-        (math.expm1, "aten::expm1"),
-        (math.fabs, "aten::fabs"),
-        (math.floor, "aten::floor"),
-        (math.gamma, "aten::gamma"),
-        (math.lgamma, "aten::lgamma"),
-        (math.log, "aten::log"),
-        (math.log10, "aten::log10"),
-        (math.log1p, "aten::log1p"),
-        (math.pow, "aten::pow"),
-        (math.sqrt, "aten::sqrt"),
-        (math.isnan, "aten::isnan"),
-        (math.asinh, "aten::asinh"),
-        (math.atanh, "aten::atanh"),
-        (math.cosh, "aten::cosh"),
-        (math.sinh, "aten::sinh"),
-        (math.tanh, "aten::tanh"),
-        (math.acos, "aten::acos"),
-        (math.asin, "aten::asin"),
-        (math.atan, "aten::atan"),
-        (math.atan2, "aten::atan2"),
-        (math.cos, "aten::cos"),
-        (math.sin, "aten::sin"),
-        (math.tan, "aten::tan"),
-        (math.asinh, "aten::asinh"),
-        (math.atanh, "aten::atanh"),
-        (math.acosh, "aten::acosh"),
-        (math.sinh, "aten::sinh"),
-        (math.cosh, "aten::cosh"),
-        (math.tanh, "aten::tanh"),
-        (math.fmod, "aten::fmod"),
-        (math.modf, "aten::modf"),
-        (math.factorial, "aten::factorial"),
-        (math.frexp, "aten::frexp"),
-        (math.isnan, "aten::isnan"),
-        (math.isinf, "aten::isinf"),
-        (math.degrees, "aten::degrees"),
-        (math.radians, "aten::radians"),
-        (math.ldexp, "aten::ldexp"),
-        (torch._C._infer_size, "aten::_infer_size"),
-        (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
-        (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
-        (torch.nn.functional.interpolate, "aten::__interpolate"),
-        (torch.nn.functional.upsample_bilinear, "aten::__upsample_bilinear"),
-        (torch.nn.functional.upsample_nearest, "aten::__upsample_nearest"),
-        (torch.nn.functional.upsample, "aten::__upsample"),
-        (torch.nn.init._no_grad_fill_, "aten::_no_grad_fill_"),
-        (torch.nn.init._no_grad_normal_, "aten::_no_grad_normal_"),
-        (torch.nn.init._no_grad_uniform_, "aten::_no_grad_uniform_"),
-        (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
-        (torch._C._get_tracing_state, "aten::_get_tracing_state"),
-        (warnings.warn, "aten::warn"),
-    ]
-
-    for builtin, aten_op in builtin_ops:
+    for builtin, aten_op in _builtin_ops:
         _builtin_table[id(builtin)] = aten_op
     if not PY2:
         _builtin_table[id(math.gcd)] = "aten::gcd"
@@ -2110,24 +2101,11 @@ def _get_script_class(name):
                            "Did you forget to import it?".format(name))
     return _script_classes[name]
 
-# qualified_name => list[(overload decl, overload default args)]
-_overloaded_fns = {}
+# overloads are registered in _jit_internal and compiled here so that _overload
+# can be used in nn/functional.py without an import cycle
 
 # qualified name => list[compiled fns]
 _compiled_overloaded_fns = {}
-
-def _overload(func):
-    qual_name = _qualified_name(func)
-    global _overloaded_fns
-    fn_overload_list = _overloaded_fns.get(qual_name)
-    if fn_overload_list is None:
-        fn_overload_list = []
-        _overloaded_fns[qual_name] = fn_overload_list
-    signature = torch.jit.annotations.get_signature(func)
-    if signature is None:
-        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {obj}").format(func)
-    fn_overload_list.append((torch.jit.get_jit_def(func).decl(), get_default_args(func)))
-    return func
 
 def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
     impl_ast = torch.jit.get_jit_def(impl_fn)
@@ -2135,6 +2113,12 @@ def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_
     _rcb = _gen_rcb(impl_fn, _frames_up)
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
+
+def _get_overload_decl_and_defaults(func):
+    signature = torch.jit.annotations.get_signature(func)
+    if signature is None:
+        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {obj}").format(func)
+    return (torch.jit.get_jit_def(func).decl(), get_default_args(func))
 
 def _get_overloads(obj):
     # check for cached compiled fns
@@ -2145,8 +2129,7 @@ def _get_overloads(obj):
         return compiled_overloads
 
     # check for not yet compiled overloads
-    global _overloaded_fns
-    overloads = _overloaded_fns.get(qual_name, None)
+    overloads = _jit_internal._get_fn_overloads(qual_name)
     if overloads is None:
         return None
     compiled_fns = []
@@ -2154,20 +2137,21 @@ def _get_overloads(obj):
     # This is more complicated because you can have a default arg with a type
     # incompatible with a type of parameter in an overload, and other validation.
     # This is still an internal api so for now use defaults from overload
-    for overload_decl, overload_defaults in overloads:
+    for overload_fn in overloads:
+        overload_decl, overload_defaults = _get_overload_decl_and_defaults(overload_fn)
         compiled_fn = _compile_function_with_overload(qual_name, obj, overload_decl, overload_defaults)
         compiled_fns.append(compiled_fn)
 
     # cache compilation, remove information stored to do compilation
     _compiled_overloaded_fns[qual_name] = compiled_fns
-    del _overloaded_fns[qual_name]
+    _jit_internal._clear_fn_overloads(qual_name)
     return compiled_fns
 
 def _check_directly_compile_overloaded(obj):
     qual_name = _qualified_name(obj)
     global _compiled_overloaded_fns
     global _overloaded_fns
-    if qual_name in _compiled_overloaded_fns or qual_name in _overloaded_fns:
+    if qual_name in _compiled_overloaded_fns or _jit_internal._get_fn_overloads(qual_name):
         raise RuntimeError("Function {} cannot be directly compiled because it"
                            " is overloaded. It must be used in a context of a function"
                            " where its inputs can determine which overload to call.".format(qual_name))
