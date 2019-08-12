@@ -1,4 +1,5 @@
 import torch
+from cpp_api_parity import CppArgDeclaration
 
 '''
 `SampleModule` is used by `test_cpp_api_parity.py` to test that Python / C++ API
@@ -14,24 +15,24 @@ is different from the C++ equivalent.
 class SampleModule(torch.nn.Module):
     def __init__(self, has_parity):
         super(SampleModule, self).__init__()
-        self.register_parameter('param', torch.nn.Parameter(torch.Tensor(2, 3)))
-        self.register_buffer('buffer', torch.Tensor(3, 4))
+        self.register_parameter('param', torch.nn.Parameter(torch.Tensor(3, 4)))
+        self.register_buffer('buffer', torch.Tensor(4, 5))
         self.has_parity = has_parity
         self.reset_parameters()
 
     def reset_parameters(self):
         with torch.no_grad():
-            self.param.zero_()
-            self.buffer.zero_()
+            self.param.fill_(1)
+            self.buffer.fill_(1)
             if not self.has_parity:
-                self.param.add_(1)
-                self.buffer.add_(1)
+                self.param.add_(10)
+                self.buffer.add_(10)
 
     def forward(self, x):
         if not self.has_parity:
-            return x + 1
+            return x + self.param * 4 + 3
         else:
-            return x
+            return x + self.param * 2
 
 SAMPLE_MODULE_CPP_SOURCE = """\n
 struct SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImpl> {
@@ -39,11 +40,11 @@ struct SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImpl> {
     reset();
   }
   void reset() {
-    param = register_parameter("param", torch::zeros({2, 3}));
-    buffer = register_buffer("buffer", torch::zeros({3, 4}));
+    param = register_parameter("param", torch::ones({3, 4}));
+    buffer = register_buffer("buffer", torch::ones({4, 5}));
   }
   torch::Tensor forward(torch::Tensor x) {
-    return x;
+    return x + param * 2;
   }
   torch::Tensor param;
   torch::Tensor buffer;
@@ -57,18 +58,24 @@ module_tests = [
         module_name='SampleModule',
         constructor_args=(True, ),
         cpp_constructor_args='',
-        cpp_source=SAMPLE_MODULE_CPP_SOURCE,
         input_size=(3, 4),
         desc='has_parity',
-        expect_error=False,
+        expect_parity_error=False,
     ),
     dict(
         module_name='SampleModule',
         constructor_args=(False, ),
         cpp_constructor_args='',
-        cpp_source=SAMPLE_MODULE_CPP_SOURCE,
         input_size=(3, 4),
         desc='no_parity',
-        expect_error=True,
+        expect_parity_error=True,
     ),
 ]
+
+module_metadata = dict(
+    python_module_class=SampleModule,
+    cpp_forward_arg_declarations=[CppArgDeclaration(arg_type='torch::Tensor', arg_name='x')],
+    cpp_source=SAMPLE_MODULE_CPP_SOURCE,
+    cpp_namespace='',
+)
+
