@@ -1,7 +1,8 @@
 #include <ATen/ATen.h>
+
+#include <ATen/core/TensorOptions.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/QScheme.h>
-#include <c10/core/TensorOptions.h>
 
 namespace at {
 namespace native {
