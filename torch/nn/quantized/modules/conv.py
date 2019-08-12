@@ -102,28 +102,6 @@ class Conv2d(_ConvNd):
                                                                       self.dilation,
                                                                       self.groups)
 
-    @property
-    def scale(self):
-        return self._scale.item()
-
-    @scale.setter
-    def scale(self, s):
-        if isinstance(s, torch.Tensor):
-            self._scale = s
-        else:
-            self._scale = torch.tensor([s], dtype=torch.double)
-
-    @property
-    def zero_point(self):
-        return self._zero_point.item()
-
-    @zero_point.setter
-    def zero_point(self, zp):
-        if isinstance(zp, torch.Tensor):
-            self._zero_point = zp
-        else:
-            self._zero_point = torch.Tensor([zp]).to(torch.int)
-
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
