@@ -279,54 +279,34 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
   const py::object& pyModule_;
 };
 
-static TypePtr getTensorType(const at::Tensor& t, const TypeKind type_kind) {
-  switch (type_kind) {
-    case TypeKind::ProfiledTensorType:
-      return ProfiledTensorType::create(t);
-    case TypeKind::CompleteTensorType: {
-      auto scalar_type = t.scalar_type();
-      auto sizes = t.sizes();
-      return CompleteTensorType::create(scalar_type, at::kCPU, sizes);
-    }
-    default:
-      throw std::runtime_error(
-          "Attempted to call getTensorType for type kind other than ProfiledTensorType or CompleteTensorType.");
-  }
-}
-
 static TupleTypePtr getTupleTensorType(
     const Stack::const_iterator& s_iter,
     const Stack::const_iterator& s_iter_end,
-    const TypePtr& tupleType,
-    const TypeKind type_kind) {
+    const TypePtr& tupleType) {
   AT_ASSERT(tupleType->kind() == TupleType::Kind);
   AT_ASSERT(s_iter != s_iter_end);
 
   std::vector<TypePtr> types;
   for (const auto& subType : tupleType->containedTypes()) {
     if (subType->kind() == TupleType::Kind) {
-      types.push_back(
-          getTupleTensorType(s_iter + 1, s_iter_end, subType, type_kind));
+      types.push_back(getTupleTensorType(s_iter + 1, s_iter_end, subType));
     } else {
-      types.push_back(getTensorType(s_iter->toTensor(), type_kind));
+      types.push_back(ProfiledTensorType::create(s_iter->toTensor()));
     }
   }
   return TupleType::create(types);
 }
 
-static void setInputTensorTypes(
-    Graph& g,
-    const Stack& stack,
-    const TypeKind type_kind = TypeKind::ProfiledTensorType) {
+static void setInputTensorTypes(Graph& g, const Stack& stack) {
   at::ArrayRef<Value*> input_values = g.inputs();
   auto s_iter = stack.begin();
   for (auto v : input_values) {
     AT_ASSERT(s_iter != stack.end());
     if (v->type()->kind() == TupleType::Kind) {
       AT_ASSERT(v->node()->kind() == prim::Param);
-      v->setType(getTupleTensorType(s_iter, stack.end(), v->type(), type_kind));
+      v->setType(getTupleTensorType(s_iter, stack.end(), v->type()));
     } else {
-      v->setType(getTensorType(s_iter->toTensor(), type_kind));
+      v->setType(ProfiledTensorType::create(s_iter->toTensor()));
       s_iter++;
     }
   }
@@ -349,13 +329,10 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
     bool with_grad = false,
     bool propagate = true) {
   auto retval = graph.copy();
+  setInputTensorTypes(*retval, fmap<IValue>(inputs));
   if (propagate) {
-    setInputTensorTypes(*retval, fmap<IValue>(inputs), TypeKind::ProfiledTensorType);
     PropagateInputShapes(retval);
   }
-  setInputTensorTypes(
-      *retval, fmap<IValue>(inputs), TypeKind::CompleteTensorType);
-
   return retval;
 }
 
@@ -367,8 +344,8 @@ static std::shared_ptr<Graph> _assign_output_shapes(
   for (size_t i = 0; i < outputs.size(); ++i) {
     auto scalar_type = outputs[i].scalar_type();
     auto sizes = outputs[i].sizes();
-    auto type =
-        torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
+    auto type = torch::jit::ProfiledTensorType::createContiguous(
+        scalar_type, at::kCPU, sizes);
     retval->outputs()[i]->setType(type);
   }
   return retval;

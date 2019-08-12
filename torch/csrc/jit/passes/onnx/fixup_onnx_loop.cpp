@@ -55,7 +55,7 @@ void FixupONNXLoops(Block* block) {
       cond->setType(BoolType::create());
 
       Value* i = sub_block->inputs()[0];
-      i->setType(CompleteTensorType::fromNumberType(IntType::get()));
+      i->setType(ProfiledTensorType::fromNumberType(IntType::get()));
 
       // add cast to condition input inside the loop.
       Value* next_cond_val = sub_block->outputs()[0];
