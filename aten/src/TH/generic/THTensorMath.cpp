@@ -656,7 +656,6 @@ void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, scalar_t gain)
   scalar_t *m1_p;
   scalar_t *m2_p;
   scalar_t *r_p;
-  int64_t i;
 
   THTensor_(resize2d)(r_, N1, N2);
 
