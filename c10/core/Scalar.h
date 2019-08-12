@@ -24,9 +24,10 @@ class C10_API Scalar {
  public:
   Scalar() : Scalar(int64_t(0)) {}
 
-#define DEFINE_IMPLICIT_CTOR(type, name, member)      \
+#define DEFINE_IMPLICIT_CTOR(type, name)      \
   Scalar(type vv) : Scalar(vv, true) { }
-  AT_FORALL_SCALAR_TYPES_AND(c10::ScalarType::BFloat16, DEFINE_IMPLICIT_CTOR)
+
+  AT_FORALL_SCALAR_TYPES_AND(BFloat16, DEFINE_IMPLICIT_CTOR)
 
 #undef DEFINE_IMPLICIT_CTOR
 
@@ -53,7 +54,7 @@ class C10_API Scalar {
 
 #undef DEFINE_IMPLICIT_COMPLEX_CTOR
 
-#define DEFINE_ACCESSOR(type, name, member)               \
+#define DEFINE_ACCESSOR(type, name)                       \
   type to##name() const {                                 \
     if (Tag::HAS_d == tag) {                              \
       return checked_convert<type, double>(v.d, #type);   \
@@ -122,7 +123,7 @@ inline T Scalar::to() {
   throw std::runtime_error("to() cast to unexpected type.");
 }
 
-#define DEFINE_TO(T, name, _) \
+#define DEFINE_TO(T, name)    \
   template <>                 \
   inline T Scalar::to<T>() {  \
     return to##name();        \
