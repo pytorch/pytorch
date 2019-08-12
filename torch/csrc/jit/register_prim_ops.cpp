@@ -2788,6 +2788,7 @@ RegisterOperators reg2({
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("float"),
+    CREATE_DICT_OPS("Tensor"),
 #undef CREATE_DICT_OPS
 
     Operator(
