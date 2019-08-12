@@ -1,6 +1,30 @@
 import math
+import os
+from distutils.util import strtobool
 import torch
 from .optimizer import Optimizer
+from ..hub import _check_module_exists
+
+NUMBA_CUDA_EXIST = False
+NUMBA_CUDA_THREAD_PER_BLOCK = 512
+if not strtobool(os.environ.get('NO_NUMBA', 'n')) and _check_module_exists("numba.cuda"):
+    import numba.cuda
+    NUMBA_CUDA_EXIST = numba.cuda.is_available()
+
+    @numba.cuda.jit()
+    def numba_cuda_kernel(param, grad, exp_avg, exp_avg_sq, beta1, 
+                          beta2, step_size, bias_correction2, eps, 
+                          weight_decay):
+        i = numba.cuda.grid(1)
+        if i >= param.size:
+            return
+
+        exp_avg[i] = exp_avg[i] * beta1 + (1 - beta1) * grad[i]
+        exp_avg_sq[i] = exp_avg_sq[i] * beta2 + (1 - beta2) * grad[i]*grad[i]
+
+        denom = math.sqrt(exp_avg_sq[i]) / bias_correction2 + eps
+        param[i] *= weight_decay
+        param[i] = param[i] + (-step_size) * (exp_avg[i] / denom)
 
 
 class AdamW(Optimizer):
@@ -56,59 +80,81 @@ class AdamW(Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+
+        # In order to reduce Numba overhead, we save the device arrays 
+        # between calls to `step()` in `_nbstate`.
+        self._nbstate = getattr(self, '_nbstate', {})
+
         loss = None
         if closure is not None:
             loss = closure()
 
         for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
+            for param in group['params']:
+                if param.grad is None:
                     continue
 
-                # Perform stepweight decay
-                p.data.mul_(1 - group['lr'] * group['weight_decay'])
-
                 # Perform optimization step
-                grad = p.grad.data
+                grad = param.grad.data
+                p = param.data
                 if grad.is_sparse:
-                    raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
+                    raise RuntimeError('Adam does not support sparse gradients,' 
+                                       'please consider SparseAdam instead')
                 amsgrad = group['amsgrad']
 
-                state = self.state[p]
+                state = self.state[param]
 
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
                     # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p.data)
+                    state['exp_avg'] = torch.zeros_like(p)
                     # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p.data)
+                    state['exp_avg_sq'] = torch.zeros_like(p)
                     if amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_sq'] = torch.zeros_like(p.data)
+                        state['max_exp_avg_sq'] = torch.zeros_like(p)
+                    elif NUMBA_CUDA_EXIST and numba.cuda.is_cuda_array(p.data):
+                        self._nbstate[param] = {
+                            'param': numba.cuda.as_cuda_array(p.data.flatten()),
+                            'grad': numba.cuda.as_cuda_array(grad.flatten()),
+                            'exp_avg': numba.cuda.as_cuda_array(state['exp_avg'].data.flatten()),
+                            'exp_avg_sq': numba.cuda.as_cuda_array(state['exp_avg_sq'].data.flatten()),
+                            'blockspergrid': math.ceil(p.data.numel() / NUMBA_CUDA_THREAD_PER_BLOCK)
+                        }
 
-                exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
-                if amsgrad:
-                    max_exp_avg_sq = state['max_exp_avg_sq']
+                weight_decay = 1 - group['lr'] * group['weight_decay']
+                eps = group['eps']
                 beta1, beta2 = group['betas']
 
                 state['step'] += 1
                 bias_correction1 = 1 - beta1 ** state['step']
-                bias_correction2 = 1 - beta2 ** state['step']
-
-                # Decay the first and second moment running average coefficient
-                exp_avg.mul_(beta1).add_(1 - beta1, grad)
-                exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
-                if amsgrad:
-                    # Maintains the maximum of all 2nd moment running avg. till now
-                    torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
-                    # Use the max. for normalizing running avg. of gradient
-                    denom = (max_exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
-                else:
-                    denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
-
+                bias_correction2 = math.sqrt(1 - beta2 ** state['step'])
                 step_size = group['lr'] / bias_correction1
 
-                p.data.addcdiv_(-step_size, exp_avg, denom)
+                if param in self._nbstate:
+                    s = self._nbstate[param]
+                    numba_cuda_kernel[s['blockspergrid'], NUMBA_CUDA_THREAD_PER_BLOCK]  \
+                        (s['param'], s['grad'], s['exp_avg'], s['exp_avg_sq'], beta1, 
+                        beta2, step_size, bias_correction2, eps, weight_decay)
+                else:                                   
+                    exp_avg = state['exp_avg'].data
+                    exp_avg_sq = state['exp_avg_sq'].data
+                    # Decay the first and second moment running average coefficient
+                    exp_avg.mul_(beta1).add_(1 - beta1, grad)
+                    exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
+                    if amsgrad:
+                        max_exp_avg_sq = state['max_exp_avg_sq']
+                        # Maintains the maximum of all 2nd moment running avg. till now
+                        torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
+                        # Use the max. for normalizing running avg. of gradient
+                        denom = (max_exp_avg_sq.sqrt() / bias_correction2).add_(eps)
+                    else:
+                        denom = (exp_avg_sq.sqrt() / bias_correction2).add_(eps)
+
+                    # Perform stepweight decay
+                    p.data.mul_(weight_decay)                        
+                    
+                    p.data.addcdiv_(-step_size, exp_avg, denom)
 
         return loss
