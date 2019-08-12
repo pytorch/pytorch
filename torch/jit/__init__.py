@@ -275,8 +275,8 @@ def _unique_state_dict(module, keep_vars=False):
 
 def _remove_unused_state_batchnorm(module, state_dict):
     # Removing unused input 'num_batches_tracked' for BatchNorm. 'num_batches_tracked' is stored in
-    # register_buffer, but it's not used at ONNX export. In future, to preserve 'num_batches_tracked' in register_buffer for
-    # training, module's attribute 'training' could be used.
+    # register_buffer, but it's not used at ONNX export. In future, to preserve 'num_batches_tracked'
+    # in register_buffer for training, module's attribute 'training' could be used.
     batchnorm = 'bn'
     for sub_name, sub_mod in module.named_modules():
         if batchnorm in sub_name:

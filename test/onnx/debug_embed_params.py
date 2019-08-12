@@ -7,6 +7,7 @@ import sys
 
 import torch
 import torch.jit
+from torch.jit import _remove_unused_state_batchnorm
 from torch.autograd import Variable
 
 import onnx
@@ -40,7 +41,9 @@ def run_embed_params(proto, model, input, state_dict=None, use_gpu=True):
         # Passed in state_dict may have a different order.  Make
         # sure our order is consistent with the model's order.
         # TODO: Even better: keyword arguments!
-        for k in model.state_dict():
+        # This is necessary to avoid adding unused model input 'num_batches_tracked' to model state
+        model_state_dict = _remove_unused_state_batchnorm(model, model.state_dict())
+        for k in model_state_dict:
             if k not in state_dict:
                 # Once PyTorch Module adds unnecessary paramter, the old pre-trained model does not have it.
                 # Just simply pass the new one.
