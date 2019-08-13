@@ -25,14 +25,14 @@ Tensor quantized_cat(
     int64_t dim,
     double scale,
     int64_t zero_point) {
-  const auto x_dtype = qxs[0].scalar_type();
+  const auto x_dtype = qxs.get(0).scalar_type();
   TORCH_CHECK(
       is_valid_quantization_scheme(qxs[0]),
       "Only per-tensor quantization is supported in 'cat'!")
-  const auto x_qscheme = qxs[0].qscheme();
+  const auto x_qscheme = qxs.get(0).qscheme();
   std::vector<Tensor> xs;
   xs.reserve(qxs.size());
-  for (const auto& qx : qxs) {
+  for (const at::Tensor& qx : qxs) {
     TORCH_CHECK(x_dtype == qx.scalar_type(), "All dtypes must be the same.");
     TORCH_CHECK(
         x_qscheme == qx.qscheme(), "Quantization schemes must be the same.");
@@ -60,8 +60,9 @@ class QCat final : public torch::OperatorKernel {
       int64_t dim,
       c10::optional<double> scale,
       c10::optional<int64_t> zero_point) {
-    double _scale = scale.has_value() ? scale.value() : qxs[0].q_scale();
+    double _scale = scale.has_value() ? scale.value() : qxs.get(0).q_scale();
     int64_t _zero_point =
+
         zero_point.has_value() ? zero_point.value() : qxs[0].q_zero_point();
     return quantized_cat<ReLUFused>(qxs, dim, _scale, _zero_point);
   }

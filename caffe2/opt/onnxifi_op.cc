@@ -83,21 +83,6 @@ void SetOutputTensorDescriptorTypeAndBuffer(
       cpu_tensor->raw_mutable_data(OnnxifiTypeToDataType(onnxifi_type)));
 }
 
-void SetOutputTensorDescriptorTypeAndBuffer(
-    uint64_t onnxifi_type,
-    int8::Int8TensorCPU* cpu_int8tensor,
-    onnxTensorDescriptorV1* desc) {
-  desc->dataType = onnxifi_type;
-  Tensor* cpu_tensor = &(cpu_int8tensor->t);
-
-  desc->buffer = reinterpret_cast<onnxPointer>(
-      cpu_tensor->raw_mutable_data(OnnxifiTypeToDataType(onnxifi_type)));
-  desc->quantizationParams = 1;
-  desc->quantizationAxis = 1;
-  desc->scales = &cpu_int8tensor->scale;
-  desc->biases = &cpu_int8tensor->zero_point;
-}
-
 #ifndef C10_MOBILE
 void CopyDescriptor(
     const ExternalTensorDescriptor* from,
