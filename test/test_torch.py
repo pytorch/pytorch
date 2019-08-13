@@ -12550,7 +12550,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(nhwc.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(nhwc, x)
 
-    @pytorchtest.test_all_device_types()
+    @torchtest.test_all_device_types()
     def test_memory_format_clone(self, device):
         with memory_format_propagation():
             nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
@@ -12559,7 +12559,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertTrue(clone.is_contiguous(memory_format=torch.channels_last))
             self.assertEqual(nhwc, clone)
 
-    @pytorchtest.test_all_device_types()
+    @torchtest.test_all_device_types()
     def test_memory_format_resize_as(self, device):
         with memory_format_propagation():
             nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
@@ -12599,7 +12599,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         alias.fill_(7)
         self.assertEqual(x, alias)
 
-    @pytorchtest.test_all_device_types()
+    @torchtest.test_all_device_types()
     def test_memory_format_permute(self, device):
         x = torch.randn((10, 3, 32, 32), device=device)
         nhwc = x.contiguous(memory_format=torch.channels_last)
