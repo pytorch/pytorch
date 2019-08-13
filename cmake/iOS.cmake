@@ -158,17 +158,15 @@ set (CMAKE_IOS_SDK_ROOT ${CMAKE_IOS_SDK_ROOT} CACHE PATH "Location of the select
 set (CMAKE_OSX_SYSROOT ${CMAKE_IOS_SDK_ROOT} CACHE PATH "Sysroot used for iOS support")
 
 # set the architecture for iOS 
-if (NOT DEFINED IOS_ARCH)
-    if (IOS_PLATFORM STREQUAL "OS")
-        set (IOS_ARCH "armv7;armv7s;arm64")
-    elseif (IOS_PLATFORM STREQUAL "SIMULATOR")
-        set (IOS_ARCH "i386;x86_64")
-    elseif (IOS_PLATFORM STREQUAL "WATCHOS")
-        set (IOS_ARCH "armv7k")
-    endif ()
-endif()
+if (IOS_PLATFORM STREQUAL "OS")
+    set (DEFAULT_IOS_ARCH "armv7;armv7s;arm64")
+elseif (IOS_PLATFORM STREQUAL "SIMULATOR")
+    set (DEFAULT_IOS_ARCH "i386;x86_64")
+elseif (IOS_PLATFORM STREQUAL "WATCHOS")
+    set (DEFAULT_IOS_ARCH "armv7k")
+endif ()
 
-
+set (IOS_ARCH ${DEFAULT_IOS_ARCH} CACHE string  "Build architecture for iOS")
 set (CMAKE_OSX_ARCHITECTURES ${IOS_ARCH} CACHE string  "Build architecture for iOS")
 
 # Set the find root to the iOS developer roots and to user defined paths
