@@ -579,7 +579,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     }
     if (tuple->type && tuple->type->schema() &&
         tuple->type->schema()->name() != "") {
-      auto unqualName = tuple->type->basename();
+      auto unqualName = tuple->type->name()->name();
       auto fieldNames = fmap(tuple->type->schema()->arguments(), [](const Argument& arg) {
         return arg.name();
       });
