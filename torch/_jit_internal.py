@@ -261,7 +261,7 @@ def _parameter_list(parameter_names_fn):
 _overloaded_fns = {}  # noqa: T484
 
 def _overload(func):
-    qual_name = _qualified_name(func)
+    qual_name = func.__qualname__
     global _overloaded_fns
     fn_overload_list = _overloaded_fns.get(qual_name)
     if fn_overload_list is None:

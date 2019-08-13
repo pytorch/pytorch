@@ -1903,15 +1903,18 @@ def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
 
-def _get_overload_decl_and_defaults(func):
+def _check_no_signature(func):
     signature = torch.jit.annotations.get_signature(func)
     if signature is None:
-        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {obj}").format(func)
+        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(func.__qualname__))
+
+def _get_overload_decl_and_defaults(func):
+    _check_no_signature(func)
     return (torch.jit.get_jit_def(func).decl(), get_default_args(func))
 
 def _get_overloads(obj):
     # check for cached compiled fns
-    qual_name = _qualified_name(obj)
+    qual_name = obj.__qualname__
     global _compiled_overloaded_fns
     compiled_overloads = _compiled_overloaded_fns.get(qual_name, None)
     if compiled_overloads is not None:
@@ -1937,7 +1940,7 @@ def _get_overloads(obj):
     return compiled_fns
 
 def _check_directly_compile_overloaded(obj):
-    qual_name = _qualified_name(obj)
+    qual_name = obj.__qualname__
     global _compiled_overloaded_fns
     global _overloaded_fns
     if qual_name in _compiled_overloaded_fns or _jit_internal._get_fn_overloads(qual_name):
