@@ -184,12 +184,12 @@ class TestCppApiParity(common.TestCase):
             module_variant_name = test_params.module_variant_name
             cpp_test_name = module_variant_name + '_test_' + method_name
             if input_size:
-                example_inputs = (torch.randn(input_size), )
+                example_inputs = [torch.randn(input_size)]
             elif input_fn:
-                example_inputs = input_fn()
+                example_inputs = list(input_fn())
             else:
                 raise RuntimeError("Missing `input_size` or `input_fn` for {}".format(module_variant_name))
-            example_inputs = tuple([x.to(device) for x in example_inputs])
+            example_inputs = [x.to(device) for x in example_inputs]
             if method_name == 'init':
                 args = test_init(device, python_module_class, python_constructor_args)
             elif method_name == 'forward':
@@ -208,8 +208,8 @@ class TestCppApiParity(common.TestCase):
             for module_file_name in module_file_names:
                 cpp_args.append(module_file_name)
             for arg in args[1:]:
-                if isinstance(arg, tuple):
-                    cpp_args += list(arg)
+                if isinstance(arg, list):
+                    cpp_args += arg
                 else:
                     cpp_args.append(arg)
             try:
