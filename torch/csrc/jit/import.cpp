@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/import_export_helpers.h>
 #include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/jit/source_range_serialization.h>
 #include <torch/csrc/jit/source_range_serialization_impl.h>
@@ -85,7 +85,7 @@ class ScriptModuleDeserializer final {
   std::vector<at::Tensor> tensor_table_;
   std::unordered_set<std::string> imported_libs_;
 
-  std::vector<IValue> LEGACY_loadPickleArchive(const std::string& name);
+  IValue LEGACY_loadPickleArchive(const std::string& name);
   script::Module LEGACY_convertModule(const torch::ModuleDef& module_def);
   std::vector<IValue> LEGACY_pickled_ivalues_;
   size_t proto_version_;
@@ -143,8 +143,14 @@ script::Module ScriptModuleDeserializer::deserialize(
   loadTensorTable(&model_def);
 
   if (proto_version_ < 6) {
-    if (proto_version_ >= 2) {
-      LEGACY_pickled_ivalues_ = LEGACY_loadPickleArchive("attributes.pkl");
+    if (proto_version_ == 2) {
+      auto list = LEGACY_loadPickleArchive("attributes.pkl").toGenericList();
+      LEGACY_pickled_ivalues_.insert(
+          LEGACY_pickled_ivalues_.end(), list.begin(), list.end());
+
+    } else {
+      LEGACY_pickled_ivalues_ =
+          LEGACY_loadPickleArchive("attributes.pkl").toTuple()->elements();
     }
     moduleStack_.push_back("__torch__");
     const auto& module_def = model_def.main_module();
@@ -153,9 +159,20 @@ script::Module ScriptModuleDeserializer::deserialize(
     at::DataPtr pickle_ptr;
     size_t pickle_size;
     std::tie(pickle_ptr, pickle_size) = reader_->getRecord("data.pkl");
+
+    size_t bytes_read = 0;
+    auto data = reinterpret_cast<const char*>(pickle_ptr.get());
+    auto reader = [&](char* buffer, size_t len) {
+      // Copy len bytes into buffer
+      const char* start = data + bytes_read;
+      std::memcpy(buffer, start, len);
+      bytes_read += len;
+    };
+    auto bounds_checker = [&]() { return bytes_read < pickle_size; };
+
     Unpickler unpickler(
-        pickle_ptr.get(),
-        pickle_size,
+        reader,
+        bounds_checker,
         &tensor_table_,
         [&](const c10::QualifiedName& qn) {
           importCallback(qn.prefix());
@@ -166,13 +183,12 @@ script::Module ScriptModuleDeserializer::deserialize(
   }
 }
 
-std::vector<IValue> ScriptModuleDeserializer::LEGACY_loadPickleArchive(
-    const std::string& name) {
+IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(const std::string& name) {
   at::DataPtr attributes_ptr;
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) = reader_->getRecord(name);
-  Unpickler unpickler(
-      attributes_ptr.get(),
+  auto ivalue = unpickle(
+      reinterpret_cast<const char*>(attributes_ptr.get()),
       attributes_size,
       &tensor_table_,
       [&](const c10::QualifiedName& qn) {
@@ -180,7 +196,7 @@ std::vector<IValue> ScriptModuleDeserializer::LEGACY_loadPickleArchive(
         return c10::StrongTypePtr(
             compilation_unit_, compilation_unit_->get_class(qn));
       });
-  return unpickler.parse_ivalue_list();
+  return ivalue;
 }
 
 void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
