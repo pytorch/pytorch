@@ -1108,6 +1108,49 @@ class TestCuda(TestCase):
     def test_inplace_binary_mem_overlap(self):
         _TestTorchMixin._test_inplace_binary_mem_overlap(self, device='cuda')
 
+    # This test does not work until input/output overlap check is implemented on CUDA.
+    # Remove @unittest.expectedFailure when it's done.
+    @unittest.expectedFailure
+    def test_unary_op_input_output_overlap(self):
+        sz = 3
+        doubles = torch.randn(2 * sz, device='cuda')
+        positives = torch.randint(1, 100, (2 * sz,), device='cuda').double()
+        ints = torch.randint(-100, 100, (2 * sz,), device='cuda')
+
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.abs)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.acos)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.asin)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.atan)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, ints, torch.bitwise_not)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.ceil)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.cos)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.erf)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.erfc)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.exp)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.expm1)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.floor)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.frac)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, positives, torch.log)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, positives, torch.log10)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, positives, torch.log1p)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, positives, torch.log2)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.neg)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.reciprocal)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.round)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, positives, torch.rsqrt)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.sin)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.sigmoid)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.sqrt)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.tan)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.tanh)
+        _TestTorchMixin._test_unary_op_overlap(self, sz, doubles, torch.trunc)
+
+    def test_binary_op_input_output_overlap(self):
+        _TestTorchMixin._test_binary_op_input_output_overlap(self, torch.add, device='cuda')
+        _TestTorchMixin._test_binary_op_input_output_overlap(self, torch.mul, device='cuda')
+        _TestTorchMixin._test_binary_op_input_output_overlap(self, torch.sub, device='cuda')
+        _TestTorchMixin._test_binary_op_input_output_overlap(self, torch.div, device='cuda')
+
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_arithmetic_large_tensor(self):
         x = torch.empty(2**30, device='cuda')

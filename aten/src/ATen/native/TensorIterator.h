@@ -258,15 +258,14 @@ struct CAFFE2_API TensorIterator {
   /// CUDA reductions.
   bool is_final_output() const { return final_output_; }
 
+  void set_check_overlap(bool check_overlap) {
+    check_overlap_ = check_overlap;
+  }
+
   /// Construction
   void add_output(const Tensor& output) {
     operands_.emplace_back(output);
     num_outputs_++;
-  }
-
-  void check_and_add_output(const Tensor& output) {
-    assert_no_internal_overlap(output);
-    add_output(output);
   }
 
   void add_output(const Tensor& input, Device device, ScalarType dtype) {
@@ -294,6 +293,7 @@ struct CAFFE2_API TensorIterator {
 
 protected:
   void mark_outputs();
+  void check_overlaps();
   void compute_shape();
   void compute_strides();
   void reorder_dimensions();
@@ -319,6 +319,7 @@ protected:
   bool allow_cpu_scalars_ = false;
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
+  bool check_overlap_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover

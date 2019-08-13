@@ -535,15 +535,10 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 }
 
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
-    const Tensor& b, bool check_internal_overlap) {
+    const Tensor& b, bool check_overlap) {
   auto iter = TensorIterator();
-  if (check_internal_overlap) {
-    iter.check_and_add_output(out);
-    assert_no_partial_overlap(out, a);
-    assert_no_partial_overlap(out, b);
-  } else {
-    iter.add_output(out);
-  }
+  iter.set_check_overlap(check_overlap);
+  iter.add_output(out);
   iter.add_input(a);
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;
@@ -552,13 +547,10 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
 }
 
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
-    bool check_internal_overlap) {
+    bool check_overlap) {
   auto iter = TensorIterator();
-  if (check_internal_overlap) {
-    iter.check_and_add_output(out);
-  } else {
-    iter.add_output(out);
-  }
+  iter.set_check_overlap(check_overlap);
+  iter.add_output(out);
   iter.add_input(a);
   iter.num_outputs_ = 1;
   iter.build();
@@ -620,6 +612,24 @@ void TensorIterator::mark_outputs() {
       const auto &input = operands_[arg].tensor;
       if (output.is_same(input)) {
         operands_[i].is_read_write = true;
+      }
+    }
+  }
+}
+
+void TensorIterator::check_overlaps() {
+  if (check_overlap_) {
+    for (int i = 0; i < num_outputs_; i++) {
+      const auto &output = operands_[i].tensor;
+      if (!output.defined()) continue;
+      assert_no_internal_overlap(output);
+    }
+    for (int arg = num_outputs_; arg < ntensors(); arg++) {
+      const auto &input = operands_[arg].tensor;
+      for (int i = 0; i < num_outputs_; i++) {
+        const auto &output = operands_[i].tensor;
+        if (!output.defined()) continue;
+        assert_no_partial_overlap(output, input);
       }
     }
   }
@@ -736,6 +746,8 @@ int TensorIterator::get_dim_to_split() const {
 void TensorIterator::build() {
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
+  // Check outputs' internal overlaps and input-output overlaps
+  check_overlaps();
   // compute the broadcasted shape
   compute_shape();
   // compute each tensor's stride after broadcasting
