@@ -66,10 +66,12 @@ void set_rng_state(Tensor new_state) {
 namespace cuda {
 
 Tensor get_rng_state(torch::Device device) {
+  // yf225 TODO: assert that device is not CPU. Does this actually work on Python?
   return _get_rng_state(device);
 }
 
 void set_rng_state(Tensor new_state, torch::Device device) {
+  // yf225 TODO: assert that device is not CPU. Does this actually work on Python?
   _set_rng_state(new_state, device);
 }
 
