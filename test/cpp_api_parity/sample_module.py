@@ -15,8 +15,8 @@ When `SampleModule.has_parity` is false, behavior of `reset_parameters` / `forwa
 class SampleModule(torch.nn.Module):
     def __init__(self, has_parity):
         super(SampleModule, self).__init__()
-        self.register_parameter('param', torch.nn.Parameter(torch.Tensor(3, 4)))
-        self.register_buffer('buffer', torch.Tensor(4, 5))
+        self.register_parameter('param', torch.nn.Parameter(torch.empty(3, 4)))
+        self.register_buffer('buffer', torch.empty(4, 5))
         self.has_parity = has_parity
         self.reset_parameters()
 
