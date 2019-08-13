@@ -743,16 +743,20 @@ class TestQNNPackOps(TestCase):
                        qparams=hu.qparams(dtypes=torch.quint8,
                                           zero_point_min=0,
                                           zero_point_max=0)),
-           scale_C=st.sampled_from([0.001, 0.0821, 0.67, 7]),)
-    def test_qnnpack_add(self, A, scale_C):
+           scale_A=st.sampled_from([0.001, 0.057, 0.889, 12.3]),
+           scale_B=st.sampled_from([0.008, 0.0821, 0.67, 7]),
+           scale_C=st.sampled_from([0.003, 0.07821, 0.457, 7.34]),)
+    def test_qnnpack_add(self, A, scale_A, scale_B, scale_C):
         A_temp = A
-        A, (scale_A, zero_point_A, torch_type) = A_temp
-        B, (scale_B, zero_point_B, torch_type) = A_temp
+        A, (scale_a, zero_point_A, torch_type) = A_temp
+        B, (scale_b, zero_point_B, torch_type) = A_temp
         A = torch.from_numpy(A)
         B = torch.from_numpy(B)
 
         assume(scale_A // scale_C >= 2**-14)
         assume(scale_A // scale_C < 2**8)
+        assume(scale_B // scale_C >= 2**-14)
+        assume(scale_B // scale_C < 2**8)
 
         zero_point_C = 127
 
