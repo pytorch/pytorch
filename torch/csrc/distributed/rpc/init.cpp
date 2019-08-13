@@ -47,7 +47,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
       shared_ptr_class_<ProcessGroupAgent>(
           module, "ProcessGroupAgent", rpcAgent)
           .def(py::init<std::string,
-                        std::unordered_map<std::string, int>,
                         std::shared_ptr<::c10d::ProcessGroup>>())
           .def("get_id",
                &ProcessGroupAgent::getId,

@@ -35,6 +35,14 @@ class RpcTest(MultiProcessTestCase):
     def world_size(self):
         return 4
 
+    def test_duplicated_names(self):
+        store = dist.FileStore(self.file.name, self.world_size)
+        dist.init_process_group(backend='gloo', rank=self.rank,
+                                world_size=self.world_size, store=store)
+        with self.assertRaisesRegex(RuntimeError, "is not unique"):
+            dist.init_rpc('duplicated_name')
+        dist.join_rpc()
+
     @_wrap_with_rpc
     def test_add(self):
         n = self.rank + 1

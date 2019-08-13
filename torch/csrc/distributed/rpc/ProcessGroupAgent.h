@@ -27,7 +27,6 @@ class ProcessGroupAgent : public RpcAgent {
  public:
 
   ProcessGroupAgent(std::string workerName,
-                    std::unordered_map<std::string, int> nameMap,
                     std::shared_ptr<c10d::ProcessGroup> pg);
 
   // This method wraps the destination information and the message into a

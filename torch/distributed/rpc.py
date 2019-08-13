@@ -15,34 +15,6 @@ def _check_initialized():
                            "Call init_rpc(name) first.")
 
 
-def _collect_worker_names(name, group):
-    from . import all_gather
-    from . import get_world_size
-
-    # collect name length
-    ws = get_world_size(group)
-    name_bytes = name if sys.version_info < (3, 0) else bytes(name, 'utf8')
-    name_bytes = list(array.array('B', name_bytes))
-    name_len = len(name_bytes)
-    len_input = torch.ones(1, dtype=torch.int64) * name_len
-    len_outputs = [torch.empty(1, dtype=torch.int64) for _ in range(ws)]
-    all_gather(len_outputs, len_input, group=group)
-
-    # collect name value
-    max_len = torch.stack(len_outputs).max().item()
-    name_input = torch.empty(max_len, dtype=torch.uint8)
-    name_input[:name_len] = torch.tensor(name_bytes, dtype=torch.uint8)
-    name_outputs = [torch.empty(max_len, dtype=torch.uint8) for _ in range(ws)]
-    all_gather(name_outputs, name_input, group=group)
-
-    names = []
-    for i in range(ws):
-        name_tensor = name_outputs[i][:len_outputs[i]]
-        names.append(bytearray(name_tensor.tolist()).decode('utf8'))
-
-    return names
-
-
 def join_rpc():
     r"""
     Block until all local and remote RPC processes reach this method, process
@@ -91,10 +63,7 @@ def init_rpc(name, backend='pg'):
     if backend == 'pg':
         from .distributed_c10d import _get_default_group
         group = _get_default_group()
-        # TODO: issue #23232
-        names = _collect_worker_names(name, group)
-        name_dict = {names[r] : r for r in range(len(names))}
-        _agent = ProcessGroupAgent(name, name_dict, group)
+        _agent = ProcessGroupAgent(name, group)
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)
 
