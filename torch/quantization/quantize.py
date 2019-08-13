@@ -230,16 +230,16 @@ def quantize_dynamic(model, qconfig_dict=None, mapping=DEFAULT_DYNAMIC_MODULE_MA
     convert(model, mapping)
     return model
 
-def prepare_qat(model, mapping=DEFAULT_QAT_MODULE_MAPPING):
+def prepare_qat(model):
     model = prepare(model)
-    model = convert(model, mapping)
+    model = convert(model)
     return model
 
-def quantize_qat(model, run_fn, run_args, mapping=DEFAULT_QAT_MODULE_MAPPING):
+def quantize_qat(model, run_fn, run_args):
     r"""Do quantization aware training and output a quantized model
     """
     model.train()
-    model = prepare_qat(model, mapping)
+    model = prepare_qat(model)
     run_fn(model, run_args)
     convert(model)
     return model
