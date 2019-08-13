@@ -42,11 +42,20 @@ static void sigmoid_kernel(TensorIterator& iter) {
   });
 }
 
+template<typename T>
+T abs_impl(T v) {
+  return std::abs(v);
+}
+template<>
+uint8_t abs_impl(uint8_t v) {
+  return v;
+}
+
 static void abs_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "abs_cpu", [&]() {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return std::abs(a); },
+        [=](scalar_t a) -> scalar_t { return abs_impl(a); },
         [=](Vec256<scalar_t> a) { return a.abs(); });
   });
 }
@@ -81,9 +90,9 @@ static void frac_kernel(TensorIterator& iter) {
 }
 
 static void logical_not_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(1), "logical_not_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_not_cpu", [&]() {
     using self_t = scalar_t;
-    AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(0), "logical_not_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_not_cpu", [&]() {
       cpu_kernel(iter, [](self_t a) -> scalar_t { return static_cast<scalar_t>(!a); });
     });
   });
