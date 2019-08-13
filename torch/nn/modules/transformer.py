@@ -23,13 +23,13 @@ class Transformer(Module):
         num_decoder_layers: the number of sub-decoder-layers in the decoder (default=6).
         dim_feedforward: the dimension of the feedforward network model (default=2048).
         dropout: the dropout value (default=0.1).
+        activation: the activation function of encoder/decoder intermediate layer, relu or gelu (default=relu).
         custom_encoder: custom encoder (default=None).
         custom_decoder: custom decoder (default=None).
-        activation: the activation function of encoder/decoder intermediate layer, relu or gelu (default=relu).
 
     Examples::
         >>> transformer_model = nn.Transformer()
-        >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12, activation="gelu")
+        >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
     """
 
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
