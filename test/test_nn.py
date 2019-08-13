@@ -6144,6 +6144,72 @@ class TestNN(NNTestCase):
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
+    def test_transformerencoderlayer_gelu(self):
+        # this is a deterministic test for TransformerEncoderLayer with gelu activation
+        d_model = 4
+        nhead = 2
+        dim_feedforward = 16
+        dropout = 0.0
+        bsz = 2
+        activation = "gelu"
+
+        model = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
+
+        # set constant weights of the model
+        for idx, p in enumerate(model.parameters()):
+            x = p.data
+            sz = x.view(-1).size(0)
+            shape = x.shape
+            x = torch.cos(torch.arange(0, sz).float().view(shape))
+            p.data.copy_(x)
+
+        # deterministic input
+        encoder_input = torch.Tensor([[[20, 30, 40, 50]]])
+        result = model(encoder_input)
+        ref_output = torch.Tensor([[[2.249815,  0.131006, -0.702199,  0.177868]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # deterministic input
+        encoder_input = torch.Tensor([[[1, 2, 3, 4]],
+                                      [[5, 6, 7, 8]]])
+        result = model(encoder_input)
+        ref_output = torch.Tensor([[[2.264103,  0.121417, -0.696012,  0.159724]],
+                                   [[2.264103,  0.121417, -0.696012,  0.159724]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # deterministic input
+        encoder_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                       [0.5387, 0.1655, 0.3565, 0.0471]],
+                                      [[0.8335, 0.2799, 0.5031, 0.2947],
+                                       [0.1402, 0.0318, 0.7636, 0.1346]],
+                                      [[0.6333, 0.9344, 0.1376, 0.9938],
+                                       [0.8924, 0.2872, 0.6692, 0.2944]],
+                                      [[0.9897, 0.6915, 0.3154, 0.1733],
+                                       [0.8645, 0.3513, 0.3064, 0.0767]],
+                                      [[0.8117, 0.2366, 0.4838, 0.7881],
+                                       [0.3718, 0.4945, 0.9511, 0.0864]]])
+        result = model(encoder_input)
+        ref_output = torch.Tensor([[[2.42163188, 0.03227153, -0.60714219, -0.05908082],
+                                    [2.42151276, 0.03302179, -0.60722523, -0.05762651]],
+                                   [[2.41926761, 0.02974034, -0.60879519, -0.0621269 ],
+                                    [2.41626395, 0.03539356, -0.61087842, -0.04978623]],
+                                   [[2.42382808, 0.03218872, -0.6055963,  -0.06073591],
+                                    [2.41983477, 0.03085259, -0.60840145, -0.06046414]],
+                                   [[2.42500749, 0.03328855, -0.60476388, -0.0595334 ],
+                                    [2.4237977,  0.03290575, -0.60561789, -0.05940082]],
+                                   [[2.41383916, 0.02686345, -0.61256377, -0.06380707],
+                                    [2.42000277, 0.03800944, -0.60824798, -0.04754947]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
     def test_transformerdecoderlayer(self):
         # this is a deterministic test for TransformerDecoderLayer
         d_model = 4
@@ -6283,6 +6349,91 @@ class TestNN(NNTestCase):
                                     [2.432657, 0.029055, -0.599293, -0.072732]],
                                    [[2.431515, 0.027687, -0.600096, -0.074459],
                                     [2.433075, 0.028543, -0.598987, -0.073985]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+    def test_transformerdecoderlayer_gelu(self):
+        # this is a deterministic test for TransformerDecoderLayer with gelu activation
+        d_model = 4
+        nhead = 2
+        dim_feedforward = 16
+        dropout = 0.0
+        bsz = 2
+        seq_length = 5
+        tgt_length = 3
+        activation = "gelu"
+
+        model = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
+
+        # set constant weights of the model
+        for idx, p in enumerate(model.parameters()):
+            x = p.data
+            sz = x.view(-1).size(0)
+            shape = x.shape
+            x = torch.cos(torch.arange(0, sz).float().view(shape))
+            p.data.copy_(x)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[20, 30, 40, 50]]])
+        memory_input = torch.Tensor([[[60, 70, 80, 90]]])
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor([[[2.306435,  0.095946, -0.675796,  0.10687]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[9, 10, 11, 12]],
+                                     [[11, 12, 13, 14]]])
+        memory_input = torch.Tensor([[[1, 2, 3, 4]]])
+        result = model(decoder_input, memory_input)
+        result = result.detach().numpy()
+        ref_output = torch.Tensor([[[2.415448,  0.054389, -0.610932, -0.015661]],
+                                   [[2.415448,  0.054389, -0.610932, -0.015661]]])
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[1, 2, 3, 4]],
+                                      [[5, 6, 7, 8]]])
+        memory_input = torch.Tensor([[[9, 10, 11, 12]],
+                                     [[11, 12, 13, 14]]])
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor([[[2.338531,  0.087709, -0.65776 ,  0.080646]],
+                                   [[2.338531,  0.087709, -0.65776 ,  0.080646]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
+                                       [0.2678, 0.3677, 0.4459, 0.7166]],
+                                      [[0.8100, 0.3716, 0.4096, 0.1976],
+                                       [0.6958, 0.8844, 0.6081, 0.8315]],
+                                      [[0.0494, 0.9343, 0.5955, 0.3830],
+                                       [0.5404, 0.3464, 0.9378, 0.6200]]])
+        memory_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                      [0.5387, 0.1655, 0.3565, 0.0471]],
+                                     [[0.8335, 0.2799, 0.5031, 0.2947],
+                                      [0.1402, 0.0318, 0.7636, 0.1346]],
+                                     [[0.6333, 0.9344, 0.1376, 0.9938],
+                                      [0.8924, 0.2872, 0.6692, 0.2944]],
+                                     [[0.9897, 0.6915, 0.3154, 0.1733],
+                                      [0.8645, 0.3513, 0.3064, 0.0767]],
+                                     [[0.8117, 0.2366, 0.4838, 0.7881],
+                                      [0.3718, 0.4945, 0.9511, 0.0864]]])
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor([[[2.42049104, 0.03443088, -0.60793706, -0.05436271],
+                                    [2.42210631, 0.03546578, -0.60679895, -0.05357488]],
+                                   [[2.41907674, 0.0336104,  -0.60892977, -0.05490462],
+                                    [2.42216881, 0.03586554, -0.6067524,  -0.05289126]],
+                                   [[2.42205716, 0.03488046, -0.60683681, -0.05460596],
+                                    [2.42240309, 0.0354595,  -0.60659063, -0.05378816]]])
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
@@ -6586,6 +6737,34 @@ class TestNN(NNTestCase):
             test(encoder_input_shape, decoder_input_shape,
                  memory_key_padding_mask_size=(wrong_bsz, wrong_src_mask_size))
 
+    def test_transformer_layer_args_check(self):
+        model_names = ['TransformerEncoderLayer', 'TransformerDecoderLayer']
+        d_model = 128
+        nhead = 4
+        dim_feedforward = 65
+        dropout = 0.3
+        bsz = 3
+        seq_len = 35
+        tgt_len = 15
+        activations = ["relu", "gelu"]
+
+        wrong_activation = "abc"
+
+        encoder_input_shape = (seq_len, bsz, d_model)
+        decoder_input_shape = (tgt_len, bsz, d_model)
+
+        encoder_input = torch.randn(encoder_input_shape)
+        decoder_input = torch.randn(decoder_input_shape)
+
+        for model_name in model_names:
+            for activation in activations:
+                model = getattr(nn, model_name)(d_model, nhead, dim_feedforward,
+                                                dropout, activation)
+        # Incorrect activation
+        for model_name in model_names:
+            with self.assertRaises(RuntimeError):
+                model = getattr(nn, model_name)(d_model, nhead, dim_feedforward,
+                                                dropout, wrong_activation)
 
     def test_rnn_args_check(self):
         input_size = 3
