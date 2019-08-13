@@ -2,7 +2,7 @@ from __future__ import division
 
 # Torch
 from torch import Tensor
-from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes, _jit_python_print
+from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
 from torch._six import inf, PY2, PY37, StringIO
 from torch.autograd import Variable, Function
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
@@ -2687,15 +2687,6 @@ graph(%Ra, %Rb):
             buffer.seek(0)
             foo_loaded = torch.jit.load(buffer)
             self.assertExpected(foo_loaded.forward.code)
-
-    def test_import_way_too_new(self):
-        @torch.jit.script
-        def foo(x, y):
-            return 2 * x + y
-
-        r, _ = _jit_python_print(foo)
-        with self.assertRaisesRegex(RuntimeError, "generated from a newer version"):
-            torch.jit.CompilationUnit()._import(r, [], op_version_set=10000)
 
     def test_function_default_values(self):
         outer_var = torch.tensor(20)

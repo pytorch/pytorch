@@ -840,20 +840,6 @@ void initJitScriptBindings(PyObject* module) {
             std::move(cu), in, optional_device, extra_files);
       });
 
-  m.def(
-      "_jit_import_functions",
-      [](std::shared_ptr<CompilationUnit> cu,
-         const std::string& src,
-         const std::vector<at::Tensor>& constant_table) {
-        import_functions(
-            c10::nullopt,
-            cu,
-            std::make_shared<Source>(src),
-            constant_table,
-            nullptr,
-            nullptr);
-      });
-
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);
   m.def("_jit_clear_class_registry", []() {
@@ -864,25 +850,9 @@ void initJitScriptBindings(PyObject* module) {
       debugSetAutodiffSubgraphInlining);
   m.def("_propagate_shapes", _propagate_shapes);
   m.def(
-      "_propagate_and_assign_input_shapes", _propagate_and_assign_input_shapes);
+      "_propagate_and_assign_input_shapes",
+      _propagate_and_assign_input_shapes);
   m.def("_assign_output_shapes", _assign_output_shapes);
-  m.def("_jit_python_print", [](const py::object& obj) {
-    std::ostringstream ss;
-    std::vector<at::Tensor> constants;
-    std::vector<c10::NamedTypePtr> deps;
-    SourceRangeRecords source_ranges;
-    if (auto self = as_module(obj)) {
-      PythonPrint(ss, source_ranges, self->type(), constants, deps, true);
-    } else if (auto self = as_function(obj)) {
-      PythonPrint(
-          ss, source_ranges, *self->function_, false, constants, deps, true);
-    } else {
-      auto& m = py::cast<Method&>(obj);
-      PythonPrint(
-          ss, source_ranges, m.function(), true, constants, deps, true);
-    }
-    return std::make_pair(ss.str(), std::move(constants));
-  });
   m.def(
       "_last_executed_optimized_graph",
       []() { return lastExecutedOptimizedGraph(); },
