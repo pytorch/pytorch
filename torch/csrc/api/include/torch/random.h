@@ -1,6 +1,6 @@
 #pragma once
 
-#include <TH/TH.h>
+#include <TH/THTensor.h>
 #include <ATen/Context.h>
 #include <torch/types.h>
 
