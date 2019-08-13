@@ -6608,10 +6608,12 @@ class TestNN(NNTestCase):
         bsz = 3
         seq_len = 35
         tgt_len = 15
+        activations = ["relu", "gelu"]
 
         wrong_bsz = 7
         wrong_d_model = 63
         wrong_nhead = 5
+        wrong_activation = "abc"
 
         def test(encoder_input_shape, decoder_input_shape,
                  src_mask_len=None, tgt_mask_len=None, memory_mask_size=None,
@@ -6736,6 +6738,15 @@ class TestNN(NNTestCase):
         with self.assertRaises(AssertionError):
             test(encoder_input_shape, decoder_input_shape,
                  memory_key_padding_mask_size=(wrong_bsz, wrong_src_mask_size))
+
+        # Correct activations
+        for activation in activations:
+            model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers, num_decoder_layers,
+                                            dim_feedforward, dropout, activation)
+        # Incorrect activation
+        with self.assertRaises(RuntimeError):
+            model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers, num_decoder_layers,
+                                            dim_feedforward, dropout, wrong_activation)
 
     def test_transformer_layer_args_check(self):
         model_names = ['TransformerEncoderLayer', 'TransformerDecoderLayer']
