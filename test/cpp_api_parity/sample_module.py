@@ -82,4 +82,3 @@ module_metadata = dict(
 )
 
 torch.nn.SampleModule = SampleModule
-

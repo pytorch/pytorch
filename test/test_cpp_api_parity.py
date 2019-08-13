@@ -1,5 +1,4 @@
 import os
-import shutil
 import tempfile
 from string import Template
 import copy
@@ -234,8 +233,8 @@ def _process_test_params(test_params_dict, module_metadata, device):
         module_variant_name=module_name + (('_' + desc) if desc else '') + (('_' + device) if device != 'cpu' else ''),
         python_constructor_args=test_params_dict.get('constructor_args'),
         cpp_constructor_args=test_params_dict.get('cpp_constructor_args'),
-        input_size = test_params_dict.get('input_size', None),
-        input_fn = test_params_dict.get('input_fn', None),
+        input_size=test_params_dict.get('input_size', None),
+        input_fn=test_params_dict.get('input_fn', None),
         expect_parity_error=test_params_dict.get('expect_parity_error', False),
         cpp_forward_arg_declarations=module_metadata.get('cpp_forward_arg_declarations'),
         python_module_class=getattr(torch.nn, module_name),
@@ -264,8 +263,10 @@ for test_params_dict in sample_module.module_tests + common_nn.module_tests:
                 device=device)
             test_name = 'test_torch_nn_' + test_params.module_variant_name
             torch_nn_test_params_map[test_name] = test_params
+
             def test_fn(self):
                 self._test_torch_nn_module(test_params=torch_nn_test_params_map[self._testMethodName])
+
             if device == 'cuda':
                 test_fn = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")(test_fn)
             expect_parity_error = test_params.expect_parity_error
