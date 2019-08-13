@@ -144,11 +144,11 @@ script::Module ScriptModuleDeserializer::deserialize(
 
   if (proto_version_ < 6) {
     if (proto_version_ == 2) {
-      auto list = LEGACY_loadPickleArchive("attributes.pkl").toGenericList();
+      const auto& list =
+          LEGACY_loadPickleArchive("attributes.pkl").toGenericList();
       LEGACY_pickled_ivalues_.insert(
           LEGACY_pickled_ivalues_.end(), list.begin(), list.end());
-
-    } else {
+    } else if (proto_version_ >= 3) {
       LEGACY_pickled_ivalues_ =
           LEGACY_loadPickleArchive("attributes.pkl").toTuple()->elements();
     }
@@ -183,7 +183,8 @@ script::Module ScriptModuleDeserializer::deserialize(
   }
 }
 
-IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(const std::string& name) {
+IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
+    const std::string& name) {
   at::DataPtr attributes_ptr;
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) = reader_->getRecord(name);
