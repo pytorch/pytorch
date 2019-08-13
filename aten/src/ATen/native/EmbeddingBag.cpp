@@ -85,7 +85,7 @@ void index_select_add<float>(const Tensor &select_indices,
     std::vector<int> lengths;
 
     int64_t lower = accessor[0];
-    for (size_t i = 1; i < offsets.numel(); ++i) {
+    for (int64_t i = 1; i < offsets.numel(); ++i) {
       lengths.push_back(accessor[i] - lower);
       lower = accessor[i];
     }
@@ -174,7 +174,7 @@ void index_select_scale_add<float>(const Tensor &select_indices,
     std::vector<int> lengths;
 
     int64_t lower = accessor[0];
-    for (size_t i = 1; i < offsets.numel(); ++i) {
+    for (int64_t i = 1; i < offsets.numel(); ++i) {
       lengths.push_back(accessor[i] - lower);
       lower = accessor[i];
     }
