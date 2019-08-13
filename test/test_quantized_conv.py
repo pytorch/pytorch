@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import unittest
 import numpy as np
 import torch
 import torch.nn.quantized.functional as qF
@@ -14,7 +15,11 @@ import hypothesis_utils as hu
 from common_quantized import _conv_output_shape
 from common_utils import TestCase, run_tests
 
-
+@unittest.skipIf(
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
+)
 class QuantizedConvTest(TestCase):
     @given(X=hu.tensor_conv2d(min_batch=1, max_batch=3,
                               min_in_channels=1, max_in_channels=7,

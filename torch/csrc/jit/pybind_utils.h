@@ -93,13 +93,10 @@ inline MatchTypeReturn tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
     auto tensor = py::cast<at::Tensor>(input);
-    if (tensor.is_sparse()) {
-      return MatchTypeReturn("Sparse tensors not supported");
-    }
     if (tensor.is_mkldnn()) {
       // mkldnn tensor as opaque tensor doesn't have strides, so we can
       // not create a CompleteTensorType
-      return MatchTypeReturn(DimensionedTensorType::create(tensor));
+      return MatchTypeReturn(ProfiledTensorType::create(tensor));
     }
 
     // TODO: maybe unshape this type if this is used for script instead of
@@ -323,18 +320,26 @@ inline IValue toIValue(
   switch (type->kind()) {
     case TypeKind::TensorType:
     case TypeKind::AutogradZeroTensorType:
-    case TypeKind::DimensionedTensorType:
     case TypeKind::ProfiledTensorType:
+    case TypeKind::DimensionedTensorType:
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
-        AT_ERROR("sparse tensors not supported");
+        AT_WARN(
+            "Using sparse tensors in TorchScript is experimental. Many optimization "
+            "pathways have not been thoroughly tested with sparse tensors. Please "
+            "include the fact that the network is running sparse tensors in any bug "
+            "reports submitted.");
       }
       return var;
     }
     case TypeKind::FloatType:
       return py::cast<double>(obj);
     case TypeKind::IntType:
+      if (THPDtype_Check(obj.ptr())) {
+        auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
+        return static_cast<int64_t>(dtype->scalar_type);
+      }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
       if (!obj.is_none()) {
@@ -397,7 +402,6 @@ inline IValue toIValue(
             }
             return repeated;
           }
-        case TypeKind::DimensionedTensorType:
         case TypeKind::ProfiledTensorType:
         case TypeKind::TensorType:
           return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
@@ -437,12 +441,17 @@ inline IValue toIValue(
       }
       return userObj;
     }
-    case TypeKind::NumberType:
+    case TypeKind::NumberType: {
+      if (THPDtype_Check(obj.ptr())) {
+        auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
+        return static_cast<int64_t>(dtype->scalar_type);
+      }
       if (py::isinstance<py::int_>(obj)) {
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
       }
+    }
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
@@ -530,7 +539,11 @@ inline py::object toPyObject(IValue&& ivalue) {
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.is_sparse()) {
-      AT_ERROR("sparse tensors not supported");
+      AT_WARN(
+          "Using sparse tensors in TorchScript is experimental. Many optimization "
+          "pathways have not been thoroughly tested with sparse tensors. Please "
+          "include the fact that the network is running sparse tensors in any bug "
+          "reports submitted.");
     }
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
@@ -565,7 +578,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     }
     if (tuple->type && tuple->type->schema() &&
         tuple->type->schema()->name() != "") {
-      auto unqualName = tuple->type->basename();
+      auto unqualName = tuple->type->name()->name();
       auto fieldNames = fmap(tuple->type->schema()->arguments(), [](const Argument& arg) {
         return arg.name();
       });
