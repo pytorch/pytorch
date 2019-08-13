@@ -6958,7 +6958,7 @@ class _TestTorchMixin(object):
                 x = torch.tensor([1, 2, 3, 4], device=device, dtype=dt)
                 b = torch.tensor([2], device=device, dtype=dt)
 
-                if dt == torch.half:
+                if dt == torch.half and device == 'cpu':
                     self.assertRaises(RuntimeError, lambda: x.lt(2))
                     continue
 
@@ -12717,6 +12717,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             e2[i + 4][i] = v
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
+
+    def test_function_unwrap_message(self):
+        self.assertRaisesRegex(RuntimeError, ' call to _th_lt',
+                               lambda: torch.ones(1, dtype=torch.float) < torch.ones(1, dtype=torch.double))
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1
