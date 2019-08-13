@@ -6,7 +6,7 @@ import torch.nn.quantized as nnq
 from torch.quantization import \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules
 
-from common_utils import run_tests, TEST_WITH_UBSAN
+from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     SkipQuantModel, QuantStubModel, \
     ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, test_only_eval_fn, test_only_train_fn
@@ -14,10 +14,11 @@ from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
 
-@unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-                 'Quantization requires FBGEMM. FBGEMM does not play'
-                 ' well with UBSAN at the moment, so we skip the test if'
-                 ' we are in a UBSAN environment.')
+@unittest.skipIf(
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
+)
 class PostTrainingQuantTest(QuantizationTestCase):
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
@@ -240,10 +241,11 @@ class PostTrainingQuantTest(QuantizationTestCase):
         model = quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
-@unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-                 'Quantization requires FBGEMM. FBGEMM does not play'
-                 ' well with UBSAN at the moment, so we skip the test if'
-                 ' we are in a UBSAN environment.')
+@unittest.skipIf(
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
+)
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
         model = ManualLinearQATModel()
