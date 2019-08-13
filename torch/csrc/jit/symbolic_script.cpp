@@ -1329,6 +1329,9 @@ std::unordered_map<std::string, GradientPair> schema_to_graphs;
 // should be compiled only once and saved in Operator structure.
 // This should be done along with merging into native_functions.yaml.
 std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
+
+// CompilationUnit that holds all these Functions and keeps them alive.
+script::CompilationUnit compilation_unit;
 } // anonymous namespace
 
 std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
@@ -1431,10 +1434,9 @@ void loadModule(const script::CompilationUnit& module) {
 
 void loadFunctions() {
   for (const std::string& str : functions) {
-    script::CompilationUnit cu;
-    cu.define(c10::nullopt, str, script::nativeResolver(), nullptr);
-    loadModule(cu);
+    compilation_unit.define(c10::nullopt, str, script::nativeResolver(), nullptr);
   }
+  loadModule(compilation_unit);
 }
 
 c10::optional<GradientPair> gradientInfoForSchema(

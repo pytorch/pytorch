@@ -12699,6 +12699,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
 
+    def test_function_unwrap_message(self):
+        self.assertRaisesRegex(RuntimeError, ' call to _th_lt',
+                               lambda: torch.ones(1, dtype=torch.float) < torch.ones(1, dtype=torch.double))
+
+
     def test_binary_op_input_output_overlap(self):
         sz = 3
         data = torch.randn(3 * sz)
