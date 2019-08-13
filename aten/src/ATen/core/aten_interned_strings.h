@@ -658,8 +658,8 @@ _(aten, conv_dilated3d) \
 _(aten, conv_dilated3d_backward) \
 _(aten, conv_transpose2d) \
 _(aten, conv_transpose2d_backward) \
-_(aten, convolution_generic) \
-_(aten, convolution_generic_backward) \
+_(aten, convolution_overrideable) \
+_(aten, convolution_overrideable_backward) \
 _(aten, conv_transpose3d) \
 _(aten, conv_transpose3d_backward) \
 _(aten, threshold) \

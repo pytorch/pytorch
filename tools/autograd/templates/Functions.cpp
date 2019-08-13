@@ -2306,7 +2306,7 @@ Tensor index_backward(const Tensor & self, TensorList indices, const Tensor& gra
    return at::_index_put_impl_(zeros, indices, grad, true, true);
 }
 
-std::tuple<Tensor, Tensor, Tensor> convolution_generic_double_backward(
+std::tuple<Tensor, Tensor, Tensor> convolution_overrideable_double_backward(
     const Tensor& grad_input, const Tensor& grad_weight, const Tensor& grad_bias,
     const Tensor& grad_output, const Tensor& input, const Tensor& weight,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,

@@ -118,7 +118,7 @@ TEST(BackendExtensionTest, TestConvGeneric) {
 
   globalATenDispatch().registerOp(
     Backend::MSNPU,
-    "aten::convolution_generic(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor",
+    "aten::convolution_overrideable(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor",
     &fake_xla_convolution);
   Tensor input = empty({2, 4, 10, 2}, at::kMSNPU);
   Tensor weight= empty({6, 4, 3, 2}, at::kMSNPU);

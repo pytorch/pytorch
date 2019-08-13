@@ -495,7 +495,7 @@ at::Tensor convolution(
                           ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
 }
 
-at::Tensor convolution_generic(
+at::Tensor convolution_overrideable(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
@@ -633,7 +633,7 @@ at::Tensor _convolution(
     }
   } else {
     // Only reach here when input is backend with out-of-source implementation.
-    return at::convolution_generic(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
+    return at::convolution_overrideable(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
   }
 
   if (k == 3) {
@@ -711,7 +711,7 @@ at::Tensor _convolution_nogroup(
   AT_ERROR("unsupported ConvNd parameters");
 }
 
-std::tuple<Tensor, Tensor, Tensor> convolution_generic_backward(
+std::tuple<Tensor, Tensor, Tensor> convolution_overrideable_backward(
         const Tensor& grad_output, const Tensor& input, const Tensor& weight, const Tensor& bias,
         IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
         bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
