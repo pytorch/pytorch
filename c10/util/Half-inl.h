@@ -54,19 +54,35 @@ inline __device__ Half __ldg(const Half* ptr) {
 /// Arithmetic
 
 inline C10_HOST_DEVICE Half operator+(const Half& a, const Half& b) {
+#if __CUDA_ARCH__ >= 530 || defined(__HIP_DEVICE_COMPILE__)
+  return __hadd(static_cast<half>(a), static_cast<half>(b));
+#else
   return static_cast<float>(a) + static_cast<float>(b);
+#endif
 }
 
 inline C10_HOST_DEVICE Half operator-(const Half& a, const Half& b) {
+#if __CUDA_ARCH__ >= 530 || defined(__HIP_DEVICE_COMPILE__)
+  return __hsub(static_cast<half>(a), static_cast<half>(b));
+#else
   return static_cast<float>(a) - static_cast<float>(b);
+#endif
 }
 
 inline C10_HOST_DEVICE Half operator*(const Half& a, const Half& b) {
+#if __CUDA_ARCH__ >= 530 || defined(__HIP_DEVICE_COMPILE__)
+  return __hmul(static_cast<half>(a), static_cast<half>(b));
+#else
   return static_cast<float>(a) * static_cast<float>(b);
+#endif
 }
 
 inline C10_HOST_DEVICE Half operator/(const Half& a, const Half& b) {
+#if __CUDA_ARCH__ >= 530 || defined(__HIP_DEVICE_COMPILE__)
+  return __hdiv(static_cast<half>(a), static_cast<half>(b));
+#else
   return static_cast<float>(a) / static_cast<float>(b);
+#endif
 }
 
 inline C10_HOST_DEVICE Half operator-(const Half& a) {
@@ -74,6 +90,14 @@ inline C10_HOST_DEVICE Half operator-(const Half& a) {
   return __hneg(a);
 #else
   return -static_cast<float>(a);
+#endif
+}
+
+inline C10_HOST_DEVICE Half half_fma (const Half& a, const Half& b, const Half& c) {
+#if __CUDA_ARCH__ >= 530 || defined(__HIP_DEVICE_COMPILE__)
+  return __hfma(a, b, c);
+#else
+  return static_cast<float>(a) * static_cast<float>(b) + static_cast<float>(c);
 #endif
 }
 

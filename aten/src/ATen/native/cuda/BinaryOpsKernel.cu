@@ -14,12 +14,19 @@
 namespace at { namespace native {
 
 void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "add_cuda/sub_cuda", [&]() {
-    auto alpha = alpha_scalar.to<scalar_t>();
-    gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return a + alpha * b;
+  if (iter.dtype() == kHalf) {
+    auto alpha = alpha_scalar.to<at::Half>();
+    gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(at::Half a, at::Half b) -> at::Half {
+      return half_fma(b, alpha, a);
     });
-  });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(), "add_cuda/sub_cuda", [&]() {
+      auto alpha = alpha_scalar.to<scalar_t>();
+      gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        return a + alpha * b;
+      });
+    });
+  }
 }
 
 static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
