@@ -252,12 +252,7 @@ class TransformerEncoderLayer(Module):
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
 
-        if activation == "relu":
-            self.activation = F.relu
-        elif activation == "gelu":
-            self.activation = F.gelu
-        else:
-            raise RuntimeError(f"activation should be relu/gelu, not {activation}.")
+        self.activation = _get_activation_fn(activation)
 
     def forward(self, src, src_mask=None, src_key_padding_mask=None):
         r"""Pass the input through the endocder layer.
@@ -315,12 +310,7 @@ class TransformerDecoderLayer(Module):
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
 
-        if activation == "relu":
-            self.activation = F.relu
-        elif activation == "gelu":
-            self.activation = F.gelu
-        else:
-            raise RuntimeError(f"activation should be relu/gelu, not {activation}.")
+        self.activation = _get_activation_fn(activation)
 
     def forward(self, tgt, memory, tgt_mask=None, memory_mask=None,
                 tgt_key_padding_mask=None, memory_key_padding_mask=None):
@@ -353,3 +343,12 @@ class TransformerDecoderLayer(Module):
 
 def _get_clones(module, N):
     return ModuleList([copy.deepcopy(module) for i in range(N)])
+
+
+def _get_activation_fn(activation):
+    if activation == "relu":
+        return F.relu
+    elif activation == "gelu":
+        return F.gelu
+    else:
+        raise RuntimeError("activation should be relu/gelu, not %s." % activation)
