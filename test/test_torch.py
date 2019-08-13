@@ -6958,7 +6958,7 @@ class _TestTorchMixin(object):
                 x = torch.tensor([1, 2, 3, 4], device=device, dtype=dt)
                 b = torch.tensor([2], device=device, dtype=dt)
 
-                if dt == torch.half:
+                if dt == torch.half and device == 'cpu':
                     self.assertRaises(RuntimeError, lambda: x.lt(2))
                     continue
 
@@ -8488,6 +8488,8 @@ class _TestTorchMixin(object):
                     with self.assertRaises(RuntimeError):
                         dest.masked_scatter_(mask, src)
         self.assertEqual(len(w), 25)
+        for wi in w:
+            self.assertTrue(str(wi.message) == 'masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated,please use a mask with dtype torch.bool instead.')
 
     def test_masked_scatter_bool_tensor(self):
         for device in torch.testing.get_all_device_types():
@@ -8516,7 +8518,7 @@ class _TestTorchMixin(object):
                             self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                             continue
 
-                        if dt == torch.half:
+                        if dt == torch.half and device == 'cpu':
                             self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                             continue
 
@@ -8531,6 +8533,7 @@ class _TestTorchMixin(object):
                         torch.masked_select(src, mask, out=dst3)
                         self.assertEqual(dst3, torch.Tensor(dst2), 0)
             self.assertEqual(len(w), 1)
+            self.assertTrue(str(w[0].message) == 'masked_select received a mask with dtype torch.uint8, this behavior is now deprecated,please use a mask with dtype torch.bool instead.')
 
     def test_masked_fill(self):
         with warnings.catch_warnings(record=True) as w:
@@ -8558,7 +8561,9 @@ class _TestTorchMixin(object):
                     dst.masked_fill_((dst > 0).to(dtype), val)
                     dst2.masked_fill_((dst2 > 0).to(dtype), val)
                     self.assertEqual(dst, dst2, 0)
-            self.assertEquals(len(w), 28)
+            self.assertEqual(len(w), 28)
+            for wi in w:
+                self.assertTrue(str(wi.message) == 'masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated,please use a mask with dtype torch.bool instead.')
 
     def test_masked_fill_bool_tensor(self):
         for device in torch.testing.get_all_device_types():
@@ -12745,6 +12750,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             e2[i + 4][i] = v
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
+
+    def test_function_unwrap_message(self):
+        self.assertRaisesRegex(RuntimeError, ' call to _th_lt',
+                               lambda: torch.ones(1, dtype=torch.float) < torch.ones(1, dtype=torch.double))
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1

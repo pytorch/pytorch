@@ -949,22 +949,11 @@ struct NamedType;
 using NamedTypePtr = std::shared_ptr<NamedType>;
 
 struct CAFFE2_API NamedType : public Type {
-  NamedType(TypeKind tk, c10::optional<c10::QualifiedName> qualifiedName)
-      : Type(tk), name_(std::move(qualifiedName)) {}
+  NamedType(TypeKind tk) : Type(tk) {}
 
-  std::string python_str() const;
-  std::string qualname() const;
-  std::string qualifier() const;
-  std::string basename() const;
-
-  const c10::optional<QualifiedName>& qualified_name_obj() const {
-    return name_;
-  }
-
- protected:
-  // Fully qualified name of type (note that this has to be globally unique).
+  // Fully qualified name of type
   // Looks like: "foo.bar.Baz".
-  c10::optional<QualifiedName> name_;
+  virtual const c10::optional<QualifiedName>& name() const = 0;
 };
 
 struct TupleType;
@@ -990,6 +979,11 @@ struct CAFFE2_API TupleType : public NamedType {
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
   }
+
+  const c10::optional<c10::QualifiedName>& name() const override {
+    return name_;
+  }
+
   bool operator==(const Type& rhs) const override;
   bool isSubtypeOf(const TypePtr rhs_) const override;
 
@@ -1037,6 +1031,7 @@ struct CAFFE2_API TupleType : public NamedType {
 
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
+  c10::optional<c10::QualifiedName> name_;
   std::shared_ptr<FunctionSchema> schema_;
 };
 
@@ -1177,7 +1172,7 @@ struct CAFFE2_API StringType : public Type {
 struct FunctionType;
 using FunctionTypePtr = std::shared_ptr<FunctionType>;
 using ::torch::jit::Function;
-struct CAFFE2_API FunctionType : public Type {
+struct CAFFE2_API FunctionType : public NamedType {
   static FunctionTypePtr create(Function* function) {
     return FunctionTypePtr(
         new FunctionType(function)); // NOLINT(modernize-make-shared)
@@ -1201,11 +1196,15 @@ struct CAFFE2_API FunctionType : public Type {
   }
   static const TypeKind Kind = TypeKind::FunctionType;
 
- private:
-  FunctionType(Function* function)
-      : Type(TypeKind::FunctionType), function_(function) {}
+  const c10::optional<c10::QualifiedName>& name() const override {
+    return name_;
+  }
 
+ private:
+  FunctionType(Function* function);
   Function* function_;
+  // Holder for the name so we can return a const ref
+  c10::optional<c10::QualifiedName> name_;
 };
 
 struct NoneType;
@@ -1518,17 +1517,21 @@ struct CAFFE2_API ClassType : public NamedType {
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
-      return qualname() == user_rhs->qualname();
+      return name()->qualifiedName() == user_rhs->name()->qualifiedName();
     }
     return false;
   }
 
   std::string str() const override {
-    return std::string("ClassType<") + basename() + ">";
+    return std::string("ClassType<") + name()->name() + ">";
   }
 
   std::string python_str() const override {
-    return qualname();
+    return name()->qualifiedName();
+  }
+
+  const c10::optional<c10::QualifiedName>& name() const override {
+    return name_;
   }
 
   TypePtr getAttribute(const std::string& name) const {
@@ -1671,6 +1674,8 @@ struct CAFFE2_API ClassType : public NamedType {
 
   // List of methods associated with this class.
   std::vector<Function*> methods_;
+
+  c10::optional<QualifiedName> name_;
 };
 
 } // namespace c10
