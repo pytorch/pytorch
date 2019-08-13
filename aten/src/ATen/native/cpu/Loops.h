@@ -111,7 +111,7 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
 // is 0, then there are no scalar inputs.
 template <typename func_t, typename vec_func_t>
 static inline void
-vectorized_loop(char** C10_RESTRICT data_, int64_t n, size_t S, func_t op, vec_func_t vop) {
+vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t op, vec_func_t vop) {
   using traits = function_traits<vec_func_t>;
   using scalar_t = typename function_traits<func_t>::result_type;
   using Vec = Vec256<scalar_t>;
