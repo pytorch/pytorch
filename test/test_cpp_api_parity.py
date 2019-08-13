@@ -182,6 +182,7 @@ class TestCppApiParity(common.TestCase):
             python_constructor_args = test_params.python_constructor_args
             module_variant_name = test_params.module_variant_name
             cpp_test_name = module_variant_name + '_test_' + method_name
+
             if input_size:
                 example_inputs = [torch.randn(input_size)]
             elif input_fn:
@@ -189,6 +190,7 @@ class TestCppApiParity(common.TestCase):
             else:
                 raise RuntimeError("Missing `input_size` or `input_fn` for {}".format(module_variant_name))
             example_inputs = [x.to(device) for x in example_inputs]
+
             if method_name == 'init':
                 args = test_init(device, python_module_class, python_constructor_args)
             elif method_name == 'forward':
@@ -197,12 +199,13 @@ class TestCppApiParity(common.TestCase):
                 args = test_backward(device, python_module_class, python_constructor_args, example_inputs)
             else:
                 raise RuntimeError("{} is not a supported method to test".format(method_name))
+
             modules = args[0]
             module_file_names = []
             for module in modules:
                 module_file_name = serialize_module_into_file(module, example_inputs)
                 module_file_names.append(module_file_name)
-            
+
             cpp_args = []
             for module_file_name in module_file_names:
                 cpp_args.append(module_file_name)
