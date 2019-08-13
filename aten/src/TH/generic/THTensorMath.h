@@ -115,7 +115,6 @@ TH_API void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(div)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(lshift)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(rshift)(THTensor *r_, THTensor *t, scalar_t value);
-TH_API void THTensor_(fmod)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(remainder)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(clamp)(THTensor *r_, THTensor *t, scalar_t min_value, scalar_t max_value);
 
