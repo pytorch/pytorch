@@ -83,5 +83,6 @@ REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
 REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
+REGISTER_DISPATCH(fmod_stub, &fmod_kernel_cuda);
 
 }} // namespace at::native
