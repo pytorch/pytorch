@@ -83,10 +83,6 @@ struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
    * Compare against `other` for equality.
    */
   virtual bool equalTo(QuantizerPtr other) = 0;
-  // {
-  //   return qscheme_ == other->qscheme() && scalar_type_ ==
-  //   other->scalar_type();
-  // }
 };
 
 /**
