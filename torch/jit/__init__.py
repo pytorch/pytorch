@@ -935,12 +935,6 @@ class CompilationUnit(object):
             raise AttributeError("'CompilationUnit' has no attribute '{}'".format(attr))
         return r
 
-    def _import(self, src, constants, op_version_set=1):
-        """ test import logic for single function, use only for testing """
-        src = "op_version_set = {}\n{}".format(op_version_set, src)
-        torch._C._jit_import_functions(self._c, src, constants)
-        return self
-
 
 def _try_get_dispatched_fn(fn):
     if not callable(fn):
@@ -1443,7 +1437,8 @@ if _enabled:
 
             .. note::
 
-                * The first three trace/trace_module calls are equivalent and return ``ScriptModule`` with a single ``forward`` method.
+                * The first three trace/trace_module calls are equivalent and return ``ScriptModule``
+                  with a single ``forward`` method.
                 * The last ``trace_module`` call produces a ``ScriptModule`` with two methods.
 
                 Tracing only records operations done when the given function is run on the given
