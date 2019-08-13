@@ -5,8 +5,8 @@
 #include <torch/nn/modules/conv.h>
 #include <torch/nn/modules/dropout.h>
 #include <torch/nn/modules/linear.h>
-#include <torch/nn/modules/rnn.h>
 #include <torch/nn/modules/modulelist.h>
+#include <torch/nn/modules/rnn.h>
 #include <torch/types.h>
 #include <torch/utils.h>
 
@@ -45,9 +45,10 @@ TEST_F(ModuleListTest, ConstructsFromConcreteType) {
   copy_count = 0;
   ModuleList list(M(1), M(2), M(3));
   ASSERT_EQ(list->size(), 3);
-  // NOTE: The current implementation expects each module to be copied exactly once,
-  // which happens when the module is passed into `std::make_shared<T>()`.
-  // TODO: Find a way to avoid copying, and then delete the copy constructor of `M`.
+  // NOTE: The current implementation expects each module to be copied exactly
+  // once, which happens when the module is passed into `std::make_shared<T>()`.
+  // TODO: Find a way to avoid copying, and then delete the copy constructor of
+  // `M`.
   ASSERT_EQ(copy_count, 3);
 }
 
@@ -104,8 +105,7 @@ TEST_F(ModuleListTest, AccessWithAt) {
   }
 
   // throws for a bad index
-  ASSERT_THROWS_WITH(
-      list->at<M>(modules.size() + 1), "Index out of range");
+  ASSERT_THROWS_WITH(list->at<M>(modules.size() + 1), "Index out of range");
   ASSERT_THROWS_WITH(
       list->at<M>(modules.size() + 1000000), "Index out of range");
 }
@@ -133,8 +133,7 @@ TEST_F(ModuleListTest, AccessWithPtr) {
 
   // throws for a bad index
   ASSERT_THROWS_WITH(list->ptr(modules.size() + 1), "Index out of range");
-  ASSERT_THROWS_WITH(
-      list->ptr(modules.size() + 1000000), "Index out of range");
+  ASSERT_THROWS_WITH(list->ptr(modules.size() + 1000000), "Index out of range");
 }
 
 TEST_F(ModuleListTest, SanityCheckForHoldingStandardModules) {
@@ -148,14 +147,10 @@ TEST_F(ModuleListTest, SanityCheckForHoldingStandardModules) {
 }
 
 TEST_F(ModuleListTest, ExtendPushesModulesFromOtherSequential) {
-  struct A : torch::nn::Module {
-  };
-  struct B : torch::nn::Module {
-  };
-  struct C : torch::nn::Module {
-  };
-  struct D : torch::nn::Module {
-  };
+  struct A : torch::nn::Module {};
+  struct B : torch::nn::Module {};
+  struct C : torch::nn::Module {};
+  struct D : torch::nn::Module {};
   ModuleList a(A{}, B{});
   ModuleList b(C{}, D{});
   a->extend(*b);
@@ -191,15 +186,15 @@ TEST_F(ModuleListTest, HasReferenceSemantics) {
       first->begin(),
       first->end(),
       second->begin(),
-      [](const AnyModule& first, const AnyModule& second) {
-        return &first == &second;
+      [](const std::shared_ptr<Module>& first,
+         const std::shared_ptr<Module>& second) {
+        return first.get() == second.get();
       }));
 }
 
 TEST_F(ModuleListTest, IsCloneable) {
   ModuleList list(Linear(3, 4), Functional(torch::relu), BatchNorm(3));
-  ModuleList clone =
-      std::dynamic_pointer_cast<ModuleListImpl>(list->clone());
+  ModuleList clone = std::dynamic_pointer_cast<ModuleListImpl>(list->clone());
   ASSERT_EQ(list->size(), clone->size());
 
   for (size_t i = 0; i < list->size(); ++i) {
@@ -237,8 +232,9 @@ TEST_F(ModuleListTest, RegistersElementsAsSubmodules) {
 }
 
 TEST_F(ModuleListTest, Nesting) {
-  ModuleList list((ModuleList(Dropout(), Dropout())),
-                  (ModuleList(Dropout(), Dropout()), Dropout()));
+  ModuleList list(
+      (ModuleList(Dropout(), Dropout())),
+      (ModuleList(Dropout(), Dropout()), Dropout()));
 }
 
 TEST_F(ModuleListTest, CloneToDevice_CUDA) {
