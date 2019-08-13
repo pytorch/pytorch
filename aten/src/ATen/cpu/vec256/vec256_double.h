@@ -173,6 +173,9 @@ public:
   Vec256<double> pow(const Vec256<double> &b) const {
     return Vec256<double>(Sleef_powd4_u10(values, b));
   }
+  Vec256<double> fmod(const Vec256<double> &b) const {
+    return Vec256<double>(Sleef_fmodd4(values, b));
+  }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN

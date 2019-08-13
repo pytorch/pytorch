@@ -14,6 +14,7 @@ DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
+DEFINE_DISPATCH(fmod_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
@@ -167,6 +168,21 @@ Tensor& atan2_(Tensor& self, const Tensor& other) {
   return native::atan2_out(self, self, other);
 }
 
+Tensor& fmod_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmod_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor fmod(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty_like(self);
+  return native::fmod_out(result, self, other);
+}
+
+Tensor& fmod_(Tensor& self, const Tensor& other) {
+  return native::fmod_out(self, self, other);
+}
+
 // These are still needed because we don't have C++ conversions from number
 // types (int, float, etc.) to Tensor (only to Scalar). They're not exposed
 // to Python.
@@ -211,6 +227,19 @@ Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
+}
+
+Tensor fmod(const Tensor& self, Scalar other) {
+  return native::fmod(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& fmod_(Tensor& self, Scalar other) {
+  return native::fmod_(self, wrapped_scalar_tensor(other));
+}
+
+
+Tensor& fmod_out(Tensor& result, const Tensor& self, Scalar other) {
+  return native::fmod_out(result, self, wrapped_scalar_tensor(other));
 }
 
 }

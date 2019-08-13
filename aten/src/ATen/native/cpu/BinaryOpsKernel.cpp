@@ -81,6 +81,35 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
+//static void fmod_kernel(TensorIterator& iter, Scalar value_scalar) {
+//  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "fmod_cpu", [&] {
+//      auto value = value_scalar.to<scalar_t>();
+//      auto value_vec = Vec256<scalar_t>(value);
+//      cpu_kernel_vec(
+//              iter,
+//              [=](scalar_t a) -> scalar_t {
+//                  return std::fmod(a, value);
+//              },
+//              [=](Vec256<scalar_t> a) {
+//                  return a.fmod(value_vec);
+//              });
+//  });
+//}
+
+
+void fmod_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "fmod_cpu", [&] {
+      cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+            return std::fmod(a, b);
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a.fmod(b);
+        });
+  });
+}
+
 } // anonymous namespace
 
 
@@ -89,5 +118,6 @@ REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
+REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
 
 }} // namespace at::native

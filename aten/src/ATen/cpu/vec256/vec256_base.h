@@ -269,6 +269,13 @@ public:
     }
     return ret;
   }
+  Vec256<T> fmod(const Vec256<T> &exp) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = std::fmod(values[i], exp[i]);
+    }
+    return ret;
+  }
 #define DEFINE_COMP(binary_pred)                                              \
   Vec256<T> operator binary_pred(const Vec256<T> &other) const {              \
     Vec256<T> vec;                                                            \
