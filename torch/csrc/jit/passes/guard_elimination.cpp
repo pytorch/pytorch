@@ -153,18 +153,6 @@ std::unordered_set<Symbol> GuardElimination::simple_ops_ = {aten::add,
                                                             aten::mul,
                                                             aten::div};
 
-static void removeProfilingNodes(Block* b) {
-  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-    if (it->kind() == prim::profile) {
-      it.destroyCurrent();
-    } else {
-      for (Block* ib : it->blocks()) {
-        removeProfilingNodes(ib);
-      }
-    }
-  }
-}
-
 void EliminateRedundantGuards(std::shared_ptr<Graph> graph) {
   GuardElimination ge(std::move(graph));
   ge.run();
