@@ -259,47 +259,47 @@ void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_ele
         switch (log2_elements) {
             case 0: // 1
                 softmax_warp_forward<input_t, output_t, acc_t, 0, is_log_softmax>
-                    <<<blocks, threads>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 1: // 2
                 softmax_warp_forward<input_t, output_t, acc_t, 1, is_log_softmax>
-                    <<<blocks, threads>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 2: // 4
                 softmax_warp_forward<input_t, output_t, acc_t, 2, is_log_softmax>
-                    <<<blocks, threads>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 3: // 8
                 softmax_warp_forward<input_t, output_t, acc_t, 3, is_log_softmax>
-                    <<<blocks, threads>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 4: // 16
                 softmax_warp_forward<input_t, output_t, acc_t, 4, is_log_softmax>
-                    <<<blocks, threads>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 5: // 32
                 softmax_warp_forward<input_t, output_t, acc_t, 5, is_log_softmax>
-                    <<<blocks, threads>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 6: // 64
                 softmax_warp_forward<input_t, output_t, acc_t, 6, is_log_softmax>
-                    <<<blocks, threads>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 7: // 128
                 softmax_warp_forward<input_t, output_t, acc_t, 7, is_log_softmax>
-                    <<<blocks, threads>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 8: // 256
                 softmax_warp_forward<input_t, output_t, acc_t, 8, is_log_softmax>
-                    <<<blocks, threads>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 9: // 512
                 softmax_warp_forward<input_t, output_t, acc_t, 9, is_log_softmax>
-                    <<<blocks, threads>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 10: // 1024
                 softmax_warp_forward<input_t, output_t, acc_t, 10, is_log_softmax>
-                    <<<blocks, threads>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst, src, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             default:
                 break;
@@ -334,47 +334,47 @@ void dispatch_softmax_backward(output_t *grad_input, const input_t *grad, const 
         switch (log2_elements) {
             case 0: // 1
                 softmax_warp_backward<input_t, output_t, acc_t, 0, is_log_softmax>
-                    <<<blocks, threads>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 1: // 2
                 softmax_warp_backward<input_t, output_t, acc_t, 1, is_log_softmax>
-                    <<<blocks, threads>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 2: // 4
                 softmax_warp_backward<input_t, output_t, acc_t, 2, is_log_softmax>
-                    <<<blocks, threads>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 3: // 8
                 softmax_warp_backward<input_t, output_t, acc_t, 3, is_log_softmax>
-                    <<<blocks, threads>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 4: // 16
                 softmax_warp_backward<input_t, output_t, acc_t, 4, is_log_softmax>
-                    <<<blocks, threads>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 5: // 32
                 softmax_warp_backward<input_t, output_t, acc_t, 5, is_log_softmax>
-                    <<<blocks, threads>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 6: // 64
                 softmax_warp_backward<input_t, output_t, acc_t, 6, is_log_softmax>
-                    <<<blocks, threads>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 7: // 128
                 softmax_warp_backward<input_t, output_t, acc_t, 7, is_log_softmax>
-                    <<<blocks, threads>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 8: // 256
                 softmax_warp_backward<input_t, output_t, acc_t, 8, is_log_softmax>
-                    <<<blocks, threads>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 9: // 512
                 softmax_warp_backward<input_t, output_t, acc_t, 9, is_log_softmax>
-                    <<<blocks, threads>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             case 10: // 1024
                 softmax_warp_backward<input_t, output_t, acc_t, 10, is_log_softmax>
-                    <<<blocks, threads>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
+                    <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(grad_input, grad, output, batch_count, softmax_elements_stride, softmax_elements);
                 break;
             default:
                 break;

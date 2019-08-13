@@ -30,9 +30,8 @@ def main():
 
     # This option is used to filter test cases to run.
     parser.add_argument(
-        '--operator',
-        help='Run the test cases that contain the provided operator'
-        ' as a substring of their names',
+        '--operators',
+        help='Filter tests based on comma-delimited list of operators to test',
         default=None)
 
     parser.add_argument(
@@ -54,6 +53,13 @@ def main():
         "--iterations",
         help="Repeat each operator for the number of iterations",
         type=int
+    )
+
+    parser.add_argument(
+        "--num_runs",
+        help="Run each test for num_runs. Each run executes an operator for number of <--iterations>",
+        type=int,
+        default=1,
     )
 
     parser.add_argument(
@@ -92,6 +98,12 @@ def main():
     )
 
     parser.add_argument(
+        "--use_jit",
+        help="Run operators with PyTorch JIT mode",
+        action='store_true'
+    )
+
+    parser.add_argument(
         "--forward_only",
         help="Only run the forward path of operators",
         action='store_true'
@@ -102,7 +114,7 @@ def main():
         help='Comma-delimited list of frameworks to test (Caffe2, PyTorch)',
         default="Caffe2,PyTorch")
 
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     if benchmark_utils.is_caffe2_enabled(args.framework):
         workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])

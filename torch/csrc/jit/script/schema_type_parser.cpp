@@ -19,6 +19,7 @@ using c10::GeneratorType;
 using c10::IntType;
 using c10::ListType;
 using c10::NoneType;
+using c10::CapsuleType;
 using c10::NumberType;
 using c10::OptionalType;
 using c10::StringType;
@@ -45,6 +46,7 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"int", IntType::get()},
       {"bool", BoolType::get()},
       {"None", NoneType::get()},
+      {"Capsule", CapsuleType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE)) {
@@ -122,10 +124,10 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
 
 c10::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
     const std::string& dtype) {
-#define DEFINE_SCALAR_TYPE(_1, n, _2) {#n, at::ScalarType::n},
+#define DEFINE_SCALAR_TYPE(_1, n) {#n, at::ScalarType::n},
 
   static std::unordered_map<std::string, at::ScalarType> type_map = {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_SCALAR_TYPE)};
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
   auto type = type_map.find(dtype);
   if (type != type_map.end()) {

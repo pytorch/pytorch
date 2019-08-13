@@ -4,7 +4,7 @@
 
 #include <ATen/Context.h>
 #include <ATen/Functions.h>
-#include <c10/core/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 #include <string>
 #include <vector>
@@ -28,12 +28,6 @@ using namespace at;
 TEST(TensorOptionsTest, DefaultsToTheRightValues) {
   TensorOptions options;
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
-}
-
-TEST(TensorOptionsTest, ReturnsTheCorrectType) {
-  auto options = TensorOptions().device(kCPU).dtype(kInt).layout(kSparse);
-  ASSERT_TRUE(
-      at::getType(options) == getNonVariableType(Backend::SparseCPU, kInt));
 }
 
 TEST(TensorOptionsTest, UtilityFunctionsReturnTheRightTensorOptions) {

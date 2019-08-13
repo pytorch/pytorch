@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import copy
+import errno
 import fcntl
 import multiprocessing
 import os
@@ -35,10 +36,6 @@ INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 
 DEFAULT_TIMEOUT = 300
 CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
-
-
-if INIT_METHOD.startswith("file://"):
-    FOLDER = INIT_METHOD[7:]
 
 
 class _FC2(nn.Module):
@@ -87,6 +84,7 @@ class BatchNormNet(nn.Module):
 
 DDP_NET = Net()
 BN_NET = BatchNormNet()
+ONLY_SBN_NET = nn.SyncBatchNorm(2, momentum=0.99)
 
 
 def get_timeout(test_id):
@@ -645,7 +643,7 @@ class _DistTestBase(object):
                         tensor = tensor.cuda(rank_to_GPU[rank][0])
                     dist.broadcast(tensor, src, group_id)
                     self.assertEqual(tensor.size(), expected_tensor.size())
-                    self.assertEqual(tensor.ne(expected_tensor).max(), 0)
+                    self.assertEqual(tensor.ne(expected_tensor).max(), torch.tensor(False))
 
         self._barrier()
 
@@ -1379,9 +1377,9 @@ class _DistTestBase(object):
 
             # save the model in the middle and reload
             if test_save and idx == 2 and INIT_METHOD.startswith("file://"):
-                _, filename = tempfile.mkstemp(prefix=FOLDER)
-                torch.save(model_DDP, filename)
-                model_DDP = torch.load(filename)
+                with tempfile.NamedTemporaryFile() as tmp:
+                    torch.save(model_DDP, tmp.name)
+                    model_DDP = torch.load(tmp.name)
 
         with tempfile.TemporaryFile() as tmp_file:
             torch.save(model_DDP, tmp_file)
@@ -1410,10 +1408,9 @@ class _DistTestBase(object):
         )
 
         # test serializable/unserializable
-        if INIT_METHOD.startswith("file://"):
-            _, filename = tempfile.mkstemp(prefix=FOLDER)
-            torch.save(model_DDP, filename)
-            model_DDP = torch.load(filename)
+        with tempfile.NamedTemporaryFile() as tmp:
+            torch.save(model_DDP, tmp.name)
+            model_DDP = torch.load(tmp.name)
 
         # dummy data initialization
         local_bs = len(gpu_subset)
@@ -1434,7 +1431,7 @@ class _DistTestBase(object):
         self._barrier()
 
     @unittest.skipIf(
-        BACKEND == "nccl", "nccl does not support DistributedDataParallelCPU"
+        BACKEND == "nccl", "nccl does not support DDP on CPU models"
     )
     def test_DistributedDataParallelCPU(self):
         # Run a simple end to end DDP-CPU model, use result of single node
@@ -1453,7 +1450,6 @@ class _DistTestBase(object):
         global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
         # check two model parameters over 5 iterations
-        # TODO: add state pickling support for DistributedDataParallelCPU
         self._test_DDP_5iter(
             model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs, False
         )
@@ -1495,10 +1491,9 @@ class _DistTestBase(object):
         )
 
         # test serializable/unserializable
-        if INIT_METHOD.startswith("file://"):
-            _, filename = tempfile.mkstemp(prefix=FOLDER)
-            torch.save(model_DDP, filename)
-            model_DDP = torch.load(filename)
+        with tempfile.NamedTemporaryFile() as tmp:
+            torch.save(model_DDP, tmp.name)
+            model_DDP = torch.load(tmp.name)
 
         # dummy data initialization
         local_bs = len(gpu_subset)
@@ -1536,6 +1531,36 @@ class _DistTestBase(object):
         # test device_ids
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
         self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_Running_Value(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        model = nn.parallel.DistributedDataParallel(ONLY_SBN_NET.cuda(rank), device_ids=[rank])
+
+        input_var = []
+        for i in range(int(WORLD_SIZE)):
+            input_var_rank = torch.cat([
+                torch.ones(2, 1, 10 ** (i + 1)) * (0.1 ** (i - 1)),
+                torch.ones(2, 1, 10 ** (i + 1)) * (0.3 ** (i - 1))
+            ], dim=1)
+            input_var.append(input_var_rank)
+
+        all_input_var = torch.cat(
+            [x.permute(1, 0, 2).contiguous().view(ONLY_SBN_NET.num_features, -1) for x in input_var],
+            dim=1
+        ).cuda(rank)
+
+        for i in range(100):
+            y = model(input_var[rank].cuda(rank))
+            y.mean().backward()
+
+        running_mean, running_var = model.module.running_mean, model.module.running_var
+        torch.testing.assert_allclose(running_mean, all_input_var.mean(1))
+        torch.testing.assert_allclose(running_var, all_input_var.var(1))
 
     @skipIfNoTorchVision
     def test_SyncBatchNorm_process_group(self):
@@ -1580,12 +1605,12 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
         def setUp(self):
             super(TestDistBackend, self).setUp()
-            # Adding this hack until we fix the FileStore to delete its
-            # content at the end
+            # We rely on the manager process to delete the temporary file.
             global INIT_METHOD
+            self.temporary_file = None
             if INIT_METHOD.startswith("file://"):
-                _, filename = tempfile.mkstemp(prefix=FOLDER)
-                INIT_METHOD = "file://{}".format(filename)
+                self.temporary_file = tempfile.NamedTemporaryFile(delete=False)
+                INIT_METHOD = "file://{}".format(self.temporary_file.name)
 
             self.processes = []
             self.rank = self.MANAGER_PROCESS_RANK
@@ -1595,6 +1620,16 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
         def tearDown(self):
             super(TestDistBackend, self).tearDown()
+
+            # Clean up temporary file if we used one.
+            if self.temporary_file:
+                try:
+                    os.unlink(self.temporary_file.name)
+                except OSError as err:
+                    # ENOENT is OK because the test is supposed to clean it up.
+                    if err.errno != errno.ENOENT:
+                        raise
+
             for p in self.processes:
                 p.terminate()
 

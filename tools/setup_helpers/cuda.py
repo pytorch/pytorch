@@ -4,6 +4,7 @@ import re
 import ctypes.util
 from subprocess import Popen, PIPE
 
+from . import escape_path, which
 from .env import IS_WINDOWS, IS_LINUX, IS_DARWIN, check_env_flag, check_negative_env_flag
 
 LINUX_HOME = '/usr/local/cuda'
@@ -11,20 +12,10 @@ WINDOWS_HOME = glob.glob('C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.
 
 
 def find_nvcc():
-    if IS_WINDOWS:
-        proc = Popen(['where', 'nvcc.exe'], stdout=PIPE, stderr=PIPE)
-    else:
-        proc = Popen(['which', 'nvcc'], stdout=PIPE, stderr=PIPE)
-    out, err = proc.communicate()
-    out = out.decode().strip()
-    if len(out) > 0:
-        if IS_WINDOWS:
-            if out.find('\r\n') != -1:
-                out = out.split('\r\n')[0]
-            out = os.path.abspath(os.path.join(os.path.dirname(out), ".."))
-            out = out.replace('\\', '/')
-            out = str(out)
-        return os.path.dirname(out)
+    nvcc = which('nvcc')
+    if nvcc is not None:
+        nvcc = escape_path(nvcc)
+        return os.path.dirname(nvcc)
     else:
         return None
 

@@ -355,13 +355,30 @@ const std::vector<std::string> functions = {
                 out = mat.permute(dims)
             return out
 
-        def AD_matmul_size(mat1, mat2,
+        # In matmul backward case of [b, m, n] * [b, n, p] => [m, p],
+        # instead of doing [b, m, p] and then reduce to [m, p]
+        # whice potentially uses large intermediate of size b*m*p,
+        # we do [m, bn] * [bn, p] to avoid having the large
+        # intermediate, thus reduces max memory usage.
+        def AD_matmul_bw_special_fold(mat1, mat2):
+            mat1_transpose = AD_mat_transpose(mat1)
+            mat1_fold = mat1_transpose.reshape(-1, mat1_transpose.size()[-1])
+            mat2_fold = mat2.reshape(-1, mat2.size()[-1])
+            return mat1_fold.t().mm(mat2_fold)
+
+        def AD_matmul_bw_size(mat1, mat2,
                            out_size: List[int]):
             dim1 = mat1.dim()
             dim2 = mat2.dim()
             dim_out = len(out_size)
             if dim1 == 0 or dim2 == 0:
                 out = mat1 * mat2
+            elif dim_out == 2 and dim1 == dim2 and dim1 >=3:
+                out = AD_matmul_bw_special_fold(mat1, mat2)
+            elif dim_out == 1 and dim1 - dim2 == 1 and dim1 >= 3:
+                mat2_unsqueeze = mat2.unsqueeze(-1)
+                out = AD_matmul_bw_special_fold(mat1, mat2_unsqueeze)
+                out = out.squeeze(-1)
             elif dim1 + dim2 == dim_out:
                 if dim2 == 1:
                     target_dim2 = 0
@@ -380,8 +397,8 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 self_size = self.size()
                 other_size = other.size()
-                grad_self = AD_matmul_size(grad_output, AD_mat_transpose(other), self_size)._grad_sum_to_size(self_size)
-                grad_other = AD_matmul_size(AD_mat_transpose(self), grad_output, other_size)._grad_sum_to_size(other_size)
+                grad_self = AD_matmul_bw_size(grad_output, AD_mat_transpose(other), self_size)._grad_sum_to_size(self_size)
+                grad_other = AD_matmul_bw_size(AD_mat_transpose(self), grad_output, other_size)._grad_sum_to_size(other_size)
                 return grad_self, grad_other
 
             return torch.matmul(self, other), backward
@@ -780,7 +797,7 @@ const std::vector<std::string> functions = {
             other_size = other.size()
             def backward(grad_output):
                 grad_self = (grad_output * condition.type_as(grad_output))._grad_sum_to_size(self_size)
-                grad_other = (grad_output * (1 - condition).type_as(grad_output))._grad_sum_to_size(other_size)
+                grad_other = (grad_output * (condition.bitwise_not()).type_as(grad_output))._grad_sum_to_size(other_size)
                 return None, grad_self, grad_other
 
             return torch.where(condition, self, other), backward
@@ -1028,12 +1045,13 @@ const std::vector<std::string> functions = {
                        stride: List[int],
                        padding: List[int],
                        ceil_mode: bool,
-                       count_include_pad: bool):
+                       count_include_pad: bool,
+                       divisor_override: Optional[int]):
             def backward(grad_output):
-                grad_self = torch.avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
-                return grad_self, None, None, None, None, None
+                grad_self = torch.avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
+                return grad_self, None, None, None, None, None, None
 
-            return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad), backward
+            return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override), backward
 
         def max_pool2d(self,
                        kernel_size: List[int],
@@ -1180,8 +1198,8 @@ const std::vector<std::string> functions = {
 
             return torch.embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse), backward
 
-        def log_softmax(self, dim: int, *, dtype: Optional[int]):
-            result = torch.log_softmax(self, dim, dtype=dtype)
+        def log_softmax(self, dim: int, dtype: Optional[int]):
+            result = torch.log_softmax(self, dim, dtype)
             def backward(grad_output):
                 grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self)
                 return grad_self, None, None
@@ -1288,6 +1306,22 @@ const std::vector<std::string> functions = {
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
 
+        def clamp(self,
+                min: Optional[number],
+                max: Optional[number]):
+            def backward(grad_output):
+                if min is not None and max is not None:
+                    mask = ((self >= float(min)) * (self <= float(max))).type_as(self)
+                    return grad_output * mask, None, None
+                elif min is not None:
+                    mask = (self >= float(min)).type_as(self)
+                    return grad_output * mask, None, None
+                elif max is not None:
+                    mask = (self <= float(max)).type_as(self)
+                    return grad_output * mask, None, None
+                else: #min is None and max is None
+                    return grad_output, None, None
+            return torch.clamp(self, min=min, max=max), backward
       )"};
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
@@ -1398,7 +1432,7 @@ void loadModule(const script::CompilationUnit& module) {
 void loadFunctions() {
   for (const std::string& str : functions) {
     script::CompilationUnit cu;
-    cu.define(str, script::nativeResolver(), nullptr);
+    cu.define(c10::nullopt, str, script::nativeResolver(), nullptr);
     loadModule(cu);
   }
 }

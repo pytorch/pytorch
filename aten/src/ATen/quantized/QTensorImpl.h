@@ -57,7 +57,7 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
    * see NOTE [ TensorImpl Shallow-Copying ].
    */
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
-    AT_ASSERT(typeid(*(impl.get())) == typeid(QTensorImpl));
+    AT_ASSERT(has_compatible_shallow_copy_type(impl->type_id()));
     auto q_impl = static_cast<const QTensorImpl*>(impl.get());
     copy_tensor_metadata(
       /*src_impl=*/q_impl,

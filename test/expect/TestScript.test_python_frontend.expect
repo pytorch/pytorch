@@ -21,20 +21,21 @@
   (list
     (assign
       (variable (ident q))
-      (None)
+      (option (None))
       (option))
     (assign
       (variable (ident q))
-      (-
-        (+
-          (variable (ident x))
-          (variable (ident y)))
-        (apply
-          (.
-            (variable (ident z))
-            (ident sigmoid))
-          (list)
-          (list)))
+      (option
+        (-
+          (+
+            (variable (ident x))
+            (variable (ident y)))
+          (apply
+            (.
+              (variable (ident z))
+              (ident sigmoid))
+            (list)
+            (list))))
       (option))
     (expression statement
       (apply
@@ -43,8 +44,9 @@
         (list)))
     (assign
       (variable (ident w))
-      (unary minus
-        (variable (ident z)))
+      (option
+        (unary minus
+          (variable (ident z))))
       (option))
     (if
       (and
@@ -55,10 +57,12 @@
       (list
         (assign
           (variable (ident m))
-          (if
-            (not (variable (ident z)))
-            (variable (ident x))
-            (variable (ident y)))
+          (option
+            (if
+              (not
+                (variable (ident z)))
+              (variable (ident x))
+              (variable (ident y))))
           (option)))
       (list))
     (while
@@ -72,7 +76,7 @@
       (list
         (assign
           (variable (ident q))
-          (variable (ident x))
+          (option (variable (ident x)))
           (option))))
     (assert
       (eq (const 1) (const 1))

@@ -39,6 +39,9 @@ static DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::Bool:
       dtype.code = DLDataTypeCode::kDLUInt;
       break;
+    case ScalarType::BFloat16:
+      throw std::logic_error("BFloat16 is not supported by dlpack");
+      break;
     case ScalarType::QInt8:
       throw std::logic_error("QInt8 is not supported by dlpack");
       break;

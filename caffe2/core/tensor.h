@@ -7,7 +7,9 @@
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include "ATen/core/Tensor.h"
-#include <c10/core/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
+
+#include <ATen/core/grad_mode.h>
 
 namespace caffe2 {
 
@@ -189,7 +191,8 @@ class CAFFE2_API Tensor final {
    * 'async' parameter triggers async copy for CUDA tensors
    */
   void CopyFrom(const Tensor& src, bool async = false) {
-    AT_ASSERT(!impl_->is_variable());  // TODO: remove this when Variable and Tensor are merged
+    // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
+    AT_ASSERT(!impl_->is_variable() || !(impl_->requires_grad() && at::GradMode::is_enabled()));
     AT_ASSERTM(
         src.impl_->is_contiguous(),
         "Right now only copy of contiguous source Tensor is supported.");

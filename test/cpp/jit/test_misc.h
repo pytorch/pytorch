@@ -1,10 +1,15 @@
 #pragma once
 
+#include <ATen/ATen.h>
+#include <ATen/core/interned_strings.h>
+#include <ATen/core/ivalue.h>
+#include <ATen/Parallel.h>
+#include <ATen/ThreadLocalDebugInfo.h>
+
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include "ATen/core/interned_strings.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/argument_spec.h"
@@ -42,15 +47,12 @@
 #include "torch/csrc/autograd/variable.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
-#include "ATen/core/ivalue.h"
 #include "torch/csrc/jit/profiling_record.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
 #include "torch/jit.h"
 
 #include "onnx/onnx_pb.h"
-
-#include <ATen/ATen.h>
 
 #include <c10/util/Exception.h>
 
@@ -68,6 +70,7 @@
 
 namespace torch {
 namespace jit {
+c10::OperatorOptions aliasAnalysisFromSchema();
 namespace test {
 
 using Var = SymbolicVariable;
@@ -171,9 +174,9 @@ void testTHNNConv() {
 
   // make JIT graph
   auto graph = std::make_shared<Graph>();
-  auto ksz_val = graph->insertConstant(IValue(kernel_size));
-  auto kst_val = graph->insertConstant(IValue(stride));
-  auto pad_val = graph->insertConstant(IValue(padding));
+  auto ksz_val = graph->insertConstant(c10::impl::toList(kernel_size));
+  auto kst_val = graph->insertConstant(c10::impl::toList(stride));
+  auto pad_val = graph->insertConstant(c10::impl::toList(padding));
 
   auto inputg = graph->addInput("self");
   auto weightg = graph->addInput("weight");
@@ -382,9 +385,58 @@ void testCustomFusion() {
   auto hits = 0;
   // two multiplications
   for (const auto& n : subgraph->nodes()) {
+    (void)n;
     hits++;
   }
   AT_ASSERT(hits == 2);
+}
+
+void testCustomFusionNestedBlocks() {
+  auto g = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+
+  // test CustomFusion in nested blocks;
+  auto a = SymbolicVariable::asNewInput(*g, type);
+  auto b = SymbolicVariable::asNewInput(*g, type);
+  auto c = SymbolicVariable::asNewInput(*g, type);
+
+  auto r =
+      g->appendNode(g->create(prim::If, {c.value()}));
+  auto then_block = r->addBlock();
+  auto else_block = r->addBlock();
+  {
+    WithInsertPoint guard(then_block);
+    auto d = c * a;
+    auto t = d * b;
+    then_block->registerOutput(t.value());
+  }
+  {
+    WithInsertPoint guard(else_block);
+    auto d = c + a;
+    auto t = d + b;
+    else_block->registerOutput(t.value());
+  }
+  g->registerOutput((Var(r->output()) + c).value());
+
+  CustomFuseGraph(
+      g,
+      [](Node* n) { return n->kind() == aten::mul; },
+      Symbol::fromQualString("prim::FusionGroup"));
+
+  // Could be done in more efficient ways, but this is only a test.
+  std::function<bool(const Block*, Symbol)> dfs = [&](const Block* b, Symbol s) {
+      for (auto node : b->nodes()) {
+          if (node->kind() == s)
+              return true;
+          for (auto nested_b : node->blocks())
+              if (dfs(nested_b, s))
+                  return true;
+      }
+      return false;
+  };
+
+  AT_ASSERT(dfs(g->block(), Symbol::fromQualString("prim::FusionGroup")));
 }
 
 static const auto cf_examples = R"JIT(
@@ -769,6 +821,68 @@ void testRecordFunction() {
   autograd::profiler::popCallback();
 }
 
+class TestThreadLocalDebugInfo
+  : public at::ThreadLocalDebugInfoBase {
+ public:
+  int getModelId() const {
+    return model_id_;
+  }
+
+  void setModelId(int model_id) {
+    model_id_ = model_id;
+  }
+
+  virtual ~TestThreadLocalDebugInfo() {}
+
+ private:
+  int model_id_ = 0;
+};
+
+void testThreadLocalDebugInfo() {
+  auto checkDebugInfo = [](){
+    auto debug_info = at::getThreadLocalDebugInfo();
+    TORCH_CHECK(debug_info != nullptr);
+    auto* test_debug_info = dynamic_cast<TestThreadLocalDebugInfo*>(
+        debug_info.get());
+    TORCH_CHECK(test_debug_info != nullptr);
+    TORCH_CHECK(test_debug_info->getModelId() == 42);
+  };
+
+  TORCH_CHECK(at::getThreadLocalDebugInfo() == nullptr);
+  auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
+  debug_info->setModelId(42);
+  at::setThreadLocalDebugInfo(debug_info);
+
+  checkDebugInfo();
+
+  // check that thread local debug info is propagated through fork calls
+  std::atomic<bool> done {false};
+  at::launch([checkDebugInfo, &done](){
+    checkDebugInfo();
+    done = true;
+  });
+  while (!done) {}
+  checkDebugInfo();
+
+  // check that thread local debug info is propagated through backward pass
+  autograd::profiler::pushCallback(
+      [&checkDebugInfo](const autograd::profiler::RecordFunction& fn) {
+        checkDebugInfo();
+      },
+      [](const autograd::profiler::RecordFunction&) {});
+  {
+    auto t = torch::randn({1, 2, 3}, at::kCPU);
+    t.set_requires_grad(true);
+    auto t2 = t.pow(2);
+    t2.backward();
+  }
+  autograd::profiler::popCallback();
+
+  checkDebugInfo();
+  at::setThreadLocalDebugInfo(nullptr);
+  TORCH_CHECK(at::getThreadLocalDebugInfo() == nullptr);
+}
+
 void testAutogradProfiler() {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -806,7 +920,8 @@ void testNoneSchemaMatch() {
               push(stack, IValue());
               return 0;
             };
-          }),
+          },
+          aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
           [](const Node* node) {
@@ -819,7 +934,8 @@ void testNoneSchemaMatch() {
               }
               return 0;
             };
-          }),
+          },
+          aliasAnalysisFromSchema()),
   });
 
   // Constant propagation will run test_none and produce a None,
@@ -846,7 +962,7 @@ void testModuleDefine() {
       return self.foo + x + b
   )");
   auto result = m.run_method("add_it", torch::ones({}));
-  AT_ASSERT(result.toTensor().item<float>() == 6)
+  AT_ASSERT(result.toTensor().item<float>() == 6);
 }
 
 void testModuleConversion() {
@@ -994,8 +1110,7 @@ void testInsertBailOuts() {
   std::copy_if(nodes.begin(), nodes.end(), bailouts.begin(), is_bailout);
 
   for (auto blo : bailouts) {
-    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::Constant);
-    ASSERT_TRUE(blo->inputs().at(0)->type()->cast<FunctionType>());
+    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::BailoutTemplate);
   }
 }
 
@@ -1041,6 +1156,14 @@ void testProfiler() {
   auto tanh_n =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::tanh; });
   checkShape(*tanh_n, eltwise);
+}
+
+void testInsertConstant() {
+  Graph g;
+  ASSERT_THROWS_WITH(
+      insertConstant(
+          g, IValue(), TensorType::get(), c10::nullopt, c10::nullopt),
+      "Expected OptionalType");
 }
 
 } // namespace test

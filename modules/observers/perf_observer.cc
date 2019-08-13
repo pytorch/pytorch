@@ -6,6 +6,10 @@
 #endif
 
 #include <random>
+#include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "caffe2/core/common.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
@@ -62,6 +66,75 @@ bool registerGlobalPerfNetObserverCreator(int* /*pargc*/, char*** /*pargv*/) {
 }
 } // namespace
 
+#ifdef _WIN32
+double getTicksPerMillisecond() {
+  static LARGE_INTEGER ticks_per_sec;
+  if (!ticks_per_sec.QuadPart) {
+    QueryPerformanceFrequency(&ticks_per_sec);
+    if (!ticks_per_sec.QuadPart) {
+      return 0.0;
+    }
+  }
+
+  return static_cast<double>(ticks_per_sec.QuadPart) / 1000.0;
+}
+#else
+double getClockTimeMilliseconds(clockid_t clk_id) {
+  int result;
+  struct timespec tp;
+  result = clock_gettime(clk_id, &tp);
+  if (result == -1) {
+    return 0.0;
+  } else {
+    return tp.tv_sec * 1000.0 + tp.tv_nsec / 1000000.0;
+  }
+}
+#endif
+
+double getWallClockTimeMilliseconds() {
+#ifdef _WIN32
+  double ticks_per_ms = getTicksPerMillisecond();
+  if (ticks_per_ms) {
+    LARGE_INTEGER ticks;
+    if (QueryPerformanceCounter(&ticks)) {
+      return static_cast<double>(ticks.QuadPart) / ticks_per_ms;
+    }
+  }
+
+  return 0.0;
+#else
+  return getClockTimeMilliseconds(CLOCK_MONOTONIC);
+#endif
+}
+
+double getCpuTimeMilliseconds() {
+#ifdef _WIN32
+  FILETIME creation_time;
+  FILETIME exit_time;
+  FILETIME kernel_time;
+  FILETIME user_time;
+  if (GetProcessTimes(
+      GetCurrentProcess(),
+      &creation_time,
+      &exit_time,
+      &kernel_time,
+      &user_time)) {
+    ULARGE_INTEGER kernel;
+    ULARGE_INTEGER user;
+    kernel.HighPart = kernel_time.dwHighDateTime;
+    kernel.LowPart = kernel_time.dwLowDateTime;
+    user.HighPart = user_time.dwHighDateTime;
+    user.LowPart = user_time.dwLowDateTime;
+    return (static_cast<double>(kernel.QuadPart) +
+        static_cast<double>(user.QuadPart)) / 10000.0;
+  }
+
+  return 0.0;
+#else
+  return getClockTimeMilliseconds(CLOCK_PROCESS_CPUTIME_ID);
+#endif
+}
+
 REGISTER_CAFFE2_EARLY_INIT_FUNCTION(
     registerGlobalPerfNetObserverCreator,
     &registerGlobalPerfNetObserverCreator,
@@ -107,30 +180,31 @@ void PerfNetObserver::Start() {
     }
   }
 
-  if (logType_ != PerfNetObserver::NONE) {
-    /* Only start timer when we need to */
-    timer_.Start();
-  }
+  wallMilliseconds_ = getWallClockTimeMilliseconds();
+  cpuMilliseconds_ = getCpuTimeMilliseconds();
 }
 
 void PerfNetObserver::Stop() {
   if (logType_ == PerfNetObserver::NONE) {
     return;
   }
-  auto currentRunTime = timer_.MilliSeconds();
   std::map<std::string, PerformanceInformation> info;
   PerformanceInformation net_perf;
-  net_perf.latency = currentRunTime;
+  net_perf.cpuMilliseconds =
+      getCpuTimeMilliseconds() - cpuMilliseconds_;
+  net_perf.latency =
+      getWallClockTimeMilliseconds() - wallMilliseconds_;
+
   if (logType_ == PerfNetObserver::OPERATOR_DELAY) {
     const auto& operators = subject_->GetOperators();
     for (int idx = 0; idx < operators.size(); ++idx) {
       const auto* op = operators[idx];
       auto name = getObserverName(op, idx);
       PerformanceInformation p;
-
-      p.latency = static_cast<const PerfOperatorObserver*>(observerMap_[op])
-                      ->getMilliseconds();
-
+      const PerfOperatorObserver* opObserver =
+          static_cast<const PerfOperatorObserver*>(observerMap_[op]);
+      p.latency = opObserver->getWallMilliseconds();
+      p.cpuMilliseconds = opObserver->getCpuMilliseconds();
       p.engine = op->engine();
       p.type = op->type();
       p.tensor_shapes =
@@ -176,30 +250,34 @@ PerfOperatorObserver::PerfOperatorObserver(
     PerfNetObserver* netObserver)
     : ObserverBase<OperatorBase>(op),
       netObserver_(netObserver),
-      milliseconds_(0) {
+      wallMilliseconds_(0),
+      cpuMilliseconds_(0) {
   CAFFE_ENFORCE(netObserver_, "Observers can't operate outside of the net");
 }
 
 PerfOperatorObserver::~PerfOperatorObserver() {}
 
 void PerfOperatorObserver::Start() {
-  /* Get the time from the start of the net minus the time spent
-     in previous invocations. It is the time spent on other operators.
-     This way, when the operator finishes, the time from the start of the net
-     minus the time spent in all other operators  is the total time on this
-     operator. This is done to avoid saving a timer in each operator */
-  milliseconds_ = netObserver_->getTimer().MilliSeconds() - milliseconds_;
+  wallMilliseconds_ = getWallClockTimeMilliseconds();
+  cpuMilliseconds_ = getCpuTimeMilliseconds();
 }
 
 void PerfOperatorObserver::Stop() {
   /* Time from the start of the net minus the time spent on all other
      operators is the time spent on this operator */
-  milliseconds_ = netObserver_->getTimer().MilliSeconds() - milliseconds_;
+  cpuMilliseconds_ =
+      getCpuTimeMilliseconds() - cpuMilliseconds_;
+  wallMilliseconds_ =
+      getWallClockTimeMilliseconds() - wallMilliseconds_;
   tensor_shapes_ = subject_->InputTensorShapes();
 }
 
-double PerfOperatorObserver::getMilliseconds() const {
-  return milliseconds_;
+double PerfOperatorObserver::getWallMilliseconds() const {
+  return wallMilliseconds_;
+}
+
+double PerfOperatorObserver::getCpuMilliseconds() const {
+  return cpuMilliseconds_;
 }
 
 std::vector<TensorShape> PerfOperatorObserver::getTensorShapes() const {

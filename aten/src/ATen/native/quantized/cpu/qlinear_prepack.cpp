@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
@@ -96,8 +95,8 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_linear_prepack(Tensor W) -> Tensor W_prepack",
-    c10::RegisterOperators::options()
-      .kernel<QLinearPackWeightInt8>(QuantizedCPUTensorId()));
+    c10::RegisterOperators::options().kernel<QLinearPackWeightInt8>(
+        QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at

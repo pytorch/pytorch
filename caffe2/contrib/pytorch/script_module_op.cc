@@ -83,11 +83,14 @@ class ScriptModuleOp final : public Operator<Context> {
   }
 
   static caffe2::Tensor castIValueToTensor(IValue v) {
-    return caffe2::Tensor(
-        torch::autograd::Variable(std::move(v).toTensor()).tensor_data());
+    return caffe2::Tensor(std::move(v).toTensor());
   }
 
   bool RunOnDevice() override {
+    // The ScriptModule could have requires-grad parameters, however we don't
+    // want their gradients to be tracked in this operator.
+    torch::NoGradGuard guard;
+
     const auto& module = OperatorBase::Input<Module>(0);
     Method method = module.get_method(method_name_);
     // Assume all inputs are tensor for now

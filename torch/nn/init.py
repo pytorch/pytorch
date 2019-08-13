@@ -4,7 +4,6 @@ import math
 import warnings
 
 import torch
-from .._jit_internal import weak_script
 
 # These no_grad_* functions are necessary as wrappers around the parts of these
 # functions that use `with torch.no_grad()`. The JIT doesn't support context
@@ -72,7 +71,6 @@ def calculate_gain(nonlinearity, param=None):
         raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
 
 
-@weak_script
 def uniform_(tensor, a=0., b=1.):
     # type: (Tensor, float, float) -> Tensor
     r"""Fills the input Tensor with values drawn from the uniform
@@ -90,7 +88,6 @@ def uniform_(tensor, a=0., b=1.):
     return _no_grad_uniform_(tensor, a, b)
 
 
-@weak_script
 def normal_(tensor, mean=0., std=1.):
     # type: (Tensor, float, float) -> Tensor
     r"""Fills the input Tensor with values drawn from the normal
@@ -108,7 +105,6 @@ def normal_(tensor, mean=0., std=1.):
     return _no_grad_normal_(tensor, mean, std)
 
 
-@weak_script
 def constant_(tensor, val):
     # type: (Tensor, float) -> Tensor
     r"""Fills the input Tensor with the value :math:`\text{val}`.
@@ -124,10 +120,9 @@ def constant_(tensor, val):
     return _no_grad_fill_(tensor, val)
 
 
-@weak_script
 def ones_(tensor):
     # type: (Tensor) -> Tensor
-    r"""Fills the input Tensor with ones`.
+    r"""Fills the input Tensor with the scalar value `1`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -139,10 +134,9 @@ def ones_(tensor):
     return _no_grad_fill_(tensor, 1.)
 
 
-@weak_script
 def zeros_(tensor):
     # type: (Tensor) -> Tensor
-    r"""Fills the input Tensor with zeros`.
+    r"""Fills the input Tensor with the scalar value `0`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -205,7 +199,6 @@ def dirac_(tensor):
     return tensor
 
 
-@weak_script
 def _calculate_fan_in_and_fan_out(tensor):
     dimensions = tensor.dim()
     if dimensions < 2:
@@ -226,7 +219,6 @@ def _calculate_fan_in_and_fan_out(tensor):
     return fan_in, fan_out
 
 
-@weak_script
 def xavier_uniform_(tensor, gain=1.):
     # type: (Tensor, float) -> Tensor
     r"""Fills the input `Tensor` with values according to the method
@@ -255,7 +247,6 @@ def xavier_uniform_(tensor, gain=1.):
     return _no_grad_uniform_(tensor, -a, a)
 
 
-@weak_script
 def xavier_normal_(tensor, gain=1.):
     # type: (Tensor, float) -> Tensor
     r"""Fills the input `Tensor` with values according to the method

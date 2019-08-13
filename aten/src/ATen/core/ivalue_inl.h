@@ -14,12 +14,30 @@
 namespace torch {
 namespace jit {
 struct Function;
+namespace script {
+struct CompilationUnit;
+}
 } // namespace jit
 } // namespace torch
 namespace c10 {
 struct IValue;
 struct ClassType;
 struct TupleType;
+
+// For custom class __init__ registration, we need to pass in a function
+// that looks like this: [](IValue x, args...)
+
+// However, kernel_functor.h automatically sets the input types of the function
+// by introspecting the types of the functor (which is IValue in this case).
+// However, we need the type it binds to be Foo.
+
+// Instead, we pass in a lambda [](ivalue_holder<CurClass> x, args...) from
+// which getTypePtr can recover the original class pointer.
+
+template <typename TaggedCapsuleType>
+struct tagged_capsule {
+  IValue ivalue;
+};
 
 template<class T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::moveToIntrusivePtr() {
@@ -33,6 +51,11 @@ c10::intrusive_ptr<T, NullType> IValue::toIntrusivePtr() const {
   auto p = r;
   r.release();
   return p;
+}
+
+template<class T, class U>
+intrusive_ptr<T> static_intrusive_pointer_cast(intrusive_ptr<U> r) {
+  return intrusive_ptr<T>::reclaim(static_cast<T*>(r.release()));
 }
 
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() && {
@@ -75,6 +98,14 @@ inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() const & {
   AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
   return toIntrusivePtr<caffe2::Blob>();;
 }
+inline c10::intrusive_ptr<torch::jit::CustomClassHolder> IValue::toCapsule() && {
+  TORCH_INTERNAL_ASSERT(isCapsule());
+  return moveToIntrusivePtr<torch::jit::CustomClassHolder>();
+}
+inline c10::intrusive_ptr<torch::jit::CustomClassHolder> IValue::toCapsule() const & {
+  TORCH_INTERNAL_ASSERT(isCapsule());
+  return toIntrusivePtr<torch::jit::CustomClassHolder>();
+}
 
 namespace ivalue {
 
@@ -108,8 +139,10 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
 
  public:
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_, std::shared_ptr<TupleType> type_) {
+    TORCH_INTERNAL_ASSERT(nullptr != type_.get(), "Type cannot be nullptr");
     return c10::make_intrusive<Tuple>(std::move(elements_), type_);
   }
+  C10_DEPRECATED_MESSAGE("Creating tuples without type information is deprecated. Please use Tuple::create(elements, type) instead.")
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
     return c10::make_intrusive<Tuple>(std::move(elements_), nullptr);
   }
@@ -265,19 +298,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
  public:
-  // temporary way to break cyclic dependencies in modules by forcing the deletion
-  // of functions when the module object is destructed
-  typedef void (*OnDelete)(ivalue::Object*);
-  Object(std::shared_ptr<ClassType> type, size_t numSlots, OnDelete on_delete)
-      : type_(std::move(type)), on_delete_(on_delete) {
+  Object(StrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
     slots_.resize(numSlots);
   }
 
   static c10::intrusive_ptr<Object> create(
-      std::shared_ptr<ClassType> type,
-      size_t numSlots,
-      OnDelete on_delete = nullptr) {
-    return c10::make_intrusive<Object>(std::move(type), numSlots, on_delete);
+      StrongTypePtr type,
+      size_t numSlots) {
+    return c10::make_intrusive<Object>(std::move(type), numSlots);
   }
 
   /**
@@ -321,16 +349,17 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return slots_;
   }
   std::shared_ptr<ClassType> type() const {
-    return type_;
+    return type_.type_;
   }
-  // temporarily defined in class_type.cpp to
-  // ensure Modules do not leak memory
-  ~Object();
+
+  std::shared_ptr<torch::jit::script::CompilationUnit> compilation_unit() {
+    return type_.cu_;
+  }
+
  private:
   void resizeObject(size_t slot);
-  std::shared_ptr<ClassType> type_;
+  StrongTypePtr type_;
   std::vector<IValue> slots_;
-  OnDelete on_delete_;
 };
 
 std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict);
@@ -413,6 +442,7 @@ struct _fake_type {};
 // The _fake_type<T> parameter allows us to overload
 // based on the return type.
 template <class Elem>
+C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
 std::vector<Elem> generic_to(
     IValue ivalue,
     _fake_type<std::vector<Elem>>) {
@@ -426,6 +456,23 @@ std::vector<Elem> generic_to(
     result.push_back(std::move(v));
   }
   return result;
+}
+
+template <typename T>
+T generic_to(
+    IValue ivalue,
+    _fake_type<T>) {
+    using ElemType = typename std::remove_pointer<T>::type::element_type;
+    auto obj = ivalue.toObject();
+    auto capsule = obj->getSlot(0);
+    return c10::static_intrusive_pointer_cast<ElemType>(capsule.toCapsule());
+}
+
+template <typename T>
+tagged_capsule<T> generic_to(
+    IValue ivalue,
+    _fake_type<tagged_capsule<T>>) {
+    return tagged_capsule<T>{ivalue};
 }
 
 template <typename Elem>
@@ -443,12 +490,13 @@ c10::Dict<Key, Value> generic_to(
 }
 
 template <typename K, typename V>
+C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")
 std::unordered_map<K, V> generic_to(
     IValue ivalue,
     _fake_type<std::unordered_map<K, V>>) {
   std::unordered_map<K, V> specialized_dict;
 
-  for (auto item : std::move(ivalue).toGenericDict()) {
+  for (const auto& item : std::move(ivalue).toGenericDict()) {
     specialized_dict[item.key().to<K>()] = item.value().to<V>();
   }
 
@@ -593,15 +641,13 @@ inline IValue::IValue(c10::impl::GenericList v)
 : tag(Tag::GenericList), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.impl_.release();
 }
-inline IValue::IValue(std::vector<IValue> v)
-: IValue(c10::impl::toList(std::move(v))) {}
 
 template<class T> inline IValue::IValue(c10::List<T> v)
 : IValue(impl::toGenericList<T>(std::move(v))) {
   static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
 }
 template<class T> inline IValue::IValue(std::vector<T> v)
-: IValue(impl::GenericList()) {
+: IValue(c10::List<T>()) {
   static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
@@ -619,7 +665,7 @@ inline IValue::IValue(c10::Dict<Key, Value> v)
 : IValue(impl::toGenericDict(std::move(v))) {}
 
 template<class Key, class Value> inline IValue::IValue(std::unordered_map<Key, Value> v)
-: IValue(impl::GenericDict()) {
+: IValue(Dict<Key, Value>()) {
   auto dict = to<c10::Dict<Key, Value>>();
   dict.reserve(v.size());
   for (auto& e : v) {
@@ -637,6 +683,10 @@ inline IValue::IValue(c10::nullopt_t): IValue() {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(c10::intrusive_ptr<torch::jit::CustomClassHolder> v)
+: tag(Tag::Capsule), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
@@ -686,4 +736,50 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   }
 }
 
+namespace ivalue {
+namespace detail {
+// This code allows us to template on a function based on whether IValue has a
+// constructor for it. Specifically, has_constructor<T>{} inherits from std::true_type if
+// IValue(T) compiles, and inherits from std::false_type if IValue(T) doesn't.
+// We use it for calling the IValue constructor for `from` if it exists, and otherwise
+// attempt to use our custom class code.
+template<class> struct type_sink { typedef void type; };
+template<class T> using type_sink_t = typename type_sink<T>::type;
+template<class T, class=void> struct has_constructor : std::false_type {}; \
+template<class T> struct has_constructor<
+  T,
+  type_sink_t< decltype( IValue(std::declval<T>())) >
+>: std::true_type {};
+
+template <typename T>
+IValue from_(T x, std::true_type) {
+  return IValue(x);
+}
+template <typename T>
+IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
+  using inputType = c10::intrusive_ptr<T>;
+  if (!isCustomClassRegistered<inputType>()) {
+    throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
+  }
+  auto res = getCustomClassType<inputType>();
+  auto retObject = ivalue::Object::create(res->second, 1);
+  auto objPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(x);
+
+  retObject->setSlot(0, IValue(objPtr));
+  auto resIVal = IValue(std::move(retObject));
+  return resIVal;
+}
+template <typename T>
+IValue from_(T x, std::false_type) {
+  static_assert(guts::false_t<T>::value, "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
+  return IValue();
+}
+}
+
+template <typename T>
+IValue from(T x) {
+  return detail::from_(x, detail::has_constructor<T>{});
+}
+
+}
 } // namespace c10

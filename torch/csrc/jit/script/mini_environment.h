@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir.h>
 

@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
-#include <ATen/core/op_registration/test_helpers.h>
 
+// This intentionally tests a deprecated API
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
+#include <ATen/core/op_registration/test_helpers.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
@@ -12,10 +16,6 @@
  * > static auto registry = c10::RegisterOperators()
  * >   .op("func(Tensor a) -> Tensor", &kernel);
  */
-
-// This intentionally tests a deprecated API
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 using c10::RegisterOperators;
 using c10::TensorTypeId;
@@ -904,6 +904,23 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptional
   EXPECT_TRUE(outputs[0].isNone());
   EXPECT_EQ(4, outputs[1].toInt());
   EXPECT_TRUE(outputs[2].isNone());
+}
+
+std::string concatKernel(const Tensor& tensor1, std::string a, const std::string& b, int64_t c) {
+  return a + b + c10::guts::to_string(c);
+}
+
+void expectCallsConcatUnboxed(TensorTypeId type_id) {
+  // assert that schema and cpu kernel are present
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
+  ASSERT_TRUE(op.has_value());
+  std::string result = callOpUnboxed<std::string, const Tensor&, std::string, const std::string&, int64_t>(*op, type_id, dummyTensor(type_id), "1", "2", 3);
+  EXPECT_EQ("123", result);
+}
+
+TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", &concatKernel);
+  expectCallsConcatUnboxed(TensorType1());
 }
 
 std::tuple<int64_t, Tensor> kernelForSchemaInference(Tensor arg1, int64_t arg2, const std::vector<Tensor>& arg3) {
