@@ -82,12 +82,6 @@ class TestNamedTensor(TestCase):
         self.assertTrue(partially_named.has_names())
         self.assertTrue(fully_named.has_names())
 
-    def test_contains(self):
-        self.assertTrue(0 in torch.LongTensor([0, 1, 2]))
-        with self.assertRaises(NotImplementedError):
-            "foo" in torch.LongTensor([0, 1, 2])
-            "0" in torch.LongTensor([0, 1, 2])
-        
     def test_repr(self):
         named_tensor = torch.zeros(2, 3).set_names_(['N', 'C'])
         expected = "tensor([[0., 0., 0.],\n        [0., 0., 0.]], names=('N', 'C'))"

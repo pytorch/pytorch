@@ -9705,6 +9705,12 @@ class _TestTorchMixin(object):
         val += 10
         self.assertEqual(val in x, False)
 
+        with self.assertRaisesRegex(
+            RuntimeError,
+            'Tensor.__contains__ only supports scalars'):
+            "foo" in x
+            [1, 2] in x
+
     @staticmethod
     def _test_rot90(self, use_cuda=False):
         device = torch.device("cuda" if use_cuda else "cpu")

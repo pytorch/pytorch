@@ -423,10 +423,15 @@ class Tensor(torch._C._TensorBase):
             element (Tensor or scalar): element to be checked
                 for presence in current tensor"
         """
-        if not isinstance(element, (torch.Tensor, Number)):
-            raise NotImplementedError
-        return (element == self).any().item()
+        if isinstance(element, (torch.Tensor, Number)):
+            return (element == self).any().item()
 
+        raise RuntimeError(
+            "Tensor.__contains__ only supports scalars, but you passed in a %s. "
+            "Please file a bug if you believe this message to be incorrect." %
+            type(element)
+        )
+        
     @property
     def __cuda_array_interface__(self):
         """Array view description for cuda tensors.
