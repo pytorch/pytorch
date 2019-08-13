@@ -3878,7 +3878,7 @@ class _TestTorchMixin(object):
             if dtype == torch.bfloat16:
                 continue
 
-            for n, m in product([3, 5, 7], repeat=2):                
+            for n, m in product([3, 5, 7], repeat=2):
                 # Construct identity using diagonal and fill
                 res1 = torch.eye(n, m, device=device, dtype=dtype)
                 naive_eye = torch.zeros(n, m, dtype=dtype, device=device)
