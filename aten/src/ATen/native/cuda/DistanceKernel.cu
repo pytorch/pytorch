@@ -138,7 +138,7 @@ __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
   const int y = blockIdx.y * blockDim.y + threadIdx.y;
   const int l = y / r_size;
   const int k = y % r_size;
-  if (k >= count) {
+  if (y >= count) {
     return;
   }
 
