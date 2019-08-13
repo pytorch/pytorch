@@ -1437,7 +1437,8 @@ if _enabled:
 
             .. note::
 
-                * The first three trace/trace_module calls are equivalent and return ``ScriptModule`` with a single ``forward`` method.
+                * The first three trace/trace_module calls are equivalent and return ``ScriptModule``
+                  with a single ``forward`` method.
                 * The last ``trace_module`` call produces a ``ScriptModule`` with two methods.
 
                 Tracing only records operations done when the given function is run on the given
