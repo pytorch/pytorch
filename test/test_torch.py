@@ -6949,52 +6949,71 @@ class _TestTorchMixin(torchtest):
 
     def test_logical(self):
         for device in torch.testing.get_all_device_types():
-            x = torch.tensor([1, 2, 3, 4], device=device)
-            self.assertEqual(x.lt(2), torch.tensor([True, False, False, False]))
-            self.assertEqual(x.le(2), torch.tensor([True, True, False, False]))
-            self.assertEqual(x.ge(2), torch.tensor([False, True, True, True]))
-            self.assertEqual(x.gt(2), torch.tensor([False, False, True, True]))
-            self.assertEqual(x.eq(2), torch.tensor([False, True, False, False]))
-            self.assertEqual(x.ne(2), torch.tensor([True, False, True, True]))
+            for dt in torch.testing.get_all_dtypes():
+                x = torch.tensor([1, 2, 3, 4], device=device, dtype=dt)
+                b = torch.tensor([2], device=device, dtype=dt)
 
-            b = torch.tensor([2], device=device)
-            self.assertEqual(x.lt(b), torch.tensor([True, False, False, False]))
-            self.assertEqual(x.le(b), torch.tensor([True, True, False, False]))
-            self.assertEqual(x.ge(b), torch.tensor([False, True, True, True]))
-            self.assertEqual(x.gt(b), torch.tensor([False, False, True, True]))
-            self.assertEqual(x.eq(b), torch.tensor([False, True, False, False]))
-            self.assertEqual(x.ne(b), torch.tensor([True, False, True, True]))
+                if dt == torch.half and device == 'cpu':
+                    self.assertRaises(RuntimeError, lambda: x.lt(2))
+                    continue
 
+                if dt == torch.bool:
+                    # torch.bool is a special case and is being tested later
+                    # in this test
+                    continue
 
-            with warnings.catch_warnings(record=True) as warningsCount:
-                byteRes = torch.empty_like(x, device=device).byte()
-                boolRes = torch.empty_like(x, device=device).bool()
+                if device == 'cuda' and dt == torch.bfloat16:
+                    self.assertRaises(RuntimeError, lambda: x > b)
+                    self.assertRaises(RuntimeError, lambda: x < b)
+                    self.assertRaises(RuntimeError, lambda: x == b)
+                    self.assertRaises(RuntimeError, lambda: x != b)
+                    self.assertRaises(RuntimeError, lambda: x >= b)
+                    self.assertRaises(RuntimeError, lambda: x <= b)
+                    continue
 
-                torch.lt(x, b, out=byteRes)
-                torch.lt(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
+                self.assertEqual(x.lt(2), torch.tensor([True, False, False, False]))
+                self.assertEqual(x.le(2), torch.tensor([True, True, False, False]))
+                self.assertEqual(x.ge(2), torch.tensor([False, True, True, True]))
+                self.assertEqual(x.gt(2), torch.tensor([False, False, True, True]))
+                self.assertEqual(x.eq(2), torch.tensor([False, True, False, False]))
+                self.assertEqual(x.ne(2), torch.tensor([True, False, True, True]))
 
-                torch.le(x, b, out=byteRes)
-                torch.le(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
+                self.assertEqual(x.lt(b), torch.tensor([True, False, False, False]))
+                self.assertEqual(x.le(b), torch.tensor([True, True, False, False]))
+                self.assertEqual(x.ge(b), torch.tensor([False, True, True, True]))
+                self.assertEqual(x.gt(b), torch.tensor([False, False, True, True]))
+                self.assertEqual(x.eq(b), torch.tensor([False, True, False, False]))
+                self.assertEqual(x.ne(b), torch.tensor([True, False, True, True]))
 
-                torch.ge(x, b, out=byteRes)
-                torch.ge(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
+                with warnings.catch_warnings(record=True) as warningsCount:
+                    byteRes = torch.empty_like(x, device=device).byte()
+                    boolRes = torch.empty_like(x, device=device).bool()
 
-                torch.gt(x, b, out=byteRes)
-                torch.gt(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
+                    torch.lt(x, b, out=byteRes)
+                    torch.lt(x, b, out=boolRes)
+                    self.assertEqual(byteRes.bool(), boolRes)
 
-                torch.eq(x, b, out=byteRes)
-                torch.eq(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
+                    torch.le(x, b, out=byteRes)
+                    torch.le(x, b, out=boolRes)
+                    self.assertEqual(byteRes.bool(), boolRes)
 
-                torch.ne(x, b, out=byteRes)
-                torch.ne(x, b, out=boolRes)
-                self.assertEqual(byteRes.bool(), boolRes)
+                    torch.ge(x, b, out=byteRes)
+                    torch.ge(x, b, out=boolRes)
+                    self.assertEqual(byteRes.bool(), boolRes)
 
-                self.assertEquals(len(warningsCount), 6)
+                    torch.gt(x, b, out=byteRes)
+                    torch.gt(x, b, out=boolRes)
+                    self.assertEqual(byteRes.bool(), boolRes)
+
+                    torch.eq(x, b, out=byteRes)
+                    torch.eq(x, b, out=boolRes)
+                    self.assertEqual(byteRes.bool(), boolRes)
+
+                    torch.ne(x, b, out=byteRes)
+                    torch.ne(x, b, out=boolRes)
+                    self.assertEqual(byteRes.bool(), boolRes)
+
+                    self.assertEquals(len(warningsCount), 6)
 
             # Bool Tensor
             x = torch.tensor([True, False, True, False], device=device)
