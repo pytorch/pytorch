@@ -22,7 +22,6 @@ TEST_F(RandomTest, GetAndSetRNGState) {
 TEST_F(RandomTest, GetAndSetRNGState_CUDA) {
   auto state = torch::cuda::get_rng_state();
   auto stateCloned = state.clone();
-
   auto before = torch::rand({1000}, torch::Device(torch::kCUDA));
 
   ASSERT_TRUE(torch::equal(state, stateCloned));
