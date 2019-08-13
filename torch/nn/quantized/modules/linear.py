@@ -166,7 +166,7 @@ class Linear(torch.nn.Module):
 
     @torch.jit.export
     def __setstate__(self, state):
-        # type: (Tuple[int, int, torch.Tensor, torch.Tensor, float, int]) -> None
+        # type: (Tuple[int, int, Optional[torch.Tensor], torch.Tensor, float, int]) -> None
         self.in_features = state[0]
         self.out_features = state[1]
         self.bias = state[2]
