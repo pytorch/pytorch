@@ -215,13 +215,16 @@ class ShapePropagator {
   // new type promotion logic. See tensor_attributes.rst for details.
   // This doesn't handle the case of arithmetic ops with Scalar arguments (when
   // `Tensor.getUnsafeTensorImpl()->is_wrapped_nubmer()` would return true)
-  c10::ScalarType getPromotedTypeForArithmeticOp(Node *node) {
+  c10::optional<c10::ScalarType> getPromotedTypeForArithmeticOp(Node *node) {
     c10::ScalarType dimmed = c10::ScalarType::Undefined;
     c10::ScalarType zerodim = c10::ScalarType::Undefined;
     // binary arithmetic ops, more than 2 args is alpha.
     for (size_t i = 0 ; i < 2 ; i++ ) {
       auto dtt = node->inputs()[i]->type()->expect<ProfiledTensorType>();
       auto inputDtype = dtt->scalarType();
+      if (!dtt || !inputDtype) {
+        return c10::nullopt;
+      }
       if (*dtt->dim() > 0) {
         dimmed = unionScalarTypes(dimmed, *inputDtype);
       } else if (!isFloatingType(dimmed)) {
@@ -718,7 +721,7 @@ class ShapePropagator {
   bool PropagateTensorShapeOnNode(Node* node, bool insert_expands) {
     static const auto broadcast =
         [](std::vector<ProfiledTensorTypePtr>& tensor_types,
-           at::ScalarType t) -> ProfiledTensorTypePtr {
+           c10::optional<at::ScalarType> t) -> ProfiledTensorTypePtr {
       if (tensor_types.size() == 1) {
         return tensor_types[0]->dimensionedOnly()->withScalarType(t);
       }
@@ -935,7 +938,11 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<ProfiledTensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, *(*maybe_tensor_types)[0]->scalarType())};
+            auto dtype = (*maybe_tensor_types)[0]->scalarType();
+            if (!dtype) {
+              return {};
+            }
+            return {broadcast(*maybe_tensor_types, *dtype)};
           }
           return {};
         }};
@@ -953,7 +960,7 @@ class ShapePropagator {
                     gatherTensorTypes<ProfiledTensorType>(node)) {
               auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
               auto second_scalar_type = tryScalarTypeFromJitType(node->inputs()[1]->type());
-              if (!second_scalar_type) {
+              if (!first_scalar_type || !second_scalar_type) {
                 return {};
               }
               if (isIntegralType(*first_scalar_type) && isFloatingType(*second_scalar_type) )
@@ -961,13 +968,13 @@ class ShapePropagator {
                 auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
                 return {broadcast(*maybe_tensor_types, default_dtype)};
               }
-              if (c10::ScalarType::Bool == first_scalar_type &&
+              if (c10::ScalarType::Bool == *first_scalar_type &&
                   c10::ScalarType::Bool != *second_scalar_type)
               {
                   auto result_type = c10::promoteTypes(*first_scalar_type, *second_scalar_type);
                   return {broadcast(*maybe_tensor_types, result_type)};
               }
-              return {broadcast(*maybe_tensor_types, *first_scalar_type)};
+              return {broadcast(*maybe_tensor_types, first_scalar_type)};
             }
             return {};
           }};
@@ -994,7 +1001,7 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<ProfiledTensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, *(*maybe_tensor_types)[0]->scalarType())};
+            return {broadcast(*maybe_tensor_types, (*maybe_tensor_types)[0]->scalarType())};
           }
           return {};
         }};
@@ -1008,7 +1015,7 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<ProfiledTensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, *(*maybe_tensor_types)[1]->scalarType())};
+            return {broadcast(*maybe_tensor_types, (*maybe_tensor_types)[1]->scalarType())};
           }
           return {};
         }};
