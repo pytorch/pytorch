@@ -1,6 +1,6 @@
 from collections import namedtuple
 
-CppArgDeclaration = namedtuple('CppArgDeclaration', 'arg_type arg_name')
+CppArgDeclaration = namedtuple('CppArgDeclaration', ['arg_type', 'arg_name'])
 
 TorchNNTestParams = namedtuple(
     'TorchNNTestParams',
