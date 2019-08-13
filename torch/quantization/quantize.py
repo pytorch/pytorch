@@ -238,7 +238,7 @@ def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_D
 
 def prepare_qat(model):
     model = prepare(model)
-    model = convert(model)
+    model = convert(model, DEFAULT_QAT_MODULE_MAPPING)
     return model
 
 def quantize_qat(model, run_fn, run_args):
