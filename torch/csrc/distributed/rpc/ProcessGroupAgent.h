@@ -34,9 +34,11 @@ class ProcessGroupAgent : public RpcAgent {
   // SendWork object, and put the SendWork into a queue. Another thread will
   // consume SendWork from the queue and send it out.
   std::shared_ptr<FutureMessage> send(
-      uint64_t to, Message&& message) override;
+      worker_id_t to, Message&& message) override;
 
-  uint64_t getId(const std::string& workerName) override;
+  worker_id_t getId() override;
+
+  worker_id_t getWorkerId(const std::string& workerName) override;
 
   void join() override;
 

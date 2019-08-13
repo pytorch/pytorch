@@ -7,6 +7,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+using worker_id_t = uint64_t;
 
 // ``RpcAgent`` is the base class for sending and receiving RPC messages. It
 // provides a unified ``send`` API for both request and response messages, and
@@ -23,7 +24,7 @@ class RpcAgent;
 // implementation to be both stateless and non-blocking. For example, t may
 // enqueue the message and the ``RpcAgent`` reference, and use a different set
 // of threads to process them later.
-using RequestCallback = std::function<void(uint64_t, Message&&, RpcAgent&)>;
+using RequestCallback = std::function<void(worker_id_t, Message&&, RpcAgent&)>;
 
 class RpcAgent {
  public:
@@ -35,7 +36,7 @@ class RpcAgent {
   // ``RpcAgent`` base class makes no assumption on the thread-safeness of the
   // ``RequestCallback``. ``RpcAgent`` implementations need to make sure that
   // its threading model conform to ``RequestCallback``'s requirement.
-  RpcAgent(std::string workerName, uint64_t id, RequestCallback cb);
+  RpcAgent(std::string workerName, worker_id_t id, RequestCallback cb);
 
   virtual ~RpcAgent();
 
@@ -47,10 +48,13 @@ class RpcAgent {
   // when the response arrives. For other message types, the Future should be
   // ignored by the caller.
   virtual std::shared_ptr<FutureMessage> send(
-      uint64_t to, Message&& message) = 0;
+      worker_id_t to, Message&& message) = 0;
+
+  // Return the id of this RpcAgent
+  virtual worker_id_t getId() = 0;
 
   // Return the id of the given ``workerName``.
-  virtual uint64_t getId(const std::string& workerName) = 0;
+  virtual worker_id_t getWorkerId(const std::string& workerName) = 0;
 
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
@@ -62,7 +66,7 @@ class RpcAgent {
 
  protected:
   const std::string workerName_;
-  const uint64_t id_;
+  const worker_id_t id_;
   const RequestCallback cb_;
 };
 

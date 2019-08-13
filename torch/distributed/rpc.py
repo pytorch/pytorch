@@ -99,9 +99,12 @@ def init_rpc(name, backend='pg'):
         raise RuntimeError("Unrecognized RPC backend ", backend)
 
 
-def get_id(workerName):
+def get_id(workerName=None):
     _check_initialized()
-    return _agent.get_id(workerName)
+    if workerName:
+        return _agent.get_worker_id(workerName)
+    else:
+        return _agent.get_id()
 
 
 def rpc(to, func, args=None, kwargs=None, async_call=False):
@@ -173,7 +176,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
     if isinstance(to, str):
-        to = _agent.get_id(to)
+        to = _agent.get_worker_id(to)
     fut = invoke_rpc(_agent, to, qualified_name, *args, **kwargs)
 
     if async_call:

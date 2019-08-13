@@ -4,7 +4,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-void processRequestBlocking(uint64_t from, Message&& request, RpcAgent& agent) {
+void processRequestBlocking(
+    worker_id_t from, Message&& request, RpcAgent& agent) {
   switch (request.type()) {
     case MessageType::SCRIPT_CALL: {
       ScriptCall op = ScriptCall::fromMessage(request);

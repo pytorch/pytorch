@@ -52,6 +52,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def("get_id",
                &ProcessGroupAgent::getId,
                py::call_guard<py::gil_scoped_release>())
+          .def("get_worker_id",
+               &ProcessGroupAgent::getWorkerId,
+               py::call_guard<py::gil_scoped_release>())
           .def("join",
                &ProcessGroupAgent::join,
                py::call_guard<py::gil_scoped_release>())

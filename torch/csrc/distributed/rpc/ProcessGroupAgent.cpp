@@ -77,8 +77,12 @@ ProcessGroupAgent::ProcessGroupAgent(
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
-uint64_t ProcessGroupAgent::getId(const std::string& workerName) {
-  auto idIter = nameMap_.find(workerName);
+worker_id_t ProcessGroupAgent::getId() {
+  return id_;
+}
+
+worker_id_t ProcessGroupAgent::getWorkerId(const std::string& workerName) {
+  const auto idIter = nameMap_.find(workerName);
   TORCH_CHECK(idIter != nameMap_.end(),
       "Unknown destination worker ", workerName);
 
@@ -121,8 +125,8 @@ void ProcessGroupAgent::sync() {
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
-    uint64_t to, Message&& message) {
-  TORCH_CHECK(to != (uint64_t)pg_->getRank(),
+    worker_id_t to, Message&& message) {
+  TORCH_CHECK(to != (worker_id_t)pg_->getRank(),
       "ProcessGroupAgent does not support making RPC calls to self.")
 
   auto requestId = nextId();
