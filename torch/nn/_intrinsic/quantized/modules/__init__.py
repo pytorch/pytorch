@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+# @lint-ignore-every PYTHON3COMPATIMPORTS
 
 from .conv_relu import ConvReLU2d
 from .functional_relu import AddReLU
