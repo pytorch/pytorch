@@ -1,10 +1,15 @@
 #pragma once
 
+#include <ATen/ATen.h>
+#include <ATen/core/interned_strings.h>
+#include <ATen/core/ivalue.h>
+#include <ATen/Parallel.h>
+#include <ATen/ThreadLocalDebugInfo.h>
+
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include "ATen/core/interned_strings.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/argument_spec.h"
@@ -42,15 +47,12 @@
 #include "torch/csrc/autograd/variable.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
-#include "ATen/core/ivalue.h"
 #include "torch/csrc/jit/profiling_record.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
 #include "torch/jit.h"
 
 #include "onnx/onnx_pb.h"
-
-#include <ATen/ATen.h>
 
 #include <c10/util/Exception.h>
 
@@ -817,6 +819,68 @@ void testRecordFunction() {
 
   autograd::profiler::popCallback();
   autograd::profiler::popCallback();
+}
+
+class TestThreadLocalDebugInfo
+  : public at::ThreadLocalDebugInfoBase {
+ public:
+  int getModelId() const {
+    return model_id_;
+  }
+
+  void setModelId(int model_id) {
+    model_id_ = model_id;
+  }
+
+  virtual ~TestThreadLocalDebugInfo() {}
+
+ private:
+  int model_id_ = 0;
+};
+
+void testThreadLocalDebugInfo() {
+  auto checkDebugInfo = [](){
+    auto debug_info = at::getThreadLocalDebugInfo();
+    TORCH_CHECK(debug_info != nullptr);
+    auto* test_debug_info = dynamic_cast<TestThreadLocalDebugInfo*>(
+        debug_info.get());
+    TORCH_CHECK(test_debug_info != nullptr);
+    TORCH_CHECK(test_debug_info->getModelId() == 42);
+  };
+
+  TORCH_CHECK(at::getThreadLocalDebugInfo() == nullptr);
+  auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
+  debug_info->setModelId(42);
+  at::setThreadLocalDebugInfo(debug_info);
+
+  checkDebugInfo();
+
+  // check that thread local debug info is propagated through fork calls
+  std::atomic<bool> done {false};
+  at::launch([checkDebugInfo, &done](){
+    checkDebugInfo();
+    done = true;
+  });
+  while (!done) {}
+  checkDebugInfo();
+
+  // check that thread local debug info is propagated through backward pass
+  autograd::profiler::pushCallback(
+      [&checkDebugInfo](const autograd::profiler::RecordFunction& fn) {
+        checkDebugInfo();
+      },
+      [](const autograd::profiler::RecordFunction&) {});
+  {
+    auto t = torch::randn({1, 2, 3}, at::kCPU);
+    t.set_requires_grad(true);
+    auto t2 = t.pow(2);
+    t2.backward();
+  }
+  autograd::profiler::popCallback();
+
+  checkDebugInfo();
+  at::setThreadLocalDebugInfo(nullptr);
+  TORCH_CHECK(at::getThreadLocalDebugInfo() == nullptr);
 }
 
 void testAutogradProfiler() {
