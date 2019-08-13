@@ -479,10 +479,9 @@ binary_linux_build: &binary_linux_build
         if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
           retry yum -q -y install epel-release
           retry yum -q -y install expect moreutils
-          retry yum -q -y install zip openssl
         elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
           retry apt-get update
-          retry apt-get -y install expect moreutils zip openssl
+          retry apt-get -y install expect moreutils
           conda install -y -c eumetsat expect
           conda install -y cmake
         fi
