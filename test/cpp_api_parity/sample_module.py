@@ -50,7 +50,11 @@ struct SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImpl> {
   torch::Tensor buffer;
 };
 
+namespace torch {
+namespace nn{
 TORCH_MODULE(SampleModule);
+}
+}
 """
 
 module_tests = [
@@ -73,9 +77,9 @@ module_tests = [
 ]
 
 module_metadata = dict(
-    python_module_class=SampleModule,
     cpp_forward_arg_declarations=[CppArgDeclaration(arg_type='torch::Tensor', arg_name='x')],
     cpp_source=SAMPLE_MODULE_CPP_SOURCE,
-    cpp_namespace='',
 )
+
+torch.nn.SampleModule = SampleModule
 
