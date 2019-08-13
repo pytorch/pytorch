@@ -916,9 +916,9 @@ endif()
 
 # ---[ NCCL
 if(USE_NCCL)
-  if(NOT (USE_CUDA OR USE_ROCM))
+  if(NOT USE_GPU)
     message(WARNING
-        "Not using CUDA, so disabling NCCL. Suppress this warning with "
+        "Not using CUDA/ROCM, so disabling USE_NCCL. Suppress this warning with "
         "-DUSE_NCCL=OFF.")
     caffe2_update_option(USE_NCCL OFF)
   elseif(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
@@ -971,7 +971,7 @@ if(USE_GLOO)
     # Add explicit dependency since NCCL is built from third_party.
     # Without dependency, make -jN with N>1 can fail if the NCCL build
     # hasn't finished when CUDA targets are linked.
-    if(USE_NCCL AND NOT USE_SYSTEM_NCCL)
+    if(USE_NCCL AND NOT USE_ROCM)
       add_dependencies(gloo_cuda nccl_external)
     endif()
     # Pick the right dependency depending on USE_CUDA
