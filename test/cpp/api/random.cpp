@@ -30,4 +30,7 @@ TEST_F(RandomTest, GetAndSetRNGState_CUDA) {
   torch::cuda::set_rng_state(state);
   auto after = torch::rand({1000}, torch::Device(torch::kCUDA));
   ASSERT_TRUE(torch::equal(before, after));
+
+  ASSERT_THROWS_WITH(torch::cuda::get_rng_state(torch::Device(torch::kCPU)), "only supports CUDA device");
+  ASSERT_THROWS_WITH(torch::cuda::set_rng_state(state, torch::Device(torch::kCPU)), "only supports CUDA device");
 }

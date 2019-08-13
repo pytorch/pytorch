@@ -66,12 +66,14 @@ void set_rng_state(Tensor new_state) {
 namespace cuda {
 
 Tensor get_rng_state(torch::Device device) {
-  // yf225 TODO: assert that device is not CPU. Does this actually work on Python?
+  TORCH_CHECK(device.type() == torch::kCUDA,
+    "torch::cuda::get_rng_state() only supports CUDA device. Please use torch::get_rng_state() for CPU random number generator state.");
   return _get_rng_state(device);
 }
 
 void set_rng_state(Tensor new_state, torch::Device device) {
-  // yf225 TODO: assert that device is not CPU. Does this actually work on Python?
+  TORCH_CHECK(device.type() == torch::kCUDA,
+    "torch::cuda::set_rng_state() only supports CUDA device. Please use torch::set_rng_state() for CPU random number generator state.");
   _set_rng_state(new_state, device);
 }
 
