@@ -102,5 +102,17 @@ TORCH_API void InsertQuantDequantNodesForParam(
     const std::string& param_name,
     const Fn& getQParamFunc,
     at::ScalarType t);
+
+TORCH_API void PrepareQuant(
+    const script::Module& module,
+    const std::string& method_name,
+    const script::Module& observer_module);
+
+TORCH_API script::Module InsertQuantDeQuant(
+    const script::Module& module,
+    const std::string& method_name);
+
+TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
+
 } // namespace jit
 } // namespace torch
