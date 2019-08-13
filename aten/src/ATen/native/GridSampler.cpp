@@ -89,21 +89,8 @@ namespace {
     }
   }
 
-  static inline bool within_bounds_2d(int64_t h, int64_t w, int64_t H, int64_t W) {
-    return h >= 0 && h < H && w >= 0 && w < W;
-  }
-
   static inline bool within_bounds_3d(int64_t d, int64_t h, int64_t w, int64_t D, int64_t H, int64_t W) {
     return d >= 0 && d < D && h >= 0 && h < H && w >= 0 && w < W;
-  }
-
-  template<typename scalar_t>
-  static inline void safe_add_2d(scalar_t *data, int64_t h, int64_t w,
-                                 int64_t sH, int64_t sW, int64_t H, int64_t W,
-                                 scalar_t delta) {
-    if (within_bounds_2d(h, w, H, W)) {
-      data[h * sH + w * sW] += delta;
-    }
   }
 
   template<typename scalar_t>
