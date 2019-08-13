@@ -18,12 +18,7 @@ torch_nn_has_parity = set([
     'Linear',
 ])
 
-
-class TestCppApiParity(common.TestCase):
-    def _test_torch_nn_module(self, test_params):
-        torch_nn_test_methods = ['init', 'forward', 'backward']
-
-        TORCH_NN_MODULE_COMMON_TEST_HARNESS = """\n
+TORCH_NN_MODULE_COMMON_TEST_HARNESS = """\n
 #include <torch/script.h>
 
 const char * const parity_test_error_msg = "Parity test failed";
@@ -58,13 +53,8 @@ void test_module_state_equality(std::shared_ptr<torch::nn::Module> m1, std::shar
   }
 }
 """
-        def test_init(device, python_module_class, python_constructor_args):
-            torch.manual_seed(2)
-            module = python_module_class(*python_constructor_args)
-            module = module.to(device)
-            return [module], device
 
-        TORCH_NN_MODULE_TEST_INIT = Template("""\n
+TORCH_NN_MODULE_TEST_INIT = Template("""\n
 void ${module_variant_name}_test_init(
     const std::string& saved_module_path,
     const std::string& device) {
@@ -79,14 +69,7 @@ void ${module_variant_name}_test_init(
 }
 """)
 
-        def test_forward(device, python_module_class, python_constructor_args, example_inputs):
-            torch.manual_seed(2)
-            module = python_module_class(*python_constructor_args)
-            module = module.to(device)
-            python_output = module(*example_inputs)
-            return [module], device, python_output, example_inputs
-
-        TORCH_NN_MODULE_TEST_FORWARD = Template("""\n
+TORCH_NN_MODULE_TEST_FORWARD = Template("""\n
 void ${module_variant_name}_test_forward(
     const std::string& saved_module_path,
     const std::string& device,
@@ -106,23 +89,7 @@ void ${module_variant_name}_test_forward(
 }
 """)
 
-        def test_backward(device, python_module_class, python_constructor_args, example_inputs):
-            torch.manual_seed(2)
-            module = python_module_class(*python_constructor_args)
-            module = module.to(device)
-            python_output = module(*example_inputs)
-            python_output.sum().backward()
-            # JIT tracing does not save a module's parameters' gradients into ScriptModule.
-            # Instead, we create another module `grad_module` with the same structure as `module`,
-            # and use `grad_module`'s parameters to save `module`'s corresponding parameters'
-            # gradients. Then, we trace both `module` and `grad_module`, serialize them and
-            # pass them into C++ for parity testing.
-            grad_module = copy.deepcopy(module)
-            for param, grad_param in zip(module.parameters(), grad_module.parameters()):
-                grad_param.data = param.grad
-            return [module, grad_module], device, example_inputs
-
-        TORCH_NN_MODULE_TEST_BACKWARD = Template("""\n
+TORCH_NN_MODULE_TEST_BACKWARD = Template("""\n
 void ${module_variant_name}_test_backward(
     const std::string& saved_module_path,
     const std::string& saved_grad_module_path,
@@ -148,6 +115,39 @@ void ${module_variant_name}_test_backward(
   }
 }
 """)
+
+class TestCppApiParity(common.TestCase):
+    def _test_torch_nn_module(self, test_params):
+        torch_nn_test_methods = ['init', 'forward', 'backward']
+
+        def test_init(device, python_module_class, python_constructor_args):
+            torch.manual_seed(2)
+            module = python_module_class(*python_constructor_args)
+            module = module.to(device)
+            return [module], device
+
+        def test_forward(device, python_module_class, python_constructor_args, example_inputs):
+            torch.manual_seed(2)
+            module = python_module_class(*python_constructor_args)
+            module = module.to(device)
+            python_output = module(*example_inputs)
+            return [module], device, python_output, example_inputs
+
+        def test_backward(device, python_module_class, python_constructor_args, example_inputs):
+            torch.manual_seed(2)
+            module = python_module_class(*python_constructor_args)
+            module = module.to(device)
+            python_output = module(*example_inputs)
+            python_output.sum().backward()
+            # JIT tracing does not save a module's parameters' gradients into ScriptModule.
+            # Instead, we create another module `grad_module` with the same structure as `module`,
+            # and use `grad_module`'s parameters to save `module`'s corresponding parameters'
+            # gradients. Then, we trace both `module` and `grad_module`, serialize them and
+            # pass them into C++ for parity testing.
+            grad_module = copy.deepcopy(module)
+            for param, grad_param in zip(module.parameters(), grad_module.parameters()):
+                grad_param.data = param.grad
+            return [module, grad_module], device, example_inputs
 
         # Generate C++ code for this test case
         cpp_source = TORCH_NN_MODULE_COMMON_TEST_HARNESS + test_params['cpp_source']
