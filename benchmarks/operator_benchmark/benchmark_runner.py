@@ -72,7 +72,7 @@ def main():
     parser.add_argument(
         "--warmup_iterations",
         help="Number of iterations to ignore before measuring performance",
-        default=10,
+        default=100,
         type=int
     )
 
