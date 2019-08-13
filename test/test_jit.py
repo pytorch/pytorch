@@ -6586,10 +6586,9 @@ a")
         a = A()
         self.assertEqual(a.with_docstring.__doc__, 'test str')
 
-    @unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-                     'Quantized RNN requires FBGEMM. FBGEMM does not play'
-                     ' well with UBSAN at the moment, so we skip the test if'
-                     ' we are in a UBSAN environment.')
+    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
+                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                     ' with instruction set support avx2 or newer.')
     def test_rnn_cell_quantized(self):
         d_in, d_hid = 2, 2
 
@@ -6681,10 +6680,9 @@ a")
             for out, ref_out in zip(outs, ref_outs):
                 torch.testing.assert_allclose(out, ref_out)
 
-    @unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-                     'Quantized RNN requires FBGEMM. FBGEMM does not play'
-                     ' well with UBSAN at the moment, so we skip the test if'
-                     ' we are in a UBSAN environment.')
+    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
+                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                     ' with instruction set support avx2 or newer.')
     def test_rnn_quantized(self):
         d_in, d_hid = 2, 2
 
@@ -11450,9 +11448,7 @@ a")
 
             traced = torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
 
-    # These tests don't work because UBSAN has a false positive about accessing
-    # out of bounds on a dynamically sized struct internal to asmjit
-    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
+    if torch.fbgemm_is_cpu_supported():
         def test_quantization_modules(self):
             K1, N1 = 2, 2
 
@@ -14872,7 +14868,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     def test_snli(self):
         self._test_snli(self, device='cpu')
 
-    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
+    if torch.fbgemm_is_cpu_supported():
         def test_snli_quantized(self):
             self._test_snli(self, device='cpu', quantized=True)
 
@@ -15014,7 +15010,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     def test_vae(self):
         self._test_vae(self, device='cpu')
 
-    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
+    if torch.fbgemm_is_cpu_supported():
         def test_vae_quantized(self):
             self._test_vae(self, device='cpu', quantized=True)
 
