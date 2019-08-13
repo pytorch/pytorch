@@ -17070,17 +17070,6 @@ class TestList(JitTestCase):
 
         self.checkScript(list_cast, ())
 
-    def test_comprehensions_wrong_expr_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
-            @torch.jit.script
-            def comp(l):
-                # type: (List[int]) -> List[float]
-
-                n = [float(x) for x in l]
-                return n
-
-            comp([1, 2, 3])
-
     def test_mutable_list_append_2(self):
         def test_append_2():
             a = [0, 1]
