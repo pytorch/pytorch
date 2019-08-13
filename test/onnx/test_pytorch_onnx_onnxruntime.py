@@ -39,7 +39,9 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         torch.onnx.export(model, input, f,
                           opset_version=self.opset_version,
                           example_outputs=output,
-                          do_constant_folding=do_constant_folding)
+                          do_constant_folding=do_constant_folding,
+                          keep_initializers_as_inputs=self.keep_initializers_as_inputs)
+
         input, _ = torch.jit._flatten(input)
         output, _ = torch.jit._flatten(output)
 
@@ -68,6 +70,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
 class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
+    keep_initializers_as_inputs = True  # For IR version 3 type export.
 
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True, batch_size=2, use_gpu=True):
         run_model_test(self, model, batch_size=batch_size,
@@ -968,6 +971,22 @@ TestONNXRuntime_opset8 = type(str("TestONNXRuntime_opset8"),
 TestONNXRuntime_opset10 = type(str("TestONNXRuntime_opset10"),
                                (unittest.TestCase,),
                                dict(TestONNXRuntime.__dict__, opset_version=10))
+
+
+# opset 10 tests, with keep_initializers_as_inputs=False for 
+# IR version 4 style export.
+TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
+                                   (unittest.TestCase,),
+                                   dict(TestONNXRuntime.__dict__,
+                                   keep_initializers_as_inputs=False))
+
+
+# opset 10 tests, with keep_initializers_as_inputs=False for 
+# IR version 4 style export.
+TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
+                                    (unittest.TestCase,),
+                                    dict(TestONNXRuntime.__dict__, opset_version=10,
+                                    keep_initializers_as_inputs=False))
 
 
 if __name__ == '__main__':
