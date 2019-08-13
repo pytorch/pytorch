@@ -1,6 +1,6 @@
 #pragma once
 
-#include <TH/THTensor.h>
+#include <TH/TH.h>
 #include <ATen/Context.h>
 #include <torch/types.h>
 
@@ -8,11 +8,6 @@ namespace torch {
 
 /// Sets the global random seed for all newly created CPU and CUDA tensors.
 using at::manual_seed;
-
-// yf225 TODO: implement torch::get_rng_state() and torch::set_rng_state()
-// yf225 TODO: we need to add torch::get_rng_state and torch::set_rng_state to C++ API,
-// following torch/random.py, torch/cuda/random.py and torch/csrc/Generator.cpp
-// yf225 TODO: Question: how to implement for CUDA?
 
 Tensor get_rng_state(torch::Device device = torch::Device(torch::kCPU)) {
   at::Generator* default_generator = torch::globalContext().defaultGenerator(device);
