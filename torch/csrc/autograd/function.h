@@ -161,14 +161,16 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   /**
    * Note: Function Streams
-   * A function's stream is determined by the first element of its input buffer
-   * that has a recorded stream. If all elements are on the same device they
-   * MUST share a stream. If the elements are on different devices they may
-   * not.
+   * A function's stream (for a given device type) is the stream of the first
+   * element of its input buffer on a device of that type.
+   *
+   * If all elements are on the same device they MUST share a stream. If
+   * elements are on different devices (across multiple GPUs, for example)
+   * they may have different streams.
    */
-  c10::optional<c10::Stream> stream() {
+  c10::optional<c10::Stream> stream(const c10::DeviceType device_type) {
     for (const auto& metadata : input_metadata_)
-      if (metadata.stream()) return metadata.stream();
+      if (metadata.device().type() == device_type) return metadata.stream();
 
     return c10::nullopt;
   }

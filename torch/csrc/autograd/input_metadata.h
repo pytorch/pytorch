@@ -1,8 +1,10 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include "c10/util/Optional.h"
+#include "c10/core/Device.h"
+#include "c10/core/DeviceType.h"
 #include "c10/core/Stream.h"
+#include "c10/core/impl/DeviceGuardImplInterface.h"
 
 #include <cstdint>
 
@@ -20,9 +22,7 @@ struct InputMetadata {
 
   InputMetadata(const at::DeprecatedTypeProperties& type, at::IntArrayRef shape, at::Device device)
   : type_{&type}, shape_{shape}, device_{device} {
-    if (device_.type() == c10::DeviceType::CUDA) {
-      stream_ = at::detail::getCUDAHooks().getCurrentCUDAStream();
-    }
+    stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
   }
 
   InputMetadata(const at::Tensor& t)
@@ -45,7 +45,7 @@ struct InputMetadata {
     return device_;
   }
 
-  c10::optional<c10::Stream> stream() const {
+  c10::Stream stream() const {
     return stream_;
   }
 
@@ -57,7 +57,7 @@ private:
   const at::DeprecatedTypeProperties* type_ = nullptr;
   at::DimVector shape_;
   at::Device device_ = at::kCPU;
-  c10::optional<c10::Stream> stream_ = c10::nullopt;
+  c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device_);
 };
 
 }} // torch::autograd

@@ -61,10 +61,6 @@ Generator* CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
 }
 
-c10::Stream CUDAHooks::getCurrentCUDAStream() const {
-  return c10::cuda::getCurrentCUDAStream();
-}
-
 Device CUDAHooks::getDeviceFromPtr(void* data) const {
   return at::cuda::getDeviceFromPtr(data);
 }
