@@ -141,7 +141,6 @@ public:
 
   void register_allocation(AllocInfo &info) {
     char buffer[3] = {0, 0, 0};
-    ssize_t bytes_read;
     send(&info, sizeof(info));
     recv(buffer, 2);
     if (strcmp(buffer, "OK") != 0)

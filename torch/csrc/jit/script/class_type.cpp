@@ -12,10 +12,12 @@ FunctionType::FunctionType(Function* function)
       name_(function->qualname()) {}
 
 Function* ClassType::getMethod(const std::string& name) const {
-  const auto qualname = QualifiedName(*qualified_name_obj(), name);
-  auto cu = compilation_unit_.lock();
-  TORCH_INTERNAL_ASSERT(cu);
-  return cu->find_function(qualname);
+  for (auto method : methods_) {
+    if (name == method->name()) {
+      return method;
+    }
+  }
+  return nullptr;
 }
 
 std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
