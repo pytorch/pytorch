@@ -23,6 +23,7 @@ template <>
 class numeric_limits<c10::BFloat16> {
   public:
     static constexpr bool is_signed = true;
+    static constexpr bool is_integer = false;
     static constexpr bool has_infinity = true;
     static constexpr bool has_quiet_NaN = true;
     static constexpr c10::BFloat16 lowest() {
