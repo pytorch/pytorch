@@ -119,7 +119,7 @@ struct TORCH_API Module {
   ~Module() {}
 
   const c10::QualifiedName& name() const {
-    return *module_object()->type()->name();
+    return *module_object()->type()->qualified_name_obj();
   }
 
   void set_optimized(bool o) {
