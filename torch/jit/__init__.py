@@ -1437,7 +1437,8 @@ if _enabled:
 
             .. note::
 
-                * The first three trace/trace_module calls are equivalent and return ``ScriptModule`` with a single ``forward`` method.
+                * The first three trace/trace_module calls are equivalent and return ``ScriptModule``
+                  with a single ``forward`` method.
                 * The last ``trace_module`` call produces a ``ScriptModule`` with two methods.
 
                 Tracing only records operations done when the given function is run on the given
@@ -1479,7 +1480,8 @@ if _enabled:
             if _compilation_unit is None:
                 _compilation_unit = _python_cu
             if optimize is not None:
-                warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
+                warnings.warn("`optimize` is deprecated and has no effect. Use "
+                              "`with torch.jit.optimized_execution()` instead")
 
             # If we were give a _cpp_module, use that one as the backing cpp
             # module instead of creating a fresh one.
