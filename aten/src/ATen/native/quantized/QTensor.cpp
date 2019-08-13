@@ -176,8 +176,8 @@ bool quantized_equal(const Tensor& self, const Tensor& other) {
   auto self_contig = self.contiguous();
   auto other_contig = other.contiguous();
 
-  void *self_data = self_contig.data_ptr();
-  void *other_data = other_contig.data_ptr();
+  void* self_data = self_contig.data_ptr();
+  void* other_data = other_contig.data_ptr();
   return 0 == memcmp(self_data, other_data, self.numel() * self.element_size());
 }
 
