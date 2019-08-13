@@ -162,14 +162,14 @@ Tensor& empty_out(
 // specialized operators for each datatype.
 // TODO: remove when we have Type support in the IR
 
-#define DEFINE_CAST_OP(_1, n, _2)                                \
+#define DEFINE_CAST_OP(_1, n)                                    \
   Tensor _cast_##n(const Tensor& self, bool non_blocking) {      \
     if (self.scalar_type() == ScalarType::n)                     \
       return self;                                               \
     return self.to(ScalarType::n, non_blocking);                 \
   }
 
-AT_FORALL_SCALAR_TYPES_AND_BOOL(DEFINE_CAST_OP)
+AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
@@ -798,7 +798,7 @@ Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
   return cpu_tensor.to(options.device());
 }
 
-#define TENSOR(T, _1, _2)                                           \
+#define TENSOR(T, _1)                                               \
   Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
     if (options.device().is_cuda()) {                               \
       return tensor_cuda(values, options);                          \
@@ -806,7 +806,7 @@ Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
       return tensor_cpu(values, options);                           \
     }                                                               \
   }
-AT_FORALL_SCALAR_TYPES_AND_BOOL(TENSOR)
+AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, TENSOR)
 #undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
