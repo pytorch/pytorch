@@ -152,12 +152,19 @@ Tensor quantized_clone(const Tensor& self) {
 }
 
 bool quantized_equal(const Tensor& self, const Tensor& other) {
-  if (self.q_scale() != other.q_scale()) {
+  if (!other.is_quantized()) {
     return false;
   }
-  if (self.q_zero_point() != other.q_zero_point()) {
+
+  // Delegate to virtual equalTo method. This will ensure different concrete
+  // Quantizers can have specific logic for comparison
+  auto self_quantizer = get_qtensorimpl(self)->quantizer();
+  auto other_quantizer = get_qtensorimpl(other)->quantizer();
+  if (!self_quantizer->equalTo(other_quantizer)) {
     return false;
   }
+
+  // Sizes and element types must be the same
   if (self.sizes() != other.sizes()) {
     return false;
   }
@@ -165,6 +172,7 @@ bool quantized_equal(const Tensor& self, const Tensor& other) {
     return false;
   }
 
+  // Data must be the same
   auto self_contig = self.contiguous();
   auto other_contig = other.contiguous();
 
