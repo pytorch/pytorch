@@ -7,6 +7,9 @@
 
 #include <random>
 #include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "caffe2/core/common.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
@@ -63,6 +66,19 @@ bool registerGlobalPerfNetObserverCreator(int* /*pargc*/, char*** /*pargv*/) {
 }
 } // namespace
 
+#ifdef _WIN32
+double getTicksPerMillisecond() {
+  static LARGE_INTEGER ticks_per_sec;
+  if (!ticks_per_sec.QuadPart) {
+    QueryPerformanceFrequency(&ticks_per_sec);
+    if (!ticks_per_sec.QuadPart) {
+      return 0.0;
+    }
+  }
+
+  return static_cast<double>(ticks_per_sec.QuadPart) / 1000.0;
+}
+#else
 double getClockTimeMilliseconds(clockid_t clk_id) {
   int result;
   struct timespec tp;
@@ -72,6 +88,51 @@ double getClockTimeMilliseconds(clockid_t clk_id) {
   } else {
     return tp.tv_sec * 1000.0 + tp.tv_nsec / 1000000.0;
   }
+}
+#endif
+
+double getWallClockTimeMilliseconds() {
+#ifdef _WIN32
+  double ticks_per_ms = getTicksPerMillisecond();
+  if (ticks_per_ms) {
+    LARGE_INTEGER ticks;
+    if (QueryPerformanceCounter(&ticks)) {
+      return static_cast<double>(ticks.QuadPart) / ticks_per_ms;
+    }
+  }
+
+  return 0.0;
+#else
+  return getClockTimeMilliseconds(CLOCK_MONOTONIC);
+#endif
+}
+
+double getCpuTimeMilliseconds() {
+#ifdef _WIN32
+  FILETIME creation_time;
+  FILETIME exit_time;
+  FILETIME kernel_time;
+  FILETIME user_time;
+  if (GetProcessTimes(
+      GetCurrentProcess(),
+      &creation_time,
+      &exit_time,
+      &kernel_time,
+      &user_time)) {
+    ULARGE_INTEGER kernel;
+    ULARGE_INTEGER user;
+    kernel.HighPart = kernel_time.dwHighDateTime;
+    kernel.LowPart = kernel_time.dwLowDateTime;
+    user.HighPart = user_time.dwHighDateTime;
+    user.LowPart = user_time.dwLowDateTime;
+    return (static_cast<double>(kernel.QuadPart) +
+        static_cast<double>(user.QuadPart)) / 10000.0;
+  }
+
+  return 0.0;
+#else
+  return getClockTimeMilliseconds(CLOCK_PROCESS_CPUTIME_ID);
+#endif
 }
 
 REGISTER_CAFFE2_EARLY_INIT_FUNCTION(
@@ -119,8 +180,8 @@ void PerfNetObserver::Start() {
     }
   }
 
-  wallMilliseconds_ = getClockTimeMilliseconds(CLOCK_MONOTONIC);
-  cpuMilliseconds_ = getClockTimeMilliseconds(CLOCK_PROCESS_CPUTIME_ID);
+  wallMilliseconds_ = getWallClockTimeMilliseconds();
+  cpuMilliseconds_ = getCpuTimeMilliseconds();
 }
 
 void PerfNetObserver::Stop() {
@@ -130,9 +191,9 @@ void PerfNetObserver::Stop() {
   std::map<std::string, PerformanceInformation> info;
   PerformanceInformation net_perf;
   net_perf.cpuMilliseconds =
-      getClockTimeMilliseconds(CLOCK_PROCESS_CPUTIME_ID) - cpuMilliseconds_;
+      getCpuTimeMilliseconds() - cpuMilliseconds_;
   net_perf.latency =
-      getClockTimeMilliseconds(CLOCK_MONOTONIC) - wallMilliseconds_;
+      getWallClockTimeMilliseconds() - wallMilliseconds_;
 
   if (logType_ == PerfNetObserver::OPERATOR_DELAY) {
     const auto& operators = subject_->GetOperators();
@@ -197,17 +258,17 @@ PerfOperatorObserver::PerfOperatorObserver(
 PerfOperatorObserver::~PerfOperatorObserver() {}
 
 void PerfOperatorObserver::Start() {
-  wallMilliseconds_ = getClockTimeMilliseconds(CLOCK_MONOTONIC);
-  cpuMilliseconds_ = getClockTimeMilliseconds(CLOCK_PROCESS_CPUTIME_ID);
+  wallMilliseconds_ = getWallClockTimeMilliseconds();
+  cpuMilliseconds_ = getCpuTimeMilliseconds();
 }
 
 void PerfOperatorObserver::Stop() {
   /* Time from the start of the net minus the time spent on all other
      operators is the time spent on this operator */
   cpuMilliseconds_ =
-      getClockTimeMilliseconds(CLOCK_PROCESS_CPUTIME_ID) - cpuMilliseconds_;
+      getCpuTimeMilliseconds() - cpuMilliseconds_;
   wallMilliseconds_ =
-      getClockTimeMilliseconds(CLOCK_MONOTONIC) - wallMilliseconds_;
+      getWallClockTimeMilliseconds() - wallMilliseconds_;
   tensor_shapes_ = subject_->InputTensorShapes();
 }
 

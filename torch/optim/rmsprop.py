@@ -88,7 +88,7 @@ class RMSprop(Optimizer):
                 if group['centered']:
                     grad_avg = state['grad_avg']
                     grad_avg.mul_(alpha).add_(1 - alpha, grad)
-                    avg = square_avg.addcmul(-1, grad_avg, grad_avg).sqrt().add_(group['eps'])
+                    avg = square_avg.addcmul(-1, grad_avg, grad_avg).sqrt_().add_(group['eps'])
                 else:
                     avg = square_avg.sqrt().add_(group['eps'])
 
