@@ -2310,7 +2310,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_generic_double_backward(
     const Tensor& grad_input, const Tensor& grad_weight, const Tensor& grad_bias,
     const Tensor& grad_output, const Tensor& input, const Tensor& weight,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
-    bool transposed, IntArrayRef output_padding, int groups) {
+    bool transposed, IntArrayRef output_padding, int groups, std::array<bool, 3> output_mask) {
   AT_ERROR("Backend should either override this function or use thnn implementation");
   return std::tuple<Tensor, Tensor, Tensor>(
           at::empty_like(grad_output),

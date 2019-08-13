@@ -499,7 +499,7 @@ at::Tensor convolution_generic(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
-  AT_ERROR("Backend should either override this function or use thnn implementation");
+  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use globalATenDispatch().registerOp to override this function ");
 }
 
 at::Tensor _convolution(
@@ -537,14 +537,6 @@ at::Tensor _convolution(
   params.cudnn_enabled = cudnn_enabled;
 
   check_shape_forward(input, weight, bias, params, input_is_mkldnn);
-
-  // I have a choice here to move this above or under the views below.
-  // Temporarily put it above as this is the most generic version,
-  // could potentially move to the end of function if XLA doesn't handle
-  // it.
-  if (input.device().type() == c10::DeviceType::MSNPU) {
-    return at::convolution_generic(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
-  }
 
   if (k == 3) {
     params.view1d_as_2d();
@@ -623,7 +615,8 @@ at::Tensor _convolution(
                                       params.padding, params.stride, params.dilation, params.groups);
     }
 #endif
-  } else {
+  } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
+    // TH/native only covers CPU/CUDA implementation.
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
@@ -638,6 +631,9 @@ at::Tensor _convolution(
       }
       output = at::cat(outputs, 1);
     }
+  } else {
+    // Only reach here when input is backend with out-of-source implementation.
+    return at::convolution_generic(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
   }
 
   if (k == 3) {
@@ -718,8 +714,8 @@ at::Tensor _convolution_nogroup(
 std::tuple<Tensor, Tensor, Tensor> convolution_generic_backward(
         const Tensor& grad_output, const Tensor& input, const Tensor& weight, const Tensor& bias,
         IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
-        bool transposed, IntArrayRef output_padding, int64_t groups) {
-  AT_ERROR("Backend should either override this function or use thnn implementation");
+        bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
+  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use globalATenDispatch().registerOp to override this function ");
   return std::tuple<Tensor, Tensor, Tensor>(
           at::empty_like(input),
           at::empty_like(weight),
