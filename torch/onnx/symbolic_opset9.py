@@ -1159,15 +1159,12 @@ for k, v in sym_help.cast_pytorch_to_onnx.items():
 
 @parse_args('v', 'i', 'v', 'v', 'v', 'v')
 def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
-    return g.op("ConstantOfShape", sizes,
-                value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+    return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
 @parse_args('v', 'i', 'v', 'v', 'v', 'v')
 def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
-    shape = g.op("Shape", input)
-    return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+    return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 
 @parse_args('v', 'i', 'v', 'v', 'v')
