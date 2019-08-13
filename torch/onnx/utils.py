@@ -48,7 +48,8 @@ def set_training(model, mode):
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=False, example_outputs=None, strip_doc_string=True, dynamic_axes=None):
+           do_constant_folding=False, example_outputs=None, strip_doc_string=True,
+           dynamic_axes=None, keep_initializers_as_inputs=True):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -61,7 +62,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
-            example_outputs=example_outputs, strip_doc_string=strip_doc_string, dynamic_axes=dynamic_axes)
+            example_outputs=example_outputs, strip_doc_string=strip_doc_string, 
+            dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs)
 
 
 # ONNX can't handle constants that are lists of tensors, which can
@@ -265,7 +267,8 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                             input_names=None, output_names=None, aten=False, export_raw_ir=False,
                             operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
                             example_outputs=None, propagate=False, google_printer=False,
-                            opset_version=None, _retain_param_name=True):
+                            opset_version=None, _retain_param_name=True, 
+                            keep_initializers_as_inputs=True):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -275,14 +278,16 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, propagate, google_printer,
-                                    opset_version, _retain_param_name)
+                                    opset_version, _retain_param_name,
+                                    keep_initializers_as_inputs=keep_initializers_as_inputs)
 
 
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
                              google_printer=False, opset_version=None, _retain_param_name=False,
-                             do_constant_folding=False):
+                             do_constant_folding=False,
+                             keep_initializers_as_inputs=True):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
@@ -295,7 +300,9 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                     example_outputs, propagate, _retain_param_name,
                                                     do_constant_folding)
 
-    return graph._pretty_print_onnx(params_dict, opset_version, False, operator_export_type, google_printer)
+    return graph._pretty_print_onnx(params_dict, opset_version, False, 
+                                    operator_export_type, google_printer,
+                                    keep_initializers_as_inputs)
 
 
 # NOTE: the output `torch_out` will contain the output tensors resulting from
@@ -306,7 +313,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False, do_constant_folding=False,
-            strip_doc_string=True, dynamic_axes=None):
+            strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=True):
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
                          'exporter, please use \'attribute\' module to '
@@ -337,10 +344,12 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
 
         if export_params:
             proto, export_map = graph._export_onnx(
-                params_dict, opset_version, dynamic_axes, defer_weight_export, operator_export_type, strip_doc_string)
+                params_dict, opset_version, dynamic_axes, defer_weight_export,
+                operator_export_type, strip_doc_string, keep_initializers_as_inputs)
         else:
             proto, export_map = graph._export_onnx(
-                {}, opset_version, dynamic_axes, False, operator_export_type, strip_doc_string)
+                {}, opset_version, dynamic_axes, False, operator_export_type,
+                strip_doc_string, keep_initializers_as_inputs)
 
         if export_type == ExportTypes.PROTOBUF_FILE:
             assert(len(export_map) == 0)
