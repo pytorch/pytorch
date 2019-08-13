@@ -793,15 +793,15 @@ Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
 }
 
 template <typename T>
-Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
+Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
   auto cpu_tensor = tensor_cpu(values, options.device(DeviceType::CPU));
   return cpu_tensor.to(options.device());
 }
 
 #define TENSOR(T, _1)                                               \
   Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
-    if (options.device().is_cuda()) {                               \
-      return tensor_cuda(values, options);                          \
+    if (options.device().type() != c10::DeviceType::CPU) {          \
+      return tensor_backend(values, options);                       \
     } else {                                                        \
       return tensor_cpu(values, options);                           \
     }                                                               \
