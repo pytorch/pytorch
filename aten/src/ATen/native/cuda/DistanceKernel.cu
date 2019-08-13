@@ -108,6 +108,26 @@ __device__ static inline scalar_t reduce_agg(scalar_t agg) {
 }
 
 template <typename scalar_t, typename F>
+__device__ static inline scalar_t reduce_agg2(scalar_t agg) {
+
+  __shared__ scalar_t shared[forward_threads];
+
+  int tid = threadIdx.x;
+  shared[tid] = agg;
+  __syncthreads();
+
+  for(int s=1; s < blockDim.x; s *= 2) {
+    if (tid % (2*s) == 0) {
+      sdata[tid] += sdata[tid + s];
+    }
+    __syncthreads();
+  }
+
+  return sdata[tid];
+
+}
+
+template <typename scalar_t, typename F>
 __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t * self, const int64_t n, const int64_t m, const scalar_t p,
                                               const double n2, const double n2_squared_minus_1) {
   const int k = blockIdx.x;
@@ -216,7 +236,7 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   for (; a < end; a += stride, b += stride) {
     F::inc(agg, std::abs(*a - *b), p);
   }
-  agg = reduce_agg<scalar_t, F>(agg);
+  agg = reduce_agg2<scalar_t, F>(agg);
   if (threadIdx.x == 0) {
     result[blockIdx.x] = F::finish(agg, p);
   }
