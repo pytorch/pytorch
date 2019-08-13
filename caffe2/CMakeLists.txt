@@ -680,7 +680,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
 
-
   set(TH_CPU_INCLUDE
     # dense
     aten/src/TH
