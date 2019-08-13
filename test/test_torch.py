@@ -12705,7 +12705,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         # c is identical to a and b:
         c = data[0:sz]
-        c_exp = c.clone()
         a = data[0:sz]
         b = data[0:sz]
         c_exp = a + b
@@ -12714,7 +12713,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         # c, a and b are independent:
         c = data[0:sz]
-        c_exp = c.clone()
         a = data[sz:2 * sz]
         b = data[2 * sz:3 * sz]
         c_exp = a + b
@@ -12723,7 +12721,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         # c and a are identical but b is independent:
         c = data[0:sz]
-        c_exp = c.clone()
         a = data[0:sz]
         b = data[2 * sz:3 * sz]
         c_exp = a + b
@@ -12732,7 +12729,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         # c and b are identical but a is independent:
         c = data[0:sz]
-        c_exp = c.clone()
         a = data[sz:2 * sz]
         b = data[0:sz]
         c_exp = a + b
@@ -12741,7 +12737,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         # a and b have a partial overlap but c is independent:
         c = data[0:sz]
-        c_exp = c.clone()
         a = data[sz:2 * sz]
         b = data[sz + 1:2 * sz + 1]
         c_exp = a + b
@@ -12750,7 +12745,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         # c has partial overlap with a:
         c = data[0:sz]
-        c_exp = c.clone()
         a = data[1:sz + 1]
         b = data[2 * sz:3 * sz]
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -12758,7 +12752,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         # c has partial overlap with b:
         c = data[0:sz]
-        c_exp = c.clone()
         a = data[0:sz]
         b = data[2:sz + 2]
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
