@@ -332,6 +332,8 @@ class _TestTorchMixin(object):
             for i in range(10):
                 for j in range(100):
                     res2[i] += m[i, j] * v[j]
+            print(res1)
+            print(res2)
             self.assertEqual(res1, res2)
 
         # Test 0-strided
@@ -1610,15 +1612,19 @@ class _TestTorchMixin(object):
         self.assertFalse(x.any())
 
     def test_mv(self):
-        m1 = torch.randn(100, 100)
-        v1 = torch.randn(100)
+        def _test_mv(m1, v1):
+            res1 = torch.mv(m1, v1)
+            res2 = res1.clone().zero_()
+            for i, j in iter_indices(m1):
+                res2[i] += m1[i][j] * v1[j]
 
-        res1 = torch.mv(m1, v1)
-        res2 = res1.clone().zero_()
-        for i, j in iter_indices(m1):
-            res2[i] += m1[i][j] * v1[j]
+            self.assertEqual(res1, res2)
 
-        self.assertEqual(res1, res2)
+        _test_mv(torch.randn(100, 100, dtype=torch.float32), torch.randn(100, dtype=torch.float32))
+        _test_mv(torch.randn(100, 100, dtype=torch.float64), torch.randn(100, dtype=torch.float64))
+        _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int32), torch.randint(0, 100, (100, ), dtype=torch.int32))
+        _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int64), torch.randint(0, 100, (100, ), dtype=torch.int64))
+        _test_mv(torch.randn(100, 100, dtype=torch.float32).bfloat16(), torch.randn(100, dtype=torch.float32).bfloat16())
 
     def test_numpy_args(self):
         x1 = torch.randn(10)
@@ -2068,6 +2074,7 @@ class _TestTorchMixin(object):
             _test_mm(n, m, p, torch.float64, lambda x, y: torch.randn(x, y, dtype=torch.float64))
             _test_mm(n, m, p, torch.int32, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int32))
             _test_mm(n, m, p, torch.int64, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int64))
+            _test_mm(n, m, p, torch.bfloat16, lambda x, y: torch.randn(x, y, dtype=torch.float32).bfloat16())
 
     @staticmethod
     def _test_lu(self, cast, pivot=True):
