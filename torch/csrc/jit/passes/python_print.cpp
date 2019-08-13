@@ -242,10 +242,9 @@ struct PythonPrintPass {
   // where N is the index into this table.
   std::vector<at::Tensor>& tensor_table_;
 
-  // Any classes used are written to this table, to be later written out as
-  // dependencies.
+  // Any NamedTypes (classes, functions, NamedTuples) used are written to this
+  // table.
   std::vector<c10::NamedTypePtr>& deps_table_;
-  std::vector<c10::NamedTypePtr> direct_deps_;
   // Helper to avoid duplicating class types
   void registerDependency(const c10::NamedTypePtr& type) {
     if (legacy_module_printing_) {
@@ -261,10 +260,6 @@ struct PythonPrintPass {
     if (std::find(deps_table_.cbegin(), deps_table_.cend(), type) ==
         deps_table_.cend()) {
       deps_table_.push_back(type);
-    }
-    if (std::find(direct_deps_.cbegin(), direct_deps_.cend(), type) ==
-        direct_deps_.cend()) {
-      direct_deps_.push_back(type);
     }
   }
 
@@ -1169,7 +1164,7 @@ struct PythonPrintPass {
   std::string getImports() {
     std::ostringstream ret;
     std::unordered_set<std::string> already_printed;
-    for (const auto& c : direct_deps_) {
+    for (const auto& c : deps_table_) {
       if (already_printed.count(c->name()->prefix())) {
         continue;
       }
@@ -1191,7 +1186,9 @@ struct PythonPrintPass {
         deps_table_(deps_table),
         enforce_importable_(enforce_importable),
         is_method_(is_method),
-        legacy_module_printing_(legacy_module_printing) {}
+        legacy_module_printing_(legacy_module_printing) {
+    TORCH_INTERNAL_ASSERT(deps_table.empty());
+  }
 
   // TODO: we should consider forcing functions to return a single value
   // instead of handling this tuple logic both in the compiler and the printer
@@ -1288,9 +1285,9 @@ struct PythonPrintPass {
       TORCH_INTERNAL_ASSERT(false);
     }
     // remove `classType` from the list of deps
-    direct_deps_.erase(
-        std::remove(direct_deps_.begin(), direct_deps_.end(), type),
-        direct_deps_.end());
+    deps_table_.erase(
+        std::remove(deps_table_.begin(), deps_table_.end(), type),
+        deps_table_.end());
   }
 
   void print(std::ostream& out, SourceRangeRecords& source_ranges_out) {
