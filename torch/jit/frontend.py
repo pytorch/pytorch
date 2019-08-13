@@ -422,7 +422,7 @@ class ExprBuilder(Builder):
         value = build_expr(ctx, expr.value)
         # <sigh> name is just a string, so it's not annotated in any way.
         source = ctx.source
-        pos = find_after(ctx, value.range().end, '.').end  # Start with the dot
+        pos = find_after(ctx, value.range().end - 1, '.').end  # Start with the dot
         while source[pos] in string.whitespace:  # Skip whitespace
             pos += 1
         start_pos = pos
