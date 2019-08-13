@@ -60,6 +60,102 @@ inline TensorOptions Tensor::options() const {
 }
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
+inline int64_t Tensor::bench__one_arg_at() const {
+    static auto table = globalATenDispatch().getOpTable("aten::bench__one_arg_at(Tensor self) -> int");
+    return table->getOp<int64_t (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
+}
+inline int64_t Tensor::bench__one_arg_c10() const {
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bench__one_arg_c10", ""}).value();
+    if (is_variable()) {
+        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &>(op, const_cast<Tensor&>(*this));
+    } else {
+        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
+    }
+}
+inline Tensor Tensor::bench__one_arg_return_at() const {
+    static auto table = globalATenDispatch().getOpTable("aten::bench__one_arg_return_at(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
+}
+inline Tensor Tensor::bench__one_arg_return_c10() const {
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bench__one_arg_return_c10", ""}).value();
+    if (is_variable()) {
+        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &>(op, const_cast<Tensor&>(*this));
+    } else {
+        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &>(const_cast<Tensor&>(*this));
+    }
+}
+inline int64_t Tensor::bench__two_args_at(const Tensor & other) const {
+    static auto table = globalATenDispatch().getOpTable("aten::bench__two_args_at(Tensor self, Tensor other) -> int");
+    return table->getOp<int64_t (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other);
+}
+inline int64_t Tensor::bench__two_args_c10(const Tensor & other) const {
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bench__two_args_c10", ""}).value();
+    if (is_variable()) {
+        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
+    } else {
+        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<int64_t, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+    }
+}
+inline Tensor Tensor::bench__two_args_return_at(const Tensor & other) const {
+    static auto table = globalATenDispatch().getOpTable("aten::bench__two_args_return_at(Tensor self, Tensor other) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other);
+}
+inline Tensor Tensor::bench__two_args_return_c10(const Tensor & other) const {
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bench__two_args_return_c10", ""}).value();
+    if (is_variable()) {
+        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other);
+    } else {
+        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other);
+    }
+}
+inline int64_t Tensor::bench__three_args_at(const Tensor & other, const Tensor & third) const {
+    static auto table = globalATenDispatch().getOpTable("aten::bench__three_args_at(Tensor self, Tensor other, Tensor third) -> int");
+    return table->getOp<int64_t (const Tensor &, const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other, third);
+}
+inline int64_t Tensor::bench__three_args_c10(const Tensor & other, const Tensor & third) const {
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bench__three_args_c10", ""}).value();
+    if (is_variable()) {
+        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other, third);
+    } else {
+        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<int64_t, const Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other, third);
+    }
+}
+inline Tensor Tensor::bench__three_args_return_at(const Tensor & other, const Tensor & third) const {
+    static auto table = globalATenDispatch().getOpTable("aten::bench__three_args_return_at(Tensor self, Tensor other, Tensor third) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other, third);
+}
+inline Tensor Tensor::bench__three_args_return_c10(const Tensor & other, const Tensor & third) const {
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bench__three_args_return_c10", ""}).value();
+    if (is_variable()) {
+        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), other, third);
+    } else {
+        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), other, third);
+    }
+}
+inline Tensor Tensor::bench__add_at(const Tensor & b) const {
+    static auto table = globalATenDispatch().getOpTable("aten::bench__add_at(Tensor self, Tensor b) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), b);
+}
+inline Tensor Tensor::bench__add_c10(const Tensor & b) const {
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bench__add_c10", ""}).value();
+    if (is_variable()) {
+        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, const Tensor &>(op, const_cast<Tensor&>(*this), b);
+    } else {
+        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), b);
+    }
+}
+inline int64_t Tensor::bench__one_arg_dispatch_at() const {
+    static auto table = globalATenDispatch().getOpTable("aten::bench__one_arg_dispatch_at(Tensor self) -> int");
+    return table->getOp<int64_t (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
+}
+inline int64_t Tensor::bench__one_arg_dispatch_c10() const {
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::bench__one_arg_dispatch_c10", ""}).value();
+    if (is_variable()) {
+        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, const Tensor &>(op, const_cast<Tensor&>(*this));
+    } else {
+        return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<int64_t, const Tensor &>(const_cast<Tensor&>(*this));
+    }
+}
 inline void Tensor::backward(const Tensor & gradient, bool keep_graph, bool create_graph) const {
     static auto table = globalATenDispatch().getOpTable("aten::backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> void");
     return table->getOp<void (const Tensor &, const Tensor &, bool, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), gradient, keep_graph, create_graph);
