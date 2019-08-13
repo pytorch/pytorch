@@ -226,7 +226,7 @@ void EncoderBase::EncodeValueInfo(
     onnx::TypeProto* t = v->mutable_type();
     onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
     onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
-    const std::vector<std::int64_t>& sizes =
+    std::vector<std::int64_t> sizes =
         node_type->sizes().concrete_sizes().value();
     for (size_t i = 0; i < sizes.size(); i++) {
       shape->add_dim();
