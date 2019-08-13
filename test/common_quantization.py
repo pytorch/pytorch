@@ -364,6 +364,7 @@ class SubModForFusion(torch.nn.Module):
         x = self.bn(x)
         return x
 
+
 class ModForFusion(torch.nn.Module):
     def __init__(self):
         super(ModForFusion, self).__init__()
@@ -380,3 +381,37 @@ class ModForFusion(torch.nn.Module):
         x = self.sub1(x)
         x = self.sub2(x)
         return x
+
+
+class DummyObserver(torch.nn.Module):
+    def calculate_qparams(self):
+        return 1.0, 0
+
+    def forward(self, x):
+        return x
+
+
+class ModForWrapping(torch.nn.Module):
+    def __init__(self, quantized=False):
+        super(ModForWrapping, self).__init__()
+        self.qconfig = default_qconfig
+        if quantized:
+            self.mycat = nnq.QFunctional()
+            self.myadd = nnq.QFunctional()
+        else:
+            self.mycat = nnq.FloatFunctional()
+            self.myadd = nnq.FloatFunctional()
+            self.mycat.observer = DummyObserver()
+            self.myadd.observer = DummyObserver()
+
+    def forward(self, x):
+        y = self.mycat.cat([x, x, x])
+        z = self.myadd.add(y, y)
+        return z
+
+    @classmethod
+    def from_float(cls, mod):
+        new_mod = cls(quantized=True)
+        new_mod.mycat = new_mod.mycat.from_float(mod.mycat)
+        new_mod.myadd = new_mod.myadd.from_float(mod.myadd)
+        return new_mod
