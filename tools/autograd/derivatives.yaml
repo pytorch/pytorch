@@ -750,7 +750,7 @@
 - name: sinh(Tensor self) -> Tensor
   self: grad * self.cosh()
 
-- name: slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
+- name: slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
   self: slice_backward(grad, self.sizes(), dim, start, end, step)
 
 - name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
@@ -765,7 +765,7 @@
   self: index_select_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]
 
-- name: split(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
+- name: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   self: split_backward(grads, split_size, dim, self.sizes(), self.options())
 
 - name: split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
