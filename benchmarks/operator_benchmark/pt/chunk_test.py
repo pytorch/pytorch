@@ -12,10 +12,10 @@ import torch
 
 # Configs for PT Chunk operator
 chunks_short_configs = op_bench.cross_product_configs(
-    M=[8, 64, 128],
-    N=range(2, 10, 3),
-    chunks=[2, 3],
-    tags=["short"]
+    M=[64, 128],
+    N=[64],
+    chunks=[3],
+    tags=['short']
 )
 
 
@@ -23,7 +23,7 @@ class ChunkBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, chunks): 
         self.input_one = torch.rand(M, N) 
         self.chunks = chunks
-        self.set_module_name("chunks")
+        self.set_module_name('chunks')
 
     def forward(self):
         return torch.chunk(self.input_one, self.chunks)
