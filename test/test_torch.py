@@ -1881,7 +1881,7 @@ class _TestTorchMixin(torchtest):
 
     @staticmethod
     def _test_logical_xor(self, device):
-        for dtype in [torch.bool] + torch.testing.get_all_math_dtypes(device):
+        for dtype in torch.testing.get_all_dtypes():
             expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
             for other_dtype in [torch.bool] + torch.testing.get_all_math_dtypes(device):
                 a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
@@ -1889,11 +1889,7 @@ class _TestTorchMixin(torchtest):
                 # new tensor
                 self.assertEqual(expected_res.bool(), a.logical_xor(b))
                 # out
-                c = torch.empty(0, dtype=torch.bool, device=device)
-                torch.logical_xor(a, b, out=c)
-                self.assertEqual(expected_res.bool(), c)
-                # out is not bool
-                for out_dtype in torch.testing.get_all_math_dtypes(device):
+                for out_dtype in torch.testing.get_all_dtypes():
                     c = torch.empty(0, dtype=out_dtype, device=device)
                     torch.logical_xor(a, b, out=c)
                     self.assertEqual(expected_res.bool(), c.bool())

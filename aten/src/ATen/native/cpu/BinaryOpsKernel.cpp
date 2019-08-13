@@ -81,25 +81,15 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
-template <class self_t, class other_t>
-void logical_xor_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(0), "logical_xor_cpu", [&]() {
-    cpu_kernel(iter,
-      [](self_t a, other_t b) -> scalar_t {
-        return static_cast<scalar_t>((!a) != (!b));
-    });
-  });
-}
-
 void logical_xor_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(1), "logical_xor_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_xor_cpu", [&]() {
     using self_t = scalar_t;
-    AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(2), "logical_xor_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(2), "logical_xor_cpu", [&]() {
       using other_t = scalar_t;
-      AT_DISPATCH_ALL_TYPES_AND(kBool, iter.dtype(0), "logical_xor_cpu", [&]() {
+      AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_xor_cpu", [&]() {
         cpu_kernel(iter,
           [](self_t a, other_t b) -> scalar_t {
-            return static_cast<scalar_t>((!a) != (!b));
+            return static_cast<scalar_t>(bool(a) != bool(b));
         });
       });
     });
