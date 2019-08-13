@@ -1217,7 +1217,7 @@ struct CAFFE2_API StringType : public Type {
 struct FunctionType;
 using FunctionTypePtr = std::shared_ptr<FunctionType>;
 using ::torch::jit::Function;
-struct CAFFE2_API FunctionType : public NamedType {
+struct CAFFE2_API FunctionType : public Type {
   static FunctionTypePtr create(Function* function) {
     return FunctionTypePtr(
         new FunctionType(function)); // NOLINT(modernize-make-shared)
@@ -1241,15 +1241,11 @@ struct CAFFE2_API FunctionType : public NamedType {
   }
   static const TypeKind Kind = TypeKind::FunctionType;
 
-  const c10::optional<c10::QualifiedName>& name() const override {
-    return name_;
-  }
-
  private:
-  FunctionType(Function* function);
+  FunctionType(Function* function)
+      : Type(TypeKind::FunctionType), function_(function) {}
+
   Function* function_;
-  // Holder for the name so we can return a const ref
-  c10::optional<c10::QualifiedName> name_;
 };
 
 struct NoneType;
