@@ -735,7 +735,7 @@ struct PythonPrintPass {
     if (const auto classType = type->cast<ClassType>()) {
       addToClassTable(classType);
     } else if (const auto tupleType = type->cast<TupleType>()) {
-      if (tupleType->qualified_name_obj()) {
+      if (tupleType->name()) {
         addToClassTable(tupleType);
       }
     }
@@ -991,7 +991,7 @@ struct PythonPrintPass {
         if (auto qualname = node->output()
                                 ->type()
                                 ->expect<TupleType>()
-                                ->qualified_name_obj()) {
+                                ->name()) {
           stmt << qualname->qualifiedName();
         }
         printValueList(
@@ -1171,12 +1171,12 @@ struct PythonPrintPass {
     std::ostringstream ret;
     std::unordered_set<std::string> already_printed;
     for (const auto& c : direct_class_deps_) {
-      if (already_printed.count(c->qualifier())) {
+      if (already_printed.count(c->name()->prefix())) {
         continue;
       }
       // TODO we try to print a def for TestLinear in TestLinear.forward
-      ret << "import " << c->qualifier() << "\n";
-      already_printed.insert(c->qualifier());
+      ret << "import " << c->name()->prefix() << "\n";
+      already_printed.insert(c->name()->prefix());
     }
     return ret.str();
   }
@@ -1255,7 +1255,7 @@ struct PythonPrintPass {
       if (legacy_module_printing_) {
         is_module = false;
       }
-      body_ << "class " << classType->basename();
+      body_ << "class " << classType->name()->name();
       if (is_module) {
         body_ << "(Module)";
       }
@@ -1275,7 +1275,7 @@ struct PythonPrintPass {
       }
     } else if (auto tupleType = type->cast<TupleType>()) {
       TORCH_INTERNAL_ASSERT(tupleType->schema());
-      body_ << "class " << tupleType->basename();
+      body_ << "class " << tupleType->name()->name();
       body_ << "(NamedTuple):\n";
       {
         const auto guard = WithIndented();

@@ -656,7 +656,7 @@ class ScriptModuleSerializer2 : public ScriptModuleSerializer {
 
       // For the type, foo.bar.Baz
       const std::string filename = ImportExportHelpers::qualifierToPath(
-          class_type->qualifier(), torch::PROTO_VERSION_NEWEST);
+          class_type->name()->prefix(), torch::PROTO_VERSION_NEWEST);
       // End state: filename is "foo/bar.py", in which we will define a class
       // named Baz
       auto& stream = fileToSrc[filename];
@@ -799,7 +799,7 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
 
     // For the type, foo.bar.Baz
     const std::string filename =
-        ImportExportHelpers::qualifierToPath(class_type->qualifier(), 5);
+        ImportExportHelpers::qualifierToPath(class_type->name()->prefix(), 5);
     // End state: filename is "foo/bar.py", in which we will define a class
     // named Baz
     fileToSrc[filename] << class_src;
@@ -811,7 +811,7 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   for (const auto& item : converted_classes_) {
     const c10::NamedTypePtr& class_type = item.key();
     const std::string filename =
-        ImportExportHelpers::qualifierToPath(class_type->qualifier(), 5);
+        ImportExportHelpers::qualifierToPath(class_type->name()->prefix(), 5);
     if (written_files.count(filename)) {
       continue;
     }

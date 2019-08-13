@@ -4,10 +4,10 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
-#include <ATen/core/TensorOptions.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
@@ -1748,7 +1748,7 @@ inline Tensor Tensor::slice(int64_t dim, int64_t start, int64_t end, int64_t ste
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::slice(const_cast<Tensor&>(*this), dim, start, end, step);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)");
+    static auto table = globalATenDispatch().getOpTable("aten::slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, start, end, step);
 #endif
 }
@@ -1780,7 +1780,7 @@ inline std::vector<Tensor> Tensor::split(int64_t split_size, int64_t dim) const 
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::split(const_cast<Tensor&>(*this), split_size, dim);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::split(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]");
+    static auto table = globalATenDispatch().getOpTable("aten::split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]");
     return table->getOp<std::vector<Tensor> (const Tensor &, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), split_size, dim);
 #endif
 }
