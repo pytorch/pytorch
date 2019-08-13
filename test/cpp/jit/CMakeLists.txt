@@ -5,7 +5,7 @@ add_executable(test_jit
   ${JIT_TEST_ROOT}/test.cpp)
 
 target_link_libraries(test_jit PRIVATE torch gtest)
-target_include_directories(test_api PRIVATE ${TH_CPU_INCLUDE})
+target_include_directories(test_jit PRIVATE ${TH_CPU_INCLUDE})
 target_include_directories(test_jit PRIVATE ${ATen_CPU_INCLUDE})
 target_compile_definitions(test_jit PRIVATE USE_GTEST)
 
