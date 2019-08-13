@@ -30,7 +30,7 @@ from common_methods_invocations import tri_tests_args, run_additional_tri_tests,
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, pytorchtest, \
+    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, torchtest, \
     memory_format_propagation
 from multiprocessing.reduction import ForkingPickler
 
@@ -102,7 +102,7 @@ class BytesIOContext(io.BytesIO):
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
-class _TestTorchMixin(pytorchtest):
+class _TestTorchMixin(torchtest):
     def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True):
         float_types = [torch.double,
                        torch.float]
@@ -1634,6 +1634,29 @@ class _TestTorchMixin(pytorchtest):
         res2 = x1.sum(axis=(0, 2), keepdims=True)
         self.assertEqual(res1, res2)
 
+    def test_addcdiv(self):
+        def _test_addcdiv(a, alpha, b, c):
+            actual = torch.addcdiv(a, alpha, b, c)
+            expected = a + (alpha * b) / c
+            self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
+
+        def non_zero_rand(size, dtype, device):
+            if dtype.is_floating_point:
+                a = torch.rand(size=size, dtype=dtype, device=device)
+            elif dtype == torch.uint8:
+                a = torch.randint(1, 5, size=size, dtype=dtype, device=device)
+            else:
+                a = torch.randint(-5, 5, size=size, dtype=dtype, device=device)
+            return a + (a == 0).type(dtype)
+
+        for device in torch.testing.get_all_device_types():
+            for dtype in torch.testing.get_all_math_dtypes(device):
+                _test_addcdiv(
+                    non_zero_rand((2, 2), dtype=dtype, device=device),
+                    0.5,
+                    non_zero_rand((2, 2), dtype=dtype, device=device),
+                    non_zero_rand((2, 2), dtype=dtype, device=device))
+
     def test_add(self):
         for device in torch.testing.get_all_device_types():
             # [res] torch.add([res,] tensor1, tensor2)
@@ -2648,10 +2671,16 @@ class _TestTorchMixin(pytorchtest):
             aRes = torch.cumsum(a, 0)
             bRes = torch.cumsum(b, 0)
             self.assertEqual(aRes, bRes)
+            self.assertEqual(aRes, torch.tensor([[1, 0, 1],
+                                                 [1, 0, 1],
+                                                 [2, 1, 2]]))
 
             aRes = torch.cumsum(a, 1)
             bRes = torch.cumsum(b, 1)
             self.assertEqual(aRes, bRes)
+            self.assertEqual(aRes, torch.tensor([[1, 1, 2],
+                                                 [0, 0, 0],
+                                                 [1, 2, 3]]))
 
     def test_cumprod(self):
         for d in torch.testing.get_all_device_types():
@@ -2668,10 +2697,16 @@ class _TestTorchMixin(pytorchtest):
             aRes = torch.cumprod(a, 0)
             bRes = torch.cumprod(b, 0)
             self.assertEqual(aRes, bRes)
+            self.assertEqual(aRes, torch.tensor([[1, 0, 1],
+                                                 [0, 0, 0],
+                                                 [0, 0, 0]]))
 
             aRes = torch.cumprod(a, 1)
             bRes = torch.cumprod(b, 1)
             self.assertEqual(aRes, bRes)
+            self.assertEqual(aRes, torch.tensor([[1, 0, 0],
+                                                 [0, 0, 0],
+                                                 [1, 1, 1]]))
 
     def _test_reduce_integer_upcast(self, fn, has_out=True):
         shape = (3, 4, 5)
@@ -2839,7 +2874,7 @@ class _TestTorchMixin(pytorchtest):
                             self.assertEqual(std1, std2)
                             self.assertEqual(mean1, mean2)
 
-    @pytorchtest.test_all_device_types()
+    @torchtest.test_all_device_types()
     def test_var_mean_some_dims(self, device):
         sizes = (4, 6, 7, 5, 3)
         dims = len(sizes)
@@ -2856,7 +2891,7 @@ class _TestTorchMixin(pytorchtest):
                         self.assertEqual(var1, var2)
                         self.assertEqual(mean1, mean2)
 
-    @pytorchtest.test_all_device_types()
+    @torchtest.test_all_device_types()
     def test_zeros_like(self, device):
         expected = torch.zeros((100, 100,), device=device)
 
@@ -3492,7 +3527,7 @@ class _TestTorchMixin(pytorchtest):
             x[1] = True
             self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool))
 
-    @pytorchtest.test_all_device_types()
+    @torchtest.test_all_device_types()
     def test_unfold_all_devices_and_dtypes(self, device):
         for dt in torch.testing.get_all_dtypes():
             if dt == torch.bfloat16:
@@ -12771,6 +12806,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             e2[i + 4][i] = v
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
+
+    def test_function_unwrap_message(self):
+        self.assertRaisesRegex(RuntimeError, ' call to _th_lt',
+                               lambda: torch.ones(1, dtype=torch.float) < torch.ones(1, dtype=torch.double))
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1
