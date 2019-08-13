@@ -25,28 +25,29 @@ class Transformer(Module):
         dropout: the dropout value (default=0.1).
         custom_encoder: custom encoder (default=None).
         custom_decoder: custom decoder (default=None).
+        activation: the activation function of encoder/decoder intermediate layer, relu or gelu (default=relu).
 
     Examples::
         >>> transformer_model = nn.Transformer(src_vocab, tgt_vocab)
-        >>> transformer_model = nn.Transformer(src_vocab, tgt_vocab, nhead=16, num_encoder_layers=12)
+        >>> transformer_model = nn.Transformer(src_vocab, tgt_vocab, nhead=16, num_encoder_layers=12, activation="gelu")
     """
 
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
                  num_decoder_layers=6, dim_feedforward=2048, dropout=0.1,
-                 custom_encoder=None, custom_decoder=None):
+                 activation="relu", custom_encoder=None, custom_decoder=None):
         super(Transformer, self).__init__()
 
         if custom_encoder is not None:
             self.encoder = custom_encoder
         else:
-            encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout)
+            encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
             encoder_norm = LayerNorm(d_model)
             self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         if custom_decoder is not None:
             self.decoder = custom_decoder
         else:
-            decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout)
+            decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
             decoder_norm = LayerNorm(d_model)
             self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
 
