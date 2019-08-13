@@ -535,6 +535,26 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
     return out;
 }
 
+std::string NamedType::python_str() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->qualifiedName();
+}
+
+std::string NamedType::qualname() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->qualifiedName();
+}
+
+std::string NamedType::qualifier() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->prefix();
+}
+
+std::string NamedType::basename() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->name();
+}
+
 std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(
     c10::QualifiedName qualName,
     std::vector<std::string> field_names,
@@ -608,7 +628,7 @@ bool TupleType::operator==(const Type& rhs) const {
 std::string TupleType::str() const {
   std::stringstream ss;
   if (schema_ && name_) {
-    ss << name_->qualifiedName();
+    ss << qualname();
   } else {
     ss << "(";
     for(size_t i = 0; i < elements().size(); ++i) {
@@ -623,7 +643,7 @@ std::string TupleType::str() const {
 std::string TupleType::python_str() const {
   std::stringstream ss;
   if (schema_ && name_) {
-    ss << name_->qualifiedName();
+    ss << qualname();
   } else {
     ss << "Tuple[";
     for(size_t i = 0; i < elements().size(); ++i) {
