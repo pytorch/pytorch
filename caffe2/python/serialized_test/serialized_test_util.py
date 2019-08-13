@@ -213,9 +213,9 @@ class SerializedTestCase(hu.HypothesisTestCase):
                 if not getattr(_output_context, 'disable_gen_coverage', False):
                     coverage.gen_serialized_test_coverage(
                         self.get_output_dir(), TOP_DIR)
-            else:
-                self.compare_test(
-                    inputs, outputs, gradient_operator, atol, rtol)
+                else:
+                    self.compare_test(
+                        inputs, outputs, gradient_operator, atol, rtol)
 
     def assertReferenceChecks(
         self,

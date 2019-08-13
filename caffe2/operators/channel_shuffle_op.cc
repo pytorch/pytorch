@@ -65,27 +65,29 @@ void RunChannelShuffleNHWC(
 } // namespace
 
 template <>
-bool ChannelShuffleOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
+template <typename T>
+bool ChannelShuffleOp<CPUContext>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(0);
 
-  auto* Y = Output(0, X.sizes(), at::dtype<float>());
+  auto* Y = Output(0, X.sizes(), at::dtype<T>());
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int G = group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
   const int K = C / G;
   const int HxW = X.numel() / (N * C);
-  const float* X_data = X.data<float>();
-  float* Y_data = Y->mutable_data<float>();
-  RunChannelShuffleNCHW<float>(N, G, K, HxW, X_data, Y_data, &context_);
+  const T* X_data = X.template data<T>();
+  T* Y_data = Y->template mutable_data<T>();
+  RunChannelShuffleNCHW<T>(N, G, K, HxW, X_data, Y_data, &context_);
   return true;
 } // namespace caffe2
 
 template <>
-bool ChannelShuffleOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
+template <typename T>
+bool ChannelShuffleOp<CPUContext>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(0);
 
-  auto* Y = Output(0, X.sizes(), at::dtype<float>());
+  auto* Y = Output(0, X.sizes(), at::dtype<T>());
   const int ndim = X.dim();
   const int N = X.dim32(0);
   const int C = X.dim32(ndim - 1);
@@ -93,34 +95,36 @@ bool ChannelShuffleOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(C % G, 0);
   const int K = C / G;
   const int HxW = X.numel() / (N * C);
-  const float* X_data = X.data<float>();
-  float* Y_data = Y->mutable_data<float>();
-  RunChannelShuffleNHWC<float>(N, G, K, HxW, X_data, Y_data, &context_);
+  const T* X_data = X.template data<T>();
+  T* Y_data = Y->template mutable_data<T>();
+  RunChannelShuffleNHWC<T>(N, G, K, HxW, X_data, Y_data, &context_);
   return true;
 }
 
 template <>
-bool ChannelShuffleGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
+template <typename T>
+bool ChannelShuffleGradientOp<CPUContext>::RunOnDeviceWithOrderNCHW() {
   const auto& dY = Input(0);
 
-  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
+  auto* dX = Output(0, dY.sizes(), at::dtype<T>());
   const int N = dY.dim32(0);
   const int C = dY.dim32(1);
   const int G = group_;
   CAFFE_ENFORCE_EQ(C % G, 0);
   const int K = C / G;
   const int HxW = dY.numel() / (N * C);
-  const float* dY_data = dY.data<float>();
-  float* dX_data = dX->mutable_data<float>();
-  RunChannelShuffleNCHW<float>(N, K, G, HxW, dY_data, dX_data, &context_);
+  const T* dY_data = dY.template data<T>();
+  T* dX_data = dX->template mutable_data<T>();
+  RunChannelShuffleNCHW<T>(N, K, G, HxW, dY_data, dX_data, &context_);
   return true;
 }
 
 template <>
-bool ChannelShuffleGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
+template <typename T>
+bool ChannelShuffleGradientOp<CPUContext>::RunOnDeviceWithOrderNHWC() {
   const auto& dY = Input(0);
 
-  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
+  auto* dX = Output(0, dY.sizes(), at::dtype<T>());
   const int ndim = dY.dim();
   const int N = dY.dim32(0);
   const int C = dY.dim32(ndim - 1);
@@ -128,16 +132,16 @@ bool ChannelShuffleGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(C % G, 0);
   const int K = C / G;
   const int HxW = dY.numel() / (N * C);
-  const float* dY_data = dY.data<float>();
-  float* dX_data = dX->mutable_data<float>();
-  RunChannelShuffleNHWC<float>(N, K, G, HxW, dY_data, dX_data, &context_);
+  const T* dY_data = dY.template data<T>();
+  T* dX_data = dX->template mutable_data<T>();
+  RunChannelShuffleNHWC<T>(N, K, G, HxW, dY_data, dX_data, &context_);
   return true;
 }
 
-REGISTER_CPU_OPERATOR(ChannelShuffle, ChannelShuffleOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(ChannelShuffle, ChannelShuffleOp<CPUContext>);
 REGISTER_CPU_GRADIENT_OPERATOR(
     ChannelShuffleGradient,
-    ChannelShuffleGradientOp<float, CPUContext>);
+    ChannelShuffleGradientOp<CPUContext>);
 
 OPERATOR_SCHEMA(ChannelShuffle)
     .IdenticalTypeAndShape()

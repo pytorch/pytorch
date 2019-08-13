@@ -7,7 +7,7 @@
 
 namespace caffe2 {
 
-template <typename T, class Context>
+template <class Context>
 class ChannelShuffleOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -22,12 +22,20 @@ class ChannelShuffleOp final : public Operator<Context> {
   }
 
   bool RunOnDevice() override {
-    return order_ == StorageOrder::NCHW ? RunOnDeviceWithOrderNCHW()
-                                        : RunOnDeviceWithOrderNHWC();
+    return DispatchHelper<TensorTypes<float, double, int, int64_t, at::Half>>::
+        call(this, Input(0));
   }
 
+  template <typename T>
+  bool DoRunWithType() {
+    return order_ == StorageOrder::NCHW ? RunOnDeviceWithOrderNCHW<T>()
+                                        : RunOnDeviceWithOrderNHWC<T>();
+  }
+
+  template <typename T>
   bool RunOnDeviceWithOrderNCHW();
 
+  template <typename T>
   bool RunOnDeviceWithOrderNHWC();
 
  private:
@@ -35,7 +43,7 @@ class ChannelShuffleOp final : public Operator<Context> {
   const int group_;
 };
 
-template <typename T, class Context>
+template <class Context>
 class ChannelShuffleGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -50,12 +58,20 @@ class ChannelShuffleGradientOp final : public Operator<Context> {
   }
 
   bool RunOnDevice() override {
-    return order_ == StorageOrder::NCHW ? RunOnDeviceWithOrderNCHW()
-                                        : RunOnDeviceWithOrderNHWC();
+    return DispatchHelper<TensorTypes<float, double, int, int64_t, at::Half>>::
+        call(this, Input(0));
   }
 
+  template <typename T>
+  bool DoRunWithType() {
+    return order_ == StorageOrder::NCHW ? RunOnDeviceWithOrderNCHW<T>()
+                                        : RunOnDeviceWithOrderNHWC<T>();
+  }
+
+  template <typename T>
   bool RunOnDeviceWithOrderNCHW();
 
+  template <typename T>
   bool RunOnDeviceWithOrderNHWC();
 
  private:

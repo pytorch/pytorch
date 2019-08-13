@@ -1,11 +1,11 @@
 # Serialized Test Coverage Report
 This is an automatically generated file. Please see `caffe2/python/serialized_test/README.md` for details. In the case of merge conflicts, please rebase and regenerate.
 ## Summary
-Serialized tests have covered 219/743 (29.4%) operators
+Serialized tests have covered 219/750 (29.2%) operators
 
 ## Not covered operators
 <details>
-<summary>There are 524 not covered operators</summary>
+<summary>There are 531 not covered operators</summary>
 
 * APMeter
 * ATen
@@ -78,6 +78,8 @@ Serialized tests have covered 219/743 (29.4%) operators
 * CopyFromCPUInput
 * CopyGPUToCPU
 * CopyOnDeviceLike
+* CopyRowsToTensor
+* CopyRowsToTensorGradient
 * Cos
 * CosGradient
 * CosineSimilarity
@@ -125,6 +127,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * EnsureCPUOutput
 * EnsureClipped
 * EnsureDense
+* Equalizer
 * Exp
 * ExpandDims
 * FCFp16X
@@ -138,6 +141,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * FP16MomentumSGDUpdate
 * FP32MomentumSGDUpdate
 * FP32ToFP16Fake
+* FP32ToFP16FakeNoSubnormal
 * Fail
 * FbFCPacked
 * FbGemmPack
@@ -154,6 +158,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * FloatToRowwiseQuantized8Bits
 * Fp16FC
 * Fp16FCAcc16
+* Fp16FCAcc32
 * Free
 * Ftrl
 * FunHash
@@ -424,6 +429,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * SortedSegmentWeightedSumGradient
 * SpaceToBatch
 * SparseAdam
+* SparseDropoutWithReplacement
 * SparseFtrl
 * SparseFunHash
 * SparseFunHashGradient
@@ -467,6 +473,7 @@ Serialized tests have covered 219/743 (29.4%) operators
 * SparseUnsortedSegmentSumGradient
 * SparseUnsortedSegmentWeightedSum
 * SparseUnsortedSegmentWeightedSumGradient
+* SpatialBNRelu
 * Sqr
 * Sqrt
 * SquaredL2Distance

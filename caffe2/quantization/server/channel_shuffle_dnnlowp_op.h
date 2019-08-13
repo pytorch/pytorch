@@ -11,7 +11,7 @@ namespace caffe2 {
 namespace {
 
 template <class Context>
-using ChannelShuffleFp32Op = ChannelShuffleOp<float, Context>;
+using ChannelShuffleFp32Op = ChannelShuffleOp<Context>;
 
 } // namespace
 
