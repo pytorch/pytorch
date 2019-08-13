@@ -34,6 +34,9 @@ class FunctionalAPITest(QuantizationTestCase):
         self.assertEqual(qY, qY_hat)
 
 
+@unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
+                 'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                 ' with instruction set support avx2 or newer.')
 class ModuleAPITest(QuantizationTestCase):
     @given(
         batch_size=st.integers(1, 5),
