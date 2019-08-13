@@ -142,7 +142,6 @@ class TestCppApiParity(common.TestCase):
                 grad_param.data = param.grad
             return [module, grad_module], device, example_inputs
 
-        # Generate C++ code for this test case
         def generate_and_compile_cpp_test_functions(test_params):
             cpp_source = TORCH_NN_MODULE_COMMON_TEST_HARNESS + test_params.cpp_source
             functions = []
@@ -256,7 +255,6 @@ torch_nn_modules.module_metadata_map['SampleModule'] = sample_module.module_meta
 
 for test_params_dict in sample_module.module_tests + common_nn.module_tests:
     module_name = test_params_dict.get('module_name')
-    desc = test_params_dict.get('desc', None)
     if module_name in torch_nn_has_parity:
         module_metadata = torch_nn_modules.module_metadata_map[module_name]
         for device in ['cpu', 'cuda']:
