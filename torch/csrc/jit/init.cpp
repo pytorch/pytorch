@@ -113,7 +113,9 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
-      .def("_jit_pass_onnx_cast_all_constant_to_floating", CastAllConstantToFloating)
+      .def(
+          "_jit_pass_onnx_cast_all_constant_to_floating",
+          CastAllConstantToFloating)
       .def(
           "_jit_pass_onnx_constant_fold",
           [](std::shared_ptr<Graph>& graph,
@@ -290,6 +292,11 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_constant_propagation",
           [](std::shared_ptr<Graph>& g) { return ConstantPropagation(g); })
+      .def(
+          "_jit_pass_constant_propagation",
+          [](const script::Module& m) -> script::Module {
+            return ConstantPropagation(m);
+          })
       .def("_jit_pass_erase_shape_information", EraseShapeInformation)
       .def(
           "_jit_pass_create_autodiff_subgraphs",
