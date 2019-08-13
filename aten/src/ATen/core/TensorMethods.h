@@ -4,10 +4,10 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
-#include <ATen/core/TensorOptions.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
@@ -732,7 +732,7 @@ inline int64_t Tensor::size(Dimname dim) const {
 }
 #endif
 inline Tensor Tensor::slice(int64_t dim, int64_t start, int64_t end, int64_t step) const {
-    static auto table = globalATenDispatch().getOpTable("aten::slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)");
+    static auto table = globalATenDispatch().getOpTable("aten::slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, start, end, step);
 }
 inline std::tuple<Tensor,Tensor> Tensor::slogdet() const {
@@ -748,7 +748,7 @@ inline Tensor Tensor::softmax(int64_t dim, c10::optional<ScalarType> dtype) cons
     return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, dtype);
 }
 inline std::vector<Tensor> Tensor::split(int64_t split_size, int64_t dim) const {
-    static auto table = globalATenDispatch().getOpTable("aten::split(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]");
+    static auto table = globalATenDispatch().getOpTable("aten::split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]");
     return table->getOp<std::vector<Tensor> (const Tensor &, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), split_size, dim);
 }
 inline std::vector<Tensor> Tensor::split_with_sizes(IntArrayRef split_sizes, int64_t dim) const {
@@ -1810,10 +1810,10 @@ inline bool is_quantized(Tensor self) {
   return self.is_quantized();
 }
 
-#define DEFINE_CAST(T, name, _)                  \
+#define DEFINE_CAST(T, name)                     \
   template <>                                    \
   inline T* Tensor::data() const {               \
-    TORCH_CHECK(                                    \
+    TORCH_CHECK(                                 \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \
@@ -1826,7 +1826,7 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
 AT_FORALL_QINT_TYPES(DEFINE_CAST)
 #undef DEFINE_CAST
 
-#define DEFINE_ITEM(T, name, _)   \
+#define DEFINE_ITEM(T, name)      \
   template <>                     \
   inline T Tensor::item() const { \
     return item().to##name();     \
