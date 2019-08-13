@@ -22,7 +22,7 @@ def find_cudnn_windows_lib():
     # Override the default search process
     # Fixes https://github.com/pytorch/pytorch/issues/20202
     # The libary selection will be done in these directories one by one
-    # 1. [Package Root]\Lib 
+    # 1. [Package Root]\Lib
     #    That's where our libraries are in, which should be loaded first.
     # 2. Default directories
     #    That is stored in the environment variable `PATH`.

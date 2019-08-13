@@ -186,7 +186,7 @@ class TestTypePromotion(TestCase):
             tensor[torch.abs(tensor) < 0.05] = 5
         return tensor
 
-    # verifies that torch.<op>(first, second) is the same as 
+    # verifies that torch.<op>(first, second) is the same as
     # torch.<op>(first.to(common_dtype), second.to(common_dtype)) in cases where that should hold.
     @float_double_default_dtype
     def test_many_promotions(self, device):

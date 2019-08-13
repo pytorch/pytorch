@@ -294,7 +294,7 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
-        a: the negative slope of the rectifier used after this layer (only 
+        a: the negative slope of the rectifier used after this layer (only
         used with ``'leaky_relu'``)
         mode: either ``'fan_in'`` (default) or ``'fan_out'``. Choosing ``'fan_in'``
             preserves the magnitude of the variance of the weights in the
@@ -329,7 +329,7 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
-        a: the negative slope of the rectifier used after this layer (only 
+        a: the negative slope of the rectifier used after this layer (only
         used with ``'leaky_relu'``)
         mode: either ``'fan_in'`` (default) or ``'fan_out'``. Choosing ``'fan_in'``
             preserves the magnitude of the variance of the weights in the

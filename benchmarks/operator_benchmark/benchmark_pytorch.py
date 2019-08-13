@@ -154,14 +154,14 @@ class PyTorchOperatorTestCase(object):
             for _ in range(num_runs):
                 start_time = time.time()
                 self.output = self.op_bench.forward()
-                if cuda_sync: 
+                if cuda_sync:
                     torch.cuda.synchronize(torch.cuda.current_device())
                 end_time = time.time()
                 self.time_series.append((end_time - start_time) * 1e3)
         else:
             for _ in range(num_runs):
                 self.output = self.op_bench.forward()
-            if cuda_sync: 
+            if cuda_sync:
                 torch.cuda.synchronize(torch.cuda.current_device())
 
     def _output_mean(self):
