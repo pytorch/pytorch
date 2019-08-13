@@ -358,7 +358,7 @@ void testATenNativeBatchNorm() {
 void testCustomFusion() {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = ProfiledTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  auto type = TensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
   auto a = SymbolicVariable::asNewInput(*graph, type);
   auto b = SymbolicVariable::asNewInput(*graph, type);
   auto c = a * b;
@@ -392,7 +392,7 @@ void testCustomFusion() {
 void testCustomFusionNestedBlocks() {
   auto g = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = ProfiledTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  auto type = TensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
 
   // test CustomFusion in nested blocks;
   auto a = SymbolicVariable::asNewInput(*g, type);
@@ -956,7 +956,7 @@ static void checkShape(
     bool prev = true) {
   auto profile = (prev) ? n->inputs().at(0)->node() : n;
   auto tp = profile->output()->type();
-  auto ptp = tp->expect<ProfiledTensorType>();
+  auto ptp = tp->expect<TensorType>();
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
 
@@ -989,7 +989,7 @@ void testInsertAndEliminateRedundantGuards() {
     return n->kind() == prim::Guard;
   });
   ASSERT_NE(guard, nodes.end());
-  ASSERT_EQ(guard->input()->type()->cast<ProfiledTensorType>(), nullptr);
+  ASSERT_EQ(guard->input()->type()->cast<TensorType>(), nullptr);
   checkShape(*guard, {2, 3}, false);
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);

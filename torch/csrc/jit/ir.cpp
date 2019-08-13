@@ -314,7 +314,7 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   c10::optional<at::Device> device = c10::nullopt;
   auto checkValue = [&](const Value* v) {
-    if (ProfiledTensorTypePtr type = v->type()->cast<ProfiledTensorType>()) {
+    if (TensorTypePtr type = v->type()->cast<TensorType>()) {
       if (type->device() && !has_device) {
         has_device = true;
         device = *type->device();
@@ -669,7 +669,7 @@ void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
 }
 
 void Value::inferTypeFrom(const at::Tensor& output) {
-  setType(ProfiledTensorType::create(output));
+  setType(TensorType::create(output));
 }
 
 bool Value::mustBeNone() const {
@@ -1421,7 +1421,7 @@ Node* Graph::createDict(
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
-  result->output()->setType(ProfiledTensorType::fromNumberType(std::move(typ)));
+  result->output()->setType(TensorType::fromNumberType(std::move(typ)));
   return result;
 }
 

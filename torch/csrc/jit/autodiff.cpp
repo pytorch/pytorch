@@ -307,7 +307,7 @@ class GradientHelper {
       // reutrns them as a tuple
       auto sizes = node->namedInput(attr::self)
                        ->type()
-                       ->expect<ProfiledTensorType>()
+                       ->expect<TensorType>()
                        ->sizes()
                        .concrete_sizes()
                        .value();

@@ -625,38 +625,31 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "dim",
           [](Type& t) {
-            auto vshape =
-                ProfiledTensorType::create(t.shared_from_this())->sizes();
+            auto vshape = t.shared_from_this()->expect<TensorType>()->sizes();
             return vshape.size() ? py::cast(*vshape.size())
                                  : py::cast<py::none>(Py_None);
           })
       .def(
           "sizes",
           [](Type& t) {
-            return t.expect<ProfiledTensorType>()
-                ->sizes()
-                .concrete_sizes()
-                .value();
+            return t.expect<TensorType>()->sizes().concrete_sizes().value();
           })
       .def(
           "strides",
           [](Type& t) {
-            return t.expect<ProfiledTensorType>()
-                ->strides()
-                .concrete_sizes()
-                .value();
+            return t.expect<TensorType>()->strides().concrete_sizes().value();
           })
       .def(
           "contiguous",
           [](Type& t) {
             return std::static_pointer_cast<Type>(
-                t.expect<ProfiledTensorType>()->contiguous());
+                t.expect<TensorType>()->contiguous());
           })
       .def(
           "scalarType",
           [](Type& t) {
             auto scalar_type =
-                ProfiledTensorType::create(t.shared_from_this())->scalarType();
+                t.shared_from_this()->expect<TensorType>()->scalarType();
             return (scalar_type) ? toString(*scalar_type) : nullptr;
           })
       .def(

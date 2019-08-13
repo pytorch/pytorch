@@ -34,9 +34,9 @@ void ProfilingRecord::instrumentBlock(Block* block) {
         IValue t;
         pop(stack, t);
         if (t.isTensor()) {
-          auto pttp = ProfiledTensorType::create(t.toTensor());
+          auto pttp = TensorType::create(t.toTensor());
           std::lock_guard<std::mutex> lock(this->mutex_);
-          if (auto type = pno->type()->cast<ProfiledTensorType>()) {
+          if (auto type = pno->type()->cast<TensorType>()) {
             pno->setType(type->merge(pttp));
           } else {
             pno->setType(pttp);
@@ -77,11 +77,10 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   return pr;
 }
 
-ProfiledTensorTypePtr ProfilingRecord::toProfiledTensorTypePtr(
-    const IValue& ival) {
+TensorTypePtr ProfilingRecord::toTensorTypePtr(const IValue& ival) {
   if (ival.isTensor()) {
     auto tensor = ival.toTensor();
-    return ProfiledTensorType::create(tensor);
+    return TensorType::create(tensor);
   }
 
   return {nullptr};
