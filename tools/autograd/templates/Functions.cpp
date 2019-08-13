@@ -788,7 +788,8 @@ Tensor max_pool_double_backward(const Tensor & grad, const Tensor & indices, int
   auto size = indices.sizes().slice(0, indices.dim() - dim).vec();
   size.push_back(-1);
   auto indices_view = indices.view(size);
-  return grad.contiguous().view(size).gather(-1, indices_view).view(indices.sizes());
+  const auto memory_format = indices.suggest_memory_format();
+  return grad.contiguous(memory_format).view(size).gather(-1, indices_view).view(indices.sizes());
 }
 
 Tensor glu_double_backward(const Tensor & grad, const Tensor & grad_output, const Tensor & input, int64_t dim) {
