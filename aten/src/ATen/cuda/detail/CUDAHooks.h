@@ -1,7 +1,6 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include <ATen/Generator.h>
-#include <c10/util/Optional.h>
 
 // TODO: No need to have this whole header, we can just put it all in
 // the cpp file
@@ -15,6 +14,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   Device getDeviceFromPtr(void* data) const override;
   bool isPinnedPtr(void* data) const override;
   Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;
+  c10::Stream getCurrentCUDAStream() const override;
   bool hasCUDA() const override;
   bool hasMAGMA() const override;
   bool hasCuDNN() const override;

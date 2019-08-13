@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/Registry.h>
+#include <c10/core/Stream.h>
 
 #include <cstddef>
 #include <functional>
@@ -65,6 +66,10 @@ struct CAFFE2_API CUDAHooksInterface {
 
   virtual Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual c10::Stream getCurrentCUDAStream() const {
+    TORCH_CHECK(false, "Cannot get CUDA stream without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual Device getDeviceFromPtr(void* data) const {

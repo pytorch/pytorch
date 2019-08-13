@@ -69,6 +69,19 @@ struct MSNPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   DeviceIndex deviceCount() const noexcept override {
     return 1;
   }
+
+  // Event-related functions
+  void record(void** event,
+    const Stream& stream,
+    const DeviceIndex device_index,
+    const EventFlag flag) const override { }
+  void block(
+    void* event,
+    const Stream& stream) const override { }
+  bool queryEvent(void* event) const override { return true; }
+  void destroyEvent(
+    void* event,
+    const DeviceIndex device_index) const noexcept override { }
 };
 
 constexpr DeviceType MSNPUGuardImpl::static_type;

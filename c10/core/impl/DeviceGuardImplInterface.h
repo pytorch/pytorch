@@ -3,6 +3,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
+#include <c10/core/impl/EventInterface.h>
 
 // Just for C10_ANONYMOUS_VARIABLE
 #include <c10/util/Registry.h>
@@ -79,6 +80,45 @@ struct C10_API DeviceGuardImplInterface {
    * to set the current device to match the device of this stream.
    */
   virtual Stream exchangeStream(Stream) const noexcept = 0;
+
+/**
+ * Destroys the given event.
+ */
+  virtual void destroyEvent (
+    void* event,
+    const DeviceIndex device_index) const noexcept = 0;
+
+/**
+ * Marks the event as not recorded and enqueues the event in the
+ * stream's work queue. When the stream processes the event either:
+ *  (1) the event is marked as recorded
+ *  (2) if the event was enqueued again, nothing happens
+ * Put another way, events reflect only the most recent call to record.
+ */
+  virtual void record(
+    void** event,
+    const Stream& stream,
+    const DeviceIndex device_index,
+    const c10::EventFlag flag) const = 0;
+
+/**
+ * Does nothing if the event has not been scheduled to be recorded.
+ * If the event was previously enqueued to be recorded, a command
+ * to wait for the event is inserted in the stream's work queue.
+ * When the stream reaches this command it will stop processing
+ * additional commands until the event is marked as recorded.
+ */
+  virtual void block(
+    void* event,
+    const Stream& stream) const = 0;
+
+/**
+ * Returns true if
+ *  (1) the event has never been scheduled to be recorded
+ *  (2) is marked as recorded.
+ * Returns false otherwise.
+ */
+  virtual bool queryEvent(void* event) const = 0;
 
   /**
    * Get the number of devices.  WARNING: This is REQUIRED to not raise

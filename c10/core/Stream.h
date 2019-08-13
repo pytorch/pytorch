@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/impl/EventInterface.h>
 
 namespace c10 {
 
@@ -91,6 +92,14 @@ public:
   DeviceType device_type() const noexcept { return device_.type(); }
   DeviceIndex device_index() const noexcept { return device_.index(); }
   StreamId id() const noexcept { return id_; }
+
+  // Enqueues a wait instruction in the stream's work queue.
+  // This instruction is a no-op unless the event is marked
+  // for recording. In that case the stream stops processing
+  // until the event is recorded.
+  void wait(const impl::EventInterface& event) const {
+    event.block(*this);
+  }
 
   // The purpose of this function is to more conveniently permit binding
   // of Stream to and from Python.  Without packing, I have to setup a whole

@@ -94,6 +94,92 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     C10_HIP_CHECK(hipGetDeviceCount(&deviceCnt));
     return deviceCnt;
   }
+
+  // Event-related functions
+  void createEvent(
+    hipEvent_t* hip_event,
+    const DeviceIndex device_index,
+    const EventFlag flag) const {
+    // Maps PyTorch's Event::Flag to HIP flag
+    auto hip_flag = hipEventDefault;
+    switch (flag) {
+      case EventFlag::PYTORCH_DEFAULT:
+      case EventFlag::HIP_EVENT_DISABLE_TIMING:
+        hip_flag = hipEventDisableTiming;
+        break;
+      case EventFlag::BACKEND_DEFAULT:
+      case EventFlag::HIP_EVENT_DEFAULT:
+        hip_flag = hipEventDefault;
+        break;
+      default:
+        AT_ERROR("HIP event received unknown flag");
+    }
+
+    C10_HIP_CHECK(hipEventCreate(hip_event, hip_flag));
+  }
+
+  void destroyEvent(
+    void* event,
+    const DeviceIndex device_index) const noexcept override {
+    if (!event) return;
+    auto hip_event = static_cast<hipEvent_t>(event);
+    int orig_device;
+    hipGetDevice(&orig_device);
+    hipSetDevice(device_index);
+    hipEventDestroy(hip_event);
+    hipSetDevice(orig_device);
+  }
+
+  void record(void** event,
+    const Stream& stream,
+    const DeviceIndex device_index,
+    const EventFlag flag) const override {
+    TORCH_CHECK(device_index == -1 || device_index == stream.device_index(),
+      "Event device index ",
+      device_index,
+      " does not match recording stream's device index ",
+      stream.device_index(),
+      ".");
+
+    hipEvent_t cuda_event = static_cast<hipEvent_t>(*event);
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+
+    // Moves to stream's device to record
+    const auto orig_device = getDevice();
+    setDevice(stream.device());
+
+    // Creates the event (lazily)
+    if (!hip_event) createEvent(&hip_event, stream.device_index(), flag);
+    C10_HIP_CHECK(hipEventRecord(hip_event, hip_stream));
+    // Makes the void* point to the (possibly just allocated) HIP event
+    *event = hip_event;
+
+    // Resets device
+    setDevice(orig_device);
+  }
+
+  void block(
+    void* event,
+    const Stream& stream) const override {
+    if (!event) return;
+    hipEvent_t cuda_event = static_cast<hipEvent_t>(event);
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+    const auto orig_device = getDevice();
+    setDevice(stream.device());
+    C10_HIP_CHECK(hipStreamWaitEvent(
+      hip_stream,
+      hip_event,
+      /*flags (must be zero)=*/ 0));
+    setDevice(orig_device);
+  }
+
+  bool queryEvent(void* event) const override {
+    if (!event) return true;
+    hipEvent_t cuda_event = static_cast<hipEvent_t>(event);
+    const hipError_t err = hipEventQuery(hip_event);
+    if (err != hipErrorNotReady) C10_HIP_CHECK(err);
+    return (err == hipSuccess);
+  }
 };
 
 // All of the guards which have HIPGuardImpl burned in need to also have
