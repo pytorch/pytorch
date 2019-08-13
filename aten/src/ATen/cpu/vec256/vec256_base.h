@@ -183,6 +183,13 @@ public:
   Vec256<T> atan() const {
     return map(std::atan);
   }
+  Vec256<T> atan2(const Vec256<T> &exp) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = std::atan2(values[i], exp[i]);
+    }
+    return ret;
+  }
   Vec256<T> erf() const {
     return map(std::erf);
   }
@@ -459,7 +466,7 @@ namespace {
   };
 }
 template<typename dst_t, typename src_t>
-Vec256<dst_t> cast(const Vec256<src_t>& src) {
+inline Vec256<dst_t> cast(const Vec256<src_t>& src) {
   return CastImpl<dst_t, src_t>::apply(src);
 }
 
@@ -527,7 +534,7 @@ interleave2(const Vec256<T>& a, const Vec256<T>& b) {
 }
 
 template <typename src_T, typename dst_T>
-void convert(const src_T *src, dst_T *dst, int64_t n) {
+inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 #ifndef _MSC_VER
 # pragma unroll
 #endif

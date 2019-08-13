@@ -150,11 +150,18 @@ struct PythonResolver : public Resolver {
           qualifiedName,
           TupleType::namedTupleSchemaFromNamesAndTypes(
               qualifiedName, fields, annotations));
-      get_python_cu()->register_class(tt);
+      if (auto type = get_python_cu()->get_type(qualifiedName)) {
+        TORCH_CHECK(
+            type->isSubtypeOf(tt),
+            "Can't to redefine NamedTuple: ",
+            tt->python_str());
+            return type;
+      }
+
+      get_python_cu()->register_type(tt);
       return tt;
     }
-
-    return get_python_cu()->get_class(qualifiedName);
+    return get_python_cu()->get_type(qualifiedName);
   }
 
  private:
@@ -583,13 +590,14 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            std::vector<c10::NamedTypePtr> classes;
+            std::vector<c10::NamedTypePtr> deps;
             SourceRangeRecords source_ranges;
-            PythonPrint(ss, source_ranges, self, tensors, classes, false);
+            PythonPrint(
+                ss, source_ranges, self.type(), tensors, deps, false);
             return ss.str();
           })
       .def("apply", &Module::apply)
-      .def("_copy_into", &Module::copy_into)
+      .def("_clone", &Module::clone)
       .def_property_readonly(
           "name", [](const Module& self) { return self.name().name(); })
       .def(
@@ -642,7 +650,7 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self,
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-            Module module("__main__");
+            Module module("__torch__.PlaceholderModule");
             addFunctionToModule(module, self);
             module.save(filename, _extra_files);
           },
@@ -653,7 +661,7 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
-            Module module("__main__");
+            Module module("__torch__.PlaceholderModule");
             addFunctionToModule(module, self);
             module.save(buf, _extra_files);
             return py::bytes(buf.str());
@@ -672,7 +680,7 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            std::vector<c10::NamedTypePtr> classes;
+            std::vector<c10::NamedTypePtr> deps;
             SourceRangeRecords source_ranges;
             PythonPrint(
                 ss,
@@ -680,7 +688,7 @@ void initJitScriptBindings(PyObject* module) {
                 *self.function_,
                 false,
                 tensors,
-                classes,
+                deps,
                 false);
             return ss.str();
           })
@@ -714,10 +722,10 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
         std::vector<at::Tensor> tensors;
-        std::vector<c10::NamedTypePtr> classes;
+        std::vector<c10::NamedTypePtr> deps;
         SourceRangeRecords source_ranges;
         PythonPrint(
-            ss, source_ranges, self.function(), true, tensors, classes, false);
+            ss, source_ranges, self.function(), true, tensors, deps, false);
         return ss.str();
       });
   m.def(
@@ -776,7 +784,7 @@ void initJitScriptBindings(PyObject* module) {
         auto cu = get_python_cu();
         const auto classname = c10::QualifiedName(qualifiedName);
         auto classType = ClassType::create(classname, cu);
-        cu->register_class(classType);
+        cu->register_type(classType);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.body()) {
@@ -832,20 +840,6 @@ void initJitScriptBindings(PyObject* module) {
             std::move(cu), in, optional_device, extra_files);
       });
 
-  m.def(
-      "_jit_import_functions",
-      [](std::shared_ptr<CompilationUnit> cu,
-         const std::string& src,
-         const std::vector<at::Tensor>& constant_table) {
-        import_functions(
-            c10::nullopt,
-            cu,
-            std::make_shared<Source>(src),
-            constant_table,
-            nullptr,
-            nullptr);
-      });
-
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);
   m.def("_jit_clear_class_registry", []() {
@@ -856,25 +850,9 @@ void initJitScriptBindings(PyObject* module) {
       debugSetAutodiffSubgraphInlining);
   m.def("_propagate_shapes", _propagate_shapes);
   m.def(
-      "_propagate_and_assign_input_shapes", _propagate_and_assign_input_shapes);
+      "_propagate_and_assign_input_shapes",
+      _propagate_and_assign_input_shapes);
   m.def("_assign_output_shapes", _assign_output_shapes);
-  m.def("_jit_python_print", [](const py::object& obj) {
-    std::ostringstream ss;
-    std::vector<at::Tensor> constants;
-    std::vector<c10::NamedTypePtr> classes;
-    SourceRangeRecords source_ranges;
-    if (auto self = as_module(obj)) {
-      PythonPrint(ss, source_ranges, *self, constants, classes, true);
-    } else if (auto self = as_function(obj)) {
-      PythonPrint(
-          ss, source_ranges, *self->function_, false, constants, classes, true);
-    } else {
-      auto& m = py::cast<Method&>(obj);
-      PythonPrint(
-          ss, source_ranges, m.function(), true, constants, classes, true);
-    }
-    return std::make_pair(ss.str(), std::move(constants));
-  });
   m.def(
       "_last_executed_optimized_graph",
       []() { return lastExecutedOptimizedGraph(); },
