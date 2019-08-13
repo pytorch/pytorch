@@ -45,13 +45,7 @@ from functools import wraps
 #                                       method which can be used to retrieve the
 #                                       concrete sizes.
 # @deprecated
-# DimensionedTensorType <: TensorType - Denotes a Tensor for which we know the scalar
-#                             type and number of dimensions, but not the concrete
-#                             shapes. For example, appears as 'Float(*, *)' in
-#                             graph print-outs. Useful accessor methods include
-#                             dim() and scalarType()
-# @deprecated
-# CompleteTensorType <: DimensionedTensorType - Denotes a Tensor for which we know the
+# CompleteTensorType <: TensorType - Denotes a Tensor for which we know the
 #                                               concrete sizes in addition to the information
 #                                               contained in TensorTyper. This adds a sizes()
 #                                               method which can be used to retrieve the
@@ -59,7 +53,7 @@ from functools import wraps
 #
 # In general, we should prefer to rely on the least specific information possible.
 # For example, not relying on tensor properties at all is better than relying
-# on the number of dimensions (DimensionedTensorType) which is better than relying on
+# on the number of dimensions which is better than relying on
 # concrete shapes (CompleteTensorType). Doing so will make the export symbolics
 # more robust to different graphs.
 
@@ -157,10 +151,6 @@ def _scalar(x):
     """Convert a scalar tensor into a Python value."""
     assert x.numel() == 1
     return x.item()
-
-
-def _is_complete_or_dimensioned_tensor_type(tensor):
-    return tensor.type().kind() == "DimensionedTensorType" or tensor.type().kind() == "CompleteTensorType"
 
 
 def _if_scalar_type_as(g, self, tensor):
