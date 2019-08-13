@@ -627,7 +627,9 @@ void initPythonIRBindings(PyObject* module_) {
             s << t;
             return s.str();
           })
-      .def("kind", [](const Type& t) { return typeKindToString(t.kind()); })
+      .def("kind", [](const Type& t) { 
+        return typeKindToString(t.kind()); 
+      })
       .def(
           "dim",
           [](Type& t) {
