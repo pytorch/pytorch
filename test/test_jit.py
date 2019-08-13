@@ -2144,8 +2144,9 @@ graph(%Ra, %Rb):
         f(t, "hi")
         graph = f.graph_for(t, "hi")
         input_types = list(next(graph.inputs()).type().elements())
-        self.assertEqual(input_types[0].kind(), 'DimensionedTensorType')
-        self.assertEqual(input_types[1].elements()[1].kind(), 'DimensionedTensorType')
+        w = input_types[0]
+        self.assertEqual(input_types[0].kind(), 'ProfiledTensorType')
+        self.assertEqual(input_types[1].elements()[1].kind(), 'ProfiledTensorType')
 
     def test_constant_prop_simple(self):
         @torch.jit.script
@@ -5160,7 +5161,7 @@ a")
         res = fn(t, 1)
         self.assertEqual(res, 0)
         g = torch.jit.last_executed_optimized_graph()
-        self.assertEqual(next(g.inputs()).type().kind(), 'DimensionedTensorType')
+        self.assertEqual(next(g.inputs()).type().kind(), 'ProfiledTensorType')
 
         @torch.jit.script
         def fn(x, y, b):
@@ -8199,9 +8200,9 @@ a")
 
         graph = _propagate_shapes(tensor_unifying.graph, (a, b, c), False)
         if_outputs = list(graph.findNode("prim::If").outputs())
-        self.assertTrue(if_outputs[0].type().str() == "Float(*, *)")
-        self.assertTrue(if_outputs[1].type().str() == "Tensor")
-        self.assertTrue(if_outputs[2].type().str() == "Tensor")
+        self.assertTrue(if_outputs[0].type().str() == "Float(2, 2)")
+        self.assertTrue(if_outputs[1].type().str() == "Tensor(2, *)")
+        self.assertTrue(if_outputs[2].type().str() == "Tensor(2, 4)")
 
     def test_list_unify(self):
         # allowing a unififed int?[] would cause a runtime error b/c
@@ -12903,7 +12904,7 @@ a")
         test_shape_prop(torch.tensor(0.5))
         graph = test_shape_prop.graph_for(torch.tensor(0.5))
         # Shape analysis of z should propagate through if statement
-        FileCheck().check("Long(*, *)").check("prim::If").run(graph)
+        FileCheck().check("Long(2, 2)").check("prim::If").run(graph)
 
     def test_partial_returns(self):
         with self.assertRaisesRegex(RuntimeError, "does not return along all"):
