@@ -5,11 +5,11 @@ from cpp_api_parity import CppArgDeclaration
 `SampleModule` is used by `test_cpp_api_parity.py` to test that Python / C++ API
 parity test harness works for `torch.nn.Module` subclasses.
 
-When `SampleModule.has_parity` is true, behavior of `reset_parameters` and `forward`
-is the same as the C++ equivalent.
+When `SampleModule.has_parity` is true, behavior of `reset_parameters` / `forward` /
+`backward` is the same as the C++ equivalent.
 
-When `SampleModule.has_parity` is false, behavior of `reset_parameters` and `forward`
-is different from the C++ equivalent.
+When `SampleModule.has_parity` is false, behavior of `reset_parameters` / `forward` /
+`backward` is different from the C++ equivalent.
 '''
 
 class SampleModule(torch.nn.Module):
