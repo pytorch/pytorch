@@ -155,7 +155,7 @@ auto reg_str_ops_2 =
 
                   return splits;
                 }))
-        .op("aten::slice(str string, int start, int end=9223372036854775807, int step=1) -> str",
+        .op("aten::slice.str(str string, int start, int end=9223372036854775807, int step=1) -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
                 .catchAllKernel<decltype(stringSlice), &stringSlice>())
@@ -649,7 +649,7 @@ auto reg_str_ops_2 =
                       pre_partition, separator, post_partition);
                 }))
 
-        .op("aten::split(str self, str separator=' ', int max=-1) -> str[]",
+        .op("aten::split.str(str self, str separator=' ', int max=-1) -> str[]",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
                 .catchAllKernel(

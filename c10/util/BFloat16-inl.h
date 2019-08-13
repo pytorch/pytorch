@@ -34,11 +34,7 @@ inline C10_HOST_DEVICE BFloat16 operator/(const BFloat16& a, const BFloat16& b) 
 }
 
 inline C10_HOST_DEVICE BFloat16 operator-(const BFloat16& a) {
-#if __CUDA_ARCH__ >= 530 || defined(__HIP_DEVICE_COMPILE__)
-  return __hneg(a);
-#else
   return -static_cast<float>(a);
-#endif
 }
 
 inline C10_HOST_DEVICE BFloat16& operator+=(BFloat16& a, const BFloat16& b) {
@@ -206,6 +202,7 @@ template <>
 class numeric_limits<c10::BFloat16> {
   public:
     static constexpr bool is_signed = true;
+    static constexpr bool is_integer = false;
     static constexpr bool has_infinity = true;
     static constexpr bool has_quiet_NaN = true;
     static constexpr c10::BFloat16 lowest() {

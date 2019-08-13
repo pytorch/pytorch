@@ -265,10 +265,11 @@ class _TestTorchMixin(object):
 
     def test_ger(self):
         types = {
-            'torch.DoubleTensor': 1e-8,
-            'torch.FloatTensor': 1e-4,
+            'torch.DoubleTensor',
+            'torch.FloatTensor',
+            'torch.BFloat16Tensor',
         }
-        for tname, _prec in types.items():
+        for tname in types:
             v1 = torch.randn(100).type(tname)
             v2 = torch.randn(100).type(tname)
             res1 = torch.ger(v1, v2)
@@ -279,7 +280,7 @@ class _TestTorchMixin(object):
             self.assertEqual(res1, res2)
 
         # Test 0-strided
-        for tname, _prec in types.items():
+        for tname in types:
             v1 = torch.randn(1).type(tname).expand(100)
             v2 = torch.randn(100).type(tname)
             res1 = torch.ger(v1, v2)
@@ -291,8 +292,9 @@ class _TestTorchMixin(object):
 
     def test_addr(self):
         types = {
-            'torch.DoubleTensor': 1e-8,
-            'torch.FloatTensor': 1e-4,
+            'torch.DoubleTensor',
+            'torch.FloatTensor',
+            'torch.BFloat16Tensor',
         }
 
         def run_test(m, v1, v2, m_transform=lambda x: x):
@@ -304,7 +306,7 @@ class _TestTorchMixin(object):
                     ref[i, j] += v1[i] * v2[j]
             self.assertEqual(m, ref)
 
-        for tname, _prec in types.items():
+        for tname in types:
             for h, w in [(100, 110), (1, 20), (200, 2)]:
                 m = torch.randn(h, w).type(tname)
                 v1 = torch.randn(h).type(tname)
@@ -321,6 +323,7 @@ class _TestTorchMixin(object):
         types = {
             'torch.DoubleTensor': 1e-8,
             'torch.FloatTensor': 1e-4,
+            'torch.BFloat16Tensor': 0.4,
         }
         for tname, _prec in types.items():
             t = torch.randn(10).type(tname)
@@ -332,9 +335,8 @@ class _TestTorchMixin(object):
             for i in range(10):
                 for j in range(100):
                     res2[i] += m[i, j] * v[j]
-            print(res1)
-            print(res2)
-            self.assertEqual(res1, res2)
+
+            self.assertEqual(res1, res2, _prec)
 
         # Test 0-strided
         for tname, _prec in types.items():
@@ -347,12 +349,14 @@ class _TestTorchMixin(object):
             for i in range(10):
                 for j in range(100):
                     res2[i] += m[i, j] * v[j]
-            self.assertEqual(res1, res2)
+
+            self.assertEqual(res1, res2, _prec)
 
     def test_addmm(self):
         types = {
             'torch.DoubleTensor': 1e-8,
             'torch.FloatTensor': 1e-4,
+            'torch.BFloat16Tensor': 0.3,
         }
         for tname, _prec in types.items():
             M = torch.randn(10, 25).type(tname)
@@ -365,7 +369,7 @@ class _TestTorchMixin(object):
                 for j in range(25):
                     for k in range(50):
                         res2[i, j] += m1[i, k] * m2[k, j]
-            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res2, _prec)
 
         # Test 0-strided
         for tname, _prec in types.items():
@@ -379,7 +383,7 @@ class _TestTorchMixin(object):
                 for j in range(25):
                     for k in range(50):
                         res2[i, j] += m1[i, k] * m2[k, j]
-            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res2, _prec)
 
     def test_logical_any(self):
         for device in torch.testing.get_all_device_types():
@@ -1900,6 +1904,7 @@ class _TestTorchMixin(object):
                 a1 = torch.tensor([0.1, 0.1], dtype=torch.bfloat16, device=device)
                 a2 = torch.tensor([1.1, 0.1], dtype=torch.bfloat16, device=device)
                 self.assertEqual(a1 * a2, torch.tensor([0.11, 0.01], dtype=torch.bfloat16, device=device), 0.01)
+                self.assertEqual(a1.mul(a2), a1 * a2)
 
     def test_div(self):
         m1 = torch.randn(10, 10)
@@ -1913,6 +1918,7 @@ class _TestTorchMixin(object):
         a1 = torch.tensor([4.2, 6.2], dtype=torch.bfloat16)
         a2 = torch.tensor([2., 2.], dtype=torch.bfloat16)
         self.assertEqual(a1 / a2, torch.tensor([2.1, 3.1], dtype=torch.bfloat16), 0.01)
+        self.assertEqual(a1.div(a2), a1 / a2)
 
     def test_floordiv(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
@@ -6965,7 +6971,7 @@ class _TestTorchMixin(object):
                 x = torch.tensor([1, 2, 3, 4], device=device, dtype=dt)
                 b = torch.tensor([2], device=device, dtype=dt)
 
-                if dt == torch.half:
+                if dt == torch.half and device == 'cpu':
                     self.assertRaises(RuntimeError, lambda: x.lt(2))
                     continue
 
@@ -8495,6 +8501,8 @@ class _TestTorchMixin(object):
                     with self.assertRaises(RuntimeError):
                         dest.masked_scatter_(mask, src)
         self.assertEqual(len(w), 25)
+        for wi in w:
+            self.assertTrue(str(wi.message) == 'masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated,please use a mask with dtype torch.bool instead.')
 
     def test_masked_scatter_bool_tensor(self):
         for device in torch.testing.get_all_device_types():
@@ -8523,7 +8531,7 @@ class _TestTorchMixin(object):
                             self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                             continue
 
-                        if dt == torch.half:
+                        if dt == torch.half and device == 'cpu':
                             self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
                             continue
 
@@ -8538,6 +8546,7 @@ class _TestTorchMixin(object):
                         torch.masked_select(src, mask, out=dst3)
                         self.assertEqual(dst3, torch.Tensor(dst2), 0)
             self.assertEqual(len(w), 1)
+            self.assertTrue(str(w[0].message) == 'masked_select received a mask with dtype torch.uint8, this behavior is now deprecated,please use a mask with dtype torch.bool instead.')
 
     def test_masked_fill(self):
         with warnings.catch_warnings(record=True) as w:
@@ -8565,7 +8574,9 @@ class _TestTorchMixin(object):
                     dst.masked_fill_((dst > 0).to(dtype), val)
                     dst2.masked_fill_((dst2 > 0).to(dtype), val)
                     self.assertEqual(dst, dst2, 0)
-            self.assertEquals(len(w), 28)
+            self.assertEqual(len(w), 28)
+            for wi in w:
+                self.assertTrue(str(wi.message) == 'masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated,please use a mask with dtype torch.bool instead.')
 
     def test_masked_fill_bool_tensor(self):
         for device in torch.testing.get_all_device_types():
@@ -12752,6 +12763,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             e2[i + 4][i] = v
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
+
+    def test_function_unwrap_message(self):
+        self.assertRaisesRegex(RuntimeError, ' call to _th_lt',
+                               lambda: torch.ones(1, dtype=torch.float) < torch.ones(1, dtype=torch.double))
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1
