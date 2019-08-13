@@ -326,8 +326,7 @@ class TestDynamicQuantizedLinear(TestCase):
         output_channels=st.integers(4, 8),
         use_bias=st.booleans(),
         use_relu=st.booleans(),
-        use_multi_dim_input=st.booleans()),
-    )
+        use_multi_dim_input=st.booleans())
     def test_qlinear(self, batch_size, input_channels, output_channels,
                      use_bias, use_relu, use_multi_dim_input):
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
