@@ -592,7 +592,7 @@ void initJitScriptBindings(PyObject* module) {
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> classes;
             SourceRangeRecords source_ranges;
-            PythonPrint(ss, source_ranges, self, tensors, classes, false);
+            PythonPrint(ss, source_ranges, self.type(), tensors, classes, false);
             return ss.str();
           })
       .def("apply", &Module::apply)
@@ -649,7 +649,7 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self,
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-            Module module("__main__");
+            Module module("__torch__.PlaceholderModule");
             addFunctionToModule(module, self);
             module.save(filename, _extra_files);
           },
@@ -660,7 +660,7 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
-            Module module("__main__");
+            Module module("__torch__.PlaceholderModule");
             addFunctionToModule(module, self);
             module.save(buf, _extra_files);
             return py::bytes(buf.str());
@@ -871,7 +871,7 @@ void initJitScriptBindings(PyObject* module) {
     std::vector<c10::NamedTypePtr> classes;
     SourceRangeRecords source_ranges;
     if (auto self = as_module(obj)) {
-      PythonPrint(ss, source_ranges, *self, constants, classes, true);
+      PythonPrint(ss, source_ranges, self->type(), constants, classes, true);
     } else if (auto self = as_function(obj)) {
       PythonPrint(
           ss, source_ranges, *self->function_, false, constants, classes, true);
