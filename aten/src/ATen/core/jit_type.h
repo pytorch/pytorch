@@ -952,12 +952,7 @@ struct CAFFE2_API NamedType : public Type {
   NamedType(TypeKind tk, c10::optional<c10::QualifiedName> qualifiedName)
       : Type(tk), name_(std::move(qualifiedName)) {}
 
-  std::string python_str() const;
-  std::string qualname() const;
-  std::string qualifier() const;
-  std::string basename() const;
-
-  const c10::optional<QualifiedName>& qualified_name_obj() const {
+  const c10::optional<QualifiedName>& name() const {
     return name_;
   }
 
@@ -1518,17 +1513,17 @@ struct CAFFE2_API ClassType : public NamedType {
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
-      return qualname() == user_rhs->qualname();
+      return name()->qualifiedName() == user_rhs->name()->qualifiedName();
     }
     return false;
   }
 
   std::string str() const override {
-    return std::string("ClassType<") + basename() + ">";
+    return std::string("ClassType<") + name()->name() + ">";
   }
 
   std::string python_str() const override {
-    return qualname();
+    return name()->qualifiedName();
   }
 
   TypePtr getAttribute(const std::string& name) const {
