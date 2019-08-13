@@ -225,7 +225,6 @@ def quantize_dynamic(model, qconfig_dict=None, mapping=DEFAULT_DYNAMIC_MODULE_MA
     """
     model.eval()
     propagate_qconfig(model, qconfig_dict)
-    # add_observer(model)
     convert(model, mapping)
     return model
 

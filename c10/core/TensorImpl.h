@@ -5,9 +5,12 @@
 #include <numeric>
 
 #include <c10/core/Backend.h>
+#include <c10/core/DefaultDtype.h>
+#include <c10/core/Device.h>
+#include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
-#include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeId.h>
 #include <c10/core/TensorTypeIdRegistration.h>
 #include <c10/core/CopyBytes.h>
