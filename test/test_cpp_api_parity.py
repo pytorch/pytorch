@@ -113,8 +113,8 @@ void ${module_variant_name}_test_forward(
             python_output = module(*example_inputs)
             python_output.sum().backward()
             # JIT tracing does not save a module's parameters' gradients into ScriptModule.
-            # Instead, we create another module `grad_module` with the same structure, and
-            # use `grad_module`'s parameters to save the original module `module`'s parameters'
+            # Instead, we create another module `grad_module` with the same structure as `module`,
+            # and use `grad_module`'s parameters to save `module`'s corresponding parameters'
             # gradients. Then, we trace both `module` and `grad_module`, serialize them and
             # pass them into C++ for parity testing.
             grad_module = copy.deepcopy(module)
