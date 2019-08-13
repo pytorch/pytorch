@@ -2,6 +2,8 @@
 
 #include <torch/torch.h>
 
+#include <test/cpp/api/support.h>
+
 struct RandomTest : torch::test::SeedingFixture {};
 
 TEST_F(RandomTest, GetAndSetRNGState) {

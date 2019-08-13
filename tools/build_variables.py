@@ -193,6 +193,7 @@ def add_torch_libs():
         "torch/csrc/api/src/optim/rmsprop.cpp",
         "torch/csrc/api/src/optim/serialize.cpp",
         "torch/csrc/api/src/optim/sgd.cpp",
+        "torch/csrc/api/src/random.cpp",
         "torch/csrc/api/src/serialize/input-archive.cpp",
         "torch/csrc/api/src/serialize/output-archive.cpp",
     ]
