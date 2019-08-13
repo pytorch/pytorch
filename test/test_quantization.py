@@ -6,18 +6,21 @@ import torch.nn.quantized as nnq
 from torch.quantization import \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules
 
-from common_utils import run_tests, TEST_WITH_UBSAN
+from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     SkipQuantModel, QuantStubModel, \
-    ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, test_only_eval_fn, test_only_train_fn
+    ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
+    ModForWrapping, \
+    test_only_eval_fn, test_only_train_fn
 
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
 
-@unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-                 'Quantization requires FBGEMM. FBGEMM does not play'
-                 ' well with UBSAN at the moment, so we skip the test if'
-                 ' we are in a UBSAN environment.')
+@unittest.skipIf(
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
+)
 class PostTrainingQuantTest(QuantizationTestCase):
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
@@ -240,10 +243,11 @@ class PostTrainingQuantTest(QuantizationTestCase):
         model = quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
-@unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-                 'Quantization requires FBGEMM. FBGEMM does not play'
-                 ' well with UBSAN at the moment, so we skip the test if'
-                 ' we are in a UBSAN environment.')
+@unittest.skipIf(
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
+)
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
         model = ManualLinearQATModel()
@@ -297,6 +301,33 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         model = ManualConvLinearQATModel()
         model = quantize_qat(model, test_only_train_fn, self.img_data)
         checkQuantized(model)
+
+
+class ScriptabilityTest(QuantizationTestCase):
+    def setUp(self):
+        self.model_under_test = ModForWrapping(quantized=False)
+        self.qmodel_under_test = ModForWrapping(quantized=True)
+        self.qmodel_under_test = self.qmodel_under_test.from_float(
+            self.model_under_test)
+        self.x = torch.rand(10)
+        self.qx = torch.quantize_linear(self.x.to(torch.float), scale=1.0,
+                                        zero_point=0, dtype=torch.qint32)
+
+    def test_quantized(self):
+        qtraced_model = torch.jit.trace(self.qmodel_under_test, self.qx,
+                                        check_trace=False)
+        self.assertEqual(qtraced_model(self.qx), self.qmodel_under_test(self.qx))
+
+        qscripted_model = torch.jit.script(self.qmodel_under_test)
+        self.assertEqual(qscripted_model(self.qx), self.qmodel_under_test(self.qx))
+
+    def test_float(self):
+        traced_model = torch.jit.trace(self.model_under_test, self.x,
+                                       check_trace=False)
+        self.assertEqual(traced_model(self.x), self.model_under_test(self.x))
+
+        scripted_model = torch.jit.script(self.model_under_test)
+        self.assertEqual(scripted_model(self.x), self.model_under_test(self.x))
 
 
 class FusionTest(QuantizationTestCase):
