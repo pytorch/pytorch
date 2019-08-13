@@ -589,10 +589,9 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            std::vector<c10::NamedTypePtr> deps;
+            std::vector<c10::NamedTypePtr> classes;
             SourceRangeRecords source_ranges;
-            PythonPrint(
-                ss, source_ranges, self.type(), tensors, deps, false);
+            PythonPrint(ss, source_ranges, self.type(), tensors, classes, false);
             return ss.str();
           })
       .def("apply", &Module::apply)
@@ -679,7 +678,7 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            std::vector<c10::NamedTypePtr> deps;
+            std::vector<c10::NamedTypePtr> classes;
             SourceRangeRecords source_ranges;
             PythonPrint(
                 ss,
@@ -687,7 +686,7 @@ void initJitScriptBindings(PyObject* module) {
                 *self.function_,
                 false,
                 tensors,
-                deps,
+                classes,
                 false);
             return ss.str();
           })
@@ -721,10 +720,10 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
         std::vector<at::Tensor> tensors;
-        std::vector<c10::NamedTypePtr> deps;
+        std::vector<c10::NamedTypePtr> classes;
         SourceRangeRecords source_ranges;
         PythonPrint(
-            ss, source_ranges, self.function(), true, tensors, deps, false);
+            ss, source_ranges, self.function(), true, tensors, classes, false);
         return ss.str();
       });
   m.def(
@@ -868,17 +867,17 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_python_print", [](const py::object& obj) {
     std::ostringstream ss;
     std::vector<at::Tensor> constants;
-    std::vector<c10::NamedTypePtr> deps;
+    std::vector<c10::NamedTypePtr> classes;
     SourceRangeRecords source_ranges;
     if (auto self = as_module(obj)) {
-      PythonPrint(ss, source_ranges, self->type(), constants, deps, true);
+      PythonPrint(ss, source_ranges, self->type(), constants, classes, true);
     } else if (auto self = as_function(obj)) {
       PythonPrint(
-          ss, source_ranges, *self->function_, false, constants, deps, true);
+          ss, source_ranges, *self->function_, false, constants, classes, true);
     } else {
       auto& m = py::cast<Method&>(obj);
       PythonPrint(
-          ss, source_ranges, m.function(), true, constants, deps, true);
+          ss, source_ranges, m.function(), true, constants, classes, true);
     }
     return std::make_pair(ss.str(), std::move(constants));
   });

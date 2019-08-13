@@ -244,10 +244,10 @@ struct PythonPrintPass {
 
   // Any classes used are written to this table, to be later written out as
   // dependencies.
-  std::vector<c10::NamedTypePtr>& deps_table_;
-  std::vector<c10::NamedTypePtr> direct_deps_;
+  std::vector<c10::NamedTypePtr>& class_table_;
+  std::vector<c10::NamedTypePtr> direct_class_deps_;
   // Helper to avoid duplicating class types
-  void registerDependency(const c10::NamedTypePtr& type) {
+  void addToClassTable(const c10::NamedTypePtr& type) {
     if (legacy_module_printing_) {
       // we serialize module classes separately.
       // Including them in the class table as well will cause the code
@@ -258,13 +258,14 @@ struct PythonPrintPass {
         }
       }
     }
-    if (std::find(deps_table_.cbegin(), deps_table_.cend(), type) ==
-        deps_table_.cend()) {
-      deps_table_.push_back(type);
+    if (std::find(class_table_.cbegin(), class_table_.cend(), type) ==
+        class_table_.cend()) {
+      class_table_.push_back(type);
     }
-    if (std::find(direct_deps_.cbegin(), direct_deps_.cend(), type) ==
-        direct_deps_.cend()) {
-      direct_deps_.push_back(type);
+    if (std::find(
+            direct_class_deps_.cbegin(), direct_class_deps_.cend(), type) ==
+        direct_class_deps_.cend()) {
+      direct_class_deps_.push_back(type);
     }
   }
 
@@ -732,10 +733,10 @@ struct PythonPrintPass {
   // Recursively check contained types for any class dependencies
   void registerClassDependencies(const TypePtr& type) {
     if (const auto classType = type->cast<ClassType>()) {
-      registerDependency(classType);
+      addToClassTable(classType);
     } else if (const auto tupleType = type->cast<TupleType>()) {
       if (tupleType->name()) {
-        registerDependency(tupleType);
+        addToClassTable(tupleType);
       }
     }
     for (const auto& containedType : type->containedTypes()) {
@@ -1169,7 +1170,7 @@ struct PythonPrintPass {
   std::string getImports() {
     std::ostringstream ret;
     std::unordered_set<std::string> already_printed;
-    for (const auto& c : direct_deps_) {
+    for (const auto& c : direct_class_deps_) {
       if (already_printed.count(c->name()->prefix())) {
         continue;
       }
@@ -1182,13 +1183,13 @@ struct PythonPrintPass {
 
   PythonPrintPass(
       std::vector<at::Tensor>& tensor_table,
-      std::vector<c10::NamedTypePtr>& deps_table,
+      std::vector<c10::NamedTypePtr>& class_table,
       bool enforce_importable,
       bool is_method,
       bool legacy_module_printing)
       : body_(&source_range_stack_),
         tensor_table_(tensor_table),
-        deps_table_(deps_table),
+        class_table_(class_table),
         enforce_importable_(enforce_importable),
         is_method_(is_method),
         legacy_module_printing_(legacy_module_printing) {}
@@ -1288,9 +1289,9 @@ struct PythonPrintPass {
       TORCH_INTERNAL_ASSERT(false);
     }
     // remove `classType` from the list of deps
-    direct_deps_.erase(
-        std::remove(direct_deps_.begin(), direct_deps_.end(), type),
-        direct_deps_.end());
+    direct_class_deps_.erase(
+        std::remove(direct_class_deps_.begin(), direct_class_deps_.end(), type),
+        direct_class_deps_.end());
   }
 
   void print(std::ostream& out, SourceRangeRecords& source_ranges_out) {
@@ -1312,11 +1313,11 @@ void PythonPrint(
     const Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
+    std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(
       tensor_table,
-      deps_table,
+      class_table,
       enforce_importable,
       is_method,
       /*legacy_module_printing=*/false);
@@ -1329,11 +1330,11 @@ void PythonPrint(
     SourceRangeRecords& source_ranges_out,
     const c10::NamedTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
+    std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(
       tensor_table,
-      deps_table,
+      class_table,
       enforce_importable,
       /*is_method=*/true,
       /*legacy_module_printing=*/false);
@@ -1346,11 +1347,11 @@ void LEGACY_PythonPrint(
     SourceRangeRecords& source_ranges_out,
     const c10::NamedTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
+    std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(
       tensor_table,
-      deps_table,
+      class_table,
       enforce_importable,
       /*is_method=*/true,
       /*legacy_module_printing=*/true);
@@ -1363,11 +1364,11 @@ void LEGACY_PythonPrint(
     SourceRangeRecords& source_ranges_out,
     const script::Module& module,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
+    std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(
       tensor_table,
-      deps_table,
+      class_table,
       enforce_importable,
       /*is_method=*/true,
       /*legacy_module_printing=*/true);
