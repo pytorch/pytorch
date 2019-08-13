@@ -71,9 +71,9 @@ void atan2_kernel_cuda(TensorIterator& iter) {
 }
 
 void logical_xor_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_xor_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_xor_cuda", [&]() {
     using self_t = scalar_t;
-    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(2), "logical_xor_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(2), "logical_xor_cuda", [&]() {
       using other_t = scalar_t;
       AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_xor_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(self_t a, other_t b) -> scalar_t {
