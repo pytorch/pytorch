@@ -131,7 +131,7 @@ void IValue::dump() const {
 
 
 std::string ivalue::Object::name() const {
-  return this->type_.type_->name()->qualifiedName();
+  return this->type_.type_->qualname();
 }
 
 IValue ivalue::Object::getAttr(const std::string& name) const {

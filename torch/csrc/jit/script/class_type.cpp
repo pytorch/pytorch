@@ -6,10 +6,6 @@ namespace c10 {
 
 // This file exists because we need to reference module.h, which we can't from
 // c10. Sigh...
-FunctionType::FunctionType(Function* function)
-    : NamedType(TypeKind::FunctionType),
-      function_(function),
-      name_(function->qualname()) {}
 
 Function* ClassType::getMethod(const std::string& name) const {
   for (auto method : methods_) {
@@ -83,9 +79,7 @@ ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module)
-    : NamedType(TypeKind::ClassType),
-      compilation_unit_(std::move(cu)),
-      name_(std::move(name)) {
+    : NamedType(TypeKind::ClassType, name), compilation_unit_(std::move(cu)) {
   if (is_module) {
     parameterSlots_ = std::make_shared<std::vector<bool>>();
   }
