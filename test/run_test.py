@@ -18,16 +18,6 @@ from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
 
 TESTS = [
-    # These are set to run first because quantization is under heavy development
-    # for the release and we want to ensure timely test signal
-    'qat',
-    'quantization',
-    'quantized_conv',
-    'quantized',
-    'quantized_tensor',
-    'quantized_nn_mods',
-    'quantizer',
-
     'autograd',
     'cpp_extensions',
     'c10d',
@@ -51,6 +41,13 @@ TESTS = [
     'nn',
     'numba_integration',
     'optim',
+    'qat',
+    'quantization',
+    'quantized_conv',
+    'quantized',
+    'quantized_tensor',
+    'quantized_nn_mods',
+    'quantizer',
     'rpc',
     'sparse',
     'torch',
@@ -280,6 +277,16 @@ def parse_args():
         metavar='TESTS',
         help='select the last test to run (excludes following tests)')
     parser.add_argument(
+        '-b',
+        '--bring-to-front',
+        nargs='+',
+        choices=TestChoices(TESTS),
+        default=[],
+        metavar='TESTS',
+        help='select a set of tests to run first. This can be used in situations'
+             ' where you want to run all tests, but care more about some set, '
+             'e.g. after making a change to a specific component')
+    parser.add_argument(
         '--ignore-win-blacklist',
         action='store_true',
         help='always run blacklisted windows tests')
@@ -351,6 +358,11 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 
 def get_selected_tests(options):
     selected_tests = options.include
+
+    if options.bring_to_front:
+        to_front = set(options.bring_to_front)
+        selected_tests = options.bring_to_front + filter(lambda name: name not in to_front,
+                                                         selected_tests)
 
     if options.first:
         first_index = find_test_index(options.first, selected_tests)
