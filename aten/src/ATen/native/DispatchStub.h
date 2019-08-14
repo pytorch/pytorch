@@ -96,9 +96,9 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
     return DEFAULT;
   }
 
-  FnPtr cpu_dispatch_ptr = nullptr;
-  FnPtr cuda_dispatch_ptr = nullptr;
-  FnPtr hip_dispatch_ptr = nullptr;
+  FnPtr cpu_dispatch_ptr;
+  FnPtr cuda_dispatch_ptr;
+  FnPtr hip_dispatch_ptr;
   static FnPtr DEFAULT;
 #ifdef HAVE_AVX_CPU_DEFINITION
   static FnPtr AVX;
