@@ -195,7 +195,7 @@ if (MSVC)
       endif(${flag_var} MATCHES "/Z[iI]")
       # Turn off warnings on Windows
       string(REPLACE "/W3" "/w" ${flag_var} "${${flag_var}}")
-      string(REPLACE "/EHs" "" ${flag_var} "${${flag_var}}")
+      #string(REPLACE "/EHs" "" ${flag_var} "${${flag_var}}")
     endforeach(flag_var)
   endif(MSVC_Z7_OVERRIDE)
   foreach(flag_var
