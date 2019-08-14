@@ -106,14 +106,14 @@ class TestQuantizedOps(TestCase):
             qY_hat = op(qX)
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
-        ops_under_test_inline = {
-            'inline native': torch.relu_,
-            'inline nn.functional': torch.nn.functional.relu_,
+        ops_under_test_inplace = {
+            'inplace native': torch.relu_,
+            'inplace nn.functional': torch.nn.functional.relu_,
         }
 
-        for name, op in ops_under_test_inline.items():
+        for name, op in ops_under_test_inplace.items():
             qY_hat = qX.clone()
-            op(qY_hat)
+            op_(qY_hat)
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
     """Tests the correctness of the add and add_relu op."""
