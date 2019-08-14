@@ -4,14 +4,17 @@ import unittest
 import torch
 import torch.nn.quantized as nnq
 from torch.quantization import \
-    quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules
+    QConfig, default_observer, default_weight_observer, \
+    quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
+    quantize_dynamic, default_qconfig
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     SkipQuantModel, QuantStubModel, \
     ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
     ModForWrapping, \
-    test_only_eval_fn, test_only_train_fn
+    test_only_eval_fn, test_only_train_fn, \
+    prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, TwoLayerLinearModel, NestedModel
 
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
@@ -242,6 +245,139 @@ class PostTrainingQuantTest(QuantizationTestCase):
         # test one line API
         model = quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
+
+
+@unittest.skipIf(
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
+)
+class PostTrainingDynamicQuantTest(QuantizationTestCase):
+    def test_single_layer(self):
+        r"""Dynamic Quantize SingleLayerLinearDynamicModel which has one Linear module,
+        make sure it is swapped to nnqd.Linear which is the quantized version of
+        the module
+        """
+        model = SingleLayerLinearDynamicModel().eval()
+        qconfig_dict = {
+            '': default_qconfig
+        }
+        model = prepare_dynamic(model, qconfig_dict)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.fc1)
+
+        checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(SingleLayerLinearDynamicModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
+    def test_two_layers(self):
+        r"""TwoLayerLinearModel has two Linear modules but we only quantize the second one
+        `fc2`, and `fc1`is not quantized
+        """
+        model = TwoLayerLinearModel().eval()
+        qconfig_dict = {
+            'fc2': default_qconfig
+        }
+        model = prepare_dynamic(model, qconfig_dict)
+
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.assertEqual(type(model.fc1), torch.nn.Linear)
+            self.checkDynamicQuantizedLinear(model.fc2)
+
+        checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(TwoLayerLinearModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
+    def test_nested1(self):
+        r"""Test quantization for nested model, top level 'fc3' and
+        'fc1' of submodule 'sub2', 'sub2.fc2' is not quantized
+        """
+        model = NestedModel().eval()
+        qconfig_dict = {
+            'fc3': default_qconfig,
+            'sub2.fc1': default_qconfig
+        }
+
+        model = prepare_dynamic(model, qconfig_dict)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkLinear(model.sub1.fc)
+            self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkLinear(model.sub2.fc2)
+
+        checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
+    def test_nested2(self):
+        r"""Another test case for quantized, we will quantize all submodules
+        of submodule sub2
+        """
+        model = NestedModel().eval()
+        qconfig_dict = {
+            'fc3': default_qconfig,
+            'sub2': default_qconfig
+        }
+        model = prepare_dynamic(model, qconfig_dict)
+
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkLinear(model.sub1.fc)
+            self.assertEqual(type(model.sub1.relu), torch.nn.ReLU)
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
+            self.checkDynamicQuantizedLinear(model.fc3)
+
+        checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
+    def test_nested3(self):
+        r"""More complicated nested test case with child qconfig overrides
+        parent qconfig
+        """
+        model = NestedModel().eval()
+        custum_options = {
+            'dtype': torch.quint8,
+            'qscheme': torch.per_tensor_affine
+        }
+        custom_qconfig = QConfig(weight=default_weight_observer(),
+                                 activation=default_observer(**custum_options))
+        qconfig_dict = {
+            'fc3': default_qconfig,
+            'sub2': default_qconfig,
+            'sub2.fc1': custom_qconfig
+        }
+        model = prepare_dynamic(model, qconfig_dict)
+
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
+            self.checkDynamicQuantizedLinear(model.fc3)
+
+        checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
