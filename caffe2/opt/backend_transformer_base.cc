@@ -4,10 +4,9 @@
 
 namespace caffe2 {
 
-namespace {
 // Populate 'net_pos' argument for any ops that don't already have it. 'net_pos'
 // we populate here starts after the max 'net_pos' value we encountered.
-void annotateOpIndex(NetDef* net) {
+void BackendTransformerBase::annotateOpIndex(NetDef* net) {
   // find the max net_pos that we have so far.
   int i = -1;
   for (const auto& op : net->op()) {
@@ -23,7 +22,6 @@ void annotateOpIndex(NetDef* net) {
     }
   }
 }
-} // namespace
 
 std::string BackendTransformerBase::getModelId(const NetDef& net) {
   static std::atomic<size_t> seq_id{0};
