@@ -63,6 +63,8 @@ TENSOR_IMPLEMENT_LOGICAL_BYTE(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(eq,==)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(ne,!=)
 
+#if !defined(TH_REAL_IS_BFLOAT16)
+
 int THTensor_(equal)(THTensor *ta, THTensor* tb)
 {
   int equal = 1;
@@ -1500,6 +1502,8 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t
                         }
   );
 }
+
+#endif
 
 #undef TH_MATH_NAME
 #endif /* floating point only part */
