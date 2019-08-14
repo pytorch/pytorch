@@ -9707,11 +9707,11 @@ class _TestTorchMixin(object):
 
         self.assertRaisesRegex(
             RuntimeError,
-            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type("foo")),
+            "Tensor.__contains__ only supports Tensor or Number, but you passed in a {}.".format(type("foo")),
             "foo" in x)
         self.assertRaisesRegex(
             RuntimeError,
-            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type([1, 2])),
+            "Tensor.__contains__ only supports Tensor or Number, but you passed in a {}.".format(type([1, 2])),
             [1, 2] in x)
 
     @staticmethod
