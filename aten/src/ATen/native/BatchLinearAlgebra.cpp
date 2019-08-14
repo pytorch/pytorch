@@ -1126,6 +1126,10 @@ Tensor _lu_solve_helper_cpu(const Tensor& self, const Tensor& LU_data, const Ten
   auto LU_data_working_copy = cloneBatchedColumnMajor(LU_data);
   auto LU_pivots_working_copy = LU_pivots.is_contiguous() ? LU_pivots : LU_pivots.contiguous();
   std::vector<int64_t> infos(batchCount(self), 0);
+
+  if (self.numel() == 0 || LU_data.numel() == 0) {
+    return at::zeros_like(self);
+  }
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cpu", [&]{
     apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, infos);
   });
@@ -1137,17 +1141,14 @@ Tensor _lu_solve_helper_cpu(const Tensor& self, const Tensor& LU_data, const Ten
   return self_working_copy;
 }
 
+// Supports arbitrary batch dimensions for self and LU_data (implicity LU_pivots also)
 Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
-  TORCH_CHECK(self.dim() == 3 || self.dim() == 2,
-              "b should have 2 or 3 dimensions, but has ", self.dim(), " dimensions instead");
-  TORCH_CHECK(LU_data.dim() == 3,
-              "LU_data should have 3 dimensions, but has ", LU_data.dim(), " dimensions instead");
-  TORCH_CHECK(self.size(0) == LU_data.size(0),
-              "b and LU_data should have the same number of batches");
-  TORCH_CHECK(LU_pivots.size(1) == LU_data.size(2),
+  TORCH_CHECK(self.dim() >= 2,
+              "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  TORCH_CHECK(LU_data.dim() >= 2,
+              "LU_data should have at least 2 dimensions, but has ", LU_data.dim(), " dimensions instead");
+  TORCH_CHECK(LU_pivots.size(-1) == LU_data.size(-1),
               "Number of pivots per batch should be same as the dimension of the matrix");
-  TORCH_CHECK(LU_pivots.size(0) == LU_data.size(0),
-              "Batch dimensions of LU_pivots doesn't match batch dimensions of LU_data");
   TORCH_CHECK(LU_pivots.dtype() == at::kInt,
               "LU_pivots should be a Tensor of scalar type Int");
   TORCH_CHECK(LU_pivots.device() == LU_data.device(),
@@ -1155,23 +1156,23 @@ Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivo
               "but found LU_pivots on ", LU_pivots.device(), " and LU_data on ",
               LU_data.device(), " instead");
 
-  Tensor self_3D;
-  if (self.dim() == 2) {
-    TORCH_WARN("Passing RHS tensor with number of dimensions = 2 is deprecated, "
-               "and will be removed in the next release. Please unsqueeze the last dimension "
-               "to obtain an RHS tensor with number of right hand sides = 1");
-    self_3D = self.unsqueeze(2);
-  } else {
-    self_3D = self;
-  }
-  linearSolveCheckInputs(self_3D, LU_data, "lu_solve");
+  // We check whether the batch dimensions of LU_pivots match the batch dimensions of LU_data
+  // e.g.: LU_pivots.sizes() = 4 x 3 x 2, LU_data.sizes() = 4 x 3 x 2 x 2 is a pair of correct inputs
+  // e.g.: LU_pivots.sizes() = 4 x 3 x 2, LU_data.sizes() = 12 x 2 x 2 is a pair of incorrect inputs
+  IntArrayRef pivots_sizes(LU_pivots.sizes().data(), LU_pivots.ndimension() - 1);
+  IntArrayRef lu_sizes(LU_data.sizes().data(), LU_data.ndimension() - 2);
+  TORCH_CHECK(pivots_sizes == lu_sizes,
+              "batch dimensions of LU_pivots doesn't match batch dimensions of LU_data");
 
-  Tensor solution = at::_lu_solve_helper(self_3D, LU_data, LU_pivots);
-  if (self.dim() == 2) {
-    return solution.squeeze(2);
-  } else {
-    return solution;
-  }
+  Tensor self_broadcasted, LU_data_broadcasted;
+  std::tie(self_broadcasted, LU_data_broadcasted) = _linear_solve_broadcast_args(self, LU_data, "lu_solve");
+
+  // Now, we need to broadcast pivots too for the batch dimensions to match
+  IntArrayRef new_lu_sizes(LU_data_broadcasted.sizes().data(), LU_data_broadcasted.ndimension() - 2);
+  std::vector<int64_t> new_pivots_sizes = infer_size(new_lu_sizes, pivots_sizes);
+  new_pivots_sizes.push_back(LU_data.size(-1));
+  Tensor LU_pivots_broadcasted = LU_pivots.expand(new_pivots_sizes);
+  return at::_lu_solve_helper(self_broadcasted, LU_data_broadcasted, LU_pivots_broadcasted);
 }
 
 Tensor& lu_solve_out(Tensor& result, const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {

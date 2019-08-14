@@ -1501,6 +1501,10 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto LU_data_working_copy = cloneBatchedColumnMajor(LU_data);
   auto LU_pivots_working_copy = LU_pivots.is_contiguous() ? LU_pivots : LU_pivots.contiguous();
+
+  if (self.numel() == 0 || LU_data.numel() == 0) {
+    return at::zeros_like(self);
+  }
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cuda", [&]{
     apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, info);
   });

@@ -2537,6 +2537,11 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda(), pivot=False)
         _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda(), pivot=True)
 
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_lu_solve_batched(self):
+        _TestTorchMixin._test_lu_solve_batched(self, lambda t: t.cuda(), pivot=False)
+        _TestTorchMixin._test_lu_solve_batched(self, lambda t: t.cuda(), pivot=True)
+
     @slowTest
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu_solve_batched_many_batches(self):
