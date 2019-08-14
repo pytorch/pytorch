@@ -1778,7 +1778,7 @@ inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
 }
 
 inline bool Tensor::has_names() const {
-  return impl::internal_has_names(unsafeGetTensorImpl());
+  return impl::has_names(unsafeGetTensorImpl());
 }
 #endif
 
