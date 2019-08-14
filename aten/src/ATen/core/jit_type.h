@@ -301,8 +301,8 @@ struct CAFFE2_API VaryingShape {
     return dims_->size();
   }
 
-  const std::vector<c10::optional<int64_t>>& sizes() const { 
-    return dims_.value(); 
+  const c10::optional<ListOfOptionalInts>& sizes() const { 
+    return dims_; 
   }
 
   VaryingShape merge(const VaryingShape& other) const;

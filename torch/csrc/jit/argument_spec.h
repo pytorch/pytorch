@@ -441,9 +441,9 @@ namespace std {
 template <>
 struct hash<c10::VaryingShape> {
   size_t operator()(const c10::VaryingShape& vs) const {
-    return torch::
-        get_hash<c10::optional<size_t>, std::vector<c10::optional<int64_t>>>(
-            vs.size(), vs.sizes());
+    return torch::get_hash(
+        vs.size(),
+        vs.size() ? vs.sizes().value() : std::vector<c10::optional<int64_t>>());
   }
 };
 

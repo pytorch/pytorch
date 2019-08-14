@@ -29,22 +29,26 @@ void ProfilingRecord::instrumentBlock(Block* block) {
 
       auto pn = createProfileNode(nullptr, {i});
       auto pno = pn->addOutput();
+      bool first = true;
       pno->setType(TensorType::get());
-      std::function<void(Stack&)> shape_profiler = [this, pno](Stack& stack) {
-        IValue t;
-        pop(stack, t);
-        if (t.isTensor()) {
-          auto pttp = TensorType::create(t.toTensor());
-          std::lock_guard<std::mutex> lock(this->mutex_);
-          if (auto type = pno->type()->cast<TensorType>()) {
-            pno->setType(type->merge(pttp));
-          } else {
-            pno->setType(pttp);
-          }
-        }
-        // passing t through
-        push(stack, t);
-      };
+      std::function<void(Stack&)> shape_profiler =
+          [this, pno, first](Stack& stack) mutable {
+            IValue t;
+            pop(stack, t);
+            if (t.isTensor()) {
+              auto pttp = TensorType::create(t.toTensor());
+              std::lock_guard<std::mutex> lock(this->mutex_);
+              if (auto type = pno->type()->cast<TensorType>()) {
+                if (!first) {
+                  pttp = pttp->merge(type);
+                }
+                pno->setType(pttp);
+                first = false;
+              }
+            }
+            // passing t through
+            push(stack, t);
+          };
 
       pn->setCallback(shape_profiler);
       pn->insertBefore(n);
