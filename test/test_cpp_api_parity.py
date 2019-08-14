@@ -115,18 +115,18 @@ class TestCppApiParity(common.TestCase):
     def _test_torch_nn_module(self, test_params):
         torch_nn_test_methods = ['init', 'forward', 'backward']
 
-        def test_init(device, python_module_class, python_constructor_args):
+        def setup_init_test(device, python_module_class, python_constructor_args):
             torch.manual_seed(2)
             module = python_module_class(*python_constructor_args).to(device)
             return [module], device
 
-        def test_forward(device, python_module_class, python_constructor_args, example_inputs):
+        def setup_forward_test(device, python_module_class, python_constructor_args, example_inputs):
             torch.manual_seed(2)
             module = python_module_class(*python_constructor_args).to(device)
             python_output = module(*example_inputs)
             return [module], device, python_output, example_inputs
 
-        def test_backward(device, python_module_class, python_constructor_args, example_inputs):
+        def setup_backward_test(device, python_module_class, python_constructor_args, example_inputs):
             torch.manual_seed(2)
             module = python_module_class(*python_constructor_args).to(device)
             python_output = module(*example_inputs)
@@ -192,11 +192,11 @@ class TestCppApiParity(common.TestCase):
             example_inputs = [x.to(device) for x in example_inputs]
 
             if method_name == 'init':
-                args = test_init(device, python_module_class, python_constructor_args)
+                args = setup_init_test(device, python_module_class, python_constructor_args)
             elif method_name == 'forward':
-                args = test_forward(device, python_module_class, python_constructor_args, example_inputs)
+                args = setup_forward_test(device, python_module_class, python_constructor_args, example_inputs)
             elif method_name == 'backward':
-                args = test_backward(device, python_module_class, python_constructor_args, example_inputs)
+                args = setup_backward_test(device, python_module_class, python_constructor_args, example_inputs)
             else:
                 raise RuntimeError("{} is not a supported method to test".format(method_name))
 
