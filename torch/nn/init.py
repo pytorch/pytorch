@@ -199,7 +199,7 @@ def dirac_(tensor):
     return tensor
 
 
-def _calculate_fan_in_and_fan_out(tensor):
+def _calculate_fan_in_and_fan_out(tensor, is_depthwise=None):
     dimensions = tensor.dim()
     if dimensions < 2:
         raise ValueError("Fan in and fan out can not be computed for tensor with fewer than 2 dimensions")
@@ -213,13 +213,20 @@ def _calculate_fan_in_and_fan_out(tensor):
         receptive_field_size = 1
         if tensor.dim() > 2:
             receptive_field_size = tensor[0][0].numel()
-        fan_in = num_input_fmaps * receptive_field_size
-        fan_out = num_output_fmaps * receptive_field_size
+        if is_depthwise is None and num_input_fmaps == 1:
+            warnings.warn(
+                'Possible depthwise conv kernel, check and set `is_depthwise` to eliminate this warning',
+                stacklevel=2)
+        if is_depthwise:
+            fan_in, fan_out = receptive_field_size, receptive_field_size
+        else:
+            fan_in = num_input_fmaps * receptive_field_size
+            fan_out = num_output_fmaps * receptive_field_size
 
     return fan_in, fan_out
 
 
-def xavier_uniform_(tensor, gain=1.):
+def xavier_uniform_(tensor, gain=1., is_depthwise=None):
     # type: (Tensor, float) -> Tensor
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
@@ -235,19 +242,21 @@ def xavier_uniform_(tensor, gain=1.):
     Args:
         tensor: an n-dimensional `torch.Tensor`
         gain: an optional scaling factor
+        is_depthwise: an optional indicator indicate whether a depthwise conv kernel,
+            `None` for back compatibility and warn user when possible error detected.
 
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain('relu'))
     """
-    fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
+    fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor, is_depthwise=is_depthwise)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
     a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
 
     return _no_grad_uniform_(tensor, -a, a)
 
 
-def xavier_normal_(tensor, gain=1.):
+def xavier_normal_(tensor, gain=1., is_depthwise=None):
     # type: (Tensor, float) -> Tensor
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
@@ -263,28 +272,30 @@ def xavier_normal_(tensor, gain=1.):
     Args:
         tensor: an n-dimensional `torch.Tensor`
         gain: an optional scaling factor
+        is_depthwise: an optional indicator indicate whether a depthwise conv kernel,
+            `None` for back compatibility and warn user when possible error detected.
 
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_normal_(w)
     """
-    fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
+    fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor, is_depthwise=is_depthwise)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
 
     return _no_grad_normal_(tensor, 0., std)
 
 
-def _calculate_correct_fan(tensor, mode):
+def _calculate_correct_fan(tensor, mode, is_depthwise=None):
     mode = mode.lower()
     valid_modes = ['fan_in', 'fan_out']
     if mode not in valid_modes:
         raise ValueError("Mode {} not supported, please use one of {}".format(mode, valid_modes))
 
-    fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
+    fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor, is_depthwise=is_depthwise)
     return fan_in if mode == 'fan_in' else fan_out
 
 
-def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
+def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu', is_depthwise=None):
     r"""Fills the input `Tensor` with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification` - He, K. et al. (2015), using a
@@ -306,12 +317,14 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
             backwards pass.
         nonlinearity: the non-linear function (`nn.functional` name),
             recommended to use only with ``'relu'`` or ``'leaky_relu'`` (default).
+        is_depthwise: an optional indicator indicate whether a depthwise conv kernel,
+            `None` for back compatibility and warn user when possible error detected.
 
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.kaiming_uniform_(w, mode='fan_in', nonlinearity='relu')
     """
-    fan = _calculate_correct_fan(tensor, mode)
+    fan = _calculate_correct_fan(tensor, mode, is_depthwise=is_depthwise)
     gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
     bound = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
@@ -319,7 +332,7 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
         return tensor.uniform_(-bound, bound)
 
 
-def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
+def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu', is_depthwise=None):
     r"""Fills the input `Tensor` with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification` - He, K. et al. (2015), using a
@@ -341,12 +354,14 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
             backwards pass.
         nonlinearity: the non-linear function (`nn.functional` name),
             recommended to use only with ``'relu'`` or ``'leaky_relu'`` (default).
+        is_depthwise: an optional indicator indicate whether a depthwise conv kernel,
+            `None` for back compatibility and warn user when possible error detected.
 
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.kaiming_normal_(w, mode='fan_out', nonlinearity='relu')
     """
-    fan = _calculate_correct_fan(tensor, mode)
+    fan = _calculate_correct_fan(tensor, mode, is_depthwise=is_depthwise)
     gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
     with torch.no_grad():
