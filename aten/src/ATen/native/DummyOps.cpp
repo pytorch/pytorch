@@ -14,6 +14,14 @@ int64_t bench__zero_args_c10() {
   return 0;
 }
 
+int64_t bench__nodispatch_at(const Tensor& in) {
+  return 0;
+}
+
+int64_t bench__nodispatch_c10(const Tensor& in) {
+  return 0;
+}
+
 int64_t bench__one_arg_at(const Tensor& in) {
   return 0;
 }

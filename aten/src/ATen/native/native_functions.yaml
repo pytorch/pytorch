@@ -7,69 +7,92 @@
   variants: function
   use_c10_dispatcher: True
 
+- func: bench__nodispatch_at(Tensor self) -> int
+  variants: function, method
+
+- func: bench__nodispatch_c10(Tensor self) -> int
+  variants: function, method
+  use_c10_dispatcher: True
+
 - func: bench__one_arg_at(Tensor self) -> int
   variants: function, method
+  dispatch:
+    CPU: bench__one_arg_at
 
 - func: bench__one_arg_c10(Tensor self) -> int
   variants: function, method
   use_c10_dispatcher: True
+  dispatch:
+    CPU: bench__one_arg_c10
 
 - func: bench__one_arg_return_at(Tensor self) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: bench__one_arg_return_at
 
 - func: bench__one_arg_return_c10(Tensor self) -> Tensor
   variants: function, method
   use_c10_dispatcher: True
+  dispatch:
+    CPU: bench__one_arg_return_c10
 
 - func: bench__two_args_at(Tensor self, Tensor other) -> int
   variants: function, method
+  dispatch:
+    CPU: bench__two_args_at
 
 - func: bench__two_args_c10(Tensor self, Tensor other) -> int
   variants: function, method
   use_c10_dispatcher: True
+  dispatch:
+    CPU: bench__two_args_c10
 
 - func: bench__two_args_return_at(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: bench__two_args_return_at
 
 - func: bench__two_args_return_c10(Tensor self, Tensor other) -> Tensor
   variants: function, method
   use_c10_dispatcher: True
+  dispatch:
+    CPU: bench__two_args_return_c10
 
 - func: bench__three_args_at(Tensor self, Tensor other, Tensor third) -> int
   variants: function, method
+  dispatch:
+    CPU: bench__three_args_at
 
 - func: bench__three_args_c10(Tensor self, Tensor other, Tensor third) -> int
   variants: function, method
   use_c10_dispatcher: True
+  dispatch:
+    CPU: bench__three_args_c10
 
 - func: bench__three_args_return_at(Tensor self, Tensor other, Tensor third) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: bench__three_args_return_at
 
 - func: bench__three_args_return_c10(Tensor self, Tensor other, Tensor third) -> Tensor
   variants: function, method
   use_c10_dispatcher: True
+  dispatch:
+    CPU: bench__three_args_return_c10
 
 
 
 - func: bench__add_at(Tensor self, Tensor b) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: bench__add_at
 
 - func: bench__add_c10(Tensor self, Tensor b) -> Tensor
   variants: function, method
   use_c10_dispatcher: True
-
-
-
-- func: bench__one_arg_dispatch_at(Tensor self) -> int
-  variants: function, method
   dispatch:
-    CPU: bench__one_arg_at
+    CPU: bench__add_c10
 
-- func: bench__one_arg_dispatch_c10(Tensor self) -> int
-  variants: function, method
-  use_c10_dispatcher: True
-  dispatch:
-    CPU: bench__one_arg_c10
 
 
 # Temporary type cast operators. These are needed to trace type-casts now since
