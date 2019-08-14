@@ -528,6 +528,11 @@ class TestNamedTensor(TestCase):
             method('bernoulli_', 0.5),
             method('bernoulli_', torch.tensor(0.5)),
 
+            method('softmax', dim=1),
+            method('softmax', dim='D'),
+            method('log_softmax', dim=1),
+            method('log_softmax', dim='D'),
+
             [Function('F.dropout(inplace)', lambda t: F.dropout(t, p=0.5, inplace=True))],
             [Function('F.dropout(outplace)', lambda t: F.dropout(t, p=0.5, inplace=False))],
         ]
