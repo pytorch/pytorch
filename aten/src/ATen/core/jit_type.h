@@ -511,6 +511,9 @@ struct CAFFE2_API TensorType : public Type {
     return TensorType::create(scalar_type, dev, sz, srs, gr, zero);
   }
   // is all information about the type specified except for autograd?
+  // This replaces the notion of a 'CompleteTensorType' that used to exist
+  // in the type-hierarchy. Excluding require_grad and autogradZero allows
+  // this to match the old behavior.
   bool isComplete() const {
     return scalar_type_ && device_ && sizes_.isComplete() && strides_.isComplete();
   }

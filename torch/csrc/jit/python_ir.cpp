@@ -637,13 +637,23 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "sizes",
-          [](Type& t) {
-            return t.expect<TensorType>()->sizes().concrete_sizes().value();
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              if (auto cs = ptt->sizes().concrete_sizes()) {
+                return py::cast(*cs);
+              }
+            }
+            return py::none();
           })
       .def(
-          "strides",
-          [](Type& t) {
-            return t.expect<TensorType>()->strides().concrete_sizes().value();
+          "sizes",
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              if (auto cs = ptt->strides().concrete_sizes()) {
+                return py::cast(*cs);
+              }
+            }
+            return py::none();
           })
       .def(
           "contiguous",
