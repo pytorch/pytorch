@@ -7,7 +7,7 @@
 @echo off
 setlocal
 
-:: Recent cmake has problems 1
+:: Recent cmake has problems 2
 choco uninstall cmake.install
 choco install --no-progress cmake --version 3.12.1
 
