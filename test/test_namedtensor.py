@@ -89,7 +89,7 @@ class TestNamedTensor(TestCase):
         self.assertTrue(fully_named.has_names())
 
     def test_repr(self):
-        named_tensor = torch.zeros(2, 3).names_(['N', 'C'])
+        named_tensor = torch.zeros(2, 3).names_('N', 'C')
         expected = "tensor([[0., 0., 0.],\n        [0., 0., 0.]], names=('N', 'C'))"
         self.assertEqual(repr(named_tensor), expected)
 
@@ -97,20 +97,20 @@ class TestNamedTensor(TestCase):
         expected = "tensor([[0., 0., 0.],\n        [0., 0., 0.]])"
         self.assertEqual(repr(unnamed_tensor), expected)
 
-        none_named_tensor = torch.zeros(2, 3).names_([None, None])
+        none_named_tensor = torch.zeros(2, 3).names_(None, None)
         self.assertEqual(repr(none_named_tensor), expected)
 
     def test_noncontig_contiguous(self):
         # This type of contiguous is special-cased and therefore needs its own test
         for device in torch.testing.get_all_device_types():
-            x = torch.randn(2, 3, device=device).t().names_(('N', 'C'))
+            x = torch.randn(2, 3, device=device).t().names_('N', 'C')
             self.assertEqual(x.contiguous().names, ('N', 'C'))
 
     def test_copy_transpose(self):
         # This type of copy is special-cased and therefore needs its own test
         def _test(self_names, other_names, expected_names):
             x = torch.empty(2, 5, names=self_names)
-            y = torch.empty(5, 2).t().names_(other_names)
+            y = torch.empty(5, 2).t().names_(*other_names)
             x.copy_(y)
             self.assertEqual(x.names, expected_names)
 
@@ -121,25 +121,89 @@ class TestNamedTensor(TestCase):
     def test_names_(self):
         tensor = torch.empty(1, 1, names=('N', 'C'))
         self.assertEqual(tensor.names_(None).names, (None, None))
-        self.assertEqual(tensor.names_(['H', 'W']).names, ('H', 'W'))
+        self.assertEqual(tensor.names_('H', 'W').names, ('H', 'W'))
         with self.assertRaisesRegex(RuntimeError, 'Number of names'):
-            tensor.names_(['N', 'C', 'W'])
+            tensor.names_('N', 'C', 'W')
         with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
-            tensor.names_(['N', 'N'])
+            tensor.names_('N', 'N')
 
     def test_view_names(self):
         tensor = torch.empty(1, 1, names=('N', 'C'))
 
         self.assertEqual(tensor.view_names(None).names, (None, None))
-        self.assertEqual(tensor.view_names(['H', 'W']).names, ('H', 'W'))
+        self.assertEqual(tensor.view_names('H', 'W').names, ('H', 'W'))
 
         # Check that we didn't modify tensor.names
         self.assertEqual(tensor.names, ('N', 'C'))
 
         with self.assertRaisesRegex(RuntimeError, 'Number of names'):
-            tensor.view_names(['N', 'C', 'W'])
+            tensor.view_names('N', 'C', 'W')
         with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
-            tensor.view_names(['N', 'N'])
+            tensor.view_names('N', 'N')
+
+        with self.assertRaisesRegex(RuntimeError, 'either positional args or keyword args'):
+            tensor.view_names(None, N='batch')
+
+        # view_names returns a view on the tensor
+        self.assertEqual(tensor.view_names('H', 'W').data_ptr(), tensor.data_ptr())
+        self.assertEqual(tensor.view_names(None).data_ptr(), tensor.data_ptr())
+
+    def test_view_names_globber(self):
+        scalar = torch.randn([])
+        unnamed_tensor = torch.empty(1, 1, 1, 1)
+        named_tensor = torch.empty(1, 1, 1, 1, names=('N', 'C', 'H', 'W'))
+
+        self.assertEqual(scalar.view_names(None).names, [])
+        self.assertEqual(scalar.view_names('*').names, [])
+
+        # Check that it works with unnamed tensors
+        self.assertEqual(unnamed_tensor.view_names('*').names, unnamed_tensor.names)
+        self.assertEqual(unnamed_tensor.view_names('*', 'H', 'W').names,
+                         [None, None, 'H', 'W'])
+        self.assertEqual(unnamed_tensor.view_names('N', '*', 'W').names,
+                         ['N', None, None, 'W'])
+        self.assertEqual(unnamed_tensor.view_names('N', 'C', '*').names,
+                         ['N', 'C', None, None])
+
+        # Check that it works with named tensors
+        self.assertEqual(named_tensor.view_names('*').names, named_tensor.names)
+        self.assertEqual(named_tensor.view_names('*', 'width').names,
+                         ['N', 'C', 'H', 'width'])
+        self.assertEqual(named_tensor.view_names('batch', 'channels', '*', 'width').names,
+                         ['batch', 'channels', 'H', 'width'])
+        self.assertEqual(named_tensor.view_names('batch', '*').names,
+                         ['batch', 'C', 'H', 'W'])
+
+        # Test empty glob
+        self.assertEqual(unnamed_tensor.view_names('*', None, None, None, None).names,
+                         [None, None, None, None])
+        self.assertEqual(named_tensor.view_names('N', 'C', 'H', '*', 'W').names,
+                         ['N', 'C', 'H', 'W'])
+
+        # Multiple globs throw
+        with self.assertRaisesRegex(RuntimeError, 'More than one '):
+            named_tensor.view_names('*', 'channels', '*')
+
+    def test_view_names_rename_map(self):
+        scalar = torch.randn([])
+        unnamed_tensor = torch.empty(1, 1, 1, 1)
+        named_tensor = torch.empty(1, 1, 1, 1, names=('N', 'C', 'H', 'W'))
+
+        with self.assertRaisesRegex(RuntimeError, "dim 'N' does not exist"):
+            scalar.view_names(N='batch')
+        with self.assertRaisesRegex(RuntimeError, "dim 'N' does not exist"):
+            unnamed_tensor.view_names(N='batch')
+        with self.assertRaisesRegex(RuntimeError, "dim 'B' does not exist"):
+            named_tensor.view_names(B='batch')
+        with self.assertRaisesRegex(RuntimeError, "dim 'B' does not exist"):
+            named_tensor.view_names(H='height', B='batch')
+
+        self.assertEqual(named_tensor.view_names(N='batch').data_ptr(),
+                         named_tensor.data_ptr())
+        self.assertEqual(named_tensor.view_names(N='batch').names,
+                         ['batch', 'C', 'H', 'W'])
+        self.assertEqual(named_tensor.view_names(N='batch', H='height').names,
+                         ['batch', 'C', 'height', 'W'])
 
     def test_set_names_property(self):
         tensor = torch.empty(1, 1, names=('N', 'C'))
@@ -167,7 +231,7 @@ class TestNamedTensor(TestCase):
             result = factory(1, 2, 3, names=names, device=device)
 
             torch.manual_seed(0)
-            expected = factory(1, 2, 3, device=device).names_(names)
+            expected = factory(1, 2, 3, device=device).names_(*names)
 
             self.assertTensorDataAndNamesEqual(result, expected)
 
@@ -185,7 +249,7 @@ class TestNamedTensor(TestCase):
         for device in torch.testing.get_all_device_types():
             names = ('N', 'T', 'D')
             result = torch.full([1, 2, 3], 2, names=names, device=device)
-            expected = torch.full([1, 2, 3], 2, device=device).names_(names)
+            expected = torch.full([1, 2, 3], 2, device=device).names_(*names)
             self.assertTensorDataAndNamesEqual(result, expected)
 
     def test_size(self):
