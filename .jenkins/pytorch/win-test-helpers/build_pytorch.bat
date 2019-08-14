@@ -61,6 +61,9 @@ set PATH=%TMP_DIR_WIN%\bin;%PATH%
 :: Target only our CI GPU machine's CUDA arch to speed up the build
 set TORCH_CUDA_ARCH_LIST=5.2
 
+:: Suppress warnings; our Windows is extremely warning unclean
+set NOWARN=1
+
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats

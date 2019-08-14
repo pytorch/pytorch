@@ -25,6 +25,12 @@
 #     compiles, because distutils always uses CC to compile, even for C++
 #     files.
 #
+#   WERROR
+#     build with warnings as errors
+#
+#   NOWARN
+#     build with warnings disabled
+#
 # Environment variables for feature toggles:
 #
 #   USE_CUDNN=0
@@ -577,6 +583,8 @@ def configure_extension_build():
             # /bigobj increases number of sections in .obj file, which is needed to link
             # against libaries in Python 2.7 under Windows
             extra_compile_args.append('/bigobj')
+        if check_env_flag('NOWARN'):
+            extra_compile_args.append('/w')
     else:
         extra_link_args = []
         extra_compile_args = [
@@ -601,6 +609,8 @@ def configure_extension_build():
         ]
         if check_env_flag('WERROR'):
             extra_compile_args.append('-Werror')
+        if check_env_flag('NOWARN'):
+            extra_compile_args.append('-w')
 
     library_dirs.append(lib_path)
 
