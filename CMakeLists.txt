@@ -204,6 +204,7 @@ if (MSVC)
   endforeach(flag_var)
   # Turning off USE_DISTRIBUTED on default
   set(USE_DISTRIBUTED OFF)
+  string(APPEND CMAKE_CXX_FLAGS " /w")
 endif(MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
