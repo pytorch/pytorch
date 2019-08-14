@@ -466,6 +466,7 @@ Example::
     module = torch.jit.script(M(None))
 
 .. _TorchScript Class:
+.. _TorchScript Classes:
 
 TorchScript Classes
 ^^^^^^^^^^^^^^^^^^^
