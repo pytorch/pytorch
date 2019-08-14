@@ -2395,68 +2395,24 @@ class _TestTorchMixin(torchtest):
         self.assertEqual(tensor.pow(exp), torch.pow(tensor, exp))
 
     @staticmethod
-    def _test_int_pow(self, cast):
+    def _test_integral_pow(self, cast, dtype, range):
         if not TEST_NUMPY:
-            return
+            raise unittest.SkipTest('numpy not found')
 
-        typecasts = [
-            lambda x: x.long(),
-        ]
-
-        if not IS_WINDOWS:
-            typecasts.append(lambda x: x.int())
-
-        tensor = cast(torch.tensor((3, 3), dtype=torch.int64).random_(-10, 10))
-        exps = [0, 1, 2, 5,
-                cast(torch.tensor((3, 3), dtype=torch.int64).random_(0, 10))]
-
-        for typecast in typecasts:
-            for exp in exps:
-                t = typecast(tensor)
-                e = exp if isinstance(exp, int) else typecast(exp)
-                _TestTorchMixin._check_against_np(self, t, e)
-
-    @staticmethod
-    def _test_short_pow(self, cast):
-        if not TEST_NUMPY:
-            return
-
-        tensor = cast(torch.tensor((3, 3), dtype=torch.int16).random_(-5, 5))
-        exps = [0, 1, 2, 5,
-                cast(torch.tensor((3, 3), dtype=torch.int16).random_(0, 10))]
-
-        for exp in exps:
-            _TestTorchMixin._check_against_np(self, tensor, exp)
-
-    @staticmethod
-    def _test_ubyte_pow(self, cast):
-        if not TEST_NUMPY:
-            return
-
-        tensor = cast(torch.tensor((3, 3), dtype=torch.uint8).random_(0, 4))
-        exps = [0, 1, 2, 5,
-                cast(torch.tensor((3, 3), dtype=torch.uint8).random_(0, 10))]
-
-        for exp in exps:
-            _TestTorchMixin._check_against_np(self, tensor, exp)
-
-    @staticmethod
-    def _test_byte_pow(self, cast):
-        if not TEST_NUMPY:
-            return
-
-        tensor = cast(torch.tensor((3, 3), dtype=torch.int8).random_(-3, 4))
+        tensor = cast(torch.tensor((3, 3), dtype=dtype).random_(*range))
         exps = [0, 1, 2, 4,
-                cast(torch.tensor((3, 3), dtype=torch.int8).random_(0, 10))]
+                cast(torch.tensor((3, 3), dtype=dtype).random_(0, 10))]
 
         for exp in exps:
             _TestTorchMixin._check_against_np(self, tensor, exp)
 
     def test_int_pow(self):
-        self._test_int_pow(self, lambda x: x)
-        self._test_short_pow(self, lambda x: x)
-        self._test_byte_pow(self, lambda x: x)
-        self._test_ubyte_pow(self, lambda x: x)
+        self._test_integral_pow(self, lambda x: x, torch.int8, (-3, 4))
+        self._test_integral_pow(self, lambda x: x, torch.uint8, (0, 4))
+        self._test_integral_pow(self, lambda x: x, torch.int16, (-5, 5))
+        self._test_integral_pow(self, lambda x: x, torch.int64, (-10, 10))
+        if not IS_WINDOWS:
+            self._test_integral_pow(self, lambda x: x, torch.int32, (-10, 10))
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_tensor_pow_neg_ints(self):
@@ -2490,15 +2446,10 @@ class _TestTorchMixin(torchtest):
                 "Integers to negative integer powers are not allowed.",
                 lambda: torch.pow(tensor, pow, out=out))
 
-    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    def test_int_tensor_pow_non_neg_ints(self):
-        ints = [-3, -2, -1, 0, 1, 2, 3]
-        non_neg_ints = [0, 1, 2, 3]
-
-        tensor = torch.tensor(ints, dtype=torch.int32)
-        nparr = np.array(ints, dtype=np.int32)
-        out = torch.empty_like(tensor)
-        for pow in non_neg_ints:
+    def _test_int32_tensor_pow_ints32(self, bases, pows):
+        tensor = torch.tensor(bases, dtype=torch.int32)
+        nparr = np.array(bases, dtype=np.int32)
+        for pow in pows:
             expected = np.power(nparr, pow)
 
             actual = tensor.pow(pow)
@@ -2515,33 +2466,19 @@ class _TestTorchMixin(torchtest):
             actual2 = torch.pow(tensor, pow, out=actual)
             self.assertEqual(expected, actual.numpy())
             self.assertEqual(expected, actual2.numpy())
+
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_int_tensor_pow_non_neg_ints(self):
+        ints = [-3, -2, -1, 0, 1, 2, 3]
+        non_neg_ints = [0, 1, 2, 3]
+        self._test_int32_tensor_pow_ints32(ints, non_neg_ints)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_extreme_int_tensor_pow_0_and_1(self):
         extreme_ints = [torch.iinfo(torch.int32).min,
                         torch.iinfo(torch.int32).max]
         non_neg_ints = [0, 1]
-
-        tensor = torch.tensor(extreme_ints, dtype=torch.int32)
-        nparr = np.array(extreme_ints, dtype=np.int32)
-
-        for pow in non_neg_ints:
-            expected = np.power(nparr, pow)
-
-            actual = tensor.pow(pow)
-            self.assertEqual(expected, actual.numpy())
-
-            actual = tensor.clone()
-            actual2 = actual.pow_(pow)
-            self.assertEqual(expected, actual.numpy())
-            self.assertEqual(expected, actual2.numpy())
-
-            actual = torch.pow(tensor, pow)
-            self.assertEqual(expected, actual.numpy())
-
-            actual2 = torch.pow(tensor, pow, out=actual)
-            self.assertEqual(expected, actual.numpy())
-            self.assertEqual(expected, actual2.numpy())
+        self._test_int32_tensor_pow_ints32(extreme_ints, non_neg_ints)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_non_neg_int_tensor_pow_non_neg_floats(self):
@@ -2578,7 +2515,6 @@ class _TestTorchMixin(torchtest):
 
         tensor = torch.tensor(floats, dtype=torch.float32)
         nparr = np.array(floats, dtype=np.float32)
-        out = torch.empty_like(tensor)
         for base in floats:
             # Numpy propagates int to float, so we need to cast to np.int32
             expected = np.power(base, nparr).astype(np.float32)
@@ -12725,13 +12661,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         with self.assertRaisesRegex(RuntimeError, 'single memory location'):
             start.lerp_(end, weight)
 
-    @unittest.expectedFailure
     def test_pow_mem_overlap(self):
-        TestTorch.binary_check_mem_overlap(self, 'pow_', device='cpu')
-        tensor = torch.tensor(value, device=device).expand(3, 3)
-        other = 42
+        self.binary_check_mem_overlap(self, 'pow_', device='cpu')
+        tensor = torch.tensor(42, device='cpu').expand(3, 3)
         with self.assertRaisesRegex(RuntimeError, 'single memory location'):
-            inplace_op(tensor, other)
+            tensor.pow_(42)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
     def test_reverse_binary_ops_multiple_device(self):
