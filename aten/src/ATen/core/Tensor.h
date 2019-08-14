@@ -360,10 +360,10 @@ class CAFFE2_API Tensor {
   void backward(const Tensor & gradient={}, bool keep_graph=false, bool create_graph=false) const;
   void set_data(const Tensor & new_data) const;
   #ifdef BUILD_NAMEDTENSOR
-  Tensor & set_names_(c10::optional<DimnameList> names) const;
+  Tensor & names_(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
-  Tensor set_names(c10::optional<DimnameList> names) const;
+  Tensor view_names(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor align_to(DimnameList names) const;

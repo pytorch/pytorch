@@ -66,14 +66,14 @@ inline void Tensor::set_data(const Tensor & new_data) const {
     return table->getOp<void (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), new_data);
 }
 #ifdef BUILD_NAMEDTENSOR
-inline Tensor & Tensor::set_names_(c10::optional<DimnameList> names) const {
-    static auto table = globalATenDispatch().getOpTable("aten::set_names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
+inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
+    static auto table = globalATenDispatch().getOpTable("aten::names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, c10::optional<DimnameList>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
 }
 #endif
 #ifdef BUILD_NAMEDTENSOR
-inline Tensor Tensor::set_names(c10::optional<DimnameList> names) const {
-    static auto table = globalATenDispatch().getOpTable("aten::set_names(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
+inline Tensor Tensor::view_names(c10::optional<DimnameList> names) const {
+    static auto table = globalATenDispatch().getOpTable("aten::view_names(Tensor(a) self, Dimname[]? names) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, c10::optional<DimnameList>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
 }
 #endif
