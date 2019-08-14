@@ -76,6 +76,19 @@ def relu(input, inplace=False):
         return orig_relu(input, inplace)
 
 
+orig_mv = torch.mv
+
+
+def mv(*args, **kwargs):
+    if is_nested_tensor(args[0]):
+        ret = []
+        for tensor1, tensor2 in zip(args[0]._tensors, args[1]._tensors):
+            ret.append(orig_mv(tensor1, tensor2))
+        return NestedTensor(ret)
+    else:
+        return orig_mv(*args, **kwargs)
+
+
 def is_nested_tensor(obj):
     return isinstance(obj, NestedTensor)
 
@@ -117,6 +130,12 @@ def nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_memory
         for data_ in data:
             if is_nested_tensor(data_):
                 nested_tensors.append(data_.clone().detach())
+
+        if len(nested_tensors) == 0:
+            for data_ in data:
+                if isinstance(data_, list) or isinstance(data_, tuple):
+                    nested_tensors.append(nested_tensor(data_))
+
         if len(nested_tensors) > 0:
             if len(nested_tensors) != len(data):
                 raise ValueError("All entries of the passed list must either be Tensors or NestedTensors")
@@ -227,11 +246,11 @@ def _verify_tensors(obj):
         is_pinned = tensors[0].is_pinned()
         for tensor in tensors:
             if not (dim == tensor.dim() and
-                    layout == tensor.layout
-                    and device == tensor.device
-                    and dtype == tensor.dtype
-                    and requires_grad == tensor.requires_grad
-                    and is_pinned == tensor.is_pinned()):
+                    layout == tensor.layout and
+                    device == tensor.device and
+                    dtype == tensor.dtype and
+                    requires_grad == tensor.requires_grad and
+                    is_pinned == tensor.is_pinned()):
                 raise ValueError("Each passed Tensor "
                                  "must match in dim, layout, "
                                  "device, dtype and requires_grad")
@@ -393,8 +412,20 @@ class NestedTensor(object):
         if dim is None:
             return torch.stack(tuple(t.sum() for t in self._tensors)).sum()
         else:
-            if dim > 0:
+            if dim > self.nested_dim - 1:
                 return torch.as_nested_tensor(tuple(t.sum(dim - 1) for t in self._tensors))
+            else:
+                raise NotImplementedError("Reductions over NestedTensor dimension not defined")
+
+    # TODO: Not covered by RFC! NestedTensor 0.0.2 will talk about reductions.
+    # TODO: This needs indicies!!! - not clear
+    def argmax(self, dim=None):
+        # We currently asmaxe len(self._tensors) is always non-zero
+        if dim is None:
+            raise NotImplementedError("Full reduction currently not supported")
+        else:
+            if dim > self.nested_dim - 1:
+                return torch.as_nested_tensor(tuple(t.argmax(dim - 1) for t in self._tensors))
             else:
                 raise NotImplementedError("Reductions over NestedTensor dimension not defined")
 
@@ -425,3 +456,19 @@ class NestedTensor(object):
 
     def unbind(self):
         return tuple(self._tensors)
+
+    def flatten(self):
+        if self.nested_dim == 1:
+            return self
+        if self.nested_dim == 2:
+            return as_nested_tensor(tuple(map(lambda x: x.unbind(), self.unbind())))
+        return as_nested_tensor(tuple(map(lambda x: x.flatten, self.unbind())))
+
+    def to_tensor(self):
+        if None in self.size():
+            raise ValueError("Cannot convert irreguarly shaped NestedTensor into a Tensor")
+        else:
+            if self.nested_dim == 1:
+                return torch.stack(self.unbind())
+            else:
+                return torch.stack(list(map(lambda x: x.to_tensor(), self.unbind())))
