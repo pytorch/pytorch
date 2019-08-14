@@ -23,15 +23,20 @@ This makes it possible to train models in PyTorch using familiar tools in Python
 the model via TorchScript to a production environment where Python programs may be disadvantageous.
 for performance and multi-threading reasons.
 
+For a gentle introduction to TorchScript, see the `Introduction to TorchScript <https://pytorch.org/tutorials/beginner/Intro_to_TorchScript_tutorial.html>`_ tutorial.
+
+For an end-to-end example of converting a PyTorch model to TorchScript and running it in C++, see the
+`Loading a PyTorch Model in C++ <https://pytorch.org/tutorials/advanced/cpp_export.html>`_ tutorial.
+
 Creating TorchScript Code
 --------------------------
 
-.. autofunction:: script(obj, optimize=None)
+.. autoclass:: ScriptModule()
+    :members:
+
+.. autofunction:: script(obj)
 
 .. autofunction:: trace(func, example_inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
-
-.. autoclass:: ScriptModule(optimize=None)
-    :members:
 
 .. autofunction:: save
 
@@ -260,7 +265,7 @@ TorchScript Language Reference
 -------------------------------
 
 TorchScript is a statically typed subset of Python that can either be written directly (using
-the ``@torch.jit.script`` decorator) or generated automatically from Python code via
+the :func:`@torch.jit.script <torch.jit.script>` decorator) or generated automatically from Python code via
 tracing. When using tracing, code is automatically converted into this subset of
 Python by recording only the actual operators on tensors and simply executing and
 discarding the other surrounding Python code.
@@ -400,6 +405,7 @@ Example::
     return x
 
 .. _TorchScript Class:
+.. _TorchScript Classes:
 
 TorchScript Classes
 ^^^^^^^^^^^^^^^^^^^
