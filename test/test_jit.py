@@ -17065,6 +17065,7 @@ class TestList(JitTestCase):
 
     def test_comprehension_out_type_not_in_type(self):
         def list_cast():
+            # type: () -> int
             li = [int(i) for i in [torch.tensor(0), torch.tensor(1), torch.tensor(2)]]
             return li[0] + li[1] + li[2]
 

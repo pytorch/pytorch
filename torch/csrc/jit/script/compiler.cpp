@@ -1016,21 +1016,18 @@ struct to_ir {
   }
 
   // emit a single expr from the loop comprehension so that we can correctly
-  // type the list we create, then remove the nodes we created
+  // type the list we create, then remove the nodes we emitted
   TypePtr getListCompType(
       const ListComp& lc,
       const ListTypePtr& input_list_type) {
     auto b = graph->insertNode(graph->create(prim::Loop))->addBlock();
     pushFrame(b);
     WithInsertPoint guard(b);
-    auto list_element = std::make_shared<SimpleValue>(
-        graph
-            ->insertNode(
-                graph->createUninitialized(input_list_type->getElementType()))
-            ->output());
+    auto li_elem = graph->insertNode(
+        graph->createUninitialized(input_list_type->getElementType()));
     emitExprsAssign(
         List<Expr>::create(lc.range(), {lc.target()}),
-        {list_element},
+        {std::make_shared<SimpleValue>(li_elem->output())},
         lc.range(),
         /*n_binders*/ 1);
     auto ret_type = emitExpr(lc.elt())->type();
