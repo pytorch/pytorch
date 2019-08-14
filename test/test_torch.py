@@ -225,9 +225,11 @@ class _TestTorchMixin(torchtest):
                        'to_dense',
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
-                       'set_names',  # BUILD_NAMEDTENSOR only
-                       'set_names_',  # BUILD_NAMEDTENSOR only
+                       'align_to',  # BUILD_NAMEDTENSOR only
+                       'view_names',  # BUILD_NAMEDTENSOR only
+                       'names_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
+                       'rename',  # BUILD_NAMEDTENSOR only
                        )
         test_namespace(torch.nn)
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear', 'feature_alpha_dropout')
@@ -2873,7 +2875,7 @@ class _TestTorchMixin(torchtest):
                             self.assertEqual(std1, std2)
                             self.assertEqual(mean1, mean2)
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     def test_var_mean_some_dims(self, device):
         sizes = (4, 6, 7, 5, 3)
         dims = len(sizes)
@@ -2890,7 +2892,7 @@ class _TestTorchMixin(torchtest):
                         self.assertEqual(var1, var2)
                         self.assertEqual(mean1, mean2)
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     def test_zeros_like(self, device):
         expected = torch.zeros((100, 100,), device=device)
 
@@ -3526,7 +3528,7 @@ class _TestTorchMixin(torchtest):
             x[1] = True
             self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool))
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     def test_unfold_all_devices_and_dtypes(self, device):
         for dt in torch.testing.get_all_dtypes():
             if dt == torch.bfloat16:

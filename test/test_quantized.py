@@ -341,6 +341,62 @@ class TestQuantizedOps(TestCase):
             cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
                              zero_point=zero_point)
 
+    """Tests the correctness of the quantized equal op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                    qparams=hu.qparams()),
+        X2=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                        qparams=hu.qparams()),
+        X_per_channel=st.booleans(),
+        X2_per_channel=st.booleans())
+    def test_equal(self, X, X2, X_per_channel, X2_per_channel):
+        X, X_params = X
+        (scale, zero_point, torch_type) = X_params
+        X2, X2_params = X2
+        (scale2, zero_point2, torch_type2) = X2_params
+
+        X = torch.from_numpy(X)
+        if X_per_channel:
+            X_scheme = 'per_channel'
+            channels = X.shape[-1]
+            qX = torch.quantize_linear_per_channel(
+                X,
+                scales=torch.tensor([scale] * channels),
+                zero_points=torch.tensor([zero_point] * channels),
+                dtype=torch_type,
+                axis=[X.ndim - 1])
+        else:
+            X_scheme = 'per_tensor'
+            qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
+                                    dtype=torch_type)
+        X2 = torch.from_numpy(X2)
+        if X2_per_channel:
+            X2_scheme = 'per_channel'
+            channels = X2.shape[-1]
+            qX2 = torch.quantize_linear_per_channel(
+                X2,
+                scales=torch.tensor([scale2] * channels),
+                zero_points=torch.tensor([zero_point2] * channels),
+                dtype=torch_type2,
+                axis=[X2.ndim - 1])
+        else:
+            X2_scheme = 'per_tensor'
+            qX2 = torch.quantize_linear(X2, scale=scale2, zero_point=zero_point2,
+                                        dtype=torch_type2)
+
+        def equal_ref(X, params, X_scheme, X2, params2, X2_scheme):
+            if X_scheme != X2_scheme:
+                return False
+            if params != params2:
+                return False
+            if X.shape != X2.shape:
+                return False
+            if (X != X2).any():
+                return False
+            return True
+
+        self.assertEqual(qX.equal(qX), equal_ref(X, X_params, X_scheme, X, X_params, X_scheme))
+        self.assertEqual(qX.equal(qX2), equal_ref(X, X_params, X_scheme, X2, X2_params, X2_scheme))
+
 
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
@@ -356,13 +412,17 @@ class TestDynamicQuantizedLinear(TestCase):
         output_channels=st.integers(4, 8),
         use_bias=st.booleans(),
         use_relu=st.booleans(),
-    )
-    def test_qlinear(self, batch_size, input_channels, output_channels, use_bias, use_relu):
+        use_multi_dim_input=st.booleans())
+    def test_qlinear(self, batch_size, input_channels, output_channels,
+                     use_bias, use_relu, use_multi_dim_input):
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
         if use_relu:
             qlinear_dynamic = torch.ops.quantized.fbgemm_linear_relu_dynamic
         else:
             qlinear_dynamic = torch.ops.quantized.fbgemm_linear_dynamic
+
+        if use_multi_dim_input:
+            batch_size *= 3  # Test the multi-dim input tensor
 
         X_scale = 1.0
         X_zp = 0
@@ -411,6 +471,9 @@ class TestDynamicQuantizedLinear(TestCase):
             _dequantize(b_q0, X_scale * W_scale, 0)
         ).to(dtype=torch.float) if use_bias else None
 
+        if use_multi_dim_input:
+            X_fp32 = X_fp32.view(3, int(batch_size / 3), input_channels)
+
         W_scale, W_zp = _calculate_dynamic_qparams(W_fp32, torch.qint8)
         W_q = torch.quantize_linear(W_fp32, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
 
@@ -427,13 +490,14 @@ class TestDynamicQuantizedLinear(TestCase):
 
         Y_fp32_ref = F.linear(X_q.dequantize(), W_q.dequantize(), b_fp32)
         # Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
+        # if use_multi_dim_input:
+        #     Y_fp32_ref = Y_fp32_ref.view(3, int(batch_size / 3), output_channels)
 
         if use_relu:
             Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
 
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          message="torch.ops.quantized.fbgemm_linear_dynamic results are off")
-
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
@@ -446,13 +510,18 @@ class TestQuantizedLinear(unittest.TestCase):
            input_channels=st.integers(16, 32),
            output_channels=st.integers(4, 8),
            use_bias=st.booleans(),
-           use_relu=st.booleans())
-    def test_qlinear(self, batch_size, input_channels, output_channels, use_bias, use_relu):
+           use_relu=st.booleans(),
+           use_multi_dim_input=st.booleans())
+    def test_qlinear(self, batch_size, input_channels, output_channels, use_bias,
+                     use_relu, use_multi_dim_input):
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
         if use_relu:
             qlinear = torch.ops.quantized.fbgemm_linear_relu
         else:
             qlinear = torch.ops.quantized.fbgemm_linear
+
+        if use_multi_dim_input:
+            batch_size *= 3  # Test the multi-dim input tensor
 
         X_scale = 1.5
         X_zp = 5
@@ -508,9 +577,15 @@ class TestQuantizedLinear(unittest.TestCase):
         Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
         if use_relu:
             Y_q_ref[Y_q_ref < Y_zp] = Y_zp
+        if use_multi_dim_input:
+            Y_q_ref = np.reshape(Y_q_ref, (3, int(batch_size / 3), output_channels))
 
         # Weight prepacking operator for quantized Linear
         W_prepack = qlinear_prepack(W_q)
+
+        if use_multi_dim_input:
+            X_q = X_q.view(3, int(batch_size / 3), input_channels)
+
         # Quantized Linear operator with prepacked weight
         Y_q = qlinear(X_q, W_prepack, b_q, Y_scale, Y_zp)
 

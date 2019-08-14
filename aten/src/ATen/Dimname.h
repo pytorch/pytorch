@@ -52,5 +52,13 @@ CAFFE2_API bool match(Dimname dimname, Dimname other);
 
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Dimname& dimname);
 
+inline bool operator==(const Dimname& lhs, const Dimname& rhs) {
+  return lhs.full_name() == rhs.full_name();
+}
+
+inline bool operator!=(const Dimname& lhs, const Dimname& rhs) {
+  return !(lhs == rhs);
+}
+
 } // namespace at
 #endif
