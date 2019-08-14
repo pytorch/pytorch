@@ -225,8 +225,11 @@ class _TestTorchMixin(torchtest):
                        'to_dense',
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
-                       'set_names_',  # BUILD_NAMEDTENSOR only
+                       'align_to',  # BUILD_NAMEDTENSOR only
+                       'view_names',  # BUILD_NAMEDTENSOR only
+                       'names_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
+                       'rename',  # BUILD_NAMEDTENSOR only
                        )
         test_namespace(torch.nn)
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear', 'feature_alpha_dropout')
@@ -1863,17 +1866,19 @@ class _TestTorchMixin(torchtest):
     @staticmethod
     def _test_logical_not(self, device):
         for dtype in torch.testing.get_all_dtypes():
+            a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
             if dtype == torch.bfloat16:
+                self.assertRaises(RuntimeError, lambda: a.logical_not())
                 continue
             expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
-            a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
             # new tensor
             self.assertEqual(expected_res.bool(), a.logical_not())
             # out
             for out_dtype in torch.testing.get_all_dtypes():
-                if out_dtype == torch.bfloat16:
-                    continue
                 b = torch.empty(0, dtype=out_dtype, device=device)
+                if out_dtype == torch.bfloat16:
+                    self.assertRaises(RuntimeError, lambda: torch.logical_not(a, out=b))
+                    continue
                 torch.logical_not(a, out=b)
                 self.assertEqual(expected_res.bool(), b.bool())
             # in-place
