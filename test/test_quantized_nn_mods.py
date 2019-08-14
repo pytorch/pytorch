@@ -12,7 +12,7 @@ from torch.nn.quantized.modules import Conv2d
 from torch.nn._intrinsic.quantized import ConvReLU2d
 import torch.quantization
 from common_utils import run_tests, tempfile
-from common_quantization import QuantizationTestCase
+from common_quantization import QuantizationTestCase, no_deadline
 from common_quantized import _calculate_dynamic_qparams
 from hypothesis import given
 from hypothesis import strategies as st
@@ -38,6 +38,12 @@ class FunctionalAPITest(QuantizationTestCase):
 
 
 class DynamicModuleAPITest(QuantizationTestCase):
+    @no_deadline
+    @unittest.skipIf(
+        not torch.fbgemm_is_cpu_supported(),
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -110,6 +116,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
 
 
 class ModuleAPITest(QuantizationTestCase):
+    @no_deadline
     @unittest.skipIf(
         not torch.fbgemm_is_cpu_supported(),
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
@@ -217,6 +224,7 @@ class ModuleAPITest(QuantizationTestCase):
         rqr2 = dequant_m(qr2)
         self.assertEqual(rqr, rqr2)
 
+    @no_deadline
     @unittest.skipIf(
         not torch.fbgemm_is_cpu_supported(),
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
