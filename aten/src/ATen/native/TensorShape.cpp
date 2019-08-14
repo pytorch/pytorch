@@ -641,11 +641,6 @@ static Tensor& propagate_transposed_names(
   return result;
 }
 
-Tensor& transpose_(Tensor& self, Dimname dim0, Dimname dim1) {
-  return self.transpose_(
-      dimname_to_position(self, dim0), dimname_to_position(self, dim1));
-}
-
 Tensor transpose(const Tensor& self, Dimname dim0, Dimname dim1) {
   return at::transpose(
       self, dimname_to_position(self, dim0), dimname_to_position(self, dim1));
@@ -672,12 +667,7 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   auto sizes = self.sizes().vec();
   std::swap(strides[dim0], strides[dim1]);
   std::swap(sizes[dim0], sizes[dim1]);
-  self.as_strided_(sizes, strides);
-#ifdef BUILD_NAMEDTENSOR
-  return propagate_transposed_names(self, self, dim0, dim1);
-#else
-  return self;
-#endif
+  return self.as_strided_(sizes, strides);
 }
 
 Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
