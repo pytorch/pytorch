@@ -22,6 +22,30 @@ std::string graph_desc(std::shared_ptr<Node> node) {
   return result+")";
 }
 
+TEST(AutogradAPITests, BackwardTest) {
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  Variable y = torch::randn({5,5}, torch::requires_grad());
+  auto res = x + 2 * y + x * y;
+  std::vector<at::Tensor> outputs;
+  outputs.emplace_back(res.sum());
+  backward(outputs);
+
+  ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({5,5}));
+  ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5,5})*2);
+}
+
+TEST(AutogradAPITests, GradTest) {
+  // Variable x = torch::randn({5,5}, torch::requires_grad());
+  // Variable y = torch::randn({5,5}, torch::requires_grad());
+  // auto res = (x + 2);
+  // auto go = torch::ones({}, torch::requires_grad());
+  // grad()
+  // res.sum().backward(go, false, true);
+
+  // ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({5,5}));
+  // ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5,5})*2);
+}
+
 TEST(CustomAutogradTest, CustomFunction) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var1, int mul, Variable var2) {

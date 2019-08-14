@@ -132,6 +132,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     PyObject *grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
       grads.push_back(((THPVariable*)grad)->cdata);
+      std::cout<<"grad :" << grads[0] << std::endl;
     } else {
       THPUtils_assert(grad == Py_None,
           "element %d of gradients tuple is not a Tensor or None", i);
@@ -165,6 +166,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   }
 
   variable_list outputs;
+  std::cout<<"roots size: " << roots.size() << " grads size: " << grads.size() << " output edges size:" << output_edges.size() << std::endl;
   {
     AutoNoGIL no_gil;
     outputs = engine.execute(roots, grads, keep_graph, create_graph, output_edges);
