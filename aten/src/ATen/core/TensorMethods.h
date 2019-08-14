@@ -4,10 +4,10 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
-#include <ATen/core/TensorOptions.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
@@ -69,6 +69,12 @@ inline void Tensor::set_data(const Tensor & new_data) const {
 inline Tensor & Tensor::set_names_(c10::optional<DimnameList> names) const {
     static auto table = globalATenDispatch().getOpTable("aten::set_names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, c10::optional<DimnameList>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::set_names(c10::optional<DimnameList> names) const {
+    static auto table = globalATenDispatch().getOpTable("aten::set_names(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
+    return table->getOp<Tensor (const Tensor &, c10::optional<DimnameList>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
 }
 #endif
 inline Tensor Tensor::abs() const {
