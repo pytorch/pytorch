@@ -9,7 +9,7 @@ setlocal
 
 choco install -y --no-progress --side-by-side cmake.portable --version 3.12.1
 
-set PATH="C:\ProgramData\chocolatey\lib\cmake.portable.3.12.1\tools\cmake-3.12.1-win64-x64\bin;%PATH%"
+set PATH=C:\ProgramData\chocolatey\lib\cmake.portable.3.12.1\tools\cmake-3.12.1-win64-x64\bin;%PATH%
 
 SET ORIGINAL_DIR=%cd%
 SET CAFFE2_ROOT=%~dp0%..
