@@ -2875,7 +2875,7 @@ class _TestTorchMixin(torchtest):
                             self.assertEqual(std1, std2)
                             self.assertEqual(mean1, mean2)
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     def test_var_mean_some_dims(self, device):
         sizes = (4, 6, 7, 5, 3)
         dims = len(sizes)
@@ -2892,7 +2892,7 @@ class _TestTorchMixin(torchtest):
                         self.assertEqual(var1, var2)
                         self.assertEqual(mean1, mean2)
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     def test_zeros_like(self, device):
         expected = torch.zeros((100, 100,), device=device)
 
@@ -3528,7 +3528,7 @@ class _TestTorchMixin(torchtest):
             x[1] = True
             self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool))
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     def test_unfold_all_devices_and_dtypes(self, device):
         for dt in torch.testing.get_all_dtypes():
             if dt == torch.bfloat16:
