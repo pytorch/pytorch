@@ -161,13 +161,17 @@ class TestCppExtension(common.TestCase):
                 err = err.decode("ascii")
 
             if not p.returncode == 0 or not err == '':
-                raise AssertionError("Flags: {},  Stderr: {}".format(flags, err))
+                raise AssertionError("Flags: {}\nReturncode: {}\nStderr: {}\n"
+                                     "Output: {} ".format(flags, p.returncode,
+                                                          err, output))
 
             actual_arches = sorted(re.findall(r'sm_\d\d', output))
             expected_arches = ['sm_' + xx for xx in expected_values]
             self.assertEqual(actual_arches, expected_arches,
-                             message="Flags: {},  Actual: {},  Expected: "
-                                     "{}".format(flags, actual_arches, expected_arches))
+                             message="Flags: {},  Actual: {},  Expected: {}\n"
+                                     "Stderr: {}\nOutput: {}".format(
+                                         flags, actual_arches, expected_arches,
+                                         err, output))
 
         temp_dir = tempfile.mkdtemp()
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
@@ -218,10 +222,12 @@ class TestCppExtension(common.TestCase):
             '': (['{}{}'.format(capability[0], capability[1])], None),
             "Maxwell+Tegra;6.1": (['53', '61'], None),
             "Pascal 3.5": (['35', '60', '61'], None),
-            "7.5+PTX": (['75'], ['75']),
-            "5.0;6.0+PTX;7.0;7.5": (['50', '60', '70', '75'], ['60']),
             "Volta": (['70'], ['70']),
         }
+        if int(torch.version.cuda.split('.')[0]) >= 10:
+            # CUDA 9 only supports compute capability <= 7.2
+            archflags["7.5+PTX"] = (['75'], ['75'])
+            archflags["5.0;6.0+PTX;7.0;7.5"] = (['50', '60', '70', '75'], ['60'])
 
         for flags, expected in archflags.items():
             self._run_jit_cuda_archflags(flags, expected)
