@@ -1,6 +1,5 @@
 import torch._C
 import torch._jit_internal as _jit_internal
-from torch._six import get_function_from_type
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch.testing
@@ -899,38 +898,29 @@ def trace_module(mod,
         raise AttributeError("expected a dictionary of (method_name, input) pairs")
 
 
-    if hasattr(mod, '_trace_compile_exports') and mod._trace_compile_exports():
-        exported = []
-        for name in dir(mod):
-            item = getattr(mod, name)
-            if callable(item):
-                if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
-                    exported.append(name)
-
-        def make_stub(method):
-            func = get_function_from_type(type(mod), method)
-            return torch.jit.script_method(func, _jit_internal.createResolutionCallbackFromClosure(func))
-
-        stubs = list(map(make_stub, exported))
-        module = torch.jit._recursive.copy_to_script_module(mod, stubs, _compilation_unit)
+    # If the module has script exports, the user has already indicated that this module
+    # is traceable, therefore we can just compile the whole module rather than tracing
+    # through it.
+    if torch._jit_internal.module_has_exports(mod):
+        module = torch.jit.script(mod)
     else:
         module = make_module(mod, _module_class, _compilation_unit)
 
-    for method_name, example_inputs in inputs.items():
-        # this is needed since Module.__call__ sets up some extra tracing
-        func = mod if method_name == "forward" else getattr(mod, method_name)
-        example_inputs = make_tuple(example_inputs)
-        module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
-        check_trace_method = module._c._get_method(method_name)
+        for method_name, example_inputs in inputs.items():
+            # this is needed since Module.__call__ sets up some extra tracing
+            func = mod if method_name == "forward" else getattr(mod, method_name)
+            example_inputs = make_tuple(example_inputs)
+            module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+            check_trace_method = module._c._get_method(method_name)
 
-        # Check the trace against new traces created from user-specified inputs
-        if check_trace:
-            if check_inputs is not None:
-                _check_trace(check_inputs, func, check_trace_method,
-                             check_tolerance, _force_outplace, True, _module_class)
-            else:
-                _check_trace([inputs], func, check_trace_method,
-                             check_tolerance, _force_outplace, True, _module_class)
+            # Check the trace against new traces created from user-specified inputs
+            if check_trace:
+                if check_inputs is not None:
+                    _check_trace(check_inputs, func, check_trace_method,
+                                 check_tolerance, _force_outplace, True, _module_class)
+                else:
+                    _check_trace([inputs], func, check_trace_method,
+                                 check_tolerance, _force_outplace, True, _module_class)
 
     return module
 
@@ -951,6 +941,12 @@ class CompilationUnit(object):
         if r is None:
             raise AttributeError("'CompilationUnit' has no attribute '{}'".format(attr))
         return r
+
+    def _import(self, src, constants, op_version_set=1):
+        """ test import logic for single function, use only for testing """
+        src = "op_version_set = {}\n{}".format(op_version_set, src)
+        torch._C._jit_import_functions(self._c, src, constants)
+        return self
 
 
 def _try_get_dispatched_fn(fn):
