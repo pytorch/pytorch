@@ -193,9 +193,6 @@ if (MSVC)
       if(${flag_var} MATCHES "/Z[iI]")
         string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
       endif(${flag_var} MATCHES "/Z[iI]")
-      # Turn off warnings on Windows
-      string(REPLACE "/W3" "/w" ${flag_var} "${${flag_var}}")
-      string(REPLACE "/EHs" "/EHa" ${flag_var} "${${flag_var}}")
     endforeach(flag_var)
   endif(MSVC_Z7_OVERRIDE)
   foreach(flag_var
@@ -204,6 +201,10 @@ if (MSVC)
     if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
       string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
     endif()
+    # Turn off warnings on Windows
+    string(REPLACE "/W3" "/w" ${flag_var} "${${flag_var}}")
+    # Suppress EHs is overridden by EHa warning
+    string(REPLACE "/EHs" "/EHa" ${flag_var} "${${flag_var}}")
   endforeach(flag_var)
   # Turning off USE_DISTRIBUTED on default
   set(USE_DISTRIBUTED OFF)
