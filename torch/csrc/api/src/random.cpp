@@ -7,6 +7,10 @@
 #include <torch/types.h>
 #include <torch/csrc/utils/tensor_types.h>
 
+#ifdef USE_CUDA
+#include <THC/THCTensorRandom.h>
+#endif
+
 namespace {
 
 torch::Tensor _get_rng_state(torch::Device device) {
