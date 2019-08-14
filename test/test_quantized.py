@@ -341,6 +341,62 @@ class TestQuantizedOps(TestCase):
             cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
                              zero_point=zero_point)
 
+    """Tests the correctness of the quantized equal op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                    qparams=hu.qparams()),
+        X2=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                        qparams=hu.qparams()),
+        X_per_channel=st.booleans(),
+        X2_per_channel=st.booleans())
+    def test_equal(self, X, X2, X_per_channel, X2_per_channel):
+        X, X_params = X
+        (scale, zero_point, torch_type) = X_params
+        X2, X2_params = X2
+        (scale2, zero_point2, torch_type2) = X2_params
+
+        X = torch.from_numpy(X)
+        if X_per_channel:
+            X_scheme = 'per_channel'
+            channels = X.shape[-1]
+            qX = torch.quantize_linear_per_channel(
+                X,
+                scales=torch.tensor([scale] * channels),
+                zero_points=torch.tensor([zero_point] * channels),
+                dtype=torch_type,
+                axis=[X.ndim - 1])
+        else:
+            X_scheme = 'per_tensor'
+            qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
+                                    dtype=torch_type)
+        X2 = torch.from_numpy(X2)
+        if X2_per_channel:
+            X2_scheme = 'per_channel'
+            channels = X2.shape[-1]
+            qX2 = torch.quantize_linear_per_channel(
+                X2,
+                scales=torch.tensor([scale2] * channels),
+                zero_points=torch.tensor([zero_point2] * channels),
+                dtype=torch_type2,
+                axis=[X2.ndim - 1])
+        else:
+            X2_scheme = 'per_tensor'
+            qX2 = torch.quantize_linear(X2, scale=scale2, zero_point=zero_point2,
+                                        dtype=torch_type2)
+
+        def equal_ref(X, params, X_scheme, X2, params2, X2_scheme):
+            if X_scheme != X2_scheme:
+                return False
+            if params != params2:
+                return False
+            if X.shape != X2.shape:
+                return False
+            if (X != X2).any():
+                return False
+            return True
+
+        self.assertEqual(qX.equal(qX), equal_ref(X, X_params, X_scheme, X, X_params, X_scheme))
+        self.assertEqual(qX.equal(qX2), equal_ref(X, X_params, X_scheme, X2, X2_params, X2_scheme))
+
 
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
@@ -433,7 +489,6 @@ class TestDynamicQuantizedLinear(TestCase):
 
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          message="torch.ops.quantized.fbgemm_linear_dynamic results are off")
-
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
