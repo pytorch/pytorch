@@ -70,6 +70,7 @@
   variants: function
   dispatch:
      CUDA: fused_dropout_cuda
+  named_guard: False
 
 - func: _masked_scale(Tensor self, Tensor mask, float scale) -> Tensor
   variants: function
@@ -89,8 +90,10 @@
 - func: _shape_as_tensor(Tensor self) -> Tensor
 
 - func: dropout(Tensor input, float p, bool train) -> Tensor
+  named_guard: False
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+  named_guard: False
 
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
 
@@ -334,21 +337,25 @@
 # Sample bernoulli with values in `self` as probability.
 - func: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: bernoulli.out(Tensor self, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   variants: function
+  named_guard: False
 
 - func: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: bernoulli_tensor_cpu_
     CUDA: bernoulli_tensor_cuda_
+  named_guard: False
 
 - func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: bernoulli_scalar_cpu_
     CUDA: bernoulli_scalar_cuda_
+  named_guard: False
 
 # This out-of-place version isn't used explicitly, but needed by jit.
 # There is no default valid on `p` here because it would introduce ambiguity
@@ -488,6 +495,7 @@
 
 - func: contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor
   variants: method
+  named_guard: False
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
 
