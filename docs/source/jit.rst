@@ -38,6 +38,8 @@ Creating TorchScript Code
 
 .. autofunction:: trace(func, example_inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
 
+.. autofunction:: trace_module(mod, inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
+
 .. autofunction:: save
 
 .. autofunction:: load

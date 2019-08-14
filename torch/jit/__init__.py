@@ -714,8 +714,15 @@ def trace(func,
         expected to run different sets of operations, depending on the input and/or the
         module state. For example,
 
-        * Tracing will not record any control-flow like if-statements or loops. When this control-flow is constant across your module, this is fine and it often inlines the control-flow decisions. But sometimes the control-flow is actually part of the model itself. For instance, a recurrent network is a loop over the (possibly dynamic) length of an input sequence.
-        * In the returned ``ScriptModule``, operations that have different behaviors in ``training`` and ``eval`` modes will always behave as if it is in the mode it was in during tracing, no matter which mode the ``ScriptModule`` is in.
+        * Tracing will not record any control-flow like if-statements or loops.
+          When this control-flow is constant across your module, this is fine and it often
+          inlines the control-flow decisions. But sometimes the control-flow is actually part
+          of the model itself. For instance, a recurrent network is a loop over
+          the (possibly dynamic) length of an input sequence.
+        * In the returned ``ScriptModule``, operations that have different
+          behaviors in ``training`` and ``eval`` modes will always behave as if it
+          is in the mode it was in during tracing, no matter which mode the
+          ``ScriptModule`` is in.
 
         In cases like these, tracing would not be appropriate and :func:`scripting <torch.jit.script>` is a better
         choice. If you trace such models, you may silently get
@@ -785,10 +792,6 @@ def trace(func,
             def forward(self, x):
                 return self.conv(x)
 
-            def weighted_kernel_sum(self, weight):
-                return weight * self.conv.weight
-
-
         n = Net()
         example_weight = torch.rand(1, 1, 3, 3)
         example_forward_input = torch.rand(1, 1, 3, 3)
@@ -800,11 +803,6 @@ def trace(func,
         # Trace a module (implicitly traces `forward`) and construct a
         # `ScriptModule` with a single `forward` method
         module = torch.jit.trace(n, example_forward_input)
-
-        # Trace specific methods on a module (specified in `inputs`), constructs
-        # a `ScriptModule` with `forward` and `weighted_kernel_sum` methods
-        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
-        module = torch.jit.trace_module(n, inputs)
     """
     if not _enabled:
         return func
@@ -870,17 +868,11 @@ def trace_module(mod,
                  _compilation_unit=_python_cu):
     """
     Trace a module and return an executable ``ScriptModule`` that will be optimized
-    using just-in-time compilation.
+    using just-in-time compilation. When a module is passed to :func:`torch.jit.trace <torch.jit.trace>`, only
+    the ``forward`` method is run and traced. With ``trace_module``, you can specify a dictionary of
+    method names to example inputs to trace (see the ``example_inputs``) argument below.
 
-    .. warning::
-
-        Tracing only correctly records functions and modules which are not data
-        dependent (e.g., do not have conditionals on data in tensors) and do not have
-        any untracked external dependencies (e.g., perform input/output or
-        access global variables). If you trace such models, you may silently get
-        incorrect results on subsequent invocations of the model. The tracer
-        will try to emit warnings when doing something that may cause an
-        incorrect trace to be produced.
+    See :func:`torch.jit.trace <torch.jit.trace>` for more information on tracing
 
     Arguments:
         mod (torch.nn.Module):           a ``torch.nn.Module`` containing methods whose names are
@@ -913,7 +905,10 @@ def trace_module(mod,
         When ``func`` is a ``torch.nn.Module``, the returned ``ScriptModule`` will have the same set of
         sub-modules and parameters as ``func``.
 
-    Example::
+    Example (tracing a module with multiple methods)::
+
+        import torch
+        import torch.nn as nn
 
         class Net(nn.Module):
             def __init__(self):
@@ -926,12 +921,23 @@ def trace_module(mod,
             def weighted_kernel_sum(self, weight):
                 return weight * self.conv.weight
 
+
+        n = Net()
         example_weight = torch.rand(1, 1, 3, 3)
         example_forward_input = torch.rand(1, 1, 3, 3)
-        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
-        n = Net()
-        module = torch.jit.trace_module(n, inputs)
 
+        # Trace a specific method and construct `ScriptModule` with
+        # a single `forward` method
+        module = torch.jit.trace(n.forward, example_forward_input)
+
+        # Trace a module (implicitly traces `forward`) and construct a
+        # `ScriptModule` with a single `forward` method
+        module = torch.jit.trace(n, example_forward_input)
+
+        # Trace specific methods on a module (specified in `inputs`), constructs
+        # a `ScriptModule` with `forward` and `weighted_kernel_sum` methods
+        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
+        module = torch.jit.trace_module(n, inputs)
     """
     if not _enabled:
         return mod
