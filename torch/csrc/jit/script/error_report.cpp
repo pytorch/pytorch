@@ -13,7 +13,7 @@ ErrorReport::ErrorReport(const ErrorReport& e)
     : ss(e.ss.str()),
       context(e.context),
       the_message(e.the_message),
-      error_stack(calls.begin(), calls.end()) {}
+      error_stack(e.error_stack.begin(), e.error_stack.end()) {}
 
 ErrorReport::ErrorReport()
     : context(c10::nullopt), error_stack(calls.begin(), calls.end()) {}
