@@ -652,7 +652,6 @@ class TestOperators(TestCase):
 
     def test_std(self):
         x = torch.randn(2, 3, 4).float()
-        y = torch.randn(2, 3, 4).float()
         self.assertONNX(lambda x: torch.std(x, dim=(0, 1), unbiased=True, keepdim=True), x)
 
     def test_retain_param_name_disabled(self):
@@ -710,6 +709,10 @@ class TestOperators(TestCase):
     def test_frobenius_norm(self):
         x = torch.randn(2, 3, 4).float()
         self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
+
+    def test_gelu(self):
+        x = torch.randn(2, 3, 4, 5, requires_grad=True)
+        self.assertONNX(lambda x: torch.nn.functional.gelu(x), x)
 
 
 if __name__ == '__main__':

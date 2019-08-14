@@ -1884,9 +1884,9 @@ def index(g, self, index):
 
 @parse_args('v', 'is', 'i')
 def frobenius_norm(g, self, dim=None, keepdim=False):
-    sqrt = g.op('Mul', self, self)
-    sumsqrt = g.op('ReduceSum', sqrt, axes_i=dim, keepdims_i=keepdim)
-    return g.op('Sqrt', sumsqrt)
+    sqr = g.op('Mul', self, self)
+    sumsqr = g.op('ReduceSum', sqr, axes_i=dim, keepdims_i=keepdim)
+    return g.op('Sqrt', sumsqr)
 
 
 @parse_args('v', 'i', 'b', 'v')
@@ -1900,3 +1900,11 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
     return g.op("Multinomial", log_input,
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
+
+
+@parse_args('v')
+def gelu(g, self):
+    sqrt = g.op('Sqrt', g.op('Constant', value_t=torch.tensor(2, dtype=torch.float)))
+    erf = g.op('Erf', g.op('Div', self, sqrt))
+    erf_plusone = g.op('Sum', erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.float)))
+    return g.op('Mul', g.op('Mul', self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.float)))
