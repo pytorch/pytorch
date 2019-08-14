@@ -1570,7 +1570,7 @@ struct CAFFE2_API ClassType : public NamedType {
 
   std::string python_str() const override {
     const auto& n = name().value();
-    return n->qualifiedName();
+    return n.qualifiedName();
   }
 
   TypePtr getAttribute(const std::string& name) const {
