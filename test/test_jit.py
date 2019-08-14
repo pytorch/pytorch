@@ -7472,6 +7472,74 @@ a")
         self.assertTrue(imported.unpack_called.item())
         torch.testing.assert_allclose(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
 
+    def test_trace_export_fns(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.a = 3
+
+            @torch.jit.export
+            def __getstate__(self):
+                return (3,)
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self.a = state[0]
+
+            def forward(self, x):
+                return x + self.a
+
+        f = Foo()
+
+        traced = torch.jit.trace(f, (torch.rand(3, 4),))
+        expected_names = ['__getstate__', '__setstate__']
+
+        def check(mod):
+            self.assertTrue(all(name in mod._c._method_names() for name in expected_names))
+
+        check(traced)
+
+        imported = self.getExportImportCopy(traced)
+        check(imported)
+
+    def test_trace_export_fns_recursive(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.a = 3
+
+            @torch.jit.export
+            def __getstate__(self):
+                return (3,)
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self.a = state[0]
+
+            def forward(self, x):
+                return x + self.a
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self):
+                super(Wrapper, self).__init__()
+                self.foo = Foo()
+
+            def forward(self, x):
+                return self.foo(x)
+
+        f = Wrapper()
+
+        traced = torch.jit.trace(f, (torch.rand(3, 4),))
+        expected_names = ['__getstate__', '__setstate__']
+
+        def check(mod):
+            self.assertTrue(all(name in mod._c._method_names() for name in expected_names))
+
+        check(traced.foo)
+
+        imported = self.getExportImportCopy(traced)
+        check(imported.foo)
+
     def test_pack_unpack_nested(self):
         class SubSubMod(torch.jit.ScriptModule):
             def __init__(self):
