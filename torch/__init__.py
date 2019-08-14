@@ -324,6 +324,10 @@ import torch.__future__
 
 _C._init_names(list(torch._storage_classes))
 
+# Import C bindings that depend on the `torch.jit` module
+_C._init_jit_dependent_bindings()
+torch.jit.post_dependent_bindings_init()
+
 # attach docstrings to torch and tensor functions
 from . import _torch_docs, _tensor_docs, _storage_docs
 del _torch_docs, _tensor_docs, _storage_docs

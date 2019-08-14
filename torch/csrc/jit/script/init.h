@@ -6,6 +6,7 @@ namespace torch {
 namespace jit {
 namespace script {
 void initJitScriptBindings(PyObject* module);
+void initScriptDependentBindings();
 
 } // namespace script
 } // namespace jit

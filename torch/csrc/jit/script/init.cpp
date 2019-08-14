@@ -384,6 +384,87 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   module.type()->addMethod(method);
 }
 
+void initScriptDependentBindings() {
+  py::object jitmodule = py::module::import("torch").attr("jit");
+  py::class_<StrongFunctionPtr>(jitmodule, "Function", py::dynamic_attr())
+      .def(
+          "__call__",
+          [](py::args args, py::kwargs kwargs) {
+            // see: [pybind11 varargs]
+            auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
+            Function& callee = *strongPtr.function_;
+            bool tracing = tracer::isTracing();
+            if (tracing) {
+              tracer::getTracingState()->graph->push_scope(callee.name());
+            }
+            py::object result = invokeScriptFunctionFromPython(
+                callee, tuple_slice(std::move(args), 1), std::move(kwargs));
+            if (tracing) {
+              tracer::getTracingState()->graph->pop_scope();
+            }
+            return result;
+          })
+      .def(
+          "save",
+          [](const StrongFunctionPtr& self,
+             const std::string& filename,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            Module module("__torch__.PlaceholderModule");
+            addFunctionToModule(module, self);
+            module.save(filename, _extra_files);
+          },
+          py::arg("filename"),
+          py::arg("_extra_files") = ExtraFilesMap())
+      .def(
+          "save_to_buffer",
+          [](const StrongFunctionPtr& self,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            std::ostringstream buf;
+            Module module("__torch__.PlaceholderModule");
+            addFunctionToModule(module, self);
+            module.save(buf, _extra_files);
+            return py::bytes(buf.str());
+          },
+          py::arg("_extra_files") = ExtraFilesMap())
+      .def_property_readonly(
+          "graph",
+          [](const StrongFunctionPtr& self) { return self.function_->graph(); })
+      .def_property_readonly(
+          "schema",
+          [](const StrongFunctionPtr& self) {
+            return self.function_->getSchema();
+          })
+      .def_property_readonly(
+          "code",
+          [](const StrongFunctionPtr& self) {
+            std::ostringstream ss;
+            std::vector<at::Tensor> tensors;
+            std::vector<c10::NamedTypePtr> classes;
+            SourceRangeRecords source_ranges;
+            PythonPrint(
+                ss,
+                source_ranges,
+                *self.function_,
+                false,
+                tensors,
+                classes,
+                false);
+            return ss.str();
+          })
+      .def(
+          "get_debug_state",
+          [](const StrongFunctionPtr& self) {
+            return self.function_->get_executor().getDebugState();
+          })
+      .def_property_readonly(
+          "name",
+          [](const StrongFunctionPtr& self) { return self.function_->name(); })
+      .def_property_readonly(
+          "qualified_name", [](const StrongFunctionPtr& self) {
+            return self.function_->qualname().qualifiedName();
+          });
+}
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -623,84 +704,6 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& src,
              ResolutionCallback rcb) {
             cu.define(c10::nullopt, src, pythonResolver(rcb), nullptr);
-          });
-
-  py::class_<StrongFunctionPtr>(m, "Function", py::dynamic_attr())
-      .def(
-          "__call__",
-          [](py::args args, py::kwargs kwargs) {
-            // see: [pybind11 varargs]
-            auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
-            Function& callee = *strongPtr.function_;
-            bool tracing = tracer::isTracing();
-            if (tracing) {
-              tracer::getTracingState()->graph->push_scope(callee.name());
-            }
-            py::object result = invokeScriptFunctionFromPython(
-                callee, tuple_slice(std::move(args), 1), std::move(kwargs));
-            if (tracing) {
-              tracer::getTracingState()->graph->pop_scope();
-            }
-            return result;
-          })
-      .def(
-          "save",
-          [](const StrongFunctionPtr& self,
-             const std::string& filename,
-             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-            Module module("__torch__.PlaceholderModule");
-            addFunctionToModule(module, self);
-            module.save(filename, _extra_files);
-          },
-          py::arg("filename"),
-          py::arg("_extra_files") = ExtraFilesMap())
-      .def(
-          "save_to_buffer",
-          [](const StrongFunctionPtr& self,
-             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-            std::ostringstream buf;
-            Module module("__torch__.PlaceholderModule");
-            addFunctionToModule(module, self);
-            module.save(buf, _extra_files);
-            return py::bytes(buf.str());
-          },
-          py::arg("_extra_files") = ExtraFilesMap())
-      .def_property_readonly(
-          "graph",
-          [](const StrongFunctionPtr& self) { return self.function_->graph(); })
-      .def_property_readonly(
-          "schema",
-          [](const StrongFunctionPtr& self) {
-            return self.function_->getSchema();
-          })
-      .def_property_readonly(
-          "code",
-          [](const StrongFunctionPtr& self) {
-            std::ostringstream ss;
-            std::vector<at::Tensor> tensors;
-            std::vector<c10::NamedTypePtr> classes;
-            SourceRangeRecords source_ranges;
-            PythonPrint(
-                ss,
-                source_ranges,
-                *self.function_,
-                false,
-                tensors,
-                classes,
-                false);
-            return ss.str();
-          })
-      .def(
-          "get_debug_state",
-          [](const StrongFunctionPtr& self) {
-            return self.function_->get_executor().getDebugState();
-          })
-      .def_property_readonly(
-          "name",
-          [](const StrongFunctionPtr& self) { return self.function_->name(); })
-      .def_property_readonly(
-          "qualified_name", [](const StrongFunctionPtr& self) {
-            return self.function_->qualname().qualifiedName();
           });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())

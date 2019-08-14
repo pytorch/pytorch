@@ -1991,8 +1991,9 @@ def _graph_for(self, *args, **kwargs):
     return last_executed_optimized_graph()
 
 torch._C.ScriptMethod.graph_for = _graph_for
-torch._C.Function.graph_for = _graph_for
-Function = torch._C.Function
+
+def post_dependent_bindings_init():
+    torch.jit.Function.graph_for = _graph_for
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

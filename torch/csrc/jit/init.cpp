@@ -359,7 +359,10 @@ void initJITBindings(PyObject* module) {
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
-          });
+          })
+      .def("_init_jit_dependent_bindings", [](){
+        script::initScriptDependentBindings();
+      });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
