@@ -29,7 +29,7 @@ from common_methods_invocations import tri_tests_args, run_additional_tri_tests,
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest
+    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, torchtest
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -100,7 +100,7 @@ class BytesIOContext(io.BytesIO):
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
-class _TestTorchMixin(object):
+class _TestTorchMixin(torchtest):
     def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True):
         float_types = [torch.double,
                        torch.float]
@@ -225,8 +225,11 @@ class _TestTorchMixin(object):
                        'to_dense',
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
-                       'set_names_',  # BUILD_NAMEDTENSOR only
+                       'align_to',  # BUILD_NAMEDTENSOR only
+                       'view_names',  # BUILD_NAMEDTENSOR only
+                       'names_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
+                       'rename',  # BUILD_NAMEDTENSOR only
                        )
         test_namespace(torch.nn)
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear', 'feature_alpha_dropout')
@@ -2872,31 +2875,26 @@ class _TestTorchMixin(object):
                             self.assertEqual(std1, std2)
                             self.assertEqual(mean1, mean2)
 
-    def test_var_mean_some_dims(self):
+    @torchtest.test_all_device_types()
+    def test_var_mean_some_dims(self, device):
         sizes = (4, 6, 7, 5, 3)
         dims = len(sizes)
-        for device in torch.testing.get_all_device_types():
-            x = torch.rand(sizes, device=device)
-            for num_of_dims in range(2, dims):
-                dim_list = list(combinations(list(range(dims)), r=num_of_dims))
-                for dim in dim_list:
-                    for unbiased in [False, True]:
-                        for keepdim in [False, True]:
-                            var1, mean1 = torch.var_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
-                            var2 = x.var(dim=dim, unbiased=unbiased, keepdim=keepdim)
-                            mean2 = x.mean(dim=dim, keepdim=keepdim)
-                            self.assertEqual(var1, var2)
-                            self.assertEqual(mean1, mean2)
 
-    def test_zeros_like(self):
-        expected = torch.zeros(100, 100)
+        x = torch.rand(sizes, device=device)
+        for num_of_dims in range(2, dims):
+            dim_list = list(combinations(list(range(dims)), r=num_of_dims))
+            for dim in dim_list:
+                for unbiased in [False, True]:
+                    for keepdim in [False, True]:
+                        var1, mean1 = torch.var_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        var2 = x.var(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        mean2 = x.mean(dim=dim, keepdim=keepdim)
+                        self.assertEqual(var1, var2)
+                        self.assertEqual(mean1, mean2)
 
-        res1 = torch.zeros_like(expected)
-        self.assertEqual(res1, expected)
-
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_zeros_like_cuda(self):
-        expected = torch.zeros(100, 100).cuda()
+    @torchtest.test_all_device_types()
+    def test_zeros_like(self, device):
+        expected = torch.zeros((100, 100,), device=device)
 
         res1 = torch.zeros_like(expected)
         self.assertEqual(res1, expected)
@@ -3530,19 +3528,19 @@ class _TestTorchMixin(object):
             x[1] = True
             self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool))
 
-    def test_unfold_all_devices_and_dtypes(self):
-        for device in torch.testing.get_all_device_types():
-            for dt in torch.testing.get_all_dtypes():
-                if dt == torch.bfloat16:
-                    self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
-                    continue
+    @torchtest.test_all_device_types()
+    def test_unfold_all_devices_and_dtypes(self, device):
+        for dt in torch.testing.get_all_dtypes():
+            if dt == torch.bfloat16:
+                self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
+                continue
 
-                if dt == torch.half and device == 'cpu':
-                    # fix once random is implemented for Half on CPU
-                    self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
-                else:
-                    x = torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device)
-                    self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
+            if dt == torch.half and device == 'cpu':
+                # fix once random is implemented for Half on CPU
+                self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
+            else:
+                x = torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device)
+                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
 
     def test_copy_all_dtypes_and_devices(self):
         from copy import copy
@@ -8488,8 +8486,10 @@ class _TestTorchMixin(object):
                     with self.assertRaises(RuntimeError):
                         dest.masked_scatter_(mask, src)
         self.assertEqual(len(w), 25)
+
+        warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
         for wi in w:
-            self.assertTrue(str(wi.message) == 'masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated,please use a mask with dtype torch.bool instead.')
+            self.assertEqual(str(wi.message)[0:55], str(warn))
 
     def test_masked_scatter_bool_tensor(self):
         for device in torch.testing.get_all_device_types():
@@ -8533,7 +8533,9 @@ class _TestTorchMixin(object):
                         torch.masked_select(src, mask, out=dst3)
                         self.assertEqual(dst3, torch.Tensor(dst2), 0)
             self.assertEqual(len(w), 1)
-            self.assertTrue(str(w[0].message) == 'masked_select received a mask with dtype torch.uint8, this behavior is now deprecated,please use a mask with dtype torch.bool instead.')
+
+            warn = 'masked_select received a mask with dtype torch.uint8,'
+            self.assertEqual(str(w[0].message)[0:53], str(warn))
 
     def test_masked_fill(self):
         with warnings.catch_warnings(record=True) as w:
@@ -8562,8 +8564,10 @@ class _TestTorchMixin(object):
                     dst2.masked_fill_((dst2 > 0).to(dtype), val)
                     self.assertEqual(dst, dst2, 0)
             self.assertEqual(len(w), 28)
+
+            warn = 'masked_fill_ received a mask with dtype torch.uint8,'
             for wi in w:
-                self.assertTrue(str(wi.message) == 'masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated,please use a mask with dtype torch.bool instead.')
+                self.assertEqual(str(wi.message)[0:52], str(warn))
 
     def test_masked_fill_bool_tensor(self):
         for device in torch.testing.get_all_device_types():
