@@ -728,12 +728,6 @@ class MultiheadAttention(Module):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        if prefix + '_qkv_same_embed_dim' not in state_dict.keys():
-            # In the early version of torch.nn.MultiheadAttention, q_proj_weight, k_proj_weight,
-            # and v_proj_weight are saved as in_proj_weight.
-            # If so, there is no attribute _qkv_same_embed_dim.
-            # To resolve the BC breaking, we just need to add the attribute _qkv_same_embed_dim.
-            state_dict[prefix + '_qkv_same_embed_dim'] = False
         super(MultiheadAttention, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
