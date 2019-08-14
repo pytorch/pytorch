@@ -103,6 +103,7 @@ __device__ static inline scalar_t reduce_agg(scalar_t agg) {
     for (int offset = blockDim.x / warpSize / 2; offset > 0; offset /= 2) {
       F::agg(agg, WARP_SHFL_DOWN(agg, offset));
     }
+    __syncthreads();
   }
   return agg;
 }
@@ -236,7 +237,7 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   for (; a < end; a += stride, b += stride) {
     F::inc(agg, std::abs(*a - *b), p);
   }
-  agg = reduce_agg2<scalar_t, F>(agg);
+  agg = reduce_agg<scalar_t, F>(agg);
   if (threadIdx.x == 0) {
     result[blockIdx.x] = F::finish(agg, p);
   }
