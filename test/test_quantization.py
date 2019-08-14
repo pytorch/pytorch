@@ -378,6 +378,34 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
+    def test_type_match_rule(self):
+        r"""Test quantization for nested model, top level 'fc3' and
+        'fc1' of submodule 'sub2', All 'torch.nn.Linear' modules are quantized
+        """
+        model = NestedModel().eval()
+        qconfig_dict = {
+            'fc3': None,
+            'sub2.fc1': None,
+            torch.nn.Linear: default_qconfig
+        }
+
+        model = prepare_dynamic(model, qconfig_dict)
+        test_only_eval_fn(model, self.calib_data)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.sub1.fc)
+            self.checkLinear(model.fc3)
+            self.checkLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
+            test_only_eval_fn(model, self.calib_data)
+
+        checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
