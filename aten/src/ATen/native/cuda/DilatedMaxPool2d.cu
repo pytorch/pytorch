@@ -174,31 +174,9 @@ void max_pool2d_with_indices_out_cuda_template(
   const auto memory_format = input_.suggest_memory_format();
 
   const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
-  /*const int64_t size3 = input_.size(-3); // nInputPlane or inputHeight
-  const int64_t size2 = input_.size(-2); // inputHeight or inputWidth
-  const int64_t size1 = input_.size(-1); // inputWidth or nInputPlane*/
-
-  int64_t nInputPlane;
-  int64_t inputWidth;
-  int64_t inputHeight;
-  int64_t in_stride_c;
-  int64_t in_stride_h;
-  int64_t in_stride_w;
-  if (memory_format == MemoryFormat::ChannelsLast) {
-    inputHeight = input_.size(-3);
-    inputWidth = input_.size(-2);
-    nInputPlane = input_.size(-1);
-    in_stride_c = 1;
-    in_stride_h = inputWidth * nInputPlane;
-    in_stride_w = nInputPlane;
-  } else {
-    nInputPlane = input_.size(-3);
-    inputHeight = input_.size(-2);
-    inputWidth = input_.size(-1);
-    in_stride_c = inputHeight * inputWidth;
-    in_stride_h = inputWidth;
-    in_stride_w = 1;
-  }
+  const int64_t nInputPlane = input_.size(-3);
+  const int64_t inputHeight = input_.size(-2);
+  const int64_t inputWidth = input_.size(-1);
 
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
@@ -212,13 +190,15 @@ void max_pool2d_with_indices_out_cuda_template(
 
   Tensor input = input_.contiguous(memory_format);
 
-  if (memory_format == MemoryFormat::ChannelsLast) {
-    output.resize_({nbatch, outputHeight, outputWidth, nInputPlane});
-    indices.resize_({nbatch, outputHeight, outputWidth, nInputPlane});
-  } else {
-    output.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
-    indices.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
-  }
+  const int64_t in_stride_c = input.stride(-3);
+  const int64_t in_stride_h = input.stride(-2);
+  const int64_t in_stride_w = input.stride(-1);
+
+  output.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
+  indices.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
+
+  output.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+  indices.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
 
   const int count = safe_downcast<int, int64_t>(output.numel());
   const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
@@ -247,11 +227,8 @@ void max_pool2d_with_indices_out_cuda_template(
      cudaGetLastError());
 
   if(input.ndimension() == 3) {
-    if (memory_format == MemoryFormat::ChannelsLast) {
-      output.resize_({outputHeight, outputWidth, nInputPlane});
-    } else {
-      output.resize_({nInputPlane, outputHeight, outputWidth});
-    }
+    output.resize_({nInputPlane, outputHeight, outputWidth});
+    output.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   }
 }
 
@@ -301,47 +278,16 @@ void max_pool2d_with_indices_backward_out_cuda_template(
   const Tensor input = input_.contiguous(memory_format);
 
   const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
-  /*const int64_t size3 = input_.size(-3); // nInputPlane or inputHeight
-  const int64_t size2 = input_.size(-2); // inputHeight or inputWidth
-  const int64_t size1 = input_.size(-1); // inputWidth or nInputPlane*/
+  const int64_t nInputPlane = input_.size(-3);
+  const int64_t inputHeight = input_.size(-2);
+  const int64_t inputWidth = input_.size(-1);
 
-  int64_t nInputPlane;
-  int64_t inputWidth;
-  int64_t inputHeight;
-  int64_t in_stride_c;
-  int64_t in_stride_h;
-  int64_t in_stride_w;
-  if (memory_format == MemoryFormat::ChannelsLast) {
-    inputHeight = input_.size(-3);
-    inputWidth = input_.size(-2);
-    nInputPlane = input_.size(-1);
-    in_stride_h = inputWidth * nInputPlane;
-    in_stride_w = nInputPlane;
-    in_stride_c = 1;
-  } else {
-    nInputPlane = input_.size(-3);
-    inputHeight = input_.size(-2);
-    inputWidth = input_.size(-1);
-    in_stride_c = inputHeight * inputWidth;
-    in_stride_h = inputWidth;
-    in_stride_w = 1;
-  }
+  const int64_t in_stride_c = input.stride(-3);
+  const int64_t in_stride_h = input.stride(-2);
+  const int64_t in_stride_w = input.stride(-1);
 
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
-
-  int64_t out_stride_c;
-  int64_t out_stride_h;
-  int64_t out_stride_w;
-  if (memory_format == MemoryFormat::ChannelsLast) {
-    out_stride_h = nInputPlane * outputWidth;
-    out_stride_w = nInputPlane;
-    out_stride_c = 1;
-  } else {
-    out_stride_c = outputHeight * outputWidth;
-    out_stride_h = outputWidth;
-    out_stride_w  = 1;
-  }
 
   max_pool2d_backward_shape_check(
     input_,
@@ -355,7 +301,13 @@ void max_pool2d_with_indices_backward_out_cuda_template(
     /*cuda=*/ true);
 
   const Tensor gradOutput = gradOutput_.contiguous(memory_format);
+
+  const int64_t out_stride_c = gradOutput.stride(-3);
+  const int64_t out_stride_h = gradOutput.stride(-2);
+  const int64_t out_stride_w = gradOutput.stride(-1);
+
   gradInput.resize_as_(input);
+  gradInput.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
 
   int64_t count = input.numel();
   dim3 grid;
