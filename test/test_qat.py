@@ -21,7 +21,7 @@ class IntrinsicQATModuleTest(TestCase):
     # to prevent spurious failures due to cuda runtime initialization.
 
     @no_deadline
-    @given(batch_size=st.integers(1, 2),
+    @given(batch_size=st.integers(2, 4),
            input_channels_per_group=st.sampled_from([2, 3, 4]),
            height=st.integers(5, 10),
            width=st.integers(5, 10),
@@ -36,7 +36,7 @@ class IntrinsicQATModuleTest(TestCase):
            dilation=st.integers(1, 1),
            padding_mode=st.sampled_from(['zeros', 'circular']),
            use_relu=st.booleans(),
-           eps=st.sampled_from([1e-5, 1e-4, 1e-3, 0.01, 0.1]),
+           eps=st.sampled_from([1e-5, 1e-4, 1e-3]),
            momentum=st.sampled_from([0.1, 0.2, 0.3]),
            freeze_bn=st.booleans())
     def test_conv_bn_relu(
@@ -123,7 +123,7 @@ class IntrinsicQATModuleTest(TestCase):
                 ref_op = compose([conv_op, bn_op, relu_op])
 
             input_clone = input.clone().detach().requires_grad_()
-            for i in range(3):
+            for i in range(2):
                 result_ref = ref_op(input)
                 result_actual = qat_op(input_clone)
                 self.assertEqual(result_ref, result_actual)
@@ -149,12 +149,12 @@ class IntrinsicQATModuleTest(TestCase):
                 running_var_actual = qat_op.running_var
                 num_batches_tracked_actual = qat_op.num_batches_tracked
                 self.assertEqual(input_grad_ref, input_grad_actual)
-                self.assertEqual(weight_grad_ref, weight_grad_actual, prec=1e-4)
+                self.assertEqual(weight_grad_ref, weight_grad_actual, prec=3e-4)
                 self.assertEqual(gamma_grad_ref, gamma_grad_actual, prec=1e-4)
                 self.assertEqual(beta_grad_ref, beta_grad_actual)
                 self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual)
                 self.assertEqual(running_mean_ref, running_mean_actual)
-                # self.assertEqual(running_var_ref, running_var_actual, prec=1e-2)
+                self.assertEqual(running_var_ref, running_var_actual)
 
 
 if __name__ == '__main__':
