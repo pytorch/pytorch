@@ -579,9 +579,9 @@ inline py::object toPyObject(IValue&& ivalue) {
     if (tuple->type && tuple->type->schema() &&
         tuple->type->schema()->name() != "") {
       auto unqualName = tuple->type->name()->name();
-      auto fieldNames = fmap(tuple->type->schema()->arguments(), [](const Argument& arg) {
-        return arg.name();
-      });
+      auto fieldNames = fmap(
+          tuple->type->schema()->arguments(),
+          [](const Argument& arg) { return arg.name(); });
       return py::module::import("torch.jit")
           .attr("_create_named_tuple")(
               t, unqualName, fieldNames);

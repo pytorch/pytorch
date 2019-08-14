@@ -1564,11 +1564,13 @@ struct CAFFE2_API ClassType : public NamedType {
   }
 
   std::string str() const override {
-    return std::string("ClassType<") + name()->name() + ">";
+    const auto& n = name().value();
+    return std::string("ClassType<") + n.name() + ">";
   }
 
   std::string python_str() const override {
-    return name()->qualifiedName();
+    const auto& n = name().value();
+    return n->qualifiedName();
   }
 
   const c10::optional<c10::QualifiedName>& name() const override {
