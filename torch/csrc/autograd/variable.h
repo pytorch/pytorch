@@ -314,6 +314,7 @@ struct TORCH_API Variable : public at::Tensor {
   Variable::AutogradMeta* get_autograd_meta() const noexcept;
 
  private:
+  friend struct WeakVariable;
   struct DifferentiableViewMeta;
 
   // Private Methods
@@ -716,4 +717,26 @@ inline at::TensorImpl* Variable::get() const {
   TORCH_CHECK(defined(), "Called Variable::get() on an undefined Variable");
   return unsafeGetTensorImpl();
 }
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//                  WeakVariable based on c10::weak_intrusive_ptr
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// This class is used to break reference cycles in AccumulateGrad::variable.
+struct TORCH_API WeakVariable final {
+  WeakVariable(const Variable& var) : self(var.getIntrusivePtr()) {}
+
+  Variable lock() {
+    return self._unsafe_get_target() ? Variable(self.lock()) : Variable();
+  }
+
+  void reset() {
+    auto var = lock();
+    var.reset();
+  }
+
+ private:
+  c10::weak_intrusive_ptr<at::TensorImpl> self;
+};
+
 }} // namespace torch::autograd

@@ -73,7 +73,9 @@ static PyObject* accumulateGradVar(PyObject *_self, void* _unused)
 {
   THPCppFunction* self = (THPCppFunction*)_self;
   auto grad_acc = (AccumulateGrad*)self->cdata.get();
-  return THPVariable_Wrap(grad_acc->variable);
+  auto var = grad_acc->variable.lock();
+  if (!var.defined()) Py_RETURN_NONE;
+  return THPVariable_Wrap(var);
 }
 
 static struct PyGetSetDef accumulate_grad_properties[] = {

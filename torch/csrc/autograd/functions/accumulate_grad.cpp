@@ -16,10 +16,11 @@ namespace torch { namespace autograd {
 
 // AccumulateGrad sets sequence_nr to the max value so it's always called
 // ASAP during backwards.
-AccumulateGrad::AccumulateGrad(Variable variable_)
+AccumulateGrad::AccumulateGrad(const Variable& variable_)
     : Node(/*sequence_nr=*/UINT64_MAX)
-    , variable(std::move(variable_)) {
-  add_input_metadata(variable);
+    , variable(variable_)
+    , variable_grad(variable_.grad()) {
+  add_input_metadata(variable_);
 }
 
 auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
@@ -28,17 +29,37 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 
   if (!grads[0].defined())
     return {};
-  if (variable.grad_fn())
+
+  auto var = variable.lock();
+  // It's possible that the Variable went out of scope and was freed.
+  // We still need to handle the unlikely case of someone holding to its grad.
+  if (!var.defined()) {
+    auto var_grad = variable_grad.lock();
+    // Everything was freed. Nothing to do.
+    if (!var_grad.defined()) return variable_list();
+    // Now here's the hard part. If both the new_grad and var_grad require grad
+    // then we just acumulate the data in place (as we'd do if the Variable was
+    // alive). Otherwise, we'd need to perform the out-of-place reduction, but
+    // since the user only holds a reference to .grad and there's no way to
+    // give him the new Value, we just assume that they know these attributes
+    // are changing when using higher order graphs.
+    if (GradMode::is_enabled() && var_grad.requires_grad() && grads[0].requires_grad()) {
+      var_grad += grads[0];
+    }
+    return variable_list();
+  }
+
+  if (var.grad_fn())
     throw std::logic_error("leaf variable has been moved into the graph interior");
-  if (!variable.requires_grad())
+  if (!var.requires_grad())
     return {};
 
   auto new_grad = std::move(grads[0]);
-  for (auto& hook : variable.hooks()) {
+  for (auto& hook : var.hooks()) {
     new_grad = (*hook)({new_grad})[0];
   }
 
-  at::Tensor& grad = variable.grad();
+  at::Tensor& grad = var.grad();
   if (!grad.defined()) {
     // under following condition, we can avoid clone()
     if (!GradMode::is_enabled()
@@ -52,10 +73,16 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       // If the function has post hooks (for example, a DDP allreduce hook),
       // call_function in Engine.cpp will temporarily bump the refcount by one, hence the
       // addition of !post_hooks().empty().
-      variable.grad() = new_grad.detach();
+      var.grad() = new_grad.detach();
     } else {
-      variable.grad() = new_grad.clone();
+      var.grad() = new_grad.clone();
     }
+    variable_grad = WeakVariable(var.grad()); // We need to update our reference
+    // This case is not strictly necessary, but it makes the first-order only case
+    // slightly more efficient and, what's more important, more predictable for
+    // the users. Thanks to this case we can avoid changing the grad tensor,
+    // a thing never promised and documented, but used in some hacks seen
+    // on the internet.
   } else if (!GradMode::is_enabled()) {
     // This case is not strictly necessary, but it makes the first-order only case
     // slightly more efficient.
@@ -81,7 +108,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       grad_variable += new_grad;
     }
   } else {
-    variable.grad() = grad + new_grad;
+    var.grad() = grad + new_grad;
   }
 
   return variable_list();

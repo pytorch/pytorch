@@ -50,9 +50,7 @@ std::shared_ptr<Node> Variable::grad_accumulator() const {
   if (result)
     return result;
 
-  c10::raw::intrusive_ptr::incref(unsafeGetTensorImpl());
-  auto intrusive_from_this = c10::intrusive_ptr<at::TensorImpl>::reclaim(unsafeGetTensorImpl());
-  result = std::make_shared<AccumulateGrad>(Variable(std::move(intrusive_from_this)));
+  result = std::make_shared<AccumulateGrad>(*this);
   autograd_meta->grad_accumulator_ = result;
   return result;
 }

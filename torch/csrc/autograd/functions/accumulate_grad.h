@@ -7,11 +7,12 @@
 namespace torch { namespace autograd {
 
 struct TORCH_API AccumulateGrad : public Node {
-  explicit AccumulateGrad(Variable variable_);
+  explicit AccumulateGrad(const Variable& variable_);
 
   variable_list apply(variable_list&& grads) override;
 
-  Variable variable;
+  WeakVariable variable;
+  WeakVariable variable_grad;
 };
 
 }} // namespace torch::autograd

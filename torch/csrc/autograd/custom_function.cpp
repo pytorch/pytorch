@@ -61,6 +61,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
       if (auto grad_acc_fn = var.try_get_grad_accumulator()) {
         auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
         grad_acc->variable.reset();
+        grad_acc->variable_grad.reset();
       }
       if (cdata) {
         var.rebase_history({cdata, output_nr});
