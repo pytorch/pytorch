@@ -556,10 +556,14 @@ std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(
   return schema;
 }
 
-TupleType::TupleType(std::vector<TypePtr> elements, c10::optional<c10::QualifiedName> name, std::shared_ptr<FunctionSchema> schema)
-: NamedType(TypeKind::TupleType, std::move(name))
-, elements_(std::move(elements))
-, schema_(std::move(schema)) {
+TupleType::TupleType(
+    std::vector<TypePtr> elements,
+    c10::optional<c10::QualifiedName> name,
+    std::shared_ptr<FunctionSchema> schema)
+    : NamedType(TypeKind::TupleType),
+      elements_(std::move(elements)),
+      name_(std::move(name)),
+      schema_(std::move(schema)) {
   has_free_variables_ =
       std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
         return v->hasFreeVariables();

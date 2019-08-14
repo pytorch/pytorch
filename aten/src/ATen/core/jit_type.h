@@ -992,17 +992,11 @@ struct NamedType;
 using NamedTypePtr = std::shared_ptr<NamedType>;
 
 struct CAFFE2_API NamedType : public Type {
-  NamedType(TypeKind tk, c10::optional<c10::QualifiedName> qualifiedName)
-      : Type(tk), name_(std::move(qualifiedName)) {}
+  NamedType(TypeKind tk) : Type(tk) {}
 
-  const c10::optional<QualifiedName>& name() const {
-    return name_;
-  }
-
- protected:
-  // Fully qualified name of type (note that this has to be globally unique).
+  // Fully qualified name of type
   // Looks like: "foo.bar.Baz".
-  c10::optional<QualifiedName> name_;
+  virtual const c10::optional<QualifiedName>& name() const = 0;
 };
 
 struct TupleType;
@@ -1028,6 +1022,11 @@ struct CAFFE2_API TupleType : public NamedType {
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
   }
+
+  const c10::optional<c10::QualifiedName>& name() const override {
+    return name_;
+  }
+
   bool operator==(const Type& rhs) const override;
   bool isSubtypeOf(const TypePtr rhs_) const override;
 
@@ -1075,6 +1074,7 @@ struct CAFFE2_API TupleType : public NamedType {
 
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
+  c10::optional<c10::QualifiedName> name_;
   std::shared_ptr<FunctionSchema> schema_;
 };
 
@@ -1573,6 +1573,10 @@ struct CAFFE2_API ClassType : public NamedType {
     return n.qualifiedName();
   }
 
+  const c10::optional<c10::QualifiedName>& name() const override {
+    return name_;
+  }
+
   TypePtr getAttribute(const std::string& name) const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t pos = 0;
@@ -1713,6 +1717,8 @@ struct CAFFE2_API ClassType : public NamedType {
 
   // List of methods associated with this class.
   std::vector<Function*> methods_;
+
+  c10::optional<QualifiedName> name_;
 };
 
 } // namespace c10
