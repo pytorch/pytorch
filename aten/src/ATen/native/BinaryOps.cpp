@@ -33,7 +33,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     /*check_internal_overlap=*/true);
   TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(), alpha_mismatch_err);
   add_stub(iter.device_type(), iter, alpha);
-  AT_ASSERT(result.scalar_type() == iter.output().dtype());
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
 }
 
@@ -136,6 +136,7 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     /*check_internal_overlap=*/true);
   TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(), alpha_mismatch_err);
   sub_stub(iter.device_type(), iter, alpha);
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
 }
 

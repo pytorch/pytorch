@@ -567,7 +567,7 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
   c10::optional<size_t> dim() const {
     return sizes().size();
   }
-  
+
 
   const VaryingShape& sizes() const {
     return sizes_;
@@ -648,7 +648,7 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
     copy->strides_ = VaryingShape(sizes().size());
     return copy;
   }
-  
+
 
   ProfiledTensorTypePtr merge(ProfiledTensorTypePtr other) {
     auto scalar_type = merge_primitive(scalarType(), other->scalarType());
@@ -1393,7 +1393,7 @@ inline TypePtr CompleteTensorType::fromNumberType(TypePtr typ) {
   } else if (typ->isSubtypeOf(BoolType::get())) {
     return CompleteTensorType::create(at::kLong, at::kCPU, {});
   }
-  AT_ERROR("unknown number type: ", typ->str());
+  TORCH_CHECK(false, "Unknown number type: ", typ->str());
 }
 
 inline TypePtr CompleteTensorType::fromBoolType() {
