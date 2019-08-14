@@ -902,7 +902,7 @@ def trace_module(mod,
     # is traceable, therefore we can just compile the whole module rather than tracing
     # through it.
     if torch._jit_internal.module_has_exports(mod):
-        module = torch.jit.script(mod)
+        module = torch.jit.script(mod, optimize=optimize)
     else:
         module = make_module(mod, _module_class, _compilation_unit)
 
