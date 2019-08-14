@@ -5,7 +5,7 @@
 
 namespace c10 {
 
-struct Stream;
+class Stream;
 
 // TODO: add comment (why is this here? what does it do?)
 enum class EventFlag {

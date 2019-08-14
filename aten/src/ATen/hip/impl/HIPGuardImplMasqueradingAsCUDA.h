@@ -115,7 +115,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
         AT_ERROR("HIP event received unknown flag");
     }
 
-    C10_HIP_CHECK(hipEventCreate(hip_event, hip_flag));
+    C10_HIP_CHECK(hipEventCreateWithFlags(hip_event, hip_flag));
   }
 
   void destroyEvent(
@@ -141,7 +141,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
       stream.device_index(),
       ".");
 
-    hipEvent_t cuda_event = static_cast<hipEvent_t>(*event);
+    hipEvent_t hip_event = static_cast<hipEvent_t>(*event);
     HIPStreamMasqueradingAsCUDA hip_stream{stream};
 
     // Moves to stream's device to record
@@ -162,7 +162,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     void* event,
     const Stream& stream) const override {
     if (!event) return;
-    hipEvent_t cuda_event = static_cast<hipEvent_t>(event);
+    hipEvent_t hip_event = static_cast<hipEvent_t>(event);
     HIPStreamMasqueradingAsCUDA hip_stream{stream};
     const auto orig_device = getDevice();
     setDevice(stream.device());
@@ -175,7 +175,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
 
   bool queryEvent(void* event) const override {
     if (!event) return true;
-    hipEvent_t cuda_event = static_cast<hipEvent_t>(event);
+    hipEvent_t hip_event = static_cast<hipEvent_t>(event);
     const hipError_t err = hipEventQuery(hip_event);
     if (err != hipErrorNotReady) C10_HIP_CHECK(err);
     return (err == hipSuccess);
