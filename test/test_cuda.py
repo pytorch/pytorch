@@ -2584,14 +2584,6 @@ class TestCuda(TestCase):
     def test_rpow(self):
         _TestTorchMixin._test_rpow(self, lambda x: x.cuda())
 
-    def test_int_pow(self):
-        _TestTorchMixin._test_integral_pow(self, lambda x: x, torch.int8, (-3, 4))
-        _TestTorchMixin._test_integral_pow(self, lambda x: x, torch.uint8, (0, 4))
-        _TestTorchMixin._test_integral_pow(self, lambda x: x, torch.int16, (-5, 5))
-        _TestTorchMixin._test_integral_pow(self, lambda x: x, torch.int64, (-10, 10))
-        if not IS_WINDOWS:
-            _TestTorchMixin._test_integral_pow(self, lambda x: x, torch.int32, (-10, 10))
-
     def test_remainder_overflow(self):
         _TestTorchMixin._test_remainder_overflow(self, dtype=torch.int64, device='cuda')
 
