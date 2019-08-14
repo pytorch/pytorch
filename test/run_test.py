@@ -361,8 +361,8 @@ def get_selected_tests(options):
 
     if options.bring_to_front:
         to_front = set(options.bring_to_front)
-        selected_tests = options.bring_to_front + filter(lambda name: name not in to_front,
-                                                         selected_tests)
+        selected_tests = options.bring_to_front + list(filter(lambda name: name not in to_front,
+                                                              selected_tests))
 
     if options.first:
         first_index = find_test_index(options.first, selected_tests)
