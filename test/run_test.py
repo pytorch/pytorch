@@ -277,7 +277,6 @@ def parse_args():
         metavar='TESTS',
         help='select the last test to run (excludes following tests)')
     parser.add_argument(
-        '-b',
         '--bring-to-front',
         nargs='+',
         choices=TestChoices(TESTS),
