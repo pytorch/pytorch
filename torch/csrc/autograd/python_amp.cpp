@@ -17,12 +17,14 @@ namespace amp {
 // grad_mode.cpp
 // I don't think I need any INCREFS/DECREFS/XDECREFS in the code below.
 
-// This can be exposed directly from Aten.
+// This is exposed directly from Aten.
 // static PyObject* THPAmp_getAmpOverflowState(PyObject* self, PyObject* arg) {
 //   HANDLE_TH_ERRORS
 //   return torch::autograd::utils::wrap(at::native::_get_amp_overflow_state());
 //   END_HANDLE_TH_ERRORS
 // }
+// Come to think of it, why not just expose all stuff here through Aten instead of manual bindings?
+// Don't forget to argue about this in the PR.
 
 static PyObject* THPAmp_getGradScalingEnabled(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
