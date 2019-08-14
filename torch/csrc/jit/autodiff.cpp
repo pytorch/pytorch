@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/autodiff.h>
 
 #include <ATen/core/functional.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -55,7 +56,6 @@ bool isDifferentiable(Node* n) {
       "aten::mul(Tensor self, Scalar other) -> Tensor",
       "aten::div(Tensor self, Scalar other) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
-      "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
       "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
       "aten::lt(Tensor self, Scalar other) -> Tensor",
       "aten::le(Tensor self, Scalar other) -> Tensor",
@@ -165,8 +165,8 @@ static c10::optional<std::vector<Value*>> build_script_grad(
   {
     WithInsertPoint guard(node->next());
     auto fw_graph = compiled_graphs->forward;
-    new_outputs = inlineCallTo(
-        *graph, *fw_graph, node->inputs(), /*unpack_outputs=*/true);
+    new_outputs = insertGraph(*graph, *fw_graph, node->inputs());
+    new_outputs = unpackOutputs(new_outputs);
     auto outputs = node->outputs();
     AT_ASSERT(new_outputs.size() == outputs.size() + 1);
     for (size_t i = 0; i < outputs.size(); ++i) {
@@ -184,8 +184,8 @@ static c10::optional<std::vector<Value*>> build_script_grad(
   auto it = grad_vec.begin();
   grad_vec.insert(it, new_outputs.back());
   ArrayRef<Value*> grad(grad_vec);
-  auto grad_inputs =
-      inlineCallTo(*graph, *bw_graph, grad, /*unpack_outputs=*/true);
+  auto grad_inputs = insertGraph(*graph, *bw_graph, grad);
+  grad_inputs = unpackOutputs(grad_inputs);
   return grad_inputs;
 };
 
@@ -282,37 +282,6 @@ class GradientHelper {
                    "aten::div(Tensor self, Scalar other) -> Tensor")) {
       return {grads.at(0) / inputs.at(1), nullptr};
 
-    } else if (
-        node->matches(
-            "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor")) {
-      // handle the case that min/max is None
-      Value* min = inputs.at(1);
-      bool min_must_be_none = min->mustBeNone();
-      Value* max = inputs.at(2);
-      bool max_must_be_none = max->mustBeNone();
-      // XXX - this formula is wrong when min or max are not stricly a constant
-      // None but may be None dynamically. In this case an internal compiler
-      // error will get thrown when trying to generate expressions involving the
-      // values of min/max
-      if (!min_must_be_none && !max_must_be_none) {
-        return {grads.at(0) *
-                    (1 - (inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0))) *
-                    (1 - (inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))),
-                nullptr,
-                nullptr};
-      } else if (max_must_be_none) {
-        return {grads.at(0) *
-                    (1 - (inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0))),
-                nullptr,
-                nullptr};
-      } else if (min_must_be_none) {
-        return {grads.at(0) *
-                    (1 - (inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))),
-                nullptr,
-                nullptr};
-      } else {
-        return {grads.at(0), nullptr, nullptr};
-      }
     } else if (
         node->matches(
             "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor")) {
@@ -533,8 +502,10 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
   };
   const auto set_grad = [&](Value* x, Value* dx) {
     if (Value* prev_grad = grad_map[x]) {
+      GRAPH_DEBUG("grad_map[", x->debugName(), "] = ", *grad_map[x]->node());
       grad_map[x] = createAutogradAdd(prev_grad, dx);
     } else {
+      GRAPH_DEBUG("grad_map[", x->debugName(), "] = ", dx->debugName());
       grad_map[x] = dx;
     }
   };
@@ -545,6 +516,11 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     if (!output->requires_grad())
       continue;
     Value* output_grad = reverse_block->addInput()->setType(output->type());
+    GRAPH_DEBUG(
+        "Adding output_grad ",
+        output_grad->debugName(),
+        " for ",
+        output->debugName());
     set_grad(output, output_grad);
     grad_desc.df_input_vjps.push_back(i);
   }
@@ -651,6 +627,12 @@ static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
           continue;
         Node* lifted_constant = graph.createClone(input->node(), err);
         reverse_block->prependNode(lifted_constant);
+        GRAPH_DEBUG(
+            "Lifting constant ",
+            input->debugName(),
+            " from GradOf's block and adding ",
+            lifted_constant->output()->debugName(),
+            " to the backprop block");
         node->replaceInputWith(input, lifted_constant->output());
       }
     }
@@ -676,7 +658,13 @@ static void deduplicateSizeCaptures(
     }
     if (usedOnlyInReverse(capture) && capture_set.count(node->input())) {
       WithInsertPoint insert_guard{*rev_info.reverse_block->nodes().begin()};
-      capture->replaceAllUsesWith(SymbolicVariable(node->input()).size());
+      auto size = SymbolicVariable(node->input()).size();
+      GRAPH_DEBUG(
+          "deduplicateSizeCaptures: Replacing ",
+          capture->debugName(),
+          " with ",
+          size->debugName());
+      capture->replaceAllUsesWith(size);
       node->destroy();
     }
   }
@@ -700,6 +688,8 @@ static void eliminateDeadCode(ReverseDetails& rev_info) {
           }
         }
         for (Value* v : to_erase) {
+          GRAPH_DEBUG(
+              "Erasing unused value ", v->debugName(), " from grad_map");
           rev_info.grad_map.erase(v);
         }
       };
@@ -789,7 +779,14 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     } else {
       // we need to create a new temporary output for this capture because it
       // wasn't availiable.
-      graph.registerOutput(capture_val);
+
+      auto out_index = graph.registerOutput(capture_val);
+      GRAPH_DEBUG(
+          "Capturing a temporary ",
+          capture_val->debugName(),
+          " as ",
+          graph.outputs()[out_index]->debugName(),
+          " for forward graph");
       grad_desc.df_input_captured_outputs.emplace_back(
           graph.outputs().size() - 1);
     }
@@ -827,6 +824,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
 
     tmp_vjp_prev->replaceAllUsesWith(new_vjp);
     new_vjp->node()->replaceInput(1, tmp_vjp_prev);
+    GRAPH_DEBUG("grad_map[", tmp->debugName(), "] = ", *new_vjp->node());
     grad_desc.df_input_vjps.emplace_back(i);
   }
 
@@ -837,13 +835,21 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   std::unordered_map<Value*, size_t> capture_to_formal_index;
   const auto& add_capture = [&](Value* captured) {
     capture_to_formal_index[captured] = reverse_block->inputs().size();
-    reverse_block->addInput()->copyMetadata(captured);
+    auto new_input = reverse_block->addInput()->copyMetadata(captured);
+    GRAPH_DEBUG(
+        "Capturing ",
+        captured->debugName(),
+        " as ",
+        new_input->debugName(),
+        " for an embedded backward block");
   };
   for (auto& offset : grad_desc.df_input_captured_inputs)
     add_capture(graph.inputs()[offset]);
   for (auto& offset : grad_desc.df_input_captured_outputs)
     add_capture(graph.outputs()[offset]);
 
+  GRAPH_DUMP(" forward graph: ", &graph);
+  GRAPH_DEBUG(" backward graph: ", *(reverse_block->owningNode()));
   grad_desc.df = std::make_shared<Graph>();
   grad_desc.df->block()->cloneFrom(reverse_block, [&](Value* v) {
     return grad_desc.df->inputs()[capture_to_formal_index.at(v)];
@@ -864,6 +870,7 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   std::swap(graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
 
+  GRAPH_DUMP("grad_desc.f: ", grad_desc.f);
   WithInsertPoint guard(grad_desc.f->block());
   // Fills in df_input_vjps and df_output_vjps
   auto rev_info = addReverseInline(grad_desc);

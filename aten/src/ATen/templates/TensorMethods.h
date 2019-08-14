@@ -98,8 +98,8 @@ inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
 
-inline bool Tensor::is_named() const {
-  return impl::internal_is_named(unsafeGetTensorImpl());
+inline bool Tensor::has_names() const {
+  return impl::internal_has_names(unsafeGetTensorImpl());
 }
 #endif
 
@@ -143,10 +143,10 @@ inline bool is_quantized(Tensor self) {
   return self.is_quantized();
 }
 
-#define DEFINE_CAST(T, name, _)                  \
+#define DEFINE_CAST(T, name)                     \
   template <>                                    \
   inline T* Tensor::data() const {               \
-    TORCH_CHECK(                                    \
+    TORCH_CHECK(                                 \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \
@@ -155,17 +155,17 @@ inline bool is_quantized(Tensor self) {
     return static_cast<T*>(this->data_ptr());    \
   }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(DEFINE_CAST)
-AT_FORALL_QINTS(DEFINE_CAST)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
+AT_FORALL_QINT_TYPES(DEFINE_CAST)
 #undef DEFINE_CAST
 
-#define DEFINE_ITEM(T, name, _)   \
+#define DEFINE_ITEM(T, name)      \
   template <>                     \
   inline T Tensor::item() const { \
     return item().to##name();     \
   }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(DEFINE_ITEM)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
 #undef DEFINE_ITEM
 
 } //namespace at

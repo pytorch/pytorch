@@ -84,10 +84,12 @@ namespace jit {
   _(InsertBailOuts)                    \
   _(PeepholeOptimize)                  \
   _(RecordFunction)                    \
+  _(ThreadLocalDebugInfo)              \
   _(SubgraphMatching)                  \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
+  _(ProfiledTensorTypeHashing)         \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
   _(InsertConstant)                    \
