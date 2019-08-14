@@ -225,7 +225,7 @@ class ShapePropagator {
       if (!dtt || !inputDtype) {
         return c10::nullopt;
       }
-      if (*dtt->dim() > 0) {
+      if (dtt->dim() && *dtt->dim() > 0) {
         dimmed = unionScalarTypes(dimmed, *inputDtype);
       } else if (!isFloatingType(dimmed)) {
         // if no dimensions
@@ -238,7 +238,7 @@ class ShapePropagator {
       return dimmed;
     }
     // int_tensor * zero_dim_floating -> floating_tensor
-    if (isIntegralType(dimmed) && isFloatingType(zerodim) ) {
+    if (isIntegralType(dimmed, false) && isFloatingType(zerodim) ) {
       return zerodim;
     }
     // bool_tensor * non_bool_scalar -> non_bool_tensor
@@ -721,7 +721,7 @@ class ShapePropagator {
   bool PropagateTensorShapeOnNode(Node* node, bool insert_expands) {
     static const auto broadcast =
         [](std::vector<ProfiledTensorTypePtr>& tensor_types,
-           const c10::optional<at::ScalarType> &t) -> ProfiledTensorTypePtr {
+           c10::optional<at::ScalarType> t) -> ProfiledTensorTypePtr {
       if (tensor_types.size() == 1) {
         return tensor_types[0]->dimensionedOnly()->withScalarType(t);
       }
@@ -963,7 +963,7 @@ class ShapePropagator {
               if (!first_scalar_type || !second_scalar_type) {
                 return {};
               }
-              if (isIntegralType(*first_scalar_type) && isFloatingType(*second_scalar_type) )
+              if (isIntegralType(*first_scalar_type, false) && isFloatingType(*second_scalar_type) )
               {
                 auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
                 return {broadcast(*maybe_tensor_types, default_dtype)};
