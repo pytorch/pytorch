@@ -7,7 +7,7 @@
 
 TH_API void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor);
 
-#if !defined(TH_REAL_IS_HALF) && !defined(TH_REAL_IS_BFLOAT16)
+#if !defined(TH_REAL_IS_HALF)
 
 TH_API void THTensor_(ltValue)(THBoolTensor *r_, THTensor* t, scalar_t value);
 TH_API void THTensor_(leValue)(THBoolTensor *r_, THTensor* t, scalar_t value);
@@ -50,6 +50,8 @@ TH_API void THTensor_(gtTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb
 TH_API void THTensor_(geTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(neTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(eqTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
+
+#if !defined(TH_REAL_IS_BFLOAT16)
 
 TH_API accreal THTensor_(sumall)(THTensor *t);
 TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
@@ -127,8 +129,6 @@ TH_API void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src);
 TH_API void THTensor_(cfmod)(THTensor *r_, THTensor *t, THTensor *src);
 TH_API void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src);
 
-TH_API void THTensor_(addcdiv)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src1, THTensor *src2);
-
 TH_API void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *mat,  THTensor *vec);
 TH_API void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *mat1, THTensor *mat2);
 TH_API void THTensor_(addr)(THTensor *r_,  scalar_t beta, THTensor *t, scalar_t alpha, THTensor *vec1, THTensor *vec2);
@@ -174,7 +174,6 @@ TH_API void THTensor_(asin)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(sinh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(tan)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(atan)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty);
 TH_API void THTensor_(tanh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erf)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erfc)(THTensor *r_, THTensor *t);
@@ -200,7 +199,7 @@ TH_API accreal THTensor_(varall)(THTensor *self, int biased);
 TH_API accreal THTensor_(stdall)(THTensor *self, int biased);
 TH_API accreal THTensor_(normall)(THTensor *t, scalar_t value);
 #endif
-
+#endif
 #endif
 #endif
 #endif

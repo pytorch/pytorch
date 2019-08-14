@@ -66,6 +66,9 @@ Tensor& neg_(Tensor& self) {
 }
 
 Tensor& neg_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(self.scalar_type() != kBool,
+              "Negation, the `-` operator, on a bool tensor is not supported. "
+              "If you are trying to invert a mask, use the `~` or `bitwise_not()` operator instead.");
   auto iter = TensorIterator::unary_op(result, self,
     /*check_internal_overlap=*/true);
   neg_stub(iter.device_type(), iter);
@@ -181,7 +184,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
 
-static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor& src) {
+inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor& src) {
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, src);
 #endif

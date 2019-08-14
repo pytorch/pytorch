@@ -42,11 +42,20 @@ static void sigmoid_kernel(TensorIterator& iter) {
   });
 }
 
+template<typename T>
+T abs_impl(T v) {
+  return std::abs(v);
+}
+template<>
+uint8_t abs_impl(uint8_t v) {
+  return v;
+}
+
 static void abs_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "abs_cpu", [&]() {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return std::abs(a); },
+        [=](scalar_t a) -> scalar_t { return abs_impl(a); },
         [=](Vec256<scalar_t> a) { return a.abs(); });
   });
 }

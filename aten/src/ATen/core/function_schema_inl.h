@@ -10,6 +10,9 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   // it is simpler for now to work directly on this schema
 
   out << schema.name();
+  if (schema.overload_name() != "") {
+    out << "." << schema.overload_name();
+  }
   out << "(";
 
   bool seen_kwarg_only = false;
