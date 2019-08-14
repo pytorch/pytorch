@@ -18,6 +18,16 @@ from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
 
 TESTS = [
+    # These are set to run first because quantization is under heavy development
+    # for the release and we want to ensure timely test signal
+    'qat',
+    'quantization',
+    'quantized_conv',
+    'quantized',
+    'quantized_tensor',
+    'quantized_nn_mods',
+    'quantizer',
+
     'autograd',
     'cpp_extensions',
     'c10d',
@@ -41,13 +51,6 @@ TESTS = [
     'nn',
     'numba_integration',
     'optim',
-    'qat',
-    'quantization',
-    'quantized_conv',
-    'quantized',
-    'quantized_tensor',
-    'quantized_nn_mods',
-    'quantizer',
     'rpc',
     'sparse',
     'torch',
