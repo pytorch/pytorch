@@ -77,7 +77,10 @@ def add_observer(module, skip_list=DEFAULT_SKIP_LIST):
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
        len(module._modules) == 0 and type(module) not in skip_list:
         # observer and hook will be gone after we swap the module
-        module.add_module('observer', module.qconfig.activation())
+        if type(module) == nnq.FloatFunctional:
+            module.observer = module.qconfig.activation()
+        else:
+            module.add_module('observer', module.qconfig.activation())
         module.register_forward_hook(_observer_forward_hook)
 
 class QuantWrapper(nn.Module):
@@ -214,8 +217,6 @@ DEFAULT_MODULE_MAPPING = {
     nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
-    # Generated modules:
-    nn.Add: nnq.Add,
     # QAT modules:
     qat.Linear: nnq.Linear,
     qat.Conv2d: nnq.Conv2d,
