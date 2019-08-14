@@ -204,7 +204,7 @@ class TestCppApiParity(common.TestCase):
             modules = args[0]
             module_file_names = [serialize_module_into_file(module, example_inputs) for module in modules]
 
-            cpp_args = module_file_names.copy()
+            cpp_args = module_file_names[:]
             for arg in args[1:]:
                 if isinstance(arg, list):
                     cpp_args += arg
