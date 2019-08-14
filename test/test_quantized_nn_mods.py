@@ -5,15 +5,18 @@ from __future__ import unicode_literals
 
 import torch
 import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
 import torch.nn._intrinsic.quantized as nnq_fused
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
 from torch.nn._intrinsic.quantized import ConvReLU2d
+import torch.quantization
 from common_utils import run_tests, tempfile
-from common_quantization import QuantizationTestCase
+from common_quantization import QuantizationTestCase, no_deadline
+from common_quantized import _calculate_dynamic_qparams
 from hypothesis import given
 from hypothesis import strategies as st
-
+import unittest
 
 '''
 Note that tests in this file are just API test, to make sure we wrapped the
@@ -34,7 +37,91 @@ class FunctionalAPITest(QuantizationTestCase):
         self.assertEqual(qY, qY_hat)
 
 
+class DynamicModuleAPITest(QuantizationTestCase):
+    @no_deadline
+    @unittest.skipIf(
+        not torch.fbgemm_is_cpu_supported(),
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    @given(
+        batch_size=st.integers(1, 5),
+        in_features=st.integers(16, 32),
+        out_features=st.integers(4, 8),
+        use_bias=st.booleans(),
+    )
+    def test_linear_api(self, batch_size, in_features, out_features, use_bias):
+        """test API functionality for nn.quantized.dynamic.Linear"""
+        W = torch.rand(out_features, in_features).float()
+        W_scale, W_zp = _calculate_dynamic_qparams(W, torch.qint8)
+        W_q = torch.quantize_linear(W, W_scale, W_zp, torch.qint8)
+        X = torch.rand(batch_size, in_features).float()
+        B = torch.rand(out_features).float() if use_bias else None
+        qlinear = nnqd.Linear(in_features, out_features)
+        qlinear.set_weight(W_q)
+        # Simple round-trip test to ensure weight()/set_weight() API
+        self.assertEqual(qlinear.weight(), W_q)
+        W_pack = qlinear._packed_weight
+        qlinear._packed_weight = W_pack
+
+        qlinear.bias = B if use_bias else None
+        Z_dq = qlinear(X)
+        # Check if the module implementation matches calling the
+        # ops directly
+        Z_ref = torch.ops.quantized.fbgemm_linear_dynamic(X, W_pack, B)
+        self.assertEqual(Z_ref, Z_dq)
+
+        # Test serialization of dynamic quantized Linear Module using state_dict
+        model_dict = qlinear.state_dict()
+        self.assertEqual(model_dict['weight'], W_q)
+        if use_bias:
+            self.assertEqual(model_dict['bias'], B)
+        with tempfile.TemporaryFile() as f:
+            torch.save(model_dict, f)
+            f.seek(0)
+            loaded_dict = torch.load(f)
+        for key in model_dict:
+            self.assertEqual(model_dict[key], loaded_dict[key])
+        loaded_qlinear = nnqd.Linear(in_features, out_features)
+        loaded_qlinear.load_state_dict(loaded_dict)
+
+        linear_unpack = torch.ops.quantized.fbgemm_linear_unpack
+        self.assertEqual(linear_unpack(qlinear._packed_weight),
+                         linear_unpack(loaded_qlinear._packed_weight))
+        if use_bias:
+            self.assertEqual(qlinear.bias, loaded_qlinear.bias)
+        self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
+        self.assertTrue(hasattr(qlinear, '_packed_weight'))
+        self.assertTrue(hasattr(loaded_qlinear, '_packed_weight'))
+        self.assertTrue(hasattr(qlinear, 'weight'))
+        self.assertTrue(hasattr(loaded_qlinear, 'weight'))
+
+        self.assertEqual(qlinear.weight(), loaded_qlinear.weight())
+        self.assertEqual(qlinear.weight(), torch.ops.quantized.fbgemm_linear_unpack(qlinear._packed_weight))
+        Z_dq2 = qlinear(X)
+        self.assertEqual(Z_dq, Z_dq2)
+
+        # test serialization of module directly
+        with tempfile.TemporaryFile() as f:
+            torch.save(qlinear, f)
+            f.seek(0)
+            loaded = torch.load(f)
+        # This check is disabled pending an issue in PyTorch serialization:
+        # https://github.com/pytorch/pytorch/issues/24045
+        # self.assertEqual(qlinear.weight(), loaded.weight())
+        self.assertEqual(qlinear.zero_point, loaded.zero_point)
+
+        # Test JIT
+        self.checkScriptable(qlinear, zip([X], [Z_ref]), check_save_load=True)
+
+
 class ModuleAPITest(QuantizationTestCase):
+    @no_deadline
+    @unittest.skipIf(
+        not torch.fbgemm_is_cpu_supported(),
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -79,7 +166,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(model_dict['weight'], W_q)
         if use_bias:
             self.assertEqual(model_dict['bias'], B_q)
-        with tempfile.NamedTemporaryFile() as f:
+        with tempfile.TemporaryFile() as f:
             torch.save(model_dict, f)
             f.seek(0)
             loaded_dict = torch.load(f)
@@ -105,11 +192,11 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertTrue(hasattr(loaded_qlinear, 'weight'))
         self.assertEqual(qlinear.weight(), loaded_qlinear.weight())
         self.assertEqual(qlinear.weight(), torch.ops.quantized.fbgemm_linear_unpack(qlinear._packed_weight))
-        Z_q2 = qlinear(X_q)
+        Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
         # test serialization of module directly
-        with tempfile.NamedTemporaryFile() as f:
+        with tempfile.TemporaryFile() as f:
             torch.save(qlinear, f)
             f.seek(0)
             loaded = torch.load(f)
@@ -137,6 +224,12 @@ class ModuleAPITest(QuantizationTestCase):
         rqr2 = dequant_m(qr2)
         self.assertEqual(rqr, rqr2)
 
+    @no_deadline
+    @unittest.skipIf(
+        not torch.fbgemm_is_cpu_supported(),
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
     @given(
         use_bias=st.booleans(),
         use_fused=st.booleans(),
@@ -182,10 +275,14 @@ class ModuleAPITest(QuantizationTestCase):
                                      groups=g,
                                      bias=use_bias,
                                      padding_mode='zeros')
-        conv_under_test.weight = qw
+        # Run module with default-initialized parameters.
+        # This tests that the constructor is correct.
+        conv_under_test(qX)
+
+        conv_under_test.set_weight(qw)
         conv_under_test.bias = qb
-        conv_under_test.scale = torch.tensor([scale], dtype=torch.double)
-        conv_under_test.zero_point = torch.tensor([zero_point], dtype=torch.long)
+        conv_under_test.scale = scale
+        conv_under_test.zero_point = zero_point
 
         # Test members
         self.assertTrue(hasattr(conv_under_test, '_packed_weight'))
@@ -193,7 +290,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertTrue(hasattr(conv_under_test, 'zero_point'))
 
         # Test properties
-        self.assertEqual(qw, conv_under_test.weight)
+        self.assertEqual(qw, conv_under_test.weight())
         self.assertEqual(qb, conv_under_test.bias)
         self.assertEqual(scale, conv_under_test.scale)
         self.assertEqual(zero_point, conv_under_test.zero_point)
@@ -220,8 +317,82 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(result_reference, result_under_test,
                          message="Tensors are not equal.")
 
+        # Test serialization of quantized Conv Module using state_dict
+        model_dict = conv_under_test.state_dict()
+        self.assertEqual(model_dict['weight'], qw)
+        if use_bias:
+            self.assertEqual(model_dict['bias'], qb)
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(model_dict, f)
+            f.seek(0)
+            loaded_dict = torch.load(f)
+        for key in model_dict:
+            self.assertEqual(loaded_dict[key], model_dict[key])
+        if use_fused:
+            loaded_conv_under_test = ConvReLU2d(in_channels=iC,
+                                                out_channels=oC,
+                                                kernel_size=(kH, kW),
+                                                stride=1,
+                                                padding=0,
+                                                dilation=1,
+                                                groups=g,
+                                                bias=use_bias,
+                                                padding_mode='zeros')
+        else:
+            loaded_conv_under_test = Conv2d(in_channels=iC,
+                                            out_channels=oC,
+                                            kernel_size=(kH, kW),
+                                            stride=1,
+                                            padding=0,
+                                            dilation=1,
+                                            groups=g,
+                                            bias=use_bias,
+                                            padding_mode='zeros')
+        loaded_conv_under_test.load_state_dict(loaded_dict)
+        self.assertEqual(loaded_conv_under_test.weight(), conv_under_test.weight())
+        if use_bias:
+            self.assertEqual(loaded_conv_under_test.bias, conv_under_test.bias)
+        self.assertEqual(loaded_conv_under_test.scale, conv_under_test.scale)
+        self.assertEqual(loaded_conv_under_test.zero_point, conv_under_test.zero_point)
+        self.assertTrue(dir(loaded_conv_under_test) == dir(conv_under_test))
+        self.assertTrue(hasattr(conv_under_test, '_packed_weight'))
+        self.assertTrue(hasattr(loaded_conv_under_test, '_packed_weight'))
+        self.assertTrue(hasattr(conv_under_test, 'weight'))
+        self.assertTrue(hasattr(loaded_conv_under_test, 'weight'))
+        self.assertEqual(loaded_conv_under_test.weight(), conv_under_test.weight())
+        self.assertEqual(loaded_conv_under_test.weight(), qw)
+        loaded_result = loaded_conv_under_test(qX)
+        self.assertEqual(loaded_result, result_reference)
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(conv_under_test, f)
+            f.seek(0)
+            loaded_conv = torch.load(f)
+
+        self.assertEqual(conv_under_test.bias, loaded_conv.bias)
+        self.assertEqual(conv_under_test.scale, loaded_conv.scale)
+        self.assertEqual(conv_under_test.zero_point, loaded_conv.zero_point)
+
         # JIT testing
-        self.checkScriptable(conv_under_test, zip([qX], [result_reference]))
+        self.checkScriptable(conv_under_test, zip([qX], [result_reference]), check_save_load=True)
+
+        # Test from_float
+        float_conv = torch.nn.Conv2d(in_channels=iC,
+                                     out_channels=oC,
+                                     kernel_size=(kH, kW),
+                                     stride=1,
+                                     padding=0,
+                                     dilation=1,
+                                     groups=g,
+                                     bias=use_bias,
+                                     padding_mode='zeros').float()
+        float_conv.qconfig = torch.quantization.default_qconfig
+        torch.quantization.prepare(float_conv)
+        float_conv(X.float())
+        quantized_float_conv = torch.quantization.convert(float_conv)
+
+        # Smoke test to make sure the module actually runs
+        quantized_float_conv(qX)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.
