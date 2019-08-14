@@ -8,8 +8,7 @@
 setlocal
 
 :: Recent cmake has problems c
-choco uninstall cmake.install
-choco install --no-progress cmake --version 3.12.1
+choco install --allow-downgrade --no-progress cmake --version 3.12.1
 
 SET ORIGINAL_DIR=%cd%
 SET CAFFE2_ROOT=%~dp0%..
