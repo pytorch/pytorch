@@ -7,7 +7,7 @@ from torch.nn import Module, ModuleList, Parameter, Sequential
 from torch._six import get_function_from_type
 
 
-def copy_to_script_module(original, stubs, _compilation_unit=None):
+def copy_to_script_module(original, stubs):
     """
     Copies the parameters, buffers, constants, attributes, and submodules
     of an nn.Module into itself.
@@ -17,7 +17,7 @@ def copy_to_script_module(original, stubs, _compilation_unit=None):
                            .format(type(original).__name__))
 
     qualified_name = torch.jit._qualified_name(type(original))
-    script_module = torch.jit.ScriptModule(_qualified_name=qualified_name, _compilation_unit=_compilation_unit)
+    script_module = torch.jit.ScriptModule(_qualified_name=qualified_name)
 
     constants_set = set(getattr(original, "__constants__", []))
     script_module.__dict__["_constants_set"] = {}
@@ -97,7 +97,7 @@ def copy_to_script_module(original, stubs, _compilation_unit=None):
     return script_module
 
 
-def recursive_script(mod):
+def recursive_script(mod, exclude_methods=()):
     """
     Makes a ScriptModule from an nn.Module. If `_methods` is provided,
     these methods are treated as @script_methods. If not, it defaults to
@@ -123,6 +123,8 @@ def recursive_script(mod):
             if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
                 exported.append(name)
     methods = methods + tuple(exported)
+
+    methods = tuple(name for name in methods if name not in exclude_methods)
 
     def make_stub(method):
         func = get_function_from_type(type(mod), method)
