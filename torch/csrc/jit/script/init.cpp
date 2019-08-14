@@ -281,8 +281,8 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
 
 static TypePtr getTensorType(const at::Tensor& t, const TypeKind type_kind) {
   switch (type_kind) {
-    case TypeKind::DimensionedTensorType:
-      return DimensionedTensorType::create(t);
+    case TypeKind::ProfiledTensorType:
+      return ProfiledTensorType::create(t);
     case TypeKind::CompleteTensorType: {
       auto scalar_type = t.scalar_type();
       auto sizes = t.sizes();
@@ -290,7 +290,7 @@ static TypePtr getTensorType(const at::Tensor& t, const TypeKind type_kind) {
     }
     default:
       throw std::runtime_error(
-          "Attempted to call getTensorType for type kind other than DimensionedTensorType or CompleteTensorType.");
+          "Attempted to call getTensorType for type kind other than ProfiledTensorType or CompleteTensorType.");
   }
 }
 
@@ -317,7 +317,7 @@ static TupleTypePtr getTupleTensorType(
 static void setInputTensorTypes(
     Graph& g,
     const Stack& stack,
-    const TypeKind type_kind = TypeKind::DimensionedTensorType) {
+    const TypeKind type_kind = TypeKind::ProfiledTensorType) {
   at::ArrayRef<Value*> input_values = g.inputs();
   auto s_iter = stack.begin();
   for (auto v : input_values) {
@@ -350,8 +350,7 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
     bool propagate = true) {
   auto retval = graph.copy();
   if (propagate) {
-    setInputTensorTypes(
-        *retval, fmap<IValue>(inputs), TypeKind::DimensionedTensorType);
+    setInputTensorTypes(*retval, fmap<IValue>(inputs), TypeKind::ProfiledTensorType);
     PropagateInputShapes(retval);
   }
   setInputTensorTypes(
@@ -590,10 +589,9 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            std::vector<c10::NamedTypePtr> deps;
+            std::vector<c10::NamedTypePtr> classes;
             SourceRangeRecords source_ranges;
-            PythonPrint(
-                ss, source_ranges, self.type(), tensors, deps, false);
+            PythonPrint(ss, source_ranges, self.type(), tensors, classes, false);
             return ss.str();
           })
       .def("apply", &Module::apply)
@@ -680,7 +678,7 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            std::vector<c10::NamedTypePtr> deps;
+            std::vector<c10::NamedTypePtr> classes;
             SourceRangeRecords source_ranges;
             PythonPrint(
                 ss,
@@ -688,7 +686,7 @@ void initJitScriptBindings(PyObject* module) {
                 *self.function_,
                 false,
                 tensors,
-                deps,
+                classes,
                 false);
             return ss.str();
           })
@@ -722,10 +720,10 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
         std::vector<at::Tensor> tensors;
-        std::vector<c10::NamedTypePtr> deps;
+        std::vector<c10::NamedTypePtr> classes;
         SourceRangeRecords source_ranges;
         PythonPrint(
-            ss, source_ranges, self.function(), true, tensors, deps, false);
+            ss, source_ranges, self.function(), true, tensors, classes, false);
         return ss.str();
       });
   m.def(
@@ -840,6 +838,20 @@ void initJitScriptBindings(PyObject* module) {
             std::move(cu), in, optional_device, extra_files);
       });
 
+  m.def(
+      "_jit_import_functions",
+      [](std::shared_ptr<CompilationUnit> cu,
+         const std::string& src,
+         const std::vector<at::Tensor>& constant_table) {
+        import_functions(
+            c10::nullopt,
+            cu,
+            std::make_shared<Source>(src),
+            constant_table,
+            nullptr,
+            nullptr);
+      });
+
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);
   m.def("_jit_clear_class_registry", []() {
@@ -850,9 +862,25 @@ void initJitScriptBindings(PyObject* module) {
       debugSetAutodiffSubgraphInlining);
   m.def("_propagate_shapes", _propagate_shapes);
   m.def(
-      "_propagate_and_assign_input_shapes",
-      _propagate_and_assign_input_shapes);
+      "_propagate_and_assign_input_shapes", _propagate_and_assign_input_shapes);
   m.def("_assign_output_shapes", _assign_output_shapes);
+  m.def("_jit_python_print", [](const py::object& obj) {
+    std::ostringstream ss;
+    std::vector<at::Tensor> constants;
+    std::vector<c10::NamedTypePtr> classes;
+    SourceRangeRecords source_ranges;
+    if (auto self = as_module(obj)) {
+      PythonPrint(ss, source_ranges, self->type(), constants, classes, true);
+    } else if (auto self = as_function(obj)) {
+      PythonPrint(
+          ss, source_ranges, *self->function_, false, constants, classes, true);
+    } else {
+      auto& m = py::cast<Method&>(obj);
+      PythonPrint(
+          ss, source_ranges, m.function(), true, constants, classes, true);
+    }
+    return std::make_pair(ss.str(), std::move(constants));
+  });
   m.def(
       "_last_executed_optimized_graph",
       []() { return lastExecutedOptimizedGraph(); },

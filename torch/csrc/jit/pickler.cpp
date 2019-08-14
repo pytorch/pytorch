@@ -199,7 +199,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isObject()) {
     auto obj = ivalue.toObject();
     auto type = obj->type();
-    pushGlobal(type->name()->prefix(), type->name()->name());
+    pushGlobal(type->qualifier(), type->basename());
     push<OpCode>(OpCode::EMPTY_TUPLE);
     push<OpCode>(OpCode::NEWOBJ);
     if (checkHasValidSetGetState(type)) {

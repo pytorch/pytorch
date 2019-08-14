@@ -41,11 +41,17 @@ struct ArgumentInfo {
   at::ScalarType type() const {
     return at::ScalarType(type_);
   }
-  operator TypePtr() const {
+  TypePtr toType() const {
     if (!defined())
       return TensorType::get();
-    return DimensionedTensorType::create(
-        type(), ConvertIntToCPUOrCUDA(device()), dim());
+    return ProfiledTensorType::create(type(),
+      ConvertIntToCPUOrCUDA(device()),
+      c10::VaryingShape(dim()),
+      c10::VaryingShape(dim()),
+      requires_grad());
+  }
+  operator TypePtr() const {
+    return toType();
   }
 
  private:
