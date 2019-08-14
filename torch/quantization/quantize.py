@@ -182,8 +182,6 @@ DEFAULT_MODULE_MAPPING = {
     nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
-    # Generated modules:
-    nn.Add: nnq.Add,
     # QAT modules:
     qat.Linear: nnq.Linear,
     qat.Conv2d: nnq.Conv2d,
@@ -243,24 +241,6 @@ def quantize_qat(model, run_fn, run_args):
     run_fn(model, run_args)
     convert(model)
     return model
-
-# Map for swapping float module to quantized ones
-DEFAULT_MODULE_MAPPING = {
-    nn.Linear: nnq.Linear,
-    nn.ReLU: nnq.ReLU,
-    nn.Conv2d: nnq.Conv2d,
-    QuantStub: nnq.Quantize,
-    DeQuantStub: nnq.DeQuantize,
-    # QAT modules:
-    qat.Linear: nnq.Linear,
-    qat.Conv2d: nnq.Conv2d,
-}
-
-# Map for swapping float module to qat modules
-DEFAULT_QAT_MODULE_MAPPING = {
-    nn.Linear: qat.Linear,
-    nn.Conv2d: qat.Conv2d,
-}
 
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts the float module with observers(where we can get quantization
