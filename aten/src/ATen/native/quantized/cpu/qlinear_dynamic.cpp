@@ -61,10 +61,6 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
         /*max=*/&x_max,
         /*len=*/input.numel());
 
-    TORCH_CHECK(
-        x_min <= 0.0 && 0.0 <= x_max,
-        "0 should be in the range of [x_min, x_max]");
-
     // Input tensor is quantized as 8-bit unsigned values
     static constexpr int precision = 8;
     static constexpr bool is_signed = false;
@@ -144,8 +140,14 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
         /*bias=*/bias_ptr,
         /*nCol=*/N);
 
+    // The resulting matrix here is 2-D, let's view it with the original
+    // left hand dimensions of the input. Here are two examples:
+    // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
+    // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
+    std::vector<int64_t> out_sizes = input.sizes().vec();
+    out_sizes.back() = N;
     // Allocate output Tensor and a buffer for fbgemmPacked to use
-    auto output = at::zeros({M, N}, input.options().dtype(at::kFloat));
+    auto output = at::zeros(out_sizes, input.options().dtype(at::kFloat));
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
     // Do the GEMM
