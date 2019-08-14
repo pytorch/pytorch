@@ -210,7 +210,12 @@ class TestCppApiParity(common.TestCase):
                 else:
                     cpp_args.append(arg)
             try:
-                getattr(cpp_module, cpp_test_name)(*cpp_args)
+                cpp_test_fn = getattr(cpp_module, cpp_test_name)
+                if test_params.expect_parity_error:
+                    with self.assertRaisesRegex(RuntimeError, "Parity test failed"):
+                        cpp_test_fn(*cpp_args)
+                else:
+                    cpp_test_fn(*cpp_args)
             finally:
                 # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
                 # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
@@ -267,9 +272,6 @@ for test_params_dict in sample_module.module_tests + common_nn.module_tests:
 
             if device == 'cuda':
                 test_fn = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")(test_fn)
-            expect_parity_error = test_params.expect_parity_error
-            if expect_parity_error:
-                test_fn = unittest.expectedFailure(test_fn)
             add_test(test_name, test_fn)
 
 
