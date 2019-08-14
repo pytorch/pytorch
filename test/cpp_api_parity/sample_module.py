@@ -40,7 +40,7 @@ struct SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImpl> {
     reset();
   }
   void reset() {
-    param = register_parameter2("param", torch::ones({3, 4}));
+    param = register_parameter("param", torch::ones({3, 4}));
     buffer = register_buffer("buffer", torch::ones({4, 5}));
   }
   torch::Tensor forward(torch::Tensor x) {
