@@ -415,6 +415,12 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
       .def(
+          "_debug_print",
+          &Module::debug_print,
+          py::arg("omit_method_bodies") = true,
+          py::arg("omit_attr_values") = true,
+          py::arg("omit_param_values") = true)
+      .def(
           "_define",
           [](Module& m,
              py::object py_m,
