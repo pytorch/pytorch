@@ -298,6 +298,7 @@ void TestIntArrayRefExpansion(DeprecatedTypeProperties& type) {
   max_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
   max_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
   avg_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1);
+  avg_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1);
 }
 
 void test(DeprecatedTypeProperties& type) {
