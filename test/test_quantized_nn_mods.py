@@ -12,8 +12,8 @@ from torch.nn.quantized.modules import Conv2d
 from torch.nn._intrinsic.quantized import ConvReLU2d
 import torch.quantization
 from common_utils import run_tests, tempfile
-from common_quantization import QuantizationTestCase
-from common_quantized import _calculate_dynamic_qparams, no_deadline
+from common_quantization import QuantizationTestCase, no_deadline
+from common_quantized import _calculate_dynamic_qparams
 from hypothesis import given
 from hypothesis import strategies as st
 import unittest
