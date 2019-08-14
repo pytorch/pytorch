@@ -769,10 +769,18 @@ class TestQNNPackOps(TestCase):
         C = (qA.dequantize() + qB.dequantize()).numpy()
 
         qC = _quantize(C, scale_C, zero_point_C)
+
         qC_qnnp = torch.ops.quantized.qnnpack_add(qA, qB, scale_C, zero_point_C)
 
         np.testing.assert_equal(qC, qC_qnnp.int_repr(),
                                 "Quantized addition failed.")
+
+        A = torch.ones((0, 2), dtype=torch.float32)
+        qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point_A,
+                                   dtype=torch.quint8)
+
+        with self.assertRaisesRegex(RuntimeError, "tensor.*size"):
+            qC_qnnp = torch.ops.quantized.qnnpack_add(qA, qB, scale_C, zero_point_C)
 
     """Tests the correctness of quantized::qnnpack_maxpool2d op."""
     @given(A=hu.tensor(shapes=hu.array_shapes(4, 4, 3, 5),
@@ -823,6 +831,13 @@ class TestQNNPackOps(TestCase):
 
         qa_pool_int = qa_pool.dequantize()
         np.testing.assert_equal(a_pool_nhwc.numpy(), qa_pool_int.numpy())
+
+        A = torch.ones((0, 4, 2, 2), dtype=torch.float32)
+        qa = torch.quantize_linear(A, scale=scale, zero_point=zero_point,
+                                   dtype=torch_type)
+
+        with self.assertRaisesRegex(RuntimeError, "tensor.*size"):
+            qa_pool = q_max_pool(qa, k, s, p, d)
 
 if __name__ == "__main__":
     run_tests()

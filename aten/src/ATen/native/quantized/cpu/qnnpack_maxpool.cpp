@@ -25,6 +25,10 @@ class QNNPACKMaxPool2D final : public torch::OperatorKernel {
         "qnnpack_maxpool(): Expected input to be 4-dimensional: got ",
         input.ndimension());
     TORCH_CHECK(
+        input.numel() > 0,
+        "qnnpack_maxpool(): Got empty input tensor, size: ",
+        input.sizes());
+    TORCH_CHECK(
         kernel_size.size() == 2,
         "qnnpack_maxpool(): Expected kernel_size to be 2-dimensional: got ",
         kernel_size.size());
