@@ -1398,7 +1398,6 @@ graph(%Ra, %Rb):
         with warnings.catch_warnings(record=True) as warns:
             traced_fn = torch.jit.trace(fn, torch.tensor([1]))
         warns = [str(w.message) for w in warns]
-        self.assertEqual(len(warns), 7)
         self.assertIn('a Python integer', warns[0])
         self.assertIn('a Python boolean', warns[1])
         self.assertIn('a Python index', warns[2])
@@ -3415,7 +3414,7 @@ def foo(x):
         bytesio = io.BytesIO(buffer)
         scripted = torch.jit.load(bytesio)
 
-        fc = FileCheck().check('code/__torch__.py:6:12')
+        fc = FileCheck().check(':6:12')
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -3501,7 +3500,10 @@ def foo(xyz):
             torch.jit.save(ft3, buffer)
             buffer.seek(0)
             archive = zipfile.ZipFile(buffer)
-            debug_file = archive.open('archive/code/__torch__.py.debug_pkl')
+            for name in archive.namelist():
+                if "debug_pkl" in name:
+                    pkl_name = name
+            debug_file = archive.open(pkl_name)
             return pickle.load(debug_file), buffer
 
         records1, buffer = debug_records_from_mod(ft3)
