@@ -664,10 +664,15 @@ def make_tuple(example_inputs):
     return example_inputs
 
 
-def make_module(mod, _module_class, _compilation_unit):
-    if _module_class is None:
-        _module_class = TopLevelTracedModule
-    return _module_class(mod, _compilation_unit=_compilation_unit)
+def make_module(mod, _module_class, _compilation_unit, exclude_methods=()):
+    if isinstance(mod, ScriptModule):
+        return mod
+    elif torch._jit_internal.module_has_exports(mod):
+        return torch.jit._recursive.recursive_script(mod, exclude_methods)
+    else:
+        if _module_class is None:
+            _module_class = TopLevelTracedModule
+        return _module_class(mod, _compilation_unit=_compilation_unit)
 
 def wrap_check_inputs(check_inputs):
     if check_inputs is None:
@@ -897,7 +902,8 @@ def trace_module(mod,
     if not isinstance(inputs, dict):
         raise AttributeError("expected a dictionary of (method_name, input) pairs")
 
-    module = make_module(mod, _module_class, _compilation_unit)
+
+    module = make_module(mod, _module_class, _compilation_unit, tuple(inputs.keys()))
 
     for method_name, example_inputs in inputs.items():
         # this is needed since Module.__call__ sets up some extra tracing
@@ -1675,10 +1681,7 @@ class TracedModule(ScriptModule):
             raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(self))
 
         for name, submodule in orig._modules.items():
-            if isinstance(submodule, ScriptModule):
-                self._modules[name] = submodule
-            else:
-                self._modules[name] = TracedModule(submodule, id_set)
+            self._modules[name] = make_module(submodule, TracedModule, _compilation_unit)
 
         self._freeze()
 
