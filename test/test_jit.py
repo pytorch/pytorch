@@ -8208,7 +8208,6 @@ a")
         c = torch.zeros(2, 4, dtype=torch.float)
 
         graph = _propagate_shapes(tensor_unifying.graph, (a, b, c), False)
-        print(graph)
         if_outputs = list(graph.findNode("prim::If").outputs())
         self.assertTrue(if_outputs[0].type().str() == "Float(*, *)")
         self.assertTrue(if_outputs[1].type().str() == "Tensor(*, *)")
