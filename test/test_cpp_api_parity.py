@@ -3,6 +3,7 @@ import tempfile
 from string import Template
 import copy
 import unittest
+import warnings
 
 import torch
 import common_utils as common
@@ -221,7 +222,10 @@ class TestCppApiParity(common.TestCase):
                 # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
                 # we close the file after creation and try to remove it manually.
                 for module_file_name in module_file_names:
-                    os.unlink(module_file_name)
+                    try:
+                        os.remove(module_file_name)
+                    except OSError as e:
+                        warnings.warn("Unable to remove {}, got error: {}".format(module_file_name, str(e)))
 
         cpp_module = generate_and_compile_cpp_test_functions(test_params)
         for method in torch_nn_test_methods:
