@@ -32,7 +32,9 @@ setup_linux_system_environment: &setup_linux_system_environment
 should_run_job: &should_run_job
   name: Should Run Job After attach_workspace
   no_output_timeout: "2m"
-  command: ~/workspace/.circleci/scripts/should_run_job.sh
+  # command: ~/workspace/.circleci/scripts/should_run_job.sh
+  command: |
+    echo "Passed"
 
 setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment After attach_workspace
@@ -2896,19 +2898,6 @@ workflows:
       #       - setup
       #       - binary_linux_conda_3.6_cu90_devtoolset7_build
 
-##############################################################################
-# Daily smoke test trigger
-##############################################################################
-  binarysmoketests:
-    triggers:
-      - schedule:
-          cron: "15 16 * * *"
-          filters:
-            branches:
-              only:
-                - master
-    jobs:
-      - setup
       - smoke_linux_manywheel_2.7m_cpu_devtoolset7:
           requires:
             - setup
@@ -3002,20 +2991,6 @@ workflows:
       - smoke_macos_conda_3.7_cpu:
           requires:
             - setup
-
-##############################################################################
-# Daily binary build trigger
-##############################################################################
-  binarybuilds:
-    triggers:
-      - schedule:
-          cron: "5 5 * * *"
-          filters:
-            branches:
-              only:
-                - master
-    jobs:
-      - setup
       - binary_linux_manywheel_2.7m_cpu_devtoolset7_build:
           requires:
             - setup
@@ -3148,10 +3123,6 @@ workflows:
       - binary_macos_libtorch_2.7_cpu_build:
           requires:
             - setup
-
-##############################################################################
-# Nightly tests
-##############################################################################
       - binary_linux_manywheel_2.7m_cpu_devtoolset7_test:
           requires:
             - setup
@@ -3479,33 +3450,3 @@ workflows:
           requires:
             - setup
             - binary_macos_libtorch_2.7_cpu_build
-
-  # Scheduled to run 4 hours after the binary jobs start
-  # These jobs need to run after all the binary jobs run, regardless of if the
-  # jobs failed or not. There's no way to do this in CircleCI right now, so we
-  # just schedule this to run after all the binary jobs should've finished.
-  # These jobs are all idempotent and very lightweight; they just upload html
-  # files that track what binaries are available and what their sizes are.
-  update_s3_htmls:
-    triggers:
-      - schedule:
-          cron: "0 9 * * *"
-          filters:
-            branches:
-              only:
-                - master
-    jobs:
-      - setup
-      - update_s3_htmls_for_nightlies:
-          context: org-member
-          requires:
-            - setup
-      - update_s3_htmls_for_nightlies_devtoolset7:
-          context: org-member
-          requires:
-            - setup
-      - upload_binary_sizes:
-          context: org-member
-          requires:
-            - setup
-
