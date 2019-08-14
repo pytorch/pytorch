@@ -593,7 +593,7 @@ class ScriptModuleSerializer {
   // A list of attributes (indexed by attr_def->id()) and module state (indexed
   // by module_def->id())
   // all classes used by this module hierarchy
-  std::vector<c10::NamedTypePtr> class_table_;
+  std::vector<c10::NamedTypePtr> deps_table_;
   OrderedDict<c10::NamedTypePtr, std::string> converted_classes_;
   std::vector<IValue> pickled_ivalues_;
 };
@@ -784,7 +784,7 @@ void ScriptModuleSerializer::serialize(
 
 void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   // Convert all the classes that this model depends on
-  for (const auto& class_type : class_table_) {
+  for (const auto& class_type : deps_table_) {
     convertClass(class_type);
   }
 
@@ -1033,7 +1033,7 @@ void ScriptModuleSerializer::convertModule(
         source_ranges,
         module,
         tensor_table_,
-        class_table_,
+        deps_table_,
         /*enforce_importable=*/true);
     torch::RecordRef* record = module_def->mutable_torchscript_arena();
 
