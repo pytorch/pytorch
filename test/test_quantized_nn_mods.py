@@ -58,6 +58,10 @@ class DynamicModuleAPITest(QuantizationTestCase):
         X = torch.rand(batch_size, in_features).float()
         B = torch.rand(out_features).float() if use_bias else None
         qlinear = nnqd.Linear(in_features, out_features)
+        # Run module with default-initialized parameters.
+        # This tests that the constructor is correct.
+        qlinear(X)
+
         qlinear.set_weight(W_q)
         # Simple round-trip test to ensure weight()/set_weight() API
         self.assertEqual(qlinear.weight(), W_q)
@@ -114,6 +118,16 @@ class DynamicModuleAPITest(QuantizationTestCase):
         # Test JIT
         self.checkScriptable(qlinear, zip([X], [Z_ref]), check_save_load=True)
 
+        # Test from_float
+        float_linear = torch.nn.Linear(in_features, out_features).float()
+        float_linear.qconfig = torch.quantization.default_qconfig
+        torch.quantization.prepare(float_linear)
+        float_linear(X.float())
+        quantized_float_linear = nnqd.Linear.from_float(float_linear)
+
+        # Smoke test to make sure the module actually runs
+        quantized_float_linear(X)
+
 
 class ModuleAPITest(QuantizationTestCase):
     @no_deadline
@@ -143,6 +157,11 @@ class ModuleAPITest(QuantizationTestCase):
             qlinear = nnq_fused.LinearReLU(in_features, out_features)
         else:
             qlinear = nnq.Linear(in_features, out_features)
+
+        # Run module with default-initialized parameters.
+        # This tests that the constructor is correct.
+        qlinear(X_q)
+
         qlinear.set_weight(W_q)
         # Simple round-trip test to ensure weight()/set_weight() API
         self.assertEqual(qlinear.weight(), W_q)
@@ -209,6 +228,16 @@ class ModuleAPITest(QuantizationTestCase):
 
         # Test JIT
         self.checkScriptable(qlinear, zip([X_q], [Z_ref]), check_save_load=True)
+
+        # Test from_float
+        float_linear = torch.nn.Linear(in_features, out_features).float()
+        float_linear.qconfig = torch.quantization.default_qconfig
+        torch.quantization.prepare(float_linear)
+        float_linear(X.float())
+        quantized_float_linear = torch.quantization.convert(float_linear)
+
+        # Smoke test to make sure the module actually runs
+        quantized_float_linear(X_q)
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
