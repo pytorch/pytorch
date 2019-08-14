@@ -161,6 +161,12 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     return fn
 
 
+def _trace_compile_exports(fn):
+    # This is a lambda so the field doesn't appear in the TorchScript
+    # class as an attribute
+    fn._trace_compile_exports = lambda self: True
+    return fn
+
 
 class FunctionModifiers(object):
     """
