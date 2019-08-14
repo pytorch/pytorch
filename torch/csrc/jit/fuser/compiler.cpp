@@ -204,13 +204,15 @@ std::shared_ptr<FusedKernel> compileKernel(
   for (size_t i = 0; i < input_desc.size(); i++) {
     const auto& desc = input_desc[i];
 
-    // TODO: can't get rid of this use of DimensionedTensorType yet
+    // TODO: can't get rid of this use of ProfiledTensorType
     // until we switch to ProfilingGraphExecutor, so we don't have to
     // run PropagateInputShapes below
-    graph->inputs()[i]->setType(DimensionedTensorType::create(
+    graph->inputs()[i]->setType(ProfiledTensorType::create(
         desc.scalar_type,
         device,
-        desc.nDim())); // TODO: nDim is bad, as it is collapsed
+        c10::VaryingShape(desc.nDim()),
+        c10::VaryingShape(desc.nDim()),
+        false)); // TODO: nDim is bad, as it is collapsed
   }
 
   PropagateInputShapes(graph);
