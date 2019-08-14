@@ -118,12 +118,12 @@ __device__ static inline scalar_t reduce_agg2(scalar_t agg) {
 
   for(int s=1; s < blockDim.x; s *= 2) {
     if (tid % (2*s) == 0) {
-      sdata[tid] += sdata[tid + s];
+      shared[tid] += shared[tid + s];
     }
     __syncthreads();
   }
 
-  return sdata[tid];
+  return shared[tid];
 
 }
 
