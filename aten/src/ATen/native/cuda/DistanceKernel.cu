@@ -90,7 +90,7 @@ __device__ static inline scalar_t reduce_agg(scalar_t agg) {
     F::agg(agg, WARP_SHFL_DOWN(agg, offset));
   }
 
-  __shared__ scalar_t shared[forward_threads];
+  /*__shared__ scalar_t shared[forward_threads];
   int lane = threadIdx.x % warpSize;
   int warp_id = threadIdx.x / warpSize;
   if (lane == 0) {
@@ -104,7 +104,7 @@ __device__ static inline scalar_t reduce_agg(scalar_t agg) {
       F::agg(agg, WARP_SHFL_DOWN(agg, offset));
     }
     __syncthreads();
-  }
+  }*/
   return agg;
 }
 
@@ -251,7 +251,7 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
   const dim3 grid(result.numel());
-  const dim3 block(forward_threads);
+  const dim3 block(std::min((int64_t)forward_threads, ((m - 1) / WARP_SIZE + 1) * WARP_SIZE));
 
   AT_DISPATCH_FLOATING_TYPES(x1.scalar_type(), "cdist_cuda", [&] {
     if (p == 0.0) {
