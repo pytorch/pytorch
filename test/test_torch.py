@@ -12735,21 +12735,22 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     @staticmethod
     def _test_unary_op_overlap(self, sz, data, op):
+
+        def _test(op, c, a):
+            c_exp = op(a)
+            self.assertEqual(op(a, out=c), c_exp, op.__name__)
+
         # c is identical to a:
         c = data[0:sz]
         a = data[0:sz]
         c_exp = torch.empty_like(c)
-        op(a, out=c_exp)
-        op(a, out=c)
-        self.assertEqual(c_exp, c)
+        _test(op, c, a)
 
         # c and a are independent:
         c = data[0:sz]
         a = data[sz:2 * sz]
         c_exp = torch.empty_like(c)
-        op(a, out=c_exp)
-        op(a, out=c)
-        self.assertEqual(c_exp, c)
+        _test(op, c, a)
 
         # c partially overlaps with a:
         c = data[0:sz]
@@ -12796,6 +12797,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     @staticmethod
     def _test_binary_op_input_output_overlap(self, op, device='cpu'):
+
+        def _test(op, c, a, b):
+            c_exp = op(a, b)
+            self.assertEqual(op(a, b, out=c), c_exp, op.__name__)
+
         sz = 3
         data = torch.randn(3 * sz, device=device)
 
@@ -12804,45 +12810,35 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         a = data[0:sz]
         b = data[0:sz]
         c_exp = torch.empty_like(c)
-        op(a, b, out=c_exp)
-        op(a, b, out=c)
-        self.assertEqual(c_exp, c)
+        _test(op, c, a, b)
 
         # c, a and b are independent:
         c = data[0:sz]
         a = data[sz:2 * sz]
         b = data[2 * sz:3 * sz]
         c_exp = torch.empty_like(c)
-        op(a, b, out=c_exp)
-        op(a, b, out=c)
-        self.assertEqual(c_exp, c)
+        _test(op, c, a, b)
 
         # c and a are identical but b is independent:
         c = data[0:sz]
         a = data[0:sz]
         b = data[2 * sz:3 * sz]
         c_exp = torch.empty_like(c)
-        op(a, b, out=c_exp)
-        op(a, b, out=c)
-        self.assertEqual(c_exp, c)
+        _test(op, c, a, b)
 
         # c and b are identical but a is independent:
         c = data[0:sz]
         a = data[sz:2 * sz]
         b = data[0:sz]
         c_exp = torch.empty_like(c)
-        op(a, b, out=c_exp)
-        op(a, b, out=c)
-        self.assertEqual(c_exp, c)
+        _test(op, c, a, b)
 
         # a and b have a partial overlap but c is independent:
         c = data[0:sz]
         a = data[sz:2 * sz]
         b = data[sz + 1:2 * sz + 1]
         c_exp = torch.empty_like(c)
-        op(a, b, out=c_exp)
-        op(a, b, out=c)
-        self.assertEqual(c_exp, c)
+        _test(op, c, a, b)
 
         # c has partial overlap with a:
         c = data[0:sz]
