@@ -1863,12 +1863,16 @@ class _TestTorchMixin(torchtest):
     @staticmethod
     def _test_logical_not(self, device):
         for dtype in torch.testing.get_all_dtypes():
+            if dtype == torch.bfloat16:
+                continue
             expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
             a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
             # new tensor
             self.assertEqual(expected_res.bool(), a.logical_not())
             # out
             for out_dtype in torch.testing.get_all_dtypes():
+                if out_dtype == torch.bfloat16:
+                    continue
                 b = torch.empty(0, dtype=out_dtype, device=device)
                 torch.logical_not(a, out=b)
                 self.assertEqual(expected_res.bool(), b.bool())
@@ -1882,14 +1886,20 @@ class _TestTorchMixin(torchtest):
     @staticmethod
     def _test_logical_xor(self, device):
         for dtype in torch.testing.get_all_dtypes():
+            if dtype == torch.bfloat16:
+                continue
             expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
-            for other_dtype in [torch.bool] + torch.testing.get_all_math_dtypes(device):
+            for other_dtype in torch.testing.get_all_dtypes():
+                if dtype == torch.bfloat16:
+                    continue
                 a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
                 b = torch.tensor([1, 0, 0, 10], dtype=other_dtype, device=device)
                 # new tensor
                 self.assertEqual(expected_res.bool(), a.logical_xor(b))
                 # out
                 for out_dtype in torch.testing.get_all_dtypes():
+                    if dtype == torch.bfloat16:
+                        continue
                     c = torch.empty(0, dtype=out_dtype, device=device)
                     torch.logical_xor(a, b, out=c)
                     self.assertEqual(expected_res.bool(), c.bool())
