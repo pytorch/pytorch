@@ -1,5 +1,6 @@
 import torch._C
 import torch._jit_internal as _jit_internal
+from torch._six import get_function_from_type
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch.testing
@@ -897,7 +898,23 @@ def trace_module(mod,
     if not isinstance(inputs, dict):
         raise AttributeError("expected a dictionary of (method_name, input) pairs")
 
-    module = make_module(mod, _module_class, _compilation_unit)
+
+    if hasattr(mod, '_trace_compile_exports') and mod._trace_compile_exports():
+        exported = []
+        for name in dir(mod):
+            item = getattr(mod, name)
+            if callable(item):
+                if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
+                    exported.append(name)
+
+        def make_stub(method):
+            func = get_function_from_type(type(mod), method)
+            return torch.jit.script_method(func, _jit_internal.createResolutionCallbackFromClosure(func))
+
+        stubs = list(map(make_stub, exported))
+        module = torch.jit._recursive.copy_to_script_module(mod, stubs, _compilation_unit)
+    else:
+        module = make_module(mod, _module_class, _compilation_unit)
 
     for method_name, example_inputs in inputs.items():
         # this is needed since Module.__call__ sets up some extra tracing

@@ -7,7 +7,7 @@ from torch.nn import Module, ModuleList, Parameter, Sequential
 from torch._six import get_function_from_type
 
 
-def copy_to_script_module(original, stubs):
+def copy_to_script_module(original, stubs, _compilation_unit=None):
     """
     Copies the parameters, buffers, constants, attributes, and submodules
     of an nn.Module into itself.
@@ -17,7 +17,7 @@ def copy_to_script_module(original, stubs):
                            .format(type(original).__name__))
 
     qualified_name = torch.jit._qualified_name(type(original))
-    script_module = torch.jit.ScriptModule(_qualified_name=qualified_name)
+    script_module = torch.jit.ScriptModule(_qualified_name=qualified_name, _compilation_unit=_compilation_unit)
 
     constants_set = set(getattr(original, "__constants__", []))
     script_module.__dict__["_constants_set"] = {}
