@@ -3,6 +3,9 @@
 #else
 
 #include "ATen/cuda/CUDAContext.h"
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #define ERROR_ONLY_FP_TYPES(func) \
   THError("%s for CUDA tensors only supports floating-point types. Try converting the tensors with .float()", func);
@@ -260,6 +263,10 @@ void THCTensor_(addmm)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, m1, m2));
   char transpose_r, transpose_m1, transpose_m2;
   THCTensor *r__, *m1_, *m2_;
+
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmm(r_, t, m1, m2);
+#endif
 
   if( (m1->dim() != 2) || (m2->dim() != 2) )
     THError("2D tensors expected, got %dD, %dD tensors", m1->dim(), m2->dim());

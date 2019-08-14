@@ -3,6 +3,7 @@ from common_utils import TestCase, run_tests
 from common_cuda import TEST_CUDA
 from collections import namedtuple
 import itertools
+import functools
 import torch
 import torch.nn.functional as F
 import sys
@@ -21,6 +22,34 @@ def flatten(lst):
 
 
 Function = namedtuple('TestCase', ['name', 'lambd'])
+
+
+def parse_compressed_namedshape(string):
+    # Metalanguage for describing a shape of a tensor compactly.
+    # 'N:3,C:2' -> size = [3, 2], names: ['N', 'C']
+    # 'None:3,None:2' -> size = [3, 2], names: ['None', 'None']
+    # '3,2' -> size = [3, 2], names None passed to ctor.
+    def parse_name(maybe_name):
+        maybe_name = maybe_name.strip()
+        if maybe_name == 'None':
+            return None
+        return maybe_name
+
+    string = string.strip()
+
+    # '3, 2' -> size = [3, 2], None names.
+    if len(string) > 0 and ':' not in string:
+        return None, [int(size) for size in string.split(',')]
+
+    dims = string.split(',')
+    tuples = [dim.split(':') for dim in dims]
+    return zip(*[(parse_name(name), int(size)) for name, size in tuples])
+
+
+def create(namedshape, factory=torch.randn):
+    # namedshape: str
+    names, shape = parse_compressed_namedshape(namedshape)
+    return factory(shape, names=names)
 
 
 class TestNamedTensor(TestCase):
@@ -845,11 +874,96 @@ class TestNamedTensor(TestCase):
         for tensor, expected in zip(output, expected_tensors):
             self.assertTensorDataAndNamesEqual(tensor, expected)
 
+T = create
+
+
+def out_fn(operator):
+    @functools.wraps(operator)
+    def fn(*inputs):
+        return operator(*inputs[1:], out=inputs[0])
+    return fn
+
+NameInferenceTest = namedtuple('NameInferenceTest', [
+    'test_name',
+    'lambd',
+    'inputs',
+    'expected_names',
+    'throws_regex',
+    'expected_failure',
+])
+NameInferenceTest.__new__.__defaults__ = (None, False)
+
+generated_name_tests = [
+    NameInferenceTest(
+        test_name='test_mm_named_out',
+        lambd=out_fn(torch.mm),
+        inputs=[T('N:3,C:2'), T('N:3,C:2'), T('W:2,H:5')],
+        expected_names=['N', 'H'],
+        expected_failure=True),
+    NameInferenceTest(
+        test_name='test_mm_all_names',
+        lambd=torch.mm,
+        inputs=[T('N:3,C:2'), T('W:2,H:5')],
+        expected_names=['N', 'H']),
+    NameInferenceTest(
+        test_name='test_mm_partial_names_left',
+        lambd=torch.mm,
+        inputs=[T('3,2'), T('W:2,H:5')],
+        expected_names=[None, 'H']),
+    NameInferenceTest(
+        test_name='test_mm_partial_names_right',
+        lambd=torch.mm,
+        inputs=[T('N:3,C:2'), T('2,5')],
+        expected_names=['N', None]),
+    NameInferenceTest(
+        test_name='test_addmm_named_out',
+        lambd=torch.addmm,
+        inputs=[T('N:3,H:5'), T('N:3,H:5'), T('N:3,C:2'), T('W:2,H:5')],
+        expected_names=['N', 'H'],
+        expected_failure=True),
+    NameInferenceTest(
+        test_name='test_addmm_all_names',
+        lambd=torch.addmm,
+        inputs=[T('N:3,H:5'), T('N:3,C:2'), T('W:2,H:5')],
+        expected_names=['N', 'H']),
+    NameInferenceTest(
+        test_name='test_addmm_partially_named_self',
+        lambd=torch.addmm,
+        inputs=[T('None:3,H:5'), T('N:3,C:2'), T('W:2,H:5')],
+        expected_names=['N', 'H']),
+    NameInferenceTest(
+        test_name='test_addmm_unnamed_self',
+        lambd=torch.addmm,
+        inputs=[T('3,5'), T('N:3,C:2'), T('W:2,H:5')],
+        expected_names=['N', 'H']),
+]
+
+def make_name_test(name_inference_test):
+    def fn(self):
+        for device in torch.testing.get_all_device_types():
+            inputs = [arg.to(device) if isinstance(arg, torch.Tensor) else arg
+                      for arg in name_inference_test.inputs]
+            if name_inference_test.throws_regex is not None:
+                with self.assertRaisesRegex(RuntimeError, name_inference_test.throws_regex):
+                    name_inference_test.lambd(*inputs)
+                return
+            output = name_inference_test.lambd(*inputs)
+            self.assertEqual(output.names, name_inference_test.expected_names)
+    fn.__name__ = name_inference_test.test_name
+    if name_inference_test.expected_failure:
+        return unittest.expectedFailure(fn)
+    return fn
+
+for name_inference_test in generated_name_tests:
+    setattr(TestNamedTensor, name_inference_test.test_name, make_name_test(name_inference_test))
+
+
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
     if attr.startswith('test_'):
         new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
         setattr(TestNamedTensor, attr, new_test)
+
 
 if __name__ == '__main__':
     run_tests()

@@ -11,6 +11,8 @@ Tensor& resize_cpu_(Tensor& self, IntArrayRef size) {
 }
 
 Tensor& resize_as_cpu_(Tensor& self, const Tensor& the_template) {
+#ifdef BUILD_NAMEDTENSOR
+#endif
   return resize_cpu_(self, the_template.sizes());
 }
 

@@ -3,6 +3,9 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 // HEY YOU!
 //
@@ -697,6 +700,10 @@ void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
   THTensor *r__, *m1_, *m2_;
   int free_m1 = 0;
   int free_m2 = 0;
+
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmm(r_, t, m1, m2);
+#endif
 
   if( (m1->dim() != 2) || (m2->dim() != 2))
     THError("matrices expected, got %dD, %dD tensors", m1->dim(), m2->dim());
