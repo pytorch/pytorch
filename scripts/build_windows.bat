@@ -4,15 +4,8 @@
 
 :: This script shows how one can build a Caffe2 binary for windows.
 
-@echo on
+@echo off
 setlocal
-
-choco install -y --no-progress --side-by-side cmake.portable --version 3.12.4
-
-call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
-set PATH=C:\ProgramData\chocolatey\lib\cmake.portable.3.12.4\tools\cmake-3.12.4-win64-x64\bin;%PATH%
-
-echo PATH=%PATH%
 
 SET ORIGINAL_DIR=%cd%
 SET CAFFE2_ROOT=%~dp0%..
@@ -62,11 +55,11 @@ if NOT DEFINED MSVC_Z7_OVERRIDE (
 )
 
 if NOT DEFINED CMAKE_GENERATOR (
-  set CMAKE_GENERATOR=Visual Studio 15 2017
+  set CMAKE_GENERATOR=Ninja
 )
 
 :: Install pyyaml for Aten codegen
-pip install pyyaml
+pip install pyyaml ninja
 
 echo CAFFE2_ROOT=%CAFFE2_ROOT%
 echo CMAKE_GENERATOR=%CMAKE_GENERATOR%
