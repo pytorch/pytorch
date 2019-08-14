@@ -130,7 +130,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
   if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-    pip install -q --user onnxruntime==0.4.0
+    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==0.5.0.dev808
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
