@@ -193,6 +193,9 @@ if (MSVC)
       if(${flag_var} MATCHES "/Z[iI]")
         string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
       endif(${flag_var} MATCHES "/Z[iI]")
+      # Turn off warnings on Windows
+      string(REPLACE "/W3" "/w" ${flag_var} "${${flag_var}}")
+      string(REPLACE "/EHs" "" ${flag_var} "${${flag_var}}")
     endforeach(flag_var)
   endif(MSVC_Z7_OVERRIDE)
   foreach(flag_var
@@ -204,7 +207,6 @@ if (MSVC)
   endforeach(flag_var)
   # Turning off USE_DISTRIBUTED on default
   set(USE_DISTRIBUTED OFF)
-  string(APPEND CMAKE_CXX_FLAGS " /w")
 endif(MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
