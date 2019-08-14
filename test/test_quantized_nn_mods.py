@@ -9,6 +9,7 @@ import torch.nn._intrinsic.quantized as nnq_fused
 import torch.nn.quantized.functional as qF
 from torch.nn.quantized.modules import Conv2d
 from torch.nn._intrinsic.quantized import ConvReLU2d
+import torch.quantization
 from common_utils import run_tests, tempfile
 from common_quantization import QuantizationTestCase, no_deadline
 from hypothesis import given
@@ -188,6 +189,10 @@ class ModuleAPITest(QuantizationTestCase):
                                      groups=g,
                                      bias=use_bias,
                                      padding_mode='zeros')
+        # Run module with default-initialized parameters.
+        # This tests that the constructor is correct.
+        conv_under_test(qX)
+
         conv_under_test.set_weight(qw)
         conv_under_test.bias = qb
         conv_under_test.scale = scale
@@ -284,6 +289,24 @@ class ModuleAPITest(QuantizationTestCase):
 
         # JIT testing
         self.checkScriptable(conv_under_test, zip([qX], [result_reference]), check_save_load=True)
+
+        # Test from_float
+        float_conv = torch.nn.Conv2d(in_channels=iC,
+                                     out_channels=oC,
+                                     kernel_size=(kH, kW),
+                                     stride=1,
+                                     padding=0,
+                                     dilation=1,
+                                     groups=g,
+                                     bias=use_bias,
+                                     padding_mode='zeros').float()
+        float_conv.qconfig = torch.quantization.default_qconfig
+        torch.quantization.prepare(float_conv)
+        float_conv(X.float())
+        quantized_float_conv = torch.quantization.convert(float_conv)
+
+        # Smoke test to make sure the module actually runs
+        quantized_float_conv(qX)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.

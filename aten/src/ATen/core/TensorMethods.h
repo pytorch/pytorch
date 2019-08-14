@@ -71,6 +71,12 @@ inline Tensor & Tensor::set_names_(c10::optional<DimnameList> names) const {
     return table->getOp<Tensor & (Tensor &, c10::optional<DimnameList>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
 }
 #endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::set_names(c10::optional<DimnameList> names) const {
+    static auto table = globalATenDispatch().getOpTable("aten::set_names(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
+    return table->getOp<Tensor (const Tensor &, c10::optional<DimnameList>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
+}
+#endif
 inline Tensor Tensor::abs() const {
     static auto table = globalATenDispatch().getOpTable("aten::abs(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
