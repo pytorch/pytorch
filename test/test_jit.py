@@ -3495,26 +3495,26 @@ def foo(xyz):
 
         ft3 = FooTest3()
 
-        def debug_records_from_mod(mod):
+        def debug_records_from_mod(self, mod):
             buffer = io.BytesIO()
             torch.jit.save(ft3, buffer)
             buffer.seek(0)
             archive = zipfile.ZipFile(buffer)
-            for name in archive.namelist():
-                if "debug_pkl" in name:
-                    pkl_name = name
-            debug_file = archive.open(pkl_name)
+            files = filter(lambda x: x.startswith('archive/code/'), archive.namelist())
+            debug_files = list(filter(lambda f: f.endswith('.debug_pkl'), files))
+            self.assertEqual(len(debug_files), 1)
+            debug_file = archive.open(debug_files[0])
             return pickle.load(debug_file), buffer
 
-        records1, buffer = debug_records_from_mod(ft3)
+        records1, buffer = debug_records_from_mod(self, ft3)
 
         buffer.seek(0)
         loaded = torch.jit.load(buffer)
-        records2, buffer = debug_records_from_mod(loaded)
+        records2, buffer = debug_records_from_mod(self, loaded)
 
         buffer.seek(0)
         loaded2 = torch.jit.load(buffer)
-        records3, _ = debug_records_from_mod(loaded2)
+        records3, _ = debug_records_from_mod(self, loaded2)
 
         self.assertEqual(records1, records2)
         self.assertEqual(records2, records3)
