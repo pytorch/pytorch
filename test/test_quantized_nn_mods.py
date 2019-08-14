@@ -16,7 +16,7 @@ from common_quantization import QuantizationTestCase
 from common_quantized import _calculate_dynamic_qparams
 from hypothesis import given
 from hypothesis import strategies as st
-
+import unittest
 
 '''
 Note that tests in this file are just API test, to make sure we wrapped the
@@ -110,6 +110,11 @@ class DynamicModuleAPITest(QuantizationTestCase):
 
 
 class ModuleAPITest(QuantizationTestCase):
+    @unittest.skipIf(
+        not torch.fbgemm_is_cpu_supported(),
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -212,6 +217,11 @@ class ModuleAPITest(QuantizationTestCase):
         rqr2 = dequant_m(qr2)
         self.assertEqual(rqr, rqr2)
 
+    @unittest.skipIf(
+        not torch.fbgemm_is_cpu_supported(),
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
     @given(
         use_bias=st.booleans(),
         use_fused=st.booleans(),
