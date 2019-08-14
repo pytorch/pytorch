@@ -76,7 +76,6 @@ class TestNamedTensor(TestCase):
                 'with duplicate names unless they are tagged and have different tags'):
             x = factory(2, 1, 1, names=('C.in', 'H', 'C'), device=device)
 
-
     def test_has_names(self):
         unnamed = torch.empty(2, 3)
         none_named = torch.empty(2, 3, names=(None, None))
@@ -115,7 +114,6 @@ class TestNamedTensor(TestCase):
             self.assertEqual(x.names, expected_names)
 
         _test(('N', 'C'), ('N', 'C'), ('N', 'C'))
-        _test(('N', None), ('N', 'C'), ('N', 'C'))
         _test(None, ('N', 'C'), ('N', 'C'))
 
     def test_names_(self):
@@ -385,6 +383,38 @@ class TestNamedTensor(TestCase):
         for _, op in tests:
             test_basic(op)
             test_wildcard(op)
+
+    def test_out_fn_semantics(self):
+        out_fn = torch.abs
+        unnamed_tensor = torch.randn(3, 2)
+        none_named_tensor = torch.randn(3, 2, names=(None, None))
+        named_tensor = torch.randn(3, 2, names=('N', 'C'))
+        partially_named_tensor = torch.randn(3, 2, names=('N', None))
+
+        with self.assertRaisesRegex(RuntimeError, "Name mismatch"):
+            out_fn(partially_named_tensor, out=named_tensor)
+        with self.assertRaisesRegex(RuntimeError, "Name mismatch"):
+            out_fn(named_tensor, out=partially_named_tensor)
+        with self.assertRaisesRegex(RuntimeError, "Name mismatch"):
+            out_fn(none_named_tensor, out=named_tensor)
+        with self.assertRaisesRegex(RuntimeError, "Name mismatch"):
+            out_fn(unnamed_tensor, out=named_tensor)
+
+        output = torch.randn(3, 2)
+        out_fn(unnamed_tensor, out=output)
+        self.assertFalse(output.has_names())
+
+        output = torch.randn(3, 2, names=(None, None))
+        out_fn(named_tensor, out=output)
+        self.assertEqual(output.names, named_tensor.names)
+
+        output = torch.randn(3, 2)
+        out_fn(named_tensor, out=output)
+        self.assertEqual(output.names, named_tensor.names)
+
+        output = torch.randn(3, 2, names=(None, None))
+        out_fn(unnamed_tensor, out=output)
+        self.assertFalse(output.has_names())
 
     def test_unary_propagate_names_fns(self):
         def _test(testcase, names=('N', 'D'), device='cpu'):
