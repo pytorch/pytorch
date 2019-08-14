@@ -9,6 +9,7 @@ setlocal
 
 choco install -y --no-progress --side-by-side cmake.portable --version 3.12.4
 
+call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
 set PATH=C:\ProgramData\chocolatey\lib\cmake.portable.3.12.4\tools\cmake-3.12.4-win64-x64\bin;%PATH%
 
 echo PATH=%PATH%
@@ -60,9 +61,9 @@ if NOT DEFINED MSVC_Z7_OVERRIDE (
   set MSVC_Z7_OVERRIDE=OFF
 )
 
-::if NOT DEFINED CMAKE_GENERATOR (
-::  set CMAKE_GENERATOR=Visual Studio 15 2017
-::)
+if NOT DEFINED CMAKE_GENERATOR (
+  set CMAKE_GENERATOR=Visual Studio 15 2017
+)
 
 :: Install pyyaml for Aten codegen
 pip install pyyaml
