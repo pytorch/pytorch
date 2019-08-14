@@ -753,7 +753,7 @@ def trace(func,
         a ``ScriptModule`` object with a single ``forward()`` method containing the traced code.
         The returned ``ScriptModule`` will have the same set of sub-modules and parameters as the
         original ``nn.Module``.
-        If ``callable`` is a standalone function, ``trace`` returns ``torch.jit._C.Function``
+        If ``callable`` is a standalone function, ``trace`` returns ``torch._C.Function``
 
     Example (tracing a function)::
 
@@ -800,7 +800,6 @@ def trace(func,
         # a `ScriptModule` with `forward` and `weighted_kernel_sum` methods
         inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
         module = torch.jit.trace_module(n, inputs)
-
     """
     if not _enabled:
         return func
@@ -979,12 +978,6 @@ class CompilationUnit(object):
         if r is None:
             raise AttributeError("'CompilationUnit' has no attribute '{}'".format(attr))
         return r
-
-    def _import(self, src, constants, op_version_set=1):
-        """ test import logic for single function, use only for testing """
-        src = "op_version_set = {}\n{}".format(op_version_set, src)
-        torch._C._jit_import_functions(self._c, src, constants)
-        return self
 
 
 def _try_get_dispatched_fn(fn):

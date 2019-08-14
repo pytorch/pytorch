@@ -8,7 +8,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorAccessor.h>
-#include <ATen/core/TensorOptions.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
@@ -22,6 +21,9 @@
 
 namespace caffe2 {
 class Tensor;
+}
+namespace c10{
+struct TensorOptions;
 }
 namespace at {
 struct Generator;
@@ -358,7 +360,13 @@ class CAFFE2_API Tensor {
   void backward(const Tensor & gradient={}, bool keep_graph=false, bool create_graph=false) const;
   void set_data(const Tensor & new_data) const;
   #ifdef BUILD_NAMEDTENSOR
-  Tensor & set_names_(c10::optional<DimnameList> names) const;
+  Tensor & names_(c10::optional<DimnameList> names) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor view_names(c10::optional<DimnameList> names) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor align_to(DimnameList names) const;
   #endif
   Tensor abs() const;
   Tensor & abs_() const;
