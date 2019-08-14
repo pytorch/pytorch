@@ -2136,7 +2136,6 @@
 - func: t_(Tensor(a!) self) -> Tensor(a!)
   device_guard: False
   variants: method
-  named_guard: False
 
 - func: tan(Tensor self) -> Tensor
   named_guard: False
@@ -2206,12 +2205,6 @@
 - func: transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   variants: method
   device_guard: False
-  named_guard: False
-
-- func: transpose_(Tensor(a!) self, Dimname dim0, Dimname dim1) -> Tensor(a!)
-  variants: method
-  device_guard: False
-  named_guard: False
 
 - func: _mkldnn_transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   device_guard: False
