@@ -17065,16 +17065,13 @@ class TestList(JitTestCase):
 
         self.assertEqual(comp([1, 2, 3], [4, 5]), [3, 6, 9, 6, 7])
 
-    def test_comprehensions_wrong_expr_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
-            @torch.jit.script
-            def comp(l):
-                # type: (List[int]) -> List[float]
+    def test_comprehension_out_type_not_in_type(self):
+        def list_cast():
+            # type: () -> int
+            li = [int(i) for i in [torch.tensor(0), torch.tensor(1), torch.tensor(2)]]
+            return li[0] + li[1] + li[2]
 
-                n = [float(x) for x in l]
-                return n
-
-            comp([1, 2, 3])
+        self.checkScript(list_cast, ())
 
     def test_mutable_list_append_2(self):
         def test_append_2():
