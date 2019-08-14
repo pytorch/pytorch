@@ -147,6 +147,9 @@ void onnxifi(
     }
   }
 
+  // Before applying backlist, make sure the ops in the net all have an net_pos;
+  caffe2::BackendTransformerBase::annotateOpIndex(net);
+
   // Parse the blacklist
   auto more_blacklist = ParseNetPositionList(FLAGS_onnxifi_blacklist);
   for (const auto& b : blacklist) {
@@ -156,12 +159,11 @@ void onnxifi(
   // ONNX mode will change the op order so it doesn't apply here
   if (!opts.use_onnx) {
     auto blacklisted_ops = parseBlackListOps(FLAGS_onnxifi_blacklist_ops);
-    int i = 0;
     for (const auto& op : net->op()) {
       if (blacklisted_ops.count(op.type())) {
-        more_blacklist.emplace(i);
+        ArgumentHelper helper(op);
+        more_blacklist.emplace(helper.GetSingleArgument(op, kNetPos, -1));
       }
-      ++i;
     }
   }
 
