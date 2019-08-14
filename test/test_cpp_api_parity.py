@@ -202,7 +202,7 @@ class TestCppApiParity(common.TestCase):
                 raise RuntimeError("{} is not a supported method to test".format(method_name))
 
             modules = args[0]
-            module_file_names = [serialize_module_into_file(module, example_inputs) for module in module]
+            module_file_names = [serialize_module_into_file(module, example_inputs) for module in modules]
 
             cpp_args = module_file_names.copy()
             for arg in args[1:]:
