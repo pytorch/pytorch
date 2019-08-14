@@ -86,39 +86,14 @@ struct dists {
 
 template <typename scalar_t, typename F>
 __device__ static inline scalar_t reduce_agg(scalar_t agg) {
-  for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-    F::agg(agg, WARP_SHFL_DOWN(agg, offset));
-  }
-
-  /*__shared__ scalar_t shared[forward_threads];
-  int lane = threadIdx.x % warpSize;
-  int warp_id = threadIdx.x / warpSize;
-  if (lane == 0) {
-    shared[warp_id] = agg;
-  }
-
-  __syncthreads();
-  agg = (threadIdx.x < blockDim.x / warpSize) ? shared[lane] : 0.0;
-  if (warp_id == 0) {
-    for (int offset = blockDim.x / warpSize / 2; offset > 0; offset /= 2) {
-      F::agg(agg, WARP_SHFL_DOWN(agg, offset));
-    }
-    __syncthreads();
-  }*/
-  return agg;
-}
-
-template <typename scalar_t, typename F>
-__device__ static inline scalar_t reduce_agg2(scalar_t agg) {
-
   __shared__ scalar_t shared[forward_threads];
 
   int tid = threadIdx.x;
   shared[tid] = agg;
   __syncthreads();
 
-  for(int s=1; s < blockDim.x; s *= 2) {
-    if (tid % (2*s) == 0) {
+  for(int s = 1; s < blockDim.x; s *= 2) {
+    if (tid % (2 * s) == 0) {
       shared[tid] += shared[tid + s];
     }
     __syncthreads();
@@ -157,12 +132,11 @@ template <typename scalar_t, typename F>
 __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const scalar_t * grad, const scalar_t * x1, const scalar_t * x2, const scalar_t * dist, int64_t gs,
                                                        const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m, const int64_t count, const int64_t r_size, const int64_t l1_size, const int64_t l2_size) {
   const int y = blockIdx.y * blockDim.y + threadIdx.y;
-  const int l = y / r_size;
-  const int k = y % r_size;
   if (y >= count) {
     return;
   }
-
+  const int l = y / r_size;
+  const int k = y % r_size;
   const int init = blockIdx.x * blockDim.x + threadIdx.x;
   const int stride = blockDim.x * gridDim.x;
   const int l_size = r_size * m;
@@ -251,7 +225,7 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
   const dim3 grid(result.numel());
-  const dim3 block(std::min((int64_t)forward_threads, ((m - 1) / WARP_SIZE + 1) * WARP_SIZE));
+  const dim3 block(forward_threads);
 
   AT_DISPATCH_FLOATING_TYPES(x1.scalar_type(), "cdist_cuda", [&] {
     if (p == 0.0) {
