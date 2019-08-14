@@ -60,9 +60,9 @@ if NOT DEFINED MSVC_Z7_OVERRIDE (
   set MSVC_Z7_OVERRIDE=OFF
 )
 
-if NOT DEFINED CMAKE_GENERATOR (
-  set CMAKE_GENERATOR=Visual Studio 15 2017
-)
+::if NOT DEFINED CMAKE_GENERATOR (
+::  set CMAKE_GENERATOR=Visual Studio 15 2017
+::)
 
 :: Install pyyaml for Aten codegen
 pip install pyyaml
