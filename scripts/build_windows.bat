@@ -7,6 +7,9 @@
 @echo off
 setlocal
 
+choco uninstall cmake
+choco install cmake --version 3.12.1
+
 SET ORIGINAL_DIR=%cd%
 SET CAFFE2_ROOT=%~dp0%..
 
