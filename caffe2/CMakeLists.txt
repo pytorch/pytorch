@@ -366,12 +366,12 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/export.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pass_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import_source.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/pickle.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import_export_helpers.cpp
     ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
@@ -430,7 +430,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/exit_transforms.cpp
@@ -457,14 +456,23 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
-    ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
 
-  if (NOT WIN32 AND NOT INTERN_BUILD_MOBILE)
+  if (NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/FutureMessage.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/Message.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/ScriptCall.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/ScriptRet.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+      ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
-  endif ()
+    if (NOT WIN32)
+      list(APPEND TORCH_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp)
+    endif()
+  endif()
 
   if (USE_CUDA)
     if (NOT USE_ROCM)
@@ -713,7 +721,7 @@ ENDIF()
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
     FILES_MATCHING PATTERN "*.h")
-  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h"
+  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h" "${TORCH_SRC_DIR}/custom_class.h"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 
