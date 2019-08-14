@@ -112,7 +112,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
-        self.checkScriptable(qlinear, zip([X], [Z_ref]), check_save_load=True)
+        self.checkScriptable(qlinear, list(zip([X], [Z_ref])), check_save_load=True)
 
 
 class ModuleAPITest(QuantizationTestCase):
