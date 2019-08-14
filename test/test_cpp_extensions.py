@@ -6,6 +6,7 @@ import warnings
 import re
 import tempfile
 import subprocess
+import glob
 
 import common_utils as common
 import torch
@@ -148,8 +149,9 @@ class TestCppExtension(common.TestCase):
         # Compile an extension with given `flags`
         def _check_cuobjdump_output(expected_values, is_ptx=False):
             elf_or_ptx = '--list-ptx' if is_ptx else '--list-elf'
-            command = ['cuobjdump', elf_or_ptx,
-                       os.path.join(temp_dir, 'cudaext_archflags' + lib_ext)]
+            # Note, .extension name may include _v1, _v2, so first find exact name
+            ext_filename = glob.glob(os.path.join(temp_dir, 'cudaext_archflag*'))[0]
+            command = ['cuobjdump', elf_or_ptx, ext_filename]
             p = subprocess.Popen(command,
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
@@ -158,10 +160,14 @@ class TestCppExtension(common.TestCase):
                 output = output.decode("ascii")
                 err = err.decode("ascii")
 
-            self.assertEqual(p.returncode, 0)
-            self.assertEqual(err, '')
-            self.assertEqual(sorted(re.findall(r'sm_\d\d', output)),
-                             ['sm_' + xx for xx in expected_values])
+            if not p.returncode == 0 or not err == '':
+                raise AssertionError("Flags: {},  Stderr: {}".format(flags, err))
+
+            actual_arches = sorted(re.findall(r'sm_\d\d', output))
+            expected_arches = ['sm_' + xx for xx in expected_values]
+            self.assertEqual(actual_arches, expected_arches,
+                             message="Flags: {},  Actual: {},  Expected: "
+                                     "{}".format(flags, actual_arches, expected_arches))
 
         temp_dir = tempfile.mkdtemp()
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
@@ -178,7 +184,6 @@ class TestCppExtension(common.TestCase):
                 build_directory=temp_dir,
             )
 
-            lib_ext = '.pyd' if IS_WINDOWS else '.so'
             # Expected output for --list-elf:
             #   ELF file    1: cudaext_archflags.1.sm_61.cubin
             #   ELF file    2: cudaext_archflags.2.sm_52.cubin
@@ -210,7 +215,7 @@ class TestCppExtension(common.TestCase):
         # expected values is length-2 tuple: (list of ELF, list of PTX)
         # note: there should not be more than one PTX value
         archflags = {
-            '': ['{}{}'.format(capability[0], capability[1])],
+            '': (['{}{}'.format(capability[0], capability[1])], None),
             "Maxwell+Tegra;6.1": (['53', '61'], None),
             "Pascal 3.5": (['35', '60', '61'], None),
             "7.5+PTX": (['75'], ['75']),
