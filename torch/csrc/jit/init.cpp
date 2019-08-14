@@ -271,8 +271,8 @@ void initJITBindings(PyObject* module) {
             }
             ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
             arg_spec_creator.specializeTypes(*graph, spec);
-            // We only get DimensionedTensorType from the arg_spec_creator, but
-            // we want CompleteTensorType. The alternative would be to have a
+            // We only get partial specialization from the arg_spec_creator, but
+            // we want full shape specialization. The alternative would be to have a
             // "complete type inference" function in ArguemntSpecCreator.
             auto g_inputs = graph->inputs();
             for (size_t i = 0; i < inputs.size(); ++i) {
