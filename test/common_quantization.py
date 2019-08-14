@@ -11,10 +11,12 @@ import hypothesis
 import io
 import torch
 import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, QConfig, default_observer, default_weight_observer, \
-    default_qat_qconfig
+    default_qat_qconfig, propagate_qconfig, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
+
 
 # Disable deadline testing if this version of hypthesis supports it, otherwise
 # just return the original function
@@ -59,6 +61,12 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
             correct += (predicted == target).sum().item()
     return train_loss, correct, total
 
+def convert_dynamic(module):
+    convert(module, DEFAULT_DYNAMIC_MODULE_MAPPING)
+
+def prepare_dynamic(model, qconfig_dict=None):
+    propagate_qconfig(model, qconfig_dict)
+    return model
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
@@ -114,6 +122,13 @@ class QuantizationTestCase(TestCase):
         self.assertEqual(type(mod), nnq.Linear)
         self.assertEqual(mod.bias.dtype, torch.qint32)
 
+    def checkDynamicQuantizedLinear(self, mod):
+        r"""Checks that mod has been swapped for an nnqd.Linear
+            module, the bias is float.
+        """
+        self.assertEqual(type(mod), nnqd.Linear)
+        self.assertEqual(mod.bias.dtype, torch.float)
+
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
 
@@ -151,6 +166,16 @@ class SingleLayerLinearModel(torch.nn.Module):
         super(SingleLayerLinearModel, self).__init__()
         self.qconfig = default_qconfig
         self.fc1 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
+
+    def forward(self, x):
+        x = self.fc1(x)
+        return x
+
+class SingleLayerLinearDynamicModel(torch.nn.Module):
+    def __init__(self):
+        super(SingleLayerLinearDynamicModel, self).__init__()
+        self.qconfig = default_qconfig
+        self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.fc1(x)
@@ -364,6 +389,7 @@ class SubModForFusion(torch.nn.Module):
         x = self.bn(x)
         return x
 
+
 class ModForFusion(torch.nn.Module):
     def __init__(self):
         super(ModForFusion, self).__init__()
@@ -380,3 +406,37 @@ class ModForFusion(torch.nn.Module):
         x = self.sub1(x)
         x = self.sub2(x)
         return x
+
+
+class DummyObserver(torch.nn.Module):
+    def calculate_qparams(self):
+        return 1.0, 0
+
+    def forward(self, x):
+        return x
+
+
+class ModForWrapping(torch.nn.Module):
+    def __init__(self, quantized=False):
+        super(ModForWrapping, self).__init__()
+        self.qconfig = default_qconfig
+        if quantized:
+            self.mycat = nnq.QFunctional()
+            self.myadd = nnq.QFunctional()
+        else:
+            self.mycat = nnq.FloatFunctional()
+            self.myadd = nnq.FloatFunctional()
+            self.mycat.observer = DummyObserver()
+            self.myadd.observer = DummyObserver()
+
+    def forward(self, x):
+        y = self.mycat.cat([x, x, x])
+        z = self.myadd.add(y, y)
+        return z
+
+    @classmethod
+    def from_float(cls, mod):
+        new_mod = cls(quantized=True)
+        new_mod.mycat = new_mod.mycat.from_float(mod.mycat)
+        new_mod.myadd = new_mod.myadd.from_float(mod.myadd)
+        return new_mod
