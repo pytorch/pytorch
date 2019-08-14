@@ -14,7 +14,7 @@ using at::manual_seed;
 Tensor TORCH_API get_rng_state();
 
 /// Sets the random number generator state.
-void TORCH_API set_rng_state(Tensor new_state);
+void TORCH_API set_rng_state(const Tensor & new_state);
 
 namespace cuda {
 
@@ -22,7 +22,7 @@ namespace cuda {
 Tensor TORCH_API get_rng_state(torch::Device device = torch::Device(torch::kCUDA));
 
 /// Sets the random number generator state of the specified GPU.
-void TORCH_API set_rng_state(Tensor new_state, torch::Device device = torch::Device(torch::kCUDA));
+void TORCH_API set_rng_state(const Tensor & new_state, torch::Device device = torch::Device(torch::kCUDA));
 
 }
 
