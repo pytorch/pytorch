@@ -16,6 +16,10 @@ public class PytorchScriptModule {
     return mNativePeer.run(input.getRawDataBuffer(), input.dims, input.getTypeCode());
   }
 
+  public IValue forward(IValue... inputs) {
+    return mNativePeer.forward(inputs);
+  }
+
   private static class NativePeer {
     static {
       System.loadLibrary("pytorch_android");
@@ -30,5 +34,7 @@ public class PytorchScriptModule {
     }
 
     private native Tensor run(Buffer data, int[] dims, int typeCode);
+
+    private native IValue forward(IValue... inputs);
   }
 }
