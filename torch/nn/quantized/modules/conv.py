@@ -74,9 +74,11 @@ class Conv2d(torch.nn.Module):
         self.output_padding = 0
         self.groups = groups
         self.padding_mode = padding_mode
+        # Initialize as NCHW. set_weight will internally transpose to
+        # NHWC
         qweight = torch._empty_affine_quantized(
-            [out_channels, kernel_size[0], kernel_size[1],
-             in_channels // self.groups],
+            [out_channels, in_channels // self.groups, kernel_size[0],
+             kernel_size[1]],
             scale=1, zero_point=0, dtype=torch.qint8)
         self.set_weight(qweight)
         self.bias = torch._empty_affine_quantized([out_channels],
@@ -200,7 +202,7 @@ class Conv2d(torch.nn.Module):
         wt_scale, wt_zp = weight_observer.calculate_qparams()
         bias_scale = (wt_scale * act_scale).float()
         qweight = torch.quantize_linear(
-            mod.weight.float().permute([0, 2, 3, 1]).contiguous(),
+            mod.weight.float().contiguous(),
             wt_scale, wt_zp.long().item(), torch.qint8)
         qconv = Conv2d(mod.in_channels, mod.out_channels, mod.kernel_size,
                        mod.stride, mod.padding, mod.dilation, mod.groups,
