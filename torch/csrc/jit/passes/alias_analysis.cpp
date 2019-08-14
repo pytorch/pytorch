@@ -317,8 +317,6 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
-    case aten::backward:
-      return analyzeBackward(node);
     case prim::TupleConstruct:
       return analyzeTupleConstruct(node);
     case prim::GradOf:
@@ -381,9 +379,10 @@ void AliasDb::analyzeImpl(Node* node) {
       "Special cases should be handled already if we're here.");
 
   if (node->kind().is_aten() || node->kind().is_prim()) {
-    // TODO This assert is only introduced to check that we don't break the
-    // current code base. Remove this later to allow aten:: and prim:: ops to
-    // use other alias analysis kinds.
+    // TODO There is nothing in the system that relies on aten:: and prim::
+    // ops using AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::INTERNAL_SPECIAL_CASE,
+    // but this is the intended behavior for all current ops and a good error check.
+    // We can consider lifting this constraint later if we have a use case for it.
     TORCH_INTERNAL_ASSERT(
         analysis == AliasAnalysisKind::FROM_SCHEMA,
         "aten:: and prim:: operators should use AliasAnalysisKind::FROM_SCHEMA but ",
@@ -419,15 +418,6 @@ void AliasDb::analyzeImpl(Node* node) {
       analysis == AliasAnalysisKind::FROM_SCHEMA,
       "AliasAnalysisKind::CONSERVATIVE/PURE/INTERNAL_SPECIAL_CASE should already have been handled above");
   const auto& schema = node->schema();
-
-  // TODO This assert is only introduced to check that we don't break the
-  // current code base. Remove this later to allow other ops to use
-  // AliasAnalysisKind::FROM_SCHEMA
-  TORCH_INTERNAL_ASSERT(
-      node->kind().is_prim() || node->kind().is_aten(),
-      "The current code base should only have AliasAnalysisKind::FROM_SCHEMA for aten:: and prim:: ops but we found it for ",
-      node->kind().toDisplayString(),
-      ". We want to open this up though.");
 
   // Bind the schema's "formal" alias annotation to the actual values those
   // schema arguments represent
@@ -664,35 +654,6 @@ void AliasDb::analyzeWait(Node* node) {
   // for safety we just register a write to every wildcard.
   for (const auto& pr : wildcardIndex_) {
     registerWrite(pr.second, node);
-  }
-}
-
-void AliasDb::analyzeBackward(Node* node) {
-  // for backward function, we analyaze the whole graph and writes to every
-  // tensor in the graph
-  TORCH_INTERNAL_ASSERT(node->kind() == aten::backward);
-  Graph* g = node->owningGraph();
-  Block* block = g->block();
-
-  for (const Value* input : g->inputs()) {
-    if (input->type()->isSubtypeOf(TensorType::get())) {
-      registerWrite(input, node);
-    }
-  }
-  for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
-       ++it) {
-    // register all writes for the input
-    for (const Value* input : it->inputs()) {
-      if (input->type()->isSubtypeOf(TensorType::get())) {
-        registerWrite(input, node);
-      }
-    }
-    // register all writes for the output
-    for (const Value* input : it->inputs()) {
-      if (input->type()->isSubtypeOf(TensorType::get())) {
-        registerWrite(input, node);
-      }
-    }
   }
 }
 
@@ -1292,7 +1253,6 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::Print,
       prim::CallFunction,
       prim::CallMethod,
-      aten::backward,
       aten::wait,
   };
 
