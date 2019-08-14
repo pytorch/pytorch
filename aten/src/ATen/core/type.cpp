@@ -25,25 +25,28 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     }
     out << ")";
   } else if (auto value = t.cast<ProfiledTensorType>()) {
-    out << "ProfiledTensor(dtype = ";
-    if  (value->scalarType().has_value())
-    {
-        out << *value->scalarType();
-    }
-    else
-    {
-      out << " dynamic";
-    }
-    out << " , shape = " << value->sizes();
-  } else if (auto value = t.cast<DimensionedTensorType>()) {
-    out << toString(value->scalarType()) << "(";
-    for (int64_t i = 0; i < value->dim(); ++i) {
-      if (i > 0) {
-        out << ", ";
+    if  (value->scalarType().has_value()) {
+      out << toString(*value->scalarType());
+      if (!value->sizes().size().has_value()) {
+        out << "Tensor";
       }
-      out << "*";
+    } else {
+      out << "Tensor";
     }
-    out << ")";
+    if (auto ndim = value->sizes().size()) {
+      out << "(";
+      for (size_t i = 0; i < *ndim; ++i) {
+        if (i > 0) {
+          out << ", ";
+        }
+        if (auto s = value->sizes()[i]) {
+          out << *s;
+        } else {
+          out << "*";
+        }
+      }
+      out << ")";
+    }
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
@@ -269,6 +272,10 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
 
   // NB: we do not return NumberType because there is not currently enough
   // operator support for it
+
+  if (t1->kind() == ProfiledTensorType::Kind && t2->kind() == ProfiledTensorType::Kind) {
+    return t1->expect<ProfiledTensorType>()->merge(t2->expect<ProfiledTensorType>());
+  }
 
   if (t1->isSubtypeOf(TensorType::get()) && t2->isSubtypeOf(TensorType::get())) {
     return static_cast<TypePtr>(TensorType::get());;

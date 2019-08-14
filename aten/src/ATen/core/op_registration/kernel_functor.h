@@ -217,11 +217,11 @@ namespace detail {
     }
   };
 
-  template<class KernelFunctor, bool AllowDeprecatedTypes, class Enable = void> struct wrap_kernel_functor final {};
+  template<class KernelFunctor, bool AllowDeprecatedTypes, class Enable = void> struct wrap_kernel_functor_boxed final {};
 
   // SFINAE version for kernels that return an output
   template<class KernelFunctor, bool AllowDeprecatedTypes>
-  struct wrap_kernel_functor<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  struct wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(Stack* stack, KernelCache* cache) {
@@ -235,7 +235,7 @@ namespace detail {
 
   // SFINAE version for kernels that don't return an output
   template<class KernelFunctor, bool AllowDeprecatedTypes>
-  struct wrap_kernel_functor<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  struct wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(Stack* stack, KernelCache* cache) {
@@ -245,6 +245,18 @@ namespace detail {
       torch::jit::pop(*stack, num_inputs);
     }
   };
+
+  template<class KernelFunctor, class OpSignature> struct wrap_kernel_functor_unboxed_ final {};
+  template<class KernelFunctor, class ReturnType, class... ParameterTypes> struct wrap_kernel_functor_unboxed_<KernelFunctor, ReturnType(ParameterTypes...)> final {
+    static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value, "Return type mismatch");
+    static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value, "Parameter types mismatch");
+
+    static ReturnType call(KernelCache* cache, ParameterTypes... args) {
+      KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
+      return (*functor)(std::forward<ParameterTypes>(args)...);
+    }
+  };
+  template<class KernelFunctor> using wrap_kernel_functor_unboxed = wrap_kernel_functor_unboxed_<KernelFunctor, typename guts::infer_function_traits_t<KernelFunctor>::func_type>;
 
   template<class KernelFunctor, class... Args>
   class KernelFactory final {

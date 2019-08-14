@@ -63,6 +63,8 @@ TENSOR_IMPLEMENT_LOGICAL_BYTE(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(eq,==)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(ne,!=)
 
+#if !defined(TH_REAL_IS_BFLOAT16)
+
 int THTensor_(equal)(THTensor *ta, THTensor* tb)
 {
   int equal = 1;
@@ -1157,12 +1159,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_
 
 LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
-void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
-{
-  THTensor_(resizeAs)(r_, tx);
-  TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, tx, scalar_t, ty, *r__data = TH_MATH_NAME(atan2)(*tx_data,*ty_data););
-}
-
 void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
   switch (n) {
     case 0: THTensor_(digamma)(r_, t); break;
@@ -1506,6 +1502,8 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t
                         }
   );
 }
+
+#endif
 
 #undef TH_MATH_NAME
 #endif /* floating point only part */

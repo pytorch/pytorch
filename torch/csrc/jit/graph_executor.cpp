@@ -28,6 +28,7 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/resource_guard.h>
@@ -694,6 +695,11 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
   DecomposeOps(graph);
+
+  // TupleConstruct / TupleUnpack pairs can still be present at this point
+  // and must be removed for fusion.
+  LowerSimpleTuples(graph);
+
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
 
