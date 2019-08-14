@@ -59,4 +59,3 @@ TEST(BackendExtensionTest, TestRegisterOp) {
       &empty_override)
   );
 }
-

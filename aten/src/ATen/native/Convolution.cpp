@@ -956,17 +956,4 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
   return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
 }
 
-std::tuple<Tensor, Tensor, Tensor> convolution_double_backward_overrideable(
-    const Tensor& ggI, const Tensor& ggW_r, const Tensor& ggb,
-    const Tensor& gO_r, const Tensor& weight_r, const Tensor& input,
-    IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
-    bool transposed_, IntArrayRef output_padding_, int64_t groups_,
-    std::array<bool, 3> output_mask) {
-  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use globalATenDispatch().registerOp to override this function ");
-  return std::tuple<Tensor, Tensor, Tensor>(
-          at::empty_like(gO_r),
-          at::empty_like(input),
-          at::empty_like(weight_r));
-}
-
 }} // at::native
