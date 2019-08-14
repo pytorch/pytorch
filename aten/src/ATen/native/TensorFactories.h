@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 
 namespace at { namespace native {
 // Different combinations of row, col, and offset can lead to two cases:

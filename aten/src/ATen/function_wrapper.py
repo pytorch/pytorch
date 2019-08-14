@@ -269,42 +269,42 @@ CHECKED_CAST = {
     'THTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THByteTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${Backend}, ScalarType::Byte)'),
     'THBoolTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${Backend}, ScalarType::Bool)'),
     'THIndexTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${Backend}, ScalarType::Long)'),
     'THIntegerTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${Backend}, ScalarType::Int)'),
     'THDenseTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${DenseBackend}, ScalarType::${ScalarName})'),
     'THDenseIndexTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${DenseBackend}, ScalarType::Long)'),
     'THStorage*':
         CodeTemplate(
             'checked_storage('
-            '${arg_name},"${arg_name}",${arg_pos}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, '
             # We're punning here (Backend and DeviceType constructors coincide)
             # but DeviceType is the correct way to classify storages
             'DeviceType::${Backend}, at::scalarTypeToTypeMeta(ScalarType::${ScalarName}))'),
@@ -1087,7 +1087,8 @@ def create_generic(top_env, declarations):
         # that is sent to top_env. This is because some of this code (Type.h,
         # Tensor.h, TensorMethods.h) is checked into the repo and must be
         # the same regardless of BUILD_NAMEDTENSOR status.
-        is_named_tensor_only = has_named_tensor_formals(formals)
+        is_named_tensor_only = (has_named_tensor_formals(formals) or
+                                option['api_name'] == 'align_tensors')
 
         def check_namedtensor_enabled(code):
             if is_named_tensor_only:
@@ -1479,8 +1480,8 @@ def create_derived(backend_type_env, declarations):
 
                             check_cast = CHECKED_CAST[arg['type']].substitute(
                                 case_env, arg_name=arg['name'], arg_pos=count,
-                                null_okay=null_okay, default_init=default_init,
-                                size=arg.get('size'))
+                                api_name=option['api_name'], null_okay=null_okay,
+                                default_init=default_init, size=arg.get('size'))
                             case_body.append("auto {}_ = {};".format(
                                 arg['name'], check_cast))
                         if drop_argument(arg, option):
