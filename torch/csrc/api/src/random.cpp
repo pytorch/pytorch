@@ -30,7 +30,7 @@ torch::Tensor _get_rng_state(torch::Device device) {
   return std::move(tensor);
 }
 
-void _set_rng_state(torch::Tensor new_state, torch::Device device) {
+void _set_rng_state(const torch::Tensor& new_state, torch::Device device) {
   auto tensor = new_state.clone();
   auto& default_generator = torch::globalContext().defaultGenerator(device);
 
@@ -63,7 +63,7 @@ Tensor get_rng_state() {
   return _get_rng_state(torch::Device(torch::kCPU));
 }
 
-void set_rng_state(Tensor new_state) {
+void set_rng_state(const Tensor& new_state) {
   _set_rng_state(new_state, torch::Device(torch::kCPU));
 }
 
@@ -75,7 +75,7 @@ Tensor get_rng_state(torch::Device device) {
   return _get_rng_state(device);
 }
 
-void set_rng_state(Tensor new_state, torch::Device device) {
+void set_rng_state(const Tensor& new_state, torch::Device device) {
   TORCH_CHECK(device.type() == torch::kCUDA,
     "torch::cuda::set_rng_state() only supports CUDA device. Please use torch::set_rng_state() for CPU random number generator.");
   _set_rng_state(new_state, device);
