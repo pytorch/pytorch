@@ -38,6 +38,7 @@ Tensor& addcmul_out(
     Scalar value) {
   checkBackend("addcmul_cpu", result, self.type().backend());
   auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
   iter.add_output(result);
   iter.add_input(self);
   iter.add_input(tensor1);
@@ -75,6 +76,7 @@ Tensor& addcdiv_out(
     Scalar value) {
   checkBackend("addcdiv_cpu", result, self.type().backend());
   auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
   iter.add_output(result);
   iter.add_input(self);
   iter.add_input(tensor1);

@@ -48,7 +48,7 @@ Tensor& bitwise_not_(Tensor& self) {
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
   checkBackend("bitwise_not", result, self.type().backend());
   auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
+    /*check_mem_overlap=*/true);
   bitwise_not_stub(iter.device_type(), iter);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
@@ -184,7 +184,7 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     checkBackend(#op, result, Backend::CPU);                    \
     auto iter = TensorIterator::unary_op(result, self,          \
-      /*check_internal_overlap=*/true);                         \
+      /*check_mem_overlap=*/true);                              \
     op##_stub(iter.device_type(), iter);                        \
     return result;                                              \
   }

@@ -12762,34 +12762,37 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         doubles = torch.randn(2 * sz)
         positives = torch.randint(1, 100, (2 * sz,)).double()
         ints = torch.randint(-100, 100, (2 * sz,))
-
-        self._test_unary_op_overlap(self, sz, doubles, torch.abs)
-        self._test_unary_op_overlap(self, sz, doubles, torch.acos)
-        self._test_unary_op_overlap(self, sz, doubles, torch.asin)
-        self._test_unary_op_overlap(self, sz, doubles, torch.atan)
-        self._test_unary_op_overlap(self, sz, ints, torch.bitwise_not)
-        self._test_unary_op_overlap(self, sz, doubles, torch.ceil)
-        self._test_unary_op_overlap(self, sz, doubles, torch.cos)
-        self._test_unary_op_overlap(self, sz, doubles, torch.erf)
-        self._test_unary_op_overlap(self, sz, doubles, torch.erfc)
-        self._test_unary_op_overlap(self, sz, doubles, torch.exp)
-        self._test_unary_op_overlap(self, sz, doubles, torch.expm1)
-        self._test_unary_op_overlap(self, sz, doubles, torch.floor)
-        self._test_unary_op_overlap(self, sz, doubles, torch.frac)
-        self._test_unary_op_overlap(self, sz, positives, torch.log)
-        self._test_unary_op_overlap(self, sz, positives, torch.log10)
-        self._test_unary_op_overlap(self, sz, positives, torch.log1p)
-        self._test_unary_op_overlap(self, sz, positives, torch.log2)
-        self._test_unary_op_overlap(self, sz, doubles, torch.neg)
-        self._test_unary_op_overlap(self, sz, doubles, torch.reciprocal)
-        self._test_unary_op_overlap(self, sz, doubles, torch.round)
-        self._test_unary_op_overlap(self, sz, positives, torch.rsqrt)
-        self._test_unary_op_overlap(self, sz, doubles, torch.sin)
-        self._test_unary_op_overlap(self, sz, doubles, torch.sigmoid)
-        self._test_unary_op_overlap(self, sz, doubles, torch.sqrt)
-        self._test_unary_op_overlap(self, sz, doubles, torch.tan)
-        self._test_unary_op_overlap(self, sz, doubles, torch.tanh)
-        self._test_unary_op_overlap(self, sz, doubles, torch.trunc)
+        ops = [
+            (ints, torch.bitwise_not),
+            (doubles, torch.neg),
+            (doubles, torch.abs),
+            (doubles, torch.acos),
+            (doubles, torch.asin),
+            (doubles, torch.atan),
+            (doubles, torch.ceil),
+            (doubles, torch.cos),
+            (doubles, torch.erf),
+            (doubles, torch.erfc),
+            (doubles, torch.exp),
+            (doubles, torch.expm1),
+            (doubles, torch.floor),
+            (doubles, torch.frac),
+            (positives, torch.log),
+            (positives, torch.log10),
+            (positives, torch.log1p),
+            (positives, torch.log2),
+            (doubles, torch.reciprocal),
+            (doubles, torch.round),
+            (positives, torch.rsqrt),
+            (doubles, torch.sin),
+            (doubles, torch.sigmoid),
+            (doubles, torch.sqrt),
+            (doubles, torch.tan),
+            (doubles, torch.tanh),
+            (doubles, torch.trunc)
+        ]
+        for args in ops:
+            _TestTorchMixin._test_unary_op_overlap(self, sz, *args)
 
     @staticmethod
     def _test_binary_op_input_output_overlap(self, op, device='cpu'):
