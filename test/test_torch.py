@@ -9705,15 +9705,14 @@ class _TestTorchMixin(object):
         val += 10
         self.assertEqual(val in x, False)
 
-        with self.assertRaisesRegex(
+        self.assertRaisesRegex(
             RuntimeError,
-            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type("foo"))):
-            "foo" in x
-
-        with self.assertRaisesRegex(
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type("foo")),
+            "foo" in x)
+        self.assertRaisesRegex(
             RuntimeError,
-            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type([1, 2]))):
-            [1, 2] in x
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type([1, 2])),
+            [1, 2] in x)
 
     @staticmethod
     def _test_rot90(self, use_cuda=False):
