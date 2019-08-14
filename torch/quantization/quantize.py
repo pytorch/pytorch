@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as qat
+from .QConfig import default_qconfig
 
 
 def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix=''):
@@ -22,11 +23,12 @@ def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix='
         None, module is modified inplace with qconfig attached
     """
     if not hasattr(module, 'qconfig'):
-        module.qconfig = None
-        if qconfig_dict and prefix in qconfig_dict:
-            module.qconfig = qconfig_dict[prefix]
-        else:
-            module.qconfig = qconfig_parent
+        module.qconfig = qconfig_parent
+        if qconfig_dict:
+            if prefix in qconfig_dict:
+                module.qconfig = qconfig_dict[prefix]
+            elif type(module) in qconfig_dict:
+                module.qconfig = qconfig_dict[type(module)]
 
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
@@ -182,8 +184,6 @@ DEFAULT_MODULE_MAPPING = {
     nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
-    # Generated modules:
-    nn.Add: nnq.Add,
     # QAT modules:
     qat.Linear: nnq.Linear,
     qat.Conv2d: nnq.Conv2d,
@@ -222,7 +222,11 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
     convert(model, mapping)
     return model
 
-def quantize_dynamic(model, qconfig_dict=None, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
+DEFAULT_QCONFIG_DICT = {
+    nn.Linear : default_qconfig
+}
+
+def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
     r"""Converts a float model to dynamic quantized model. Do dynamic training and output a quantized model.
     """
     model.eval()
@@ -230,37 +234,19 @@ def quantize_dynamic(model, qconfig_dict=None, mapping=DEFAULT_DYNAMIC_MODULE_MA
     convert(model, mapping)
     return model
 
-def prepare_qat(model, mapping=DEFAULT_QAT_MODULE_MAPPING):
+def prepare_qat(model):
     model = prepare(model)
-    model = convert(model, mapping)
+    model = convert(model, DEFAULT_QAT_MODULE_MAPPING)
     return model
 
-def quantize_qat(model, run_fn, run_args, mapping=DEFAULT_QAT_MODULE_MAPPING):
+def quantize_qat(model, run_fn, run_args):
     r"""Do quantization aware training and output a quantized model
     """
     model.train()
-    model = prepare_qat(model, mapping)
+    model = prepare_qat(model)
     run_fn(model, run_args)
     convert(model)
     return model
-
-# Map for swapping float module to quantized ones
-DEFAULT_MODULE_MAPPING = {
-    nn.Linear: nnq.Linear,
-    nn.ReLU: nnq.ReLU,
-    nn.Conv2d: nnq.Conv2d,
-    QuantStub: nnq.Quantize,
-    DeQuantStub: nnq.DeQuantize,
-    # QAT modules:
-    qat.Linear: nnq.Linear,
-    qat.Conv2d: nnq.Conv2d,
-}
-
-# Map for swapping float module to qat modules
-DEFAULT_QAT_MODULE_MAPPING = {
-    nn.Linear: qat.Linear,
-    nn.Conv2d: qat.Conv2d,
-}
 
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts the float module with observers(where we can get quantization

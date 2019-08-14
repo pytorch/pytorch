@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from ....modules.linear import Linear as NNLinear
 import torch.nn.quantized as nnq
-from torch.quantization.observer import default_weight_observer
 
 from torch._jit_internal import Optional
 
@@ -54,7 +53,7 @@ class Linear(nnq.Linear):
         return Y.to(x.dtype)
 
     @classmethod
-    def from_float(cls, mod, weight_observer=default_weight_observer):
+    def from_float(cls, mod):
         r"""Create a dynamic quantized module from a float module or qparams_dict
 
         Args:
@@ -65,6 +64,10 @@ class Linear(nnq.Linear):
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         if mod.qconfig is not None and mod.qconfig.weight() is not None:
             weight_observer = mod.qconfig.weight()
+        else:
+            from torch.quantization.observer import default_weight_observer
+            weight_observer=default_weight_observer
+
         weight_observer(mod.weight)
         wt_scale, wt_zp = weight_observer.calculate_qparams()
         qweight = torch.quantize_linear(mod.weight.float(), wt_scale, wt_zp.long().item(), torch.qint8)
