@@ -6,7 +6,11 @@ from torch.nn._intrinsic.modules.fused import ConvBnReLU2d
 from torch.nn._intrinsic.modules.fused import ConvReLU2d
 from torch.nn._intrinsic.modules.fused import LinearReLU
 
+from . import quantized
+
 __all__ = [
+    'quantized',
+    #
     'AddReLU',
     'ConvBn2d',
     'ConvBnReLU2d',

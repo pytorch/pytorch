@@ -330,6 +330,8 @@ class ScriptabilityTest(QuantizationTestCase):
         self.assertEqual(scripted_model(self.x), self.model_under_test(self.x))
 
 
+
+
 class FusionTest(QuantizationTestCase):
     def test_fuse_module_train(self):
         import torch.nn._intrinsic.modules.fused as torch_fused
