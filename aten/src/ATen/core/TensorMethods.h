@@ -4,10 +4,10 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
-#include <ATen/core/TensorOptions.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
