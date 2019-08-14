@@ -416,6 +416,10 @@ else()
     # /bigobj increases number of sections in .obj file, which is needed to link
     # against libaries in Python 2.7 under Windows
     set(${flag_var} "${${flag_var}} /MP /bigobj")
+    # Turn off warnings on Windows
+    string(REPLACE "/W3" "/w" ${flag_var} "${${flag_var}}")
+    # Suppress EHs is overridden by EHa warning
+    string(REPLACE "/EHs" "/EHa" ${flag_var} "${${flag_var}}")
   endforeach(flag_var)
 endif()
 
