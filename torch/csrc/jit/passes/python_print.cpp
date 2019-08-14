@@ -991,10 +991,8 @@ struct PythonPrintPass {
         printValueList(stmt, node->inputs(), "sorted(", ")");
       } break;
       case prim::TupleConstruct: {
-        if (auto qualname = node->output()
-                                ->type()
-                                ->expect<TupleType>()
-                                ->name()) {
+        if (auto qualname =
+                node->output()->type()->expect<TupleType>()->name()) {
           stmt << qualname->qualifiedName();
         }
         printValueList(

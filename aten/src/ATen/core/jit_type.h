@@ -460,9 +460,6 @@ inline c10::optional<T> merge_primitive(
 // an empty c10::optional in `sizes_`. If a rank is dynamic, the entire
 // `sizes_` becomes the empty optional.
 struct CAFFE2_API VaryingShape {
-  VaryingShape(const IntArrayRef& ref)
-      : size_(ref.size()), dims_(ref.begin(), ref.end()) {}
-
   VaryingShape(const std::vector<int64_t>& vec)
       : size_(vec.size()), dims_(vec.begin(), vec.end()) {}
 
@@ -470,7 +467,7 @@ struct CAFFE2_API VaryingShape {
       : size_(size), dims_(size ? size.value() : 0) {}
 
   bool operator==(const VaryingShape& other) const {
-    return size_ == other.size_ && dims_ == dims_;
+    return size_ == other.size_ && dims_ == other.dims_;
   }
 
   const c10::optional<int64_t>& operator[](int i) const {
@@ -554,13 +551,21 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
         scalar_type, device, sizes, strides, requires_grad));
   }
 
-  static ProfiledTensorTypePtr create(ProfiledTensorTypePtr pttp) {
-    return ProfiledTensorTypePtr(new ProfiledTensorType(
-        pttp->scalarType(),
-        pttp->device(),
-        pttp->sizes(),
-        pttp->strides(),
-        pttp->requiresGrad()));
+  static ProfiledTensorTypePtr create(
+      c10::optional<at::ScalarType> scalar_type,
+      c10::optional<Device> device,
+      c10::optional<size_t> dim,
+      c10::optional<bool> requires_grad) {
+    return ProfiledTensorType::create(
+        scalar_type,
+        device,
+        VaryingShape(dim),
+        VaryingShape(dim),
+        requires_grad);
+  }
+
+  c10::optional<size_t> dim() const {
+    return sizes().size();
   }
 
   const VaryingShape& sizes() const {
@@ -579,7 +584,7 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
     return requires_grad_;
   }
   bool requires_grad() const override {
-    return requires_grad_ ? *requires_grad_ : false;
+    return requires_grad_ ? *requires_grad_ : true;
   }
 
 
@@ -590,7 +595,8 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
 
     auto rt = rhs.expect<ProfiledTensorType>();
     return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
-        strides() == rt->strides() && device() == rt->device();
+        strides() == rt->strides() && device() == rt->device() &&
+        requiresGrad() == rt->requiresGrad();
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
     if (rhs->kind() == TypeKind::ProfiledTensorType)
@@ -615,6 +621,33 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
     return prod;
   }
 
+  ProfiledTensorTypePtr withRequiresGrad(c10::optional<bool> s) {
+    auto copy = clone();
+    copy->requires_grad_ = s;
+    return copy;
+  }
+
+  ProfiledTensorTypePtr withScalarType(c10::optional<ScalarType> st) {
+    auto copy = clone();
+    copy->scalar_type_ = st;
+    return copy;
+  }
+
+
+  ProfiledTensorTypePtr withDim(c10::optional<size_t> d) {
+    auto copy = clone();
+    copy->sizes_ = VaryingShape(d);
+    copy->strides_ = VaryingShape(d);
+    return copy;
+  }
+
+  ProfiledTensorTypePtr dimensionedOnly() const {
+    auto copy = clone();
+    copy->sizes_ = VaryingShape(sizes().size());
+    copy->strides_ = VaryingShape(sizes().size());
+    return copy;
+  }
+
   ProfiledTensorTypePtr merge(ProfiledTensorTypePtr other) {
     auto scalar_type = merge_primitive(scalarType(), other->scalarType());
     auto dev = merge_primitive(device(), other->device());
@@ -628,24 +661,34 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
 
  private:
   ProfiledTensorType(const at::Tensor& tensor)
-      : TensorType(),
+      : TensorType(TypeKind::ProfiledTensorType),
         scalar_type_(tensor.scalar_type()),
         device_(tensor.device()),
-        sizes_(tensor.sizes().vec()),
-        strides_(tensor.strides().vec()),
-        requires_grad_(tensor.requires_grad()) {}
+        sizes_(tensor.sizes().size()),
+        strides_(tensor.sizes().size()),
+        requires_grad_(tensor.requires_grad()) {
+          if (!tensor.is_mkldnn()) {
+            sizes_ = tensor.sizes().vec();
+            strides_ = tensor.strides().vec();
+          }
+        }
   ProfiledTensorType(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
       const VaryingShape& sizes,
       const VaryingStrides& strides,
       c10::optional<bool> requires_grad)
-      : TensorType(),
+      : TensorType(TypeKind::ProfiledTensorType),
         scalar_type_(scalar_type),
         device_(device),
         sizes_(sizes),
         strides_(strides),
         requires_grad_(requires_grad) {}
+
+  ProfiledTensorTypePtr clone() const {
+    return ProfiledTensorTypePtr(new ProfiledTensorType(
+        scalar_type_, device_, sizes_, strides_, requires_grad_));
+  }
 
   c10::optional<at::ScalarType> scalar_type_;
   c10::optional<at::Device> device_;
@@ -1334,8 +1377,7 @@ CAFFE2_API std::ostream& operator<<(std::ostream& out, const VaryingShape& t);
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 
 inline TypePtr unshapedType(const TypePtr& type) {
-  if (type->kind() == TypeKind::DimensionedTensorType ||
-      type->kind() == TypeKind::CompleteTensorType) {
+  if (type->isSubtypeOf(TensorType::get())) {
     return TensorType::get();
   }
   return type->withContained(fmap(type->containedTypes(), unshapedType));
@@ -1517,17 +1559,22 @@ struct CAFFE2_API ClassType : public NamedType {
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
-      return name()->qualifiedName() == user_rhs->name()->qualifiedName();
+      const auto& lhs_name = name().value();
+      const auto& rhs_name = user_rhs->name().value();
+
+      return lhs_name == rhs_name;
     }
     return false;
   }
 
   std::string str() const override {
-    return std::string("ClassType<") + name()->name() + ">";
+    const auto& n = name().value();
+    return std::string("ClassType<") + n.name() + ">";
   }
 
   std::string python_str() const override {
-    return name()->qualifiedName();
+    const auto& n = name().value();
+    return n.qualifiedName();
   }
 
   const c10::optional<c10::QualifiedName>& name() const override {
@@ -1637,6 +1684,10 @@ struct CAFFE2_API ClassType : public NamedType {
     for(size_t i = 0; i < attributeNames_.size(); ++i) {
       AT_ASSERT(attributeTypes_[i]->isSubtypeOf(contained_types[i]));
       ptr->addAttribute(attributeNames_[i], contained_types[i]);
+    }
+    // Copy methods over
+    for (const auto& method : methods()) {
+      ptr->addMethod(method);
     }
     return ptr;
   }
