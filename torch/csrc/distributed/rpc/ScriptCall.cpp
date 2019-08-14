@@ -65,8 +65,8 @@ ScriptCall ScriptCall::fromMessage(const Message& message) {
 
     const std::string& str_schema = values.back().toStringRef();
     // extract symbol from the schema
-    auto str_symbol = str_schema.substr(0, str_schema.find('('));
-    auto symbol = at::Symbol::fromQualString(str_symbol);
+    auto schema = torch::jit::parseSchema(str_schema);
+    auto symbol = at::Symbol::fromQualString(schema.name());
     auto op = matchOperator(symbol, str_schema);
     // remove str_schema from values
     values.pop_back();
