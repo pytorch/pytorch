@@ -6,6 +6,10 @@ namespace c10 {
 
 // This file exists because we need to reference module.h, which we can't from
 // c10. Sigh...
+FunctionType::FunctionType(Function* function)
+    : NamedType(TypeKind::FunctionType),
+      function_(function),
+      name_(function->qualname()) {}
 
 Function* ClassType::getMethod(const std::string& name) const {
   for (auto method : methods_) {
