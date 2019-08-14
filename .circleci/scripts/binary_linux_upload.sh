@@ -21,20 +21,23 @@ chmod +x /home/circleci/project/login_to_anaconda.sh
 set -eux -o pipefail
 export PATH="$MINICONDA_ROOT/bin:$PATH"
 
+export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225"
+export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225"
+
 # Upload the package to the final location
 pushd /home/circleci/project/final_pkgs
 if [[ "$PACKAGE_TYPE" == conda ]]; then
-  retry conda install -yq anaconda-client
-  retry timeout 30 /home/circleci/project/login_to_anaconda.sh
-  anaconda upload "$(ls)" -u pytorch --label main --no-progress --force
+  # retry conda install -yq anaconda-client
+  # retry timeout 30 /home/circleci/project/login_to_anaconda.sh
+  # anaconda upload "$(ls)" -u pytorch --label main --no-progress --force
 elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
   retry pip install -q awscli
-  s3_dir="s3://pytorch/libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
+  s3_dir="s3://pytorch-binary-tmp-yf225/libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
   for pkg in $(ls); do
     retry aws s3 cp "$pkg" "$s3_dir" --acl public-read
   done
 else
-  retry pip install -q awscli
-  s3_dir="s3://pytorch/whl/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
-  retry aws s3 cp "$(ls)" "$s3_dir" --acl public-read
+  # retry pip install -q awscli
+  # s3_dir="s3://pytorch/whl/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
+  # retry aws s3 cp "$(ls)" "$s3_dir" --acl public-read
 fi
