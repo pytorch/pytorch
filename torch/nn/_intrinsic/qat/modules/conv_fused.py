@@ -1,11 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 import torch.nn as nn
-from torch.nn import init
 import torch.nn._intrinsic as nni
-from torch.nn.qat import Conv2d as QATConv2d
-from torch.nn import Parameter
+import torch.nn.qat as nnqat
 import torch.nn.functional as F
+from torch.nn import init
 
 
 class ConvBn2d(nn.Conv2d):
@@ -53,8 +52,8 @@ class ConvBn2d(nn.Conv2d):
         self.momentum = momentum
         self.freeze_bn = freeze_bn if self.training else True
         self.num_features = out_channels
-        self.gamma = Parameter(torch.Tensor(out_channels))
-        self.beta = Parameter(torch.Tensor(out_channels))
+        self.gamma = nn.Parameter(torch.Tensor(out_channels))
+        self.beta = nn.Parameter(torch.Tensor(out_channels))
         self.affine = True
         self.track_running_stats = True
         self.register_buffer('running_mean', torch.zeros(out_channels))
@@ -99,7 +98,7 @@ class ConvBn2d(nn.Conv2d):
         else:
             exponential_average_factor = self.momentum
 
-        if self.training and self.track_running_stats:
+        if self.training and not self.freeze_bn and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
             if self.num_batches_tracked is not None:
                 self.num_batches_tracked += 1
@@ -221,7 +220,7 @@ class ConvBnReLU2d(ConvBn2d):
     def from_float(cls, mod, qconfig=None):
         return super(ConvBnReLU2d, cls).from_float(mod, qconfig)
 
-class ConvReLU2d(QATConv2d):
+class ConvReLU2d(nnqat.Conv2d):
     r"""
     A ConvReLU2d module is a fused module of Conv2d and ReLU, attached with
     FakeQuantize modules for both output activation and weight for

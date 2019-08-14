@@ -97,11 +97,11 @@ class IntrinsicQATModuleTest(TestCase):
 
             # align inputs and internal parameters
             input = torch.randn(batch_size, input_channels, height, width, dtype=torch.float, requires_grad=True)
-            conv_op.weight = qat_op.weight
-            bn_op.running_mean = qat_op.running_mean
-            bn_op.running_var = qat_op.running_var
-            bn_op.weight = qat_op.gamma
-            bn_op.bias = qat_op.beta
+            conv_op.weight = torch.nn.Parameter(qat_op.weight.detach())
+            bn_op.running_mean = qat_op.running_mean.clone()
+            bn_op.running_var = qat_op.running_var.clone()
+            bn_op.weight = torch.nn.Parameter(qat_op.gamma.detach())
+            bn_op.bias = torch.nn.Parameter(qat_op.beta.detach())
 
             def compose(functions):
                 # functions are reversed for natural reading order
@@ -123,7 +123,7 @@ class IntrinsicQATModuleTest(TestCase):
                 ref_op = compose([conv_op, bn_op, relu_op])
 
             input_clone = input.clone().detach().requires_grad_()
-            for i in range(2):
+            for i in range(3):
                 result_ref = ref_op(input)
                 result_actual = qat_op(input_clone)
                 self.assertEqual(result_ref, result_actual)
@@ -132,11 +132,30 @@ class IntrinsicQATModuleTest(TestCase):
                 dout = torch.randn(result_ref.size(), dtype=torch.float)
                 loss = (result_ref - dout).sum()
                 loss.backward()
-                grad_ref = input.grad.cpu()
+                input_grad_ref = input.grad.cpu()
+                weight_grad_ref = conv_op.weight.grad.cpu()
+                gamma_grad_ref = bn_op.weight.grad.cpu()
+                beta_grad_ref = bn_op.bias.grad.cpu()
+                running_mean_ref = bn_op.running_mean
+                running_var_ref = bn_op.running_var
+                num_batches_tracked_ref = bn_op.num_batches_tracked
                 loss = (result_actual - dout).sum()
                 loss.backward()
-                grad_actual = input_clone.grad.cpu()
-                self.assertEqual(grad_ref, grad_actual)
+                input_grad_actual = input_clone.grad.cpu()
+                weight_grad_actual = qat_op.weight.grad.cpu()
+                gamma_grad_actual = qat_op.gamma.grad.cpu()
+                beta_grad_actual = qat_op.beta.grad.cpu()
+                running_mean_actual = qat_op.running_mean
+                running_var_actual = qat_op.running_var
+                num_batches_tracked_actual = qat_op.num_batches_tracked
+                self.assertEqual(input_grad_ref, input_grad_actual)
+                self.assertEqual(weight_grad_ref, weight_grad_actual, prec=1e-4)
+                self.assertEqual(gamma_grad_ref, gamma_grad_actual, prec=1e-4)
+                self.assertEqual(beta_grad_ref, beta_grad_actual)
+                self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual)
+                self.assertEqual(running_mean_ref, running_mean_actual)
+                # self.assertEqual(running_var_ref, running_var_actual, prec=1e-2)
+
 
 if __name__ == '__main__':
     run_tests()
