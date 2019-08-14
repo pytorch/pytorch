@@ -712,11 +712,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
         if (output_names is None) or len(output_names) == 0:
             output_names = [y.debugName() for y in model.graph.outputs()]
 
-    valid_names = set()
-    if input_names is not None:
-        valid_names.add(x for x in input_names)
-    if output_names is not None:
-        valid_names.add(x for x in output_names)
+    valid_names = set((input_names or []) + (output_names or []))
 
     # If dynamic axes are provided as a list rather than dictionary, they should
     # first get converted to a dictionary in expected format. If desired axes names
