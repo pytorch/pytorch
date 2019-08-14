@@ -664,10 +664,15 @@ def make_tuple(example_inputs):
     return example_inputs
 
 
-def make_module(mod, _module_class, _compilation_unit):
-    if _module_class is None:
-        _module_class = TopLevelTracedModule
-    return _module_class(mod, _compilation_unit=_compilation_unit)
+def make_module(mod, _module_class, _compilation_unit, exclude_methods=()):
+    if isinstance(mod, ScriptModule):
+        return mod
+    elif torch._jit_internal.module_has_exports(mod):
+        return torch.jit._recursive.recursive_script(mod, exclude_methods)
+    else:
+        if _module_class is None:
+            _module_class = TopLevelTracedModule
+        return _module_class(mod, _compilation_unit=_compilation_unit)
 
 def wrap_check_inputs(check_inputs):
     if check_inputs is None:
@@ -898,29 +903,23 @@ def trace_module(mod,
         raise AttributeError("expected a dictionary of (method_name, input) pairs")
 
 
-    # If the module has script exports, the user has already indicated that this module
-    # is traceable, therefore we can just compile the whole module rather than tracing
-    # through it.
-    if torch._jit_internal.module_has_exports(mod):
-        module = torch.jit.script(mod, optimize=optimize)
-    else:
-        module = make_module(mod, _module_class, _compilation_unit)
+    module = make_module(mod, _module_class, _compilation_unit, tuple(inputs.keys()))
 
-        for method_name, example_inputs in inputs.items():
-            # this is needed since Module.__call__ sets up some extra tracing
-            func = mod if method_name == "forward" else getattr(mod, method_name)
-            example_inputs = make_tuple(example_inputs)
-            module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
-            check_trace_method = module._c._get_method(method_name)
+    for method_name, example_inputs in inputs.items():
+        # this is needed since Module.__call__ sets up some extra tracing
+        func = mod if method_name == "forward" else getattr(mod, method_name)
+        example_inputs = make_tuple(example_inputs)
+        module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+        check_trace_method = module._c._get_method(method_name)
 
-            # Check the trace against new traces created from user-specified inputs
-            if check_trace:
-                if check_inputs is not None:
-                    _check_trace(check_inputs, func, check_trace_method,
-                                 check_tolerance, _force_outplace, True, _module_class)
-                else:
-                    _check_trace([inputs], func, check_trace_method,
-                                 check_tolerance, _force_outplace, True, _module_class)
+        # Check the trace against new traces created from user-specified inputs
+        if check_trace:
+            if check_inputs is not None:
+                _check_trace(check_inputs, func, check_trace_method,
+                             check_tolerance, _force_outplace, True, _module_class)
+            else:
+                _check_trace([inputs], func, check_trace_method,
+                             check_tolerance, _force_outplace, True, _module_class)
 
     return module
 
@@ -1688,10 +1687,7 @@ class TracedModule(ScriptModule):
             raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(self))
 
         for name, submodule in orig._modules.items():
-            if isinstance(submodule, ScriptModule):
-                self._modules[name] = submodule
-            else:
-                self._modules[name] = TracedModule(submodule, id_set)
+            self._modules[name] = make_module(submodule, TracedModule, _compilation_unit)
 
         self._freeze()
 
