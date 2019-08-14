@@ -493,6 +493,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
       return toSimple(g.insertConstant(v, nullptr, loc));
+    } else if (THPQScheme_Check(obj.ptr())) {
+      auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+      const auto v = static_cast<uint8_t>(qscheme->qscheme);
+      return toSimple(g.insertConstant(v, nullptr, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       return std::make_shared<ConstantPythonTupleValue>(obj);
     }

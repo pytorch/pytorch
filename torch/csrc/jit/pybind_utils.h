@@ -6,6 +6,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/module.h>
@@ -122,6 +123,8 @@ inline MatchTypeReturn tryToInferType(py::handle input) {
   } else if (THPDevice_Check(input.ptr())) {
     return MatchTypeReturn(DeviceObjType::get());
   } else if (THPDtype_Check(input.ptr())) {
+    return MatchTypeReturn(IntType::get());
+  } else if (THPQScheme_Check(input.ptr())) {
     return MatchTypeReturn(IntType::get());
   }
 
@@ -340,6 +343,10 @@ inline IValue toIValue(
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
         return static_cast<int64_t>(dtype->scalar_type);
       }
+      if (THPQScheme_Check(obj.ptr())) {
+        auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+        return static_cast<uint8_t>(qscheme->qscheme);
+      }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
       if (!obj.is_none()) {
@@ -445,6 +452,10 @@ inline IValue toIValue(
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
         return static_cast<int64_t>(dtype->scalar_type);
+      }
+      if (THPQScheme_Check(obj.ptr())) {
+        auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+        return static_cast<uint8_t>(qscheme->qscheme);
       }
       if (py::isinstance<py::int_>(obj)) {
         return py::cast<int64_t>(obj);

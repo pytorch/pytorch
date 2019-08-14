@@ -7397,6 +7397,22 @@ a")
                 v = sub(v)
             self.assertEqual(o, v)
 
+    def test_attr_qscheme_script(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.qscheme = torch.per_tensor_affine
+
+            def forward(self):
+                if self.qscheme == torch.per_tensor_symmetric:
+                    return 3
+                else:
+                    return 4
+
+        f = Foo()
+        scripted = torch.jit.script(f)
+        self.assertEqual(f(), scripted())
+
     def test_script_module_const_submodule_fail(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
