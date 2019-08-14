@@ -23,7 +23,7 @@ void bitwise_not_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-static void logical_not_kernel_cuda(TensorIterator& iter) {
+void logical_not_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_not_cuda", [&]() {
     using self_t = scalar_t;
     AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_not_cuda", [&]() {
