@@ -47,14 +47,22 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
   std::vector<Dimname> names_;
 };
 
+// Sets the names of `tensor` to be `names`.
+CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
+CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
+
+// Everywhere this is used, it is possible to not instantiate the vector by doing
+// some more clever bookkeeping. This is important for performance.
+std::vector<Dimname> FIXME_default_names(size_t len);
+
 namespace impl {
 
 // Some helper functions on TensorImpl. Useful for working with names in TH.
 // XXX: Ideally these would exist as methods on TensorImpl
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names);
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names);
-CAFFE2_API optional<DimnameList> internal_get_names(TensorImpl* impl);
-CAFFE2_API bool internal_has_names(TensorImpl* impl);
+CAFFE2_API optional<DimnameList> get_names(TensorImpl* impl);
+CAFFE2_API bool has_names(TensorImpl* impl);
 
 
 } // namespace impl

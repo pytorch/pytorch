@@ -1248,11 +1248,17 @@
 # log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
+
+- func: log_softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  named_guard: False
 
 - func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   dispatch:
     CPU: log_softmax_cpu
     CUDA: log_softmax_cuda
+  named_guard: False
 
 - func: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   dispatch:
@@ -1939,12 +1945,18 @@
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
+
+- func: softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  named_guard: False
 
 - func: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   dispatch:
     CPU: softmax_cpu
     CUDA: softmax_cuda
     MkldnnCPU: mkldnn_softmax
+  named_guard: False
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   dispatch:
