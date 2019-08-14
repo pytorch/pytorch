@@ -17,9 +17,9 @@ This module contains core functionalities for performance microbenchmark tests.
 """
 
 """
-This is used to store configs of tests 
-An example input is: 
-TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1', 
+This is used to store configs of tests
+An example input is:
+TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
     tag='long', run_backward=False)
 """
 TestConfig = namedtuple("TestConfig", "test_name input_config tag run_backward")
@@ -29,12 +29,12 @@ BENCHMARK_TESTER = {}
 
 
 def _register_test(test_case):
-    """ This method is used to register test. func_name is a global unique 
-    string. For PyTorch add operator with M=8, N=2, K=1, tag = long, here 
+    """ This method is used to register test. func_name is a global unique
+    string. For PyTorch add operator with M=8, N=2, K=1, tag = long, here
     are the values for the members in test_case:
     op.module_name: add
     framework: PyTorch
-    test_config: TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1', 
+    test_config: TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
         tag='long', run_backward=False)
     func_name: addPyTorchTestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
                                     tag='long', run_backward=False)
@@ -50,17 +50,17 @@ class BenchmarkRunner(object):
     benchmark test groups.
 
     Attributes:
-        tag_filter (str): control the benchmarks which matches the tag. 
+        tag_filter (str): control the benchmarks which matches the tag.
         operator (str): only run benchmark test cases that contains
     this filter string in the test case's id.
         test_name (str): only run benchmark test cases that matches this filter,
         this is a case-sensitive substring match and it happens in
-        the _keep_test method. 
+        the _keep_test method.
     """
     def __init__(self, args):
         # TODO: consider time-bound constraints as well.
         self.args = args
-        self.iters = 100
+        self.iters = 200
         self.has_explicit_iteration_count = False
         self.multiplier = 2
         self.predefined_minimum_secs = 4
@@ -70,9 +70,9 @@ class BenchmarkRunner(object):
         if self.args.iterations:
             self.has_explicit_iteration_count = True
             self.iters = self.args.iterations
-        # when a specific test is selected by a user, we don't need 
-        # to match the tag anymore 
-        if self.args.test_name is not None: 
+        # when a specific test is selected by a user, we don't need
+        # to match the tag anymore
+        if self.args.test_name is not None:
             self.args.tag_filter = None
 
     def _print_header(self):
@@ -90,7 +90,7 @@ class BenchmarkRunner(object):
             if self.args.operators is None:
                 ops = set(test_case.op_bench.module_name()
                           for _, test_case in BENCHMARK_TESTER.items())
-                for op in ops: 
+                for op in ops:
                     print("# {}".format(op))
             else:
                 print("# {}".format(self.args.operators))
@@ -99,7 +99,7 @@ class BenchmarkRunner(object):
         if self.args.ai_pep_format:
             # Output for AI-PEP
             test_name = '_'.join([test_case.framework, test_case.test_config.test_name])
-            for run in range(self.num_runs): 
+            for run in range(self.num_runs):
                 print("{}Observer ".format(test_case.framework) + json.dumps(
                     {
                         "type": test_name,
@@ -118,13 +118,13 @@ class BenchmarkRunner(object):
                       test_case.test_config.input_config))
 
             mode = "Backward" if test_case.test_config.run_backward else "Forward"
-            if self.num_runs > 1: 
-                for run in range(self.num_runs): 
+            if self.num_runs > 1:
+                for run in range(self.num_runs):
                     print("Run: {}, {} Execution Time (us) : {:.3f}".format(
                         run,
                         mode, reported_run_time_us[run]))
                 print()
-            else: 
+            else:
                 print("{} Execution Time (us) : {:.3f}\n".format(
                     mode, reported_run_time_us[0]))
 
@@ -132,13 +132,13 @@ class BenchmarkRunner(object):
         return (i * self.multiplier)
 
     def _iteration_result_is_significant(self, iters, run_time_sec, curr_test_total_time, has_explicit_iteration_count):
-        """ This function decides whether the measured time can be reported based on the 
+        """ This function decides whether the measured time can be reported based on the
         following conditions: 1) the number of iterations is larger than the max_iters.
         2) the execution time is larger than the predefined minimum_time
-        3) the execution time is larger than user defined minimum_time 
+        3) the execution time is larger than user defined minimum_time
         """
         return ((iters > self.max_iters or
-                run_time_sec > self.predefined_minimum_secs or 
+                run_time_sec > self.predefined_minimum_secs or
                 has_explicit_iteration_count) and
                 curr_test_total_time > self.args.min_time_per_test)
 
@@ -152,7 +152,7 @@ class BenchmarkRunner(object):
         return forward_time
 
     def _launch_backward(self, test_case, iters):
-        """ This function runs forward path of an op to get an output. Then the backward path is executed 
+        """ This function runs forward path of an op to get an output. Then the backward path is executed
         and the execution time is reported
         """
         test_case.run_forward(num_runs=1)
@@ -163,8 +163,8 @@ class BenchmarkRunner(object):
 
     def _measure_time(self, launch_test, test_case, iters):
         """
-        This function execute the operator for <iters> iterations then look at the time. 
-        If it's not significant, the number of iterations will be increased before rerun. 
+        This function execute the operator for <iters> iterations then look at the time.
+        If it's not significant, the number of iterations will be increased before rerun.
         The execution stops when the time becomes significant.
         """
         curr_test_total_time = 0
@@ -189,7 +189,7 @@ class BenchmarkRunner(object):
         return (cmd_flag is None or test_flag == cmd_flag)
 
     def _check_keep_list(self, test_flag, cmd_flag_list):
-        if (cmd_flag_list is None or 
+        if (cmd_flag_list is None or
                 any(test_flag == cmd_flag for cmd_flag in cmd_flag_list)):
             return True
         return False
@@ -221,7 +221,7 @@ class BenchmarkRunner(object):
             return
 
         for full_test_id, test_case in BENCHMARK_TESTER.items():
-            op_test_config = test_case.test_config 
+            op_test_config = test_case.test_config
 
             if not self._keep_test(test_case):
                 continue
@@ -239,13 +239,13 @@ class BenchmarkRunner(object):
 
             if op_test_config.run_backward:
                 launch_func = self._launch_backward
-            else: 
+            else:
                 launch_func = self._launch_forward
 
             # Warmup
             launch_func(test_case, self.args.warmup_iterations)
             # Actual Execution
-            reported_time = [self._measure_time(launch_func, test_case, self.iters) 
+            reported_time = [self._measure_time(launch_func, test_case, self.iters)
                              for _ in range(self.num_runs)]
 
             self._print_perf_result(reported_time, test_case)

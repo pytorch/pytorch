@@ -134,8 +134,7 @@ class Linear(torch.nn.Module):
         destination[prefix + 'weight'] = self.weight()
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
-        if self.bias is not None:
-            destination[prefix + 'bias'] = self.bias
+        destination[prefix + 'bias'] = self.bias
 
     @torch.jit.export
     def __getstate__(self):
@@ -156,9 +155,8 @@ class Linear(torch.nn.Module):
         self.set_weight(state_dict[prefix + 'weight'])
         state_dict.pop(prefix + 'weight')
 
-        if prefix + 'bias' in state_dict:
-            self.bias.copy_(state_dict[prefix + 'bias'])
-            state_dict.pop(prefix + 'bias')
+        self.bias = state_dict[prefix + 'bias']
+        state_dict.pop(prefix + 'bias')
 
         self.scale = float(state_dict[prefix + 'scale'])
         state_dict.pop(prefix + 'scale')
@@ -171,7 +169,7 @@ class Linear(torch.nn.Module):
 
     @torch.jit.export
     def __setstate__(self, state):
-        # type: (Tuple[int, int, torch.Tensor, torch.Tensor, float, int]) -> None
+        # type: (Tuple[int, int, Optional[torch.Tensor], torch.Tensor, float, int]) -> None
         self.in_features = state[0]
         self.out_features = state[1]
         self.bias = state[2]

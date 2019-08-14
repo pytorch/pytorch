@@ -8,7 +8,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorAccessor.h>
-#include <ATen/core/TensorOptions.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
@@ -22,6 +21,9 @@
 
 namespace caffe2 {
 class Tensor;
+}
+namespace c10{
+struct TensorOptions;
 }
 namespace at {
 struct Generator;
@@ -172,7 +174,7 @@ class CAFFE2_API Tensor {
   }
 #ifdef BUILD_NAMEDTENSOR
   optional<DimnameList> names() const {
-    return impl::internal_get_names(unsafeGetTensorImpl());
+    return impl::get_names(unsafeGetTensorImpl());
   }
 #endif
   int64_t ndimension() const {
@@ -358,7 +360,13 @@ class CAFFE2_API Tensor {
   void backward(const Tensor & gradient={}, bool keep_graph=false, bool create_graph=false) const;
   void set_data(const Tensor & new_data) const;
   #ifdef BUILD_NAMEDTENSOR
-  Tensor & set_names_(c10::optional<DimnameList> names) const;
+  Tensor & names_(c10::optional<DimnameList> names) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor view_names(c10::optional<DimnameList> names) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor align_to(DimnameList names) const;
   #endif
   Tensor abs() const;
   Tensor & abs_() const;
@@ -467,6 +475,9 @@ class CAFFE2_API Tensor {
   Tensor & log2_() const;
   Tensor logdet() const;
   Tensor log_softmax(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor log_softmax(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor logsumexp(IntArrayRef dim, bool keepdim=false) const;
   Tensor matmul(const Tensor & other) const;
   Tensor matrix_power(int64_t n) const;
@@ -532,6 +543,9 @@ class CAFFE2_API Tensor {
   std::tuple<Tensor,Tensor> slogdet() const;
   Tensor smm(const Tensor & mat2) const;
   Tensor softmax(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor softmax(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   std::vector<Tensor> split(int64_t split_size, int64_t dim=0) const;
   std::vector<Tensor> split_with_sizes(IntArrayRef split_sizes, int64_t dim=0) const;
   Tensor squeeze() const;

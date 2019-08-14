@@ -214,7 +214,6 @@ class ConvBnReLU2d(ConvBn2d):
                                            freeze_bn,
                                            qconfig)
 
-
     def forward(self, input):
         return self.observer(F.relu(super(ConvBnReLU2d, self)._forward(input)))
 
