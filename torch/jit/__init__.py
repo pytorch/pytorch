@@ -693,12 +693,32 @@ def trace(func,
     Trace a function and return an executable ``ScriptModule`` or ``torch._C.Function``
     that will be optimized using just-in-time compilation.
 
-    .. warning::
+    Using ``torch.jit.trace`` and :func:`torch.jit.trace_module<torch.jit.trace_module>`, you can turn an existing module or Python
+    function into a TorchScript ``torch._C.Function`` or ``ScriptModule``. You must provide example inputs,
+    and we run the function, recording the operations performed on all the tensors.
 
+    * The resulting recording of a standalone function produces ``torch._C.Function``.
+    * The resulting recording of ``forward`` function of ``nn.Module`` or ``nn.Module`` produces ``ScriptModule``.
+
+    This module also contains any parameters that the original
+    module had as well.
+
+    .. warning::
         Tracing only correctly records functions and modules which are not data
         dependent (e.g., do not have conditionals on data in tensors) and do not have
         any untracked external dependencies (e.g., perform input/output or
-        access global variables). If you trace such models, you may silently get
+        access global variables). Tracing only records operations done when the given
+        function is run on the given
+        tensors. Therefore, the returned ``ScriptModule`` will always run the same traced
+        graph on any input. This has some important implications when your module is
+        expected to run different sets of operations, depending on the input and/or the
+        module state. For example,
+
+        * Tracing will not record any control-flow like if-statements or loops. When this control-flow is constant across your module, this is fine and it often inlines the control-flow decisions. But sometimes the control-flow is actually part of the model itself. For instance, a recurrent network is a loop over the (possibly dynamic) length of an input sequence.
+        * In the returned ``ScriptModule``, operations that have different behaviors in ``training`` and ``eval`` modes will always behave as if it is in the mode it was in during tracing, no matter which mode the ``ScriptModule`` is in.
+
+        In cases like these, tracing would not be appropriate and :func:`scripting <torch.jit.script>` is a better
+        choice. If you trace such models, you may silently get
         incorrect results on subsequent invocations of the model. The tracer
         will try to emit warnings when doing something that may cause an
         incorrect trace to be produced.
@@ -738,9 +758,24 @@ def trace(func,
         a ``ScriptModule`` object with a single ``forward()`` method containing the traced code.
         The returned ``ScriptModule`` will have the same set of sub-modules and parameters as the
         original ``nn.Module``.
-        If ``callable`` is a standalone function, ``trace`` returns ``torch.jit._C.Function``
+        If ``callable`` is a standalone function, ``trace`` returns ``torch._C.Function``
 
-    Example::
+    Example (tracing a function)::
+
+        import torch
+        def foo(x, y):
+            return 2 * x + y
+
+        # Run `foo` with the provided inputs and record the tensor operations
+        traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
+
+        # `traced_foo` can now be run with the TorchScript interpreter or saved
+        # and loaded in a Python-free environment
+
+    Example (tracing an existing module)::
+
+        import torch
+        import torch.nn as nn
 
         class Net(nn.Module):
             def __init__(self):
@@ -753,14 +788,23 @@ def trace(func,
             def weighted_kernel_sum(self, weight):
                 return weight * self.conv.weight
 
+
+        n = Net()
         example_weight = torch.rand(1, 1, 3, 3)
         example_forward_input = torch.rand(1, 1, 3, 3)
-        n = Net()
 
-        # the following two calls are equivalent
-        module = module = torch.jit.trace_module(n, {'forward': example_forward_input})
+        # Trace a specific method and construct `ScriptModule` with
+        # a single `forward` method
+        module = torch.jit.trace(n.forward, example_forward_input)
+
+        # Trace a module (implicitly traces `forward`) and construct a
+        # `ScriptModule` with a single `forward` method
         module = torch.jit.trace(n, example_forward_input)
 
+        # Trace specific methods on a module (specified in `inputs`), constructs
+        # a `ScriptModule` with `forward` and `weighted_kernel_sum` methods
+        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
+        module = torch.jit.trace_module(n, inputs)
     """
     if not _enabled:
         return func
@@ -996,10 +1040,17 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a ``ScriptModule`` or
-    ``torch._C.Function``.
+    ``torch._C.Function``. TorchScript itself is a subset of the Python language, so not all
+    features in Python work, but we provide enough functionality to compute on
+    tensors and do control-dependent operations. For a complete guide, see the
+    `TorchScript Language Reference`_.
+
+    ``torch.jit.script`` can be used as a function for modules and functions, and as a decorator
+    ``@torch.jit.script`` for `TorchScript Classes`_ and functions.
 
     **Scripting a function**
-        The ``@torch.jit.script`` decorator will construct a ``torch._C.Function``.
+        The ``@torch.jit.script`` decorator will construct a ``torch._C.Function``
+        by compiling the body of the function.
 
         Example (scripting a function)::
 
@@ -1381,104 +1432,9 @@ if _enabled:
         as Python functions, but in ``ScriptModule``\s methods are implemented as
         TorchScript functions,  a statically-typed subset of Python that contains all
         of PyTorch's built-in Tensor operations. This difference allows your
-        ScriptModules code to run without the need for a Python interpreter.
+        ``ScriptModule``\s code to run without the need for a Python interpreter.
 
-        ``ScriptModule``\s be created in two ways:
-
-        **Tracing:**
-
-            Using ``torch.jit.trace`` and ``torch.jit.trace_module``, you can turn an existing module or Python
-            function into a TorchScript ``torch._C.Function`` or ``ScriptModule``. You must provide example inputs,
-            and we run the function, recording the operations performed on all the tensors.
-            * The resulting recording of a standalone function produces ``torch._C.Function``.
-            * The resulting recording of ``forward`` function of ``nn.Module`` or ``nn.Module`` produces ``ScriptModule``.
-
-            This module also contains any parameters that the original
-            module had as well.
-
-            Example (tracing a function)::
-
-                import torch
-                def foo(x, y):
-                    return 2 * x + y
-                traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
-
-            .. note::
-                Tracing a standalone function will construct a ``torch._C.Function``, but
-                tracing an ``nn.Module``\s ``forward`` will construct a ``ScriptModule``
-
-            Example (tracing an existing module)::
-
-                import torch
-                import torch.nn as nn
-
-                class Net(nn.Module):
-                    def __init__(self):
-                        super(Net, self).__init__()
-                        self.conv = nn.Conv2d(1, 1, 3)
-
-                    def forward(self, x):
-                        return self.conv(x)
-
-                    def weighted_kernel_sum(self, weight):
-                        return weight * self.conv.weight
-
-
-                n = Net()
-                example_weight = torch.rand(1, 1, 3, 3)
-                example_forward_input = torch.rand(1, 1, 3, 3)
-
-                inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
-
-                # all three trace calls below are equivalent
-                # and construct `ScriptModule` with a single `forward` method
-                module = torch.jit.trace(n.forward, example_forward_input)
-                module = torch.jit.trace(n, example_forward_input)
-                module = torch.jit.trace_module(n, inputs)
-
-                # trace_module produces `ScriptModule` with two methods:
-                # `forward` and `weighted_kernel_sum`
-                module = torch.jit.trace_module(n, inputs)
-
-
-            .. note::
-
-                * The first three trace/trace_module calls are equivalent and return ``ScriptModule``
-                  with a single ``forward`` method.
-                * The last ``trace_module`` call produces a ``ScriptModule`` with two methods.
-
-                Tracing only records operations done when the given function is run on the given
-                tensors. Therefore, the returned ``ScriptModule`` will always run the same traced
-                graph on any input. This has some important implications when your module is
-                expected to run different sets of operations, depending on the input and/or the
-                module state. For example,
-
-                    + Tracing will not record any control-flow like if-statements or loops. When
-                      this control-flow is constant across your module, this is fine and it often
-                      inlines the control-flow decisions. But sometimes the control-flow is
-                      actually part of the model itself. For instance, a recurrent network is
-                      a loop over the (possibly dynamic) length of an input sequence.
-
-                    + In the returned ``ScriptModule``, operations that have different behaviors
-                      in ``training`` and ``eval`` modes will always behave as if it is in the
-                      mode it was in during tracing, no matter which mode the ``ScriptModule``
-                      is in.
-
-                In cases like these, tracing would not be appropriate and scripting is a better
-                choice.
-
-        **Scripting:**
-
-            You can write TorchScript code directly using Python syntax. You do this
-            using the ``@torch.jit.script`` decorator for functions and modules. You can
-            also call ``torch.jit.script`` directly with the function or module you wish to
-            compile. On functions, the body of the function is compiled to TorchScript. If
-            applied to an ``nn.Module``, by default the ``forward`` method and any methods it
-            calls are compiled, and all buffer and Parameters of the original module are copied
-            to a new ``ScriptModule``. You should not need to construct a ``ScriptModule`` manually.
-            TorchScript itself is a subset of the Python language, so not all
-            features in Python work, but we provide enough functionality to compute on
-            tensors and do control-dependent operations.
+        ``ScriptModule``\s should not be created manually, instead use either :func:`tracing <torch.jit.trace>` or :func:`scripting <torch.jit.script>`.
         """
         def __init__(self, optimize=None, _qualified_name=None, _compilation_unit=None, _cpp_module=None):
             if _qualified_name is None:
