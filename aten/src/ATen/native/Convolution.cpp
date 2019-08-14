@@ -711,15 +711,15 @@ at::Tensor _convolution_nogroup(
   AT_ERROR("unsupported ConvNd parameters");
 }
 
-std::tuple<Tensor, Tensor, Tensor> convolution_overrideable_backward(
-        const Tensor& grad_output, const Tensor& input, const Tensor& weight, const Tensor& bias,
+std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
+        const Tensor& grad_output, const Tensor& input, const Tensor& weight,
         IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
         bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
   AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use globalATenDispatch().registerOp to override this function ");
   return std::tuple<Tensor, Tensor, Tensor>(
           at::empty_like(input),
           at::empty_like(weight),
-          at::empty_like(bias));
+          at::empty({}));
 }
 
 static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {
@@ -947,6 +947,19 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
   if (output_mask[2] && !gW.defined()) gW = at::zeros_like(weight);
 
   return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
+}
+
+std::tuple<Tensor, Tensor, Tensor> convolution_double_backward_overrideable(
+    const Tensor& ggI, const Tensor& ggW_r, const Tensor& ggb,
+    const Tensor& gO_r, const Tensor& weight_r, const Tensor& input,
+    IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
+    bool transposed_, IntArrayRef output_padding_, int64_t groups_,
+    std::array<bool, 3> output_mask) {
+  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use globalATenDispatch().registerOp to override this function ");
+  return std::tuple<Tensor, Tensor, Tensor>(
+          at::empty_like(gO_r),
+          at::empty_like(input),
+          at::empty_like(weight_r));
 }
 
 }} // at::native

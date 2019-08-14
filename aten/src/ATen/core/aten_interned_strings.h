@@ -41,6 +41,8 @@ _(aten, _cat) \
 _(aten, _ceil) \
 _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
+_(aten, convolution_overrideable) \
+_(aten, convolution_backward_overrideable) \
 _(aten, _convolution_nogroup) \
 _(aten, _copy_ignoring_overlaps) \
 _(aten, _cos) \
@@ -658,8 +660,6 @@ _(aten, conv_dilated3d) \
 _(aten, conv_dilated3d_backward) \
 _(aten, conv_transpose2d) \
 _(aten, conv_transpose2d_backward) \
-_(aten, convolution_overrideable) \
-_(aten, convolution_overrideable_backward) \
 _(aten, conv_transpose3d) \
 _(aten, conv_transpose3d_backward) \
 _(aten, threshold) \

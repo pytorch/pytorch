@@ -623,14 +623,14 @@ class TestCppExtension(common.TestCase):
             torch.set_default_dtype(initial_default)
 
     def test_compilation_error_formatting(self):
-        # Test that the missing-semicolon error message has linebreaks in it. 
+        # Test that the missing-semicolon error message has linebreaks in it.
         # This'll fail if the message has been munged into a single line.
         # It's hard to write anything more specific as every compiler has it's own
         # error formatting.
         with self.assertRaises(RuntimeError) as e:
             torch.utils.cpp_extension.load_inline(
                 name="test_compilation_error_formatting",
-                cpp_sources="int main() { return 0 }") 
+                cpp_sources="int main() { return 0 }")
         pattern = r'.*(\\n|\\r).*'
         self.assertNotRegex(str(e), pattern)
 
@@ -668,6 +668,25 @@ class TestMSNPUTensor(common.TestCase):
         c = a + b
         self.assertEqual(msnpu_extension.get_test_int(), 1)
 
+    def test_conv_backend_override(self):
+        # To simplify tests, we use 4d input here to avoid doing view4d( which
+        # needs more overrides) in _convolution.
+        input = torch.empty(2, 4, 10, 2, device='msnpu', requires_grad=True)
+        weight = torch.empty(6, 4, 2, 2, device='msnpu', requires_grad=True)
+        bias = torch.empty(6, device='msnpu')
+
+        # Make sure forward is overriden
+        out = torch.nn.functional.conv1d(input, weight, bias, 2, 0, 1, 1)
+        self.assertEqual(msnpu_extension.get_test_int(), 2)
+        self.assertEqual(out.shape[0], input.shape[0])
+        self.assertEqual(out.shape[1], weight.shape[0])
+
+        # Make sure backward is overriden
+        # Double backward is dispatched to _convolution_double_backward.
+        # It is not tested here as it involves more computation/overrides.
+        grad = torch.autograd.grad(out, input, out, create_graph=True)
+        self.assertEqual(msnpu_extension.get_test_int(), 3)
+        self.assertEqual(grad[0].shape, input.shape)
 
 if __name__ == "__main__":
     common.run_tests()
