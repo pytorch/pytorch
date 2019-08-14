@@ -122,6 +122,9 @@ Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
     const TensorOptions& options) {
+  if (!names.has_value()) {
+    return at::empty(size, options);
+  }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
   TORCH_CHECK(options.backend() == Backend::CPU || options.backend() == Backend::CUDA,
@@ -833,6 +836,69 @@ Tensor clone(const Tensor& src) {
   self.copy_(src);
   return self;
 }
+
+#ifdef BUILD_NAMEDTENSOR
+// ~~~~~~~~~~~~~~~~~~~~~~~~~ named tensor overloads ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// In the short term, these exist.
+// In the long term, we should move DimnameList into TensorOptions to avoid
+// having these overloads.
+
+Tensor full(
+    IntArrayRef size,
+    Scalar fill_value,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  auto result = at::empty(size, names, options);
+  return result.fill_(fill_value);
+}
+
+Tensor ones(
+    IntArrayRef size,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  return native::full(size, /*fill_value=*/1, names, options);
+}
+
+Tensor zeros(
+    IntArrayRef size,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  return native::full(size, /*fill_value=*/0, names, options);
+}
+
+Tensor randn(
+    IntArrayRef size,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  return native::randn(size, nullptr, names, options);
+}
+
+Tensor randn(
+    IntArrayRef size,
+    Generator* generator,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  auto result = at::empty(size, names, options);
+  return result.normal_(0, 1, generator);
+}
+
+Tensor rand(
+    IntArrayRef size,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  return native::rand(size, nullptr, names, options);
+}
+
+Tensor rand(
+    IntArrayRef size,
+    Generator* generator,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  auto result = at::empty(size, names, options);
+  return result.uniform_(0, 1, generator);
+}
+
+#endif
 
 } // namespace native
 } // namespace at
