@@ -128,8 +128,10 @@ class ConvBn2d(nn.Conv2d):
             conv = conv * rescale_factor.reshape([1, -1, 1, 1])
             conv = conv + (self.beta - self.gamma * batch_mean * batch_rstd).reshape([1, -1, 1, 1])
 
-            self.running_mean = exponential_average_factor * batch_mean.detach() + (1 - exponential_average_factor) * self.running_mean
-            self.running_var = exponential_average_factor * unbiased_batch_var.detach() + (1 - exponential_average_factor) * self.running_var
+            self.running_mean = exponential_average_factor * batch_mean.detach() + \
+                (1 - exponential_average_factor) * self.running_mean
+            self.running_var = exponential_average_factor * unbiased_batch_var.detach() + \
+                (1 - exponential_average_factor) * self.running_var
         else:
             conv = conv + (self.beta - self.gamma * self.running_mean /
                            running_std).reshape([1, -1, 1, 1])
