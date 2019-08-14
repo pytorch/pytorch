@@ -135,17 +135,20 @@ class Conv2d(_ConvNd):
                                          mod.running_var, mod.eps, mod.gamma, mod.beta)
             assert hasattr(mod, 'observer'), 'Input QAT module must have observer attached'
             weight_observer = mod.weight_fake_quant
+            activation_observer = mod.observer
         else:
             assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
                 cls._FLOAT_MODULE.__name__
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            weight_observer = mod.qconfig.weight()
             # workaround for sequential, ConvReLU2d should probably
             # inherit from Conv2d instead
             if type(mod) == nni.ConvReLU2d:
+                activation_observer = mod[1].observer
                 mod = mod[0]
+            else:
+                activation_observer = mod.observer
+            weight_observer = mod.qconfig.weight()
             weight_observer(mod.weight)
-        activation_observer = mod.observer
         act_scale, act_zp = activation_observer.calculate_qparams()
         wt_scale, wt_zp = weight_observer.calculate_qparams()
         bias_scale = (wt_scale * act_scale).float()

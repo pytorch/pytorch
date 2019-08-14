@@ -25,7 +25,7 @@ def propagate_qconfig_helper(module, qconfig_dict, skip_list=DEFAULT_SKIP_LIST, 
         None, module is modified inplace with qconfig attached
     """
     if type(module) in skip_list:
-        assert not hasattr(module, 'qconfig'), str(type(module)) + ' module is in skip list, it should not have qconfig'
+        module.qconfig = None
     if not hasattr(module, 'qconfig') and type(module) not in skip_list:
         module.qconfig = None
         if qconfig_dict and prefix in qconfig_dict:
@@ -260,7 +260,7 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING):
     reassign = {}
     # TODO(jerryzh): remove after deciding on the impl of
     # intrinsic moudles
-    if type(module) in [nni.ConvBn2d, nni.ConvBnReLU2d]:
+    if type(module) in [nni.ConvBn2d, nni.ConvBnReLU2d, nni.LinearReLU, nni.ConvReLU2d]:
         return module_swapped
 
     for name, mod in module.named_children():

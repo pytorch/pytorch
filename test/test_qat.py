@@ -122,7 +122,7 @@ class IntrinsicQATModuleTest(TestCase):
             else:
                 ref_op = compose([conv_op, bn_op, relu_op])
 
-            input_clone = input.clone().detach_().requires_grad_()
+            input_clone = input.clone().detach().requires_grad_()
             for i in range(2):
                 result_ref = ref_op(input)
                 result_actual = qat_op(input_clone)
