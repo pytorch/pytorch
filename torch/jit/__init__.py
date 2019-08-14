@@ -709,8 +709,15 @@ def trace(func,
         expected to run different sets of operations, depending on the input and/or the
         module state. For example,
 
-        * Tracing will not record any control-flow like if-statements or loops. When this control-flow is constant across your module, this is fine and it often inlines the control-flow decisions. But sometimes the control-flow is actually part of the model itself. For instance, a recurrent network is a loop over the (possibly dynamic) length of an input sequence.
-        * In the returned ``ScriptModule``, operations that have different behaviors in ``training`` and ``eval`` modes will always behave as if it is in the mode it was in during tracing, no matter which mode the ``ScriptModule`` is in.
+        * Tracing will not record any control-flow like if-statements or loops.
+          When this control-flow is constant across your module, this is fine and it often
+          inlines the control-flow decisions. But sometimes the control-flow is actually part
+          of the model itself. For instance, a recurrent network is a loop over
+          the (possibly dynamic) length of an input sequence.
+        * In the returned ``ScriptModule``, operations that have different
+          behaviors in ``training`` and ``eval`` modes will always behave as if it
+          is in the mode it was in during tracing, no matter which mode the
+          ``ScriptModule`` is in.
 
         In cases like these, tracing would not be appropriate and :func:`scripting <torch.jit.script>` is a better
         choice. If you trace such models, you may silently get
