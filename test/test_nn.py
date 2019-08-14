@@ -9632,6 +9632,18 @@ for test_params in module_tests + new_module_tests:
         test = NewModuleTest(**test_params)
 
         add_test(test, decorator)
+    if 'check_with_channels_last' in test_params:
+        desc = test_params.get('with_channels_last', None)
+        test_params['desc'] = 'with_channels_last' if desc is None else desc + '_with_channels_last'
+
+        def gen_channel_last_input(input_size):
+            def input_func():
+                return torch.rand(size=input_size).contiguous(memory_format=torch.channels_last)
+            return input_func
+
+        test_params['input_fn'] = gen_channel_last_input(test_params['input_size'])
+        test = NewModuleTest(**test_params)
+        add_test(test, decorator)
 
 for test_params in criterion_tests + new_criterion_tests:
     name = test_params.pop('module_name')
