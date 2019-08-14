@@ -228,7 +228,6 @@ void max_pool2d_with_indices_out_cuda_template(
 
   if(input.ndimension() == 3) {
     output.resize_({nInputPlane, outputHeight, outputWidth});
-    output.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   }
 }
 
@@ -307,7 +306,6 @@ void max_pool2d_with_indices_backward_out_cuda_template(
   const int64_t out_stride_w = gradOutput.stride(-1);
 
   gradInput.resize_as_(input);
-  gradInput.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
 
   int64_t count = input.numel();
   dim3 grid;
