@@ -39,6 +39,10 @@
   variants: method
   named_guard: False
 
+- func: set_names(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
+  variants: method
+  named_guard: False
+
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   dispatch:
     CUDA: _cudnn_ctc_loss
@@ -4241,6 +4245,7 @@
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
+  named_guard: False
 
 - func: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   dispatch:
