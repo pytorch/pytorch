@@ -87,11 +87,10 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
     stream << "torch::nn::ModuleList";
   }
 
-  /// Adds a new (boxed) `Module` to the `Sequential` container.
-  template <typename ModuleType>
-  void push_back(std::shared_ptr<ModuleType> module_ptr) {
-    push_back(std::shared_ptr<Module>(
-        module_ptr)); // std::shared_ptr<Module>(static_cast<Module*>(module_ptr.get()))
+  void push_back(std::shared_ptr<Module> module) {
+    modules_.push_back(std::move(module));
+    const auto index = modules_.size() - 1;
+    register_module(std::to_string(index), modules_[index]);
   }
 
   /// Adds a new `Module` to the `ModuleList` container, moving or copying
@@ -179,7 +178,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
         torch::detail::is_module<T>::value,
         "Can only call ModuleList::ptr with an nn::Module type");
     TORCH_CHECK(index < size(), "Index out of range");
-    return std::shared_ptr<T>(modules_[index]->as<T>());
+    return std::dynamic_pointer_cast<T>(modules_[index]);
   }
 
   /// Like `ptr(index)`.
@@ -209,12 +208,6 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
 
   /// The base case, when the list of modules is empty.
   void push_back_var() {}
-
-  void push_back(std::shared_ptr<Module> module) {
-    modules_.push_back(std::move(module));
-    const auto index = modules_.size() - 1;
-    register_module(std::to_string(index), modules_[index]);
-  }
 
   // Box the AnyModules to give ModuleList reference semantics, like the rest of
   // the API. Note that this is not required otherwise, this could just be a
