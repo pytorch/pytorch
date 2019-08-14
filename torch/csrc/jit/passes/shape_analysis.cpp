@@ -721,7 +721,7 @@ class ShapePropagator {
   bool PropagateTensorShapeOnNode(Node* node, bool insert_expands) {
     static const auto broadcast =
         [](std::vector<ProfiledTensorTypePtr>& tensor_types,
-           c10::optional<at::ScalarType> t) -> ProfiledTensorTypePtr {
+           const c10::optional<at::ScalarType> &t) -> ProfiledTensorTypePtr {
       if (tensor_types.size() == 1) {
         return tensor_types[0]->dimensionedOnly()->withScalarType(t);
       }
