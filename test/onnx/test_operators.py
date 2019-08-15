@@ -707,6 +707,11 @@ class TestOperators(TestCase):
         x = torch.randn(2, 3, 4).float()
         self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
 
+    def test_remainder(self):
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 1, 4)
+        self.assertONNX(lambda x, y: torch.remainder(x, y), (x, y))
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

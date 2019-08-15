@@ -1900,3 +1900,8 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
     return g.op("Multinomial", log_input,
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
+
+def remainder(g, input, other):
+    div = g.op("Floor", g.op("Div", input, other))
+    quo = g.op("Mul", div, other)
+    return g.op("Sub", input, quo)
