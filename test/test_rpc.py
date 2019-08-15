@@ -17,6 +17,18 @@ def my_function(a, b, c):
 def no_result():
     print("do nothing")
 
+def nested_rpc(dst):
+    return dist.rpc(dst, torch.add, args=(torch.ones(2, 2), 1))
+
+def light_rpc():
+    return 0
+
+def heavy_rpc(tensor):
+    for i in range(1, 100):
+        tensor *= i
+        tensor /= i + 1
+    return 0
+
 # it is used to test python user defined class and methods over rpc
 class my_class:
     def __init__(self, a):
@@ -204,6 +216,40 @@ class RpcTest(MultiProcessTestCase):
         except Exception as e:
             expected = "run_python_udf_internal caught exception: " + str(e)
         self.assertEqual(ret, expected)
+
+    @_wrap_with_rpc
+    def test_nested_rpc(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        ret = dist.rpc('worker{}'.format(dst_rank), nested_rpc,
+                       args=('worker{}'.format(self.rank),))
+        self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+    def _stress_test_rpc(self, f, repeat=1000, args=()):
+        import time
+
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        futs = []
+        tik = time.time()
+        for _ in range(repeat):
+            fut = dist.rpc('worker{}'.format(dst_rank), f, args=args, async_call=True)
+            futs.append(fut)
+
+        for fut in futs:
+            self.assertEqual(fut.wait(), 0)
+        tok = time.time()
+        print("Rank {} finished testing {} {} times in {} seconds.".format(
+            self.rank, f.__name__, repeat, tok - tik
+        ))
+
+    @_wrap_with_rpc
+    def test_stress_light_rpc(self):
+        self._stress_test_rpc(light_rpc)
+
+    @_wrap_with_rpc
+    def test_stress_heavy_rpc(self):
+        self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
 
 if __name__ == '__main__':
     run_tests()
