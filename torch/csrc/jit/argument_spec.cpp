@@ -52,7 +52,7 @@ void ArgumentSpecCreator::scan(
     size_t pos = instructions_.size();
     instructions_.emplace_back(ENTER_OBJECT);
     for (size_t i = 0; i < cls->numAttributes(); ++i) {
-      auto key = cls->qualname() + cls->attributeNames().at(i);
+      auto key = cls->name()->qualifiedName() + cls->attributeNames().at(i);
       // it is only safe to specialize because someone might have written to it
       if (!written_slots.count(key)) {
         scan(cls->containedTypes().at(i), depth + 1, written_slots);
@@ -77,7 +77,7 @@ static void scanWrittenSlots(
   for (Node* n : block->nodes()) {
     if (n->kind() == prim::SetAttr) {
       if (auto cls = n->inputs().at(0)->type()->cast<ClassType>()) {
-        written_slots.insert(cls->qualname() + n->s(attr::name));
+        written_slots.insert(cls->name()->qualifiedName() + n->s(attr::name));
       }
     }
     for (Block* subblock : n->blocks()) {
