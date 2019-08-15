@@ -73,9 +73,7 @@ void atan2_kernel_cuda(TensorIterator& iter) {
 template <typename Kernel>
 void logical_binary_kernel_cuda_impl(TensorIterator& iter, const char* op_name, Kernel kernel) {
   AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), op_name, [&]() {
-    using self_t = scalar_t;
     AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(2), op_name, [&]() {
-      using other_t = scalar_t;
       AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), op_name, [&]() {
         gpu_kernel(iter, kernel);
       });
