@@ -212,6 +212,7 @@ Pointwise Ops
 .. autofunction:: log1p
 .. autofunction:: log2
 .. autofunction:: logical_not
+.. autofunction:: logical_xor
 .. autofunction:: mul
 .. autofunction:: mvlgamma
 .. autofunction:: neg
