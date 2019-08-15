@@ -7,8 +7,8 @@ import torch.jit
 import torch.nn as nn
 import torch.nn.functional as F
 from common_utils import TestCase, run_tests
-from torch.quantization import default_qconfig, QuantStub, DeQuantStub, \
-    quantize
+from torch.quantization import QuantStub, DeQuantStub, \
+    quantize, default_eval_fn, QConfig
 # TODO : Quantizer tests to be integrated with CI once quantizer intf hardened
 
 r"""
@@ -226,49 +226,38 @@ class QuantizerTestCase(TestCase):
         self.assertAlmostEqual(eagerDict["z"][1], activationDict["z.1"][1], places=15)
 
     def test_compare_qparam_eager_script_default(self):
-        # Simple test case with conv->relu->maxpool
-        # class TestScriptM(torch.jit.ScriptModule):
-        #     def __init__(self, init_weight=None):
-        #         super(TestScriptM, self).__init__()
-        #         self.conv1 = nn.Conv2d(1, 20, 5, 1)
-        #         self.conv1.weight.data.fill_(1.0)
-        #         self.conv1.bias.data.fill_(0.01)
-
-        #     @torch.jit.script_method
-        #     def forward(self, x):
-        #         y = F.relu(self.conv1(x))
-        #         z = F.max_pool2d(y, 2, 2)
-        #         return z
-
-        # class TestM(nn.Module):
-        #     def __init__(self, quantObj=None):
-        #         super(TestM, self).__init__()
-        #         self.conv1 = nn.Conv2d(1, 20, 5, 1)
-        #         self.conv1.weight.data.fill_(1.0)
-        #         self.conv1.bias.data.fill_(0.01)
-        #         self.qconfig = default_qconfig
-        #         self.quant = QuantStub()
-        #         self.dequant = DeQuantStub()
-
-        #     def forward(self, x):
-        #         y = F.relu(self.conv1(self.quant(x)))
-        #         z = F.max_pool2d(y, 2, 2)
-        #         return self.dequant(z)
-        class ScriptedObserver(torch.jit.ScriptModule):
+        class Observer(torch.nn.Module):
             def __init__(self):
-                super(ScriptedObserver, self).__init__()
+                super(Observer, self).__init__()
+                self.dtype = torch.quint8
+                self.qscheme = torch.per_tensor_affine
                 self.register_buffer("i", torch.Tensor([0]))
 
-            @torch.jit.script_method
             def forward(self, x):
-                print('observing:', x.size())
                 self.i += 1
                 return x
 
-            @torch.jit.script_method
+            @torch.jit.export
             def calculate_qparams(self):
-                print('caclulate_qparams')
-                return 2.0, 3
+                return torch.tensor([2.0]), torch.tensor([3])
+
+        class WeightObserver(Observer):
+            def __init__(self):
+                super(WeightObserver, self).__init__()
+                self.dtype = torch.qint8
+
+        class TestM(nn.Module):
+            def __init__(self, qconfig):
+                super(TestM, self).__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5, 1)
+                self.conv1.weight.data.fill_(1.0)
+                self.conv1.bias.data.fill_(0.01)
+                self.qconfig = qconfig
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                return self.dequant(F.relu(self.conv1(self.quant(x))))
 
         class TestScriptM(torch.jit.ScriptModule):
             def __init__(self, init_weight=None):
@@ -280,53 +269,59 @@ class QuantizerTestCase(TestCase):
             @torch.jit.script_method
             def forward(self, x):
                 y = F.relu(self.conv1(x))
-                y = self.func(y)
                 return y
 
-            @torch.jit.script_method
-            def func(self, a):
-                return a + 3 # torch.tensor([3], dtype=torch.float)
-
         # Test Data
-        data = torch.ones(1, 1, 28, 28)
+        data = [(torch.ones(1, 1, 28, 28), 1)]
 
         # Eager mode
-        # eager_module = TestM()
-        # quantized_eager_module = quantize(eager_module, default_eval_fn, [data])
+        fake_qconfig = QConfig(activation=Observer, weight=WeightObserver)
+        eager_module = TestM(fake_qconfig)
+        quantized_eager_module = quantize(eager_module, default_eval_fn, data)
 
         # Script mode
+        # TODO: test jit.script as well
         script_module = TestScriptM()
 
         # This performs type analysis to identify tensors from other
         # types. This info needed for further quantizer passes
+        # torch._C._jit_pass_constant_propagation(script_module)
         torch._C._jit_pass_constant_propagation(script_module.graph)
         print('input:', script_module.graph)
 
         # Attach observer module to scriptM, modify forward function
         # to include calls to observer
-        torch._C._jit_pass_prepare_quant(script_module._c, "forward", ScriptedObserver()._c)
+        # torch._C._jit_pass_prepare_quant(script_module._c, "forward", {x:y._c for x,y in qconfig})
+        ScriptedObserver = torch.jit.script(Observer())
+        ScriptedWeightObserver = torch.jit.script(WeightObserver())
+        print('--------- 1. Prepare Quant -------------')
+        torch._C._jit_pass_prepare_quant(script_module._c, "forward", ScriptedObserver._c, ScriptedWeightObserver._c)
 
         print('after observer:', script_module.graph)
         # print(script_module.code)
 
         # Run ScriptM Model and Collect statistics
-        script_module.forward(data)
+        print('--------- 2. Calibration -------------')
+        # script_module(data[0])
 
         # Insert quantize and dequantize calls
+        print('--------- 3. Convert -------------')
         script_module._c = torch._C._jit_pass_insert_quant_dequant(script_module._c, "forward")
         torch._C._jit_pass_constant_propagation(script_module.graph)
 
-        res = script_module(data)
+        res = script_module(data[0])
         print(script_module.graph)
         print(script_module.code)
         print(res.size())
         print('before fusion')
         # torch._C._jit_pass_custom_pattern_based_rewrite_graph()
+        print('--------- 4. Fusion -------------')
         torch._C._jit_pass_quant_fusion(script_module.graph)
         print('after fusion:')
         print(script_module.graph)
         print(script_module.code)
-        # print(data, res)
+        res = script_module(data)
+        print(data, res)
 
         # Compare results for eager and graph mode
         # eagerDict = eagerQuantObj.getQParamDict()

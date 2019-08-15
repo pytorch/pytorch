@@ -160,9 +160,10 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_prepare_quant",
           [](const script::Module& module,
              const std::string& method_name,
-             const script::Module& observer_module) {
+             const script::Module& observer_module,
+             const script::Module& weight_observer_module) {
 //             py::dict& qconfig_dict) {
-            PrepareQuant(module, method_name, observer_module);
+            PrepareQuant(module, method_name, observer_module, weight_observer_module);
           })
       .def(
           "_jit_pass_insert_quant_dequant",
@@ -289,8 +290,8 @@ void initJITBindings(PyObject* module) {
             }
             ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
             arg_spec_creator.specializeTypes(*graph, spec);
-            // We only get DimensionedTensorType from the arg_spec_creator, but
-            // we want CompleteTensorType. The alternative would be to have a
+            // We only get partial specialization from the arg_spec_creator, but
+            // we want full shape specialization. The alternative would be to have a
             // "complete type inference" function in ArguemntSpecCreator.
             auto g_inputs = graph->inputs();
             for (size_t i = 0; i < inputs.size(); ++i) {

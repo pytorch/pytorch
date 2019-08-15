@@ -642,7 +642,8 @@ static Node* prepQuantAddObserverFor(
 TORCH_API void PrepareQuant(
     const script::Module& module,
     const std::string& method_name,
-    const script::Module& observer_module) {
+    const script::Module& observer_module,
+    const script::Module& weight_observer_module) {
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   auto num_activation_inputs = method.num_inputs();
@@ -708,8 +709,11 @@ TORCH_API void PrepareQuant(
       // Skip inserting observer for bias
       if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
         continue;
+      } else if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "weight") {
+        insertObserverForwardCall(v, v->owningGraph(), module, weight_observer_module);
+      } else {
+        insertObserverForwardCall(v, v->owningGraph(), module, observer_module);
       }
-      insertObserverForwardCall(v, v->owningGraph(), module, observer_module);
     }
   }
 }
@@ -968,14 +972,15 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
         return (%r_dequant))";
 
-      // aten function for fbgemm_conv is not ready yet, so the following
-      // code is not runnable
+  // aten function for fbgemm_conv is not ready yet, therefore the following
+  // code is not runnable
   std::string replacement = R"(
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         %w_quant = aten::quantize_linear(%w, %w_scale, %w_zero_point, %w_dtype)
         %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
-        %r = aten::conv2d(%a_quant, %w_quant, %b_quant, %c, %d, %e, %f)
+        %w_packed = quantized::fbgemm_conv_prepack(%w_quant, %stride, %padding, %dilation, %groups)
+        %r = quantized::fbgemm_conv2d(%a_quant, %w_packed, %b_quant, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
         %r_intrepr = aten::int_repr(%r)
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
         return (%r_dequant))";
