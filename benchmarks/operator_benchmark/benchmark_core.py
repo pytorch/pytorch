@@ -3,9 +3,11 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import cpp_extension # noqa
 import functools
 import numpy as np
 import timeit
+import torch
 import json
 
 import benchmark_utils
@@ -241,6 +243,9 @@ class BenchmarkRunner(object):
                 launch_func = self._launch_backward
             else:
                 launch_func = self._launch_forward
+
+            if self.args.wipe_cache:
+                torch.ops.operator_benchmark._clear_cache()
 
             # Warmup
             launch_func(test_case, self.args.warmup_iterations)

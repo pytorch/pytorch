@@ -11,6 +11,7 @@ import torch.jit._logging
 import torch.jit.frontend
 import torch.jit.quantized
 import zipfile
+import functools
 
 # Testing utils
 from common_utils import TestCase, IS_WINDOWS, \
@@ -156,7 +157,8 @@ class JitTestCase(TestCase):
 
     def emitFunctionHook(self, func):
         # func has invalid names for export, skip the jitter check
-        if func.name == "<lambda>" or "aten::" in func.name or not _inline_everything:
+        inline_everything = torch._C._jit_get_inline_everything_mode()
+        if func.name == "<lambda>" or "aten::" in func.name or not inline_everything:
             return
         self._compared_saved_loaded(func)
 
@@ -487,17 +489,13 @@ def enable_profiling_mode():
     finally:
         torch._C._jit_set_profiling_mode(False)
 
-_inline_everything = True
 @contextmanager
-def disable_inline_everything_mode():
-    global _inline_everything
-    old = _inline_everything
-    _inline_everything = False
-    torch._C._jit_set_inline_everything_mode(False)
+def inline_everything_mode(should_inline):
+    old = torch._C._jit_get_inline_everything_mode()
+    torch._C._jit_set_inline_everything_mode(should_inline)
     try:
         yield
     finally:
-        _inline_everything = old
         torch._C._jit_set_inline_everything_mode(old)
 
 
@@ -509,6 +507,13 @@ def disable_autodiff_subgraph_inlining(enabled=True):
         yield
     finally:
         torch._C._debug_set_autodiff_subgraph_inlining(True)
+
+def _inline_everything(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with inline_everything_mode(True):
+            fn(*args, **kwargs)
+    return wrapper
 
 
 # make it easy to quicky define/trace a function for these tests

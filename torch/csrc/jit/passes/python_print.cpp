@@ -1362,13 +1362,14 @@ void PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable) {
+  bool is_class_type = type->cast<TupleType>() || type->cast<ClassType>();
   PythonPrintPass pp(
       tensor_table,
       deps_table,
       enforce_importable,
-      /*is_method=*/true,
+      /*is_method=*/is_class_type,
       /*legacy_module_printing=*/false);
-  if (type->cast<TupleType>() || type->cast<ClassType>()) {
+  if (is_class_type) {
     pp.printClass(type);
   } else {
     auto f = type->cast<FunctionType>();
