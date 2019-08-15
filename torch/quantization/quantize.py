@@ -5,6 +5,7 @@ import torch.nn._intrinsic.quantized as nniq
 import torch.nn._intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
+from .QConfig import default_dynamic_qconfig
 import torch.nn.qat as nnqat
 
 
@@ -247,7 +248,11 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
     convert(model, mapping)
     return model
 
-def quantize_dynamic(model, qconfig_dict=None, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
+DEFAULT_QCONFIG_DICT = {
+    nn.Linear : default_dynamic_qconfig
+}
+
+def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
     r"""Converts a float model to dynamic quantized model. Do dynamic training and output a quantized model.
     """
     model.eval()
