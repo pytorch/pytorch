@@ -111,7 +111,7 @@ class TestQuantizedOps(TestCase):
             'inplace nn.functional': torch.nn.functional.relu_,
         }
 
-        for name, op in ops_under_test_inplace.items():
+        for name, op_ in ops_under_test_inplace.items():
             qY_hat = qX.clone()
             op_(qY_hat)
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
