@@ -4,9 +4,9 @@ import unittest
 import torch
 import torch.nn.quantized as nnq
 from torch.quantization import \
-    QConfig_dynamic, default_observer, default_weight_observer, \
+    QConfig_dynamic, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
-    quantize_dynamic, default_qconfig, default_dynamic_qconfig
+    quantize_dynamic, default_dynamic_qconfig
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
