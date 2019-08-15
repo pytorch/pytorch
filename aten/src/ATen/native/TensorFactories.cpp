@@ -13,7 +13,7 @@
 #include <c10/util/Deprecated.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorFactories.h>
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 #include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
@@ -121,12 +121,16 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
 Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
-    const TensorOptions& options) {
+    const TensorOptions& options,
+    optional<MemoryFormat> optional_memory_format) {
+  if (!names.has_value()) {
+    return at::empty(size, options, optional_memory_format);
+  }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
   TORCH_CHECK(options.backend() == Backend::CPU || options.backend() == Backend::CUDA,
       "NYI: named tensors only support CPU and CUDA tensors");
-  auto result = at::empty(size, options);
+  auto result = at::empty(size, options, optional_memory_format);
   internal_set_names_inplace(result, names);
   return result;
 }
@@ -162,14 +166,14 @@ Tensor& empty_out(
 // specialized operators for each datatype.
 // TODO: remove when we have Type support in the IR
 
-#define DEFINE_CAST_OP(_1, n, _2)                                \
+#define DEFINE_CAST_OP(_1, n)                                    \
   Tensor _cast_##n(const Tensor& self, bool non_blocking) {      \
     if (self.scalar_type() == ScalarType::n)                     \
       return self;                                               \
     return self.to(ScalarType::n, non_blocking);                 \
   }
 
-AT_FORALL_SCALAR_TYPES_AND_BOOL(DEFINE_CAST_OP)
+AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
@@ -225,7 +229,11 @@ Tensor empty_like(
                                        use_memory_format);
   }
 
+#ifdef BUILD_NAMEDTENSOR
+  return at::empty(self.sizes(), self.names(), options, use_memory_format);
+#else
   return at::empty(self.sizes(), options, use_memory_format);
+#endif
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -793,20 +801,20 @@ Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
 }
 
 template <typename T>
-Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
+Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
   auto cpu_tensor = tensor_cpu(values, options.device(DeviceType::CPU));
   return cpu_tensor.to(options.device());
 }
 
-#define TENSOR(T, _1, _2)                                           \
+#define TENSOR(T, _1)                                               \
   Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
-    if (options.device().is_cuda()) {                               \
-      return tensor_cuda(values, options);                          \
+    if (options.device().type() != c10::DeviceType::CPU) {          \
+      return tensor_backend(values, options);                       \
     } else {                                                        \
       return tensor_cpu(values, options);                           \
     }                                                               \
   }
-AT_FORALL_SCALAR_TYPES_AND_BOOL(TENSOR)
+AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, TENSOR)
 #undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
@@ -833,6 +841,69 @@ Tensor clone(const Tensor& src) {
   self.copy_(src);
   return self;
 }
+
+#ifdef BUILD_NAMEDTENSOR
+// ~~~~~~~~~~~~~~~~~~~~~~~~~ named tensor overloads ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// In the short term, these exist.
+// In the long term, we should move DimnameList into TensorOptions to avoid
+// having these overloads.
+
+Tensor full(
+    IntArrayRef size,
+    Scalar fill_value,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  auto result = at::empty(size, names, options);
+  return result.fill_(fill_value);
+}
+
+Tensor ones(
+    IntArrayRef size,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  return native::full(size, /*fill_value=*/1, names, options);
+}
+
+Tensor zeros(
+    IntArrayRef size,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  return native::full(size, /*fill_value=*/0, names, options);
+}
+
+Tensor randn(
+    IntArrayRef size,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  return native::randn(size, nullptr, names, options);
+}
+
+Tensor randn(
+    IntArrayRef size,
+    Generator* generator,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  auto result = at::empty(size, names, options);
+  return result.normal_(0, 1, generator);
+}
+
+Tensor rand(
+    IntArrayRef size,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  return native::rand(size, nullptr, names, options);
+}
+
+Tensor rand(
+    IntArrayRef size,
+    Generator* generator,
+    optional<DimnameList> names,
+    const TensorOptions& options) {
+  auto result = at::empty(size, names, options);
+  return result.uniform_(0, 1, generator);
+}
+
+#endif
 
 } // namespace native
 } // namespace at

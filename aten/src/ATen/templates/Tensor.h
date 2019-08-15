@@ -8,7 +8,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorAccessor.h>
-#include <ATen/core/TensorOptions.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
@@ -22,6 +21,9 @@
 
 namespace caffe2 {
 class Tensor;
+}
+namespace c10{
+struct TensorOptions;
 }
 namespace at {
 struct Generator;
@@ -172,7 +174,7 @@ class CAFFE2_API Tensor {
   }
 #ifdef BUILD_NAMEDTENSOR
   optional<DimnameList> names() const {
-    return impl::internal_get_names(unsafeGetTensorImpl());
+    return impl::get_names(unsafeGetTensorImpl());
   }
 #endif
   int64_t ndimension() const {

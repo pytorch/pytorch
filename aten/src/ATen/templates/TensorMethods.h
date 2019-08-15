@@ -4,10 +4,10 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
-#include <ATen/core/TensorOptions.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
@@ -99,7 +99,7 @@ inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
 }
 
 inline bool Tensor::has_names() const {
-  return impl::internal_has_names(unsafeGetTensorImpl());
+  return impl::has_names(unsafeGetTensorImpl());
 }
 #endif
 
@@ -143,10 +143,10 @@ inline bool is_quantized(Tensor self) {
   return self.is_quantized();
 }
 
-#define DEFINE_CAST(T, name, _)                  \
+#define DEFINE_CAST(T, name)                     \
   template <>                                    \
   inline T* Tensor::data() const {               \
-    TORCH_CHECK(                                    \
+    TORCH_CHECK(                                 \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \
@@ -159,7 +159,7 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
 AT_FORALL_QINT_TYPES(DEFINE_CAST)
 #undef DEFINE_CAST
 
-#define DEFINE_ITEM(T, name, _)   \
+#define DEFINE_ITEM(T, name)      \
   template <>                     \
   inline T Tensor::item() const { \
     return item().to##name();     \
