@@ -2280,6 +2280,11 @@ class TestCuda(TestCase):
     def test_cholesky_batched(self):
         _TestTorchMixin._test_cholesky_batched(self, lambda t: t.cuda())
 
+    @slowTest
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_cholesky_batched_many_batches(self):
+        _TestTorchMixin._test_cholesky_batched_many_batches(self, lambda t: t.cuda())
+
     def test_view(self):
         _TestTorchMixin._test_view(self, lambda t: t.cuda())
 
