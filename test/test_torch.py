@@ -12507,7 +12507,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             inplace_op(tensor, other)
 
     @staticmethod
-    def binary_check_input_output_mem_overlap(self, data, sz, op, device):
+    def binary_check_input_output_mem_overlap(self, data, sz, op):
 
         def _test(op, c, a, b):
             c_exp = op(a, b)
@@ -12863,8 +12863,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # internal overlap check for inplace_op
             self.binary_check_mem_overlap(self, inplace_op, device=device)
             # input/output overlap check for out op
-            self.binary_check_input_output_mem_overlap(self, data, sz, op,
-                                                       device=device)
+            self.binary_check_input_output_mem_overlap(self, data, sz, op)
 
 # Functions to test negative dimension wrapping
 METHOD = 1
