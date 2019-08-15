@@ -278,14 +278,6 @@ def _get_fn_overloads(qual_name):
 def _clear_fn_overloads(qual_name):
     del _overloaded_fns[qual_name]
 
-# overloading registration
-# overloads get registered in this file, and compiled in torch/jit/__init__.py
-# so that they can be imported in nn/functional.py without an import cycle
-
-# qualified_name => list[overload_functions]
-
-_overloaded_fns = {}  # noqa: T484
-
 def get_class_name(method):
     current_frame = sys._current_frames()[threading.currentThread().ident]
 
