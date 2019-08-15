@@ -21,6 +21,17 @@ void processRequestBlocking(
       agent.send(from, std::move(response));
       break;
     }
+    case MessageType::PYTHON_CALL: {
+      std::vector<torch::Tensor> tensorTable;
+      agent.send(
+          from,
+          Message(
+              PythonRpcHandler::generatePythonUDFResult(request),
+              std::move(tensorTable),
+              MessageType::PYTHON_RET,
+              request.id()));
+      break;
+    }
     default: {
       AT_ERROR("Request type ", request.type(), " not supported.");
     }
