@@ -215,24 +215,24 @@ Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
 }
 
 Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.scalar_type() == kBool && other.scalar_type() == kBool,
-              "logical_xor currently only supports bool tensors.");
-  TORCH_CHECK(result.scalar_type() == kBool,
-              "The output tensor of logical_xor must be a bool tensor.");
-  auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_internal_overlap=*/true);
+  TensorIterator iter;
+  iter.dont_compute_common_dtype();
+  iter.check_and_add_output(result);
+  iter.add_input(self);
+  iter.add_input(other);
+  iter.build();
   logical_xor_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor logical_xor(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
   at::logical_xor_out(result, self, other);
   return result;
 }
 
 Tensor& logical_xor_(Tensor& self, const Tensor& other) {
-  return native::logical_xor_out(self, self, other);
+  return at::logical_xor_out(self, self, other);
 }
 
 }

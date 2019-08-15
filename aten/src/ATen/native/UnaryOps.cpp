@@ -57,7 +57,7 @@ Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor logical_not(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
   return at::logical_not_out(result, self);
 }
 
@@ -66,16 +66,12 @@ Tensor& logical_not_(Tensor& self) {
 }
 
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() == kBool,
-              "logical_not currently only supports bool tensors.");
-  TORCH_CHECK(result.scalar_type() == kBool,
-              "The output tensor of logical_not must be a bool tensor.");
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
+  TensorIterator iter;
+  iter.dont_compute_common_dtype();
+  iter.check_and_add_output(result);
+  iter.add_input(self);
+  iter.build();
   logical_not_stub(iter.device_type(), iter);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
