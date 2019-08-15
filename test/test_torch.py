@@ -8516,29 +8516,44 @@ class _TestTorchMixin(torchtest):
 
     def test_masked_scatter(self):
         with warnings.catch_warnings(record=True) as w:
-            for dtype in [torch.uint8, torch.bool]:
-                num_copy, num_dest = 3, 10
-                dest = torch.randn(num_dest)
-                src = torch.randn(num_copy)
-                mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=dtype)
-                dest2 = dest.clone()
-                dest.masked_scatter_(mask, src)
-                j = 0
-                for i in range(num_dest):
-                    if mask[i]:
-                        dest2[i] = src[j]
-                        j += 1
-                self.assertEqual(dest, dest2, 0)
+            for maskType in [torch.uint8, torch.bool]:
+                for dt in torch.testing.get_all_dtypes():
+                    num_copy, num_dest = 3, 10
+                    dest = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=dt)
+                    dest2 = dest.clone()
+                    src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt)
+                    mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=maskType)
 
-                # make source bigger than number of 1s in mask
-                src = torch.randn(num_dest)
-                dest.masked_scatter_(mask, src)
+                    if dt == torch.bool:
+                        # torch.bool is a special case and is being tested
+                        # in a separate test
+                        continue
 
-                # make src smaller. this should fail
-                src = torch.randn(num_copy - 1)
-                with self.assertRaises(RuntimeError):
+                    if dt == torch.half:
+                        self.assertRaises(RuntimeError, lambda: dest.masked_scatter_(mask, src))
+                        continue
+
                     dest.masked_scatter_(mask, src)
-        self.assertEqual(len(w), 3)
+                    j = 0
+                    for i in range(num_dest):
+                        if mask[i]:
+                            dest2[i] = src[j]
+                            j += 1
+                    self.assertEqual(dest, dest2, 0)
+
+                    # make source bigger than number of 1s in mask
+                    src = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=dt)
+                    dest.masked_scatter_(mask, src)
+
+                    # make src smaller. this should fail
+                    src = torch.randn(num_copy - 1)
+                    with self.assertRaises(RuntimeError):
+                        dest.masked_scatter_(mask, src)
+        self.assertEqual(len(w), 25)
+
+        warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
+        for wi in w:
+            self.assertEqual(str(wi.message)[0:55], str(warn))
 
     def test_masked_scatter_bool_tensor(self):
         for device in torch.testing.get_all_device_types():
@@ -8555,44 +8570,68 @@ class _TestTorchMixin(torchtest):
 
     def test_masked_select(self):
         for device in torch.testing.get_all_device_types():
-            with warnings.catch_warnings(record=True) as w:
-                for dtype in [torch.uint8, torch.bool]:
-                    num_src = 10
-                    src = torch.randn(num_src, device=device)
-                    mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(dtype)
-                    dst = src.masked_select(mask)
-                    dst2 = []
-                    for i in range(num_src):
-                        if mask[i]:
-                            dst2 += [src[i]]
-                    self.assertEqual(dst, torch.tensor(dst2), 0)
+            for dt in torch.testing.get_all_dtypes():
+                with warnings.catch_warnings(record=True) as w:
+                    for maskType in [torch.uint8, torch.bool]:
+                        num_src = 10
+                        src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
+                        mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
 
-                    dst3 = torch.empty_like(src, device=device)
-                    torch.masked_select(src, mask, out=dst3)
-                    self.assertEqual(dst3, torch.Tensor(dst2), 0)
-            self.assertEquals(len(w), 1)
+                        if dt == torch.bfloat16 and device == 'cuda':
+                            # remove once bfloat16 implemented on CUDA
+                            self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
+                            continue
+
+                        if dt == torch.half and device == 'cpu':
+                            self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
+                            continue
+
+                        dst = src.masked_select(mask)
+                        dst2 = []
+                        for i in range(num_src):
+                            if mask[i]:
+                                dst2 += [src[i]]
+                        self.assertEqual(dst, torch.tensor(dst2), 0)
+
+                        dst3 = torch.empty_like(src, device=device)
+                        torch.masked_select(src, mask, out=dst3)
+                        self.assertEqual(dst3, torch.Tensor(dst2), 0)
+            self.assertEqual(len(w), 1)
+
+            warn = 'masked_select received a mask with dtype torch.uint8,'
+            self.assertEqual(str(w[0].message)[0:53], str(warn))
 
     def test_masked_fill(self):
         with warnings.catch_warnings(record=True) as w:
-            for dtype in [torch.uint8, torch.bool]:
-                num_dest = 10
-                dst = torch.randn(num_dest)
-                mask = torch.rand(num_dest).mul(2).floor().to(dtype)
-                val = random.random()
-                dst2 = dst.clone()
-                dst.masked_fill_(mask, val)
-                for i in range(num_dest):
-                    if mask[i]:
-                        dst2[i] = val
-                self.assertEqual(dst, dst2, 0)
+            for dt in torch.testing.get_all_dtypes():
+                for dtype in [torch.uint8, torch.bool]:
+                    num_dest = 10
+                    dst = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt)
+                    mask = torch.rand(num_dest).mul(2).floor().to(dtype)
+                    val = random.random()
+                    dst2 = dst.clone()
 
-                # test non-contiguous case
-                dst = torch.randn(num_dest, num_dest, num_dest).permute((2, 0, 1))
-                dst2 = dst.clone()
-                dst.masked_fill_((dst > 0).to(dtype), val)
-                dst2.masked_fill_((dst2 > 0).to(dtype), val)
-                self.assertEqual(dst, dst2, 0)
-            self.assertEquals(len(w), 3)
+                    if dt == torch.half:
+                        self.assertRaises(RuntimeError, lambda: dst.masked_fill_(mask, val))
+                        continue
+
+                    dst.masked_fill_(mask, val)
+                    for i in range(num_dest):
+                        if mask[i]:
+                            dst2[i] = val
+                    self.assertEqual(dst, dst2, 0)
+
+                    # test non-contiguous case
+                    dst = torch.randn(num_dest, num_dest, num_dest).permute((2, 0, 1))
+                    dst2 = dst.clone()
+                    dst.masked_fill_((dst > 0).to(dtype), val)
+                    dst2.masked_fill_((dst2 > 0).to(dtype), val)
+                    self.assertEqual(dst, dst2, 0)
+            self.assertEqual(len(w), 28)
+
+            warn = 'masked_fill_ received a mask with dtype torch.uint8,'
+            for wi in w:
+                self.assertEqual(str(wi.message)[0:52], str(warn))
 
     def test_masked_fill_bool_tensor(self):
         for device in torch.testing.get_all_device_types():
