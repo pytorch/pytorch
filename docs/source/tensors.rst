@@ -316,6 +316,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: log2_
    .. automethod:: log_normal_
    .. automethod:: logsumexp
+   .. automethod:: logical_not
+   .. automethod:: logical_not_
    .. automethod:: long
    .. automethod:: lstsq
    .. automethod:: lt

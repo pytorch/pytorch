@@ -2539,6 +2539,22 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.logical_not,
+           r"""
+logical_not(input, out=None) -> Tensor
+
+Computes the element-wise logical NOT of the given input tensor. The input tensor must have the bool dtype.
+
+Args:
+    input (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
+Example:
+
+    >>> torch.logical_not(torch.tensor([True, False]))
+    tensor([ False,  True])
+""")
+
 add_docstr(torch.logspace,
            r"""
 logspace(start, end, steps=100, base=10.0, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor

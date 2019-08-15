@@ -1863,6 +1863,29 @@ class _TestTorchMixin(torchtest):
     def test_bitwise_not(self):
         self._test_bitwise_not(self, 'cpu')
 
+    @staticmethod
+    def _test_logical_not(self, device):
+        for dtype in (torch.bool,):  # will add more dtypes in the future
+            expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
+            a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
+            # new tensor
+            self.assertEqual(expected_res, a.logical_not())
+            # out
+            b = torch.empty(0, dtype=bool, device=device)
+            torch.logical_not(a, out=b)
+            self.assertEqual(expected_res, b)
+            # out is not bool
+            b = torch.empty(0, dtype=torch.uint8, device=device)
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"The output tensor of logical_not must be a bool tensor\."):
+                torch.logical_not(a, out=b)
+            # in-place
+            a.logical_not_()
+            self.assertEqual(expected_res, a)
+
+    def test_logical_not(self):
+        self._test_logical_not(self, 'cpu')
+
     def test_threshold(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
             if dtype != torch.uint8 and dtype != torch.float16:
