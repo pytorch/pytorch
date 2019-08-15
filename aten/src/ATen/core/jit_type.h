@@ -1685,6 +1685,10 @@ struct CAFFE2_API ClassType : public NamedType {
       AT_ASSERT(attributeTypes_[i]->isSubtypeOf(contained_types[i]));
       ptr->addAttribute(attributeNames_[i], contained_types[i]);
     }
+    // Copy methods over
+    for (const auto& method : methods()) {
+      ptr->addMethod(method);
+    }
     return ptr;
   }
 
