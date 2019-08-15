@@ -45,12 +45,12 @@ def random_int_tensor(seed, size, low=0, high=2 ** 32, a=22695477, c=1, m=2 ** 3
     """
     return torch.floor(random_float_tensor(seed, size, a, c, m) * (high - low)) + low
 
+
 def gen_float_tensor(seed, shape, requires_grad=False):
     return random_float_tensor(seed, shape, requires_grad=requires_grad)
 
 
 class TestNestedTensor(TestCase):
-
 
     def test_nested_constructor(self):
         def _gen_nested_tensor():
@@ -63,8 +63,6 @@ class TestNestedTensor(TestCase):
         nested_tensors = [_gen_nested_tensor() for _ in range(num_nested_tensor)]
         nested_tensor = torch.nested_tensor(nested_tensors)
         nested_tensor.cos_()
-        import pdb; pdb.set_trace()
-
 
     def test_constructor(self):
         tensors = []
