@@ -5,6 +5,7 @@
 #include <torch/csrc/distributed/rpc/FutureMessage.h>
 #include <torch/csrc/distributed/rpc/RpcAgent.h>
 #include <torch/csrc/distributed/rpc/functions.h>
+#include <torch/csrc/distributed/rpc/PythonRpcHandler.h>
 
 #include <thread>
 
@@ -12,11 +13,26 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct RpcWork {
-  RpcWork(const int rank, Message&& message) : rank_(rank), message_(message) {}
 
-  const int rank_;
+// SendWork and RecvWork will be put into a task queue, and later picked up by
+// worker threads from the same ThreadPool.
+struct SendWork {
+  SendWork(const int to, Message&& message) :
+    to_(to), message_(message) {}
+
+  const int to_;
   Message message_;
+};
+
+// SendWork wraps a Message and RecvWork wraps a Tensor. The difference here is
+// to allow us to run serialization/deserialization in the worker threads.
+struct RecvWork {
+  RecvWork(const int from, MessageType type, torch::Tensor&& payload)
+      : from_(from), type_(type), payload_(payload) {}
+
+  const int from_;
+  const MessageType type_;
+  torch::Tensor payload_;
 };
 
 class ProcessGroupAgent : public RpcAgent {
@@ -38,11 +54,10 @@ class ProcessGroupAgent : public RpcAgent {
   void sync() override;
 
  private:
-  // put SendWork into a queue and notify the sendLoop thread
-  void enqueueSend(RpcWork work);
-  void enqueueRecv(RpcWork work);
-  // sending out the message
-  void sendLoop();
+  // put SendWork into a queue and notify the worker thread
+  void enqueueSend(SendWork work);
+  // put RecvWork into a queue and notify the worker thread
+  void enqueueRecv(RecvWork work);
   // receiving messages
   void listenLoop();
 
@@ -60,7 +75,7 @@ class ProcessGroupAgent : public RpcAgent {
   std::vector<std::string> names_;
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
-  std::unique_ptr<std::mutex[]> sendMutexes_;
+  std::vector<std::mutex> sendMutexes_;
   std::thread listenerThread_;
   ThreadPool threadPool_;
   std::unordered_map<int64_t, std::shared_ptr<FutureMessage>> futures_;
