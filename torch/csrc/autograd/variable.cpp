@@ -180,4 +180,21 @@ void Variable::rebase_history(Edge gradient_edge) {
   }
 }
 
+void Variable::create_cpp_hook() {
+  auto &list = get_autograd_meta()->cpp_hooks_list;
+  list.reset(new hooks_list());
+  std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, output_nr()));
+  auto fn = grad_fn();
+  if (fn) {
+    fn->add_pre_hook(std::move(hook_ptr));
+  }
+}
+
+void Variable::remove_hook(unsigned pos) {
+  auto &list = get_autograd_meta()->cpp_hooks_list;
+  TORCH_CHECK(list && pos < list->size() , "Invalid idx");
+  // Hook will be ignored
+  (*list)[pos] = NULL;
+}
+
 }} // namespace torch::autograd
