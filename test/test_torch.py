@@ -12452,8 +12452,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         with self.assertRaisesRegex(RuntimeError, 'single memory location'):
             inplace_op(tensor, other)
 
-    @staticmethod
-    def _test_inplace_unary_mem_overlap(self, device='cpu'):
+    @torchtest.for_all_device_types()
+    def test_inplace_unary_mem_overlap(self, device):
         TestTorch.unary_check_mem_overlap(self, lambda t: t.acos_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.asin_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.atan_(), device=device)
@@ -12476,17 +12476,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         TestTorch.unary_check_mem_overlap(self, lambda t: t.tanh_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.trunc_(), device=device)
 
-    @staticmethod
-    def _test_inplace_binary_mem_overlap(self, device='cpu'):
+    @torchtest.for_all_device_types()
+    def test_inplace_binary_mem_overlap(self, device):
         binary_ops = ['add_', 'mul_', 'div_', 'sub_']
         for op in binary_ops:
             TestTorch.binary_check_mem_overlap(self, op, device=device)
-
-    def test_inplace_unary_mem_overlap(self):
-        return self._test_inplace_unary_mem_overlap(self)
-
-    def test_inplace_binary_mem_overlap(self):
-        return self._test_inplace_binary_mem_overlap(self)
 
     @unittest.expectedFailure
     def test_abs_unary_mem_overlap(self):
@@ -12733,71 +12727,71 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertRaisesRegex(RuntimeError, ' call to _th_lt',
                                lambda: torch.ones(1, dtype=torch.float) < torch.ones(1, dtype=torch.double))
 
-    @staticmethod
-    def _test_unary_op_overlap(self, sz, data, op):
-
+    @torchtest.for_all_device_types()
+    def test_unary_op_input_output_overlap(self, device):
         def _test(op, c, a):
             c_exp = op(a)
             self.assertEqual(op(a, out=c), c_exp, op.__name__)
 
-        # c is identical to a:
-        c = data[0:sz]
-        a = data[0:sz]
-        c_exp = torch.empty_like(c)
-        _test(op, c, a)
-
-        # c and a are independent:
-        c = data[0:sz]
-        a = data[sz:2 * sz]
-        c_exp = torch.empty_like(c)
-        _test(op, c, a)
-
-        # c partially overlaps with a:
-        c = data[0:sz]
-        a = data[1:sz + 1]
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            op(a, out=c)
-
-    def test_unary_op_input_output_overlap(self):
         sz = 3
-        doubles = torch.randn(2 * sz)
-        positives = torch.randint(1, 100, (2 * sz,)).double()
-        ints = torch.randint(-100, 100, (2 * sz,))
+        doubles = torch.randn(2 * sz, device=device)
+        positives = torch.randint(1, 100, (2 * sz,), device=device).double()
+        ints = torch.randint(-100, 100, (2 * sz,), device=device)
         ops = [
-            (ints, torch.bitwise_not),
-            (doubles, torch.neg),
-            (doubles, torch.abs),
-            (doubles, torch.acos),
-            (doubles, torch.asin),
-            (doubles, torch.atan),
-            (doubles, torch.ceil),
-            (doubles, torch.cos),
-            (doubles, torch.erf),
-            (doubles, torch.erfc),
-            (doubles, torch.exp),
-            (doubles, torch.expm1),
-            (doubles, torch.floor),
-            (doubles, torch.frac),
-            (positives, torch.log),
-            (positives, torch.log10),
-            (positives, torch.log1p),
-            (positives, torch.log2),
-            (doubles, torch.reciprocal),
-            (doubles, torch.round),
-            (positives, torch.rsqrt),
-            (doubles, torch.sin),
-            (doubles, torch.sigmoid),
-            (doubles, torch.sqrt),
-            (doubles, torch.tan),
-            (doubles, torch.tanh),
-            (doubles, torch.trunc)
+            (ints, torch.bitwise_not, True),
+            (doubles, torch.neg, True),
+            (doubles, torch.abs, False),
+            (doubles, torch.acos, False),
+            (doubles, torch.asin, False),
+            (doubles, torch.atan, False),
+            (doubles, torch.ceil, False),
+            (doubles, torch.cos, False),
+            (doubles, torch.erf, False),
+            (doubles, torch.erfc, False),
+            (doubles, torch.exp, False),
+            (doubles, torch.expm1, False),
+            (doubles, torch.floor, False),
+            (doubles, torch.frac, False),
+            (positives, torch.log, False),
+            (positives, torch.log10, False),
+            (positives, torch.log1p, False),
+            (positives, torch.log2, False),
+            (doubles, torch.reciprocal, False),
+            (doubles, torch.round, False),
+            (positives, torch.rsqrt, False),
+            (doubles, torch.sin, False),
+            (doubles, torch.sigmoid, False),
+            (doubles, torch.sqrt, False),
+            (doubles, torch.tan, False),
+            (doubles, torch.tanh, False),
+            (doubles, torch.trunc, False)
         ]
-        for args in ops:
-            _TestTorchMixin._test_unary_op_overlap(self, sz, *args)
+        for (data, op, has_cuda_impl) in ops:
+            # c is identical to a:
+            c = data[0:sz]
+            a = data[0:sz]
+            c_exp = torch.empty_like(c)
+            _test(op, c, a)
 
-    @staticmethod
-    def _test_binary_op_input_output_overlap(self, op, device='cpu'):
+            # c and a are independent:
+            c = data[0:sz]
+            a = data[sz:2 * sz]
+            c_exp = torch.empty_like(c)
+            _test(op, c, a)
 
+            # c partially overlaps with a:
+            c = data[0:sz]
+            a = data[1:sz + 1]
+            if device == 'cuda' and not has_cuda_impl:
+                with self.assertRaises(AssertionError):
+                    with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+                        op(a, out=c)
+            else:
+                with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+                    op(a, out=c)
+
+    @torchtest.for_all_device_types()
+    def test_binary_op_input_output_overlap(self, device):
         def _test(op, c, a, b):
             c_exp = op(a, b)
             self.assertEqual(op(a, b, out=c), c_exp, op.__name__)
@@ -12805,60 +12799,55 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         sz = 3
         data = torch.randn(3 * sz, device=device)
 
-        # c is identical to a and b:
-        c = data[0:sz]
-        a = data[0:sz]
-        b = data[0:sz]
-        c_exp = torch.empty_like(c)
-        _test(op, c, a, b)
+        for op in [torch.add, torch.mul, torch.sub, torch.div]:
+            # c is identical to a and b:
+            c = data[0:sz]
+            a = data[0:sz]
+            b = data[0:sz]
+            c_exp = torch.empty_like(c)
+            _test(op, c, a, b)
 
-        # c, a and b are independent:
-        c = data[0:sz]
-        a = data[sz:2 * sz]
-        b = data[2 * sz:3 * sz]
-        c_exp = torch.empty_like(c)
-        _test(op, c, a, b)
+            # c, a and b are independent:
+            c = data[0:sz]
+            a = data[sz:2 * sz]
+            b = data[2 * sz:3 * sz]
+            c_exp = torch.empty_like(c)
+            _test(op, c, a, b)
 
-        # c and a are identical but b is independent:
-        c = data[0:sz]
-        a = data[0:sz]
-        b = data[2 * sz:3 * sz]
-        c_exp = torch.empty_like(c)
-        _test(op, c, a, b)
+            # c and a are identical but b is independent:
+            c = data[0:sz]
+            a = data[0:sz]
+            b = data[2 * sz:3 * sz]
+            c_exp = torch.empty_like(c)
+            _test(op, c, a, b)
 
-        # c and b are identical but a is independent:
-        c = data[0:sz]
-        a = data[sz:2 * sz]
-        b = data[0:sz]
-        c_exp = torch.empty_like(c)
-        _test(op, c, a, b)
+            # c and b are identical but a is independent:
+            c = data[0:sz]
+            a = data[sz:2 * sz]
+            b = data[0:sz]
+            c_exp = torch.empty_like(c)
+            _test(op, c, a, b)
 
-        # a and b have a partial overlap but c is independent:
-        c = data[0:sz]
-        a = data[sz:2 * sz]
-        b = data[sz + 1:2 * sz + 1]
-        c_exp = torch.empty_like(c)
-        _test(op, c, a, b)
+            # a and b have a partial overlap but c is independent:
+            c = data[0:sz]
+            a = data[sz:2 * sz]
+            b = data[sz + 1:2 * sz + 1]
+            c_exp = torch.empty_like(c)
+            _test(op, c, a, b)
 
-        # c has partial overlap with a:
-        c = data[0:sz]
-        a = data[1:sz + 1]
-        b = data[2 * sz:3 * sz]
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            op(a, b, out=c)
+            # c has partial overlap with a:
+            c = data[0:sz]
+            a = data[1:sz + 1]
+            b = data[2 * sz:3 * sz]
+            with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+                op(a, b, out=c)
 
-        # c has partial overlap with b:
-        c = data[0:sz]
-        a = data[0:sz]
-        b = data[2:sz + 2]
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            op(a, b, out=c)
-
-    def test_binary_op_input_output_overlap(self):
-        self._test_binary_op_input_output_overlap(self, torch.add)
-        self._test_binary_op_input_output_overlap(self, torch.mul)
-        self._test_binary_op_input_output_overlap(self, torch.sub)
-        self._test_binary_op_input_output_overlap(self, torch.div)
+            # c has partial overlap with b:
+            c = data[0:sz]
+            a = data[0:sz]
+            b = data[2:sz + 2]
+            with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+                op(a, b, out=c)
 
 # Functions to test negative dimension wrapping
 METHOD = 1

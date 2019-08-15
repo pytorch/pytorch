@@ -1102,65 +1102,6 @@ class TestCuda(TestCase):
     def test_isinf(self):
         _TestTorchMixin._test_isinf(self, lambda t: t.cuda())
 
-    def test_inplace_unary_mem_overlap(self):
-        _TestTorchMixin._test_inplace_unary_mem_overlap(self, device='cuda')
-
-    def test_inplace_binary_mem_overlap(self):
-        _TestTorchMixin._test_inplace_binary_mem_overlap(self, device='cuda')
-
-    def test_unary_op_input_output_overlap(self):
-        sz = 3
-        doubles = torch.randn(2 * sz, device='cuda')
-        positives = torch.randint(1, 100, (2 * sz,), device='cuda').double()
-        ints = torch.randint(-100, 100, (2 * sz,), device='cuda')
-        ops = [
-            (ints, torch.bitwise_not),
-            (doubles, torch.neg)
-        ]
-        for args in ops:
-            _TestTorchMixin._test_unary_op_overlap(self, sz, *args)
-
-        # Input/output overlap check is not implemented on CUDA for
-        # the following ops. Move the op to the upper section when
-        # the input/output overlap check is implemented.
-        ops = [
-            (doubles, torch.abs),
-            (doubles, torch.acos),
-            (doubles, torch.asin),
-            (doubles, torch.atan),
-            (doubles, torch.ceil),
-            (doubles, torch.cos),
-            (doubles, torch.erf),
-            (doubles, torch.erfc),
-            (doubles, torch.exp),
-            (doubles, torch.expm1),
-            (doubles, torch.floor),
-            (doubles, torch.frac),
-            (positives, torch.log),
-            (positives, torch.log10),
-            (positives, torch.log1p),
-            (positives, torch.log2),
-            (doubles, torch.reciprocal),
-            (doubles, torch.round),
-            (positives, torch.rsqrt),
-            (doubles, torch.sin),
-            (doubles, torch.sigmoid),
-            (doubles, torch.sqrt),
-            (doubles, torch.tan),
-            (doubles, torch.tanh),
-            (doubles, torch.trunc)
-        ]
-        for args in ops:
-            with self.assertRaisesRegex(AssertionError,
-                                        "RuntimeError not raised"):
-                _TestTorchMixin._test_unary_op_overlap(self, sz, *args)
-
-    def test_binary_op_input_output_overlap(self):
-        _TestTorchMixin._test_binary_op_input_output_overlap(self, torch.add, device='cuda')
-        _TestTorchMixin._test_binary_op_input_output_overlap(self, torch.mul, device='cuda')
-        _TestTorchMixin._test_binary_op_input_output_overlap(self, torch.sub, device='cuda')
-        _TestTorchMixin._test_binary_op_input_output_overlap(self, torch.div, device='cuda')
-
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_arithmetic_large_tensor(self):
         x = torch.empty(2**30, device='cuda')
