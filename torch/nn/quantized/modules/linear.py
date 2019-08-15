@@ -44,7 +44,7 @@ class Quantize(Module):
         qparams = mod.observer.calculate_qparams()
         return Quantize(qparams[0].item(), qparams[1].item(), mod.observer.dtype)
 
-    def extra_repro(self):
+    def extra_repr(self):
         return 'scale={}, zero_point={}, dtype={}'.format(self._scale, self._zero_point, self._dtype)
 
 class DeQuantize(Module):
