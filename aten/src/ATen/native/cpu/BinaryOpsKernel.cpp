@@ -81,24 +81,8 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
-//static void fmod_kernel(TensorIterator& iter, Scalar value_scalar) {
-//  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "fmod_cpu", [&] {
-//      auto value = value_scalar.to<scalar_t>();
-//      auto value_vec = Vec256<scalar_t>(value);
-//      cpu_kernel_vec(
-//              iter,
-//              [=](scalar_t a) -> scalar_t {
-//                  return std::fmod(a, value);
-//              },
-//              [=](Vec256<scalar_t> a) {
-//                  return a.fmod(value_vec);
-//              });
-//  });
-//}
-
-
 void fmod_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "fmod_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "fmod_cpu", [&] {
       cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
