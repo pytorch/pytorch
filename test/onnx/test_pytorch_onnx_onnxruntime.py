@@ -875,11 +875,11 @@ class TestONNXRuntime(unittest.TestCase):
             return input
 
         input = make_input(RNN_BATCH_SIZE)
-        self.run_test(model, input, batch_size=RNN_BATCH_SIZE,)
+        self.run_test(model, input, batch_size=RNN_BATCH_SIZE, atol=1e-5)
 
         # test that the model still runs with a different batch size
         other_input = make_input(RNN_BATCH_SIZE + 1)
-        self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
+        self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1, atol=1e-5)
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
