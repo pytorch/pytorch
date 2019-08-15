@@ -1,5 +1,8 @@
-from . import invoke_rpc
+#!/usr/bin/env python3
+
+from . import invoke_rpc_builtin, invoke_rpc_python_udf
 from . import ProcessGroupAgent
+from .internal_rpc_utils import serialize, PythonUDF
 
 import array
 import sys
@@ -15,8 +18,7 @@ def _collect_worker_names(name, group):
 
     # collect name length
     ws = get_world_size(group)
-    name_bytes = name if sys.version_info < (3, 0) else bytes(name, 'utf8')
-    name_bytes = list(array.array('B', name_bytes))
+    name_bytes = list(array.array('B', bytes(name, 'utf8')))
     name_len = len(name_bytes)
     len_input = torch.ones(1, dtype=torch.int64) * name_len
     len_outputs = [torch.empty(1, dtype=torch.int64) for _ in range(ws)]
@@ -80,6 +82,9 @@ def init_rpc(name, backend='pg'):
                        process group backend ``"pg"`` is the only available
                        backend implementation. (default: ``"pg"``).
     """
+    if sys.version_info < (3, 0):
+        raise RuntimeError("RPC package does not support Python2.")
+
     global _agent
 
     if _agent:
@@ -105,7 +110,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
 
     Arguments:
         to (str): name of the destination worker.
-        func (callable): a builtin function (e.g., ``torch.add``).
+        func (callable): any callable function. builtin functions (like torch.add) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -146,7 +151,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
         >>> dist.init_rpc("worker0")
         >>> fut1 = dist.rpc("worker1", torch.add, args=(torch.ones(2), 3), async_call=True)
-        >>> fut2 = dist.rpc("worker1", torch.add, args=(torch.ones(2), 2), async_call=True)
+        >>> fut2 = dist.rpc("worker1", min, args=(1, 2), async_call=True)
         >>> result = fut1.wait() + fut2.wait()
         >>> dist.join_rpc()
 
@@ -156,17 +161,21 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         >>> dist.init_rpc("worker1")
         >>> dist.join_rpc()
     """
+    if not callable(func):
+        raise TypeError("function should be callable.")
+
     if _agent is None:
         raise RuntimeError("RPC has not been initialized. "
                            "Call init_rpc(name) first.")
 
     qualified_name = torch.jit._find_builtin(func)
-    if qualified_name is None:
-        raise RuntimeError("unknown builtin function %s." % func)
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
-    fut = invoke_rpc(_agent, to, qualified_name, *args, **kwargs)
+    if qualified_name is not None:
+        fut = invoke_rpc_builtin(_agent, to, qualified_name, *args, **kwargs)
+    else:
+        fut = invoke_rpc_python_udf(_agent, to, serialize(PythonUDF(func, args, kwargs)))
 
     if async_call:
         return fut
