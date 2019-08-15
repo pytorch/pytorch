@@ -213,10 +213,10 @@ class Conv2d(torch.nn.Module):
             weight_observer(mod.weight)
         act_scale, act_zp = activation_observer.calculate_qparams()
         wt_scale, wt_zp = weight_observer.calculate_qparams()
-        bias_scale = (wt_scale * act_scale).float()
+        bias_scale = float(wt_scale * act_scale)
         qweight = torch.quantize_linear(
-            mod.weight.float().contiguous(),
-            wt_scale, wt_zp.long().item(), torch.qint8)
+            mod.weight.float(),
+            float(wt_scale), int(wt_zp), torch.qint8)
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
