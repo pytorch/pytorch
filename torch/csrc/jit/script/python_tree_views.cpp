@@ -13,7 +13,7 @@ namespace torch {
 namespace jit {
 namespace script {
 
-c10::optional<std::string> maybeConvertToString(py::object obj) {
+c10::optional<std::string> maybeConvertToString(const py::object& obj) {
   if (obj.is_none()) {
     return c10::nullopt;
   }
