@@ -556,7 +556,13 @@ binary_linux_upload: &binary_linux_upload
   - run:
       name: Upload
       no_output_timeout: "1h"
-      command: ~/workspace/.circleci/scripts/binary_linux_upload.sh
+      command: |
+        set +x
+        echo "Set AWS credentials"
+        export AWS_ACCESS_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225="${AWS_ACCESS_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225:-}"
+        export AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225="${AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225:-}"
+        set -x
+        ~/workspace/.circleci/scripts/binary_linux_upload.sh
 
 
 ##############################################################################
@@ -626,6 +632,11 @@ binary_mac_upload: &binary_mac_upload
       name: Upload
       no_output_timeout: "10m"
       command: |
+        set +x
+        echo "Set AWS credentials"
+        export AWS_ACCESS_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225="${AWS_ACCESS_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225:-}"
+        export AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225="${AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225:-}"
+        set -x
         script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_upload.sh"
         cat "$script"
         source "$script"

@@ -2,8 +2,8 @@
 # Do NOT set -x
 set -eu -o pipefail
 set +x
-export AWS_ACCESS_KEY_ID="${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
-export AWS_SECRET_ACCESS_KEY="${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
+export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225}"
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225}"
 cat >/Users/distiller/project/login_to_anaconda.sh <<EOL
 set +x
 echo "Trying to login to Anaconda"
@@ -21,9 +21,6 @@ set -eux -o pipefail
 
 source "/Users/distiller/project/env"
 export "PATH=$workdir/miniconda/bin:$PATH"
-
-export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225"
-export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225"
 
 pushd "$workdir/final_pkgs"
 if [[ "$PACKAGE_TYPE" == conda ]]; then

@@ -59,9 +59,6 @@ else
 fi
 export PYTORCH_BUILD_NUMBER=1
 
-export AWS_ACCESS_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225="${AWS_ACCESS_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225:-}"
-export AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225="${AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225:-}"
-
 cat >>"$envfile" <<EOL
 # =================== The following code will be executed inside Docker container ===================
 export TZ=UTC
@@ -98,9 +95,6 @@ export CIRCLE_TAG="${CIRCLE_TAG:-}"
 export CIRCLE_SHA1="$CIRCLE_SHA1"
 export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
 export CIRCLE_BRANCH="$CIRCLE_BRANCH"
-
-export AWS_ACCESS_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225="$AWS_ACCESS_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225"
-export AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225="$AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225"
 # =================== The above code will be executed inside Docker container ===================
 EOL
 

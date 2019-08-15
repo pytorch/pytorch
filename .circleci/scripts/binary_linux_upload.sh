@@ -3,8 +3,8 @@
 source /home/circleci/project/env
 set -eu -o pipefail
 set +x
-declare -x "AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
-declare -x "AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
+declare -x "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225}"
+declare -x "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225}"
 cat >/home/circleci/project/login_to_anaconda.sh <<EOL
 set +x
 echo "Trying to login to Anaconda"
@@ -20,9 +20,6 @@ chmod +x /home/circleci/project/login_to_anaconda.sh
 #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!
 set -eux -o pipefail
 export PATH="$MINICONDA_ROOT/bin:$PATH"
-
-export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225"
-export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF225"
 
 # Upload the package to the final location
 pushd /home/circleci/project/final_pkgs
