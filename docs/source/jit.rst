@@ -72,12 +72,12 @@ encoder module generated using tracing.
 
     torch.jit.script = script_wrapper
 
-    otrace = torch.jit.trace
-    def tchanger(obj, *args, **kwargs):
+    original_trace = torch.jit.trace
+    def trace_wrapper(obj, *args, **kwargs):
         obj.__module__ = 'FakeMod'
-        return otrace(obj, *args, **kwargs)
+        return original_trace(obj, *args, **kwargs)
 
-    torch.jit.trace = tchanger
+    torch.jit.trace = trace_wrapper
 
 
 Example (calling a traced function in script):
