@@ -69,10 +69,18 @@ void set_rng_state(const Tensor & new_state) {
 
 namespace cuda {
 
+Tensor get_rng_state(torch::DeviceIndex device_index) {
+  return get_rng_state(torch::Device(torch::kCUDA, device_index));
+}
+
 Tensor get_rng_state(torch::Device device) {
   TORCH_CHECK(device.type() == torch::kCUDA,
     "torch::cuda::get_rng_state() only supports CUDA device. Please use torch::get_rng_state() for CPU random number generator.");
   return _get_rng_state(device);
+}
+
+void set_rng_state(const Tensor & new_state, torch::DeviceIndex device_index) {
+  return set_rng_state(new_state, torch::Device(torch::kCUDA, device_index));
 }
 
 void set_rng_state(const Tensor & new_state, torch::Device device) {
