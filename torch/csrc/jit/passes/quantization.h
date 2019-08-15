@@ -109,5 +109,9 @@ TORCH_API void PrepareQuant(
     const script::Module& observer_module,
     const script::Module& weight_observer_module);
 
+TORCH_API script::Module InsertQuantDeQuant(
+    const script::Module& module,
+    const std::string& method_name);
+
 } // namespace jit
 } // namespace torch
