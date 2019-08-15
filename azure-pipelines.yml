@@ -77,6 +77,17 @@ jobs:
   - script: sudo apt-get install -y doxygen && pip install -r requirements.txt
   - script: cd docs/cpp/source && ./check-doxygen.sh
 
+- job: python_doc_check
+  displayName: "Python doctest"
+  pool:
+    vmImage: 'Ubuntu 16.04'
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "3.6"
+  - script: sudo apt-get install -y doxygen && pip install -r requirements.txt
+  - script: cd docs && make doctest
+
 - job: clang_tidy
   displayName: "clang tidy"
   pool:
