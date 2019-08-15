@@ -242,6 +242,10 @@ from sphinx.util.docfields import TypedField
 from sphinx import addnodes
 
 
+# Without this, doctest adds any example with a `>>>` as a test
+doctest_test_doctest_blocks = ''
+
+
 def patched_make_field(self, types, domain, items, **kw):
     # `kw` catches `env=None` needed for newer sphinx while maintaining
     #  backwards compatibility when passed along further down!
