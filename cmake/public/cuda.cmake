@@ -101,6 +101,7 @@ else()
   set(CUDNN_STATIC OFF)
 endif()
 
+message(STATUS "${CMAKE_MODULE_PATH}")
 find_package(CUDNN)
 
 if(NOT CUDNN_FOUND)
