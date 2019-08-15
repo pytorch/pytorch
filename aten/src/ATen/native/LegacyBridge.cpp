@@ -4,12 +4,6 @@
 
 namespace at { namespace native {
 
-namespace {
-  static bool _has_native(const Tensor& self) {
-    return self.is_sparse();
-  }
-}
-
 // Note [Multiple dispatch to sparse]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // In an ideal world, we would use direct support for multiple dispatch to

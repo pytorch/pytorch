@@ -280,7 +280,7 @@ class TestFuser(JitTestCase):
             c = s(inp1, inp2)
             c.sum().backward()
             graph = backward_graph(s)
-            self.assertAllFused(graph)
+            self.assertAllFused(graph, except_for={'aten::Float'})
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm

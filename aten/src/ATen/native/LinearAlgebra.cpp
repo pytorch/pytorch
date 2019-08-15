@@ -587,7 +587,7 @@ Tensor chain_matmul(TensorList matrices) {
     // the chain (zero-indexed)
     std::vector<int64_t> p;
     p.push_back(matrices[0].size(0));
-    for (int64_t i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
       p.push_back(matrices[i].size(1));
     }
 

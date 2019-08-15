@@ -7,12 +7,25 @@ r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
 
+import hypothesis
+import io
 import torch
+import torch.nn as nn
 import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, QConfig, default_observer, default_weight_observer, \
-    default_qat_qconfig
+    default_qat_qconfig, propagate_qconfig, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
+
+
+# Disable deadline testing if this version of hypthesis supports it, otherwise
+# just return the original function
+def no_deadline(fn):
+    try:
+        return hypothesis.settings(deadline=None)(fn)
+    except hypothesis.errors.InvalidArgument:
+        return fn
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -49,6 +62,12 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
             correct += (predicted == target).sum().item()
     return train_loss, correct, total
 
+def convert_dynamic(module):
+    convert(module, DEFAULT_DYNAMIC_MODULE_MAPPING)
+
+def prepare_dynamic(model, qconfig_dict=None):
+    propagate_qconfig(model, qconfig_dict)
+    return model
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
@@ -80,7 +99,8 @@ class QuantizationTestCase(TestCase):
             have observers in preperation for quantization
         """
         if hasattr(module, 'qconfig') and module.qconfig is not None and len(module._modules) == 0:
-            self.assertTrue(hasattr(module, 'observer'))
+            self.assertTrue(hasattr(module, 'observer'),
+                            'module: ' + str(type(module)) + ' do not have observer')
         for child in module.children():
             self.checkObservers(child)
 
@@ -104,9 +124,52 @@ class QuantizationTestCase(TestCase):
         self.assertEqual(type(mod), nnq.Linear)
         self.assertEqual(mod.bias.dtype, torch.qint32)
 
+    def checkDynamicQuantizedLinear(self, mod):
+        r"""Checks that mod has been swapped for an nnqd.Linear
+            module, the bias is float.
+        """
+        self.assertEqual(type(mod), nnqd.Linear)
+        self.assertEqual(mod.bias.dtype, torch.float)
+
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
 
+    # calib_data follows the same schema as calib_data for
+    # test_only_eval_fn, i.e. (input iterable, output iterable)
+    def checkScriptable(self, orig_mod, calib_data, check_save_load=False):
+        scripted = torch.jit.script(orig_mod)
+        self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
+
+        # Use first calib_data entry as trace input
+        #
+        # TODO: Trace checking is blocked on this issue:
+        # https://github.com/pytorch/pytorch/issues/23986
+        #
+        # Once that's resolved we can remove `check_trace=False`
+        traced = torch.jit.trace(orig_mod, calib_data[0][0], check_trace=False)
+        self._checkScriptable(orig_mod, traced, calib_data, check_save_load)
+
+    # Call this twice: once for a scripted module and once for a traced module
+    def _checkScriptable(self, orig_mod, script_mod, calib_data, check_save_load):
+        self._checkModuleCorrectnessAgainstOrig(orig_mod, script_mod, calib_data)
+
+        # Test save/load
+        buffer = io.BytesIO()
+        torch.jit.save(script_mod, buffer)
+
+        buffer.seek(0)
+        loaded_mod = torch.jit.load(buffer)
+
+        # Pending __get_state_ and __set_state__ support
+        # See tracking task https://github.com/pytorch/pytorch/issues/23984
+        if check_save_load:
+            self._checkModuleCorrectnessAgainstOrig(orig_mod, loaded_mod, calib_data)
+
+    def _checkModuleCorrectnessAgainstOrig(self, orig_mod, test_mod, calib_data):
+        for (inp, _) in calib_data:
+            ref_output = orig_mod(inp)
+            scripted_output = test_mod(inp)
+            self.assertEqual(scripted_output, ref_output)
 
 # Below are a series of neural net models to use in testing quantization
 class SingleLayerLinearModel(torch.nn.Module):
@@ -114,6 +177,16 @@ class SingleLayerLinearModel(torch.nn.Module):
         super(SingleLayerLinearModel, self).__init__()
         self.qconfig = default_qconfig
         self.fc1 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
+
+    def forward(self, x):
+        x = self.fc1(x)
+        return x
+
+class SingleLayerLinearDynamicModel(torch.nn.Module):
+    def __init__(self):
+        super(SingleLayerLinearDynamicModel, self).__init__()
+        self.qconfig = default_qconfig
+        self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.fc1(x)
@@ -316,30 +389,85 @@ class ManualConvLinearQATModel(torch.nn.Module):
         return self.dequant(x)
 
 
-class SubModForFusion(torch.nn.Module):
+class SubModelForFusion(nn.Module):
     def __init__(self):
-        super(SubModForFusion, self).__init__()
-        self.conv = torch.nn.Conv2d(20, 20, 1, bias=None)
-        self.bn = torch.nn.BatchNorm2d(20)
+        super(SubModelForFusion, self).__init__()
+        self.conv = nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)
+        self.bn = nn.BatchNorm2d(2).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.conv(x)
         x = self.bn(x)
         return x
 
-class ModForFusion(torch.nn.Module):
+
+class SubModelWithoutFusion(nn.Module):
     def __init__(self):
-        super(ModForFusion, self).__init__()
-        self.conv1 = torch.nn.Conv2d(10, 20, 5, bias=None)
-        self.bn1 = torch.nn.BatchNorm2d(20)
-        self.relu1 = torch.nn.ReLU(inplace=False)
-        self.sub1 = SubModForFusion()
-        self.sub2 = SubModForFusion()
+        super(SubModelWithoutFusion, self).__init__()
+        self.conv = nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)
+        self.relu = nn.ReLU(inplace=False).to(dtype=torch.float)
 
     def forward(self, x):
+        return self.relu(self.conv(x))
+
+class ModelForFusion(nn.Module):
+    def __init__(self, qconfig):
+        super(ModelForFusion, self).__init__()
+        self.conv1 = nn.Conv2d(3, 2, 5, bias=None).to(dtype=torch.float)
+        self.bn1 = nn.BatchNorm2d(2).to(dtype=torch.float)
+        self.relu1 = nn.ReLU(inplace=False).to(dtype=torch.float)
+        self.sub1 = SubModelForFusion()
+        self.sub2 = SubModelWithoutFusion()
+        self.fc = nn.Linear(72, 10).to(dtype=torch.float)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.qconfig = qconfig
+        # don't quantize sub2
+        self.sub2.qconfig = None
+        self.fc.qconfig = None
+
+    def forward(self, x):
+        x = self.quant(x)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu1(x)
         x = self.sub1(x)
+        x = self.dequant(x)
         x = self.sub2(x)
+        x = x.view(-1, 72).contiguous()
+        x = self.fc(x)
         return x
+
+
+class DummyObserver(torch.nn.Module):
+    def calculate_qparams(self):
+        return 1.0, 0
+
+    def forward(self, x):
+        return x
+
+
+class ModForWrapping(torch.nn.Module):
+    def __init__(self, quantized=False):
+        super(ModForWrapping, self).__init__()
+        self.qconfig = default_qconfig
+        if quantized:
+            self.mycat = nnq.QFunctional()
+            self.myadd = nnq.QFunctional()
+        else:
+            self.mycat = nnq.FloatFunctional()
+            self.myadd = nnq.FloatFunctional()
+            self.mycat.observer = DummyObserver()
+            self.myadd.observer = DummyObserver()
+
+    def forward(self, x):
+        y = self.mycat.cat([x, x, x])
+        z = self.myadd.add(y, y)
+        return z
+
+    @classmethod
+    def from_float(cls, mod):
+        new_mod = cls(quantized=True)
+        new_mod.mycat = new_mod.mycat.from_float(mod.mycat)
+        new_mod.myadd = new_mod.myadd.from_float(mod.myadd)
+        return new_mod
