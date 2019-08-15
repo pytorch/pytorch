@@ -82,7 +82,7 @@ encoder module generated using tracing.
 
 Example (calling a traced function in script):
 
-.. testcode
+.. testcode::
 
     import torch
 
@@ -101,7 +101,7 @@ preserved correctly.
 
 Example (calling a script function in a traced function):
 
-.. testcode
+.. testcode::
 
     import torch
 
@@ -124,7 +124,7 @@ a submodule using tracing that can be called from the methods of a script module
 
 Example (using a traced module):
 
-.. testcode
+.. testcode::
 
     import torch
     import torchvision
@@ -159,7 +159,7 @@ non-Python environment.
 
 The new usage looks like this:
 
-.. testcode
+.. testcode::
 
     import torch
     import torch.nn as nn
@@ -212,7 +212,7 @@ Functions
 ~~~~~~~~~
 Functions don't change much, they can be decorated with ``@torch.jit.ignore`` if needed.
 
-.. testcode
+.. testcode::
 
     # Same behavior as pre-PyTorch 1.2
     @torch.jit.script
@@ -242,7 +242,7 @@ The TorchScript compiler needs to know the types of `module attributes`_. Most t
 
 Old API:
 
-.. testcode
+.. testcode::
 
     from typing import Dict
     import torch
@@ -257,7 +257,7 @@ Old API:
 
 New API:
 
-.. testcode
+.. testcode::
 
     from typing import Dict
 
@@ -281,7 +281,7 @@ Python 2
 ^^^^^^^^
 If you are stuck on Python 2 and cannot use the class annotation syntax, you can use the ``__annotations__`` class member to directly apply type annotations.
 
-.. testcode
+.. testcode::
 
     from typing import Dict
 
@@ -299,7 +299,7 @@ The ``Final`` type constructor can be used to mark members as `constant`_. If me
 
 Old API:
 
-.. testcode
+.. testcode::
 
     class MyModule(torch.jit.ScriptModule):
         __constants__ = ['my_constant']
@@ -314,7 +314,7 @@ Old API:
 
 New API:
 
-.. testcode
+.. testcode::
 
     try:
         from typing_extensions import Final
@@ -345,7 +345,7 @@ Containers are assumed to have type ``Tensor`` and be non-optional (see
 tell the TorchScript compiler what the type should be. Python 3 style type hints are
 now supported.
 
-.. testcode
+.. testcode::
 
     import torch
     from typing import Dict, Optional
@@ -434,7 +434,7 @@ MyPy-style type annotations using the types listed above:
 Example:
 
 
-.. testcode
+.. testcode::
 
     @torch.jit.script
     def foo(x, tup):
@@ -444,7 +444,7 @@ Example:
 
     print(foo(3, (torch.rand(3), torch.rand(3))))
 
-.. testoutput
+.. testoutput::
 
     ...
 
@@ -452,7 +452,7 @@ Example:
   It is also possible to annotate types with Python 3 type hints from the
   ``typing`` module.
 
-  .. testcode
+  .. testcode::
 
     import torch
     from typing import Tuple
@@ -464,7 +464,7 @@ Example:
 
     print(foo(3, (torch.rand(3), torch.rand(3))))
 
-  .. testoutput
+  .. testoutput::
 
       ...
 
@@ -478,7 +478,7 @@ use `Python 3 type hints`_. If you are on Python 2, you can use ``torch.jit.anno
 
 Example (``torch.jit.annotate`` for Python 2):
 
-.. testcode
+.. testcode::
 
     import torch
     from typing import List, Tuple
@@ -517,7 +517,7 @@ Only local variables will be refined, an attribute like ``self.x`` will not (see
 
 Example:
 
-.. testcode
+.. testcode::
 
     import torch
     import torch.nn as nn
@@ -559,7 +559,7 @@ TorchScript Classes
 Python classes can be used in TorchScript if they are annotated with ``@torch.jit.script``,
 similar to how you would declare a TorchScript function:
 
-.. testcode
+.. testcode::
     :skipif: True  # TODO: fix the source file resolving so this can be tested
 
     @torch.jit.script
@@ -622,7 +622,7 @@ Named Tuples
 ^^^^^^^^^^^^
 Types produced by :func:`collections.namedtuple <collections.namedtuple>` can be used in TorchScript.
 
-.. testcode
+.. testcode::
 
     import torch
     import collections
@@ -752,7 +752,7 @@ Function Calls
 
     Calls to other script functions:
 
-    .. testcode
+    .. testcode::
 
         import torch
 
@@ -778,7 +778,7 @@ Method Calls
     Calling a submodule directly (e.g. ``self.resnet(input)``) is equivalent to
     calling its ``forward`` method (e.g. ``self.resnet.forward(input)``)
 
-    .. testcode
+    .. testcode::
 
         import torch
         import torch.nn as nn
@@ -905,7 +905,7 @@ For loops over tuples:
 
 For loops over constant ``torch.nn.ModuleList``
 
-      .. testcode
+      .. testcode::
 
           class SubModule(torch.jit.ScriptModule):
               def __init__(self):
@@ -1067,7 +1067,7 @@ Python-defined Constants
 
         Example:
 
-        .. testcode
+        .. testcode::
 
             class Foo(torch.jit.ScriptModule):
                 __constants__ = ['a']
@@ -1106,7 +1106,7 @@ model binary. Tensor attributes are semantically the same as buffers.
 
 Example:
 
-.. testcode
+.. testcode::
 
     class Foo(torch.jit.ScriptModule):
         def __init__(self, a_dict):
@@ -1237,39 +1237,45 @@ Interpreting Graphs
                 rv = rv + 1.0
           return rv
 
-        print(str(foo.graph).strip())
+        print(foo.graph)
+
+    .. testoutput::
+
+        ...
 
     ``.graph`` follows the same rules described in the `Inspecting Code`_ section
     with regard to ``forward`` method lookup.
 
-    The example script above produces the graph:
+    The example script above produces the graph::
 
-    .. testoutput::
-
-        graph(%len.1 : int):
-        %24 : int = prim::Constant[value=1]()
-        %17 : bool = prim::Constant[value=1]() # None:5:3
-        %12 : bool? = prim::Constant()
-        %10 : Device? = prim::Constant()
-        %6 : int? = prim::Constant()
-        %1 : int = prim::Constant[value=3]() # None:4:20
-        %2 : int = prim::Constant[value=4]() # None:4:23
-        %20 : int = prim::Constant[value=10]() # None:6:12
-        %23 : float = prim::Constant[value=1]() # None:7:19
-        %4 : int[] = prim::ListConstruct(%1, %2)
-        %rv.1 : Tensor = aten::zeros(%4, %6, %6, %10, %12) # None:4:8
-        %rv : Tensor = prim::Loop(%len.1, %17, %rv.1) # None:5:3
-            block0(%i.1 : int, %rv.14 : Tensor):
-            %21 : bool = aten::lt(%i.1, %20) # None:6:8
-            %rv.13 : Tensor = prim::If(%21) # None:6:5
-                block0():
-                %rv.3 : Tensor = aten::sub(%rv.14, %23, %24) # None:7:14
-                -> (%rv.3)
-                block1():
-                %rv.6 : Tensor = aten::add(%rv.14, %23, %24) # None:9:14
-                -> (%rv.6)
-            -> (%17, %rv.13)
-        return (%rv)
+        graph(%len : int) {
+          %15 : int = prim::Constant[value=1]()
+          %9 : bool = prim::Constant[value=1]()
+          %7 : Device = prim::Constant[value="cpu"]()
+          %6 : int = prim::Constant[value=0]()
+          %5 : int = prim::Constant[value=6]()
+          %1 : int = prim::Constant[value=3]()
+          %2 : int = prim::Constant[value=4]()
+          %11 : int = prim::Constant[value=10]()
+          %14 : float = prim::Constant[value=1]()
+          %4 : int[] = prim::ListConstruct(%1, %2)
+          %rv.1 : Tensor = aten::zeros(%4, %5, %6, %7)
+          %rv : Tensor = prim::Loop(%len, %9, %rv.1)
+            block0(%i : int, %13 : Tensor) {
+              %12 : bool = aten::lt(%i, %11)
+              %rv.4 : Tensor = prim::If(%12)
+                block0() {
+                  %rv.2 : Tensor = aten::sub(%13, %14, %15)
+                  -> (%rv.2)
+                }
+                block1() {
+                  %rv.3 : Tensor = aten::add(%13, %14, %15)
+                  -> (%rv.3)
+                }
+              -> (%9, %rv.4)
+            }
+          return (%rv);
+        }
 
 
     Take the instruction ``%rv.1 : Dynamic = aten::zeros(%3, %4, %5, %6)`` for
