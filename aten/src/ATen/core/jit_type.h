@@ -567,7 +567,6 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
   c10::optional<size_t> dim() const {
     return sizes().size();
   }
-  
 
   const VaryingShape& sizes() const {
     return sizes_;
@@ -648,7 +647,6 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
     copy->strides_ = VaryingShape(sizes().size());
     return copy;
   }
-  
 
   ProfiledTensorTypePtr merge(ProfiledTensorTypePtr other) {
     auto scalar_type = merge_primitive(scalarType(), other->scalarType());
@@ -1561,17 +1559,22 @@ struct CAFFE2_API ClassType : public NamedType {
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
-      return name()->qualifiedName() == user_rhs->name()->qualifiedName();
+      const auto& lhs_name = name().value();
+      const auto& rhs_name = user_rhs->name().value();
+
+      return lhs_name == rhs_name;
     }
     return false;
   }
 
   std::string str() const override {
-    return std::string("ClassType<") + name()->name() + ">";
+    const auto& n = name().value();
+    return std::string("ClassType<") + n.name() + ">";
   }
 
   std::string python_str() const override {
-    return name()->qualifiedName();
+    const auto& n = name().value();
+    return n.qualifiedName();
   }
 
   const c10::optional<c10::QualifiedName>& name() const override {
