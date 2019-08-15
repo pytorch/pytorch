@@ -149,8 +149,10 @@ class TestCppExtension(common.TestCase):
         # Compile an extension with given `flags`
         def _check_cuobjdump_output(expected_values, is_ptx=False):
             elf_or_ptx = '--list-ptx' if is_ptx else '--list-elf'
+            lib_ext = '.pyd' if IS_WINDOWS else '.so'
             # Note, .extension name may include _v1, _v2, so first find exact name
-            ext_filename = glob.glob(os.path.join(temp_dir, 'cudaext_archflag*'))[0]
+            ext_filename = glob.glob(os.path.join(temp_dir,
+                                                  'cudaext_archflag*' + lib_ext))[0]
             command = ['cuobjdump', elf_or_ptx, ext_filename]
             p = subprocess.Popen(command,
                                  stdout=subprocess.PIPE,
