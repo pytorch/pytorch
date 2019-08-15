@@ -222,7 +222,7 @@ class Conv2d(torch.nn.Module):
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight(qweight)
         if mod.bias is not None:
-            qconv.bias = torch.quantize_linear(mod.bias, bias_scale, 0, torch.qint32)
+            qconv.bias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
         else:
             qconv.bias = None
         qconv.scale = float(act_scale)
