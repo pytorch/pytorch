@@ -205,7 +205,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
   Tensor input_sorted;
   if (!consecutive) {
     input_sorted = at::empty(input_flat.sizes(), input_flat.options());
-    for (int64_t i = 0; i < indices.size(); ++i) {
+    for (size_t i = 0; i < indices.size(); ++i) {
       input_sorted[i] = input_flat[indices[i]];
     }
   } else {

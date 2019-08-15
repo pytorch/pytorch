@@ -35,6 +35,7 @@ class Observer(nn.Module):
         else:
             self.min_val = torch.min(torch.min(x), self.min_val)
             self.max_val = torch.max(torch.max(x), self.max_val)
+        return x
 
     def calculate_qparams(self):
         if self.dtype == torch.qint8:
@@ -61,7 +62,7 @@ class Observer(nn.Module):
                 zero_point = max(qmin, zero_point)
                 zero_point = min(qmax, zero_point)
 
-        return torch.tensor([scale, zero_point])
+        return torch.tensor([scale]), torch.tensor([zero_point])
 
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)

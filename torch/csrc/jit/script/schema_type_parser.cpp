@@ -12,7 +12,6 @@ using c10::BoolType;
 using c10::CompleteTensorType;
 using c10::DeviceObjType;
 using c10::DictType;
-using c10::DimensionedTensorType;
 using c10::FloatType;
 using c10::FutureType;
 using c10::GeneratorType;
@@ -149,7 +148,12 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       L.expect('*');
       num_dims++;
     });
-    ptr = DimensionedTensorType::create(dtype, at::DeviceType::CPU, num_dims);
+    ptr = at::ProfiledTensorType::create(
+        dtype,
+        at::DeviceType::CPU,
+        c10::VaryingShape(num_dims),
+        c10::VaryingShape(num_dims),
+        c10::nullopt);
   } else {
     std::vector<int64_t> dims;
     parseList(TK_NOTHING, ',', ')', [&] {

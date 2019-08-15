@@ -84,6 +84,7 @@ namespace jit {
   _(InsertBailOuts)                    \
   _(PeepholeOptimize)                  \
   _(RecordFunction)                    \
+  _(ThreadLocalDebugInfo)              \
   _(SubgraphMatching)                  \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
@@ -93,7 +94,9 @@ namespace jit {
   _(SaveExtraFilesHook)                \
   _(InsertConstant)                    \
   _(DCE)                               \
-  _(CustomFusionNestedBlocks)
+  _(CustomFusionNestedBlocks)          \
+  _(ImportTooNew)                      \
+  _(ClassDerive)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
