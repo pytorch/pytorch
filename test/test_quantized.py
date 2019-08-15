@@ -269,7 +269,7 @@ class TestQuantizedOps(TestCase):
         qC = _quantize(C, scale_C, zero_point_C)
         qC_hat = mul(qA, qB, scale=scale_C, zero_point=zero_point_C)
         np.testing.assert_equal(qC, qC_hat.int_repr(),
-                                "Quantized mulition failed.")
+                                "Quantized multiplication failed.")
         qC_out_hat = torch._empty_affine_quantized(qC.shape,
                                                    scale=scale_C,
                                                    zero_point=zero_point_C,
@@ -283,7 +283,7 @@ class TestQuantizedOps(TestCase):
         qCrelu = _quantize(Crelu, scale_C, zero_point_C)
         qCrelu_hat = mul_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
         np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
-                                "Quantized mulition with ReLU failed.")
+                                "Quantized multiplication with ReLU failed.")
         qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
                                                        scale=scale_C,
                                                        zero_point=zero_point_C,
