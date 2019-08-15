@@ -88,6 +88,7 @@ Example (calling a traced function in script):
 
     def foo(x, y):
         return 2 * x + y
+
     traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
 
     @torch.jit.script
@@ -400,6 +401,7 @@ net models. In particular, TorchScript supports:
    "``bool``", "A boolean value"
    "``int``", "A scalar integer"
    "``float``", "A scalar floating point number"
+   "``str``", "A string"
    "``List[T]``", "A list of which all members are type ``T``"
    "``Optional[T]``", "A value which is either None or type ``T``"
    "``Dict[K, V]``", "A dict with key type ``K`` and value type ``V``. Only ``str``, ``int``, and ``float`` are allowed as key types."
