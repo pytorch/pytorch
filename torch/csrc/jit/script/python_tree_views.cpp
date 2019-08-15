@@ -30,7 +30,7 @@ struct SourceRangeFactory {
       size_t leading_whitespace_chars)
       : source_(std::make_shared<Source>(
             std::move(text),
-            maybeConvertToString(filename),
+            maybeConvertToString(std::move(filename)),
             file_lineno)),
         leading_whitespace_chars_(leading_whitespace_chars) {}
 

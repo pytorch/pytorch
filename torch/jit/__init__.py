@@ -1137,8 +1137,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
                 @torch.jit.ignore
                 def python_only_fn(self, input):
-                    # This function won't be compiled, so any Python APIs can be
-                    # used
+                    # This function won't be compiled, so any
+                    # Python APIs can be used
                     import pdb
                     pdb.set_trace()
 

@@ -447,7 +447,7 @@ Example:
     print(foo(3, (torch.rand(3), torch.rand(3))))
 
 .. testoutput::
-    :hidden:
+    :hide:
 
     ...
 
@@ -468,9 +468,9 @@ Example:
     print(foo(3, (torch.rand(3), torch.rand(3))))
 
   .. testoutput::
-    :hidden:
+    :hide:
 
-      ...
+    ...
 
   In our examples, we use comment-based type hints to ensure Python 2
   compatibility as well.
@@ -642,7 +642,7 @@ Types produced by :func:`collections.namedtuple <collections.namedtuple>` can be
     print(total(p))
 
 .. testoutput::
-    :hidden:
+    :hide:
 
     ...
 
@@ -1245,7 +1245,7 @@ Interpreting Graphs
         print(foo.graph)
 
     .. testoutput::
-        :hidden:
+        :hide:
 
         ...
 
