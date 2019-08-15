@@ -34,7 +34,7 @@ bool IsCondCastRequired(Value* cond_val) {
       return *scalar_type != c10::kBool;
     }
   }
-  return !type->isSubclass(TypeKind::BoolType);
+  return !type->isSubtypeOf(BoolType::get());
 }
 
 void FixupONNXLoops(Block* block) {

@@ -64,10 +64,17 @@ TensorTypePtr TensorType::get() {
   static auto value = TensorType::create();
   return value;
 }
-AutogradZeroTensorTypePtr AutogradZeroTensorType::get() {
-  static auto value = AutogradZeroTensorType::create();
+
+ProfiledTensorTypePtr ProfiledTensorType::get() {
+  static auto value = ProfiledTensorType::create(
+      {},
+      {},
+      VaryingShape{c10::optional<size_t>()},
+      VaryingShape{c10::optional<size_t>()},
+      {});
   return value;
 }
+
 NumberTypePtr NumberType::get() {
   static auto value = NumberType::create();
   return value;
