@@ -44,14 +44,18 @@ __global__ void MaxPoolForward(const int nthreads, const scalar_t* bottom_data,
     accscalar_t maxval = at::numeric_limits<accscalar_t>::lower_bound(); // -Infinity
     int maxidx = hstart * in_stride_h + wstart * in_stride_w;
     bottom_data += (n * channels * height * width + c * in_stride_c);
-    for (int h = hstart; h < hend; h += dilation_h) {
-      for (int w = wstart; w < wend; w += dilation_w) {
-        scalar_t val = bottom_data[h * in_stride_h + w * in_stride_w];
+    int hstep_idx = dilation_h * in_stride_h;
+    int wstep_idx = dilation_w * in_stride_w;
+    for (int h = hstart, idx = maxidx; h < hend; h += dilation_h, idx += hstep_idx) {
+      int prev_idx = idx;
+      for (int w = wstart; w < wend; w += dilation_w, idx += wstep_idx) {
+        scalar_t val = bottom_data[idx];
         if ((ScalarConvert<scalar_t, accscalar_t>::to(val) > maxval) || THCNumerics<scalar_t>::isnan(val)) {
-          maxidx = h * in_stride_h + w * in_stride_w;
+          maxidx = idx;
           maxval = ScalarConvert<scalar_t, accscalar_t>::to(val);
         }
       }
+      idx = prev_idx;
     }
     top_data[index] = ScalarConvert<scalar_t, accscalar_t>::to(maxval);
     top_mask[index] = maxidx;
