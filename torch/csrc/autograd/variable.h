@@ -724,19 +724,16 @@ inline at::TensorImpl* Variable::get() const {
 
 /// This class is used to break reference cycles in AccumulateGrad::variable.
 struct TORCH_API WeakVariable final {
-  WeakVariable(const Variable& var) : self(var.getIntrusivePtr()) {}
+  WeakVariable(const Variable& var) : ptr(var.getIntrusivePtr()) {}
 
   Variable lock() {
-    return self._unsafe_get_target() ? Variable(self.lock()) : Variable();
+    return ptr._unsafe_get_target() ? Variable(ptr.lock()) : Variable();
   }
 
-  void reset() {
-    auto var = lock();
-    var.reset();
-  }
+  void reset() { ptr.reset(); }
 
  private:
-  c10::weak_intrusive_ptr<at::TensorImpl> self;
+  c10::weak_intrusive_ptr<at::TensorImpl> ptr;
 };
 
 }} // namespace torch::autograd
