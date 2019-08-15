@@ -102,5 +102,12 @@ TORCH_API void InsertQuantDequantNodesForParam(
     const std::string& param_name,
     const Fn& getQParamFunc,
     at::ScalarType t);
+
+TORCH_API void PrepareQuant(
+    const script::Module& module,
+    const std::string& method_name,
+    const script::Module& observer_module,
+    const script::Module& weight_observer_module);
+
 } // namespace jit
 } // namespace torch

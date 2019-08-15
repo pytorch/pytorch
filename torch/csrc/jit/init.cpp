@@ -157,6 +157,14 @@ void initJITBindings(PyObject* module) {
             new_node->destroy();
           })
       .def(
+          "_jit_pass_prepare_quant",
+          [](const script::Module& module,
+             const std::string& method_name,
+             const script::Module& observer_module,
+             const script::Module& weight_observer_module) {
+            PrepareQuant(module, method_name, observer_module, weight_observer_module);
+          })
+      .def(
           "_jit_pass_insert_observers",
           [](const StrongFunctionPtr& function_var,
              py::function pyObserverFunction) {
