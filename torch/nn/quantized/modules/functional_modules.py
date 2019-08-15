@@ -23,6 +23,8 @@ class FloatFunctional(torch.nn.Module):
     Valid operation names:
         - add
         - cat
+
+    TODO: The overloads will be landed ONLY after #24259 lands
     """
     def __init__(self):
         super(FloatFunctional, self).__init__()
@@ -32,7 +34,8 @@ class FloatFunctional(torch.nn.Module):
         raise RuntimeError("FloatFunctional is not intended to use the " +
                            "'forward'. Please use the underlying operation")
 
-    r"""Operation equivalent to ``torch.add``"""
+    r"""Operation equivalent to ``torch.add(Tensor, Tensor)``"""
+    @torch.jit._overload_method
     def add(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
         r = torch.add(x, y)
@@ -40,9 +43,28 @@ class FloatFunctional(torch.nn.Module):
         self.observer(r)
         return r
 
-    r"""Operation equivalent to ``torch.mul``"""
+    r"""Operation equivalent to ``torch.add(Tensor, float)``"""
+    @torch.jit._overload_method  # noqa: F811
+    def add(self, x, y):
+        # type: (Tensor, float) -> Tensor
+        r = torch.add(x, y)
+        # TODO: Fix for QAT.
+        self.observer(r)
+        return r
+
+    r"""Operation equivalent to ``torch.mul(Tensor, Tensor)``"""
+    @torch.jit._overload_method
     def mul(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
+        r = torch.mul(x, y)
+        # TODO: Fix for QAT.
+        self.observer(r)
+        return r
+
+    r"""Operation equivalent to ``torch.mul(Tensor, float)``"""
+    @torch.jit._overload_method  # noqa: F811
+    def mul(self, x, y):
+        # type: (Tensor, float) -> Tensor
         r = torch.mul(x, y)
         # TODO: Fix for QAT.
         self.observer(r)
@@ -77,7 +99,6 @@ class QFunctional(torch.nn.Module):
     Valid operation names:
         - add
         - cat
-
     """
     def __init__(self):
         super(QFunctional, self).__init__()
@@ -87,12 +108,30 @@ class QFunctional(torch.nn.Module):
                            "'forward'. Please use the underlying operation")
 
     r"""Operation equivalent to ``torch.ops.quantized.add``"""
+    @torch.jit._overload_method
     def add(self, x, y):
+        # type: (Tensor, Tensor) -> Tensor
         return ops.quantized.add(x, y, scale=self.scale,
                                  zero_point=self.zero_point)
 
-    r"""Operation equivalent to ``torch.ops.quantized.mul``"""
+    r"""Operation equivalent to ``torch.ops.quantized.add(Tensor, float)``"""
+    @torch.jit._overload_method  # noqa: F811
+    def add(self, x, y):
+        # type: (Tensor, float) -> Tensor
+        return ops.quantized.add(x, y, scale=self.scale,
+                                 zero_point=self.zero_point)
+
+    r"""Operation equivalent to ``torch.ops.quantized.mul(Tensor, Tensor)``"""
+    @torch.jit._overload_method
     def mul(self, x, y):
+        # type: (Tensor, Tensor) -> Tensor
+        return ops.quantized.add(x, y, scale=self.scale,
+                                 zero_point=self.zero_point)
+
+    r"""Operation equivalent to ``torch.ops.quantized.mul(Tensor, float)``"""
+    @torch.jit._overload_method  # noqa: F811
+    def mul(self, x, y):
+        # type: (Tensor, float) -> Tensor
         return ops.quantized.add(x, y, scale=self.scale,
                                  zero_point=self.zero_point)
 
