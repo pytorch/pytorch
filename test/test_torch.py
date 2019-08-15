@@ -12940,7 +12940,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             else:
                 with self.assertRaises(AssertionError):
                     self.unary_check_input_output_mem_overlap(self, data, sz,
-                                                               op)
+                                                              op)
 
     @torchtest.for_all_device_types()
     def test_unary_inplace_op_mem_overlap(self, device):
