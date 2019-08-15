@@ -46,9 +46,6 @@ static void report_not_a_subsequence_error(
   }
 }
 
-static std::vector<Dimname> default_names(size_t len) {
-  return { len, Dimname::wildcard() };
-}
 
 // Let tensor `t` have size `tensor_sizes` and `tensor_names`.
 // This helper function computes the resulting size of `t` after aligning it
@@ -110,7 +107,7 @@ static Tensor align(const Tensor& tensor, DimnameList names, bool is_aligning_tw
     auto tensor_sizes = tensor.sizes();
     expanded_sizes = aligned_size(
         tensor_sizes,
-        default_names(tensor_sizes.size()),
+        FIXME_default_names(tensor_sizes.size()),
         names,
         is_aligning_two_tensors);
   }
@@ -123,7 +120,7 @@ Tensor align_to(const Tensor& tensor, DimnameList names) {
   TORCH_CHECK(
       names.size() >= tensor.dim(),
       "Cannot align tensor with dims ",
-      tensor.names() ? tensor.names().value() : default_names(tensor.dim()),
+      tensor.names() ? tensor.names().value() : FIXME_default_names(tensor.dim()),
       " to a shorter list of dims ", names, ".");
   return align(tensor, names, /*aligning_two_tensors=*/false);
 }
@@ -147,7 +144,7 @@ std::vector<Tensor> align_tensors(TensorList tensors) {
   if (longest_names.has_value()) {
     return align_tensors_to(tensors, *longest_names);
   } else {
-    auto align_names = default_names(longest_dim->dim());
+    auto align_names = FIXME_default_names(longest_dim->dim());
     return align_tensors_to(tensors, align_names);
   }
 }

@@ -151,5 +151,35 @@ Tensor quantized_clone(const Tensor& self) {
   return dst;
 }
 
+bool quantized_equal(const Tensor& self, const Tensor& other) {
+  if (!other.is_quantized()) {
+    return false;
+  }
+
+  // Delegate to virtual equalTo method. This will ensure different concrete
+  // Quantizers can have specific logic for comparison
+  auto self_quantizer = get_qtensorimpl(self)->quantizer();
+  auto other_quantizer = get_qtensorimpl(other)->quantizer();
+  if (!self_quantizer->equalTo(other_quantizer)) {
+    return false;
+  }
+
+  // Sizes and element types must be the same
+  if (self.sizes() != other.sizes()) {
+    return false;
+  }
+  if (self.element_size() != other.element_size()) {
+    return false;
+  }
+
+  // Data must be the same
+  auto self_contig = self.contiguous();
+  auto other_contig = other.contiguous();
+
+  void* self_data = self_contig.data_ptr();
+  void* other_data = other_contig.data_ptr();
+  return 0 == memcmp(self_data, other_data, self.numel() * self.element_size());
+}
+
 } // namespace native
 } // namespace at
