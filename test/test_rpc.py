@@ -194,9 +194,9 @@ class RpcTest(MultiProcessTestCase):
         n = self.rank + 1
         dst_rank = n % self.world_size
         fut1 = dist.rpc('worker{}'.format(dst_rank),
-                         my_class.my_static_method,
-                         args=(n + 10,),
-                         async_call=True)
+                        my_class.my_static_method,
+                        args=(n + 10,),
+                        async_call=True)
         fut2 = dist.rpc('worker{}'.format(dst_rank),
                         min,
                         args=(n, n + 1, n + 2),
