@@ -7,7 +7,7 @@
 
 TH_API void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor);
 
-#if !defined(TH_REAL_IS_HALF) && !defined(TH_REAL_IS_BFLOAT16)
+#if !defined(TH_REAL_IS_HALF)
 
 TH_API void THTensor_(ltValue)(THBoolTensor *r_, THTensor* t, scalar_t value);
 TH_API void THTensor_(leValue)(THBoolTensor *r_, THTensor* t, scalar_t value);
@@ -50,6 +50,8 @@ TH_API void THTensor_(gtTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb
 TH_API void THTensor_(geTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(neTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(eqTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
+
+#if !defined(TH_REAL_IS_BFLOAT16)
 
 TH_API accreal THTensor_(sumall)(THTensor *t);
 TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
@@ -199,7 +201,7 @@ TH_API accreal THTensor_(varall)(THTensor *self, int biased);
 TH_API accreal THTensor_(stdall)(THTensor *self, int biased);
 TH_API accreal THTensor_(normall)(THTensor *t, scalar_t value);
 #endif
-
+#endif
 #endif
 #endif
 #endif

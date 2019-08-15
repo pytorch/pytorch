@@ -1603,7 +1603,7 @@ class ExternalTensorFunctionsBase {
       std::vector<float>* scale,
       std::vector<float>* offset,
       uint32_t* axis) = 0;
-  virtual TypeIdentifier GetTypeMetaId(const string& name) = 0;
+  virtual TypeIdentifier GetTypeMetaId() = 0;
   virtual TypeMeta GetExternalTensorType(const void* c) = 0;
   virtual vector<int64_t> GetExternalTensorInfo(
       const void* c,

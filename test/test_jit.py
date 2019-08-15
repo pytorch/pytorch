@@ -1398,7 +1398,6 @@ graph(%Ra, %Rb):
         with warnings.catch_warnings(record=True) as warns:
             traced_fn = torch.jit.trace(fn, torch.tensor([1]))
         warns = [str(w.message) for w in warns]
-        self.assertEqual(len(warns), 7)
         self.assertIn('a Python integer', warns[0])
         self.assertIn('a Python boolean', warns[1])
         self.assertIn('a Python index', warns[2])
@@ -3406,7 +3405,7 @@ def foo(x):
         bytesio = io.BytesIO(buffer)
         scripted = torch.jit.load(bytesio)
 
-        fc = FileCheck().check('code/__torch__.py:6:12')
+        fc = FileCheck().check(':6:12')
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -3487,23 +3486,26 @@ def foo(xyz):
 
         ft3 = FooTest3()
 
-        def debug_records_from_mod(mod):
+        def debug_records_from_mod(self, mod):
             buffer = io.BytesIO()
             torch.jit.save(ft3, buffer)
             buffer.seek(0)
             archive = zipfile.ZipFile(buffer)
-            debug_file = archive.open('archive/code/__torch__.py.debug_pkl')
+            files = filter(lambda x: x.startswith('archive/code/'), archive.namelist())
+            debug_files = list(filter(lambda f: f.endswith('.debug_pkl'), files))
+            self.assertEqual(len(debug_files), 1)
+            debug_file = archive.open(debug_files[0])
             return pickle.load(debug_file), buffer
 
-        records1, buffer = debug_records_from_mod(ft3)
+        records1, buffer = debug_records_from_mod(self, ft3)
 
         buffer.seek(0)
         loaded = torch.jit.load(buffer)
-        records2, buffer = debug_records_from_mod(loaded)
+        records2, buffer = debug_records_from_mod(self, loaded)
 
         buffer.seek(0)
         loaded2 = torch.jit.load(buffer)
-        records3, _ = debug_records_from_mod(loaded2)
+        records3, _ = debug_records_from_mod(self, loaded2)
 
         self.assertEqual(records1, records2)
         self.assertEqual(records2, records3)
@@ -7469,6 +7471,74 @@ a")
         # Test load paths
         self.assertTrue(imported.unpack_called.item())
         torch.testing.assert_allclose(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
+
+    def test_trace_export_fns(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.a = 3
+
+            @torch.jit.export
+            def __getstate__(self):
+                return (3,)
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self.a = state[0]
+
+            def forward(self, x):
+                return x + self.a
+
+        f = Foo()
+
+        traced = torch.jit.trace(f, (torch.rand(3, 4),))
+        expected_names = ['__getstate__', '__setstate__']
+
+        def check(mod):
+            self.assertTrue(all(name in mod._c._method_names() for name in expected_names))
+
+        check(traced)
+
+        imported = self.getExportImportCopy(traced)
+        check(imported)
+
+    def test_trace_export_fns_recursive(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.a = 3
+
+            @torch.jit.export
+            def __getstate__(self):
+                return (3,)
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self.a = state[0]
+
+            def forward(self, x):
+                return x + self.a
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self):
+                super(Wrapper, self).__init__()
+                self.foo = Foo()
+
+            def forward(self, x):
+                return self.foo(x)
+
+        f = Wrapper()
+
+        traced = torch.jit.trace(f, (torch.rand(3, 4),))
+        expected_names = ['__getstate__', '__setstate__']
+
+        def check(mod):
+            self.assertTrue(all(name in mod._c._method_names() for name in expected_names))
+
+        check(traced.foo)
+
+        imported = self.getExportImportCopy(traced)
+        check(imported.foo)
 
     def test_pack_unpack_nested(self):
         class SubSubMod(torch.jit.ScriptModule):
@@ -17054,16 +17124,13 @@ class TestList(JitTestCase):
 
         self.assertEqual(comp([1, 2, 3], [4, 5]), [3, 6, 9, 6, 7])
 
-    def test_comprehensions_wrong_expr_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
-            @torch.jit.script
-            def comp(l):
-                # type: (List[int]) -> List[float]
+    def test_comprehension_out_type_not_in_type(self):
+        def list_cast():
+            # type: () -> int
+            li = [int(i) for i in [torch.tensor(0), torch.tensor(1), torch.tensor(2)]]
+            return li[0] + li[1] + li[2]
 
-                n = [float(x) for x in l]
-                return n
-
-            comp([1, 2, 3])
+        self.checkScript(list_cast, ())
 
     def test_mutable_list_append_2(self):
         def test_append_2():
