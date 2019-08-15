@@ -2389,7 +2389,7 @@ class _TestTorchMixin(torchtest):
     def test_rpow(self):
         self._test_rpow(self, lambda x: x)
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_pow(self, device):
         if not TEST_NUMPY:
@@ -2416,7 +2416,7 @@ class _TestTorchMixin(torchtest):
         # if not IS_WINDOWS:
         _test_integral_pow(torch.int32, (-10, 10), device)
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_tensor_pow_neg_ints(self, device):
         ints = [torch.iinfo(torch.int32).min,
@@ -2481,14 +2481,14 @@ class _TestTorchMixin(torchtest):
             self.assertEqual(expected, actual.cpu().numpy())
             self.assertEqual(expected, actual2.cpu().numpy())
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_tensor_pow_non_neg_ints(self, device):
         ints = [-3, -2, -1, 0, 1, 2, 3]
         non_neg_ints = [0, 1, 2, 3]
         self._test_int32_tensor_pow_ints32(ints, non_neg_ints, device)
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_extreme_int_tensor_pow_0_and_1(self, device):
         extreme_ints = [torch.iinfo(torch.int32).min,
@@ -2496,7 +2496,7 @@ class _TestTorchMixin(torchtest):
         non_neg_ints = [0, 1]
         self._test_int32_tensor_pow_ints32(extreme_ints, non_neg_ints, device)
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_non_neg_int_tensor_pow_non_neg_floats(self, device):
         ints = [0, 1, 23, 4567]
@@ -2548,7 +2548,7 @@ class _TestTorchMixin(torchtest):
                 self.assertEqual(expected, actual.cpu().numpy())
                 self.assertEqual(expected, actual2.cpu().numpy())
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_float_scalar_pow_float_tensor(self, device):
         def assertEqual(x, y):
@@ -2568,7 +2568,7 @@ class _TestTorchMixin(torchtest):
             assertEqual(expected, actual.cpu().numpy())
             assertEqual(expected, actual2.cpu().numpy())
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_tensor_pow_tensor(self, dev):
         def assertEqual(x, y):
