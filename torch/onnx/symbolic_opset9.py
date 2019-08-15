@@ -1901,7 +1901,11 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
 
+
 def remainder(g, input, other):
-    div = g.op("Floor", g.op("Div", input, other))
+    div = g.op("Div", input, other)
+    if input.type().scalarType() != 'Int':
+        div = g.op("Floor", div)
     quo = g.op("Mul", div, other)
-    return g.op("Sub", input, quo)
+    dtype = input.type().scalarType()
+    return g.op("Cast", g.op("Sub", input, quo), to_i=sym_help.cast_pytorch_to_onnx[dtype])

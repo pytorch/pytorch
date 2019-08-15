@@ -761,8 +761,8 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input, other):
                 return torch.remainder(input, other)
 
-        x = torch.randn(2, 3, requires_grad=True)
-        y = torch.randn(1)[0]
+        x = torch.randint(10, (2, 3)).to(dtype=torch.int)
+        y = torch.tensor(1).to(dtype=torch.int)
         self.run_test(RemainderModel(), (x, y))
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
