@@ -1865,20 +1865,22 @@ class _TestTorchMixin(torchtest):
 
     @staticmethod
     def _test_logical_not(self, device):
-        for dtype in (torch.bool,):  # will add more dtypes in the future
-            expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
+        for dtype in torch.testing.get_all_dtypes():
             a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
+            if dtype == torch.bfloat16:
+                self.assertRaises(RuntimeError, lambda: a.logical_not())
+                continue
+            expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
             # new tensor
-            self.assertEqual(expected_res, a.logical_not())
+            self.assertEqual(expected_res.bool(), a.logical_not())
             # out
-            b = torch.empty(0, dtype=bool, device=device)
-            torch.logical_not(a, out=b)
-            self.assertEqual(expected_res, b)
-            # out is not bool
-            b = torch.empty(0, dtype=torch.uint8, device=device)
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"The output tensor of logical_not must be a bool tensor\."):
+            for out_dtype in torch.testing.get_all_dtypes():
+                b = torch.empty(0, dtype=out_dtype, device=device)
+                if out_dtype == torch.bfloat16:
+                    self.assertRaises(RuntimeError, lambda: torch.logical_not(a, out=b))
+                    continue
                 torch.logical_not(a, out=b)
+                self.assertEqual(expected_res.bool(), b.bool())
             # in-place
             a.logical_not_()
             self.assertEqual(expected_res, a)
