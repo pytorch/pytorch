@@ -1440,7 +1440,8 @@ if _enabled:
         of PyTorch's built-in Tensor operations. This difference allows your
         ``ScriptModule``\s code to run without the need for a Python interpreter.
 
-        ``ScriptModule``\s should not be created manually, instead use either :func:`tracing <torch.jit.trace>` or :func:`scripting <torch.jit.script>`.
+        ``ScriptModule``\s should not be created manually, instead use
+        either :func:`tracing <torch.jit.trace>` or :func:`scripting <torch.jit.script>`.
         """
         def __init__(self, optimize=None, _qualified_name=None, _compilation_unit=None, _cpp_module=None):
             if _qualified_name is None:
