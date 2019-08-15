@@ -191,6 +191,7 @@ Pointwise Ops
 .. autofunction:: asin
 .. autofunction:: atan
 .. autofunction:: atan2
+.. autofunction:: bitwise_not
 .. autofunction:: ceil
 .. autofunction:: clamp
 .. autofunction:: cos
@@ -324,7 +325,6 @@ BLAS and LAPACK Operations
 .. autofunction:: addr
 .. autofunction:: baddbmm
 .. autofunction:: bmm
-.. autofunction:: bitwise_not
 .. autofunction:: chain_matmul
 .. autofunction:: cholesky
 .. autofunction:: cholesky_inverse

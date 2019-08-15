@@ -2582,8 +2582,6 @@ Example::
     >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
     >>> torch.logical_and(a, b)
     tensor([ False, False,  True, False])
-    >>> torch.logical_and(a.double(), b.double())
-    tensor([ False, False,  True, False])
     >>> torch.logical_and(a.double(), b)
     tensor([ False, False,  True, False])
     >>> torch.logical_and(a, b, out=torch.empty(4, dtype=torch.int8))
