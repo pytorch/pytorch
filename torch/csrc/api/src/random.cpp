@@ -27,7 +27,7 @@ torch::Tensor _get_rng_state(torch::Device device) {
     TORCH_INTERNAL_ASSERT(false, "libtorch not compiled with CUDA");
 #endif
   }
-  return std::move(tensor);
+  return tensor;
 }
 
 void _set_rng_state(const torch::Tensor & new_state, torch::Device device) {
