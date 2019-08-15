@@ -106,10 +106,10 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
 static inline void sub_check(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.scalar_type() != kBool || other.scalar_type() != kBool,
               "Subtraction, the `-` operator, with two bool tensors is not supported. "
-              "Use the `^` operator instead.")
+              "Use the `^` or `logical_xor()` operator instead.")
   TORCH_CHECK(self.scalar_type() != kBool && other.scalar_type() != kBool,
               "Subtraction, the `-` operator, with a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `bitwise_not()` operator instead.");
+              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }
 
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {

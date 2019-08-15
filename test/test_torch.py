@@ -1744,15 +1744,15 @@ class _TestTorchMixin(torchtest):
             m2 = torch.tensor([True, True, False, False, False, True], dtype=torch.bool, device=device)
             self.assertRaisesRegex(RuntimeError,
                                    r"Subtraction, the `\-` operator, with two bool tensors is not supported. "
-                                   r"Use the `\^` operator instead.",
+                                   r"Use the `\^` or `logical_xor\(\)` operator instead.",
                                    lambda: m1 - m2)
             self.assertRaisesRegex(RuntimeError,
                                    r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
-                                   r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                                   r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
                                    lambda: 1 - m1)
             self.assertRaisesRegex(RuntimeError,
                                    r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
-                                   r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                                   r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
                                    lambda: m2 - 1)
 
     def test_sub(self):
@@ -1820,7 +1820,7 @@ class _TestTorchMixin(torchtest):
             self.assertRaisesRegex(
                 RuntimeError,
                 r"Negation, the `\-` operator, on a bool tensor is not supported. "
-                r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
                 lambda: - cast(torch.tensor([False, True])))
 
     def test_neg(self):
