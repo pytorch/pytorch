@@ -1,10 +1,12 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
-from torch.nn.modules.module import Module
-from torch.nn.modules.linear import Linear as NNLinear
 
 from torch._jit_internal import Optional, Tuple
+import torch.nn as nn
+import torch.nn._intrinsic as nni
+from torch.nn.modules import Module
+
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor
@@ -93,6 +95,7 @@ class Linear(torch.nn.Module):
         >>> print(output.size())
         torch.Size([128, 30])
     """
+    _FLOAT_MODULE = nn.Linear
 
     __annotations__ = {'bias' : Optional[torch.Tensor]}
 
@@ -182,8 +185,8 @@ class Linear(torch.nn.Module):
     def set_weight(self, w):
         self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
 
-    @staticmethod
-    def from_float(mod):
+    @classmethod
+    def from_float(cls, mod):
         r"""Create a quantized module from a float module or qparams_dict
 
         Args:
@@ -193,13 +196,21 @@ class Linear(torch.nn.Module):
         if hasattr(mod, 'weight_fake_quant'):
             # assert type(mod) == QATLinear, 'training mode nnq.Linear.from_float only works for nn.qat.Linear'
             weight_observer = mod.weight_fake_quant
+            activation_observer = mod.observer
         else:
-            assert type(mod) == NNLinear, 'nnq.Linear.from_float only works for nn.Linear'
+            assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+                cls._FLOAT_MODULE.__name__
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
+            # workaround for sequential, ConvReLU2d should probably
+            # inherit from Conv2d instead
+            if type(mod) == nni.LinearReLU:
+                activation_observer = mod[1].observer
+                mod = mod[0]
+            else:
+                activation_observer = mod.observer
             weight_observer = mod.qconfig.weight()
             weight_observer(mod.weight)
-        activation_observer = mod.observer
         act_scale, act_zp = activation_observer.calculate_qparams()
         wt_scale, wt_zp = weight_observer.calculate_qparams()
         bias_scale = (wt_scale * act_scale).float()
@@ -208,7 +219,7 @@ class Linear(torch.nn.Module):
             qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
         else:
             qbias = None
-        qlinear = Linear(mod.in_features, mod.out_features)
+        qlinear = cls(mod.in_features, mod.out_features)
         qlinear.set_weight(qweight)
         qlinear.bias = qbias
         qlinear.scale = float(act_scale)
