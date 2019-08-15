@@ -638,15 +638,29 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "sizes",
-          [](Type& t) { return t.expect<CompleteTensorType>()->sizes(); })
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<ProfiledTensorType>()) {
+              if (auto cs = ptt->sizes().concrete_sizes()) {
+                return py::cast(*cs);
+              }
+            }
+            return py::none();
+          })
       .def(
-          "strides",
-          [](Type& t) { return t.expect<CompleteTensorType>()->strides(); })
+          "sizes",
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<ProfiledTensorType>()) {
+              if (auto cs = ptt->strides().concrete_sizes()) {
+                return py::cast(*cs);
+              }
+            }
+            return py::none();
+          })
       .def(
           "contiguous",
           [](Type& t) {
             return std::static_pointer_cast<Type>(
-                t.expect<CompleteTensorType>()->contiguous());
+                t.expect<ProfiledTensorType>()->contiguous());
           })
       .def(
           "scalarType",
