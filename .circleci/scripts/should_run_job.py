@@ -43,6 +43,7 @@ default_set = [
     'pytorch-macos-10.13-cuda9.2-cudnn7-py3',
     # PyTorch Android
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c',
+    'wip_pytorch_android_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build',
 
     # XLA
     'pytorch-xla-linux-trusty-py3.6-gcc5.4',
