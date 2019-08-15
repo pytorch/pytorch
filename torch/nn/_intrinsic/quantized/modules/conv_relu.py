@@ -24,13 +24,10 @@ class ConvReLU2d(nnq.Conv2d):
                                          stride=stride, padding=padding, dilation=dilation,
                                          groups=groups, bias=bias, padding_mode=padding_mode)
 
-    # TODO(jerryzh or james): change to use functions
-    @property
     def weight(self):
         return torch.ops.quantized.fbgemm_conv_unpack(self._packed_weight).permute([0, 3, 1, 2])
 
-    @weight.setter
-    def weight(self, w):
+    def set_weight(self, w):
         self._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(w.permute([0, 2, 3, 1]),
                                                                       self.stride,
                                                                       self.padding,
