@@ -41,7 +41,7 @@ class Linear(nnq.Linear):
         # deserialization modules
         if bias_:
             del self.bias
-            self.bias = torch.Tensor(out_features)
+            self.bias = torch.Tensor(out_features).float()
         else:
             self.bias = None
 
