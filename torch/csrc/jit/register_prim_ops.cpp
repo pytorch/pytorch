@@ -49,7 +49,7 @@ namespace jit {
 
 namespace {
 
-template <class T>
+template<class T>
 c10::List<T> make_result_list() {
   return c10::List<T>();
 }
@@ -643,21 +643,6 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
-     Operator(
-         "aten::backward(Tensor(a!) self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
-         [](Stack& stack) {
-           bool create_graph = pop(stack).toBool();
-           auto retain_graph = pop(stack).toOptional<bool>();
-           IValue gradient_ivalue = pop(stack);
-           at::Tensor gradient = gradient_ivalue.isNone()
-               ? at::Tensor()
-               : gradient_ivalue.toTensor();
-           at::Tensor self = pop(stack).toTensor();
-           bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
-           self.backward(gradient, keep_graph, create_graph);
-           return 0;
-         },
-         aliasAnalysisSpecialCase()),
      Operator(
          "prim::AutogradZero() -> Tensor",
          [](const Node* node) {

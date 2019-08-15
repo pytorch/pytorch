@@ -57,7 +57,7 @@ void checkZeroPoint(std::string fn_name, int64_t zero_point) {
 
 template <typename T>
 void checkZeroPoints(std::string fn_name, std::vector<int64_t> zero_points) {
-  for (int i = 0; i < zero_points.size(); ++i) {
+  for (size_t i = 0; i < zero_points.size(); ++i) {
     TORCH_CHECK(zero_points[i] <= std::numeric_limits<T>::max(),
                 fn_name,
                 "zero_point",
@@ -246,9 +246,9 @@ Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
   int64_t batches = size_to_dim_(channel_axis, rtensor.sizes());
   int64_t elements_per_channel = size_from_dim_(channel_axis + 1, rtensor.sizes());
   int64_t channel = rtensor.size(channel_axis);
-  TORCH_CHECK(channel == scales.size(),
+  TORCH_CHECK(channel == int64_t(scales.size()),
               "length of scales must equal to channel");
-  TORCH_CHECK(channel == zero_points.size(),
+  TORCH_CHECK(channel == int64_t(zero_points.size()),
               "length of zero_points must equal to channel");
   const float* rdata = rtensor.data<float>();
   auto qdata = qtensor.data<T>();
@@ -279,9 +279,9 @@ Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
   int64_t batches = size_to_dim_(channel_axis, rtensor.sizes());
   int64_t elements_per_channel = size_from_dim_(channel_axis + 1, rtensor.sizes());
   int64_t channel = rtensor.size(channel_axis);
-  TORCH_CHECK(channel == scales.size(),
+  TORCH_CHECK(channel == int64_t(scales.size()),
               "length of scales must equal to channel");
-  TORCH_CHECK(channel == zero_points.size(),
+  TORCH_CHECK(channel == int64_t(zero_points.size()),
               "length of zero_points must equal to channel");
   const auto* qd = qtensor.data<T>();
   float* rd = rtensor.data<float>();
