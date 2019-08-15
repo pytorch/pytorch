@@ -70,7 +70,7 @@ static void bitwise_not_kernel(TensorIterator& iter) {
             return !a;
           });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_cpu", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_not_cpu", [&]() {
       cpu_kernel(
           iter,
           [](scalar_t a) -> scalar_t {
@@ -87,6 +87,11 @@ static void frac_kernel(TensorIterator& iter) {
         [=](scalar_t a) -> scalar_t { return a - std::trunc(a); },
         [=](Vec256<scalar_t> a) { return a.frac(); });
   });
+}
+
+
+static void logical_not_kernel(TensorIterator& iter) {
+  cpu_kernel(iter, [](bool a) -> bool { return !a; });
 }
 
 static void reciprocal_kernel(TensorIterator& iter) {
@@ -233,6 +238,7 @@ REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel)
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
+REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);

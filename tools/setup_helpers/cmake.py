@@ -11,7 +11,7 @@ import distutils
 import distutils.sysconfig
 from distutils.version import LooseVersion
 
-from . import escape_path, which
+from . import which
 from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag)
 from .cuda import USE_CUDA
 from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
@@ -225,6 +225,7 @@ class CMake:
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
+             'CUDA_NVCC_EXECUTABLE',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'INSTALL_TEST',
              'MKL_THREADING',
@@ -278,12 +279,11 @@ class CMake:
         build_options.update(cmake__options)
 
         CMake.defines(args,
-                      PYTHON_EXECUTABLE=escape_path(sys.executable),
-                      PYTHON_LIBRARY=escape_path(cmake_python_library),
-                      PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
+                      PYTHON_EXECUTABLE=sys.executable,
+                      PYTHON_LIBRARY=cmake_python_library,
+                      PYTHON_INCLUDE_DIR=distutils.sysconfig.get_python_inc(),
                       TORCH_BUILD_VERSION=version,
-                      NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
-                      CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
+                      NUMPY_INCLUDE_DIR=NUMPY_INCLUDE_DIR,
                       **build_options)
 
         if USE_GLOO_IBVERBS:
