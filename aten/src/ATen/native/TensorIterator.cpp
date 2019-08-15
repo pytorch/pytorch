@@ -619,20 +619,16 @@ void TensorIterator::mark_outputs() {
 }
 
 void TensorIterator::check_mem_overlaps() {
-  if (check_mem_overlap_) {
-    for (int i = 0; i < ntensors(); i++) {
-      if (i < num_outputs_) {
-        const auto& output = operands_[i].tensor;
-        if (!output.defined()) continue;
-        assert_no_internal_overlap(output);
-      } else {
-        const auto& input = operands_[i].tensor;
-        for (int j = 0; j < num_outputs_; j++) {
-          const auto& output = operands_[j].tensor;
-          if (!output.defined()) continue;
-          assert_no_partial_overlap(output, input);
-        }
-      }
+  if (!check_mem_overlap_) {
+    return;
+  }
+  for (int i = 0; i < num_outputs_; i++) {
+    const auto& output = operands_[i].tensor;
+    if (!output.defined()) continue;
+    assert_no_internal_overlap(output);
+    for (int j = num_outputs_; j < ntensors(); j++) {
+      const auto& input = operands_[j].tensor;
+      assert_no_partial_overlap(output, input);
     }
   }
 }

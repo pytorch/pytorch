@@ -12455,19 +12455,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(torch._debug_has_internal_overlap(b_expanded), OVERLAP_YES)
 
     @staticmethod
-    def unary_check_mem_overlap(self, inplace_op, value=-0.5, device='cpu'):
+    def unary_check_internal_mem_overlap(self, inplace_op, value=-0.5,
+                                         device='cpu'):
         tensor = torch.tensor(value, device=device).expand(3, 3)
-        if device == 'cuda' and inplace_op == torch.Tensor.sigmoid_:
-            with self.assertRaises(AssertionError):
-                with self.assertRaisesRegex(RuntimeError,
-                                            'single memory location'):
-                    inplace_op(tensor)
-        else:
-            with self.assertRaisesRegex(RuntimeError, 'single memory location'):
-                inplace_op(tensor)
+        with self.assertRaisesRegex(RuntimeError, 'single memory location'):
+            inplace_op(tensor)
 
     @staticmethod
-    def unary_check_input_output_mem_overlap(self, data, sz, op, device):
+    def unary_check_input_output_mem_overlap(self, data, sz, op):
 
         def _test(op, c, a):
             c_exp = op(a)
@@ -12488,17 +12483,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         # c partially overlaps with a:
         c = data[0:sz]
         a = data[1:sz + 1]
-        if device == 'cuda' and op not in [torch.bitwise_not, torch.neg]:
-            with self.assertRaises(AssertionError):
-                with self.assertRaisesRegex(RuntimeError,
-                                            'unsupported operation'):
-                    op(a, out=c)
-        else:
-            with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-                op(a, out=c)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            op(a, out=c)
 
     @staticmethod
-    def binary_check_mem_overlap(self, inplace_op, value=-0.5, device='cpu'):
+    def binary_check_internal_mem_overlap(self, inplace_op, value=-0.5,
+                                          device='cpu'):
         if isinstance(inplace_op, str):
             inplace_op = getattr(torch.Tensor, inplace_op)
         tensor = torch.tensor(value, device=device).expand(3, 3)
@@ -12564,19 +12554,19 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     @unittest.expectedFailure
     def test_abs_unary_mem_overlap(self):
-        self.unary_check_mem_overlap(lambda t: t.abs_())
+        self.unary_check_internal_mem_overlap(lambda t: t.abs_())
 
     @unittest.expectedFailure
     def test_sinh_unary_mem_overlap(self):
-        self.unary_check_mem_overlap(lambda t: t.sinh_())
+        self.unary_check_internal_mem_overlap(lambda t: t.sinh_())
 
     @unittest.expectedFailure
     def test_cosh_unary_mem_overlap(self):
-        self.unary_check_mem_overlap(lambda t: t.cosh_())
+        self.unary_check_internal_mem_overlap(lambda t: t.cosh_())
 
     @staticmethod
     def _test_lerp_mem_self_overlap(self, device='cpu'):
-        start = torch.randn((1), device=device).expand(3, 3)
+        start = torch.randn((1,), device=device).expand(3, 3)
         end = torch.randn((3, 3), device=device)
         weight = torch.randn((3, 3), device=device)
         with self.assertRaisesRegex(RuntimeError, 'single memory location'):
@@ -12808,46 +12798,114 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                lambda: torch.ones(1, dtype=torch.float) < torch.ones(1, dtype=torch.double))
 
     @torchtest.for_all_device_types()
-    def test_unary_op_mem_overlap(self, device):
+    def test_unary_out_op_mem_overlap(self, device):
         sz = 3
         doubles = torch.randn(2 * sz, device=device)
         positives = torch.randint(1, 100, (2 * sz,), device=device).double()
         ints = torch.randint(-100, 100, (2 * sz,), device=device)
         ops = [
-            (ints, torch.bitwise_not, torch.Tensor.bitwise_not_),
-            (doubles, torch.neg, torch.Tensor.neg_),
-            (doubles, torch.abs, torch.Tensor.abs_),
-            (doubles, torch.acos, torch.Tensor.acos_),
-            (doubles, torch.asin, torch.Tensor.asin_),
-            (doubles, torch.atan, torch.Tensor.atan_),
-            (doubles, torch.ceil, torch.Tensor.ceil_),
-            (doubles, torch.cos, torch.Tensor.cos_),
-            (doubles, torch.erf, torch.Tensor.erf_),
-            (doubles, torch.erfc, torch.Tensor.erfc_),
-            (doubles, torch.exp, torch.Tensor.exp_),
-            (doubles, torch.expm1, torch.Tensor.expm1_),
-            (doubles, torch.floor, torch.Tensor.floor_),
-            (doubles, torch.frac, torch.Tensor.frac_),
-            (positives, torch.log, torch.Tensor.log_),
-            (positives, torch.log10, torch.Tensor.log10_),
-            (positives, torch.log1p, torch.Tensor.log1p_),
-            (positives, torch.log2, torch.Tensor.log2_),
-            (doubles, torch.reciprocal, torch.Tensor.reciprocal_),
-            (doubles, torch.round, torch.Tensor.round_),
-            (positives, torch.rsqrt, torch.Tensor.rsqrt_),
-            (doubles, torch.sin, torch.Tensor.sin_),
-            (doubles, torch.sigmoid, torch.Tensor.sigmoid_),
-            (doubles, torch.sqrt, torch.Tensor.sqrt_),
-            (doubles, torch.tan, torch.Tensor.tan_),
-            (doubles, torch.tanh, torch.Tensor.tanh_),
-            (doubles, torch.trunc, torch.Tensor.trunc_)
+            (ints, torch.bitwise_not),
+            (doubles, torch.neg)
         ]
-        for (data, op, inplace_op) in ops:
-            # internal overlap check for inplace_op
-            self.unary_check_mem_overlap(self, inplace_op, device=device)
+        for (data, op) in ops:
             # input/output overlap check for out op
-            self.unary_check_input_output_mem_overlap(self, data, sz, op,
-                                                      device=device)
+            self.unary_check_input_output_mem_overlap(self, data, sz, op)
+
+    @torchtest.for_all_device_types()
+    def test_unary_out_op_mem_overlap_that_do_not_work_on_cuda(self, device):
+        # This test asserts that some out ops have input/ouput mem overlap check
+        # in cpu implementation but not in cuda implementation. Please remove
+        # the op from this test as soon as it has cuda input/ouput mem overlap check
+        sz = 3
+        doubles = torch.randn(2 * sz, device=device)
+        positives = torch.randint(1, 100, (2 * sz,), device=device).double()
+        ints = torch.randint(-100, 100, (2 * sz,), device=device)
+        ops = [
+            (doubles, torch.abs),
+            (doubles, torch.acos),
+            (doubles, torch.asin),
+            (doubles, torch.atan),
+            (doubles, torch.ceil),
+            (doubles, torch.cos),
+            (doubles, torch.erf),
+            (doubles, torch.erfc),
+            (doubles, torch.exp),
+            (doubles, torch.expm1),
+            (doubles, torch.floor),
+            (doubles, torch.frac),
+            (positives, torch.log),
+            (positives, torch.log10),
+            (positives, torch.log1p),
+            (positives, torch.log2),
+            (doubles, torch.reciprocal),
+            (doubles, torch.round),
+            (positives, torch.rsqrt),
+            (doubles, torch.sin),
+            (doubles, torch.sigmoid),
+            (doubles, torch.sqrt),
+            (doubles, torch.tan),
+            (doubles, torch.tanh),
+            (doubles, torch.trunc)
+        ]
+        for (data, op) in ops:
+            # input/output overlap check for out op
+            if device == 'cpu':
+                self.unary_check_input_output_mem_overlap(self, data, sz, op)
+            else:
+                with self.assertRaises(AssertionError):
+                    self.unary_check_input_output_mem_overlap(self, data, sz,
+                                                               op)
+
+    @torchtest.for_all_device_types()
+    def test_unary_inplace_op_mem_overlap(self, device):
+        ops = [
+            torch.Tensor.bitwise_not_,
+            torch.Tensor.neg_,
+            torch.Tensor.abs_,
+            torch.Tensor.acos_,
+            torch.Tensor.asin_,
+            torch.Tensor.atan_,
+            torch.Tensor.ceil_,
+            torch.Tensor.cos_,
+            torch.Tensor.erf_,
+            torch.Tensor.erfc_,
+            torch.Tensor.exp_,
+            torch.Tensor.expm1_,
+            torch.Tensor.floor_,
+            torch.Tensor.frac_,
+            torch.Tensor.log_,
+            torch.Tensor.log10_,
+            torch.Tensor.log1p_,
+            torch.Tensor.log2_,
+            torch.Tensor.reciprocal_,
+            torch.Tensor.round_,
+            torch.Tensor.rsqrt_,
+            torch.Tensor.sin_,
+            torch.Tensor.sqrt_,
+            torch.Tensor.tan_,
+            torch.Tensor.tanh_,
+            torch.Tensor.trunc_
+        ]
+        for op in ops:
+            # internal overlap check for inplace_op
+            self.unary_check_internal_mem_overlap(self, op, device=device)
+
+    @torchtest.for_all_device_types()
+    def test_unary_inplace_op_mem_overlap_that_do_not_work_on_cuda(self, device):
+        # This test asserts that some inplace ops have internal mem overlap check
+        # in cpu implementation but not in cuda implementation. Please remove
+        # the op from this test as soon as it has cuda internal mem overlap check
+        ops = [
+            torch.Tensor.sigmoid_
+        ]
+        for op in ops:
+            # internal overlap check for inplace_op
+            if device == 'cpu':
+                self.unary_check_internal_mem_overlap(self, op, device=device)
+            else:
+                with self.assertRaises(AssertionError):
+                    self.unary_check_internal_mem_overlap(self, op,
+                                                          device=device)
 
     @torchtest.for_all_device_types()
     def test_binary_op_mem_overlap(self, device):
@@ -12861,7 +12919,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         ]
         for (op, inplace_op) in ops:
             # internal overlap check for inplace_op
-            self.binary_check_mem_overlap(self, inplace_op, device=device)
+            self.binary_check_internal_mem_overlap(self, inplace_op,
+                                                   device=device)
             # input/output overlap check for out op
             self.binary_check_input_output_mem_overlap(self, data, sz, op)
 
