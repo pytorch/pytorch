@@ -736,9 +736,10 @@ Casts
 
 Accessing Module Parameters
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    ``self.my_parameter``
+    ::
 
-    ``self.my_submodule.my_parameter``
+        self.my_parameter
+        self.my_submodule.my_parameter
 
 
 Statements
@@ -762,6 +763,7 @@ Pattern Matching Assignments
 Print Statements
 
     ::
+
         print("the result of an add:", a + b)
 
 If Statements
@@ -835,7 +837,7 @@ For loops over constant ``torch.nn.ModuleList``
                   return v
 
       .. note::
-          To use a ``nn.ModuleList`` inside a ``@script_method`` it must be marked
+          To use a ``nn.ModuleList`` inside a compiled method, it must be marked
           constant by adding the name of the attribute to the ``__constants__``
           list for the type. For loops over a ``nn.ModuleList`` will unroll the body of the
           loop at compile time, with each member of the constant module list.
@@ -863,7 +865,7 @@ Variable Resolution
 TorchScript supports a subset of Python's variable resolution (i.e. scoping)
 rules. Local variables behave the same as in Python, except for the restriction
 that a variable must have the same type along all paths through a function.
-If a variable has a different type on different sides of an if statement, it
+If a variable has a different type on different branches of an if statement, it
 is an error to use it after the end of the if statement.
 
 Similarly, a variable is not allowed to be used if it is only *defined* along some
