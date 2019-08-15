@@ -2,16 +2,20 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import unittest
 import torch
+import torch.nn as nn
 import torch.nn.quantized as nnq
+import torch.nn._intrinsic as nni
+import torch.nn._intrinsic.quantized as nniq
+import torch.nn._intrinsic.qat as nniqat
 from torch.quantization import \
     QConfig_dynamic, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
-    quantize_dynamic, default_dynamic_qconfig
+    quantize_dynamic, default_qconfig, default_qat_qconfig, default_dynamic_qconfig
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     SkipQuantModel, QuantStubModel, \
-    ModForFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
+    ModelForFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
     ModForWrapping, \
     test_only_eval_fn, test_only_train_fn, \
     prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, TwoLayerLinearModel, NestedModel
@@ -493,54 +497,110 @@ class ScriptabilityTest(QuantizationTestCase):
         self.assertEqual(scripted_model(self.x), self.model_under_test(self.x))
 
 
+@unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
+                 'Quantization requires FBGEMM. FBGEMM does not play'
+                 ' well with UBSAN at the moment, so we skip the test if'
+                 ' we are in a UBSAN environment.')
 class FusionTest(QuantizationTestCase):
     def test_fuse_module_train(self):
-        import torch.nn._intrinsic.modules.fused as torch_fused
-        testMod = ModForFusion()
-        testMod.train()
-        fuse_modules(testMod, [['conv1', 'bn1', 'relu1'],
-                               ['sub1.conv', 'sub1.bn']])
-        self.assertEqual(type(testMod.conv1), torch_fused.ConvBnReLU2d,
+        model = ModelForFusion(default_qat_qconfig).train()
+        fuse_modules(model, [['conv1', 'bn1', 'relu1'],
+                             ['sub1.conv', 'sub1.bn']])
+        self.assertEqual(type(model.conv1), nni.ConvBnReLU2d,
                          "Fused Conv + BN + Relu first layer")
-        self.assertEqual(type(testMod.bn1), torch.nn.Identity,
+        self.assertEqual(type(model.bn1), torch.nn.Identity,
                          "Fused Conv + BN + Relu (skipped BN)")
-        self.assertEqual(type(testMod.relu1), torch.nn.Identity,
+        self.assertEqual(type(model.relu1), torch.nn.Identity,
                          "Fused Conv + BN + Relu (skipped Relu)")
 
-        self.assertEqual(type(testMod.sub1.conv), torch_fused.ConvBn2d,
+        self.assertEqual(type(model.sub1.conv), nni.ConvBn2d,
                          "Fused submodule Conv + BN")
-        self.assertEqual(type(testMod.sub1.bn), torch.nn.Identity,
+        self.assertEqual(type(model.sub1.bn), torch.nn.Identity,
                          "Fused submodule Conv + BN (skipped BN)")
-        self.assertEqual(type(testMod.sub2.conv), torch.nn.Conv2d,
+        self.assertEqual(type(model.sub2.conv), torch.nn.Conv2d,
                          "Non-fused submodule Conv")
-        self.assertEqual(type(testMod.sub2.bn), torch.nn.BatchNorm2d,
-                         "Non-fused submodule BN")
+        self.assertEqual(type(model.sub2.relu), torch.nn.ReLU,
+                         "Non-fused submodule ReLU")
+        model = prepare_qat(model)
+        self.checkObservers(model)
+
+        def checkQAT(model):
+            self.assertEqual(type(model.conv1), nniqat.ConvBnReLU2d)
+            self.assertEqual(type(model.bn1), nn.Identity)
+            self.assertEqual(type(model.relu1), nn.Identity)
+            self.assertEqual(type(model.sub1.conv), nniqat.ConvBn2d)
+            self.assertEqual(type(model.sub1.bn), nn.Identity)
+            self.assertEqual(type(model.sub2.conv), nn.Conv2d)
+            self.assertEqual(type(model.sub2.relu), nn.ReLU)
+
+        checkQAT(model)
+        test_only_train_fn(model, self.img_data)
+        convert(model)
+
+        def checkQuantized(model):
+            self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
+            self.assertEqual(type(model.bn1), nn.Identity)
+            self.assertEqual(type(model.relu1), nn.Identity)
+            self.assertEqual(type(model.sub1.conv), nnq.Conv2d)
+            self.assertEqual(type(model.sub1.bn), nn.Identity)
+            self.assertEqual(type(model.sub2.conv), nn.Conv2d)
+            self.assertEqual(type(model.sub2.relu), nn.ReLU)
+            test_only_eval_fn(model, self.img_data)
+        checkQuantized(model)
+
+        model = ModelForFusion(default_qat_qconfig).train()
+        fuse_modules(model, [['conv1', 'bn1', 'relu1'],
+                             ['sub1.conv', 'sub1.bn']])
+        model = quantize_qat(model, test_only_train_fn, self.img_data)
+        checkQuantized(model)
+
 
     def test_fuse_module_eval(self):
-        import torch.nn._intrinsic.modules.fused as torch_fused
-        testMod = ModForFusion()
-        testMod.eval()
-        fuse_modules(testMod, [['conv1', 'bn1', 'relu1'] ,
-                               ['sub1.conv', 'sub1.bn']])
-        self.assertEqual(type(testMod.conv1), torch_fused.ConvReLU2d,
+        model = ModelForFusion(default_qconfig)
+        model.eval()
+        fuse_modules(model, [['conv1', 'bn1', 'relu1'] ,
+                             ['sub1.conv', 'sub1.bn']])
+        self.assertEqual(type(model.conv1), nni.ConvReLU2d,
                          "Fused Conv + BN + Relu first layer (BN is folded)")
-        self.assertEqual(type(testMod.conv1[0]), torch.nn.Conv2d,
+        self.assertEqual(type(model.conv1[0]), nn.Conv2d,
                          "Fused Conv + BN + Relu (Conv + folded BN only)")
-        self.assertEqual(type(testMod.conv1[1]), torch.nn.ReLU,
+        self.assertEqual(type(model.conv1[1]), nn.ReLU,
                          "Fused Conv + BN + Relu second layer (Relu only)")
-        self.assertEqual(type(testMod.bn1), torch.nn.Identity,
+        self.assertEqual(type(model.bn1), nn.Identity,
                          "Fused Conv + BN + Relu second layer (Skipped BN)")
-        self.assertEqual(type(testMod.relu1), torch.nn.Identity,
+        self.assertEqual(type(model.relu1), nn.Identity,
                          "Fused Conv + BN + Relu second layer (Skipped Relu)")
 
-        self.assertEqual(type(testMod.sub1.conv), torch.nn.Conv2d,
+        self.assertEqual(type(model.sub1.conv), nn.Conv2d,
                          "Fused submodule Conv + folded BN")
-        self.assertEqual(type(testMod.sub1.bn), torch.nn.Identity,
+        self.assertEqual(type(model.sub1.bn), nn.Identity,
                          "Fused submodule (skipped BN)")
-        self.assertEqual(type(testMod.sub2.conv), torch.nn.Conv2d,
+        self.assertEqual(type(model.sub2.conv), nn.Conv2d,
                          "Non-fused submodule Conv")
-        self.assertEqual(type(testMod.sub2.bn), torch.nn.BatchNorm2d,
-                         "Non-fused submodule BN")
+        self.assertEqual(type(model.sub2.relu), torch.nn.ReLU,
+                         "Non-fused submodule ReLU")
+
+        model = prepare(model)
+        self.checkObservers(model)
+        test_only_eval_fn(model, self.img_data)
+        convert(model)
+
+        def checkQuantized(model):
+            self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
+            self.assertEqual(type(model.bn1), nn.Identity)
+            self.assertEqual(type(model.relu1), nn.Identity)
+            self.assertEqual(type(model.sub1.conv), nnq.Conv2d)
+            self.assertEqual(type(model.sub1.bn), nn.Identity)
+            self.assertEqual(type(model.sub2.conv), nn.Conv2d)
+            self.assertEqual(type(model.sub2.relu), nn.ReLU)
+            test_only_eval_fn(model, self.img_data)
+        checkQuantized(model)
+
+        model = ModelForFusion(default_qat_qconfig).eval()
+        fuse_modules(model, [['conv1', 'bn1', 'relu1'],
+                             ['sub1.conv', 'sub1.bn']])
+        model = quantize(model, test_only_eval_fn, self.img_data)
+        checkQuantized(model)
 
 
 if __name__ == '__main__':

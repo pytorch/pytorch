@@ -147,22 +147,6 @@ Node* createIntReprNode(Value* v, Graph* g) {
   return intrepr;
 }
 
-script::Module clone_module(const script::Module& module) {
-  script::Module result(c10::QualifiedName(module.name().qualifiedName()), module.class_compilation_unit(), true);
-  for (const auto& param: module.get_parameters()) {
-    result.register_parameter(param.name(), module.get_parameter(param.name()), false);
-  }
-
-  for (const auto& attr: module.get_attributes()) {
-    result.register_attribute(attr.name(), attr.type(), module.get_attribute(attr.name()));
-  }
-
-  for (const auto& mod: module.get_module_slots()) {
-    result.register_module(mod.name(), module.get_module(mod.name()));
-  }
-  return result;
-}
-
 // Create observer.forward Node and insert a call to observer forward function
 Node* insertObserverForwardCall(Value* v, Graph* g, script::Module module, script::Module observer_module) {
   std::string observer_name = "observer_for_" + v->debugName();
@@ -673,8 +657,6 @@ TORCH_API void PrepareQuant(
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get())) {
       Node* observer_node = insertObserverForwardCall(v, v->owningGraph(), module, observer_module);
-      // Node* new_observer_node = addObserverFor(v, observer_node, insert_node);
-      // new_observer_node->insertBefore(insert_node);
       observer_for_input.emplace(observer_node);
     }
   }
@@ -786,7 +768,8 @@ void quantizeBias(const script::Module& module, Value* v) {
       IValue act_qparam = getQParam(module, activation);
       // Get qparam from weight
       IValue weight_qparam = getQParam(module, weight);
-      IValue bias_scale =  1.0 / act_qparam.toTuple()->elements()[0].toDouble() / weight_qparam.toTuple()->elements()[0].toDouble();
+      std::cout << "scale:" << act_qparam.toTuple()->elements()[0].value();
+      IValue bias_scale =  1.0 / act_qparam.toTuple()->elements()[0].value().toDouble() / weight_qparam.toTuple()->elements()[0].value().toDouble();
       IValue bias_qparam = c10::ivalue::Tuple::create(std::vector<IValue>({bias_scale, IValue(0)}), act_qparam.toTuple()->type);
       Node* dequant = insertQuantDeQuantCall(v, bias_qparam, at::kQInt32);
       v->replaceAllUsesWith(dequant->output());
