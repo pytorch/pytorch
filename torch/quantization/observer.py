@@ -62,7 +62,7 @@ class Observer(nn.Module):
                 zero_point = max(qmin, zero_point)
                 zero_point = min(qmax, zero_point)
 
-        return torch.tensor([scale, zero_point])
+        return torch.tensor([scale]), torch.tensor([zero_point])
 
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)

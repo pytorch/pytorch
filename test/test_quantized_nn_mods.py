@@ -58,6 +58,10 @@ class DynamicModuleAPITest(QuantizationTestCase):
         X = torch.rand(batch_size, in_features).float()
         B = torch.rand(out_features).float() if use_bias else None
         qlinear = nnqd.Linear(in_features, out_features)
+        # Run module with default-initialized parameters.
+        # This tests that the constructor is correct.
+        qlinear(X)
+
         qlinear.set_weight(W_q)
         # Simple round-trip test to ensure weight()/set_weight() API
         self.assertEqual(qlinear.weight(), W_q)
@@ -112,7 +116,17 @@ class DynamicModuleAPITest(QuantizationTestCase):
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
-        self.checkScriptable(qlinear, zip([X], [Z_ref]), check_save_load=True)
+        self.checkScriptable(qlinear, list(zip([X], [Z_ref])), check_save_load=True)
+
+        # Test from_float
+        float_linear = torch.nn.Linear(in_features, out_features).float()
+        float_linear.qconfig = torch.quantization.default_qconfig
+        torch.quantization.prepare(float_linear)
+        float_linear(X.float())
+        quantized_float_linear = nnqd.Linear.from_float(float_linear)
+
+        # Smoke test to make sure the module actually runs
+        quantized_float_linear(X)
 
 
 class ModuleAPITest(QuantizationTestCase):
@@ -143,6 +157,11 @@ class ModuleAPITest(QuantizationTestCase):
             qlinear = nnq_fused.LinearReLU(in_features, out_features)
         else:
             qlinear = nnq.Linear(in_features, out_features)
+
+        # Run module with default-initialized parameters.
+        # This tests that the constructor is correct.
+        qlinear(X_q)
+
         qlinear.set_weight(W_q)
         # Simple round-trip test to ensure weight()/set_weight() API
         self.assertEqual(qlinear.weight(), W_q)
@@ -208,7 +227,17 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
-        self.checkScriptable(qlinear, zip([X_q], [Z_ref]), check_save_load=True)
+        self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])), check_save_load=True)
+
+        # Test from_float
+        float_linear = torch.nn.Linear(in_features, out_features).float()
+        float_linear.qconfig = torch.quantization.default_qconfig
+        torch.quantization.prepare(float_linear)
+        float_linear(X.float())
+        quantized_float_linear = torch.quantization.convert(float_linear)
+
+        # Smoke test to make sure the module actually runs
+        quantized_float_linear(X_q)
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
@@ -374,7 +403,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(conv_under_test.zero_point, loaded_conv.zero_point)
 
         # JIT testing
-        self.checkScriptable(conv_under_test, zip([qX], [result_reference]), check_save_load=True)
+        self.checkScriptable(conv_under_test, list(zip([qX], [result_reference])), check_save_load=True)
 
         # Test from_float
         float_conv = torch.nn.Conv2d(in_channels=iC,
@@ -419,7 +448,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(qX_expect, qX_hat)
 
         # JIT Testing
-        self.checkScriptable(pool_under_test, zip([X], [qX_expect]))
+        self.checkScriptable(pool_under_test, list(zip([X], [qX_expect])))
 
 if __name__ == '__main__':
     run_tests()
