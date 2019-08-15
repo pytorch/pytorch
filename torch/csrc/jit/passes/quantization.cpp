@@ -715,6 +715,7 @@ Node* insertQuantDeQuantCall(Value* v, IValue qparams, at::ScalarType t, bool af
   auto tp = qparams.toTuple();
   IValue scale = tp->elements()[0];
   IValue zero_point = tp->elements()[1];
+  std::cout << "scale of activation isTensor: " << scale.isTensor();
   Value* scale_val = g->insertConstant(scale);
   Value* zero_point_val = g->insertConstant(zero_point);
 
@@ -768,8 +769,9 @@ void quantizeBias(const script::Module& module, Value* v) {
       IValue act_qparam = getQParam(module, activation);
       // Get qparam from weight
       IValue weight_qparam = getQParam(module, weight);
-      std::cout << "scale:" << act_qparam.toTuple()->elements()[0];
-      IValue bias_scale =  1.0 / act_qparam.toTuple()->elements()[0].toScalar().toDouble() / weight_qparam.toTuple()->elements()[0].toScalar().toDouble();
+      std::cout << "scale:" << act_qparam.toTuple()->elements()[0] << std::endl;
+      IValue bias_scale =  c10::Scalar(act_qparam.toTuple()->elements()[0].toTensor().item().toDouble() * weight_qparam.toTuple()->elements()[0].toTensor().item().toDouble());
+      std::cout << "bias_scale:" << bias_scale << std::endl;
       IValue bias_qparam = c10::ivalue::Tuple::create(std::vector<IValue>({bias_scale, IValue(0)}), act_qparam.toTuple()->type);
       Node* dequant = insertQuantDeQuantCall(v, bias_qparam, at::kQInt32);
       v->replaceAllUsesWith(dequant->output());
@@ -819,7 +821,7 @@ script::Module InsertQuantDeQuant(
     for (Node* n : b->nodes()) {
       // Skip nodes that we don't need to observe, e.g. 'prim::Constant' or
       // observer nodes
-      if (!outputsNeedToBeObserved(n)) { // || observer_for_input.count(n) != 0) {
+      if (!outputsNeedToBeObserved(n) || observer_for_input.count(n) != 0) {
         continue;
       }
 
@@ -872,7 +874,12 @@ script::Module InsertQuantDeQuant(
         }
         auto calculate_qparams = (*observer_module).get_method("calculate_qparams");
         IValue qparams = calculate_qparams(std::vector<IValue>());
-        Node* dequant = insertQuantDeQuantCall(v, qparams, at::kQInt8);
+        Node* dequant;
+        if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "weight") {
+          dequant = insertQuantDeQuantCall(v, qparams, at::kQInt8);
+        } else {
+          dequant = insertQuantDeQuantCall(v, qparams, at::kQUInt8);
+        }
         v->replaceAllUsesWith(dequant->output());
         Node* q = traverseToQuantNode(dequant);
         TORCH_INTERNAL_ASSERT(q);
@@ -902,7 +909,7 @@ script::Module InsertQuantDeQuant(
         }
         auto calculate_qparams = (*observer_module).get_method("calculate_qparams");
         IValue qparams = calculate_qparams(std::vector<IValue>());
-        Node* dequant = insertQuantDeQuantCall(v, qparams, at::kQInt8, false);
+        Node* dequant = insertQuantDeQuantCall(v, qparams, at::kQUInt8, false);
         v->replaceAllUsesWith(dequant->output());
         Node* q = traverseToQuantNode(dequant);
         TORCH_INTERNAL_ASSERT(q);
