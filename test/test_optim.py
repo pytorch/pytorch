@@ -1191,8 +1191,6 @@ class TestLRScheduler(TestCase):
                     T_i = int(T_mult) * T_i
                 targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
                 targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
-            # NOTE CosineAnnealingWarmRestarts requires step before
-            scheduler.step()
             self._test(scheduler, targets, iters)
 
     def test_CosineAnnealingWarmRestarts_lr2(self):

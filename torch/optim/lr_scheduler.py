@@ -800,7 +800,18 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.T_i = T_0
         self.T_mult = T_mult
         self.eta_min = eta_min
-        super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch)
+
+        # TODO Invoke super instead of repeating the parent __init__ with epoch passed to self.step
+        # super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch)
+
+        _attach_opt(self, optimizer)
+        self._init_epoch_and_base(optimizer, last_epoch)
+        self._ensure_opt_first_helper()
+
+        if last_epoch == -1:
+            self.last_epoch = 0
+        self.step(self.last_epoch)
+
         self.T_cur = self.last_epoch
 
     def _compute_values(self):
