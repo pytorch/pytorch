@@ -93,15 +93,7 @@ inline MatchTypeReturn tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
     auto tensor = py::cast<at::Tensor>(input);
-    if (tensor.is_mkldnn()) {
-      // mkldnn tensor as opaque tensor doesn't have strides, so we can
-      // not create a CompleteTensorType
-      return MatchTypeReturn(ProfiledTensorType::create(tensor));
-    }
-
-    // TODO: maybe unshape this type if this is used for script instead of
-    // tracing
-    return MatchTypeReturn(CompleteTensorType::create(tensor));
+    return MatchTypeReturn(ProfiledTensorType::create(tensor));
   }
 
   if (input.is(py::none())) {
@@ -320,9 +312,7 @@ inline IValue toIValue(
   switch (type->kind()) {
     case TypeKind::TensorType:
     case TypeKind::AutogradZeroTensorType:
-    case TypeKind::ProfiledTensorType:
-    case TypeKind::DimensionedTensorType:
-    case TypeKind::CompleteTensorType: {
+    case TypeKind::ProfiledTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
         AT_WARN(
