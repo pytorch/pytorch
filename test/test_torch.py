@@ -1912,19 +1912,13 @@ class _TestTorchMixin(torchtest):
                 getattr(a, op + '_')(b)
                 self.assertEqual(expected_res, a)
 
-    @staticmethod
-    def _test_logical_xor(self, device):
-        self._test_logical_binary(self, 'logical_xor', [0, 0, 1, 1], [10, 0, 1, 0],  [1, 0, 0, 10], device)
+    @torchtest.for_all_device_types()
+    def test_logical_and(self, device):
+        self._test_logical_binary(self, 'logical_and', [1, 0, 0, 0], [10, 0, 1, 0], [1, 0, 0, 10], device)
 
-    def test_logical_xor(self):
-        self._test_logical_xor(self, 'cpu')
-
-    @staticmethod
-    def _test_logical_and(self, device):
-        self._test_logical_binary(self, 'logical_and', [1, 0, 0, 0], [10, 0, 1, 0],  [1, 0, 0, 10], device)
-
-    def test_logical_and(self):
-        self._test_logical_and(self, 'cpu')
+    @torchtest.for_all_device_types()
+    def test_logical_xor(self, device):
+        self._test_logical_binary(self, 'logical_xor', [0, 0, 1, 1], [10, 0, 1, 0], [1, 0, 0, 10], device)
 
     def test_threshold(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
