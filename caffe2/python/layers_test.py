@@ -2229,12 +2229,12 @@ class TestLayers(LayersTestCase):
         self.model.FeatureSparseToDense(input_record, input_specs)
 
         expected_accessed_features = {
-            float_features_column: AccessedFeatures(
-                float_features_type, set(float_features_ids)),
-            id_list_features_column: AccessedFeatures(
-                id_list_features_type, set(id_list_features_ids)),
-            id_score_list_features_column: AccessedFeatures(
-                id_score_list_features_type, set(id_score_list_features_ids)),
+            float_features_column: [
+                AccessedFeatures(float_features_type, set(float_features_ids))],
+            id_list_features_column: [
+                AccessedFeatures(id_list_features_type, set(id_list_features_ids))],
+            id_score_list_features_column: [
+                AccessedFeatures(id_score_list_features_type, set(id_score_list_features_ids))],
         }
 
         self.assertEqual(len(self.model.layers), 1)

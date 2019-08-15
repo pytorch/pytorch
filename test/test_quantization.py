@@ -4,9 +4,9 @@ import unittest
 import torch
 import torch.nn.quantized as nnq
 from torch.quantization import \
-    QConfig, default_observer, default_weight_observer, \
+    QConfig_dynamic, default_observer, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
-    quantize_dynamic, default_qconfig
+    quantize_dynamic, default_qconfig, default_dynamic_qconfig
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
@@ -260,7 +260,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         """
         model = SingleLayerLinearDynamicModel().eval()
         qconfig_dict = {
-            '': default_qconfig
+            '': default_dynamic_qconfig
         }
         model = prepare_dynamic(model, qconfig_dict)
         convert_dynamic(model)
@@ -280,7 +280,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         """
         model = TwoLayerLinearModel().eval()
         qconfig_dict = {
-            'fc2': default_qconfig
+            'fc2': default_dynamic_qconfig
         }
         model = prepare_dynamic(model, qconfig_dict)
 
@@ -302,8 +302,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         """
         model = NestedModel().eval()
         qconfig_dict = {
-            'fc3': default_qconfig,
-            'sub2.fc1': default_qconfig
+            'fc3': default_dynamic_qconfig,
+            'sub2.fc1': default_dynamic_qconfig
         }
 
         model = prepare_dynamic(model, qconfig_dict)
@@ -327,8 +327,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         """
         model = NestedModel().eval()
         qconfig_dict = {
-            'fc3': default_qconfig,
-            'sub2': default_qconfig
+            'fc3': default_dynamic_qconfig,
+            'sub2': default_dynamic_qconfig
         }
         model = prepare_dynamic(model, qconfig_dict)
 
@@ -356,14 +356,13 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             'dtype': torch.quint8,
             'qscheme': torch.per_tensor_affine
         }
-        custom_qconfig = QConfig(weight=default_weight_observer(),
-                                 activation=default_observer(**custum_options))
-        qconfig_dict = {
-            'fc3': default_qconfig,
-            'sub2': default_qconfig,
-            'sub2.fc1': custom_qconfig
+        custom_dynamic_qconfig = QConfig_dynamic(weight=default_weight_observer())
+        qconfig_dynamic_dict = {
+            'fc3': default_dynamic_qconfig,
+            'sub2': default_dynamic_qconfig,
+            'sub2.fc1': custom_dynamic_qconfig
         }
-        model = prepare_dynamic(model, qconfig_dict)
+        model = prepare_dynamic(model, qconfig_dynamic_dict)
 
         convert_dynamic(model)
 
@@ -371,6 +370,34 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
             self.checkDynamicQuantizedLinear(model.sub2.fc2)
             self.checkDynamicQuantizedLinear(model.fc3)
+
+        checkQuantized(model)
+
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dynamic_dict)
+        checkQuantized(model)
+
+    def test_type_match_rule(self):
+        r"""Test quantization for nested model, top level 'fc3' and
+        'fc1' of submodule 'sub2', All 'torch.nn.Linear' modules are quantized
+        """
+        model = NestedModel().eval()
+        qconfig_dict = {
+            'fc3': None,
+            'sub2.fc1': None,
+            torch.nn.Linear: default_dynamic_qconfig
+        }
+
+        model = prepare_dynamic(model, qconfig_dict)
+        test_only_eval_fn(model, self.calib_data)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.sub1.fc)
+            self.checkLinear(model.fc3)
+            self.checkLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
+            test_only_eval_fn(model, self.calib_data)
 
         checkQuantized(model)
 
