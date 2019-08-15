@@ -940,13 +940,13 @@ class TestComparatorOps(TestCase):
                           '__lt__', 'eq', 'ne', 'ge', 'le', 'gt', 'lt')
 
         for op in ops_under_test:
-            result_ref = getattr(dqA, op_name)(dqB)
-            result = getattr(qA, op_name)(qB)
+            result_ref = getattr(dqA, op)(dqB)
+            result = getattr(qA, op)(qB)
             self.assertEqual(result_ref, result,
                              "'tensor.{}(tensor)'' failed".format(op))
             # Reversed broadcasting.
-            result_ref = getattr(dqB, op_name)(dqA)
-            result = getattr(qB, op_name)(qA)
+            result_ref = getattr(dqB, op)(dqA)
+            result = getattr(qB, op)(qA)
             self.assertEqual(result_ref, result,
                              "'tensor.{}(tensor)'' failed".format(op))
 
@@ -966,19 +966,19 @@ class TestComparatorOps(TestCase):
         ops_under_test_nonreversible = ('eq', 'ne', 'ge', 'le', 'gt', 'lt')
 
         for op in ops_under_test_reversible:
-            result_ref = getattr(dqA, op_name)(b)
-            result = getattr(qA, op_name)(b)
+            result_ref = getattr(dqA, op)(b)
+            result = getattr(qA, op)(b)
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
             # Reversed broadcasting.
-            result_ref = getattr(b, op_name)(dqA)
-            result = getattr(b, op_name)(qA)
+            result_ref = getattr(b, op)(dqA)
+            result = getattr(b, op)(qA)
             self.assertEqual(result_ref, result,
                              "'scalar.{}(tensor)'' failed".format(op))
 
         for op in ops_under_test_nonreversible:
-            result_ref = getattr(dqA, op_name)(b)
-            result = getattr(qA, op_name)(b)
+            result_ref = getattr(dqA, op)(b)
+            result = getattr(qA, op)(b)
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
 
