@@ -18557,6 +18557,7 @@ class TestLogging(JitTestCase):
 
 
 class TestDocs(unittest.TestCase):
+    @slowTest
     def test_docs(self):
         import subprocess
         docs_dir = '../docs'
