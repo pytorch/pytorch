@@ -395,6 +395,31 @@
     CPU: bitwise_not_out
     CUDA: bitwise_not_out
 
+- func: logical_not(Tensor self) -> Tensor
+  variants: function, method
+
+- func: logical_not_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
+
+- func: logical_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: logical_not_out
+    CUDA: logical_not_out
+
+- func: logical_xor(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: logical_xor_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  named_guard: False
+
+- func: logical_xor.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: logical_xor_out
+    CUDA: logical_xor_out
+  named_guard: False
+
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: blackman_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1248,11 +1273,17 @@
 # log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
+
+- func: log_softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  named_guard: False
 
 - func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   dispatch:
     CPU: log_softmax_cpu
     CUDA: log_softmax_cuda
+  named_guard: False
 
 - func: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   dispatch:
@@ -1939,12 +1970,18 @@
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
+
+- func: softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  named_guard: False
 
 - func: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   dispatch:
     CPU: softmax_cpu
     CUDA: softmax_cuda
     MkldnnCPU: mkldnn_softmax
+  named_guard: False
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   dispatch:
@@ -4227,6 +4264,7 @@
   dispatch:
     CPU: legacy::cpu::_th_equal
     CUDA: legacy::cuda::_th_equal
+    QuantizedCPU: quantized_equal
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
