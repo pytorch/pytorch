@@ -138,6 +138,15 @@ class QuantizationTestCase(TestCase):
         scripted = torch.jit.script(orig_mod)
         self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
 
+        # Use first calib_data entry as trace input
+        #
+        # TODO: Trace checking is blocked on this issue:
+        # https://github.com/pytorch/pytorch/issues/23986
+        #
+        # Once that's resolved we can remove `check_trace=False`
+        traced = torch.jit.trace(orig_mod, calib_data[0][0], check_trace=False)
+        self._checkScriptable(orig_mod, traced, calib_data, check_save_load)
+
     # Call this twice: once for a scripted module and once for a traced module
     def _checkScriptable(self, orig_mod, script_mod, calib_data, check_save_load):
         self._checkModuleCorrectnessAgainstOrig(orig_mod, script_mod, calib_data)

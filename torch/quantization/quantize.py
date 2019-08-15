@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as qat
-from .QConfig import default_qconfig
+from .QConfig import default_dynamic_qconfig
 
 
 def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix=''):
@@ -223,7 +223,7 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
     return model
 
 DEFAULT_QCONFIG_DICT = {
-    nn.Linear : default_qconfig
+    nn.Linear : default_dynamic_qconfig
 }
 
 def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
