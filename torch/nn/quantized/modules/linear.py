@@ -203,7 +203,7 @@ class Linear(torch.nn.Module):
         act_scale, act_zp = activation_observer.calculate_qparams()
         wt_scale, wt_zp = weight_observer.calculate_qparams()
         bias_scale = float(wt_scale * act_scale)
-        qweight = torch.quantize_linear(mod.weight.float(), float(wt_scale), long(wt_zp), torch.qint8)
+        qweight = torch.quantize_linear(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
         if mod.bias is not None:
             qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
         else:
@@ -212,5 +212,5 @@ class Linear(torch.nn.Module):
         qlinear.set_weight(qweight)
         qlinear.bias = qbias
         qlinear.scale = float(act_scale)
-        qlinear.zero_point = long(act_zp)
+        qlinear.zero_point = int(act_zp)
         return qlinear

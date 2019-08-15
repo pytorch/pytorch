@@ -96,5 +96,5 @@ class QFunctional(torch.nn.Module):
         scale, zero_point = mod.observer.calculate_qparams()
         new_mod = QFunctional()
         new_mod.scale = float(scale)
-        new_mod.zero_point = long(zero_point)
+        new_mod.zero_point = int(zero_point)
         return new_mod
