@@ -212,7 +212,7 @@ class BuildExtension(build_ext, object):
 
     When using :class:`BuildExtension`, it is allowed to supply a dictionary
     for ``extra_compile_args`` (rather than the usual list) that maps from
-    languages (``cxx`` or ``cuda``) to a list of additional compiler flags to
+    languages (``cxx`` or ``nvcc``) to a list of additional compiler flags to
     supply to the compiler. This makes it possible to supply different flags to
     the C++ and CUDA compiler during mixed compilation.
     '''
@@ -264,7 +264,8 @@ class BuildExtension(build_ext, object):
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
-                    cflags = COMMON_NVCC_FLAGS + ['--compiler-options', "'-fPIC'"] + cflags
+                    cflags = COMMON_NVCC_FLAGS + ['--compiler-options',
+                                                  "'-fPIC'"] + cflags + _get_cuda_arch_flags(cflags)
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
                 # NVCC does not allow multiple -std to be passed, so we avoid
@@ -320,7 +321,8 @@ class BuildExtension(build_ext, object):
                             cflags = self.cflags
                         else:
                             cflags = []
-                        cflags = COMMON_NVCC_FLAGS + cflags
+
+                        cflags = COMMON_NVCC_FLAGS + cflags + _get_cuda_arch_flags(cflags)
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
                         cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
@@ -928,6 +930,71 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
     return extra_ldflags
 
 
+def _get_cuda_arch_flags(cflags=None):
+    '''
+    Determine CUDA arch flags to use.
+
+    For an arch, say "6.1", the added compile flag will be
+    ``-gencode=arch=compute_61,code=sm_61``.
+    For an added "+PTX", an additional
+    ``-gencode=arch=compute_xx,code=compute_xx`` is added.
+
+    See select_compute_arch.cmake for corresponding named and supported arches
+    when building with CMake.
+    '''
+    # If cflags is given, there may already be user-provided arch flags in it
+    # (from `extra_compile_args`)
+    if cflags is not None:
+        for flag in cflags:
+            if 'arch' in flag:
+                return []
+
+    named_arches = {'Fermi': '2.0;2.1',
+                    'Kepler+Tegra': '3.2',
+                    'Kepler+Tesla': '3.7',
+                    'Kepler': '3.0;3.5+PTX',
+                    'Maxwell+Tegra': '5.3',
+                    'Maxwell': '5.0;5.2+PTX',
+                    'Pascal': '6.0;6.1+PTX',
+                    'Volta': '7.0+PTX',
+                    'Turing': '7.5+PTX'}
+
+    supported_arches = ['2.0', '2.1', '3.0', '3.2', '3.5', '3.7', '5.0', '5.2',
+                        '5.3', '6.0', '6.1', '6.2', '7.0', '7.2', '7.5']
+    valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
+
+    # The default is sm_30 for CUDA 9.x and 10.x
+    # First check for an env var (same as used by the main setup.py)
+    # Can be one or more architectures, e.g. "6.1" or "3.5;5.2;6.0;6.1;7.0+PTX"
+    # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
+    arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
+
+    # If not given, determine what's needed for the GPU that can be found
+    if not arch_list:
+        capability = torch.cuda.get_device_capability()
+        arch_list = ['{}.{}'.format(capability[0], capability[1])]
+    else:
+        # Deal with lists that are ' ' separated (only deal with ';' after)
+        arch_list = arch_list.replace(' ', ';')
+        # Expand named arches
+        for named_arch, archval in named_arches.items():
+            arch_list = arch_list.replace(named_arch, archval)
+
+        arch_list = arch_list.split(';')
+
+    flags = []
+    for arch in arch_list:
+        if arch not in valid_arch_strings:
+            raise ValueError("Unknown CUDA arch ({}) or GPU not supported".format(arch))
+        else:
+            num = arch[0] + arch[2]
+            flags.append('-gencode=arch=compute_{},code=sm_{}'.format(num, num))
+            if arch.endswith('+PTX'):
+                flags.append('-gencode=arch=compute_{},code=compute_{}'.format(num, num))
+
+    return list(set(flags))
+
+
 def _get_build_directory(name, verbose):
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
     if root_extensions_directory is None:
@@ -1041,7 +1108,7 @@ def _write_ninja_file(path,
     flags = ['cflags = {}'.format(' '.join(cflags))]
 
     if with_cuda:
-        cuda_flags = common_cflags + COMMON_NVCC_FLAGS
+        cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags()
         if IS_WINDOWS:
             for flag in COMMON_MSVC_FLAGS:
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags

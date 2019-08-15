@@ -9,7 +9,7 @@ namespace autograd {
   /// Computes the gradient of current tensor w.r.t. graph leaves.
   TORCH_API void backward(
       const variable_list& tensors,
-      variable_list grad_tensors={},
+      const variable_list& grad_tensors={},
       c10::optional<bool> keep_graph=c10::nullopt,
       bool create_graph=false);
 
@@ -17,7 +17,7 @@ namespace autograd {
   TORCH_API variable_list grad(
       const variable_list& outputs,
       const variable_list& inputs,
-      variable_list grad_outputs={},
+      const variable_list& grad_outputs={},
       c10::optional<bool> keep_graph=c10::nullopt,
       bool create_graph=false,
       bool allow_unused=false);
