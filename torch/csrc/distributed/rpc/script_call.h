@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/util/Optional.h>
-#include <torch/csrc/distributed/rpc/Message.h>
+#include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/pickler.h>
 #include <vector>
