@@ -3507,26 +3507,28 @@ class _TestTorchMixin(torchtest):
         torch.set_default_tensor_type(saved_type)
 
     def test_bool_tensor_comparison_ops(self):
-        a = torch.tensor([True, False, True, False, True, False], dtype=torch.bool)
-        b = torch.tensor([True, False, True, True, True, True], dtype=torch.bool)
         for device in torch.testing.get_all_device_types():
-            self.assertEqual(a == b, torch.tensor([1, 1, 1, 0, 1, 0], dtype=torch.uint8))
-            self.assertEqual(a != b, torch.tensor([0, 0, 0, 1, 0, 1], dtype=torch.uint8))
-            self.assertEqual(a < b, torch.tensor([0, 0, 0, 1, 0, 1], dtype=torch.uint8))
-            self.assertEqual(a > b, torch.tensor([0, 0, 0, 0, 0, 0], dtype=torch.uint8))
-            self.assertEqual(a >= b, torch.tensor([1, 1, 1, 0, 1, 0], dtype=torch.uint8))
-            self.assertEqual(a <= b, torch.tensor([1, 1, 1, 1, 1, 1], dtype=torch.uint8))
-            self.assertEqual(a > False, torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
-            self.assertEqual(a == torch.tensor(True, dtype=torch.bool), torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
-            self.assertEqual(a == torch.tensor(0, dtype=torch.bool), torch.tensor([0, 1, 0, 1, 0, 1], dtype=torch.uint8))
+            a = torch.tensor([True, False, True, False, True, False], dtype=torch.bool, device=device)
+            b = torch.tensor([True, False, True, True, True, True], dtype=torch.bool, device=device)
+            self.assertEqual(a == b, torch.tensor([1, 1, 1, 0, 1, 0], dtype=torch.bool, device=device))
+            self.assertEqual(a != b, torch.tensor([0, 0, 0, 1, 0, 1], dtype=torch.bool, device=device))
+            self.assertEqual(a < b, torch.tensor([0, 0, 0, 1, 0, 1], dtype=torch.bool, device=device))
+            self.assertEqual(a > b, torch.tensor([0, 0, 0, 0, 0, 0], dtype=torch.bool, device=device))
+            self.assertEqual(a >= b, torch.tensor([1, 1, 1, 0, 1, 0], dtype=torch.bool, device=device))
+            self.assertEqual(a <= b, torch.tensor([1, 1, 1, 1, 1, 1], dtype=torch.bool, device=device))
+            self.assertEqual(a > False, torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.bool, device=device))
+            self.assertEqual(a == torch.tensor(True, dtype=torch.bool, device=device),
+                             torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.bool, device=device))
+            self.assertEqual(a == torch.tensor(0, dtype=torch.bool, device=device),
+                             torch.tensor([0, 1, 0, 1, 0, 1], dtype=torch.bool, device=device))
             self.assertFalse(a.equal(b))
 
     def test_bool_tensor_value_change(self):
         for device in torch.testing.get_all_device_types():
-            x = torch.tensor([True, False], dtype=torch.bool)
+            x = torch.tensor([True, False], dtype=torch.bool, device=device)
             x[0] = False
             x[1] = True
-            self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool))
+            self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool, device=device))
 
     @torchtest.for_all_device_types()
     def test_unfold_all_devices_and_dtypes(self, device):
