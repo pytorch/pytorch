@@ -938,6 +938,9 @@ Tensor alias(const Tensor& self) {
     impl->set_sizes_and_strides(self.sizes(), self.strides());
     self_ = Tensor(std::move(impl));
   }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(self_, self);
+#endif
   return self_;
 }
 

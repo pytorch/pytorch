@@ -709,6 +709,43 @@ struct to_ir {
         name, "", std::move(args), std::move(returns), false, false);
   }
 
+  // see [setstate type]
+  static TypePtr getTypeForSetStateArg(const Self* self) {
+    TORCH_CHECK(self, "Expected __setstate__ to have a `self` argument");
+    self->getClassType()->getMethod("__getstate__")->ensure_defined();
+    return self->getClassType()
+        ->getMethod("__getstate__")
+        ->getSchema()
+        .returns()
+        .at(0)
+        .type();
+  }
+
+  // see [setstate type]
+  static bool shouldDeriveSetStateType(
+      const Def& def,
+      const FunctionSchema& schema) {
+    const bool noTypeAnnotations = std::all_of(
+        schema.arguments().begin(),
+        schema.arguments().end(),
+        [](const Argument& arg) { return arg.is_inferred_type(); });
+
+    bool shouldInfer = def.name().name() == "__setstate__" && noTypeAnnotations;
+    if (!shouldInfer) {
+      return false;
+    }
+
+    // Do some additional basic validation that the __setstate__ func is
+    // well-formed
+    TORCH_INTERNAL_ASSERT(def.name().name() == "__setstate__");
+    const auto numDeclParams = def.decl().params().size();
+    TORCH_CHECK(
+        numDeclParams,
+        "Expected 2 arguments for __setstate__, got: ",
+        numDeclParams);
+    return true;
+  }
+
   std::vector<Argument> emitFormalArguments(
       const Def& def,
       const Self* self,
@@ -739,6 +776,12 @@ struct to_ir {
       arguments.emplace_back(name, new_input->type());
       ++it;
     }
+
+    // [setstate type]
+    // __setstate__ is special, because if the user leaves it un-annotated we
+    // will derive the type for `state` from the output type of __getstate__.
+    // This is necessary so that we can allow submodules to appear in `state`.
+    bool shouldDeriveType = shouldDeriveSetStateType(def, schema);
     size_t arg_annotation_idx = 0;
     for (; it != end; ++it) {
       auto& name = (*it).ident().name();
@@ -748,7 +791,14 @@ struct to_ir {
         new_input->setDebugName(name);
       }
       // Record the type for the schema and set the Type on the Value*
-      arguments.push_back(schema.arguments().at(arg_annotation_idx++));
+      auto arg = schema.arguments().at(arg_annotation_idx++);
+      if (shouldDeriveType) {
+        TORCH_INTERNAL_ASSERT(schema.arguments().size() == 1);
+        const auto& inferredStateType = getTypeForSetStateArg(self);
+        arg = arg.cloneWithType(inferredStateType);
+      }
+
+      arguments.push_back(arg);
       new_input->setType(arguments.back().type());
 
       // NB: set type of new_input before setVar call so the Store is
@@ -965,6 +1015,27 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
+  // emit a single expr from the loop comprehension so that we can correctly
+  // type the list we create, then remove the nodes we emitted
+  TypePtr getListCompType(
+      const ListComp& lc,
+      const ListTypePtr& input_list_type) {
+    auto b = graph->insertNode(graph->create(prim::Loop))->addBlock();
+    pushFrame(b);
+    WithInsertPoint guard(b);
+    auto li_elem = graph->insertNode(
+        graph->createUninitialized(input_list_type->getElementType()));
+    emitExprsAssign(
+        List<Expr>::create(lc.range(), {lc.target()}),
+        {std::make_shared<SimpleValue>(li_elem->output())},
+        lc.range(),
+        /*n_binders*/ 1);
+    auto ret_type = emitExpr(lc.elt())->type();
+    popFrame();
+    b->owningNode()->destroy();
+    return ret_type;
+  }
+
   Value* emitListComprehension(const ListComp& lc) {
     // this avoids a race condition where we would re-use the same temp name
     static std::atomic<size_t> tmp_count{0};
@@ -977,19 +1048,14 @@ struct to_ir {
       throw ErrorReport(lc.range())
           << "iterator expression is expected to be a list";
     }
-    auto elem_types = list_value->type()->containedTypes();
-    // TODO: users can easily change the type to (x,1) or float(x)
-    // as in `float(x) for x in my_list_of_ints`
-    // eventually, we would probably want to temporarily inject x
-    // so we can evaluate the generator expression (e.g. `float(x)`) depending
-    // on x
 
     // given `[x*2 for x in my_list]` this generates the following AST:
     // __list_acc = []
     // for x in my_list:
     //  __list_acc.append(x*2)
-    const auto n = graph->insertNode(
-        graph->createList(elem_types.at(0), at::ArrayRef<Value*>{}));
+    const auto n = graph->insertNode(graph->createList(
+        getListCompType(lc, list_value->type()->expect<ListType>()),
+        at::ArrayRef<Value*>{}));
     environment_stack->setVar(lc.range(), tmp_name, n->output());
     const auto tmp_list_ident = Ident::create(lc.range(), tmp_name);
     const auto tmp_list_var = Var::create(lc.range(), tmp_list_ident);
@@ -3180,40 +3246,10 @@ std::vector<Function*> CompilationUnit::define(
     const Self* self,
     bool shouldMangle) {
   TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
-  // We need to compile `__init__` first, since it can determine what attributes
-  // are available to other methods. So reorder the definitions accordingly.
-  c10::optional<size_t> init_idx;
-  for (size_t i = 0; i < definitions.size(); i++) {
-    const auto& def = definitions[i];
-    if (def.name().name() == "__init__") {
-      init_idx = i;
-      break;
-    }
-  }
-
   std::vector<Function*> functions;
   std::unordered_map<std::string, Function*> function_table;
-  if (init_idx.has_value()) {
-    // if we have an init, do it first.
-    auto fn = define(
-        prefix,
-        definitions[*init_idx],
-        resolvers[*init_idx],
-        self,
-        function_table,
-        shouldMangle);
-    const auto& name = fn->name();
-    function_table[name] = fn.get();
-    functions.push_back(fn.get());
-    register_function(std::move(fn));
-  }
 
   for (size_t i = 0; i < definitions.size(); i++) {
-    if (init_idx.has_value() && i == *init_idx) {
-      // skip this def since it's already been compiled
-      continue;
-    }
-
     auto fn = define(
         prefix,
         definitions[i],
@@ -3225,6 +3261,15 @@ std::vector<Function*> CompilationUnit::define(
     function_table[name] = fn.get();
     functions.push_back(fn.get());
     register_function(std::move(fn));
+  }
+
+  // We need to compile `__init__` first, since it can determine what attributes
+  // are available to other methods. So reorder the definitions accordingly.
+  for (size_t i = 0; i < definitions.size(); i++) {
+    const auto& def = definitions[i];
+    if (def.name().name() == "__init__") {
+      functions[i]->ensure_defined();
+    }
   }
 
   for (Function* function : functions) {
