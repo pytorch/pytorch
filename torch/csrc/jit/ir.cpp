@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -257,6 +258,12 @@ std::ostream& Node::print(
       std::tie(filename, line, col) = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
     }
+  }
+  if (kind() == prim::Constant &&
+      output()->type()->kind() == FunctionType::Kind) {
+    auto funcname =
+        output()->type()->expect<FunctionType>()->function()->name();
+    out << " # " << funcname;
   }
 
   out << "\n";
