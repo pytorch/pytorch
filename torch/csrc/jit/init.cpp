@@ -172,6 +172,9 @@ void initJITBindings(PyObject* module) {
           }
       )
       .def(
+          "_jit_pass_quant_fusion",
+          [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
+      .def(
           "_jit_pass_insert_observers",
           [](const StrongFunctionPtr& function_var,
              py::function pyObserverFunction) {

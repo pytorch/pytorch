@@ -113,5 +113,7 @@ TORCH_API script::Module InsertQuantDeQuant(
     const script::Module& module,
     const std::string& method_name);
 
+TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
+
 } // namespace jit
 } // namespace torch

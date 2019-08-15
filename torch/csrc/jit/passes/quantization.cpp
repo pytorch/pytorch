@@ -936,5 +936,40 @@ script::Module InsertQuantDeQuant(
   return result;
 }
 
+void QuantFusion(std::shared_ptr<Graph>& graph) {
+  SubgraphRewriter rewriter;
+  std::string pattern = R"(
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+        %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
+        %a_intrepr = aten::int_repr(%a_quant)
+        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %w_quant = aten::quantize_linear(%w, %w_scale, %w_zero_point, %w_dtype)
+        %w_intrepr = aten::int_repr(%w_quant)
+        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
+        %b_intrepr = aten::int_repr(%b_quant)
+        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b_dequant, %c, %d, %e, %f)
+        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        %r_intrepr = aten::int_repr(%r_quant)
+        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_dequant))";
+
+  // aten function for fbgemm_conv is not ready yet, therefore the following
+  // code is not runnable
+  std::string replacement = R"(
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
+        %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
+        %w_quant = aten::quantize_linear(%w, %w_scale, %w_zero_point, %w_dtype)
+        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
+        %w_packed = quantized::fbgemm_conv_prepack(%w_quant, %stride, %padding, %dilation, %groups)
+        %r = quantized::fbgemm_conv2d(%a_quant, %w_packed, %b_quant, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
+        %r_intrepr = aten::int_repr(%r)
+        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_dequant))";
+  rewriter.RegisterRewritePattern(pattern, replacement);
+  rewriter.runOnGraph(graph);
+}
+
 } // namespace jit
 } // namespace torch
