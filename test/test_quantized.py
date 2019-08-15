@@ -343,11 +343,11 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the quantized equal op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                    qparams=hu.qparams()),
-        X2=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()),
+           X2=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                         qparams=hu.qparams()),
-        X_per_channel=st.booleans(),
-        X2_per_channel=st.booleans())
+           X_per_channel=st.booleans(),
+           X2_per_channel=st.booleans())
     def test_equal(self, X, X2, X_per_channel, X2_per_channel):
         X, X_params = X
         (scale, zero_point, torch_type) = X_params
@@ -367,7 +367,7 @@ class TestQuantizedOps(TestCase):
         else:
             X_scheme = 'per_tensor'
             qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
-                                    dtype=torch_type)
+                                       dtype=torch_type)
         X2 = torch.from_numpy(X2)
         if X2_per_channel:
             X2_scheme = 'per_channel'
