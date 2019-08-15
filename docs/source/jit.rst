@@ -447,6 +447,7 @@ Example:
     print(foo(3, (torch.rand(3), torch.rand(3))))
 
 .. testoutput::
+    :hidden:
 
     ...
 
@@ -467,6 +468,7 @@ Example:
     print(foo(3, (torch.rand(3), torch.rand(3))))
 
   .. testoutput::
+    :hidden:
 
       ...
 
@@ -640,6 +642,7 @@ Types produced by :func:`collections.namedtuple <collections.namedtuple>` can be
     print(total(p))
 
 .. testoutput::
+    :hidden:
 
     ...
 
@@ -843,6 +846,7 @@ Statements
 TorchScript supports the following types of statements:
 
 Simple Assignments
+
     ::
 
         a = b
@@ -850,6 +854,7 @@ Simple Assignments
         a -= b
 
 Pattern Matching Assignments
+
     ::
 
         a, b = tuple_or_list
@@ -1067,20 +1072,18 @@ Python-defined Constants
     2. Attributes of a ScriptModule can be marked constant by listing them
        as a member of the ``__constants__`` property of the class:
 
-        Example:
+    .. testcode::
 
-        .. testcode::
+        class Foo(torch.jit.ScriptModule):
+            __constants__ = ['a']
 
-            class Foo(torch.jit.ScriptModule):
-                __constants__ = ['a']
+            def __init__(self):
+                super(Foo, self).__init__(False)
+                self.a = 1 + 4
 
-                def __init__(self):
-                    super(Foo, self).__init__(False)
-                    self.a = 1 + 4
-
-                @torch.jit.script_method
-                def forward(self, input):
-                    return self.a + input
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.a + input
 
     Supported constant Python Values are
 
@@ -1242,6 +1245,7 @@ Interpreting Graphs
         print(foo.graph)
 
     .. testoutput::
+        :hidden:
 
         ...
 
