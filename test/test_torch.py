@@ -12562,12 +12562,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             op(a, b, out=c)
 
-    @torchtest.for_all_device_types()
-    def test_inplace_binary_mem_overlap(self, device):
-        binary_ops = ['add_', 'mul_', 'div_', 'sub_']
-        for op in binary_ops:
-            TestTorch.binary_check_mem_overlap(self, op, device=device)
-
     @unittest.expectedFailure
     def test_abs_unary_mem_overlap(self):
         self.unary_check_mem_overlap(lambda t: t.abs_())
@@ -12856,7 +12850,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                                       device=device)
 
     @torchtest.for_all_device_types()
-    def test_binary_op_input_output_overlap(self, device):
+    def test_binary_op_mem_overlap(self, device):
         sz = 3
         data = torch.randn(3 * sz, device=device)
         ops = [
