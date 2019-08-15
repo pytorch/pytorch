@@ -36,6 +36,14 @@ def propagate_qconfig_helper(module, qconfig_dict, skip_list=DEFAULT_SKIP_LIST, 
             elif type(module) in qconfig_dict:
                 module.qconfig = qconfig_dict[type(module)]
 
+    # Don't quantize empty Sequential, empty Sequential is same as
+    # Identity, but we can't put Sequential into skip list because
+    # we also have non-empty Sequential and the qconfig needs to
+    # be propagated to child in that case
+    # TODO: Add test
+    if len(module._modules) == 0 and type(module) == nn.Sequential:
+        module.qconfig = None
+
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
         propagate_qconfig_helper(child, qconfig_dict, skip_list, module.qconfig, module_prefix)
