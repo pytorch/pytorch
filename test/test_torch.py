@@ -1886,6 +1886,30 @@ class _TestTorchMixin(torchtest):
     def test_logical_not(self):
         self._test_logical_not(self, 'cpu')
 
+    @staticmethod
+    def _test_logical_xor(self, device):
+        for dtype in (torch.bool,):  # Will add more dtypes in the future
+            expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
+            a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
+            b = torch.tensor([1, 0, 0, 10], dtype=dtype, device=device)
+            # new tensor
+            self.assertEqual(expected_res, a.logical_xor(b))
+            # out
+            c = torch.empty(0, dtype=dtype, device=device)
+            torch.logical_xor(a, b, out=c)
+            self.assertEqual(expected_res, c)
+            # out is not bool
+            c = torch.empty(0, dtype=torch.uint8, device=device)
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"The output tensor of logical_xor must be a bool tensor\."):
+                torch.logical_xor(a, b, out=c)
+            # in-place
+            a.logical_xor_(b)
+            self.assertEqual(expected_res, a)
+
+    def test_logical_xor(self):
+        self._test_logical_xor(self, 'cpu')
+
     def test_threshold(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
             if dtype != torch.uint8 and dtype != torch.float16:

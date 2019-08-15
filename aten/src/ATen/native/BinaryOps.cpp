@@ -14,6 +14,7 @@ DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
+DEFINE_DISPATCH(logical_xor_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
@@ -211,6 +212,27 @@ Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
+}
+
+Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(self.scalar_type() == kBool && other.scalar_type() == kBool,
+              "logical_xor currently only supports bool tensors.");
+  TORCH_CHECK(result.scalar_type() == kBool,
+              "The output tensor of logical_xor must be a bool tensor.");
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_internal_overlap=*/true);
+  logical_xor_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor logical_xor(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  at::logical_xor_out(result, self, other);
+  return result;
+}
+
+Tensor& logical_xor_(Tensor& self, const Tensor& other) {
+  return native::logical_xor_out(self, self, other);
 }
 
 }
