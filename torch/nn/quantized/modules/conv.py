@@ -69,7 +69,7 @@ class Conv2d(torch.nn.Module):
             raise ValueError('out_channels must be divisible by groups')
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.kernel_size = kernel_size
+        self.kernel_size = _pair(kernel_size)
         self.stride = _pair(stride)
         self.padding = _pair(padding)
         self.dilation = _pair(dilation)
