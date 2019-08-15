@@ -307,9 +307,10 @@ class QuantizerTestCase(TestCase):
         # Insert quantize and dequantize calls
         print('--------- 3. Convert -------------')
         script_module._c = torch._C._jit_pass_insert_quant_dequant(script_module._c, "forward")
-        torch._C._jit_pass_constant_propagation(script_module.graph)
+        print(script_module.graph)
+        # torch._C._jit_pass_constant_propagation(script_module.graph)
 
-        res = script_module(data[0])
+        res = script_module(data[0][0])
         print(script_module.graph)
         print(script_module.code)
         print(res.size())
@@ -320,8 +321,6 @@ class QuantizerTestCase(TestCase):
         print('after fusion:')
         print(script_module.graph)
         print(script_module.code)
-        res = script_module(data)
-        print(data, res)
 
         # Compare results for eager and graph mode
         # eagerDict = eagerQuantObj.getQParamDict()
