@@ -502,6 +502,20 @@ bitwise_not_() -> Tensor
 In-place version of :meth:`~Tensor.bitwise_not`
 """)
 
+add_docstr_all('logical_not',
+               r"""
+logical_not() -> Tensor
+
+See :func:`torch.logical_not`
+""")
+
+add_docstr_all('logical_not_',
+               r"""
+logical_not_() -> Tensor
+
+In-place version of :meth:`~Tensor.logical_not`
+""")
+
 add_docstr_all('bmm',
                r"""
 bmm(batch2) -> Tensor
