@@ -349,7 +349,7 @@ struct CompleteArgumentInfo {
   operator TypePtr() const {
     if (!defined())
       return TensorType::get();
-    return CompleteTensorType::create(
+    return ProfiledTensorType::create(
         type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
   }
 
