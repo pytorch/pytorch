@@ -2566,18 +2566,29 @@ add_docstr(torch.logical_xor,
            r"""
 logical_xor(input, other, out=None) -> Tensor
 
-Computes the element-wise logical XOR of the given input tensors. Both input tensors must have the bool dtype.
+Computes the element-wise logical XOR of the given input tensors. Zeros are treated as ``False`` and nonzeros are
+treated as ``True``.
 
 Args:
-    input (Tensor): the input tensor
+    {input}
     other (Tensor): the tensor to compute XOR with
-    out (Tensor, optional): the output tensor
+    {out}
 
-Example:
+Example::
 
     >>> torch.logical_xor(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
     tensor([ False, False,  True])
-""")
+    >>> a = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
+    >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
+    >>> torch.logical_xor(a, b)
+    tensor([ True,  True, False, False])
+    >>> torch.logical_xor(a.double(), b.double())
+    tensor([ True,  True, False, False])
+    >>> torch.logical_xor(a.double(), b)
+    tensor([ True,  True, False, False])
+    >>> torch.logical_xor(a, b, out=torch.empty(4, dtype=torch.int8))
+    tensor([1, 1, 0, 0], dtype=torch.int8)
+""".format(**common_args))
 
 add_docstr(torch.logspace,
            r"""

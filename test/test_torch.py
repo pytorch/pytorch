@@ -1890,24 +1890,27 @@ class _TestTorchMixin(torchtest):
 
     @staticmethod
     def _test_logical_xor(self, device):
-        for dtype in (torch.bool,):  # Will add more dtypes in the future
+        for dtype in torch.testing.get_all_dtypes():
             expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
-            a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
-            b = torch.tensor([1, 0, 0, 10], dtype=dtype, device=device)
-            # new tensor
-            self.assertEqual(expected_res, a.logical_xor(b))
-            # out
-            c = torch.empty(0, dtype=dtype, device=device)
-            torch.logical_xor(a, b, out=c)
-            self.assertEqual(expected_res, c)
-            # out is not bool
-            c = torch.empty(0, dtype=torch.uint8, device=device)
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"The output tensor of logical_xor must be a bool tensor\."):
-                torch.logical_xor(a, b, out=c)
-            # in-place
-            a.logical_xor_(b)
-            self.assertEqual(expected_res, a)
+            for other_dtype in torch.testing.get_all_dtypes():
+                a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
+                b = torch.tensor([1, 0, 0, 10], dtype=other_dtype, device=device)
+                if torch.bfloat16 in (dtype, other_dtype):
+                    self.assertRaises(RuntimeError, lambda: a.logical_xor(b))
+                    continue
+                # new tensor
+                self.assertEqual(expected_res.bool(), a.logical_xor(b))
+                # out
+                for out_dtype in torch.testing.get_all_dtypes():
+                    c = torch.empty(0, dtype=out_dtype, device=device)
+                    if out_dtype == torch.bfloat16:
+                        self.assertRaises(RuntimeError, lambda: torch.logical_xor(a, b, out=c))
+                        continue
+                    torch.logical_xor(a, b, out=c)
+                    self.assertEqual(expected_res.bool(), c.bool())
+                # in-place
+                a.logical_xor_(b)
+                self.assertEqual(expected_res, a)
 
     def test_logical_xor(self):
         self._test_logical_xor(self, 'cpu')
