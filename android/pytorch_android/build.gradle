@@ -12,13 +12,15 @@ android {
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         ndk {
-            abiFilters "x86", "armeabi-v7a", "arm64-v8a", "x86_64"
+            abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
         }
     }
     buildTypes {
+        debug {
+            minifyEnabled false
+        }
         release {
             minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
     sourceSets {
@@ -31,6 +33,10 @@ android {
             path "CMakeLists.txt"
         }
     }
+
+    useLibrary 'android.test.runner'
+    useLibrary 'android.test.base'
+    useLibrary 'android.test.mock'
 }
 
 dependencies {
@@ -38,8 +44,10 @@ dependencies {
 
     implementation 'com.android.support:appcompat-v7:28.0.0'
 
-    androidTestImplementation 'junit:junit:' + rootProject.junitVersion
+    testImplementation 'junit:junit:' + rootProject.junitVersion
+    testImplementation 'androidx.test:core:' + rootProject.coreVersion
 
+    androidTestImplementation 'junit:junit:' + rootProject.junitVersion
     androidTestImplementation 'androidx.test:core:' + rootProject.coreVersion
     androidTestImplementation 'androidx.test.ext:junit:' + rootProject.extJUnitVersion
     androidTestImplementation 'androidx.test:rules:' + rootProject.rulesVersion
