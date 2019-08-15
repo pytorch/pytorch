@@ -7,8 +7,11 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch
+import torch.nn as nn
+import torch.nn._intrinsic as nni
+import torch.nn._intrinsic.qat as nniqat
+from torch.nn.utils import fuse_conv_bn_weights
 from torch._ops import ops
-from torch.nn import Conv2d as NNConv2d
 from torch.nn.modules.utils import _pair
 
 from torch._jit_internal import Optional
@@ -50,7 +53,7 @@ class Conv2d(torch.nn.Module):
 
     """
 
-    __FLOAT_MODULE = NNConv2d
+    _FLOAT_MODULE = nn.Conv2d
     __annotations__ = {'bias' : Optional[torch.Tensor]}
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -188,25 +191,35 @@ class Conv2d(torch.nn.Module):
         if hasattr(mod, 'weight_fake_quant'):
             # assert type(mod) == cls.__QAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
             #     cls.__QAT_MODULE.__name__
-            assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
+            if type(mod) == nniqat.ConvBn2d:
+                mod.weight, mod.bias = \
+                    fuse_conv_bn_weights(mod.weight, mod.bias, mod.running_mean,
+                                         mod.running_var, mod.eps, mod.gamma, mod.beta)
+            assert hasattr(mod, 'observer'), 'Input QAT module must have observer attached'
             weight_observer = mod.weight_fake_quant
+            activation_observer = mod.observer
         else:
-            assert type(mod) == cls.__FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-                cls.__FLOAT_MODULE.__name__
+            assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+                cls._FLOAT_MODULE.__name__
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
+            # workaround for sequential, ConvReLU2d should probably
+            # inherit from Conv2d instead
+            if type(mod) == nni.ConvReLU2d:
+                activation_observer = mod[1].observer
+                mod = mod[0]
+            else:
+                activation_observer = mod.observer
             weight_observer = mod.qconfig.weight()
             weight_observer(mod.weight)
-        activation_observer = mod.observer
         act_scale, act_zp = activation_observer.calculate_qparams()
         wt_scale, wt_zp = weight_observer.calculate_qparams()
         bias_scale = (wt_scale * act_scale).float()
         qweight = torch.quantize_linear(
             mod.weight.float().contiguous(),
             wt_scale, wt_zp.long().item(), torch.qint8)
-        qconv = Conv2d(mod.in_channels, mod.out_channels, mod.kernel_size,
-                       mod.stride, mod.padding, mod.dilation, mod.groups,
-                       mod.bias is not None, mod.padding_mode)
+        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
+                    mod.stride, mod.padding, mod.dilation, mod.groups,
+                    mod.bias is not None, mod.padding_mode)
         qconv.set_weight(qweight)
         if mod.bias is not None:
             qconv.bias = torch.quantize_linear(mod.bias, bias_scale, 0, torch.qint32)

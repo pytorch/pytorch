@@ -10,6 +10,7 @@ checking quantization api and properties of resulting modules.
 import hypothesis
 import io
 import torch
+import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from common_utils import TestCase
@@ -98,7 +99,8 @@ class QuantizationTestCase(TestCase):
             have observers in preperation for quantization
         """
         if hasattr(module, 'qconfig') and module.qconfig is not None and len(module._modules) == 0:
-            self.assertTrue(hasattr(module, 'observer'))
+            self.assertTrue(hasattr(module, 'observer'),
+                            'module: ' + str(type(module)) + ' do not have observer')
         for child in module.children():
             self.checkObservers(child)
 
@@ -387,11 +389,11 @@ class ManualConvLinearQATModel(torch.nn.Module):
         return self.dequant(x)
 
 
-class SubModForFusion(torch.nn.Module):
+class SubModelForFusion(nn.Module):
     def __init__(self):
-        super(SubModForFusion, self).__init__()
-        self.conv = torch.nn.Conv2d(20, 20, 1, bias=None)
-        self.bn = torch.nn.BatchNorm2d(20)
+        super(SubModelForFusion, self).__init__()
+        self.conv = nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)
+        self.bn = nn.BatchNorm2d(2).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.conv(x)
@@ -399,21 +401,41 @@ class SubModForFusion(torch.nn.Module):
         return x
 
 
-class ModForFusion(torch.nn.Module):
+class SubModelWithoutFusion(nn.Module):
     def __init__(self):
-        super(ModForFusion, self).__init__()
-        self.conv1 = torch.nn.Conv2d(10, 20, 5, bias=None)
-        self.bn1 = torch.nn.BatchNorm2d(20)
-        self.relu1 = torch.nn.ReLU(inplace=False)
-        self.sub1 = SubModForFusion()
-        self.sub2 = SubModForFusion()
+        super(SubModelWithoutFusion, self).__init__()
+        self.conv = nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)
+        self.relu = nn.ReLU(inplace=False).to(dtype=torch.float)
 
     def forward(self, x):
+        return self.relu(self.conv(x))
+
+class ModelForFusion(nn.Module):
+    def __init__(self, qconfig):
+        super(ModelForFusion, self).__init__()
+        self.conv1 = nn.Conv2d(3, 2, 5, bias=None).to(dtype=torch.float)
+        self.bn1 = nn.BatchNorm2d(2).to(dtype=torch.float)
+        self.relu1 = nn.ReLU(inplace=False).to(dtype=torch.float)
+        self.sub1 = SubModelForFusion()
+        self.sub2 = SubModelWithoutFusion()
+        self.fc = nn.Linear(72, 10).to(dtype=torch.float)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.qconfig = qconfig
+        # don't quantize sub2
+        self.sub2.qconfig = None
+        self.fc.qconfig = None
+
+    def forward(self, x):
+        x = self.quant(x)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu1(x)
         x = self.sub1(x)
+        x = self.dequant(x)
         x = self.sub2(x)
+        x = x.view(-1, 72).contiguous()
+        x = self.fc(x)
         return x
 
 
