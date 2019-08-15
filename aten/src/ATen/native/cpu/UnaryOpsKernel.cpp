@@ -70,7 +70,7 @@ static void bitwise_not_kernel(TensorIterator& iter) {
             return !a;
           });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_cpu", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_not_cpu", [&]() {
       cpu_kernel(
           iter,
           [](scalar_t a) -> scalar_t {
