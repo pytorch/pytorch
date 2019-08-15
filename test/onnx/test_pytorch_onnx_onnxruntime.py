@@ -313,7 +313,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), x)
 
     # NOTE: Supported in onnxruntime master, enable this after 0.5 release.
-    @skipIfUnsupportedOpsetVersion([10])
+    @skipIfUnsupportedOpsetVersion([10, 11])
     def test_interpolate_output_size(self):
         class MyModel(torch.nn.Module):
             def forward(self, x):
@@ -322,7 +322,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), x)
 
     # NOTE: Supported in onnxruntime master, enable this after 0.5 release.
-    @skipIfUnsupportedOpsetVersion([10])
+    @skipIfUnsupportedOpsetVersion([10, 11])
     def test_interpolate_upsample(self):
         class MyModel(torch.nn.Module):
             def forward(self, x):
@@ -412,7 +412,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(IndexSelectScalerIndexModel(base), (x, index_offset))
 
     # TODO: enable for opset 10 when ONNXRuntime version will be updated
-    @skipIfUnsupportedOpsetVersion([10])
+    @skipIfUnsupportedOpsetVersion([10, 11])
     def test_topk(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -422,6 +422,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModule(), x)
 
     @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedOpsetVersion([11])
     def test_topk_script(self):
         class MyModuleDynamic(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -701,6 +702,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
 
+    @skipIfUnsupportedOpsetVersion([11])
     def test_sort(self):
         class SortModel(torch.nn.Module):
             def __init__(self, dim):
@@ -730,6 +732,16 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_test(MaskedFillModel2(), x)
+
+    @unittest.skip("Enable this once depthToSpace attr 'mode' is supported in ORT")
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_pixel_shuffle(self):
+        class PixelShuffle(torch.nn.Module):
+            def forward(self, x):
+                return torch.pixel_shuffle(x, upscale_factor=2)
+
+        x = torch.randn(2, 16, 4, 3, requires_grad=True)
+        self.run_test(PixelShuffle(), x)
 
     def test_frobenius_norm(self):
         class NormModel(torch.nn.Module):
@@ -971,6 +983,11 @@ TestONNXRuntime_opset8 = type(str("TestONNXRuntime_opset8"),
 TestONNXRuntime_opset10 = type(str("TestONNXRuntime_opset10"),
                                (unittest.TestCase,),
                                dict(TestONNXRuntime.__dict__, opset_version=10))
+
+# opset 11 tests
+TestONNXRuntime_opset11 = type(str("TestONNXRuntime_opset11"),
+                               (unittest.TestCase,),
+                               dict(TestONNXRuntime.__dict__, opset_version=11))
 
 
 # opset 10 tests, with keep_initializers_as_inputs=False for 

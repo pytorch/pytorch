@@ -237,7 +237,7 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 
 _default_onnx_opset_version = 9
 _onnx_master_opset = 10
-_onnx_stable_opsets = [7, 8, 9, 10]
+_onnx_stable_opsets = [7, 8, 9, 10, 11]
 _export_onnx_opset_version = _default_onnx_opset_version
 
 
