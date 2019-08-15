@@ -161,7 +161,6 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     return fn
 
 
-
 class FunctionModifiers(object):
     """
     Used to denote the behavior of a function in TorchScript. See export() and
@@ -220,6 +219,14 @@ def ignore(drop_on_export=False):
     raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
                        "a function but got {}".format(drop_on_export))
 
+
+def module_has_exports(mod):
+    for name in dir(mod):
+        item = getattr(mod, name)
+        if callable(item):
+            if get_torchscript_modifier(item) is FunctionModifiers.EXPORT:
+                return True
+    return False
 
 def should_drop_on_export(fn):
     attr = get_torchscript_modifier(fn)
