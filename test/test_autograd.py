@@ -3038,20 +3038,20 @@ class TestAutograd(TestCase):
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
     # test for backward in https://github.com/pytorch/pytorch/issues/15511
-    def test_pdist_large(self):
-        def func(x):
-            return torch.pdist(x, p=2)
-
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
-            # shape[0] should be able to be (roughly) arbitrarily large, but the kernel
-            # is currently limited to smaller sizes (see issue above); this is just testing
-            # a floor.
-            shape = (1000, 1)
-            x = torch.randn(shape, device=device).requires_grad_()
-            output = torch.pdist(x, p=2)
-            # just run a single backward, as gradcheck/gradgradcheck is expensive here
-            output.sum().backward()
+    # def test_pdist_large(self):
+    #     def func(x):
+    #         return torch.pdist(x, p=2)
+    #
+    #     devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+    #     for device in devices:
+    #         # shape[0] should be able to be (roughly) arbitrarily large, but the kernel
+    #         # is currently limited to smaller sizes (see issue above); this is just testing
+    #         # a floor.
+    #         shape = (1000, 1)
+    #         x = torch.randn(shape, device=device).requires_grad_()
+    #         output = torch.pdist(x, p=2)
+    #         # just run a single backward, as gradcheck/gradgradcheck is expensive here
+    #         output.sum().backward()
 
     @skipIfNoLapack
     def test_pinverse(self):
