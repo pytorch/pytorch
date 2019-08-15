@@ -12,6 +12,9 @@ py::object to_py_obj(const Message& message) {
       stack.push_back(ret.value());
       return torch::jit::createPyObjectForStack(std::move(stack));
     }
+    case MessageType::PYTHON_RET: {
+      return PythonRpcHandler::loadPythonUDFResult(message);
+    }
     default: {
       AT_ERROR("Unrecognized response message type ", message.type());
     }
@@ -25,7 +28,7 @@ FutureMessage::Callback wrap_callback(
   };
 }
 
-std::shared_ptr<FutureMessage> py_rpc(
+std::shared_ptr<FutureMessage> py_rpc_builtin(
     RpcAgent& agent,
     const std::string& dstName,
     const std::string& opName,
@@ -49,6 +52,19 @@ std::shared_ptr<FutureMessage> py_rpc(
 
   AT_ERROR("Failed to match operator name ", opName, " and arguments "
       "(args: ", args, ", kwargs: ", kwargs, ") to a builtin operator");
+}
+
+std::shared_ptr<FutureMessage> py_rpc_python_udf(
+    RpcAgent& agent,
+    const std::string& dstName,
+    const std::string& pickledPythonUDF) {
+  std::vector<char> data(pickledPythonUDF.begin(), pickledPythonUDF.end());
+  std::vector<torch::Tensor> tensor_table;
+
+  return agent.send(dstName,
+                    Message(std::move(data),
+                            std::move(tensor_table),
+                            MessageType::PYTHON_CALL));
 }
 
 }

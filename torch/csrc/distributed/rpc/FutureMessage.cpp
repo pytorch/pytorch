@@ -7,7 +7,7 @@ namespace rpc {
 const Message& FutureMessage::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
   finished_cv_.wait(lock, [this]{return completed_.load();});
-  return message_.value();
+  return message_;
 }
 
 void FutureMessage::markCompleted(Message message) {
@@ -26,7 +26,7 @@ void FutureMessage::markCompleted() {
   markCompleted(Message());
 }
 
-const c10::optional<Message>& FutureMessage::message() {
+const Message& FutureMessage::message() {
   return message_;
 }
 

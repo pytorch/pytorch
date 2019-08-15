@@ -46,21 +46,20 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def("get",
           [&](FutureMessage& fut) {
             auto ret = c10::optional<py::object>();
-            if (fut.message().has_value()) {
-              ret = to_py_obj(fut.message().value());
+            if (fut.completed()) {
+              ret = to_py_obj(fut.message());
             }
             return ret;
           },
           py::call_guard<py::gil_scoped_release>())
-      .def("then",
+      .def("add_callback",
           // Python Callback taking a FutureMessage& instead of py::object of
           // the return value, because we do not want to force the Message to
           // py::object convertion if not necessary.
           [&](FutureMessage& fut,
-              const std::function<void(FutureMessage&)> cb) -> FutureMessage& {
+              const std::function<void(FutureMessage&)> cb) {
             fut.addCallback(wrap_callback(fut, cb));
             // return FutureMessage here to support chaining multiple then().
-            return fut;
           });
 
   auto processGroupAgent =
@@ -68,7 +67,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
           module, "ProcessGroupAgent", rpcAgent)
           .def(py::init<std::string,
                         std::unordered_map<std::string, int>,
-                        std::shared_ptr<::c10d::ProcessGroup>>())
+                        std::shared_ptr<::c10d::ProcessGroup>,
+                        int>(),
+               py::arg("name"),
+               py::arg("name_map"),
+               py::arg("process_group"),
+               py::arg("num_send_recv_threads") = 4)
           .def("join",
                &ProcessGroupAgent::join,
                py::call_guard<py::gil_scoped_release>())
@@ -76,13 +80,20 @@ PyObject* rpc_init(PyObject* /* unused */) {
                &ProcessGroupAgent::sync,
                py::call_guard<py::gil_scoped_release>());
 
-  module.def("invoke_rpc", [](
+  module.def("invoke_rpc_builtin", [](
       RpcAgent& agent,
       const std::string& dstName,
       const std::string& opName,
       const py::args& args,
       const py::kwargs& kwargs) {
-    return py_rpc(agent, dstName, opName, args, kwargs);
+    return py_rpc_builtin(agent, dstName, opName, args, kwargs);
+  });
+
+  module.def("invoke_rpc_python_udf", [](
+      RpcAgent& agent,
+      const std::string& dstName,
+      const std::string& pickledPythonUDF) {
+    return py_rpc_python_udf(agent, dstName, pickledPythonUDF);
   });
 
   Py_RETURN_TRUE;

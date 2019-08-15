@@ -876,7 +876,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   Tensor values = input._values();
   IntArrayRef sizes = input.sizes();
   const int64_t sparse_dim = input.sparse_dim();
-  const int64_t dense_dim = input.dense_dim();
+  // const int64_t dense_dim = input.dense_dim();
 
   auto dims_to_keep_v = std::vector<int64_t>();
   auto dense_dims_to_sum_v = std::vector<int64_t>();
