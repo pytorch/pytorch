@@ -94,7 +94,9 @@ namespace jit {
   _(SaveExtraFilesHook)                \
   _(InsertConstant)                    \
   _(DCE)                               \
-  _(CustomFusionNestedBlocks)
+  _(CustomFusionNestedBlocks)          \
+  _(ImportTooNew)                      \
+  _(ClassDerive)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

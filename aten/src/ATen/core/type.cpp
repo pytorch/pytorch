@@ -6,25 +6,7 @@
 namespace c10 {
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
-  if(auto value = t.cast<CompleteTensorType>()) {
-    out << toString(value->scalarType()) << "(";
-    auto& sizes = value->sizes();
-    auto& strides = value->strides();
-    AT_ASSERT(sizes.size() == strides.size());
-    for (size_t i = 0; i < sizes.size(); i++) {
-      if (i > 0) {
-        out << ", ";
-      }
-      // TODO: figure out a good way to output strides, or
-      // add a "debug" printing mode which adds the extra stuff
-      out << sizes[i]; // << "%" << strides[i];
-      int64_t expected = i + 1 < sizes.size() ? sizes[i+1]*strides[i+1] : 1;
-      if (strides[i] != expected) {
-        out << "!"; //mark non-contiguous
-      }
-    }
-    out << ")";
-  } else if (auto value = t.cast<ProfiledTensorType>()) {
+  if (auto value = t.cast<ProfiledTensorType>()) {
     if  (value->scalarType().has_value()) {
       out << toString(*value->scalarType());
       if (!value->sizes().size().has_value()) {
@@ -82,10 +64,17 @@ TensorTypePtr TensorType::get() {
   static auto value = TensorType::create();
   return value;
 }
-AutogradZeroTensorTypePtr AutogradZeroTensorType::get() {
-  static auto value = AutogradZeroTensorType::create();
+
+ProfiledTensorTypePtr ProfiledTensorType::get() {
+  static auto value = ProfiledTensorType::create(
+      {},
+      {},
+      VaryingShape{c10::optional<size_t>()},
+      VaryingShape{c10::optional<size_t>()},
+      {});
   return value;
 }
+
 NumberTypePtr NumberType::get() {
   static auto value = NumberType::create();
   return value;
@@ -151,7 +140,7 @@ ListTypePtr ListType::ofBools() {
 // the type, like in the tracer.
 TypePtr incompleteInferTypeFrom(const IValue& value) {
   if (value.isTensor()) {
-    return CompleteTensorType::create(value.toTensor());
+    return ProfiledTensorType::create(value.toTensor());
   } else if (value.isDouble()) {
     return FloatType::get();
   } else if (value.isInt()) {
@@ -535,26 +524,6 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
     return out;
 }
 
-std::string NamedType::python_str() const {
-  TORCH_INTERNAL_ASSERT(name_);
-  return name_->qualifiedName();
-}
-
-std::string NamedType::qualname() const {
-  TORCH_INTERNAL_ASSERT(name_);
-  return name_->qualifiedName();
-}
-
-std::string NamedType::qualifier() const {
-  TORCH_INTERNAL_ASSERT(name_);
-  return name_->prefix();
-}
-
-std::string NamedType::basename() const {
-  TORCH_INTERNAL_ASSERT(name_);
-  return name_->name();
-}
-
 std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(
     c10::QualifiedName qualName,
     std::vector<std::string> field_names,
@@ -576,10 +545,14 @@ std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(
   return schema;
 }
 
-TupleType::TupleType(std::vector<TypePtr> elements, c10::optional<c10::QualifiedName> name, std::shared_ptr<FunctionSchema> schema)
-: NamedType(TypeKind::TupleType, std::move(name))
-, elements_(std::move(elements))
-, schema_(std::move(schema)) {
+TupleType::TupleType(
+    std::vector<TypePtr> elements,
+    c10::optional<c10::QualifiedName> name,
+    std::shared_ptr<FunctionSchema> schema)
+    : NamedType(TypeKind::TupleType),
+      elements_(std::move(elements)),
+      name_(std::move(name)),
+      schema_(std::move(schema)) {
   has_free_variables_ =
       std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
         return v->hasFreeVariables();
@@ -628,7 +601,7 @@ bool TupleType::operator==(const Type& rhs) const {
 std::string TupleType::str() const {
   std::stringstream ss;
   if (schema_ && name_) {
-    ss << qualname();
+    ss << name_->qualifiedName();
   } else {
     ss << "(";
     for(size_t i = 0; i < elements().size(); ++i) {
@@ -643,7 +616,7 @@ std::string TupleType::str() const {
 std::string TupleType::python_str() const {
   std::stringstream ss;
   if (schema_ && name_) {
-    ss << qualname();
+    ss << name_->qualifiedName();
   } else {
     ss << "Tuple[";
     for(size_t i = 0; i < elements().size(); ++i) {
