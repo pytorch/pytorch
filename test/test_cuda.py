@@ -6,6 +6,7 @@ from itertools import repeat
 import os
 from contextlib import contextmanager
 import threading
+import math
 if sys.version_info[0] == 3:
     import queue
 else:
@@ -1085,11 +1086,24 @@ class TestCuda(TestCase):
         self.assertEqual(x.type(torch.int).get_device(), 1)
         self.assertEqual(x.to(torch.int).get_device(), 1)
 
+    def test_abs_zero(self):
+        # Both abs(0.0) and abs(-0.0) should result in 0.0
+        for dtype in (torch.float, torch.double):
+            abs_zeros = torch.tensor([0.0, -0.0], device='cuda', dtype=dtype).abs().tolist()
+            for num in abs_zeros:
+                self.assertGreater(math.copysign(1.0, num), 0.0)
+
     def test_neg(self):
         _TestTorchMixin._test_neg(self, lambda t: t.cuda())
 
     def test_bitwise_not(self):
         _TestTorchMixin._test_bitwise_not(self, 'cuda')
+
+    def test_logical_not(self):
+        _TestTorchMixin._test_logical_not(self, 'cuda')
+
+    def test_logical_xor(self):
+        _TestTorchMixin._test_logical_xor(self, 'cuda')
 
     def test_isinf(self):
         _TestTorchMixin._test_isinf(self, lambda t: t.cuda())
@@ -1721,6 +1735,8 @@ class TestCuda(TestCase):
     def test_streams_multi_gpu_query(self):
         d0 = torch.device('cuda:0')
         d1 = torch.device('cuda:1')
+        torch.cuda.synchronize(d0)
+        torch.cuda.synchronize(d1)
 
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
@@ -2790,49 +2806,7 @@ class TestCuda(TestCase):
         torch.cuda.nvtx.range_pop()
 
     def test_randperm_cuda(self):
-        cuda = torch.device('cuda:0')
-
-        # Test core functionality. For small n, randperm is offloaded to CPU instead. For large n, randperm is executed
-        # on GPU.
-        for n in (100, 50000, 100000):
-            # Ensure both integer and floating-point numbers are tested. Half follows an execution path that is
-            # different from others on cuda.
-            for dtype in (torch.long, torch.half, torch.float):
-                if n > 2049 and dtype == torch.half:  # Large n for torch.half will raise an exception, do not test here.
-                    continue
-                with torch.random.fork_rng(devices=[0]):
-                    res1 = torch.randperm(n, dtype=dtype, device=cuda)
-                res2 = torch.empty(0, dtype=dtype, device=cuda)
-                torch.randperm(n, out=res2, dtype=dtype, device=cuda)
-                self.assertEqual(res1, res2, 0)
-
-        # Default type is long
-        for n in (100, 50000):
-            self.assertIsInstance(torch.randperm(n, device=cuda), torch.cuda.LongTensor)
-
-        # randperm of 0 elements is an empty tensor
-        res1 = torch.randperm(0, device=cuda)
-        res2 = torch.cuda.LongTensor(5)
-        torch.randperm(0, out=res2, device=cuda)
-        self.assertEqual(res1.numel(), 0)
-        self.assertEqual(res2.numel(), 0)
-
-        # Test exceptions when n is too large for a floating point type
-        for res, small_n, large_n in ((torch.cuda.HalfTensor(), 2**11 + 1, 2**11 + 2),
-                                      (torch.cuda.FloatTensor(), 2**24 + 1, 2**24 + 2),
-                                      (torch.cuda.DoubleTensor(), 2**25,  # 2**53 + 1 is too large to run
-                                       2**53 + 2)):
-            torch.randperm(small_n, out=res)  # No exception expected
-            self.assertRaises(RuntimeError, lambda: torch.randperm(large_n, out=res))
-
-        # Test non-contiguous tensors
-        for n in (4, 5, 6, 10, 20):
-            non_contiguous_tensor = torch.zeros((2, 3), dtype=torch.long, device=cuda).t()
-            self.assertFalse(non_contiguous_tensor.is_contiguous())
-            with torch.random.fork_rng(devices=[0]):
-                res = torch.randperm(n, dtype=torch.long, device=cuda)
-            torch.randperm(n, out=non_contiguous_tensor)
-            self.assertEqual(non_contiguous_tensor, res)
+        _TestTorchMixin._test_randperm(self, device='cuda')
 
     def test_random_neg_values(self):
         _TestTorchMixin._test_random_neg_values(self, use_cuda=True)

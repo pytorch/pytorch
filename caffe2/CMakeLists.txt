@@ -371,6 +371,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import_source.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/pickle.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import_export_helpers.cpp
     ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
@@ -458,13 +459,17 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
 
   if (NOT INTERN_BUILD_MOBILE)
-    list(APPEND TORCH_SRCS 
+    list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/FutureMessage.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/Message.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/ScriptCall.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/ScriptRet.cpp
       ${TORCH_SRC_DIR}/csrc/jit/export.cpp
       ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
     if (NOT WIN32)
-      list(APPEND TORCH_SRCS 
+      list(APPEND TORCH_SRCS
         ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp)
     endif()
   endif()
@@ -716,7 +721,7 @@ ENDIF()
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
     FILES_MATCHING PATTERN "*.h")
-  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h"
+  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h" "${TORCH_SRC_DIR}/custom_class.h"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 
