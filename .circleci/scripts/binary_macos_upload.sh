@@ -27,6 +27,7 @@ export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_KEY_FOR_PYTORCH_BINARY_TMP_BUCKET_YF22
 
 pushd "$workdir/final_pkgs"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
+  echo "skipped"
   # retry conda install -yq anaconda-client
   # retry /Users/distiller/project/login_to_anaconda.sh
   # retry anaconda upload "$(ls)" -u pytorch-nightly --label main --no-progress --force
@@ -37,6 +38,7 @@ elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
     retry aws s3 cp "$pkg" "$s3_dir" --acl public-read
   done
 else
+  echo "skipped"
   # retry pip install -q awscli
   # s3_dir="s3://pytorch/whl/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
   # retry aws s3 cp "$(ls)" "$s3_dir" --acl public-read
