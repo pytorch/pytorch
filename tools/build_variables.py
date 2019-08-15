@@ -239,6 +239,7 @@ def add_torch_libs():
         "torch/csrc/distributed/rpc/ProcessGroupAgent.cpp",
         "torch/csrc/distributed/rpc/functions.cpp",
         "torch/csrc/distributed/rpc/python_functions.cpp",
+        "torch/csrc/distributed/rpc/PythonRpcHandler.cpp",
         "torch/csrc/jit/init.cpp",
         "torch/csrc/jit/passes/inline_fork_wait.cpp",
         "torch/csrc/jit/passes/onnx.cpp",
