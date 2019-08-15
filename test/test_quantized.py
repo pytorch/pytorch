@@ -923,7 +923,7 @@ class TestComparatorOps(TestCase):
                        qparams=hu.qparams(dtypes=torch.quint8)),
            B=hu.tensor(shapes=((5,), (1, 5), (1, 1, 5), (4, 5), (3, 4, 5)),
                        qparams=hu.qparams(dtypes=torch.quint8)))
-    def test_eq_tensor_tensor(self, A, B):
+    def test_compare_tensor_tensor(self, A, B):
         A, (scale_a, zero_point_a, dtype_a) = A
         B, (scale_b, zero_point_b, dtype_b) = B
         tA = torch.from_numpy(A)
@@ -953,7 +953,7 @@ class TestComparatorOps(TestCase):
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams(dtypes=torch.quint8)),
            b=st.floats(allow_infinity=False, allow_nan=False, width=32))
-    def test_eq_tensor_scalar(self, A, b):
+    def test_compare_tensor_scalar(self, A, b):
         A, (scale_a, zero_point_a, dtype_a) = A
         tA = torch.from_numpy(A)
 
