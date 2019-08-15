@@ -31,7 +31,7 @@ import warnings
 from collections import OrderedDict, namedtuple
 
 # These are imported so users can access them from the `torch.jit` module
-from torch._jit_internal import Final, _overload  # noqa: F401
+from torch._jit_internal import Final, _overload, _overload_method  # noqa: F401
 from torch._jit_internal import ignore, export  # noqa: F401
 
 if sys.version_info[0] > 2:
@@ -1906,7 +1906,8 @@ def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_
 def _check_no_signature(func):
     signature = torch.jit.annotations.get_signature(func)
     if signature is None:
-        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(func.__qualname__))
+        qual_name = _qualified_name(func)
+        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
 
 def _get_overload_decl_and_defaults(func):
     _check_no_signature(func)
@@ -1914,7 +1915,7 @@ def _get_overload_decl_and_defaults(func):
 
 def _get_overloads(obj):
     # check for cached compiled fns
-    qual_name = obj.__qualname__
+    qual_name = _qualified_name(obj)
     global _compiled_overloaded_fns
     compiled_overloads = _compiled_overloaded_fns.get(qual_name, None)
     if compiled_overloads is not None:
@@ -1940,7 +1941,7 @@ def _get_overloads(obj):
     return compiled_fns
 
 def _check_directly_compile_overloaded(obj):
-    qual_name = obj.__qualname__
+    qual_name = _qualified_name(obj)
     global _compiled_overloaded_fns
     global _overloaded_fns
     if qual_name in _compiled_overloaded_fns or _jit_internal._get_fn_overloads(qual_name):

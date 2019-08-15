@@ -13166,17 +13166,17 @@ a")
 
         self.checkScript(test_uses, ())
 
-    def test_elias(self):
+    def test_method_overloading(self):
         class W(torch.nn.Module):
             def __init__(self):
                 super(W, self).__init__()
 
-            @torch.jit._overload  # noqa: F811
+            @torch.jit._overload_method  # noqa: F811
             def forward(self, x):  # noqa: F811
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
                 pass
 
-            @torch.jit._overload  # noqa: F811
+            @torch.jit._overload_method  # noqa: F811
             def forward(self, x):  # noqa: F811
                 # type: (Tensor) -> Tensor
                 pass
@@ -13196,9 +13196,9 @@ a")
             def forward(self, x):
                 return self.weak(x) + self.weak((x, x))
 
-        s = S()
+        s_mod = S()
         x = torch.ones(1)
-        self.assertEqual(s(x), x + 20 + 5 + x)
+        self.assertEqual(s_mod(x), x + 20 + 5 + x)
 
         w = W()
         self.assertEqual(w((x, x)), x + 5)
@@ -13208,11 +13208,11 @@ a")
             def __init__(self):
                 super(Unannotated, self).__init__()
 
-            @torch.jit._overload  # noqa: F811
+            @torch.jit._overload_method  # noqa: F811
             def hello(self, x):  # noqa: F811
                 pass
 
-            @torch.jit._overload  # noqa: F811
+            @torch.jit._overload_method  # noqa: F811
             def hello(self, x):  # noqa: F811
                 # type: (int) -> (int)
                 pass
@@ -13231,12 +13231,12 @@ a")
             def __init__(self):
                 super(CompileOverloadError, self).__init__()
 
-            @torch.jit._overload  # noqa: F811
+            @torch.jit._overload_method  # noqa: F811
             def hello(self, x):  # noqa: F811
                 # type: (str) -> (int)
                 pass
 
-            @torch.jit._overload  # noqa: F811
+            @torch.jit._overload_method  # noqa: F811
             def hello(self, x):  # noqa: F811
                 # type: (int) -> (int)
                 pass

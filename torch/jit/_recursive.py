@@ -123,9 +123,12 @@ def recursive_script(mod):
         if callable(item):
             if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
                 exported.append(name)
-            method_overloads = _jit_internal._get_fn_overloads(item.__qualname__)
-            if method_overloads is not None:
-                overloads.append((item, method_overloads))
+
+            # builtin functions like repr() in python 2 do not have __module__ defined
+            if hasattr(item, "__module__") and item.__module__ is not None:
+                method_overloads = _jit_internal._get_overloaded_methods(item, mod._get_name())
+                if method_overloads is not None:
+                    overloads.append((item, method_overloads))
 
     methods = methods + tuple(exported)
 
@@ -143,7 +146,7 @@ def recursive_script(mod):
             _rcb = _jit_internal.createResolutionCallbackFromClosure(orig_fn)
             overload_stubs.append(torch.jit.ScriptMethodStub(_rcb, new_ast, overload_fn))
 
-    setattr(mod, "__overloads__", overload_name_mappings)
+    mod.__overloads__ = overload_name_mappings
 
     # we shouldn't directly compile overloaded methods, just its overloads
     def ignore_overloaded(method_name):
