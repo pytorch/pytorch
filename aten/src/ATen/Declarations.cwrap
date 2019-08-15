@@ -73,6 +73,7 @@
   name: _th_masked_fill_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   cname: maskedFill
   variants: function
   return: self
@@ -93,6 +94,7 @@
   name: _th_masked_fill_bool_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   cname: maskedFillBool
   variants: function
   return: self
@@ -113,6 +115,7 @@
   name: _th_masked_scatter_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   cname: maskedCopy
   variants: function
   return: self
@@ -126,6 +129,7 @@
   name: _th_masked_scatter_bool_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   cname: maskedCopyBool
   variants: function
   return: self
@@ -140,6 +144,7 @@
   cname: maskedSelect
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -155,6 +160,7 @@
   cname: maskedSelectBool
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
