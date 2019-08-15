@@ -2452,7 +2452,7 @@ class _TestTorchMixin(torchtest):
         def _test_integral_pow(dt, range, dev):
             tensor = torch.tensor((3, 3), dtype=dt, device=dev).random_(*range)
             exps = [0, 1, 2, 4,
-                    torch.tensor((3, 3), dtype=dt, device=dev).random_(0, 10)]
+                    torch.tensor((3, 3), dtype=dt, device=dev).random_(0, 5)]
             for exp in exps:
                 _check_against_np(tensor, exp)
 
@@ -2460,8 +2460,8 @@ class _TestTorchMixin(torchtest):
         _test_integral_pow(torch.uint8, (0, 4), device)
         _test_integral_pow(torch.int16, (-5, 5), device)
         _test_integral_pow(torch.int64, (-10, 10), device)
-        # if not IS_WINDOWS:
-        _test_integral_pow(torch.int32, (-10, 10), device)
+        if not IS_WINDOWS:
+            _test_integral_pow(torch.int32, (-10, 10), device)
 
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
