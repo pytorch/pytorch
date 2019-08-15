@@ -2673,7 +2673,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
 
     if align_corners is None:
         warnings.warn("Default grid_sample and affine_grid behavior has changed "
-                      "to align_corners=False since 1.2.1. Please specify "
+                      "to align_corners=False since 1.3.0. Please specify "
                       "align_corners=True if the old behavior is desired. "
                       "See the documentation of grid_sample for details.")
         align_corners = False
@@ -2712,7 +2712,7 @@ def affine_grid(theta, size, align_corners=None):
     """
     if align_corners is None:
         warnings.warn("Default grid_sample and affine_grid behavior has changed "
-                      "to align_corners=False since 1.2.1. Please specify "
+                      "to align_corners=False since 1.3.0. Please specify "
                       "align_corners=True if the old behavior is desired. "
                       "See the documentation of grid_sample for details.")
         align_corners = False
