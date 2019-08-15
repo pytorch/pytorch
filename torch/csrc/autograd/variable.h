@@ -293,9 +293,9 @@ struct TORCH_API Variable : public at::Tensor {
   void clear_hooks();
 
   template <typename T>
-  using hook_return_void_t = c10::guts::enable_if_t<std::is_void<decltype(T(std::declval<Variable>()))>::value, unsigned>;
+  using hook_return_void_t = c10::guts::enable_if_t<std::is_void<typename std::result_of<T&(Variable)>::type>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = c10::guts::enable_if_t<std::is_same<decltype(T(std::declval<Variable>())), Variable>::value, unsigned>;
+  using hook_return_var_t = c10::guts::enable_if_t<std::is_same<typename std::result_of<T&(Variable)>::type, Variable>::value, unsigned>;
   // Remove hook at given position
   void remove_hook(unsigned pos);
 
@@ -307,7 +307,6 @@ struct TORCH_API Variable : public at::Tensor {
   template <typename T>
   hook_return_var_t<T> register_hook(T&& hook);
 
-  void create_cpp_hook();
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -338,6 +337,7 @@ struct TORCH_API Variable : public at::Tensor {
 
   Variable(c10::intrusive_ptr<at::TensorImpl> self);
   at::TensorImpl* get() const;
+  void create_cpp_hook();
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -696,9 +696,10 @@ auto Variable::register_hook(T&& hook) -> Variable::hook_return_void_t<T> {
   unsigned idx = list->size();
   // Return the grad argument in case of a hook with void return type to have an
   // std::function with Variable return type
-  list->push_back([hook](Variable grad){
-    hook(grad);
-    return grad;});
+  std::function<void(Variable)> fn(hook);
+  list->emplace_back([fn](Variable grad){
+   fn(grad);
+    return Variable();});
   return idx;
 }
 

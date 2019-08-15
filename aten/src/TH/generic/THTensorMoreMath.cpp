@@ -63,6 +63,11 @@ TENSOR_IMPLEMENT_LOGICAL_BYTE(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(eq,==)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(ne,!=)
 
+ptrdiff_t THTensor_(numel)(THTensor *t)
+{
+  return THTensor_(nElement)(t);
+}
+
 #if !defined(TH_REAL_IS_BFLOAT16)
 
 int THTensor_(equal)(THTensor *ta, THTensor* tb)
@@ -111,11 +116,6 @@ TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(r_, t);
 #endif
-}
-
-ptrdiff_t THTensor_(numel)(THTensor *t)
-{
-  return THTensor_(nElement)(t);
 }
 
 // Helper function to be used in a reduction operation.

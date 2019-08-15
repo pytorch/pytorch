@@ -87,14 +87,14 @@ class QFunctional(torch.nn.Module):
     def cat(self, x, dim=0):
         # type: (List[Tensor], int) -> Tensor
         return ops.quantized.cat(x, scale=self.scale,
-                                 zero_point=self.zero_point, axis=dim)
+                                 zero_point=self.zero_point, dim=dim)
 
     @classmethod
     def from_float(cls, mod):
         assert type(mod) == FloatFunctional,\
             "QFunctional.from_float expects an instance of FloatFunctional"
-        scale, zero_point = mod.observer.calculate_qparams()[:2]
+        scale, zero_point = mod.observer.calculate_qparams()
         new_mod = QFunctional()
-        new_mod.scale = scale
-        new_mod.zero_point = zero_point
+        new_mod.scale = float(scale)
+        new_mod.zero_point = int(zero_point)
         return new_mod
