@@ -10,7 +10,8 @@ import torch.nn._intrinsic.qat as nniqat
 from torch.quantization import \
     QConfig_dynamic, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
-    quantize_dynamic, default_qconfig, default_qat_qconfig, default_dynamic_qconfig
+    quantize_dynamic, default_qconfig, default_qat_qconfig, \
+    default_dynamic_qconfig, Observer
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
@@ -22,6 +23,10 @@ from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
 
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
+
+from hypothesis import given
+from hypothesis import strategies as st
+
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
@@ -601,6 +606,29 @@ class FusionTest(QuantizationTestCase):
                              ['sub1.conv', 'sub1.bn']])
         model = quantize(model, test_only_eval_fn, self.img_data)
         checkQuantized(model)
+
+class ObserverTest(QuantizationTestCase):
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
+    def test_observer(self, qdtype, qscheme):
+        myobs = Observer(dtype=qdtype, qscheme=qscheme)
+        x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
+        result = myobs(x)
+        result = myobs(y)
+        self.assertEqual(result, y)
+        self.assertEqual(myobs.min_val, 1.0)
+        self.assertEqual(myobs.max_val, 8.0)
+        qparams = myobs.calculate_qparams()
+        if qscheme == torch.per_tensor_symmetric:
+            ref_scale = 0.062745
+            ref_zero_point = 0 if qdtype is torch.qint8 else 128
+        else:
+            ref_scale = 0.0313725
+            ref_zero_point = -128 if qdtype is torch.qint8 else 0
+        self.assertEqual(qparams[1].item(), ref_zero_point)
+        self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
+
 
 
 if __name__ == '__main__':
