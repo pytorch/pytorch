@@ -148,7 +148,7 @@ class IntrinsicQATModuleTest(TestCase):
                 running_var_actual = qat_op.running_var
                 num_batches_tracked_actual = qat_op.num_batches_tracked
                 self.assertEqual(input_grad_ref, input_grad_actual)
-                self.assertEqual(weight_grad_ref, weight_grad_actual, prec=1e-4)
+                self.assertEqual(weight_grad_ref, weight_grad_actual, prec=5e-4)
                 self.assertEqual(gamma_grad_ref, gamma_grad_actual, prec=1e-4)
                 self.assertEqual(beta_grad_ref, beta_grad_actual)
                 self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual)
