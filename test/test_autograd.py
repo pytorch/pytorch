@@ -71,6 +71,7 @@ def graph_desc(fn):
 
 
 class TestAutograd(TestCase):
+
     def _function_test(self, cls):
         x = torch.randn(5, 5, requires_grad=True)
         y = torch.randn(5, 5, requires_grad=True)
