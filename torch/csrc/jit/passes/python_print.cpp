@@ -261,7 +261,7 @@ struct PythonPrintPass {
     auto it = std::find_if(
         deps_table_.cbegin(),
         deps_table_.cend(),
-        [&](const c10::NamedTypePtr dep) { return *dep == *type; });
+        [&](const c10::NamedTypePtr& dep) { return *dep == *type; });
 
     if (it == deps_table_.cend()) {
       deps_table_.push_back(type);
