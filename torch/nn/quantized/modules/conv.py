@@ -90,6 +90,19 @@ class Conv2d(torch.nn.Module):
         self.scale = 1.0
         self.zero_point = 0
 
+    def extra_repr(self):
+        s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
+             ', stride={stride}, scale={scale}, zero_point={zero_point}')
+        if self.padding != (0,) * len(self.padding):
+            s += ', padding={padding}'
+        if self.dilation != (1,) * len(self.dilation):
+            s += ', dilation={dilation}'
+        if self.groups != 1:
+            s += ', groups={groups}'
+        if self.bias is None:
+            s += ', bias=False'
+        return s.format(**self.__dict__)
+
     def set_weight(self, w):
         self._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(
             w.permute([0, 2, 3, 1]), self.stride, self.padding, self.dilation, self.groups)
