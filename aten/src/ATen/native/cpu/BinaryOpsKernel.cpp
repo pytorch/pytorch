@@ -82,7 +82,7 @@ void div_kernel(TensorIterator& iter) {
 }
 
 void fmod_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "fmod_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "fmod_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
