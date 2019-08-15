@@ -9,7 +9,7 @@ endif()
 # release (3.11.3) yet. Hence we need our own Modules_CUDA_fix to enable sccache.
 list(APPEND CMAKE_MODULE_PATH
      ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix
-     ${CMAKE_CURRENT_LIST_DIR}/../Modules)
+     ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
 # We don't want to statically link cudart, because we rely on it's dynamic linkage in
 # python (follow along torch/cuda/__init__.py and usage of cudaGetErrorName).

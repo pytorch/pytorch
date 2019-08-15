@@ -151,7 +151,7 @@ class LearningRateOp final : public Operator<Context> {
           sub_policy_num_iters.size(),
           0,
           "Must specify at least one sub learning rate policy.");
-      for (int i = 0; i < sub_policy_num_iters.size(); ++i) {
+      for (size_t i = 0; i < sub_policy_num_iters.size(); ++i) {
         CAFFE_ENFORCE_GT(
             sub_policy_num_iters[i],
             0,
