@@ -18556,6 +18556,19 @@ class TestLogging(JitTestCase):
             torch.jit._logging.set_logger(old_logger)
 
 
+class TestDocs(unittest.TestCase):
+    def test_docs(self):
+        import subprocess
+        docs_dir = '../docs'
+        docs_dir = [os.path.dirname(__file__), '..', 'docs']
+        docs_dir = os.path.join(*docs_dir)
+
+        result = subprocess.run(['make', 'doctest'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
+        if result.returncode != 0:
+            err = result.stderr.decode('utf-8')
+            raise RuntimeError("{}\n\nDocs build failed (run `cd docs && make doctest`)".format(err))
+
+
 for test in autograd_method_tests():
     add_autograd_test(*test)
 
