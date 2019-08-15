@@ -516,6 +516,20 @@ logical_not_() -> Tensor
 In-place version of :meth:`~Tensor.logical_not`
 """)
 
+add_docstr_all('logical_and',
+               r"""
+logical_and() -> Tensor
+
+See :func:`torch.logical_and`
+""")
+
+add_docstr_all('logical_and_',
+               r"""
+logical_and_() -> Tensor
+
+In-place version of :meth:`~Tensor.logical_and`
+""")
+
 add_docstr_all('logical_xor',
                r"""
 logical_xor() -> Tensor

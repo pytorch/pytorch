@@ -2562,6 +2562,34 @@ Example::
     tensor([1, 0, 0], dtype=torch.int16)
 """.format(**common_args))
 
+add_docstr(torch.logical_and,
+           r"""
+logical_and(input, other, out=None) -> Tensor
+
+Computes the element-wise logical AND of the given input tensors. Zeros are treated as ``False`` and nonzeros are
+treated as ``True``.
+
+Args:
+    {input}
+    other (Tensor): the tensor to compute AND with
+    {out}
+
+Example::
+
+    >>> torch.logical_and(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
+    tensor([  True, False, False])
+    >>> a = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
+    >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
+    >>> torch.logical_and(a, b)
+    tensor([ False, False,  True, False])
+    >>> torch.logical_and(a.double(), b.double())
+    tensor([ False, False,  True, False])
+    >>> torch.logical_and(a.double(), b)
+    tensor([ False, False,  True, False])
+    >>> torch.logical_and(a, b, out=torch.empty(4, dtype=torch.int8))
+    tensor([0, 0, 1, 0], dtype=torch.int8)
+""".format(**common_args))
+
 add_docstr(torch.logical_xor,
            r"""
 logical_xor(input, other, out=None) -> Tensor

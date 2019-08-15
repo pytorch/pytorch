@@ -1,3 +1,4 @@
+#include <nvfunctional>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -70,18 +71,26 @@ void atan2_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void logical_xor_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_xor_cuda", [&]() {
+void logical_binary_kernel_cuda_impl(TensorIterator& iter, const char* op_name, nvstd::function<bool(bool, bool)> op) {
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), op_name, [&]() {
     using self_t = scalar_t;
-    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(2), "logical_xor_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(2), op_name, [&]() {
       using other_t = scalar_t;
-      AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_xor_cuda", [&]() {
-        gpu_kernel(iter, []GPU_LAMBDA(self_t a, other_t b) -> scalar_t {
-          return static_cast<scalar_t>(bool(a) != bool(b));
+      AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), op_name, [&]() {
+        gpu_kernel(iter, [op]GPU_LAMBDA(self_t a, other_t b) -> scalar_t {
+          return static_cast<scalar_t>(op(bool(a), bool(b)));
         });
       });
     });
   });
+}
+
+void logical_and_kernel_cuda(TensorIterator& iter) {
+  logical_binary_kernel_cuda_impl(iter, "logical_and_cuda", []GPU_LAMBDA(bool a, bool b) { return a && b; });
+}
+
+void logical_xor_kernel_cuda(TensorIterator& iter) {
+  logical_binary_kernel_cuda_impl(iter, "logical_xor_cuda", []GPU_LAMBDA(bool a, bool b) { return a != b; });
 }
 
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
@@ -89,6 +98,7 @@ REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
 REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
+REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel_cuda);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel_cuda);
 
 }} // namespace at::native

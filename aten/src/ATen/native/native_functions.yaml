@@ -406,6 +406,20 @@
     CPU: logical_not_out
     CUDA: logical_not_out
 
+- func: logical_and(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: logical_and_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  named_guard: False
+
+- func: logical_and.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: logical_and_out
+    CUDA: logical_and_out
+  named_guard: False
+
 - func: logical_xor(Tensor self, Tensor other) -> Tensor
   variants: function, method
   named_guard: False

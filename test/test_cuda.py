@@ -1105,6 +1105,8 @@ class TestCuda(TestCase):
     def test_logical_xor(self):
         _TestTorchMixin._test_logical_xor(self, 'cuda')
 
+    def test_logical_and(self):
+        _TestTorchMixin._test_logical_and(self, 'cuda')
     def test_isinf(self):
         _TestTorchMixin._test_isinf(self, lambda t: t.cuda())
 

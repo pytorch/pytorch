@@ -1889,31 +1889,42 @@ class _TestTorchMixin(torchtest):
         self._test_logical_not(self, 'cpu')
 
     @staticmethod
-    def _test_logical_xor(self, device):
+    def _test_logical_binary(self, op, expected_res_init, a_init, b_init, device):
         for dtype in torch.testing.get_all_dtypes():
-            expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
+            expected_res = torch.tensor(expected_res_init, dtype=dtype, device=device)
             for other_dtype in torch.testing.get_all_dtypes():
-                a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
-                b = torch.tensor([1, 0, 0, 10], dtype=other_dtype, device=device)
+                a = torch.tensor(a_init, dtype=dtype, device=device)
+                b = torch.tensor(b_init, dtype=other_dtype, device=device)
                 if torch.bfloat16 in (dtype, other_dtype):
-                    self.assertRaises(RuntimeError, lambda: a.logical_xor(b))
+                    self.assertRaises(RuntimeError, lambda: getattr(a, op)(b))
                     continue
                 # new tensor
-                self.assertEqual(expected_res.bool(), a.logical_xor(b))
+                self.assertEqual(expected_res.bool(), getattr(a, op)(b))
                 # out
                 for out_dtype in torch.testing.get_all_dtypes():
                     c = torch.empty(0, dtype=out_dtype, device=device)
                     if out_dtype == torch.bfloat16:
-                        self.assertRaises(RuntimeError, lambda: torch.logical_xor(a, b, out=c))
+                        self.assertRaises(RuntimeError, lambda: getattr(torch, op)(a, b, out=c))
                         continue
-                    torch.logical_xor(a, b, out=c)
+                    getattr(torch, op)(a, b, out=c)
                     self.assertEqual(expected_res.bool(), c.bool())
                 # in-place
-                a.logical_xor_(b)
+                getattr(a, op + '_')(b)
                 self.assertEqual(expected_res, a)
+
+    @staticmethod
+    def _test_logical_xor(self, device):
+        self._test_logical_binary(self, 'logical_xor', [0, 0, 1, 1], [10, 0, 1, 0],  [1, 0, 0, 10], device)
 
     def test_logical_xor(self):
         self._test_logical_xor(self, 'cpu')
+
+    @staticmethod
+    def _test_logical_and(self, device):
+        self._test_logical_binary(self, 'logical_and', [1, 0, 0, 0], [10, 0, 1, 0],  [1, 0, 0, 10], device)
+
+    def test_logical_and(self):
+        self._test_logical_and(self, 'cpu')
 
     def test_threshold(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
