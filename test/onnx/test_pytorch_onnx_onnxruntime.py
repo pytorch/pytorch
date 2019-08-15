@@ -756,7 +756,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(1, 2, 1)
         self.run_test(RemainderModel(), (x, y))
 
-    def test_remainder_zero_dim(self):
+    def test_remainder_scalar(self):
         class RemainderModel(torch.nn.Module):
             def forward(self, input, other):
                 return torch.remainder(input, other)
