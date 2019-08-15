@@ -875,9 +875,9 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
     if (running_mean is None or running_mean.node().mustBeNone()) \
             and (running_var is None or running_var.node().mustBeNone()):
-        return _unimplemented("batch_norm", "running_mean and running_var are null. "
+        return _unimplemented("batch_norm", "running_mean and running_var are None. "
                                             "Check if track_running_stats == False in the batchNorm "
-                                            "model. This might cause null running_mean and running_var.")
+                                            "model. This might cause 'None' running_mean and running_var.")
     input_sizes = input.type().sizes()
     if len(input_sizes) == 2:
         # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
