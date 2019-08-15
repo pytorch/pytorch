@@ -311,7 +311,6 @@ inline IValue toIValue(
     c10::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType:
-    case TypeKind::AutogradZeroTensorType:
     case TypeKind::ProfiledTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
