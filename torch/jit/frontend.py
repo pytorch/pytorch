@@ -156,6 +156,8 @@ def get_jit_def(fn, self_name=None):
     sourcelines, file_lineno = inspect.getsourcelines(fn)
     source = ''.join(sourcelines)
     filename = inspect.getsourcefile(fn)
+    # if filename is None:
+    #     raise RuntimeError("Could not get source file name for ", fn)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):

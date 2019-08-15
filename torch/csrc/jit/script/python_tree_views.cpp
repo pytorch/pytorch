@@ -16,6 +16,17 @@ namespace script {
 struct SourceRangeFactory {
   SourceRangeFactory(
       std::string text,
+      py::object filename,
+      size_t file_lineno,
+      size_t leading_whitespace_chars)
+      : source_(std::make_shared<Source>(
+            std::move(text),
+            std::move(py::str(filename)),
+            file_lineno)),
+        leading_whitespace_chars_(leading_whitespace_chars) {}
+
+  SourceRangeFactory(
+      std::string text,
       std::string filename,
       size_t file_lineno,
       size_t leading_whitespace_chars)
@@ -83,6 +94,7 @@ void initTreeViewBindings(PyObject* module) {
       .def_property_readonly("end", &SourceRange::end);
   py::class_<SourceRangeFactory>(m, "SourceRangeFactory")
       .def(py::init<std::string&&, std::string&&, size_t, size_t>())
+      .def(py::init<std::string&&, py::object, size_t, size_t>())
       .def("make_range", &SourceRangeFactory::create)
       .def(
           "make_raw_range",
