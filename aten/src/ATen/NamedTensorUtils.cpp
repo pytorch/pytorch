@@ -248,28 +248,32 @@ void propagate_names(TensorImpl* result, TensorImpl* src) {
   propagate_names(result, impl::get_names(src));
 }
 
-// result = m1 @ m2 + t
-void propagate_names_for_addmm(
-    TensorImpl* result,
-    /*const*/TensorImpl* t,
-    /*const*/TensorImpl* m1,
-    /*const*/TensorImpl* m2) {
-  if (impl::has_names(m1) || impl::has_names(m2)) {
-    std::vector<Dimname> mm_outnames(2, Dimname::wildcard());
-    auto m1_names = impl::get_names(m1);
-    auto m2_names = impl::get_names(m2);
-    if (m1_names) {
-      mm_outnames[0] = (*m1_names)[0];
-    }
-    if (m2_names) {
-      mm_outnames[1] = (*m2_names)[1];
-    }
-    auto add_outnames = unify_from_right(mm_outnames, impl::get_names(t));
-    TORCH_INTERNAL_ASSERT(add_outnames.has_value());
-    propagate_names(result, std::move(*add_outnames));
+static std::vector<Dimname> compute_mm_outnames(
+    optional<DimnameList> mat1_names,
+    optional<DimnameList> mat2_names) {
+  std::vector<Dimname> mm_outnames(2, Dimname::wildcard());
+  if (mat1_names) {
+    mm_outnames[0] = (*mat1_names)[0];
   }
+  if (mat2_names) {
+    mm_outnames[1] = (*mat2_names)[1];
+  }
+  return mm_outnames;
 }
 
+void propagate_names_for_addmm(
+    TensorImpl* result,
+    TensorImpl* m1,
+    TensorImpl* m2,
+    TensorImpl* bias) {
+  if (!impl::has_names(m1) && !impl::has_names(m2)) {
+    return;
+  }
+  auto mm_outnames = compute_mm_outnames(impl::get_names(m1), impl::get_names(m2));
+  auto add_outnames = unify_from_right(mm_outnames, impl::get_names(bias));
+  TORCH_INTERNAL_ASSERT(add_outnames.has_value() && add_outnames->size() == 2);
+  propagate_names(result, std::move(*add_outnames));
+}
 
 } // namespace namedinference
 } // namespace at

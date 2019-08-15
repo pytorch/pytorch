@@ -702,7 +702,9 @@ void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
   int free_m2 = 0;
 
 #ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names_for_addmm(r_, t, m1, m2);
+  // The logic in this function changes these around so we save a copy of the original
+  THTensor* orig_m1 = m1;
+  THTensor* orig_m2 = m2;
 #endif
 
   if( (m1->dim() != 2) || (m2->dim() != 2))
@@ -728,6 +730,9 @@ void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
   {
     THTensor_(resizeAs)(r_, t);
     if (beta != 0.0) {
+#ifdef BUILD_NAMEDTENSOR
+      at::NoNamesGuard guard;
+#endif
       at::Tensor r__wrap = THTensor_wrap(r_);
       at::Tensor t_wrap = THTensor_wrap(t);
       at::native::copy_(r__wrap, t_wrap);
@@ -839,6 +844,10 @@ void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
 
   if(r__ != r_)
     THTensor_(freeCopyTo)(r__, r_);
+
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmm(r_, orig_m1, orig_m2, t);
+#endif
 }
 
 void THTensor_(addr)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *vec1, THTensor *vec2)

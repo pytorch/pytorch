@@ -25,10 +25,10 @@ Function = namedtuple('TestCase', ['name', 'lambd'])
 
 
 def parse_compressed_namedshape(string):
-    # Metalanguage for describing a shape of a tensor compactly.
+    # This is a metalanguage for describing a shape of a tensor compactly.
     # 'N:3,C:2' -> size = [3, 2], names: ['N', 'C']
     # 'None:3,None:2' -> size = [3, 2], names: ['None', 'None']
-    # '3,2' -> size = [3, 2], names None passed to ctor.
+    # '3,2' -> size = [3, 2], names=None passed to ctor.
     def parse_name(maybe_name):
         maybe_name = maybe_name.strip()
         if maybe_name == 'None':
@@ -52,9 +52,29 @@ def create(namedshape, factory=torch.randn):
     return factory(shape, names=names)
 
 
+def out_fn(operator):
+    @functools.wraps(operator)
+    def fn(*inputs):
+        return operator(*inputs[1:], out=inputs[0])
+    return fn
+
+
 class TestNamedTensor(TestCase):
     def test_trivial(self):
         pass
+
+    def _test_name_inference(self, op, args=(), expected_names=(), device='cpu',
+                             maybe_raises_regex=None):
+        casted_args = [arg.to(device) if isinstance(arg, torch.Tensor) else arg
+                       for arg in args]
+        if maybe_raises_regex is not None:
+            with self.assertRaisesRegex(RuntimeError, maybe_raises_regex):
+                result = op(*args)
+            return
+        result = op(*args)
+        self.assertEqual(result.names, expected_names,
+                         message='Name inference for {} on device {} failed'.format(
+                             op.__name__, device))
 
     # TODO(rzou): Some form of this check should be added to self.assertEqual.
     # Right now I don't know what it should look like.
@@ -308,13 +328,6 @@ class TestNamedTensor(TestCase):
 
         t = torch.randn(2, 3, names=('N', 'C'))
         self.assertEqual(t.t().names, ['C', 'N'])
-
-    @unittest.expectedFailure
-    def test_transpose_variants_xfailure(self):
-        t = torch.randn(2, 3, 5, 7, names=('N', 'C', 'H', 'W'))
-        self.assertEqual(t.transpose_(1, 3).names, ['N', 'W', 'H', 'C'])
-        t = torch.randn(2, 3, names=('N', 'C'))
-        self.assertEqual(t.t_().names, ['C', 'N'])
 
     def test_info_smoke(self):
         # Smoke test for info functions / methods / attributes on named tensors.
@@ -881,88 +894,62 @@ class TestNamedTensor(TestCase):
         for tensor, expected in zip(output, expected_tensors):
             self.assertTensorDataAndNamesEqual(tensor, expected)
 
-T = create
-
-
-def out_fn(operator):
-    @functools.wraps(operator)
-    def fn(*inputs):
-        return operator(*inputs[1:], out=inputs[0])
-    return fn
-
-NameInferenceTest = namedtuple('NameInferenceTest', [
-    'test_name',
-    'lambd',
-    'inputs',
-    'expected_names',
-    'throws_regex',
-    'expected_failure',
-])
-NameInferenceTest.__new__.__defaults__ = (None, False)
-
-generated_name_tests = [
-    NameInferenceTest(
-        test_name='test_mm_named_out',
-        lambd=out_fn(torch.mm),
-        inputs=[T('N:3,C:2'), T('N:3,C:2'), T('W:2,H:5')],
-        expected_names=['N', 'H'],
-        expected_failure=True),
-    NameInferenceTest(
-        test_name='test_mm_all_names',
-        lambd=torch.mm,
-        inputs=[T('N:3,C:2'), T('W:2,H:5')],
-        expected_names=['N', 'H']),
-    NameInferenceTest(
-        test_name='test_mm_partial_names_left',
-        lambd=torch.mm,
-        inputs=[T('3,2'), T('W:2,H:5')],
-        expected_names=[None, 'H']),
-    NameInferenceTest(
-        test_name='test_mm_partial_names_right',
-        lambd=torch.mm,
-        inputs=[T('N:3,C:2'), T('2,5')],
-        expected_names=['N', None]),
-    NameInferenceTest(
-        test_name='test_addmm_named_out',
-        lambd=torch.addmm,
-        inputs=[T('N:3,H:5'), T('N:3,H:5'), T('N:3,C:2'), T('W:2,H:5')],
-        expected_names=['N', 'H'],
-        expected_failure=True),
-    NameInferenceTest(
-        test_name='test_addmm_all_names',
-        lambd=torch.addmm,
-        inputs=[T('N:3,H:5'), T('N:3,C:2'), T('W:2,H:5')],
-        expected_names=['N', 'H']),
-    NameInferenceTest(
-        test_name='test_addmm_partially_named_self',
-        lambd=torch.addmm,
-        inputs=[T('None:3,H:5'), T('N:3,C:2'), T('W:2,H:5')],
-        expected_names=['N', 'H']),
-    NameInferenceTest(
-        test_name='test_addmm_unnamed_self',
-        lambd=torch.addmm,
-        inputs=[T('3,5'), T('N:3,C:2'), T('W:2,H:5')],
-        expected_names=['N', 'H']),
-]
-
-def make_name_test(name_inference_test):
-    def fn(self):
+    def test_mm(self):
         for device in torch.testing.get_all_device_types():
-            inputs = [arg.to(device) if isinstance(arg, torch.Tensor) else arg
-                      for arg in name_inference_test.inputs]
-            if name_inference_test.throws_regex is not None:
-                with self.assertRaisesRegex(RuntimeError, name_inference_test.throws_regex):
-                    name_inference_test.lambd(*inputs)
-                return
-            output = name_inference_test.lambd(*inputs)
-            self.assertEqual(output.names, name_inference_test.expected_names)
-    fn.__name__ = name_inference_test.test_name
-    if name_inference_test.expected_failure:
-        return unittest.expectedFailure(fn)
-    return fn
+            self._test_name_inference(
+                torch.mm, device=device,
+                args=(create('N:3,C:2'), create('W:2,H:5')),
+                expected_names=('N', 'H'))
 
-for name_inference_test in generated_name_tests:
-    setattr(TestNamedTensor, name_inference_test.test_name, make_name_test(name_inference_test))
+            # left arg is unnamed
+            self._test_name_inference(
+                torch.mm, device=device,
+                args=(create('3,2'), create('W:2,H:5')),
+                expected_names=(None, 'H'))
+
+            # right arg is unnamed
+            self._test_name_inference(
+                torch.mm, device=device,
+                args=(create('N:3,C:2'), create('2,5')),
+                expected_names=('N', None))
+
+            # out=
+            self._test_name_inference(
+                out_fn(torch.mm), device=device,
+                args=(create('0'), create('N:3,C:2'), create('W:2,H:5')),
+                expected_names=('N', 'H'))
+
+    def test_addmm(self):
+        for device in torch.testing.get_all_device_types():
+            # full names
+            self._test_name_inference(
+                torch.addmm, device=device,
+                args=(create('N:3,H:5'), create('N:3,C:2'), create('W:2,H:5')),
+                expected_names=('N', 'H'))
+
+            # no name on bias
+            self._test_name_inference(
+                torch.addmm, device=device,
+                args=(create('3,5'), create('N:3,C:2'), create('W:2,H:5')),
+                expected_names=('N', 'H'))
+
+            # partially named bias
+            self._test_name_inference(
+                torch.addmm, device=device,
+                args=(create('N:3,None:5'), create('N:3,C:2'), create('W:2,H:5')),
+                expected_names=('N', 'H'))
+
+            # out=
+            self._test_name_inference(
+                out_fn(torch.addmm), device=device,
+                args=(create('0'), create('N:3,None:5'), create('N:3,C:2'), create('W:2,H:5')),
+                expected_names=('N', 'H'))
+
+            # inplace
+            self._test_name_inference(
+                torch.Tensor.addmm_, device=device,
+                args=(create('N:3,H:5'), create('N:3,C:2'), create('W:2,H:5')),
+                expected_names=('N', 'H'))
 
 
 # Disable all tests if named tensor is not available.
@@ -970,7 +957,6 @@ for attr in dir(TestNamedTensor):
     if attr.startswith('test_'):
         new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
         setattr(TestNamedTensor, attr, new_test)
-
 
 if __name__ == '__main__':
     run_tests()
