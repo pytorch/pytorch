@@ -28,6 +28,7 @@ def monkey_patch(module):
 
     module.max_pool2d = nested.max_pool2d
     module.mv = nested.mv
+    module.cat = nested.cat
 
     return module
 

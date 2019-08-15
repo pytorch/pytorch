@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 
+from . import masking
+
 # Set this flag to true, if you want to enable additional verifications.
 DEBUG = False
 
@@ -76,11 +78,29 @@ def relu(input, inplace=False):
         return orig_relu(input, inplace)
 
 
+orig_cat = torch.cat
+
+
+def cat(*args, **kwargs):
+    if is_nested_tensor(args[0][0]):
+        # Assuming 1 level of nesting
+        dim = kwargs.get('dim', None) - 1
+        assert 'out' not in kwargs
+        ret = []
+        all_tensors = list(args[0][i]._tensors for i in range(len(args[0])))
+        for tensors in zip(*all_tensors):
+            ret.append(orig_cat(tensors, dim=dim))
+        return NestedTensor(ret)
+    else:
+        return orig_cat(*args, **kwargs)
+
+
 orig_mv = torch.mv
 
 
 def mv(*args, **kwargs):
     if is_nested_tensor(args[0]):
+        # Assuming 1 level of nesting
         ret = []
         for tensor1, tensor2 in zip(args[0]._tensors, args[1]._tensors):
             ret.append(orig_mv(tensor1, tensor2))
@@ -124,7 +144,7 @@ def nested_tensor(data, dtype=None, device=None, requires_grad=False, pin_memory
         raise ValueError("Can't construct a NestedTensor from a Tensor")
     else:
         if not (isinstance(data, list) or isinstance(data, tuple)):
-            raise ValueError("Pass a list or tuple to construct a NestedTensor.")
+            raise ValueError("Pass a list or tuple to construct a NestedTensor. Got {} instead.".format(type(data)))
 
         nested_tensors = []
         for data_ in data:
@@ -246,11 +266,11 @@ def _verify_tensors(obj):
         is_pinned = tensors[0].is_pinned()
         for tensor in tensors:
             if not (dim == tensor.dim() and
-                    layout == tensor.layout and
-                    device == tensor.device and
-                    dtype == tensor.dtype and
-                    requires_grad == tensor.requires_grad and
-                    is_pinned == tensor.is_pinned()):
+                    layout == tensor.layout
+                    and device == tensor.device
+                    and dtype == tensor.dtype
+                    and requires_grad == tensor.requires_grad
+                    and is_pinned == tensor.is_pinned()):
                 raise ValueError("Each passed Tensor "
                                  "must match in dim, layout, "
                                  "device, dtype and requires_grad")
@@ -472,3 +492,15 @@ class NestedTensor(object):
                 return torch.stack(self.unbind())
             else:
                 return torch.stack(list(map(lambda x: x.to_tensor(), self.unbind())))
+
+    def to_list(self):
+        if self.nested_dim == 1:
+            return self._tensors
+        else:
+            return list(map(lambda x: x.to_list(), self.unbind()))
+
+    def to_tensor_mask(self):
+        tensor, mask = masking.make_tensor_mask(self.to_list())
+        mask = mask.sum(-1)
+        mask = (mask > 0)
+        return tensor, mask
