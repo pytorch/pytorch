@@ -1382,17 +1382,24 @@ void PythonPrint(
 void LEGACY_PythonPrint(
     std::ostream& out,
     SourceRangeRecords& source_ranges_out,
-    const c10::NamedTypePtr& classType,
+    const c10::NamedTypePtr& type,
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable) {
+  bool is_class_type = type->cast<TupleType>() || type->cast<ClassType>();
   PythonPrintPass pp(
       tensor_table,
       deps_table,
       enforce_importable,
-      /*is_method=*/true,
+      /*is_method=*/is_class_type,
       /*legacy_module_printing=*/true);
-  pp.printClass(classType);
+  if (is_class_type) {
+    pp.printClass(type);
+  } else {
+    auto f = type->cast<FunctionType>();
+    TORCH_INTERNAL_ASSERT(f);
+    pp.printFunction(*f->function());
+  }
   pp.print(out, source_ranges_out);
 }
 
