@@ -73,7 +73,6 @@ TEST_F(ModuleListTest, PushBackAddsAnElement) {
     int value;
   };
 
-  // Test unnamed submodules
   ModuleList list;
   ASSERT_EQ(list->size(), 0);
   ASSERT_TRUE(list->is_empty());
@@ -83,6 +82,31 @@ TEST_F(ModuleListTest, PushBackAddsAnElement) {
   ASSERT_EQ(list->size(), 2);
   list->push_back(M(2));
   ASSERT_EQ(list->size(), 3);
+}
+
+TEST_F(ModuleListTest, Insertion) {
+  struct M : torch::nn::Module {
+    explicit M(int value_) : value(value_) {}
+    int value;
+  };
+
+  ModuleList list;
+  list->push_back(M(1));
+  ASSERT_EQ(list->size(), 1);
+  list->insert(0, M(2));
+  ASSERT_EQ(list->size(), 2);
+  list->insert(1, M(3));
+  ASSERT_EQ(list->size(), 3);
+  list->insert(3, M(4));
+  ASSERT_EQ(list->size(), 4);
+  ASSERT_EQ(list->at<M>(0).value, 2);
+  ASSERT_EQ(list->at<M>(1).value, 3);
+  ASSERT_EQ(list->at<M>(2).value, 1);
+  ASSERT_EQ(list->at<M>(3).value, 4);
+
+  std::unordered_map<size_t, size_t> U = {{0, 2}, {1, 3}, {2, 1}, {3, 4}};
+  for (const auto& P : list->named_modules("", false))
+    ASSERT_EQ(U[std::stold(P.key())], P.value()->as<M>()->value);
 }
 
 TEST_F(ModuleListTest, AccessWithAt) {
@@ -146,7 +170,7 @@ TEST_F(ModuleListTest, SanityCheckForHoldingStandardModules) {
       LSTM(4, 5));
 }
 
-TEST_F(ModuleListTest, ExtendPushesModulesFromOtherSequential) {
+TEST_F(ModuleListTest, ExtendPushesModulesFromOtherModuleList) {
   struct A : torch::nn::Module {};
   struct B : torch::nn::Module {};
   struct C : torch::nn::Module {};
@@ -231,7 +255,7 @@ TEST_F(ModuleListTest, RegistersElementsAsSubmodules) {
   ASSERT_TRUE(modules[2]->as<FeatureDropout>());
 }
 
-TEST_F(ModuleListTest, Nesting) {
+TEST_F(ModuleListTest, NestingIsPossible) {
   ModuleList list(
       (ModuleList(Dropout(), Dropout())),
       (ModuleList(Dropout(), Dropout()), Dropout()));
@@ -240,8 +264,8 @@ TEST_F(ModuleListTest, Nesting) {
 TEST_F(ModuleListTest, CloneToDevice_CUDA) {
   ModuleList list(Linear(3, 4), Functional(torch::relu), BatchNorm(3));
   torch::Device device(torch::kCUDA, 0);
-  Sequential clone =
-      std::dynamic_pointer_cast<SequentialImpl>(list->clone(device));
+  ModuleList clone =
+      std::dynamic_pointer_cast<ModuleListImpl>(list->clone(device));
   for (const auto& p : clone->parameters()) {
     ASSERT_EQ(p.device(), device);
   }
