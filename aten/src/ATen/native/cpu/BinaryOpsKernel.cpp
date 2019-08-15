@@ -82,16 +82,25 @@ void div_kernel(TensorIterator& iter) {
 }
 
 void fmod_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "fmod_cpu", [&]() {
-      cpu_kernel_vec(
-        iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t {
+  if (isIntegralType(iter.dtype(), false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "fmod_cpu", [&]() {
+        cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
             return std::fmod(a, b);
-        },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-            return a.fmod(b);
         });
-  });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "fmod_cpu", [&]() {
+        cpu_kernel_vec(
+                iter,
+                [=](scalar_t a, scalar_t b) -> scalar_t {
+                    return std::fmod(a, b);
+                },
+                [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+                    return a.fmod(b);
+                });
+    });
+  }
+
 }
 
 } // anonymous namespace
