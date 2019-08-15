@@ -130,6 +130,9 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
   if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
+    # default pip version is tool old(9.0.2).
+    # Fix the pip error: Couldn't find a version that satisfies the requirement
+    pip install -q --user pip==19.2.2
     pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==0.5.0.dev808
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
