@@ -768,8 +768,8 @@ void quantizeBias(const script::Module& module, Value* v) {
       IValue act_qparam = getQParam(module, activation);
       // Get qparam from weight
       IValue weight_qparam = getQParam(module, weight);
-      std::cout << "scale:" << act_qparam.toTuple()->elements()[0].value();
-      IValue bias_scale =  1.0 / act_qparam.toTuple()->elements()[0].value().toDouble() / weight_qparam.toTuple()->elements()[0].value().toDouble();
+      std::cout << "scale:" << act_qparam.toTuple()->elements()[0];
+      IValue bias_scale =  1.0 / act_qparam.toTuple()->elements()[0].toScalar().toDouble() / weight_qparam.toTuple()->elements()[0].toScalar().toDouble();
       IValue bias_qparam = c10::ivalue::Tuple::create(std::vector<IValue>({bias_scale, IValue(0)}), act_qparam.toTuple()->type);
       Node* dequant = insertQuantDeQuantCall(v, bias_qparam, at::kQInt32);
       v->replaceAllUsesWith(dequant->output());
