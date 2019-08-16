@@ -327,7 +327,8 @@ struct CAFFE2_API VaryingShape {
     if (!dims_) {
       return c10::nullopt;
     }
-    return dims_->size();
+    const auto& dims = dims_.value();
+    return dims.size();
   }
 
   const c10::optional<ListOfOptionalInts>& sizes() const { 
