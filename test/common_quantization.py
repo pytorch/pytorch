@@ -10,6 +10,7 @@ checking quantization api and properties of resulting modules.
 import hypothesis
 import io
 import torch
+import torch.nn as nn
 import torch.nn._intrinsic as nni
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
@@ -389,11 +390,11 @@ class ManualConvLinearQATModel(torch.nn.Module):
         return self.dequant(x)
 
 
-class SubModelForFusion(torch.nn.Module):
+class SubModelForFusion(nn.Module):
     def __init__(self):
         super(SubModelForFusion, self).__init__()
-        self.conv = torch.nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)
-        self.bn = torch.nn.BatchNorm2d(2).to(dtype=torch.float)
+        self.conv = nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)
+        self.bn = nn.BatchNorm2d(2).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.conv(x)
@@ -401,24 +402,24 @@ class SubModelForFusion(torch.nn.Module):
         return x
 
 
-class SubModelWithoutFusion(torch.nn.Module):
+class SubModelWithoutFusion(nn.Module):
     def __init__(self):
         super(SubModelWithoutFusion, self).__init__()
-        self.conv = torch.nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)
-        self.relu = torch.nn.ReLU(inplace=False).to(dtype=torch.float)
+        self.conv = nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)
+        self.relu = nn.ReLU(inplace=False).to(dtype=torch.float)
 
     def forward(self, x):
         return self.relu(self.conv(x))
 
-class ModelForFusion(torch.nn.Module):
+class ModelForFusion(nn.Module):
     def __init__(self, qconfig):
         super(ModelForFusion, self).__init__()
-        self.conv1 = torch.nn.Conv2d(3, 2, 5, bias=None).to(dtype=torch.float)
-        self.bn1 = torch.nn.BatchNorm2d(2).to(dtype=torch.float)
-        self.relu1 = torch.nn.ReLU(inplace=False).to(dtype=torch.float)
+        self.conv1 = nn.Conv2d(3, 2, 5, bias=None).to(dtype=torch.float)
+        self.bn1 = nn.BatchNorm2d(2).to(dtype=torch.float)
+        self.relu1 = nn.ReLU(inplace=False).to(dtype=torch.float)
         self.sub1 = SubModelForFusion()
         self.sub2 = SubModelWithoutFusion()
-        self.fc = torch.nn.Linear(72, 10).to(dtype=torch.float)
+        self.fc = nn.Linear(72, 10).to(dtype=torch.float)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.qconfig = qconfig
