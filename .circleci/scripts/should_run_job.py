@@ -17,7 +17,7 @@ default_set = [
     # PyTorch ASAN
     'pytorch-linux-xenial-py3-clang5-asan',
     # PyTorch DEBUG
-    'pytorch-linux-trusty-py3.6-gcc7',
+    'pytorch_linux_xenial_py3_gcc7',
 
     # Caffe2 CPU
     'caffe2-py2-mkl-ubuntu16.04',
