@@ -70,12 +70,7 @@ void atan2_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-// Wrapper gpu_kernel and force to not inline. This would avoid the calls to gpu_kernel expanded three times in
-// logical_binary_kernel_cuda_impl and therefore should significantly reduces compilation time.
-template <typename func_t>
-static __noinline__ void gpu_kernel_no_inline_wrapper(TensorIterator& iter, const func_t& f) {
-  gpu_kernel(iter, f);
-}
+// ~~~~~~~~~~~~~ Binary logical operators BEGIN ~~~~~~~~~~~~~~~~~
 
 template <typename Op>
 void logical_binary_kernel_cuda_impl(TensorIterator& iter, const char* op_name, Op op) {
@@ -84,7 +79,7 @@ void logical_binary_kernel_cuda_impl(TensorIterator& iter, const char* op_name, 
     AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(2), op_name, [&]() {
       using other_t = scalar_t;
       AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), op_name, [&]() {
-        gpu_kernel_no_inline_wrapper(iter, [op]GPU_LAMBDA(self_t a, other_t b) -> scalar_t {
+        gpu_kernel(iter, [op]GPU_LAMBDA(self_t a, other_t b) -> scalar_t {
           return static_cast<scalar_t>(op(static_cast<bool>(a), static_cast<bool>(b)));
         });
       });
@@ -92,17 +87,33 @@ void logical_binary_kernel_cuda_impl(TensorIterator& iter, const char* op_name, 
   });
 }
 
+// We explicitly define these logical operations as named functions. If we enclose them using lambda functions, the time
+// to compile this file would be crazy.
+static bool land(bool a, bool b) {
+  return a && b;
+}
+
+static bool lor(bool a, bool b) {
+  return a || b;
+}
+
+static bool lxor(bool a, bool b) {
+  return a != b;
+}
+
 void logical_and_kernel_cuda(TensorIterator& iter) {
-  logical_binary_kernel_cuda_impl(iter, "logical_and_cuda", []GPU_LAMBDA(bool a, bool b) -> bool { return a && b; });
+  logical_binary_kernel_cuda_impl(iter, "logical_and_cuda", land);
 }
 
 void logical_or_kernel_cuda(TensorIterator& iter) {
-  logical_binary_kernel_cuda_impl(iter, "logical_or_cuda", []GPU_LAMBDA(bool a, bool b) -> bool { return a || b; });
+  logical_binary_kernel_cuda_impl(iter, "logical_or_cuda", lor);
 }
 
 void logical_xor_kernel_cuda(TensorIterator& iter) {
-  logical_binary_kernel_cuda_impl(iter, "logical_xor_cuda", []GPU_LAMBDA(bool a, bool b) -> bool { return a != b; });
+  logical_binary_kernel_cuda_impl(iter, "logical_xor_cuda", lxor);
 }
+
+// ~~~~~~~~~~~~~ Binary logical operators END ~~~~~~~~~~~~~~~~~
 
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
 REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
