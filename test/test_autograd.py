@@ -3539,6 +3539,35 @@ for shape in [(1,), ()]:
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
 
+    def test_weak_variable(self):
+        dealloc = [0]
+        class IncrementOnDelete(object):
+            def __del__(self):
+                dealloc[0] += 1
+
+        # Issue #3818: create a cyclical graph:
+        W = torch.tensor(1.0, requires_grad=True)
+        x = torch.tensor(2.0, requires_grad=True)
+        z = W * x
+        z.backward(torch.tensor(1.0), create_graph=True)
+
+        #
+        # At this point, the cycle is:
+        #   W.grad.grad_fn.next_functions[0][0].next_functions[1][0].variable is x
+        #   x.grad.grad_fn.next_functions[0][0].next_functions[1][0].variable is W
+        #
+        # The previous leak (shared_ptr):
+        #   W.grad.grad_fn.next_functions[0][0] ==> <MulBackward0 object>
+        #
+        # Making AccumulateGrad.variable a weak variable breaks the cycle.
+        #
+        W.grad.grad_fn.next_functions[0][0].register_hook(IncrementOnDelete())
+        del W, x, z
+        gc.collect()
+
+        self.assertEqual(dealloc[0], 1)
+
+
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
