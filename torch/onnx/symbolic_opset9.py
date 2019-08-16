@@ -1650,19 +1650,21 @@ def argmin(g, input, dim, keepdim):
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter(g, self, dim, index, src):
+    print("in scatter opset 9")
     return g.op("Scatter", self, index, src, axis_i=dim)
 
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter_add(g, self, dim, index, src):
+    print("in scatter_add opset 9")
     if not self.isCompleteTensor():
         return _unimplemented("scatter_add", "input size not accessible")
     dtype = self.type().scalarType()
     dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-    dims = self.type().sizes()
-    to_add = torch.zeros(dims)
-    to_add = g.op("Constant", value_t=to_add)
-    to_add = scatter(g, to_add, dim, index, src)
+    dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+    sizes = self.type().sizes()
+    to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
+    to_add = sym_help._scatter_helper(g, to_add, dim, index, src)
     return add(g, self, to_add)
 
 
