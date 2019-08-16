@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/rpc/FutureMessage.h>
 #include <torch/csrc/distributed/rpc/RpcAgent.h>
 #include <torch/csrc/distributed/rpc/functions.h>
+#include <torch/csrc/distributed/rpc/PythonRpcHandler.h>
 
 #include <deque>
 #include <thread>
