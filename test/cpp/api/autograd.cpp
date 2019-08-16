@@ -444,12 +444,18 @@ TEST(CustomAutogradTest, Hooks) {
   });
 
   Variable z = x * x + x * 2 + x * y + y;
-  x.register_hook(std::bind(bw_hook, 0 ,std::placeholders::_1));
-  auto hook_1 = z.register_hook(std::bind(bw_hook, 1, std::placeholders::_1));
+  x.register_hook([&bw_hook](Variable grad){
+    bw_hook(0, grad);
+  });
+  auto hook_1 = z.register_hook([&bw_hook](Variable grad){
+    bw_hook(1, grad);
+  });
   z.backward(torch::ones({5,5}), true, true);
   ASSERT_EQ(counter, 1);
 
-  auto hook_2 = z.register_hook(std::bind(bw_hook, 2, std::placeholders::_1));
+  auto hook_2 = z.register_hook([&bw_hook](Variable grad){
+    bw_hook(2, grad);
+  });
   z.backward(torch::ones({5,5}), true, true);
   ASSERT_EQ(counter, 4);
 
