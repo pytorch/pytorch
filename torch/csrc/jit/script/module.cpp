@@ -401,7 +401,7 @@ void Module::apply(const std::function<void(Module&)>& fn) {
   fn(*this);
 }
 
-std::string Module::_debug_print(
+std::string Module::_dump_to_string(
     bool omit_method_bodies,
     bool omit_attr_values,
     bool omit_param_values,
@@ -454,7 +454,7 @@ std::string Module::_debug_print(
   for (const Module& submodule : get_modules()) {
     // We do level + 2, because one level of indentation comes from 'submodules'
     // scope and the other one goes from a specific submodule we're printing.
-    ss << submodule._debug_print(
+    ss << submodule._dump_to_string(
         omit_method_bodies, omit_attr_values, omit_param_values, level + 2);
   }
   ss << "  }" << std::endl;
@@ -464,15 +464,14 @@ std::string Module::_debug_print(
   return torch::jit::jit_log_prefix(indent, ss.str());
 }
 
-void Module::debug_print(
+void Module::dump(
     bool omit_method_bodies = true,
     bool omit_attr_values = true,
     bool omit_param_values = true) const {
-  std::cout << _debug_print(
+  std::cout << _dump_to_string(
                    omit_method_bodies, omit_attr_values, omit_param_values, 0)
             << std::endl;
 }
-
 
 } // namespace script
 } // namespace jit

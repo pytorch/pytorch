@@ -205,7 +205,7 @@ struct TORCH_API Module {
   slot_list get_attributes() const;
   slot_list get_module_slots() const;
 
-  void debug_print(
+  void dump(
       bool omit_method_bodies,
       bool omit_attr_values,
       bool omit_param_values) const;
@@ -361,7 +361,7 @@ struct TORCH_API Module {
  private:
   Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
 
-  std::string _debug_print(
+  std::string _dump_to_string(
       bool omit_method_bodies,
       bool omit_attr_values,
       bool omit_param_values,
