@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/ProcessGroupAgent.h>
+
 #include <Python.h>
 
 namespace torch {
@@ -141,25 +142,32 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
     [&](const SendWork& work) {
       std::stringstream ss;
       serialize(work.message_, ss);
-      std::string str = ss.str();
+      std::string serializedPayload = ss.str();
 
       std::vector<torch::Tensor> preamble = {
         torch::tensor(
           {
             (int64_t)pg_->getRank(),
-            (int64_t)str.length(),
+            (int64_t)serializedPayload.length(),
             (int64_t)work.message_.type()
           }, {torch::kLong})
       };
 
       // ProcessGroup is not thread-safe when sending with the same tag, hence
       // the lock
-      std::lock_guard<std::mutex> lock(sendMutexes_[work.to_]);
-      pg_->send(preamble, work.to_, work.to_ /* channelTag */)->wait();
-      if (work.message_.type() != MessageType::SHUTDOWN) {
-        std::vector<torch::Tensor> payload ={
-            torch::from_blob((void *)str.c_str(), str.length(), {torch::kChar})
+      if (work.message_.isShutdown()) {
+        std::lock_guard<std::mutex> lock(sendMutexes_[work.to_]);
+        pg_->send(preamble, work.to_, work.to_ /* channelTag */)->wait();
+      } else {
+        std::vector<torch::Tensor> payload = {
+            torch::from_blob(
+                (void *)serializedPayload.c_str(),
+                serializedPayload.length(),
+                {torch::kChar}
+            )
         };
+        std::lock_guard<std::mutex> lock(sendMutexes_[work.to_]);
+        pg_->send(preamble, work.to_, work.to_ /* channelTag */)->wait();
         pg_->send(payload, work.to_, work.to_ /* channelTag */)->wait();
       }
     },
@@ -196,6 +204,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 }
 
 void ProcessGroupAgent::listenLoop() {
+  ::google::InitGoogleLogging("distributed.rpc");
   while (true) {
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
@@ -207,6 +216,8 @@ void ProcessGroupAgent::listenLoop() {
     MessageType type = MessageType(preamble_items[2]);
 
     if (type == MessageType::SHUTDOWN) {
+      LOG(INFO) << "Shutting down ProcessGroupAgent "
+                << workerName_ << std::endl;
       return;
     }
 
