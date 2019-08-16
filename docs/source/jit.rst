@@ -760,6 +760,11 @@ Pattern Matching Assignments
         a, b = tuple_or_list
         a, b, *c = a_tuple
 
+Multiple Assignments
+    ::
+
+        a = b, c = tup
+
 Print Statements
 
     ::
@@ -1437,5 +1442,3 @@ Q: I would like to trace module's method but I keep getting this error:
         n = Net()
         inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
         module = torch.jit.trace_module(n, inputs)
-
-

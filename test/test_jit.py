@@ -10268,6 +10268,19 @@ a")
         with self.assertRaisesRegex(RuntimeError, 'does not support augmented assign'):
             scripted_aug_assign = torch.jit.script(subscript_tuple_augmented_assign)
 
+    def test_multiple_assign(self):
+        def test():
+            a = b, c = d, f = (1, 1)
+
+            # side effect
+            ten = torch.tensor(1)
+            ten1 = ten2 = ten.add_(1)
+
+            return a, b, c, d, f, ten, ten1, ten2
+
+        self.checkScript(test, ())
+        # check frontend
+        self.assertEqual(torch.jit.script(test)(), test())
 
     def test_multi_reduction(self):
         with self.assertRaisesRegex(

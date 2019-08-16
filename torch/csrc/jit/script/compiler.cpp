@@ -2003,6 +2003,31 @@ struct to_ir {
   }
 
   void emitAssignment(const Assign& stmt) {
+    static std::atomic<size_t> tmp_count{0};
+    if (stmt.lhs_list().size() == 1) {
+      return emitSingleAssignment(stmt);
+    }
+    // multiple assign & annotated type not supported in python
+    TORCH_INTERNAL_ASSERT(stmt.lhs_list().size() > 1 && !stmt.type().present());
+    // a = b = expr()
+    // the semantics of multiple assignment is that expr() is emitted once, then
+    // from left to right the assignments are made
+    const auto tmp_name =
+        std::string("$tmp_assign_") + std::to_string(tmp_count++);
+    environment_stack->setSugaredVar(
+        stmt.rhs().range(), tmp_name, emitSugaredExpr(stmt.rhs().get(), 1));
+    auto ident = Var::create(
+        stmt.rhs().range(), Ident::create(stmt.rhs().range(), tmp_name));
+    for (auto expr : stmt.lhs_list()) {
+      emitSingleAssignment(Assign::create(
+          stmt.range(),
+          List<Expr>::create(expr.range(), {expr}),
+          Maybe<Expr>::create(stmt.rhs().range(), ident),
+          Maybe<Expr>::create(stmt.range())));
+    }
+  }
+
+  void emitSingleAssignment(const Assign& stmt) {
     if (!stmt.rhs().present()) {
       throw ErrorReport(stmt.range())
           << "For an assignment, expected an expression on the right-hand side";
