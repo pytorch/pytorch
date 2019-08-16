@@ -72,7 +72,7 @@ def main():
     parser.add_argument(
         "--warmup_iterations",
         help="Number of iterations to ignore before measuring performance",
-        default=10,
+        default=100,
         type=int
     )
 
@@ -113,6 +113,13 @@ def main():
         '--framework',
         help='Comma-delimited list of frameworks to test (Caffe2, PyTorch)',
         default="Caffe2,PyTorch")
+
+    parser.add_argument(
+        '--wipe_cache',
+        help='Wipe cache before benchmarking each operator',
+        action='store_true',
+        default=False
+    )
 
     args, _ = parser.parse_known_args()
 

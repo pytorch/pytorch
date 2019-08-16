@@ -212,7 +212,7 @@ struct Vec256<int32_t> : public Vec256i {
 };
 
 template <>
-void convert(const int32_t *src, float *dst, int64_t n) {
+inline void convert(const int32_t *src, float *dst, int64_t n) {
   int64_t i;
   // int32_t and float have same size
 #ifndef _MSC_VER
@@ -232,7 +232,7 @@ void convert(const int32_t *src, float *dst, int64_t n) {
 }
 
 template <>
-void convert(const int32_t *src, double *dst, int64_t n) {
+inline void convert(const int32_t *src, double *dst, int64_t n) {
   int64_t i;
   // int32_t has half the size of double
 #ifndef _MSC_VER

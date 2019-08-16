@@ -2,7 +2,7 @@ from __future__ import division
 
 # Torch
 from torch import Tensor
-from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes, _jit_python_print
+from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
 from torch._six import inf, PY2, PY37, StringIO
 from torch.autograd import Variable, Function
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
@@ -539,6 +539,22 @@ class TestJit(JitTestCase):
                 test_input(func_2, torch.tensor(0.5, device="cuda:0"), 0)
 
         test_device()
+
+    def test_attrs(self):
+        def foo(x):
+            return (
+                # x.dtype, TODO: dtype long -> instance conversion
+                x.device,
+                x.shape,
+                x.is_cuda,
+                x.is_mkldnn,
+                x.is_quantized,
+                x.requires_grad
+            )
+
+        scripted = torch.jit.script(foo)
+        x = torch.rand(3, 4)
+        self.assertEqual(scripted(x), foo(x))
 
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -1382,7 +1398,6 @@ graph(%Ra, %Rb):
         with warnings.catch_warnings(record=True) as warns:
             traced_fn = torch.jit.trace(fn, torch.tensor([1]))
         warns = [str(w.message) for w in warns]
-        self.assertEqual(len(warns), 7)
         self.assertIn('a Python integer', warns[0])
         self.assertIn('a Python boolean', warns[1])
         self.assertIn('a Python index', warns[2])
@@ -2093,21 +2108,28 @@ graph(%Ra, %Rb):
         ten = torch.rand(3, 3)
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
 
-    def test_sparse_tensors_error(self):
+    @suppress_warnings
+    def test_sparse_tensors(self):
         @torch.jit.ignore
         def get_sparse():
             return torch.sparse.FloatTensor(2, 3)
 
         @torch.jit.script
-        def sparse(input):
+        def test_is_sparse(input):
+            # type: (Tensor) -> bool
+            return input.is_sparse
+
+        script_out_is_sparse = test_is_sparse(get_sparse())
+        script_out_is_dense = test_is_sparse(torch.randn(2, 3))
+        self.assertEqual(script_out_is_sparse, True)
+        self.assertEqual(script_out_is_dense, False)
+
+        def test_basic_sparse(input):
             output = get_sparse()
             return output, input
 
-        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
-            sparse(get_sparse())
-
-        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
-            sparse(torch.tensor([1]))
+        self.checkScript(test_basic_sparse, (get_sparse(),))
+        self.checkScript(test_basic_sparse, (torch.tensor([1]),))
 
     def test_tuple_specialization(self):
         @torch.jit.script
@@ -2121,8 +2143,9 @@ graph(%Ra, %Rb):
         f(t, "hi")
         graph = f.graph_for(t, "hi")
         input_types = list(next(graph.inputs()).type().elements())
-        self.assertEqual(input_types[0].kind(), 'DimensionedTensorType')
-        self.assertEqual(input_types[1].elements()[1].kind(), 'DimensionedTensorType')
+        w = input_types[0]
+        self.assertEqual(input_types[0].kind(), 'ProfiledTensorType')
+        self.assertEqual(input_types[1].elements()[1].kind(), 'ProfiledTensorType')
 
     def test_constant_prop_simple(self):
         @torch.jit.script
@@ -2385,7 +2408,7 @@ graph(%Ra, %Rb):
     def test_onnx_transpose_incomplete_tensor_type(self):
         # Smoke test to get us into the state where we are attempting to export
         # a transpose op, where the input is a TensorType rather than a
-        # CompleteTensorType. This would previously not work, since we would
+        # ProfiledTensorType. This would previously not work, since we would
         # take the size of the input and use the length of its sizes as the
         # number of dimensions in the permutation.
         class Foo(torch.jit.ScriptModule):
@@ -2664,15 +2687,6 @@ graph(%Ra, %Rb):
             buffer.seek(0)
             foo_loaded = torch.jit.load(buffer)
             self.assertExpected(foo_loaded.forward.code)
-
-    def test_import_way_too_new(self):
-        @torch.jit.script
-        def foo(x, y):
-            return 2 * x + y
-
-        r, _ = _jit_python_print(foo)
-        with self.assertRaisesRegex(RuntimeError, "generated from a newer version"):
-            torch.jit.CompilationUnit()._import(r, [], op_version_set=10000)
 
     def test_function_default_values(self):
         outer_var = torch.tensor(20)
@@ -3352,7 +3366,7 @@ def foo(x):
             return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(foobar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:20".format(lineno + 1)):
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:19".format(lineno + 1)):
             scripted = torch.jit.script(foobar)
 
     def test_file_line_error_class_defn(self):
@@ -3361,7 +3375,7 @@ def foo(x):
                 return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(FooBar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:24".format(lineno + 2)):
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:23".format(lineno + 2)):
             torch.jit.script(FooBar)
 
     def test_file_line_graph(self):
@@ -3371,10 +3385,11 @@ def foo(x):
         scripted = torch.jit.script(foobar)
 
         _, lineno = inspect.getsourcelines(foobar)
-        fc = FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))
+        fc = FileCheck().check('test_jit.py:{}:19'.format(lineno + 1))
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
+    @unittest.skipIf(IS_SANDCASTLE, "[serialization forward compat]")
     def test_file_line_save_load(self):
         class Scripted(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -3390,7 +3405,7 @@ def foo(x):
         bytesio = io.BytesIO(buffer)
         scripted = torch.jit.load(bytesio)
 
-        fc = FileCheck().check('code/archive.py:4:10')
+        fc = FileCheck().check(':6:11')
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -3400,7 +3415,7 @@ def foo(xyz):
     return torch.neg(xyz)
         ''')
 
-        fc = FileCheck().check('<string>:2:12')
+        fc = FileCheck().check('<string>:3:11')
         fc.run(scripted.foo.graph)
         fc.run(str(scripted.foo.graph))
 
@@ -3443,6 +3458,7 @@ def foo(xyz):
             loaded = self.getExportImportCopy(ft)
             loaded()
 
+    @unittest.skipIf(IS_SANDCASTLE, "[serialization forward compat]")
     def test_serialized_source_ranges_dont_jitter(self):
         class FooTest3(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -3470,23 +3486,26 @@ def foo(xyz):
 
         ft3 = FooTest3()
 
-        def debug_records_from_mod(mod):
+        def debug_records_from_mod(self, mod):
             buffer = io.BytesIO()
             torch.jit.save(ft3, buffer)
             buffer.seek(0)
             archive = zipfile.ZipFile(buffer)
-            debug_file = archive.open('archive/debug/archive.pkl')
+            files = filter(lambda x: x.startswith('archive/code/'), archive.namelist())
+            debug_files = list(filter(lambda f: f.endswith('.debug_pkl'), files))
+            self.assertEqual(len(debug_files), 1)
+            debug_file = archive.open(debug_files[0])
             return pickle.load(debug_file), buffer
 
-        records1, buffer = debug_records_from_mod(ft3)
+        records1, buffer = debug_records_from_mod(self, ft3)
 
         buffer.seek(0)
         loaded = torch.jit.load(buffer)
-        records2, buffer = debug_records_from_mod(loaded)
+        records2, buffer = debug_records_from_mod(self, loaded)
 
         buffer.seek(0)
         loaded2 = torch.jit.load(buffer)
-        records3, _ = debug_records_from_mod(loaded2)
+        records3, _ = debug_records_from_mod(self, loaded2)
 
         self.assertEqual(records1, records2)
         self.assertEqual(records2, records3)
@@ -3523,14 +3542,18 @@ def foo(xyz):
             torch.jit.save(ft3, buffer)
             buffer.seek(0)
             archive = zipfile.ZipFile(buffer)
-            debug_file = archive.open('archive/debug/archive.pkl')
-            return pickle.load(debug_file), buffer
+            files = list(filter(lambda x: x.startswith('archive/code/'), archive.namelist()))
+            debug_files = filter(lambda f: f.endswith('.debug_pkl'), files)
+            debug_files = map(lambda f: archive.open(f), debug_files)
+            debug_files = map(lambda f: pickle.load(f), debug_files)
+            return list(debug_files)
 
-        records, _ = debug_records_from_mod(ft3)
-        for i in range(len(records) - 1):
-            offset, source_range = records[i]
-            offset2, source_range2 = records[i + 1]
-            self.assertNotEqual(source_range, source_range2)
+        debug_files = debug_records_from_mod(ft3)
+        for debug_file in debug_files:
+            for i in range(len(debug_file) - 1):
+                offset, source_range = debug_file[i]
+                offset2, source_range2 = debug_file[i + 1]
+                self.assertNotEqual(source_range, source_range2)
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -3541,14 +3564,29 @@ def foo(xyz):
         self.checkScript(f, (x,))
 
     def test_tensor_grad(self):
-        x = torch.tensor(1.0, requires_grad=True)
-        y = torch.tensor(1.0, requires_grad=False)
+        x = torch.randn(3, 4, requires_grad=True)
+        y = torch.randn(3, 4, requires_grad=False)
 
-        def f(x):
+        def f_requires_grad(x):
             return x.requires_grad
 
-        self.checkScript(f, (x,))
-        self.checkScript(f, (y,))
+        self.checkScript(f_requires_grad, (x,))
+        self.checkScript(f_requires_grad, (y,))
+
+        def f_grad(x):
+            return x.grad
+
+        x.sum().backward()
+        self.checkScript(f_grad, (x,))
+        self.checkScript(f_grad, (y,))
+
+    def test_tensor_data(self):
+        x = torch.randn(3, 4)
+
+        def f_data(x):
+            return x.data
+
+        self.checkScript(f_data, (x,))
 
     def test_tensor_dtype(self):
         x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
@@ -5125,7 +5163,7 @@ a")
         res = fn(t, 1)
         self.assertEqual(res, 0)
         g = torch.jit.last_executed_optimized_graph()
-        self.assertEqual(next(g.inputs()).type().kind(), 'DimensionedTensorType')
+        self.assertEqual(next(g.inputs()).type().kind(), 'ProfiledTensorType')
 
         @torch.jit.script
         def fn(x, y, b):
@@ -6542,10 +6580,9 @@ a")
         a = A()
         self.assertEqual(a.with_docstring.__doc__, 'test str')
 
-    @unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-                     'Quantized RNN requires FBGEMM. FBGEMM does not play'
-                     ' well with UBSAN at the moment, so we skip the test if'
-                     ' we are in a UBSAN environment.')
+    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
+                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                     ' with instruction set support avx2 or newer.')
     def test_rnn_cell_quantized(self):
         d_in, d_hid = 2, 2
 
@@ -6637,10 +6674,9 @@ a")
             for out, ref_out in zip(outs, ref_outs):
                 torch.testing.assert_allclose(out, ref_out)
 
-    @unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-                     'Quantized RNN requires FBGEMM. FBGEMM does not play'
-                     ' well with UBSAN at the moment, so we skip the test if'
-                     ' we are in a UBSAN environment.')
+    @unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
+                     'Quantized RNN requires FBGEMM. FBGEMM is only optimized for CPUs'
+                     ' with instruction set support avx2 or newer.')
     def test_rnn_quantized(self):
         d_in, d_hid = 2, 2
 
@@ -7436,6 +7472,74 @@ a")
         self.assertTrue(imported.unpack_called.item())
         torch.testing.assert_allclose(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
 
+    def test_trace_export_fns(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.a = 3
+
+            @torch.jit.export
+            def __getstate__(self):
+                return (3,)
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self.a = state[0]
+
+            def forward(self, x):
+                return x + self.a
+
+        f = Foo()
+
+        traced = torch.jit.trace(f, (torch.rand(3, 4),))
+        expected_names = ['__getstate__', '__setstate__']
+
+        def check(mod):
+            self.assertTrue(all(name in mod._c._method_names() for name in expected_names))
+
+        check(traced)
+
+        imported = self.getExportImportCopy(traced)
+        check(imported)
+
+    def test_trace_export_fns_recursive(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.a = 3
+
+            @torch.jit.export
+            def __getstate__(self):
+                return (3,)
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self.a = state[0]
+
+            def forward(self, x):
+                return x + self.a
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self):
+                super(Wrapper, self).__init__()
+                self.foo = Foo()
+
+            def forward(self, x):
+                return self.foo(x)
+
+        f = Wrapper()
+
+        traced = torch.jit.trace(f, (torch.rand(3, 4),))
+        expected_names = ['__getstate__', '__setstate__']
+
+        def check(mod):
+            self.assertTrue(all(name in mod._c._method_names() for name in expected_names))
+
+        check(traced.foo)
+
+        imported = self.getExportImportCopy(traced)
+        check(imported.foo)
+
     def test_pack_unpack_nested(self):
         class SubSubMod(torch.jit.ScriptModule):
             def __init__(self):
@@ -8167,8 +8271,8 @@ a")
         graph = _propagate_shapes(tensor_unifying.graph, (a, b, c), False)
         if_outputs = list(graph.findNode("prim::If").outputs())
         self.assertTrue(if_outputs[0].type().str() == "Float(*, *)")
-        self.assertTrue(if_outputs[1].type().str() == "Tensor")
-        self.assertTrue(if_outputs[2].type().str() == "Tensor")
+        self.assertTrue(if_outputs[1].type().str() == "Tensor(*, *)")
+        self.assertTrue(if_outputs[2].type().str() == "Tensor(*, *)")
 
     def test_list_unify(self):
         # allowing a unififed int?[] would cause a runtime error b/c
@@ -9746,6 +9850,7 @@ a")
 
         self.checkScript(test_script_for_in_range_ast, ())
 
+    @unittest.skip("need to debug")
     def test_for_in_range_if_ast(self):
         @torch.jit.script
         def test_script_for_in_range_if_ast(x):
@@ -10155,6 +10260,14 @@ a")
             ''')
 
             self.checkScript(star_code, (), name='star_tuple_assign')
+
+        def subscript_tuple_augmented_assign(a):
+            # type: (Tuple[int, int]) -> Tuple[int, int]
+            a[0] += 1
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, 'does not support augmented assign'):
+            scripted_aug_assign = torch.jit.script(subscript_tuple_augmented_assign)
 
 
     def test_multi_reduction(self):
@@ -11398,9 +11511,7 @@ a")
 
             traced = torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
 
-    # These tests don't work because UBSAN has a false positive about accessing
-    # out of bounds on a dynamically sized struct internal to asmjit
-    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
+    if torch.fbgemm_is_cpu_supported():
         def test_quantization_modules(self):
             K1, N1 = 2, 2
 
@@ -12434,30 +12545,47 @@ a")
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_get_set_state(self):
-        class M(torch.jit.ScriptModule):
+        class Root(torch.jit.ScriptModule):
             __constants__ = ['number']
 
-            def __init__(self, number, submodule=None):
-                super(M, self).__init__()
+            def __init__(self, number):
+                super(Root, self).__init__()
                 self.register_buffer('buffer1', torch.ones(2, 2))
                 self.register_buffer('buffer2', torch.ones(2, 2))
                 self.number = number
-                if submodule:
-                    self.submodule = submodule
 
             @torch.jit.script_method
             def __getstate__(self):
-                # type: () -> Tuple[Tensor, Tensor, int]
                 return (self.buffer1, self.buffer2, 74)
 
             @torch.jit.script_method
             def __setstate__(self, state):
-                # type: (Tuple[Tensor, Tensor, int]) -> None
                 self.buffer1 = state[0] + 10
                 self.buffer2 = state[1] + 10
 
+
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['number']
+
+            def __init__(self, number, submodule):
+                super(M, self).__init__()
+                self.register_buffer('buffer1', torch.ones(2, 2))
+                self.register_buffer('buffer2', torch.ones(2, 2))
+                self.number = number
+                self.submodule = submodule
+
+            @torch.jit.script_method
+            def __getstate__(self):
+                return (self.buffer1, self.buffer2, 74, self.submodule)
+
+            @torch.jit.script_method
+            def __setstate__(self, state):
+                self.buffer1 = state[0] + 10
+                self.buffer2 = state[1] + 10
+                self.submodule = state[3]
+
         with TemporaryFileName() as fname:
-            m = M(23, submodule=M(99))
+            m = M(23, submodule=Root(99))
             m.save(fname)
             loaded = torch.jit.load(fname)
 
@@ -12485,19 +12613,18 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return None
+                return 5
 
             @torch.jit.export
-            def __setstate__(self, _):
-                # type: (None) -> None
-                self.buffer1 = torch.ones(2, 2) + 10
+            def __setstate__(self, state):
+                self.buffer1 = torch.ones(2, 2) + state
                 self.buffer2 = torch.ones(2, 2) + 10
 
         with TemporaryFileName() as fname:
             m = torch.jit.script(NoArgState())
             m.save(fname)
             loaded = torch.jit.load(fname)
-            self.assertEqual(loaded.buffer1, torch.ones(2, 2) + 10)
+            self.assertEqual(loaded.buffer1, torch.ones(2, 2) + 5)
             self.assertEqual(loaded.buffer2, torch.ones(2, 2) + 10)
 
 
@@ -12848,7 +12975,7 @@ a")
         test_shape_prop(torch.tensor(0.5))
         graph = test_shape_prop.graph_for(torch.tensor(0.5))
         # Shape analysis of z should propagate through if statement
-        FileCheck().check("Long(*, *)").check("prim::If").run(graph)
+        FileCheck().check("Long(2, 2)").check("prim::If").run(graph)
 
     def test_partial_returns(self):
         with self.assertRaisesRegex(RuntimeError, "does not return along all"):
@@ -13531,20 +13658,17 @@ a")
             def __init__(self):
                 super(M, self).__init__()
                 for name, value, the_type in tester.get_pickle_values():
-                    setattr(self, name, torch.jit.Attribute(value, the_type))
+                    setattr(self, "_" + name, torch.jit.Attribute(value, the_type))
 
             @torch.jit.script_method
             def forward(self):
-                return (self.dict, self.float, self.int, self.bool, self.tuple,
-                        self.list, self.int_list, self.tensor_list, self.bool_list,
-                        self.float_list, self.str_list, self.none)
+                return (self._dict, self._float, self._int, self._bool, self._tuple,
+                        self._list, self._int_list, self._tensor_list, self._bool_list,
+                        self._float_list, self._str_list, self._none)
 
         with TemporaryFileName() as fname:
             M().save(fname)
-            archive_name = os.path.basename(os.path.normpath(fname))
-            archive = zipfile.ZipFile(fname, 'r')
-            pickled_data = archive.read(os.path.join(archive_name, 'attributes.pkl'))
-            out = pickle.load(io.BytesIO(pickled_data))
+            loaded = torch.jit.load(fname)
 
             def is_tensor_value(item):
                 if isinstance(item, torch.Tensor):
@@ -13552,11 +13676,10 @@ a")
                 if isinstance(item, list):
                     return is_tensor_value(item[0])
                 return False
-
-            for loaded_item, item in zip(out, self.get_pickle_values()):
-                if is_tensor_value(item[1]):
+            for name, value, the_type in self.get_pickle_values():
+                if is_tensor_value(value):
                     continue
-                self.assertEqual(item[1], loaded_item)
+                self.assertEqual(value, getattr(loaded, "_" + name))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):
@@ -13666,7 +13789,8 @@ a")
     def test_script_scope(self):
         scripted = torch.jit.script(torch.nn.functional.pad)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
+    # [serialization forward compat]
+    @unittest.skipIf(IS_SANDCASTLE or IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -13691,7 +13815,7 @@ a")
             m.save(fname)
             archive_name = os.path.basename(os.path.normpath(fname))
             archive = zipfile.ZipFile(fname, 'r')
-            pickled_data = archive.read(os.path.join(archive_name, 'attributes.pkl'))
+            pickled_data = archive.read(os.path.join(archive_name, 'data.pkl'))
 
             out = StringIO()
             pickletools.dis(pickled_data, out=out)
@@ -14807,7 +14931,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     def test_snli(self):
         self._test_snli(self, device='cpu')
 
-    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
+    if torch.fbgemm_is_cpu_supported():
         def test_snli_quantized(self):
             self._test_snli(self, device='cpu', quantized=True)
 
@@ -14949,7 +15073,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     def test_vae(self):
         self._test_vae(self, device='cpu')
 
-    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
+    if torch.fbgemm_is_cpu_supported():
         def test_vae_quantized(self):
             self._test_vae(self, device='cpu', quantized=True)
 
@@ -16252,7 +16376,7 @@ class TestAsync(JitTestCase):
                 return torch.neg(x1), self.param, self.const, torch.neg(x2), self.param
 
             @torch.jit.script_method
-            def wait_script(self, x1, x2):
+            def forward(self, x1, x2):
                 fut = torch.jit._fork(self.foo, x1, x2)
                 y_hat = self.foo(x1, x2)
                 y = torch.jit._wait(fut)
@@ -16264,7 +16388,7 @@ class TestAsync(JitTestCase):
         m = Mod()
 
         with torch.jit.optimized_execution(False):
-            y, y_hat = m.wait_script(x1, x2)
+            y, y_hat = m.forward(x1, x2)
 
         self.assertEqual(y, y_hat)
 
@@ -17001,16 +17125,13 @@ class TestList(JitTestCase):
 
         self.assertEqual(comp([1, 2, 3], [4, 5]), [3, 6, 9, 6, 7])
 
-    def test_comprehensions_wrong_expr_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
-            @torch.jit.script
-            def comp(l):
-                # type: (List[int]) -> List[float]
+    def test_comprehension_out_type_not_in_type(self):
+        def list_cast():
+            # type: () -> int
+            li = [int(i) for i in [torch.tensor(0), torch.tensor(1), torch.tensor(2)]]
+            return li[0] + li[1] + li[2]
 
-                n = [float(x) for x in l]
-                return n
-
-            comp([1, 2, 3])
+        self.checkScript(list_cast, ())
 
     def test_mutable_list_append_2(self):
         def test_append_2():
@@ -17485,6 +17606,26 @@ class TestDict(JitTestCase):
 
         self.checkScript(update, (self.dict(), self.dict()))
         self.checkScript(update, (self.dict(), self.dict2()))
+
+    def test_aug_assign(self):
+        def aug_assign_dict_tensor(a):
+            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
+            a['a'] += 1
+            a['b'] -= 12
+            a['c'] *= 122
+            a['c'] /= 2
+            return a
+
+        def aug_assign_dict_prim(a):
+            # type: (Dict[str, float]) -> Dict[str, float]
+            a['a'] += 3.4
+            a['b'] -= 2.4
+            a['c'] *= 3.0
+            a['c'] /= 2.0
+            return a
+
+        self.checkScript(aug_assign_dict_tensor, (self.dict(),))
+        self.checkScript(aug_assign_dict_prim, ({'a': 3.0, 'b': 2.0, 'c': 4.0},))
 
     def test_popitem(self):
         @torch.jit.script
