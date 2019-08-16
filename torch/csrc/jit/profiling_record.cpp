@@ -36,8 +36,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
         if (t.isTensor()) {
           auto pttp = ProfiledTensorType::create(t.toTensor());
           std::lock_guard<std::mutex> lock(this->mutex_);
-          if (pno->type()->isSubclass(TypeKind::ProfiledTensorType)) {
-            auto type = pno->type()->cast<ProfiledTensorType>();
+          if (auto type = pno->type()->cast<ProfiledTensorType>()) {
             pno->setType(type->merge(pttp));
           } else {
             pno->setType(pttp);

@@ -87,7 +87,7 @@ class QFunctional(torch.nn.Module):
     def cat(self, x, dim=0):
         # type: (List[Tensor], int) -> Tensor
         return ops.quantized.cat(x, scale=self.scale,
-                                 zero_point=self.zero_point, axis=dim)
+                                 zero_point=self.zero_point, dim=dim)
 
     @classmethod
     def from_float(cls, mod):
