@@ -221,11 +221,15 @@ void EncoderBase::EncodeValueInfo(
     const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   std::string name = n->debugName();
   v->set_name(name);
-  if (CompleteTensorTypePtr node_type = n->type()->cast<CompleteTensorType>()) {
+  if (ProfiledTensorTypePtr node_type = n->type()->cast<ProfiledTensorType>()) {
+    if (!node_type->isComplete()) {
+      return;
+    }
     onnx::TypeProto* t = v->mutable_type();
     onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
     onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
-    const std::vector<std::int64_t>& sizes = node_type->sizes();
+    std::vector<std::int64_t> sizes =
+        node_type->sizes().concrete_sizes().value();
     for (size_t i = 0; i < sizes.size(); i++) {
       shape->add_dim();
       if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
@@ -236,7 +240,8 @@ void EncoderBase::EncodeValueInfo(
         shape->mutable_dim(i)->set_dim_value(sizes[i]);
       }
     }
-    tensor_type->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
+    tensor_type->set_elem_type(
+        ATenTypeToOnnxType(node_type->scalarType().value()));
   } else if (BoolTypePtr node_type = n->type()->cast<BoolType>()) {
     onnx::TypeProto* t = v->mutable_type();
     onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();

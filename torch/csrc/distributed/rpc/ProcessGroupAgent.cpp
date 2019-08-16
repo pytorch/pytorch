@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/ProcessGroupAgent.h>
+#include <c10d/ProcessGroup.hpp>
 
 #include <Python.h>
 
@@ -155,9 +156,12 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
 
       // ProcessGroup is not thread-safe when sending with the same tag, hence
       // the lock
+      std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
       if (work.message_.isShutdown()) {
-        std::lock_guard<std::mutex> lock(sendMutexes_[work.to_]);
-        pg_->send(preamble, work.to_, work.to_ /* channelTag */)->wait();
+        pendingSends.reserve(1);
+        std::lock_guard<std::mutex> guard(sendMutexes_[work.to_]);
+        pendingSends.emplace_back(
+            pg_->send(preamble, work.to_, work.to_ /* channelTag */));
       } else {
         std::vector<torch::Tensor> payload = {
             torch::from_blob(
@@ -166,10 +170,17 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
                 {torch::kChar}
             )
         };
-        std::lock_guard<std::mutex> lock(sendMutexes_[work.to_]);
-        pg_->send(preamble, work.to_, work.to_ /* channelTag */)->wait();
-        pg_->send(payload, work.to_, work.to_ /* channelTag */)->wait();
+        pendingSends.reserve(2);
+        std::lock_guard<std::mutex> guard(sendMutexes_[work.to_]);
+        pendingSends.emplace_back(
+            pg_->send(preamble, work.to_, work.to_ /* channelTag */));
+        pendingSends.emplace_back(
+            pg_->send(payload, work.to_, work.to_ /* channelTag */));
       }
+      for (auto& pendingSend: pendingSends) {
+        pendingSend->wait();
+      }
+
     },
     std::move(work)
   ));
@@ -204,7 +215,6 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 }
 
 void ProcessGroupAgent::listenLoop() {
-  google::InitGoogleLogging("distributed.rpc");
   while (true) {
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
@@ -216,6 +226,9 @@ void ProcessGroupAgent::listenLoop() {
     MessageType type = MessageType(preamble_items[2]);
 
     if (type == MessageType::SHUTDOWN) {
+      // FIXME: This LOG also prints warnings no InitGoogleLogging() was invoked
+      // before logging, but it is not appropriate to call InitGoogleLogging()
+      // here either.
       LOG(INFO) << "Shutting down ProcessGroupAgent "
                 << workerName_ << std::endl;
       return;
