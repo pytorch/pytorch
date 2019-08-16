@@ -118,7 +118,7 @@ class QFunctional(torch.nn.Module):
     r"""Operation equivalent to ``torch.ops.quantized.mul(Tensor, Tensor)``"""
     def mul(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
-        return ops.quantized.add(x, y, scale=self.scale,
+        return ops.quantized.mul(x, y, scale=self.scale,
                                  zero_point=self.zero_point)
 
     r"""Operation equivalent to ``torch.ops.quantized.mul(Tensor, float)``"""
