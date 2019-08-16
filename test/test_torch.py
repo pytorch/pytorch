@@ -12844,7 +12844,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 inplace_op(tensor)
 
         for (fn, inputs, has_input_output_mem_overlap_check,
-             has_internal_mem_overlap_check, dev) in unary_mem_overlap_cases:
+            has_internal_mem_overlap_check, dev) in unary_mem_overlap_cases:
             if dev != device:
                 continue
             out_fn = getattr(torch, fn)
@@ -12865,10 +12865,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     @torchtest.for_all_device_types()
     def test_binary_op_mem_overlap(self, device):
         ops = [
-            (torch.add, torch.Tensor.add_),
-            (torch.mul, torch.Tensor.mul_),
-            (torch.sub, torch.Tensor.sub_),
-            (torch.div, torch.Tensor.div_)
+            "add",
+            "mul",
+            "sub",
+            "div",
+            "logical_xor"
         ]
 
         def binary_check_internal_mem_overlap(inplace_op, device):
@@ -12910,7 +12911,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 _test(op, output=data[0:sz],
                       left=data[0:sz], right=data[2:sz + 2])
 
-        for (out_op, inplace_op) in ops:
+        for fn in ops:
+            out_op = getattr(torch, fn)
+            inplace_op = getattr(torch.Tensor, fn + '_')
             # internal overlap check for inplace_op
             binary_check_internal_mem_overlap(inplace_op, device)
             # input/output overlap check for out op
@@ -12968,7 +12971,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 inplace_op(input, tensor1, tensor2)
 
         for (fn, has_input_output_mem_overlap_check,
-             has_internal_mem_overlap_check, dev) in ops:
+            has_internal_mem_overlap_check, dev) in ops:
             if dev != device:
                  continue
             out_op = getattr(torch, fn)
