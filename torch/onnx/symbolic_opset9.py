@@ -1650,13 +1650,11 @@ def argmin(g, input, dim, keepdim):
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter(g, self, dim, index, src):
-    print("in scatter opset 9")
     return g.op("Scatter", self, index, src, axis_i=dim)
 
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter_add(g, self, dim, index, src):
-    print("in scatter_add opset 9")
     if not self.isCompleteTensor():
         return _unimplemented("scatter_add", "input size not accessible")
     dtype = self.type().scalarType()
