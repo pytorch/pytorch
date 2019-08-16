@@ -195,11 +195,7 @@ def instantiate_configs():
         distro_name = fc.find_prop("distro_name")
 
         python_version = None
-        if distro_name == "xenial":
-            python_version = fc.find_prop("pyver")
-            parms_list = [fc.find_prop("abbreviated_pyver")]
-        else:
-            parms_list = ["py" + fc.find_prop("pyver")]
+        parms_list = ["py" + fc.find_prop("pyver")]
 
         compiler_name = fc.find_prop("compiler_name")
 
