@@ -290,7 +290,8 @@ void propagate_names_for_addmv(
     TensorImpl* mat,
     TensorImpl* vec,
     TensorImpl* bias) {
-  if (!impl::has_names(mat) && !impl::has_names(vec)) {
+  if (!impl::has_names(result) && !impl::has_names(mat) &&
+      !impl::has_names(vec) && !impl::has_names(bias)) {
     return;
   }
   auto mv_outnames = compute_dot_product_outnames(
@@ -311,7 +312,8 @@ void propagate_names_for_addmm(
     TensorImpl* m1,
     TensorImpl* m2,
     TensorImpl* bias) {
-  if (!impl::has_names(m1) && !impl::has_names(m2)) {
+  if (!impl::has_names(m1) && !impl::has_names(m2) &&
+      !impl::has_names(bias) && !impl::has_names(result)) {
     return;
   }
   auto mm_outnames = compute_dot_product_outnames(
