@@ -248,17 +248,62 @@ void propagate_names(TensorImpl* result, TensorImpl* src) {
   propagate_names(result, impl::get_names(src));
 }
 
-static std::vector<Dimname> compute_mm_outnames(
-    optional<DimnameList> mat1_names,
-    optional<DimnameList> mat2_names) {
-  std::vector<Dimname> mm_outnames(2, Dimname::wildcard());
-  if (mat1_names) {
-    mm_outnames[0] = (*mat1_names)[0];
+static optional<std::vector<Dimname>> compute_dot_product_outnames(
+    optional<DimnameList> tensor_names,
+    int64_t tensor_dotted_dim,
+    int64_t tensor_ndim,
+    optional<DimnameList> other_names,
+    int64_t other_dotted_dim,
+    int64_t other_ndim) {
+  int64_t num_outnames = tensor_ndim + other_ndim - 2;
+  if (num_outnames == 0) {
+    return nullopt;
   }
-  if (mat2_names) {
-    mm_outnames[1] = (*mat2_names)[1];
+  std::vector<Dimname> outnames(num_outnames, Dimname::wildcard());
+  int64_t index = 0;
+  if (tensor_names) {
+    for (int64_t j = 0; j < tensor_names->size(); ++j) {
+      if (j == tensor_dotted_dim) continue;
+      outnames[index++] = (*tensor_names)[j];
+    }
   }
-  return mm_outnames;
+  index = tensor_ndim - 1;
+  if (other_names) {
+    for (int64_t j = 0; j < other_names->size(); ++j) {
+      if (j == other_dotted_dim) continue;
+      outnames[index++] = (*other_names)[j];
+    }
+  }
+  return outnames;
+}
+
+static optional<DimnameList> to_opt_dimnames(
+    const optional<std::vector<Dimname>>& names) {
+  if (names) {
+    return *names;
+  }
+  return nullopt;
+}
+
+void propagate_names_for_addmv(
+    TensorImpl* result,
+    TensorImpl* mat,
+    TensorImpl* vec,
+    TensorImpl* bias) {
+  if (!impl::has_names(mat) && !impl::has_names(vec)) {
+    return;
+  }
+  auto mv_outnames = compute_dot_product_outnames(
+      impl::get_names(mat),
+      /*tensor_dotted_dim=*/1,
+      /*tensor_ndim=*/2,
+      impl::get_names(vec),
+      /*other_dotted_dim=*/0,
+      /*other_ndim=*/1);
+  TORCH_INTERNAL_ASSERT(mv_outnames.has_value());
+  auto add_outnames = unify_from_right(to_opt_dimnames(mv_outnames), impl::get_names(bias));
+  TORCH_INTERNAL_ASSERT(add_outnames.has_value());
+  propagate_names(result, std::move(*add_outnames));
 }
 
 void propagate_names_for_addmm(
@@ -269,8 +314,14 @@ void propagate_names_for_addmm(
   if (!impl::has_names(m1) && !impl::has_names(m2)) {
     return;
   }
-  auto mm_outnames = compute_mm_outnames(impl::get_names(m1), impl::get_names(m2));
-  auto add_outnames = unify_from_right(mm_outnames, impl::get_names(bias));
+  auto mm_outnames = compute_dot_product_outnames(
+      impl::get_names(m1),
+      /*tensor_dotted_dim=*/1,
+      /*tensor_ndim=*/2,
+      impl::get_names(m2),
+      /*other_dotted_dim=*/0,
+      /*other_ndim=*/2);
+  auto add_outnames = unify_from_right(to_opt_dimnames(mm_outnames), impl::get_names(bias));
   TORCH_INTERNAL_ASSERT(add_outnames.has_value() && add_outnames->size() == 2);
   propagate_names(result, std::move(*add_outnames));
 }

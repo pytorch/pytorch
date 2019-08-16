@@ -601,6 +601,9 @@ void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
 
   if(r_ != t)
   {
+#ifdef BUILD_NAMEDTENSOR
+    at::NoNamesGuard guard;
+#endif
     THTensor_(resizeAs)(r_, t);
     at::Tensor r__wrap = THTensor_wrap(r_);
     at::Tensor t_wrap = THTensor_wrap(t);
@@ -648,6 +651,9 @@ void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
     }
   }
 
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
+#endif
   #undef LDA_COND
 }
 
