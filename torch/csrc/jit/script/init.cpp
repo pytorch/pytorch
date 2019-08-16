@@ -751,7 +751,7 @@ void initJitScriptBindings(PyObject* module) {
         return script_compile_function(name, new_def, defaults, std::move(rcb));
       });
   m.def(
-      "replace_overloaded_method_decl",
+      "_replace_overloaded_method_decl",
       [](const Decl& overload_decl,
          const Def& implementation_def,
          const std::string& new_name) {

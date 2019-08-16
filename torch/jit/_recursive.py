@@ -142,7 +142,7 @@ def recursive_script(mod):
         for overload_fn, name in zip(overload_fns, names):
             torch.jit._check_no_signature(overload_fn)
             over_ast = torch.jit.get_jit_def(overload_fn, self_name="ScriptModule")
-            new_ast = torch._C.replace_overloaded_method_decl(over_ast.decl(), orig_ast, name)
+            new_ast = torch._C._replace_overloaded_method_decl(over_ast.decl(), orig_ast, name)
             _rcb = _jit_internal.createResolutionCallbackFromClosure(orig_fn)
             overload_stubs.append(torch.jit.ScriptMethodStub(_rcb, new_ast, overload_fn))
 
