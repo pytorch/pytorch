@@ -161,7 +161,7 @@ struct SourceResolver : public Resolver {
 
 struct SourceImporter {
   SourceImporter(
-      const std::shared_ptr<CompilationUnit> cu,
+      const std::shared_ptr<CompilationUnit>& cu,
       const std::shared_ptr<Source>& src,
       const std::vector<at::Tensor>& tensor_table,
       const std::function<void(const std::string&)>& import_callback)

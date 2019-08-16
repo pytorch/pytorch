@@ -1,6 +1,8 @@
 #pragma once
 #include <ATen/ATen.h>
 #include <string>
+#include <utility>
+#include <utility>
 #include <vector>
 
 #include <ATen/core/interned_strings.h>
@@ -88,7 +90,7 @@ struct TORCH_API GraphAttr : public AttributeValue {
   using ConstructorType = std::shared_ptr<Graph>;
   using ValueType = std::shared_ptr<Graph>;
   GraphAttr(Symbol name, ConstructorType value_)
-      : AttributeValue(name), value_(value_) {}
+      : AttributeValue(name), value_(std::move(std::move(value_))) {}
   ValueType& value() {
     return value_;
   }

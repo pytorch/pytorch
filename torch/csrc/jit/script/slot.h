@@ -15,7 +15,7 @@ enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
 // a stable location that can hold an IValue.
 // inside a module.
 struct TORCH_API Slot {
-  Slot() {}
+  Slot() = default;
   Slot(c10::intrusive_ptr<c10::ivalue::Object> container, size_t offset)
   : container_(std::move(container)), offset_(offset) {}
 
@@ -55,7 +55,7 @@ struct TORCH_API Slot {
 
 private:
   c10::intrusive_ptr<c10::ivalue::Object> container_;
-  size_t offset_;
+  size_t offset_{};
   friend struct std::hash<Slot>;
   friend struct Module;
 };

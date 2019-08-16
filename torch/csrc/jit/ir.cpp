@@ -81,7 +81,7 @@ struct const_value_list_with_types {
       : values(values), delim(std::move(delim_)) {}
 };
 
-std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
+std::ostream& operator<<(std::ostream& out, const const_value_list_with_types& l) {
   size_t i = 0;
   for (auto n : l.values) {
     if (i++ > 0) {
@@ -1475,7 +1475,7 @@ Value* Graph::insertFunctionCall(
     script::MatchedSchema& matched) {
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->output()
-                           ->setType(FunctionType::create(std::move(callee)));
+                           ->setType(FunctionType::create(callee));
   std::vector<Value*> inputs = {fn_constant};
   inputs.insert(inputs.end(), matched.inputs.begin(), matched.inputs.end());
   Value* result = insertNode(create(prim::CallFunction, inputs))
@@ -1516,12 +1516,12 @@ Node* Graph::createClone(
 }
 
 Value* Graph::insertConstant(
-    IValue val,
+    const IValue& val,
     const TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   return jit::insertConstant(
-      *this, std::move(val), result_type, std::move(loc), std::move(scope));
+      *this, val, result_type, std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString(bool print_source_locations) const {

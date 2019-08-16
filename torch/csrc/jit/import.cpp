@@ -25,6 +25,8 @@
 #include <fstream>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -60,7 +62,7 @@ class ScriptModuleDeserializer final {
   ScriptModuleDeserializer(
       std::shared_ptr<script::CompilationUnit> cu,
       std::unique_ptr<PyTorchStreamReader> reader)
-      : compilation_unit_(cu),
+      : compilation_unit_(std::move(std::move(cu))),
         reader_(std::move(reader)) {}
 
   script::Module deserialize(
@@ -88,7 +90,7 @@ class ScriptModuleDeserializer final {
   IValue LEGACY_loadPickleArchive(const std::string& name);
   script::Module LEGACY_convertModule(const torch::ModuleDef& module_def);
   std::vector<IValue> LEGACY_pickled_ivalues_;
-  size_t proto_version_;
+  size_t proto_version_{};
 };
 
 script::Module ScriptModuleDeserializer::deserialize(
@@ -125,7 +127,7 @@ script::Module ScriptModuleDeserializer::deserialize(
   AT_ASSERTM(
       model_def.ParseFromString(binary_string),
       "JSON transcoder produced invalid protobuf output.");
-  device_ = device;
+  device_ = std::move(device);
   proto_version_ = model_def.proto_version();
 
   // Load extra files.
@@ -152,7 +154,7 @@ script::Module ScriptModuleDeserializer::deserialize(
       LEGACY_pickled_ivalues_ =
           LEGACY_loadPickleArchive("attributes.pkl").toTuple()->elements();
     }
-    moduleStack_.push_back("__torch__");
+    moduleStack_.emplace_back("__torch__");
     const auto& module_def = model_def.main_module();
     return LEGACY_convertModule(module_def);
   } else {
@@ -346,7 +348,7 @@ void ScriptModuleDeserializer::moduleSetState(
   if (setstate->num_inputs() == 1) {
     setstate->run({module.module_object()});
   } else if (setstate->num_inputs() == 2) {
-    setstate->run({module.module_object(), state});
+    setstate->run({module.module_object(), std::move(state)});
   } else {
     AT_ERROR("Unexpected schema on '__setstate__'");
   }
@@ -463,7 +465,7 @@ script::Module import_ir_module(
     script::ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(&in);
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-  return deserializer.deserialize(device, extra_files);
+  return deserializer.deserialize(std::move(device), extra_files);
 }
 
 script::Module import_ir_module(
@@ -473,7 +475,7 @@ script::Module import_ir_module(
     script::ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(filename);
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-  return deserializer.deserialize(device, extra_files);
+  return deserializer.deserialize(std::move(device), extra_files);
 }
 
 script::Module import_ir_module(
@@ -483,7 +485,7 @@ script::Module import_ir_module(
     script::ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-  return deserializer.deserialize(device, extra_files);
+  return deserializer.deserialize(std::move(device), extra_files);
 }
 
 script::Module load(
@@ -492,7 +494,7 @@ script::Module load(
     script::ExtraFilesMap& extra_files) {
   std::unique_ptr<IStreamAdapter> rai =
       caffe2::make_unique<IStreamAdapter>(&in);
-  auto module = load(std::move(rai), device, extra_files);
+  auto module = load(std::move(rai), std::move(device), extra_files);
   return module;
 }
 
@@ -501,7 +503,7 @@ script::Module load(
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   std::unique_ptr<FileAdapter> rai = caffe2::make_unique<FileAdapter>(filename);
-  auto module = load(std::move(rai), device, extra_files);
+  auto module = load(std::move(rai), std::move(device), extra_files);
   return module;
 }
 
@@ -512,7 +514,7 @@ script::Module load(
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   auto cu = std::make_shared<script::CompilationUnit>();
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-  return deserializer.deserialize(device, extra_files);
+  return deserializer.deserialize(std::move(device), extra_files);
 }
 
 } // namespace jit

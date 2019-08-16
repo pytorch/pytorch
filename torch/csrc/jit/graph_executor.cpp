@@ -239,7 +239,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     for (IValue& v : stack) {
       if (v.isTensorList()) {
         for (const at::Tensor& tensor : v.toTensorListRef()) {
-          produceOutput(output_index++, std::move(tensor), outputs);
+          produceOutput(output_index++, tensor, outputs);
         }
       } else if (v.isTensor()) {
         produceOutput(output_index++, std::move(v).toTensor(), outputs);
@@ -613,7 +613,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   std::unordered_map<ArgumentSpec, ExecutionPlan> plan_cache;
 };
 
-GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph)
+GraphExecutor::GraphExecutor(const std::shared_ptr<Graph>& graph)
     : pImpl(
           getProfilingMode() ? dynamic_cast<GraphExecutorImplBase*>(
                                    new ProfilingGraphExecutorImpl(graph))

@@ -77,7 +77,7 @@ struct Suspend : public std::exception {
 
 struct InterpreterContinuation {
   InterpreterContinuation(
-      InterpreterState state_,
+      const InterpreterState& state_,
       Stack stack_,
       bool grad_mode_enabled_)
       : state(state_),

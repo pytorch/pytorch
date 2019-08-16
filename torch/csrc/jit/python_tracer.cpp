@@ -12,6 +12,7 @@
 #include <c10/util/Exception.h>
 
 #include <sstream>
+#include <utility>
 
 using namespace torch::autograd;
 using namespace torch::jit;
@@ -156,7 +157,7 @@ void initPythonTracerBindings(PyObject* module) {
       .def("pop_scope", [](TracingState& s) { s.graph->pop_scope(); })
       .def(
           "set_graph",
-          [](TracingState& s, std::shared_ptr<Graph> g) { s.graph = g; })
+          [](TracingState& s, std::shared_ptr<Graph> g) { s.graph = std::move(g); })
       .def("graph", [](TracingState& s) { return s.graph; });
 
   m.def("_tracer_warn_use_python", []() { tracer::setWarn(pythonWarn); });
@@ -169,7 +170,7 @@ void initPythonTracerBindings(PyObject* module) {
   m.def("_tracer_abandon", []() { tracer::abandon(); });
   m.def("_get_tracing_state", []() { return getTracingState(); });
   m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
-    return setTracingState(state);
+    return setTracingState(std::move(state));
   });
   m.def("_get_value_trace", [](const Variable& var) {
     return getValueTrace(var);

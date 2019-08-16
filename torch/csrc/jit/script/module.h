@@ -25,6 +25,8 @@
 #include <ostream>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <utility>
 #include <vector>
 
 // This file contains classes which assist in desugaring Python style
@@ -114,9 +116,9 @@ struct TORCH_API Module {
       std::shared_ptr<CompilationUnit> cu,
       bool shouldMangle = false);
   // module_value_ null and will be lazily initialized if is needed
-  Module() {}
+  Module() = default;
   Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
-  ~Module() {}
+  ~Module() = default;
 
   const c10::QualifiedName& name() const {
     return *module_object()->type()->name();
@@ -144,7 +146,7 @@ struct TORCH_API Module {
   // register_buffer method. With this simplification, we only need to track
   // whether a slot is a parameter to be able to classify it.
   void register_buffer(const std::string& name, autograd::Variable v) {
-    set_or_add_slot(name, TensorType::get(), v, EntityType::ATTRIBUTE);
+    set_or_add_slot(name, TensorType::get(), std::move(v), EntityType::ATTRIBUTE);
   }
 
   void register_parameter(
@@ -154,14 +156,14 @@ struct TORCH_API Module {
     set_or_add_slot(
         name,
         TensorType::get(),
-        v,
+        std::move(v),
         is_buffer ? EntityType::ATTRIBUTE : EntityType::PARAMETER);
   }
   void register_attribute(
       const std::string& name,
-      const TypePtr type,
+      const TypePtr& type,
       IValue ivalue) {
-    set_or_add_slot(name, type, ivalue, EntityType::ATTRIBUTE);
+    set_or_add_slot(name, type, std::move(ivalue), EntityType::ATTRIBUTE);
   }
   void register_module(const std::string& name, const Module& module) {
     set_or_add_slot(
@@ -169,7 +171,7 @@ struct TORCH_API Module {
   }
 
   void set_parameter(const std::string& name, at::Tensor v) {
-    get_slot(name, EntityType::PARAMETER).setValue(v);
+    get_slot(name, EntityType::PARAMETER).setValue(std::move(v));
   }
 
   autograd::Variable get_parameter(const std::string& name) const {
@@ -373,7 +375,7 @@ struct TORCH_API Module {
       const std::unordered_map<TypePtr, TypePtr>& type_remap);
 
   c10::QualifiedName getNameForMethod(std::string basename) const {
-    return QualifiedName(name(), basename);
+    return QualifiedName(name(), std::move(basename));
   }
   static const char* toString(EntityType t) {
     switch (t) {
@@ -454,8 +456,8 @@ struct TORCH_API Module {
 // that returns Module via template specialization of the operator* method.
 template <typename T>
 struct TORCH_API slot_iterator_impl {
-  slot_iterator_impl(Module module, c10::optional<EntityType> type, size_t i)
-      : module_(module), type_(type), i_(i) {
+  slot_iterator_impl(const Module& module, c10::optional<EntityType> type, size_t i)
+      : module_(module), type_(std::move(std::move(type))), i_(i) {
     advance_to_valid();
   }
   T operator*() const;
@@ -532,8 +534,8 @@ struct TORCH_API slot_list_impl {
   }
 
  private:
-  slot_list_impl(Module module, c10::optional<EntityType> type)
-      : module_(std::move(module)), type_(type) {
+  slot_list_impl(const Module& module, c10::optional<EntityType> type)
+      : module_(module), type_(std::move(std::move(type))) {
     if (!type_) {
       size_ = module_.num_slots();
     }

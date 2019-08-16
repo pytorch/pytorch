@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/operator.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -21,7 +23,7 @@ Value* insertConstant(
     const c10::TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
-  auto value = tryInsertConstant(g, val, result_type, loc, scope);
+  auto value = tryInsertConstant(g, val, result_type, std::move(loc), std::move(scope));
   if (value) {
     return *value;
   }
@@ -129,7 +131,7 @@ RegisterOperators reg({
         [](const Node* node) -> Operation {
           TypePtr type = node->output()->type();
           if (type->isSubtypeOf(TensorType::get())) {
-            auto t = node->t(attr::value);
+            const auto& t = node->t(attr::value);
             return [t](Stack& stack) {
               push(stack, t);
               return 0;

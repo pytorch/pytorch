@@ -1409,7 +1409,7 @@ void setItem(const c10::List<T>& list, int64_t idx, T&& value) {
   if (normalized_idx < 0 || normalized_idx >= list_size) {
     throw std::out_of_range("list index out of range");
   }
-  list.set(normalized_idx, std::move(value));
+  list.set(normalized_idx, std::forward<T>(value));
 }
 
 template <typename T>
@@ -2939,7 +2939,7 @@ Operation sort_op(
     std::sort(
         g_list.begin(),
         g_list.end(),
-        [lt_func, reverse, &sort_stack](IValue a, IValue b) -> bool {
+        [lt_func, reverse, &sort_stack](const IValue& a, const IValue& b) -> bool {
           // "strict weak ordering" issue - see other sort
           if (a.isSameIdentity(b)) {
             return false;

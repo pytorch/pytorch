@@ -2,6 +2,8 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
+#include <utility>
 
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/error_report.h>
@@ -247,7 +249,7 @@ struct TORCH_API NamedTupleConstructor : public SugaredValue {
 };
 
 struct FunctionValue : public SugaredValue {
-  FunctionValue(Function* callee) : callee_(std::move(callee)) {}
+  FunctionValue(Function* callee) : callee_(callee) {}
   FunctionValue(const StrongFunctionPtr& p)
       : callee_(p.function_), cu_(p.cu_) {}
 
@@ -291,7 +293,7 @@ struct TORCH_API ClosureValue : public SugaredValue {
 // defines how a method obtained from a module behaves in script
 struct MethodValue : public SugaredValue {
   MethodValue(Value* self, std::string method_name)
-      : self_(std::move(self)), method_name_(std::move(method_name)) {}
+      : self_(self), method_name_(std::move(method_name)) {}
 
   std::string kind() const override {
     return "method";
@@ -479,12 +481,12 @@ struct TORCH_API IterableValue : SugaredValue {
 // max_trip_count and set the value table for loop targets
 struct TORCH_API IterableTree : SugaredValue {
   IterableTree() = default;
-  IterableTree(const std::vector<SugaredValuePtr> children)
-      : children_(std::move(children)) {}
+  IterableTree(const std::vector<SugaredValuePtr>& children)
+      : children_(children) {}
   std::string kind() const override {
     return "iterabletree";
   }
-  void addChild(SugaredValuePtr sv) {
+  void addChild(const SugaredValuePtr& sv) {
     children_.emplace_back(sv);
   }
 
@@ -511,7 +513,7 @@ struct TORCH_API IterableTree : SugaredValue {
 //   Foo.__new__(Foo)
 // Foo is a ClassValue, calling `attr("__new__")` will return a ClassNewMethod.
 struct TORCH_API ClassNewMethod : public SugaredValue {
-  ClassNewMethod(ClassTypePtr type) : type_(type) {}
+  ClassNewMethod(ClassTypePtr type) : type_(std::move(std::move(type))) {}
   std::string kind() const override {
     return "class.__new__";
   }

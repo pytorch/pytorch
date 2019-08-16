@@ -34,7 +34,7 @@ struct PyNode : public Node {
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
 
-  ~PyNode() {
+  ~PyNode() override {
     // Can't use THPObjectPtr as a field in this class; destructor won't take
     // out GIL!  When I forgot to do this by hand
     // TestAutograd.test_inplace_view_python called me out about it.
