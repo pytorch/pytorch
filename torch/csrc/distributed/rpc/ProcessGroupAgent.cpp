@@ -204,7 +204,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 }
 
 void ProcessGroupAgent::listenLoop() {
-  ::google::InitGoogleLogging("distributed.rpc");
+  google::InitGoogleLogging("distributed.rpc");
   while (true) {
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
