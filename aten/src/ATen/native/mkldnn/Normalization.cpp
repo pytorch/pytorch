@@ -56,7 +56,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   AT_ASSERTM(input.dim() == 4 || input.dim() == 5,
              "mkldnn_batch_norm: currently mkldnn only support 2d and 3d batchnorm");
   AT_ASSERTM(weight.defined() && bias.defined(),
-             "mkldnn_batch_norm: currently mkldnn only support affine model")
+             "mkldnn_batch_norm: currently mkldnn only support affine model");
 
   ideep::tensor& x = itensor_from_mkldnn(input);
   const ideep::tensor w = get_mkldnn_tensor(weight);
