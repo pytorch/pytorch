@@ -13,6 +13,7 @@ import warnings
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
+import pickletools
 if sys.version_info[0] == 2:
     import cPickle as pickle
 else:
@@ -505,6 +506,7 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
             return result
 
     deserialized_objects = {}
+    initialized_deserialized_objects = set()
 
     def maybe_decode_ascii(bytes_str):
         # When using encoding='bytes' in Py3, some **internal** keys stored as
@@ -516,6 +518,11 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
         if isinstance(bytes_str, bytes):
             return bytes_str.decode('ascii')
         return bytes_str
+
+    deserialized_storage_keys = []
+    pending_tensors = []
+
+    tensor_data_pos = None
 
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
@@ -539,9 +546,26 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
                 view_key, offset, view_size = view_metadata
                 if view_key not in deserialized_objects:
                     deserialized_objects[view_key] = storage[offset:offset + view_size]
-                return deserialized_objects[view_key]
+                result = deserialized_objects[view_key]
             else:
-                return storage
+                result = storage
+
+            # Read the tensor from the file if it hasn't alread been read,
+            # don't do anything if this tensor has already been loaded from the
+            # file
+            if root_key not in initialized_deserialized_objects:
+                # The tensor is the one that the file is curently pointing at
+                if deserialized_storage_keys[0] == root_key:
+                    deserialized_objects[root_key]._set_from_file(f, tensor_data_pos, f_should_read_directly)
+                    initialized_deserialized_objects.add(root_key)
+                else:
+                    # If the tensor is not the one at `tensor_data_pos`, then
+                    # we have to wait until all the tensors before it are read
+                    # since this tensor's position is unknown
+                    pending_tensors = root_key
+                    pass
+
+            return result
         else:
             raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
 
@@ -568,17 +592,22 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
         raise RuntimeError("Invalid protocol version: %s" % protocol_version)
 
     _sys_info = pickle_module.load(f, **pickle_load_args)
-    unpickler = pickle_module.Unpickler(f, **pickle_load_args)
-    unpickler.persistent_load = persistent_load
-    result = unpickler.load()
+
+    # Read through the data pickle without actually loading anything, just
+    # continue through it until a STOP opcode
+    data_start = f.tell()
+    [x for x in pickletools.genops(f)]
+
 
     deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
 
+    tensor_data_pos = f.tell()
+
     offset = f.tell() if f_should_read_directly else None
-    for key in deserialized_storage_keys:
-        assert key in deserialized_objects
-        deserialized_objects[key]._set_from_file(f, offset, f_should_read_directly)
-        if offset is not None:
-            offset = f.tell()
+
+    f.seek(data_start)
+    unpickler = pickle_module.Unpickler(f, **pickle_load_args)
+    unpickler.persistent_load = persistent_load
+    result = unpickler.load()
 
     return result
