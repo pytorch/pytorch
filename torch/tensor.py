@@ -427,7 +427,7 @@ class Tensor(torch._C._TensorBase):
             return (element == self).any().item()
 
         raise RuntimeError(
-            "Tensor.__contains__ only supports Tensor or Number, but you passed in a %s." %
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a %s." %
             type(element)
         )
 
