@@ -52,6 +52,7 @@ default_set = [
     'pytorch-short-perf-test-gpu',
     'pytorch-python-doc-push',
     'pytorch-cpp-doc-push',
+    'binary_linux_manywheel_3.7m_cu100_devtoolset7'
 ]
 
 # Takes in commit message to analyze via stdin
