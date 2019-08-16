@@ -23,7 +23,8 @@ class Reducer {
       std::vector<std::vector<torch::autograd::Variable>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
       std::shared_ptr<c10d::ProcessGroup> process_group,
-      std::vector<std::vector<bool>> expect_sparse_gradients);
+      std::vector<std::vector<bool>> expect_sparse_gradients,
+      bool delay_allreduce);
 
   ~Reducer() noexcept(false);
 
@@ -75,13 +76,20 @@ class Reducer {
   bool has_marked_unused_parameters_;
   std::vector<VariableIndex> unused_parameters_;
 
+  const bool delay_allreduce_;
+  bool require_final_hook_;
+
   void mark_variable_ready_dense(VariableIndex index);
 
   void mark_variable_ready_sparse(VariableIndex index);
 
   void mark_variable_ready(VariableIndex index);
 
+  void mark_unused_variables_ready();
+
   void autograd_hook(VariableIndex index);
+
+  void delayed_autograd_hook();
 
   void mark_bucket_ready(size_t bucket_index);
 

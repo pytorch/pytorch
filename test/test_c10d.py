@@ -19,6 +19,7 @@ import torch.nn.functional as F
 import torch.distributed as c10d
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
+from torch.utils.checkpoint import checkpoint_sequential
 
 from common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, \
@@ -1640,13 +1641,18 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def world_size(self):
         return 2
 
+    @property
+    def delay_allreduce(self):
+        return False
+
     def _prepare_single_device_module(self, process_group, devices, device_ids, global_batch_size):
         model = Net()
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(devices[0]),
             device_ids=device_ids,
             process_group=process_group,
-            bucket_cap_mb=0.001)
+            bucket_cap_mb=0.001,
+            delay_allreduce=self.delay_allreduce)
 
         model.to(devices[0])
 
@@ -1668,7 +1674,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             copy.deepcopy(model),
             device_ids=device_ids,
             process_group=process_group,
-            bucket_cap_mb=0.001)
+            bucket_cap_mb=0.001,
+            delay_allreduce=self.delay_allreduce)
 
         input = torch.randn(global_batch_size, 2).cuda(devices[0])
         target = torch.randn(global_batch_size, 4)
@@ -2087,6 +2094,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             ForwardReturnValueModule().float().to(device_id),
             device_ids=[device_id],
             process_group=process_group,
+            delay_allreduce=self.delay_allreduce,
         )
 
         batch_size = 4
@@ -2177,6 +2185,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                     FindUnusedParametersModule().float().to(device_id),
                     device_ids=[device_id],
                     process_group=process_group,
+                    delay_allreduce=self.delay_allreduce,
                 )
             else:
                 model = DistributedDataParallel(
@@ -2184,6 +2193,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                     device_ids=[device_id],
                     process_group=process_group,
                     find_unused_parameters=find_unused_parameters,
+                    delay_allreduce=self.delay_allreduce,
                 )
 
             output, fc3 = model(input)
@@ -2191,16 +2201,23 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             loss = criterion(output, target)
             loss.backward()
 
-        # First test that finding unused params under these conditions is to
-        # trigger an error when `backward` is called (because fc3 is an unused
-        # parameter and will therefore be marked ready twice).
-        try:
-            test_find_unused_parameters(True)
-        except Exception as ex:
-            self.assertTrue(
-                str(ex).startswith("Expected to mark a variable ready only once."))
-        else:
-            self.fail("Expected exception")
+        if not self.delay_allreduce:
+            # First test that finding unused params under these conditions is to
+            # trigger an error when `backward` is called (because fc3 is an unused
+            # parameter and will therefore be marked ready twice).
+            #
+            # Howeve, this should work if `delay_allreduce` is set to true,
+            # because all variables are just marked ready once when the backward
+            # pass is complete.
+            try:
+                test_find_unused_parameters(True)
+            except Exception as ex:
+                self.assertTrue(
+                    str(ex).startswith(
+                        "Expected to mark a variable ready only once.")
+                    )
+            else:
+                self.fail("Expected exception")
 
         # Then test that the default behavior can be overridden by setting
         # `find_unused_parameters=False`.
@@ -2251,6 +2268,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             MultipleOutputModule().float().to(device_id),
             device_ids=[device_id],
             process_group=process_group,
+            delay_allreduce=self.delay_allreduce,
         )
 
         batch_size = 4
@@ -2292,6 +2310,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             NoGradModule().float().to(device_id),
             device_ids=[device_id],
             process_group=process_group,
+            delay_allreduce=self.delay_allreduce,
         )
 
         batch_size = 4
@@ -2442,6 +2461,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         model = DistributedDataParallel(
             IgnoredOutput().float(),
             process_group=process_group,
+            delay_allreduce=self.delay_allreduce,
         )
 
         batch_size = 4
@@ -2486,6 +2506,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             IgnoredOutputWithUnusedParameters().float(),
             process_group=process_group,
             find_unused_parameters=True,
+            delay_allreduce=self.delay_allreduce,
         )
 
         batch_size = 4
@@ -2538,6 +2559,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             model,
             device_ids=[device_id],
             process_group=process_group,
+            delay_allreduce=self.delay_allreduce,
         )
 
         batch_size = 4
@@ -2560,6 +2582,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             model,
             device_ids=[device_id],
             process_group=process_group,
+            delay_allreduce=self.delay_allreduce,
         )
 
         input = torch.rand([batch_size, 2], dtype=torch.float)
@@ -2589,6 +2612,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         ddp_model = DistributedDataParallel(
             copy.deepcopy(vanilla_model),
             process_group=process_group,
+            delay_allreduce=self.delay_allreduce,
         )
 
         mult = 2
@@ -2609,6 +2633,85 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         vanilla_parameter = next(vanilla_model.parameters())
         ddp_parameter = next(ddp_model.parameters())
         self.assertEqual(vanilla_parameter.grad, ddp_parameter.grad)
+
+
+class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
+
+    @property
+    def delay_allreduce(self):
+        return True
+
+    def test_checkpoint(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class GradientStep(nn.Module):
+
+            def __init__(self, energy):
+                super(GradientStep, self).__init__()
+                self._energy = energy
+                self.step_size = 0.1
+
+            def forward(self, x: torch.Tensor):
+                with torch.enable_grad():
+                    x.requires_grad_()
+                    omega = self._energy(x).sum()
+                    grad_out = torch.ones_like(omega).to(x.device)
+                    dx = torch.autograd.grad(outputs=omega, inputs=x, grad_outputs=grad_out,
+                                             create_graph=True, retain_graph=True,
+                                             allow_unused=True)[0]
+                    dx.requires_grad_()
+                    x = (x - self.step_size ** 2 * dx)
+                return x
+
+        class FFN(nn.Module):
+
+            def __init__(self):
+                super(FFN, self).__init__()
+                self.n_hidden = 1024
+                self._energy = nn.Sequential(
+                    nn.Linear(28**2, self.n_hidden),
+                    nn.LeakyReLU(),
+                    nn.Linear(self.n_hidden, self.n_hidden),
+                    nn.LeakyReLU(),
+                    nn.Linear(self.n_hidden, self.n_hidden),
+                    nn.LeakyReLU(),
+                    nn.Linear(self.n_hidden, 1))
+                self.L = 10
+
+            def forward(self, x: torch.Tensor):
+                y = x.clone().to(x.device)
+                y.requires_grad_()
+                fwd = nn.Sequential(*[GradientStep(self._energy) for _ in range(self.L)])
+                y = checkpoint_sequential(fwd, self.L, y)
+                return y
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        net = FFN().float().to(device_id)
+        ddp = DistributedDataParallel(
+            copy.deepcopy(net),
+            device_ids=[device_id],
+            process_group=process_group,
+            find_unused_parameters=True,
+            delay_allreduce=self.delay_allreduce,
+        )
+
+        batch_size = self.world_size
+        loss_fn = nn.MSELoss()
+        input = torch.rand([batch_size, 28**2], dtype=torch.float).to(device_id)
+        target = torch.rand([batch_size, 28**2], dtype=torch.float).to(device_id)
+
+        def step(model, input, target):
+            output = model(input)
+            loss = loss_fn(output, target)
+            loss.backward()
+
+        for _ in range(10):
+            step(ddp, input[self.rank:(self.rank + 1)], target)
+            step(net, input, target)
+
+        for i, j in zip(ddp.parameters(), net.parameters()):
+            self.assertTrue(i.allclose(j))
 
 
 class ReducerModule(nn.Module):
