@@ -3541,6 +3541,7 @@ for shape in [(1,), ()]:
 
     def test_weak_variable(self):
         dealloc = [0]
+
         class IncrementOnDelete(object):
             def __del__(self):
                 dealloc[0] += 1
