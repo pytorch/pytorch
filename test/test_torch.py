@@ -1940,31 +1940,29 @@ class _TestTorchMixin(object):
             res2[i, 3] = math.fmod(res2[i, 3], q)
         self.assertEqual(res1, res2)
 
-        def _test_fmod_with_size(size, device, is_tensor=True):
-            if is_tensor:
-                a = torch.rand(size=size, device=device, dtype=torch.double)
-                b = torch.rand(size=size, device=device, dtype=torch.double)
-                actual = a.fmod(b)
-                x = a.view(-1)
-                y = b.view(-1)
-                expected = torch.tensor([math.fmod(x[i].item(), y[i].item()) for i in range(x.numel())],
-                                        device=device, dtype=torch.double)
-                self.assertTrue(torch.allclose(expected, actual.view(-1), rtol=0, atol=0.02))
-            else:
-                a = torch.rand(size=size, device=device, dtype=torch.double)
-                b = random.random()
-                actual = a.fmod(b)
-                x = a.view(-1)
-                expected = torch.tensor([math.fmod(x[i].item(), b) for i in range(x.numel())],
-                                        device=device, dtype=torch.double)
-                self.assertTrue(torch.allclose(expected, actual.view(-1), rtol=0, atol=0.02))
+        def _test_fmod_with_size_tensor(size, device):
+            a = torch.rand(size=size, device=device, dtype=torch.double)
+            b = torch.rand(size=size, device=device, dtype=torch.double)
+            actual = a.fmod(b)
+            x = a.view(-1)
+            y = b.view(-1)
+            expected = torch.tensor([math.fmod(x[i].item(), y[i].item()) for i in range(x.numel())],
+                                    device=device, dtype=torch.double)
+            self.assertTrue(torch.allclose(expected, actual.view(-1), rtol=0, atol=0.02))
+
+        def _test_fmod_with_size_scalar(size, device):
+            a = torch.rand(size=size, device=device, dtype=torch.double)
+            b = random.random()
+            actual = a.fmod(b)
+            x = a.view(-1)
+            expected = torch.tensor([math.fmod(x[i].item(), b) for i in range(x.numel())],
+                                    device=device, dtype=torch.double)
+            self.assertTrue(torch.allclose(expected, actual.view(-1), rtol=0, atol=0.02))
+
         for device in torch.testing.get_all_device_types():
-            _test_fmod_with_size((2, 2), device)
-            _test_fmod_with_size((3, 3), device)
-            _test_fmod_with_size((5, 5), device)
-            _test_fmod_with_size((2, 2), device, False)
-            _test_fmod_with_size((3, 3), device, False)
-            _test_fmod_with_size((5, 5), device, False)
+            for size in [(2,2),(3,3),(5,5)]:
+                _test_fmod_with_size_tensor(size, device)
+                _test_fmod_with_size_scalar(size, device)
 
     def test_remainder(self):
         # Check the Floating point case, both tensor and scalar overloads
