@@ -5,12 +5,11 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch
-from torch.nn._intrinsic.modules.fused import AddReLU
 from torch.nn.quantized.modules._base_modules import _BaseQuantizedModule
 
 
 class AddReLU(torch.nn.Module, _BaseQuantizedModule):
-    _FLOAT_MODULE = AddReLU
+    _FLOAT_MODULE = torch.nn._intrinsic.AddReLU
 
     def __init__(self):
         super(AddReLU, self).__init__()
