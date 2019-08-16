@@ -14245,6 +14245,30 @@ class TestRecursiveScript(JitTestCase):
         m = torch.jit.script(MyModule())
         FileCheck().check("ClassType<MyModule>").run(m.graph)
 
+    def test_repeated_error_stack(self):
+        def d(x):
+            return "a" - 2
+
+        def c(x):
+            return d(x)
+
+        def b(x):
+            return c(x)
+
+        def a(x):
+            return b(x)
+
+        try:
+            torch.jit.script(a)
+        except Exception as e:
+            FileCheck().check_count("is being compiled", 2).run(str(e))
+
+        try:
+            torch.jit.script(a)
+        except Exception as e:
+            # Make sure that no entries are left over from the previous failure
+            FileCheck().check_count("is being compiled", 2).run(str(e))
+
     @unittest.skipIf(True, "Class annotations are a thing in > 3.5, need to fix for < 3.7")
     def test_constants_with_final(self):
         class M(torch.nn.Module):
