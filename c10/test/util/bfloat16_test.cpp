@@ -39,6 +39,25 @@ namespace {
     }
   }
 
+  TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
+    float in[100];
+    for (int i = 0; i < 100; ++i) {
+      in[i] = i + 1.25;
+    }
+
+    c10::BFloat16 bfloats[100];
+    float out[100];
+
+    for (int i = 0; i < 100; ++i) {
+      bfloats[i].x = c10::detail::round_to_nearest_even(in[i]);
+      out[i] = c10::detail::f32_from_bits(bfloats[i].x);
+
+      // The relative error should be less than 1/(2^7) since BFloat16
+      // has 7 bits mantissa.
+      EXPECT_LE(fabs(out[i] - in[i]) / in[i], 1.0 / 128);
+    }
+  }
+
   TEST(BFloat16Conversion, NaN) {
     float inNaN = float_from_bytes(0, 0xFF, 0x7FFFFF);
     EXPECT_TRUE(std::isnan(inNaN));

@@ -42,6 +42,7 @@
 - name: _thnn_nll_loss(Tensor self, LongTensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
   cname: ClassNLLCriterion
   buffers: [total_weight]
+  cpu_bfloat16: True
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
