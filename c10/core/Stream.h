@@ -97,7 +97,8 @@ public:
   // This instruction is a no-op unless the event is marked
   // for recording. In that case the stream stops processing
   // until the event is recorded.
-  void wait(const impl::EventInterface& event) const {
+  template <typename T>
+  void wait(const T& event) const {
     event.block(*this);
   }
 

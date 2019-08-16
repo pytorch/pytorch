@@ -3,7 +3,6 @@
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
-#include <c10/core/impl/EventInterface.h>
 
 // Just for C10_ANONYMOUS_VARIABLE
 #include <c10/util/Registry.h>
@@ -11,6 +10,34 @@
 #include <atomic>
 
 namespace c10 {
+
+/**
+ * Flags defining the behavior of events.
+ *
+ * PYTORCH_DEFAULT and BACKEND_DEFAULT are valid for all backends. The
+ * BACKEND_DEFAULT is what a particular backend would select if no
+ * flags were given. PYTORCH_DEFAULT is the PyTorch's framework default
+ * choice for events on that backend, which may not be the same. For example,
+ * when PyTorch creates a CUDA event it sets the flag
+ * CUDA_EVENT_DISABLING_TIMING by default to improve performance.
+ *
+ * The mapping of PYTORCH_DEFAULT and BACKEND_DEFAULT is done by each
+ * backend implementation. Backend-specific flags, like CUDA_EVENT_DEFAULT,
+ * should map one-to-one with actual event flags for those backends.
+ */
+enum class EventFlag {
+    PYTORCH_DEFAULT,
+    BACKEND_DEFAULT,
+    // CUDA flags
+    CUDA_EVENT_DEFAULT,
+    CUDA_EVENT_DISABLE_TIMING, // PyTorch-default for CUDA
+    // HIP flags
+    HIP_EVENT_DEFAULT,
+    HIP_EVENT_DISABLE_TIMING, // PyTorch-default for HIP
+    // FOR TESTING ONLY
+    INVALID
+};
+
 namespace impl {
 
 /**
@@ -113,7 +140,7 @@ struct C10_API DeviceGuardImplInterface {
     const Stream& stream) const = 0;
 
 /**
- * Returns true if
+ * Returns true if (and only if)
  *  (1) the event has never been scheduled to be recorded
  *  (2) is marked as recorded.
  * Returns false otherwise.

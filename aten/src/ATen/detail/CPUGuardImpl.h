@@ -39,18 +39,24 @@ struct CPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   // Event-related functions
+  typedef void* event_type;
   void record(void** event,
     const Stream& stream,
     const DeviceIndex device_index,
-    const EventFlag flag) const override { }
+    const EventFlag flag) const override {
+    TORCH_CHECK(false, "CPU backend doesn't support events.");
+  }
   void block(
     void* event,
-    const Stream& stream) const override { }
-  bool queryEvent(void* event) const override { return true; }
+    const Stream& stream) const override {
+    TORCH_CHECK(false, "CPU backend doesn't support events.")
+  }
+  bool queryEvent(void* event) const override {
+    TORCH_CHECK(false, "CPU backend doesn't support events.")
+  }
   void destroyEvent(
     void* event,
     const DeviceIndex device_index) const noexcept override { }
-
 };
 
 }} // namespace at::detail

@@ -59,6 +59,7 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
   }
 
   // Event-related functions
+  typedef void* event_type;
   void record(
     void** event,
     const Stream& stream,

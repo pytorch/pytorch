@@ -96,6 +96,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   }
 
   // Event-related functions
+  typedef hipEvent_t event_type;
   void createEvent(
     hipEvent_t* hip_event,
     const DeviceIndex device_index,

@@ -1,15 +1,15 @@
 #pragma once
 
-#include "c10/core/impl/EventInterface.h"
 #include "c10/core/DeviceType.h"
 #include "c10/core/Stream.h"
 #include "c10/util/Exception.h"
+#include "c10/core/impl/DeviceGuardImplInterface.h"
 
 namespace c10 {
 namespace impl {
 
 template <typename T>
-struct InlineEvent final : public EventInterface {
+struct InlineEvent final {
 
   InlineEvent() = delete;
   InlineEvent(

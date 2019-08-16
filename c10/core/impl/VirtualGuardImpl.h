@@ -45,6 +45,7 @@ public:
   }
 
   // Event functions
+  typedef void* event_type;
   void record(void** event,
     const Stream& stream,
     const DeviceIndex device_index,
