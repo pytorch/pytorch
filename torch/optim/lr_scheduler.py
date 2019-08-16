@@ -9,13 +9,11 @@ from torch._six import inf
 from .optimizer import Optimizer
 
 
-EPOCH_DEPRECATION_WARNING = (
-    "The behavior of schedulers has been changed from their closed form to their "
-    "chainable form. As such, the epoch parameter no longer applies, and is being "
-    "deprecated. The new approach is to invoke step without the epoch parameter "
-    "during the iteration. During the deprecation, if epoch is different from None, "
-    " the closed form is used whenever available instead of the chainable form."
-)
+EPOCH_DEPRECATION_WARNING = ("The epoch parameter in `scheduler.step()` was"
+        "not necessary and is being deprecated where possible. Please use"
+        "`scheduler.step()` to step the scheduler. During the deprecation, if"
+        "epoch is different from None, the closed form is used instead of the"
+        "new chainable form, where available.")
 
 
 def _attach_opt(self, optimizer):
@@ -83,10 +81,10 @@ class _LRScheduler(object):
         try:
             return self._last_computed_values
         except AttributeError:
-            raise RuntimeError("Scheduler needs to step to get last computed values.")
+            raise RuntimeError("Run `step()` at least once before `get_computed_values()`.")
 
     def _compute_values(self):
-        # Chainable Form] Compute learning rate using chainable form of the scheduler
+        # Compute learning rate using chainable form of the scheduler
         raise NotImplementedError
 
     def _compute_values_closed_form(self):
@@ -94,16 +92,13 @@ class _LRScheduler(object):
         raise NotImplementedError
 
     def get_lr(self):
-        warnings.warn(
-            "Schedulers for other parameters such as weights are in discussion, and a "
-            "common interface is in development. As such, get_computed_values is "
-            "now the supported method to obtain the last computed learning rate. "
-            "get_lr now returns the same, but will be deprecated in favor of "
-            "get_computed_values. Prior to this, get_lr was internally used to compute "
-            "the upcoming values in step, thus also leading to unexpected behavior "
-            "when invoking get_lr directly.",
-            DeprecationWarning
-        )
+        warnings.warn("`get_computed_values()` is now the supported method to"
+                "obtain the last computed learning rate. `get_lr()` now"
+                "returns the same, but will be deprecated in favor of"
+                "`get_computed_values()`. Prior to this, `get_lr()` was an"
+                "internal method to compute new scheduler values within"
+                "`step()`, leading to unexpected behavior when invoked"
+                "directly.", DeprecationWarning)
         return self.get_computed_values()
 
     def step(self, epoch=None):
@@ -126,20 +121,19 @@ class _LRScheduler(object):
                               "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
         self._step_count += 1
 
-        compute_values = self._compute_values
 
         if epoch is None:
-            epoch = self.last_epoch + 1
+            self.last_epoch = self.last_epoch + 1
+            values = self._compute_values()
         else:
             warnings.warn(EPOCH_DEPRECATION_WARNING, DeprecationWarning)
+            self.last_epoch = epoch
             try:
-                self._compute_values_closed_form()
-                compute_values = self._compute_values_closed_form
+                values = self._compute_values_closed_form()
             except NotImplementedError:
-                pass
+                values = self._compute_values()
 
-        self.last_epoch = epoch
-        for param_group, lr in zip(self.optimizer.param_groups, compute_values()):
+        for param_group, lr in zip(self.optimizer.param_groups, values):
             param_group['lr'] = lr
 
         self._last_computed_values = [group['lr'] for group in self.optimizer.param_groups]
