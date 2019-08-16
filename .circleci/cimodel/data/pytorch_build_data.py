@@ -14,13 +14,13 @@ CONFIG_TREE_DATA = [
         ("gcc", [
             ("4.8", [X("3.6")]),
             ("5.4", [
-                XImportant("3.6"),
+                X("3.6"),
                 ("3.6", [
                     ("xla", [XImportant(True)]),
                     ("namedtensor", [XImportant(True)]),
                 ]),
             ]),
-            ("7", [X("3.6")]),
+            ("7", [XImportant("3.6")]),
         ]),
     ]),
     ("xenial", [
