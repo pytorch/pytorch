@@ -93,7 +93,7 @@ class QFunctional(torch.nn.Module):
 
     r"""Operation equivalent to ``torch.ops.quantized.mul``"""
     def mul(self, x, y):
-        return ops.quantized.add(x, y, scale=self.scale,
+        return ops.quantized.mul(x, y, scale=self.scale,
                                  zero_point=self.zero_point)
 
     r"""Operation equivalent to ``torch.ops.quantized.cat``"""
