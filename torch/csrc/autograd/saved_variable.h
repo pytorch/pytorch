@@ -44,7 +44,8 @@ class TORCH_API SavedVariable {
   // it would create a circular reference. In that case, the grad_fn must be
   // passed in to the unpack function when reconstructing the Variable.
   std::shared_ptr<Node> grad_fn_;
-  // Preparation for #15219: prevents leaks in rebase_history() for inplace views.
+  // Weak version of grad_fn_ that prevents leaks in rebase_history() for
+  // inplace views.
   std::weak_ptr<Node> weak_grad_fn_;
   std::weak_ptr<Node> grad_accumulator_;
   c10::VariableVersion version_counter_;
