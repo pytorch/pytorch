@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch
+from torch import Tensor
 import torch.nn as nn
 import unittest
 from test_jit import JitTestCase
