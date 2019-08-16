@@ -1589,6 +1589,9 @@ if _enabled:
         def graph_for(self, *args, **kwargs):
             return self.forward.graph_for(*args, **kwargs)
 
+        def _get_name(self):
+            return self._c.name
+
 else:
     class ScriptModule(torch.nn.Module):
         def __init__(self):
