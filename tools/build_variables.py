@@ -37,6 +37,7 @@ libtorch_sources = [
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/custom_function.cpp",
+    "torch/csrc/autograd/cpp_hook.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/function_hook.cpp",
