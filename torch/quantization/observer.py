@@ -47,6 +47,8 @@ class ObserverBase(ABC, nn.Module):
         assert min_val <= max_val, "min {} should be less than max {}".format(
             min_val, max_val
         )
+        print("min val = {}".format(min_val))
+        print("max val = {}".format(max_val))
 
         if self.dtype == torch.qint8:
             qmin, qmax = -128, 127
@@ -64,17 +66,17 @@ class ObserverBase(ABC, nn.Module):
         else:
             if self.qscheme == torch.per_tensor_symmetric:
                 max_val = max(-min_val, max_val)
-                scale = max_val / 127.0
+                scale = max_val / ((qmax - qmin) / 2)
                 scale = max(scale, torch.finfo(torch.float32).eps)
                 zero_point = 0 if self.dtype == torch.qint8 else 128
             else:
-                scale = (max_val - min_val) / n_levels
+                scale = (max_val - min_val) / (qmax - qmin)
                 scale = max(scale, torch.finfo(torch.float32).eps)
                 zero_point = qmin - round(min_val / scale)
                 zero_point = max(qmin, zero_point)
                 zero_point = min(qmax, zero_point)
 
-        return torch.tensor([scale, zero_point])
+        return torch.tensor([scale]), torch.tensor([zero_point])
 
 
 class MinMaxObserver(ObserverBase):
@@ -325,34 +327,21 @@ class HistogramObserver(ObserverBase):
         if self.min_val is None or self.max_val is None or self.histogram is None:
             self.min_val = torch.min(x)
             self.max_val = torch.max(x)
-            self.histogram = torch.histc(x, self.bins)
+            range = self.max_val - self.min_val
+            self.relaxed_min = self.min_val - 0.5 * range
+            self.relaxed_max = self.max_val + 0.5 * range
+            self.histogram = torch.histc(
+                x, self.bins, min=self.relaxed_min, max=self.relaxed_max
+            )
+            self.min_val = self.relaxed_min
+            self.max_val = self.relaxed_max
         else:
             new_min = torch.min(x)
             new_max = torch.max(x)
-            new_histogram = torch.histc(x, self.bins)
-            # combine the existing histogram and new histogram into 1 histogram
-            combined_histogram = torch.zeros_like(self.histogram)
-            combined_min = torch.min(new_min, self.min_val)
-            combined_max = torch.max(new_max, self.max_val)
-            self._combine_histograms(
-                combined_histogram,
-                combined_min.item(),
-                combined_max.item(),
-                self.histogram,
-                self.min_val.item(),
-                self.max_val.item(),
+            new_histogram = torch.histc(
+                x, self.bins, min=self.relaxed_min, max=self.relaxed_max
             )
-            self._combine_histograms(
-                combined_histogram,
-                combined_min.item(),
-                combined_max.item(),
-                new_histogram,
-                new_min.item(),
-                new_max.item(),
-            )
-            self.histogram = combined_histogram
-            self.min_val = combined_min
-            self.max_val = combined_max
+            self.histogram = new_histogram + self.histogram
 
     def calculate_qparams(self, norm_type="L2", search_type="NonLinear", **kwargs):
         if self.histogram is None:

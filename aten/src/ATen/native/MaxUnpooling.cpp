@@ -100,7 +100,6 @@ Tensor& max_unpooling2d_forward_out_cpu(
   auto indices = indices_.contiguous();
 
   if (self.ndimension() == 3) {
-    int64_t numBatch = 1;
     int64_t numChannels = self.size(0);
     output.resize_({numChannels, oheight, owidth});
   } else {

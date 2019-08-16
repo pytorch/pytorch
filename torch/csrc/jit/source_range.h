@@ -151,7 +151,7 @@ struct CAFFE2_API SourceRange {
   bool operator!=(const SourceRange& rhs) const {
     return !(*this == rhs);
   }
-  
+
   c10::optional<SourceRange> findSourceRangeThatGenerated() const {
     if (!source_) {
       return c10::nullopt;

@@ -4,6 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <THC/THCNumerics.cuh>
 #include <limits>
 
 
@@ -26,7 +27,7 @@ static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
 }
 
 void div_kernel_cuda(TensorIterator& iter) {
-  if (!isIntegralType(iter.dtype()) && iter.is_cpu_scalar(2)) {
+  if (!isIntegralType(iter.dtype(), /*includeBool*/ false) && iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division.
@@ -61,9 +62,33 @@ void mul_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+void atan2_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "atan2_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return THCNumerics<scalar_t>::atan2(a, b);
+    });
+  });
+}
+
+void logical_xor_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_xor_cuda", [&]() {
+    using self_t = scalar_t;
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(2), "logical_xor_cuda", [&]() {
+      using other_t = scalar_t;
+      AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_xor_cuda", [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(self_t a, other_t b) -> scalar_t {
+          return static_cast<scalar_t>(bool(a) != bool(b));
+        });
+      });
+    });
+  });
+}
+
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
 REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
 REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
+REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
+REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel_cuda);
 
 }} // namespace at::native

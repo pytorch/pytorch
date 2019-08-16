@@ -161,7 +161,6 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     return fn
 
 
-
 class FunctionModifiers(object):
     """
     Used to denote the behavior of a function in TorchScript. See export() and
@@ -221,6 +220,14 @@ def ignore(drop_on_export=False):
                        "a function but got {}".format(drop_on_export))
 
 
+def module_has_exports(mod):
+    for name in dir(mod):
+        item = getattr(mod, name)
+        if callable(item):
+            if get_torchscript_modifier(item) is FunctionModifiers.EXPORT:
+                return True
+    return False
+
 def should_drop_on_export(fn):
     attr = get_torchscript_modifier(fn)
     if attr is None:
@@ -252,6 +259,29 @@ def _parameter_list(parameter_names_fn):
 
     return decorator
 
+
+# overloading registration
+# overloads get registered in this file, and compiled in torch/jit/__init__.py
+# so that they can be imported in nn/functional.py without an import cycle
+
+# qualified_name => list[overload_functions]
+_overloaded_fns = {}  # noqa: T484
+
+def _overload(func):
+    qual_name = _qualified_name(func)
+    global _overloaded_fns
+    fn_overload_list = _overloaded_fns.get(qual_name)
+    if fn_overload_list is None:
+        fn_overload_list = []
+        _overloaded_fns[qual_name] = fn_overload_list
+    fn_overload_list.append(func)
+    return func
+
+def _get_fn_overloads(qual_name):
+    return _overloaded_fns.get(qual_name)
+
+def _clear_fn_overloads(qual_name):
+    del _overloaded_fns[qual_name]
 
 try:
     import typing

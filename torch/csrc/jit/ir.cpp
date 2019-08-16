@@ -314,10 +314,10 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   c10::optional<at::Device> device = c10::nullopt;
   auto checkValue = [&](const Value* v) {
-    if (CompleteTensorTypePtr type = v->type()->cast<CompleteTensorType>()) {
-      if (!has_device) {
+    if (ProfiledTensorTypePtr type = v->type()->cast<ProfiledTensorType>()) {
+      if (type->device() && !has_device) {
         has_device = true;
-        device = type->device();
+        device = *type->device();
       } else {
         AT_ASSERT(device == type->device());
       }
@@ -669,13 +669,7 @@ void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
 }
 
 void Value::inferTypeFrom(const at::Tensor& output) {
-  if (output.is_mkldnn()) {
-    // mkldnn tensor as opaque tensor doesn't have strides, so we can
-    // not create a CompleteTensorType
-    setType(DimensionedTensorType::create(output));
-    return;
-  }
-  setType(CompleteTensorType::create(output));
+  setType(ProfiledTensorType::create(output));
 }
 
 bool Value::mustBeNone() const {
@@ -904,10 +898,12 @@ bool Node::hasSideEffects() const {
         " doesn't have one either. We don't know if this op has side effects.");
     return false;
   }
+
   if (kind_.is_prim() || kind_.is_aten()) {
-    // TODO This assert is only introduced to check that we don't break the
-    // current code base. Remove this later to allow other ops to use
-    // AliasAnalysisKind::FROM_SCHEMA
+    // TODO There is nothing in the system that relies on aten:: and prim::
+    // ops using AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::INTERNAL_SPECIAL_CASE,
+    // but this is the intended behavior for all current ops and a good error check.
+    // We can consider lifting this constraint later if we have a use case for it.
     TORCH_INTERNAL_ASSERT(
         op->aliasAnalysisKind() == AliasAnalysisKind::INTERNAL_SPECIAL_CASE ||
             op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA,
@@ -916,6 +912,7 @@ bool Node::hasSideEffects() const {
         " has ",
         toString(op->aliasAnalysisKind()));
   }
+
   switch (op->aliasAnalysisKind()) {
     case AliasAnalysisKind::PURE:
       return false;
@@ -1424,7 +1421,7 @@ Node* Graph::createDict(
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
-  result->output()->setType(CompleteTensorType::fromNumberType(std::move(typ)));
+  result->output()->setType(ProfiledTensorType::fromNumberType(std::move(typ)));
   return result;
 }
 
