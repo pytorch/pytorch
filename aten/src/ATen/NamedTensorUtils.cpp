@@ -266,7 +266,8 @@ void propagate_names_for_addmm(
     TensorImpl* m1,
     TensorImpl* m2,
     TensorImpl* bias) {
-  if (!impl::has_names(m1) && !impl::has_names(m2)) {
+  if (!impl::has_names(m1) && !impl::has_names(m2) &&
+      !impl::has_names(bias) && !impl::has_names(result)) {
     return;
   }
   auto mm_outnames = compute_mm_outnames(impl::get_names(m1), impl::get_names(m2));
