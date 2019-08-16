@@ -317,6 +317,20 @@ static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
   return type == toUnderlying(qtype);
 }
 
+static inline bool canCast(const ScalarType from, const ScalarType to) {
+  // We disallow float -> integral, e.g., int_tensor *= float is disallowed.
+  if (isFloatingType(from) && isIntegralType(to, false)) {
+    return false;
+  }
+
+  // treat bool as a distinct category. This resolves most issues that arrise from
+  // not distinguishing signed/unsigned.
+  if (ScalarType::Bool != from && ScalarType::Bool == to) {
+    return false;
+  }
+  return true;
+}
+
 static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   // This is generated according to NumPy's promote_types
   constexpr auto u1 = ScalarType::Byte;

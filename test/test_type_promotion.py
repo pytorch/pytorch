@@ -160,7 +160,9 @@ class TestTypePromotion(TestCase):
             torch.int: torch.float,
             torch.int: torch.double,
             torch.int16: torch.long,
-            torch.float16: torch.double
+            torch.float16: torch.double,
+            torch.bool: torch.long,
+            torch.bool: torch.float
         }
 
         for k, v in from_to.items():
@@ -184,6 +186,30 @@ class TestTypePromotion(TestCase):
         err = 'alpha must not be'
         self.assertRaisesRegex(RuntimeError, err,
                                lambda: torch.add(x, x, alpha=1.1))
+
+    def test_booleans(self):
+        onedim = torch.tensor([True])
+
+        self.assertEqual(onedim + onedim, onedim)
+        self.assertEqual(onedim + True, onedim)
+        self.assertEqual(torch.add(True, True), True)
+        self.assertEqual(torch.add(False, False), False)
+        self.assertEqual(torch.add(False, True), True)
+
+    def test_create_bool_tensors(self):
+        self.assertEqual(torch.arange(False, True), torch.tensor([0], dtype=torch.int64))
+        self.assertEqual(torch.arange(True), torch.tensor([0], dtype=torch.int64))
+        self.assertEqual(torch.arange(False, True, 0.5), torch.tensor([0, 0.5], dtype=torch.get_default_dtype()))
+        self.assertEqual(torch.arange(False, False), torch.ones(0, dtype=torch.int64))
+
+        self.assertEqual(torch.linspace(False, True), torch.linspace(0, 1))
+        self.assertEqual(torch.logspace(False, True), torch.logspace(0, 1))
+
+        # this seems like odd behavior but ints also create float tensors, numpy doesn't have this function.
+        self.assertEqual(torch.scalar_tensor(False), torch.tensor(0.))
+
+    def test_bool_ops(self):
+        self.assertEqual(torch.ones(5).norm(1), torch.ones(5).norm(True))
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")

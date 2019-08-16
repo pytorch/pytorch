@@ -38,8 +38,8 @@ class C10_API Scalar {
       typename T,
       typename std::enable_if<std::is_same<T, bool>::value, bool>::type* =
           nullptr>
-  Scalar(T vv) : tag(Tag::HAS_i) {
-    v.i = convert<decltype(v.i), bool>(vv);
+  Scalar(T vv) : tag(Tag::HAS_b) {
+    v.i = convert<int64_t, bool>(vv);
   }
 
 #define DEFINE_IMPLICIT_COMPLEX_CTOR(type, name, member) \
@@ -61,14 +61,15 @@ class C10_API Scalar {
     } else if (Tag::HAS_z == tag) {                       \
       return checked_convert<type, std::complex<double>>( \
           {v.z[0], v.z[1]}, #type);                       \
+    } if (Tag::HAS_b == tag) {                            \
+      return checked_convert<type, bool>(v.i, #type);     \
     } else {                                              \
       return checked_convert<type, int64_t>(v.i, #type);  \
     }                                                     \
   }
 
   // TODO: Support ComplexHalf accessor
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(
-      DEFINE_ACCESSOR)
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ACCESSOR)
 
   // also support scalar.to<int64_t>();
   template <typename T>
@@ -78,18 +79,27 @@ class C10_API Scalar {
   bool isFloatingPoint() const {
     return Tag::HAS_d == tag;
   }
+
+  C10_DEPRECATED_MESSAGE("isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")
   bool isIntegral() const {
     return Tag::HAS_i == tag;
   }
+  bool isIntegral(bool includeBool) const {
+    return Tag::HAS_i == tag || (includeBool && isBoolean());
+  }
+
   bool isComplex() const {
     return Tag::HAS_z == tag;
+  }
+  bool isBoolean() const {
+    return Tag::HAS_b == tag;
   }
 
   Scalar operator-() const;
 
  private:
     template<typename T,
-             typename std::enable_if<std::numeric_limits<T>::is_integer, bool>::type* =
+             typename std::enable_if<std::numeric_limits<T>::is_integer && ! std::is_same<T, bool>::value, bool>::type* =
                  nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_i) {
       v.i = convert<decltype(v.i), T>(vv);
@@ -105,7 +115,7 @@ class C10_API Scalar {
   // We can't set v in the initializer list using the
   // syntax v{ .member = ... } because it doesn't work on MSVC
 
-  enum class Tag { HAS_d, HAS_i, HAS_z };
+  enum class Tag { HAS_d, HAS_i, HAS_z, HAS_b };
   Tag tag;
   union {
     double d;

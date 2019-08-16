@@ -638,12 +638,14 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   if (!obj) {
     return at::Tensor();
   }
-  if (THPVariable_Check(obj)) {
+  if (THPVariable_Check(obj) && reinterpret_cast<THPVariable*>(obj)->cdata.defined()) {
     return reinterpret_cast<THPVariable*>(obj)->cdata;
   }
 
   at::Scalar scalar;
-  if (THPUtils_checkLong(obj)) {
+  if (THPUtils_checkBool(obj)) {
+    scalar = at::Scalar(THPUtils_unpackBool(obj));
+  } else if (THPUtils_checkLong(obj)) {
     scalar = at::Scalar(THPUtils_unpackLong(obj));
   } else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
@@ -670,11 +672,16 @@ at::Scalar PythonArgs::scalar_slow(int i) {
 
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
-  if (THPVariable_Check(args[i])) {
+  if (THPVariable_Check(args[i]) && reinterpret_cast<THPVariable*>(args[i])->cdata.defined()) {
     return ((THPVariable*)args[i])->cdata.item();
   }
+
   if (THPUtils_checkLong(args[i])) {
     return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  }
+
+  if (THPUtils_checkBool(args[i])) {
+    return at::Scalar(THPUtils_unpackBool(args[i]));
   }
 
   if (PyComplex_Check(args[i])) {

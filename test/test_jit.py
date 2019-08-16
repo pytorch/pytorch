@@ -7169,8 +7169,8 @@ a")
                     # subtract not supported for bool
                     if (op == 'sub' or op == 'div') and (isBool(first_arg) or isBool(second_arg)):
                         continue
-                    # div not implemneted correctly for mixed-type scalar params
-                    if (op == 'div' and type(first_arg) != type(second_arg) and type(first_arg) != str and type(second_arg) != str):
+                    # div not implemneted correctly for mixed-type or in params
+                    if (op == 'div' and (type(first_arg) != type(second_arg) or type(first_arg) == int)):
                         continue
                     return_line = "torch.{}({}, {})".format(op, first_arg, second_arg)
                     # uncomment for debugging a failed test:
@@ -7193,11 +7193,10 @@ a")
                         if dtype == torch.float64:
                             dtype = torch.float32
                     expect = self._dtype_to_expect(dtype, dim)
+                    jit_output = next(graph.outputs())
 
                     check = FileCheck()
-                    if dim >= 0:
-                        check = check.check("aten::tensor")
-                    check.check(expect).run(graph)
+                    check.check(expect).run(str(jit_output))
 
     def test_binary_op_shape(self):
         self._test_binary_op_shape(['mul', 'div', 'add', 'sub'], 0)

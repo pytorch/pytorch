@@ -99,7 +99,7 @@ inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const Tenso
 
 static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
   for (Scalar& s : l) {
-    if (!s.isIntegral()) {
+    if (!s.isIntegral(true)) {
       return false;
     }
   }

@@ -31,7 +31,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   }
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_internal_overlap=*/true);
-  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(), alpha_mismatch_err);
+  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(false), alpha_mismatch_err);
   add_stub(iter.device_type(), iter, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
@@ -44,7 +44,7 @@ Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
     return native::add_out(result, self, other, alpha);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(), alpha_mismatch_err);
+  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(false), alpha_mismatch_err);
   add_stub(iter.device_type(), iter, alpha);
   return iter.output();
 }
@@ -134,7 +134,7 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   }
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_internal_overlap=*/true);
-  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(), alpha_mismatch_err);
+  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(false), alpha_mismatch_err);
   sub_stub(iter.device_type(), iter, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
@@ -148,7 +148,7 @@ Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
     return native::sub_out(result, self, other, alpha);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
-  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(), alpha_mismatch_err);
+  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(false), alpha_mismatch_err);
   sub_stub(iter.device_type(), iter, alpha);
   return iter.output();
 }

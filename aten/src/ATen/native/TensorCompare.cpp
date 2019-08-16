@@ -100,8 +100,10 @@ bool is_nonzero(const Tensor& self) {
   Scalar localScalar = self.item();
   if (localScalar.isFloatingPoint()) {
     return localScalar.to<double>() != 0;
-  } else if (localScalar.isIntegral()){
+  } else if (localScalar.isIntegral(false)){
     return localScalar.to<int64_t>() != 0;
+  } else if (localScalar.isBoolean()) {
+    return localScalar.to<bool>();
   }
   AT_ERROR("expected non-Tensor backed scalar");
 }

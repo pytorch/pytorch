@@ -129,7 +129,7 @@ std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
 
   // if non-zero-dim tensor result is an integral type and there's a zero-dim
   // floating point operand, we'll promote the floating point type.
-  if (isIntegralType(std::get<1>(result_type))) {
+  if (isIntegralType(std::get<1>(result_type), false)) {
     auto alternate = compute_result_type(operands_,
         [](const OperandInfo& op) {
           return isFloatingType(op.tensor.scalar_type()) && op.tensor.dim() == 0;
@@ -145,27 +145,13 @@ std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
   return result_type;
 }
 
-static bool can_cast(const ScalarType from, const ScalarType to) {
-  // We disallow float -> integral, e.g., int_tensor *= float is disallowed.
-  if (isFloatingType(from) && isIntegralType(to)) {
-    return false;
-  }
-
-  // treat bool as a distinct category. This resolves most issues that arrise from
-  // not distinguishing signed/unsigned.
-  if (ScalarType::Bool != from && ScalarType::Bool == to) {
-    return false;
-  }
-  return true;
-}
-
 static void validate_dtype(OperandInfo& op, ScalarType common_dtype, int ninputs) {
   if (op.tensor.defined()) {
     // For binary_ops, we follow casting rules. For unary/nullary types
     // we require the type to match.
     if (op.is_output) {
       if ((ninputs < 2 && op.dtype != op.tensor.scalar_type()) ||
-          !can_cast(common_dtype, op.tensor.scalar_type()))
+          !canCast(common_dtype, op.tensor.scalar_type()))
       {
         AT_ERROR("result type ", common_dtype,
           " can't be cast to the desired output type ",
