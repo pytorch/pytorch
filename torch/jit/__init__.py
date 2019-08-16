@@ -1052,7 +1052,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     `TorchScript Language Reference`_.
 
     ``torch.jit.script`` can be used as a function for modules and functions, and as a decorator
-    ``@torch.jit.script`` for `TorchScript Classes`_ and functions.
+    ``@torch.jit.script`` for `TorchScript Classes <TorchScript Class_>`_ and functions.
 
     **Scripting a function**
         The ``@torch.jit.script`` decorator will construct a ``torch._C.Function``
@@ -1474,13 +1474,27 @@ if _enabled:
 
         @property
         def graph(self):
+            r"""
+            Returns a string representation of the internal graph for the
+            ``forward`` method. See `Interpreting Graphs`_ for details.
+            """
             return self.forward.graph
 
         @property
         def code(self):
+            r"""
+            Returns a pretty-printed representation (as valid Python syntax) of
+            the internal graph for the ``forward`` method. See `Inspecting Code`_
+            for details.
+            """
             return self.forward.code
 
         def save(self, *args, **kwargs):
+            r"""
+            save(f, _extra_files=ExtraFilesMap{})
+
+            See :func:`torch.jit.save <torch.jit.save>` for details.
+            """
             return self._c.save(*args, **kwargs)
 
         def save_to_buffer(self, *args, **kwargs):

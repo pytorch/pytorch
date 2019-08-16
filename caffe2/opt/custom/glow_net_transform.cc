@@ -71,9 +71,7 @@ std::unordered_set<int> ParseNetPositionList(const std::string& str) {
   return net_position_list;
 }
 
-namespace {
-
-std::unordered_set<std::string> parseBlackListOps(const std::string& str) {
+std::unordered_set<std::string> ParseBlackListOps(const std::string& str) {
   std::unordered_set<std::string> ops;
   if (str.empty()) {
     return ops;
@@ -84,7 +82,6 @@ std::unordered_set<std::string> parseBlackListOps(const std::string& str) {
   }
   return ops;
 }
-} // namespace
 
 // Carrying out the ONNXIFI transform
 void onnxifi(
@@ -158,7 +155,7 @@ void onnxifi(
 
   // ONNX mode will change the op order so it doesn't apply here
   if (!opts.use_onnx) {
-    auto blacklisted_ops = parseBlackListOps(FLAGS_onnxifi_blacklist_ops);
+    auto blacklisted_ops = ParseBlackListOps(FLAGS_onnxifi_blacklist_ops);
     for (const auto& op : net->op()) {
       if (blacklisted_ops.count(op.type())) {
         ArgumentHelper helper(op);

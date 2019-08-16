@@ -172,7 +172,7 @@ void testADFormulas() {
 void testDifferentiate() {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  auto type = ProfiledTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
