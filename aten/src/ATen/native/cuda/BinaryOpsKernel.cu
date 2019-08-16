@@ -87,8 +87,10 @@ void logical_binary_kernel_cuda_impl(TensorIterator& iter, const char* op_name, 
   });
 }
 
-// We explicitly define these logical operations as named functions. If we enclose them using lambda functions, the time
-// to compile this file would be crazy.
+// We explicitly define these logical operations as named functions. If we enclose them using lambda functions, or
+// duplicate logical_binary_kernel_cuda_impl three lines for each logical operations, the time to compile this file
+// would be crazy. Possibly we are avoiding inlining them in logical_binary_kernel_cuda_impl and thus avoiding building
+// logical_binary_kernel_cuda_impl thrice.
 static bool land(bool a, bool b) {
   return a && b;
 }
