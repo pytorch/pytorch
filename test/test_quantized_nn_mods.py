@@ -61,15 +61,14 @@ class DynamicModuleAPITest(QuantizationTestCase):
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
         qlinear(X)
-
         qlinear.set_weight(W_q)
+
         # Simple round-trip test to ensure weight()/set_weight() API
         self.assertEqual(qlinear.weight(), W_q)
         W_pack = qlinear._packed_weight
-        qlinear._packed_weight = W_pack
-
         qlinear.bias = B if use_bias else None
         Z_dq = qlinear(X)
+
         # Check if the module implementation matches calling the
         # ops directly
         Z_ref = torch.ops.quantized.fbgemm_linear_dynamic(X, W_pack, B)

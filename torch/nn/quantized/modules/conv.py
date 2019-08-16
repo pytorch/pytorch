@@ -69,7 +69,7 @@ class Conv2d(torch.nn.Module):
             raise ValueError('out_channels must be divisible by groups')
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.kernel_size = kernel_size
+        self.kernel_size = _pair(kernel_size)
         self.stride = _pair(stride)
         self.padding = _pair(padding)
         self.dilation = _pair(dilation)
@@ -227,16 +227,16 @@ class Conv2d(torch.nn.Module):
         act_scale, act_zp = activation_observer.calculate_qparams()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have a dtype of qint8'
         wt_scale, wt_zp = weight_observer.calculate_qparams()
-        bias_scale = (wt_scale * act_scale).float()
+        bias_scale = float(wt_scale * act_scale)
         qweight = torch.quantize_linear(
-            mod.weight.float().contiguous(),
-            wt_scale, wt_zp.long().item(), torch.qint8)
+            mod.weight.float(),
+            float(wt_scale), int(wt_zp), torch.qint8)
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight(qweight)
         if mod.bias is not None:
-            qconv.bias = torch.quantize_linear(mod.bias, bias_scale, 0, torch.qint32)
+            qconv.bias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
         else:
             qconv.bias = None
         qconv.scale = float(act_scale)

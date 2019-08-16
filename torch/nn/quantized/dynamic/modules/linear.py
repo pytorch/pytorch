@@ -66,7 +66,7 @@ class Linear(nnq.Linear):
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
         weight_observer(mod.weight)
         wt_scale, wt_zp = weight_observer.calculate_qparams()
-        qweight = torch.quantize_linear(mod.weight.float(), wt_scale, wt_zp.long().item(), torch.qint8)
+        qweight = torch.quantize_linear(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
         qlinear = Linear(mod.in_features, mod.out_features)
         qlinear.set_weight(qweight)
         qlinear.bias = mod.bias
