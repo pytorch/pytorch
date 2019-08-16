@@ -144,11 +144,11 @@ script::Module ScriptModuleDeserializer::deserialize(
 
   if (proto_version_ < 6) {
     if (proto_version_ == 2) {
-      auto list = LEGACY_loadPickleArchive("attributes.pkl").toGenericList();
+      const auto& list =
+          LEGACY_loadPickleArchive("attributes.pkl").toGenericList();
       LEGACY_pickled_ivalues_.insert(
           LEGACY_pickled_ivalues_.end(), list.begin(), list.end());
-
-    } else {
+    } else if (proto_version_ >= 3) {
       LEGACY_pickled_ivalues_ =
           LEGACY_loadPickleArchive("attributes.pkl").toTuple()->elements();
     }
@@ -163,18 +163,18 @@ script::Module ScriptModuleDeserializer::deserialize(
     size_t bytes_read = 0;
     auto data = reinterpret_cast<const char*>(pickle_ptr.get());
     auto reader = [&](char* buffer, size_t len) {
+      if (bytes_read + len > pickle_size) {
+        return false;
+      }
       // Copy len bytes into buffer
       const char* start = data + bytes_read;
       std::memcpy(buffer, start, len);
       bytes_read += len;
+      return true;
     };
-    auto bounds_checker = [&]() { return bytes_read < pickle_size; };
 
     Unpickler unpickler(
-        reader,
-        bounds_checker,
-        &tensor_table_,
-        [&](const c10::QualifiedName& qn) {
+        reader, &tensor_table_, [&](const c10::QualifiedName& qn) {
           importCallback(qn.prefix());
           return c10::StrongTypePtr(
               compilation_unit_, compilation_unit_->get_class(qn));
@@ -183,7 +183,8 @@ script::Module ScriptModuleDeserializer::deserialize(
   }
 }
 
-IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(const std::string& name) {
+IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
+    const std::string& name) {
   at::DataPtr attributes_ptr;
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) = reader_->getRecord(name);
