@@ -456,15 +456,8 @@ class Conv3d(_ConvNd):
             False, _triple(0), groups, bias, padding_mode)
 
     def forward(self, input):
-        if self.padding_mode == 'circular':
-            expanded_padding = ((self.padding[2] + 1) // 2, self.padding[2] // 2,
-                                (self.padding[1] + 1) // 2, self.padding[1] // 2,
-                                (self.padding[0] + 1) // 2, self.padding[0] // 2)
-            return F.conv3d(F.pad(input, expanded_padding, mode='circular'),
-                            self.weight, self.bias, self.stride, _triple(0),
-                            self.dilation, self.groups)
         return F.conv3d(input, self.weight, self.bias, self.stride,
-                        self.padding, self.dilation, self.groups)
+                        self.padding, self.dilation, self.groups, self.padding_mode)
 
 
 class _ConvTransposeMixin(object):

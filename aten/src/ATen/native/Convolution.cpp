@@ -525,6 +525,7 @@ at::Tensor _convolution(
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
   std::vector<int64_t> new_padding = padding_.vec();
+  // If we're passing in asymmetric padding
   if (padding_.size() == size_t(dim) * 2) {
     std::vector<int64_t> asymmetric;
     bool is_uneven = false;

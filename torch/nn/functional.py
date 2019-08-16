@@ -29,16 +29,24 @@ def _compute_padding_same(input_size, dim, weight, stride, dilation):
     total_padding = max(0, last_start + effective_filter_size - input_size)
     return total_padding
 
+# Takes N-dimensional padding and splits it evenly between left and right (with
+# a bias on the right side if its uneven)
+def split_padding(padding):
+    # type: (List[int]) -> List[int]
+    res: List[int] = []
+    for i in padding:
+        res.append(i // 2)
+        res.append((i + 1) // 2)
+    return res
+
 @_overload # noqa: F811
 def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int],
-    # BroadcastingList1[int], BroadcastingList1[int], int, str) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], BroadcastingList1[int], BroadcastingList1[int], int, str) -> Tensor
     pass
 
 @_overload # noqa: F811
 def conv1d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], str,
-    # BroadcastingList1[int], int, str) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], str, BroadcastingList1[int], int, str) -> Tensor
     pass
 
 def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
@@ -72,28 +80,28 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         >>> F.conv1d(inputs, filters)
     """
     if isinstance(padding, str):
-        padding_rows = _compute_padding_same(input.size(), 0, weight, stride, dilation)
-        final_padding = [padding_rows // 2, (padding_rows + 1) // 2]
+        if padding != "same":
+            raise ValueError("padding does not accept str values other than 'same'")
+        padding_dims = [_compute_padding_same(input.size(), i, weight, stride, dilation) for i in [0]]
+        final_padding = split_padding(padding_dims)
     else:
-        final_padding = padding
+        final_padding = _pair(padding)
     if padding_mode == 'circular':
         if len(final_padding) == 1:
-            expanded_padding = [(final_padding[0] + 1) // 2, final_padding[0] // 2]
-        else:
-            expanded_padding = final_padding
-        input = pad(input, expanded_padding, mode='circular')
+            final_padding = split_padding(final_padding)
+        final_padding.reverse()
+        input = pad(input, final_padding, mode='circular')
+        final_padding = _single(0)
     return torch.conv1d(input, weight, bias, stride, final_padding, dilation, groups)
 
 @_overload # noqa: F811
 def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int],
-    # BroadcastingList2[int], BroadcastingList2[int], int, str) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], int, str) -> Tensor
     pass
 
 @_overload # noqa: F811
 def conv2d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], str,
-    # BroadcastingList2[int], int, str) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], str, BroadcastingList2[int], int, str) -> Tensor
     pass
 
 
@@ -129,18 +137,18 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         >>> F.conv2d(inputs, filters, padding=1)
     """
     if isinstance(padding, str):
-        padding_rows = _compute_padding_same(input.size(), 0, weight, stride, dilation)
-        padding_cols = _compute_padding_same(input.size(), 1, weight, stride, dilation)
-        final_padding = [padding_rows // 2, (padding_rows + 1) // 2,
-                        padding_cols // 2, (padding_cols + 1) // 2]
+        if padding != "same":
+            raise ValueError("padding does not accept str values other than 'same'")
+        padding_dims = [_compute_padding_same(input.size(), i, weight, stride, dilation) for i in [0, 1]]
+        final_padding = split_padding(padding_dims)
     else:
-        final_padding = padding
+        final_padding = _pair(padding)
     if padding_mode == 'circular':
-        if len(final_padding) == 1:
-            expanded_padding = [(final_padding[0] + 1) // 2, final_padding[0] // 2]
-        else:
-            expanded_padding = final_padding
-        input = pad(input, expanded_padding, mode='circular')
+        if len(final_padding) == 2:
+            final_padding = split_padding(final_padding)
+        final_padding.reverse()
+        input = pad(input, final_padding, mode='circular')
+        final_padding = _pair(0)
     return torch.conv2d(input, weight, bias, stride, final_padding, dilation, groups)
 
 @_overload # noqa: F811
@@ -187,22 +195,18 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         >>> F.conv3d(inputs, filters)
     """
     if isinstance(padding, str):
-        padding_calc = [_compute_padding_same(input.size(), 0, weight, stride, dilation),
-                        _compute_padding_same(input.size(), 1, weight, stride, dilation),
-                        _compute_padding_same(input.size(), 2, weight, stride, dilation)
-                        ]
-        final_padding = [padding_calc[0] // 2, (padding_calc[0] + 1) // 2,
-                        padding_calc[1] // 2, (padding_calc[1] + 1) // 2,
-                        padding_calc[2] // 2, (padding_calc[2] + 1) // 2,
-        ]
+        if padding != "same":
+            raise ValueError("padding does not accept str values other than 'same'")
+        padding_dims = [_compute_padding_same(input.size(), i, weight, stride, dilation) for i in [0, 1, 2]]
+        final_padding = split_padding(padding_dims)
     else:
-        final_padding = padding
+        final_padding = _triple(padding)
     if padding_mode == 'circular':
-        if len(final_padding) == 1:
-            expanded_padding = [(final_padding[0] + 1) // 2, final_padding[0] // 2]
-        else:
-            expanded_padding = final_padding
-        input = pad(input, expanded_padding, mode='circular')
+        if len(final_padding) == 3:
+            final_padding = split_padding(final_padding)
+        final_padding.reverse()
+        input = pad(input, final_padding, mode='circular')
+        final_padding = _triple(0)
     return torch.conv3d(input, weight, bias, stride, final_padding, dilation, groups)
 
 conv_transpose1d = _add_docstr(torch.conv_transpose1d, r"""
