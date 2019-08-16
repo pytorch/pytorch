@@ -279,10 +279,13 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qX_hat = op(qX, output_size=output_size)
-            qX_repr = qX_hat.int_repr()
-            self.assertEqual(X_ref, qX_repr,
-                             message=error_message.format(name, X_ref, qX_repr))
-
+            self.assertEqual(X_ref, qX_hat.int_repr(), prec=1.0,
+                             message=error_message.format(name, X_ref, qX_hat))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                                                          qX_hat.q_zero_point()))
 
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
