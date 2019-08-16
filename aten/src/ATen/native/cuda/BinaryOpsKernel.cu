@@ -70,6 +70,13 @@ void atan2_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+// Wrapper gpu_kernel and force to not inline. This would avoid the calls to gpu_kernel expanded three times in
+// logical_binary_kernel_cuda_impl and therefore should significantly reduces compilation time.
+template <typename func_t>
+static __noinline__ void gpu_kernel_no_inline_wrapper(TensorIterator& iter, const func_t& f) {
+  gpu_kernel(iter, f);
+}
+
 template <typename Op>
 void logical_binary_kernel_cuda_impl(TensorIterator& iter, const char* op_name, Op op) {
   AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), op_name, [&]() {
@@ -77,7 +84,7 @@ void logical_binary_kernel_cuda_impl(TensorIterator& iter, const char* op_name, 
     AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(2), op_name, [&]() {
       using other_t = scalar_t;
       AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), op_name, [&]() {
-        gpu_kernel(iter, [op]GPU_LAMBDA(self_t a, other_t b) -> scalar_t {
+        gpu_kernel_no_inline_wrapper(iter, [op]GPU_LAMBDA(self_t a, other_t b) -> scalar_t {
           return static_cast<scalar_t>(op(static_cast<bool>(a), static_cast<bool>(b)));
         });
       });
