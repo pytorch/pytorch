@@ -77,20 +77,20 @@ jobs:
   - script: sudo apt-get install -y doxygen && pip install -r requirements.txt
   - script: cd docs/cpp/source && ./check-doxygen.sh
 
-- job: clang_tidy
-  displayName: "clang tidy"
-  pool:
-    vmImage: 'Ubuntu 16.04'
-  steps:
-  - task: UsePythonVersion@0
-    inputs:
-      versionSpec: "3.6"
-  - script: |
-      wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-      sudo apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-8 main"
-      sudo apt-get update
-      sudo apt-get install -y clang-tidy-8
-      sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-8 1000
-  - script: git branch master origin/master
-  - script: pip install pyyaml
-  - script: tools/run-clang-tidy-in-ci.sh
+# - job: clang_tidy
+#   displayName: "clang tidy"
+#   pool:
+#     vmImage: 'Ubuntu 16.04'
+#   steps:
+#   - task: UsePythonVersion@0
+#     inputs:
+#       versionSpec: "3.6"
+#   - script: |
+#       wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+#       sudo apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-8 main"
+#       sudo apt-get update
+#       sudo apt-get install -y clang-tidy-8
+#       sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-8 1000
+#   - script: git branch master origin/master
+#   - script: pip install pyyaml
+#   - script: tools/run-clang-tidy-in-ci.sh
