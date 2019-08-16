@@ -64,7 +64,6 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   // Event-related functions
-  typedef cudaEvent_t event_type;
   void createEvent(
     cudaEvent_t* cuda_event,
     const DeviceIndex device_index,
