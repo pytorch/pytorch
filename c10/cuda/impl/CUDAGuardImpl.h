@@ -10,8 +10,6 @@
 
 #include <cuda_runtime_api.h>
 
-#include <iostream> // TODO: remove me
-
 namespace c10 {
 namespace cuda {
 namespace impl {
