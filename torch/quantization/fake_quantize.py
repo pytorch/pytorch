@@ -43,9 +43,10 @@ class FakeQuantize(Module):
     def forward(self, X):
         if self.enabled:
             self.observer(X)
-            self.scale, self.zero_point = self.calculate_qparams()
+            scale, zero_point = self.calculate_qparams()
+            self.scale, self.zero_point = float(scale), int(zero_point)
             X = torch.fake_quantize_per_tensor_affine(
-                X, self.scale.double(), self.zero_point.long(), self.quant_min,
+                X, self.scale, self.zero_point, self.quant_min,
                 self.quant_max)
         return X
 

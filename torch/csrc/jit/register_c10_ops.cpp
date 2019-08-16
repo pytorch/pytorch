@@ -81,7 +81,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
                   reinterpret_cast<OptionalType*>(type.get())->getElementType();
             }
           }
-          if (type->isSubclass(TypeKind::TensorType)) {
+          if (type->isSubtypeOf(TensorType::get())) {
             AT_ASSERT(iter->isTensor());
             tracer::addInputs(node, args[i].name().c_str(), iter->toTensor());
           } else if (type->kind() == TypeKind::FloatType) {
@@ -100,7 +100,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           } else if (type->kind() == TypeKind::ListType) {
             const auto& elem_type =
                 reinterpret_cast<ListType*>(type.get())->getElementType();
-            if (elem_type->isSubclass(TypeKind::TensorType)) {
+            if (elem_type->isSubtypeOf(TensorType::get())) {
               AT_ASSERT(iter->isTensorList());
               auto list = iter->toTensorListRef();
               tracer::addInputs(node, args[i].name().c_str(), list);
@@ -148,13 +148,13 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
         for (auto iter = stack.end() - output_size; iter != stack.end();
              ++iter, ++i) {
           const auto& type = op.schema().returns()[i].type();
-          if (type->isSubclass(TypeKind::TensorType)) {
+          if (type->isSubtypeOf(TensorType::get())) {
             AT_ASSERT(iter->isTensor());
             tracer::addOutput(node, iter->toTensor());
           } else if (type->kind() == TypeKind::ListType) {
             const auto& elem_type =
                 reinterpret_cast<ListType*>(type.get())->getElementType();
-            if (elem_type->isSubclass(TypeKind::TensorType)) {
+            if (elem_type->isSubtypeOf(TensorType::get())) {
               AT_ASSERT(iter->isTensorList());
               tracer::addOutput(node, iter->toTensorList());
             } else {

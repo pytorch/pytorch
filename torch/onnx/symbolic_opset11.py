@@ -34,3 +34,4 @@ def cumsum(g, self, dim, dtype=None):
         parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
         csum = g.op("Cast", csum, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
     return csum
+
