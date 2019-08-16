@@ -8852,6 +8852,31 @@ a")
         self.assertEqual(output_orig, output_import)
         self.assertEqual(grad_orig, grad_import)
 
+    def test_compile_module_with_constant(self):
+        class Double(nn.Module):
+            def __init__(self, downsample=None):
+                super(Double, self).__init__()
+
+            def forward(self, input):
+                return input * 2
+
+        class Mod(nn.Module):
+            __constants__ = ['downsample']
+
+            def __init__(self, downsample=None):
+                super(Mod, self).__init__()
+                self.downsample = downsample
+
+            def forward(self, input):
+                if self.downsample is not None:
+                    return self.downsample(input)
+                return input
+
+        none_mod = torch.jit.script(Mod(None))
+        double_mod = torch.jit.script(Mod(Double()))
+        self.assertEqual(none_mod(torch.tensor(1)), torch.tensor(1))
+        self.assertEqual(double_mod(torch.tensor(1)), torch.tensor(1) * 2)
+
     def test_script_module_export_tensor_type(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, type):
