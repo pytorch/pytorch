@@ -13007,7 +13007,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_copy_mem_overlap(self, device):
         # internal overlap check for inplace_op
         tensor = torch.randn(1, device=device).expand(3, 3)
-        src = torch.randn((3,3), device=device)
+        src = torch.randn((3, 3), device=device)
         with self.assertRaisesRegex(RuntimeError, 'single memory location'):
             tensor.copy_(src)
 
