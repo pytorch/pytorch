@@ -1,4 +1,5 @@
-#include <torch/csrc/distributed/rpc/ProcessGroupAgent.h>
+#include <torch/csrc/distributed/rpc/process_group_agent.h>
+
 #include <Python.h>
 
 namespace torch {
