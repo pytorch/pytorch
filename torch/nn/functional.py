@@ -17,7 +17,7 @@ from .._jit_internal import boolean_dispatch, List, _overload
 def _compute_padding_same(input_size, dim, weight, stride, dilation):
     # type: (List[int], int, Tensor, List[int], List[int]) -> int
     # When calculating convolutions, we can examine each dimension independently
-    input_size = input_size[dim + 2] # Ignoring batch size + channel dims
+    input_size = input_size[dim + 2] #  Ignoring batch size + channel dims
     filter_size = weight.size(dim + 2)
     # Here we calculate the equivalent filter size factoring in dilation
     effective_filter_size = (filter_size - 1) * dilation[dim] + 1
@@ -29,14 +29,16 @@ def _compute_padding_same(input_size, dim, weight, stride, dilation):
     total_padding = max(0, last_start + effective_filter_size - input_size)
     return total_padding
 
-@_overload
+@_overload # noqa: F811
 def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], BroadcastingList1[int], BroadcastingList1[int], int, str) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int],
+    # BroadcastingList1[int], BroadcastingList1[int], int, str) -> Tensor
     pass
 
-@_overload
+@_overload # noqa: F811
 def conv1d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], str, BroadcastingList1[int], int, str) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], str,
+    # BroadcastingList1[int], int, str) -> Tensor
     pass
 
 def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
@@ -71,7 +73,7 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
     """
     if isinstance(padding, str):
         padding_rows = _compute_padding_same(input.size(), 0, weight, stride, dilation)
-        final_padding = [padding_rows//2, (padding_rows+1)//2]
+        final_padding = [padding_rows // 2, (padding_rows + 1) // 2]
     else:
         final_padding = padding
     if padding_mode == 'circular':
@@ -82,14 +84,16 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         input = pad(input, expanded_padding, mode='circular')
     return torch.conv1d(input, weight, bias, stride, final_padding, dilation, groups)
 
-@_overload
+@_overload # noqa: F811
 def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], int, str) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int],
+    # BroadcastingList2[int], BroadcastingList2[int], int, str) -> Tensor
     pass
 
-@_overload
+@_overload # noqa: F811
 def conv2d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], str, BroadcastingList2[int], int, str) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], str,
+    # BroadcastingList2[int], int, str) -> Tensor
     pass
 
 
@@ -127,8 +131,8 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
     if isinstance(padding, str):
         padding_rows = _compute_padding_same(input.size(), 0, weight, stride, dilation)
         padding_cols = _compute_padding_same(input.size(), 1, weight, stride, dilation)
-        final_padding = [padding_rows//2, (padding_rows+1)//2,
-                        padding_cols//2, (padding_cols+1)//2]
+        final_padding = [padding_rows // 2, (padding_rows + 1) // 2,
+                        padding_cols // 2, (padding_cols + 1) // 2]
     else:
         final_padding = padding
     if padding_mode == 'circular':
@@ -139,14 +143,16 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         input = pad(input, expanded_padding, mode='circular')
     return torch.conv2d(input, weight, bias, stride, final_padding, dilation, groups)
 
-@_overload
+@_overload # noqa: F811
 def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int], BroadcastingList3[int], BroadcastingList2[int], int, str) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int],
+    # BroadcastingList3[int], BroadcastingList2[int], int, str) -> Tensor
     pass
 
-@_overload
+@_overload # noqa: F811
 def conv3d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int], str, BroadcastingList3[int], int, str) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int], str,
+    # BroadcastingList3[int], int, str) -> Tensor
     pass
 
 
@@ -185,9 +191,9 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
                         _compute_padding_same(input.size(), 1, weight, stride, dilation),
                         _compute_padding_same(input.size(), 2, weight, stride, dilation)
                         ]
-        final_padding = [padding_calc[0]//2, (padding_calc[0]+1)//2,
-                        padding_calc[1]//2, (padding_calc[1]+1)//2,
-                        padding_calc[2]//2, (padding_calc[2]+1)//2,
+        final_padding = [padding_calc[0] // 2, (padding_calc[0] + 1) // 2,
+                        padding_calc[1] // 2, (padding_calc[1] + 1) // 2,
+                        padding_calc[2] // 2, (padding_calc[2] + 1) // 2,
         ]
     else:
         final_padding = padding
