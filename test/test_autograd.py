@@ -3122,8 +3122,8 @@ class TestAutograd(TestCase):
     def test_inplace_view_backward(self):
         # Issue #10532: Make sure that this does not raise RuntimeError.
         net = nn.Sequential(
-          nn.InstanceNorm2d(1),
-          nn.ReLU(True)
+            nn.InstanceNorm2d(1),
+            nn.ReLU(True)
         )
 
         x = torch.tensor([[[[1.0]]]], requires_grad=True)
@@ -3134,7 +3134,7 @@ class TestAutograd(TestCase):
         # https://discuss.pytorch.org/t/freeing-buffer-strange-behavior/31955/8
         inputs = torch.ones((1, 3, 256, 256), requires_grad=True)
 
-        tmp1 = (inputs+1).view_as(inputs)
+        tmp1 = (inputs + 1).view_as(inputs)
         tmp2 = torch.nn.functional.threshold(tmp1, 0., 0., True)
         prob_interpolated = torch.sigmoid(tmp2)
 
