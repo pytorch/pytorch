@@ -853,7 +853,7 @@ void initJitScriptBindings(PyObject* module) {
          const std::vector<at::Tensor>& constant_table) {
         import_functions(
             c10::nullopt,
-            cu,
+            std::move(cu),
             std::make_shared<Source>(src),
             constant_table,
             nullptr,

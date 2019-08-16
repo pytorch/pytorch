@@ -326,6 +326,9 @@ def _overload_method(func):
     return func
 
 def _get_overloaded_methods(method, mod_class):
+    # TODO: __name__ not set for submodules in recursive script
+    if not hasattr(method, "__name__"):
+        return None
     qual_name = _qualified_name(method)
     class_name_map = _overloaded_methods.get(qual_name, None)
     if class_name_map is None:
