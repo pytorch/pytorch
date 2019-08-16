@@ -4,7 +4,7 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
 
 CONFIG_TREE_DATA = [
-    ("trusty", [
+    ("xenial", [
         (None, [
             XImportant("2.7.9"),
             X("2.7"),
@@ -21,11 +21,6 @@ CONFIG_TREE_DATA = [
                 ]),
             ]),
             ("7", [X("3.6")]),
-        ]),
-    ]),
-    ("xenial", [
-        ("gcc", [
-            ("7", [XImportant("3.6")]),
         ]),
         ("clang", [
             ("5", [
