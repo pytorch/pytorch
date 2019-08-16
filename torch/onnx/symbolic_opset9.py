@@ -330,7 +330,7 @@ def transpose(g, self, dim0, dim1):
         return self
 
     # NB: Transpose in ONNX is actually a Permute
-    if self.type().kind() == "CompleteTensorType":
+    if self.isCompleteTensor():
         axes = list(range(self.type().dim()))
         axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
         return g.op("Transpose", self, perm_i=axes)
@@ -550,7 +550,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 def _max_pool(name, tuple_fn, ndims, return_indices):
     @parse_args('v', 'is', 'is', 'is', 'is', 'i')
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-        if ceil_mode and input.type().kind() != "CompleteTensorType":
+        if ceil_mode and not input.isCompleteTensor():
             return _unimplemented(name, "input size not accessible")
         if set(tuple_fn(dilation)) != {1}:
             return _unimplemented(name, "dilation")
@@ -608,7 +608,7 @@ max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, retur
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
-        if ceil_mode and input.type().kind() != "CompleteTensorType":
+        if ceil_mode and not input.isCompleteTensor():
             return _unimplemented(name, "input size not accessible")
         if divisor_override and divisor_override.node().kind() != 'prim::Constant':
             return _unimplemented(name, "divisor_override")
@@ -650,11 +650,11 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         # the same dimension, which makes it possible to export it to ONNX.
         # for MaxPool, GlobalMaxPool does not return indices,
         # so we try using max_poolxd_with_indices, and if it is not possible
-        # (input is not CompleteTensorType or output size not factor of input size)
+        # (input is not a complete tensor or output size not factor of input size)
         # then we call GlobalAveragePool and return None for the indices
         if output_size == [1] * len(output_size) and type == "AveragePool":
             return g.op("GlobalAveragePool", input)
-        if input.type().kind() != "CompleteTensorType":
+        if not input.isCompleteTensor():
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
             return _unimplemented(name, 'input size not accessible')
@@ -1251,7 +1251,7 @@ def unsqueeze(g, self, dim):
 def sort(g, self, dim, decending, out=None):
     if out is not None:
         _unimplemented("Sort", "Out parameter is not supported for sort")
-    if self.type().kind() != "CompleteTensorType":
+    if not self.isCompleteTensor():
         return _unimplemented("Sort", "input size not accessible")
 
     return g.op("TopK", self, k_i=self.type().sizes()[dim], axis_i=dim, outputs=2)
@@ -1598,7 +1598,7 @@ def flatten(g, input, start_dim, end_dim):
     if start_dim == 0 and end_dim == dim - 2 :
         return g.op("Flatten", input, axis_i=end_dim + 1)
     # use Reshape for cases where the output shape is not 2D
-    if input.type().kind() != "CompleteTensorType":
+    if not input.isCompleteTensor():
         return _unimplemented("flatten", "input size not accessible")
     input_dims = input.type().sizes()
     output_dims = []
@@ -1655,7 +1655,7 @@ def scatter(g, self, dim, index, src):
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter_add(g, self, dim, index, src):
-    if self.type().kind() != "CompleteTensorType":
+    if not self.isCompleteTensor():
         return _unimplemented("scatter_add", "input size not accessible")
     dtype = self.type().scalarType()
     dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
@@ -1689,7 +1689,7 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 @parse_args('v', 'is', 'b', 'i')
 def _std(g, input, dim, unbiased, keepdim):
-    if input.type().kind() == "CompleteTensorType" or input.type().kind() == "DimensionedTensorType":
+    if input.isCompleteTensor():
         sqrd = g.op("Mul", input, input)
         if dim is None:
             sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
