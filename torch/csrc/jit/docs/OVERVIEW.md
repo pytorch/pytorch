@@ -332,7 +332,6 @@ TorchScript, unlike Python, is statically typed, so every Value has a Type assoc
 * TensorType - the root type of all Tensors in the system.
 * ProfiledTensorType - a tensor with optionally refined information. It may optional know its device, type, requires_grad state, the number of dimensions.
   If it does know the number of dimensions it may optionally know the size of a particular dimension.
-* CompleteTensorType - A subtype of TensorType that adds fixed sizes (e.g. a [3 x 4] cuda tensor). This only appears from tracing at the moment.
 * Tuples - e.g. Tuple[Tensor, Int]. Each member of the tuple is statically typed and the length of the tuple is statically known.
 * List[T] - e.g. List[Tensor]. Mutable lists of a particular type.
 * Optional[T] - e.g. Optional[Tensor], either the Tensor value or None.

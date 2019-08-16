@@ -174,7 +174,7 @@ class CAFFE2_API Tensor {
   }
 #ifdef BUILD_NAMEDTENSOR
   optional<DimnameList> names() const {
-    return impl::internal_get_names(unsafeGetTensorImpl());
+    return impl::get_names(unsafeGetTensorImpl());
   }
 #endif
   int64_t ndimension() const {
@@ -400,6 +400,10 @@ class CAFFE2_API Tensor {
   Tensor bincount(const Tensor & weights={}, int64_t minlength=0) const;
   Tensor bitwise_not() const;
   Tensor & bitwise_not_() const;
+  Tensor logical_not() const;
+  Tensor & logical_not_() const;
+  Tensor logical_xor(const Tensor & other) const;
+  Tensor & logical_xor_(const Tensor & other) const;
   Tensor bmm(const Tensor & mat2) const;
   Tensor ceil() const;
   Tensor & ceil_() const;
@@ -475,6 +479,9 @@ class CAFFE2_API Tensor {
   Tensor & log2_() const;
   Tensor logdet() const;
   Tensor log_softmax(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor log_softmax(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor logsumexp(IntArrayRef dim, bool keepdim=false) const;
   Tensor matmul(const Tensor & other) const;
   Tensor matrix_power(int64_t n) const;
@@ -540,6 +547,9 @@ class CAFFE2_API Tensor {
   std::tuple<Tensor,Tensor> slogdet() const;
   Tensor smm(const Tensor & mat2) const;
   Tensor softmax(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor softmax(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   std::vector<Tensor> split(int64_t split_size, int64_t dim=0) const;
   std::vector<Tensor> split_with_sizes(IntArrayRef split_sizes, int64_t dim=0) const;
   Tensor squeeze() const;
