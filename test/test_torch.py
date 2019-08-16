@@ -211,7 +211,6 @@ class _TestTorchMixin(torchtest):
                        'new',
                        'polygamma',
                        'polygamma_',
-                       'record_stream',
                        'reinforce',
                        'relu',
                        'relu_',
