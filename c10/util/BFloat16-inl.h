@@ -58,15 +58,18 @@ inline C10_HOST_DEVICE BFloat16& operator/=(BFloat16& a, const BFloat16& b) {
 }
 
 inline C10_HOST_DEVICE BFloat16& operator|(BFloat16& a, const BFloat16& b) {
-  return a | b;
+  a.x = a.x | b.x;
+  return a;
 }
 
 inline C10_HOST_DEVICE BFloat16& operator^(BFloat16& a, const BFloat16& b) {
-  return a ^ b;
+  a.x = a.x ^ b.x;
+  return a;
 }
 
 inline C10_HOST_DEVICE BFloat16& operator&(BFloat16& a, const BFloat16& b) {
-  return a & b;
+  a.x = a.x & b.x;
+  return a;
 }
 
 /// Arithmetic with floats
