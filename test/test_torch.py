@@ -326,7 +326,7 @@ class _TestTorchMixin(torchtest):
         types = {
             'torch.DoubleTensor': 1e-8,
             'torch.FloatTensor': 1e-4,
-            'torch.BFloat16Tensor': 0.4,
+            'torch.BFloat16Tensor': 1e-0,
         }
         for tname, prec in types.items():
             t = torch.randn(10).type(tname)
@@ -359,7 +359,7 @@ class _TestTorchMixin(torchtest):
         types = {
             'torch.DoubleTensor': 1e-8,
             'torch.FloatTensor': 1e-4,
-            'torch.BFloat16Tensor': 0.3,
+            'torch.BFloat16Tensor': 1e-1,
         }
         for tname, prec in types.items():
             M = torch.randn(10, 25).type(tname)
@@ -1754,15 +1754,15 @@ class _TestTorchMixin(torchtest):
             m2 = torch.tensor([True, True, False, False, False, True], dtype=torch.bool, device=device)
             self.assertRaisesRegex(RuntimeError,
                                    r"Subtraction, the `\-` operator, with two bool tensors is not supported. "
-                                   r"Use the `\^` operator instead.",
+                                   r"Use the `\^` or `logical_xor\(\)` operator instead.",
                                    lambda: m1 - m2)
             self.assertRaisesRegex(RuntimeError,
                                    r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
-                                   r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                                   r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
                                    lambda: 1 - m1)
             self.assertRaisesRegex(RuntimeError,
                                    r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
-                                   r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                                   r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
                                    lambda: m2 - 1)
 
     def test_sub(self):
@@ -1830,7 +1830,7 @@ class _TestTorchMixin(torchtest):
             self.assertRaisesRegex(
                 RuntimeError,
                 r"Negation, the `\-` operator, on a bool tensor is not supported. "
-                r"If you are trying to invert a mask, use the `\~` or `bitwise_not\(\)` operator instead.",
+                r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
                 lambda: - cast(torch.tensor([False, True])))
 
     def test_neg(self):
@@ -1872,6 +1872,58 @@ class _TestTorchMixin(torchtest):
 
     def test_bitwise_not(self):
         self._test_bitwise_not(self, 'cpu')
+
+    @staticmethod
+    def _test_logical_not(self, device):
+        for dtype in torch.testing.get_all_dtypes():
+            a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
+            if dtype == torch.bfloat16:
+                self.assertRaises(RuntimeError, lambda: a.logical_not())
+                continue
+            expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
+            # new tensor
+            self.assertEqual(expected_res.bool(), a.logical_not())
+            # out
+            for out_dtype in torch.testing.get_all_dtypes():
+                b = torch.empty(0, dtype=out_dtype, device=device)
+                if out_dtype == torch.bfloat16:
+                    self.assertRaises(RuntimeError, lambda: torch.logical_not(a, out=b))
+                    continue
+                torch.logical_not(a, out=b)
+                self.assertEqual(expected_res.bool(), b.bool())
+            # in-place
+            a.logical_not_()
+            self.assertEqual(expected_res, a)
+
+    def test_logical_not(self):
+        self._test_logical_not(self, 'cpu')
+
+    @staticmethod
+    def _test_logical_xor(self, device):
+        for dtype in torch.testing.get_all_dtypes():
+            expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
+            for other_dtype in torch.testing.get_all_dtypes():
+                a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
+                b = torch.tensor([1, 0, 0, 10], dtype=other_dtype, device=device)
+                if torch.bfloat16 in (dtype, other_dtype):
+                    self.assertRaises(RuntimeError, lambda: a.logical_xor(b))
+                    continue
+                # new tensor
+                self.assertEqual(expected_res.bool(), a.logical_xor(b))
+                # out
+                for out_dtype in torch.testing.get_all_dtypes():
+                    c = torch.empty(0, dtype=out_dtype, device=device)
+                    if out_dtype == torch.bfloat16:
+                        self.assertRaises(RuntimeError, lambda: torch.logical_xor(a, b, out=c))
+                        continue
+                    torch.logical_xor(a, b, out=c)
+                    self.assertEqual(expected_res.bool(), c.bool())
+                # in-place
+                a.logical_xor_(b)
+                self.assertEqual(expected_res, a)
+
+    def test_logical_xor(self):
+        self._test_logical_xor(self, 'cpu')
 
     def test_threshold(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
@@ -2888,7 +2940,7 @@ class _TestTorchMixin(torchtest):
                             self.assertEqual(std1, std2)
                             self.assertEqual(mean1, mean2)
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     def test_var_mean_some_dims(self, device):
         sizes = (4, 6, 7, 5, 3)
         dims = len(sizes)
@@ -2905,7 +2957,7 @@ class _TestTorchMixin(torchtest):
                         self.assertEqual(var1, var2)
                         self.assertEqual(mean1, mean2)
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     def test_zeros_like(self, device):
         expected = torch.zeros((100, 100,), device=device)
 
@@ -3520,28 +3572,30 @@ class _TestTorchMixin(torchtest):
         torch.set_default_tensor_type(saved_type)
 
     def test_bool_tensor_comparison_ops(self):
-        a = torch.tensor([True, False, True, False, True, False], dtype=torch.bool)
-        b = torch.tensor([True, False, True, True, True, True], dtype=torch.bool)
         for device in torch.testing.get_all_device_types():
-            self.assertEqual(a == b, torch.tensor([1, 1, 1, 0, 1, 0], dtype=torch.uint8))
-            self.assertEqual(a != b, torch.tensor([0, 0, 0, 1, 0, 1], dtype=torch.uint8))
-            self.assertEqual(a < b, torch.tensor([0, 0, 0, 1, 0, 1], dtype=torch.uint8))
-            self.assertEqual(a > b, torch.tensor([0, 0, 0, 0, 0, 0], dtype=torch.uint8))
-            self.assertEqual(a >= b, torch.tensor([1, 1, 1, 0, 1, 0], dtype=torch.uint8))
-            self.assertEqual(a <= b, torch.tensor([1, 1, 1, 1, 1, 1], dtype=torch.uint8))
-            self.assertEqual(a > False, torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
-            self.assertEqual(a == torch.tensor(True, dtype=torch.bool), torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
-            self.assertEqual(a == torch.tensor(0, dtype=torch.bool), torch.tensor([0, 1, 0, 1, 0, 1], dtype=torch.uint8))
+            a = torch.tensor([True, False, True, False, True, False], dtype=torch.bool, device=device)
+            b = torch.tensor([True, False, True, True, True, True], dtype=torch.bool, device=device)
+            self.assertEqual(a == b, torch.tensor([1, 1, 1, 0, 1, 0], dtype=torch.bool, device=device))
+            self.assertEqual(a != b, torch.tensor([0, 0, 0, 1, 0, 1], dtype=torch.bool, device=device))
+            self.assertEqual(a < b, torch.tensor([0, 0, 0, 1, 0, 1], dtype=torch.bool, device=device))
+            self.assertEqual(a > b, torch.tensor([0, 0, 0, 0, 0, 0], dtype=torch.bool, device=device))
+            self.assertEqual(a >= b, torch.tensor([1, 1, 1, 0, 1, 0], dtype=torch.bool, device=device))
+            self.assertEqual(a <= b, torch.tensor([1, 1, 1, 1, 1, 1], dtype=torch.bool, device=device))
+            self.assertEqual(a > False, torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.bool, device=device))
+            self.assertEqual(a == torch.tensor(True, dtype=torch.bool, device=device),
+                             torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.bool, device=device))
+            self.assertEqual(a == torch.tensor(0, dtype=torch.bool, device=device),
+                             torch.tensor([0, 1, 0, 1, 0, 1], dtype=torch.bool, device=device))
             self.assertFalse(a.equal(b))
 
     def test_bool_tensor_value_change(self):
         for device in torch.testing.get_all_device_types():
-            x = torch.tensor([True, False], dtype=torch.bool)
+            x = torch.tensor([True, False], dtype=torch.bool, device=device)
             x[0] = False
             x[1] = True
-            self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool))
+            self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool, device=device))
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     def test_unfold_all_devices_and_dtypes(self, device):
         for dt in torch.testing.get_all_dtypes():
             if dt == torch.bfloat16:
@@ -4254,6 +4308,8 @@ class _TestTorchMixin(torchtest):
         self.assertEqual(r1, r2, 0)
         self.assertEqual(r2, r3[:-1], 0)
 
+        x = torch.empty(1).expand(10)
+        self.assertRaises(RuntimeError, lambda: torch.arange(10, out=x))
         msg = "unsupported range"
         self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf')))
         self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf')))
@@ -4681,6 +4737,11 @@ class _TestTorchMixin(torchtest):
         torch.zeros(5, 6).copy_(torch.zeros(6))
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))
 
+    def test_copy_many_to_one(self):
+        # Testing in-place copy where it attempt to write from many memory
+        # storage to a single storage would cause RuntimeError to be thrown
+        self.assertRaises(RuntimeError, lambda: torch.zeros(1, 6).expand(5, 6).copy_(torch.zeros(5, 6)))
+
     @staticmethod
     def _test_randperm(self, device):
         if device == 'cpu':
@@ -5076,6 +5137,14 @@ class _TestTorchMixin(torchtest):
             x.tril(0).nonzero().transpose(0, 1), torch.tril_indices(3, 3))
         self.assertEqual(
             x.triu(0).nonzero().transpose(0, 1), torch.triu_indices(3, 3))
+
+        # test stride 0 cases
+        x = torch.ones(
+            3, 1, 3, 3, dtype=torch.long, device='cpu', layout=torch.strided)
+        output = x.triu(2).expand(3, 3, 3, 3)
+        b = x.clone().expand(3, 3, 3, 3)
+        self.assertEqual(b.triu(2), output)
+        self.assertRaises(RuntimeError, lambda: b.triu_(2))
 
     @staticmethod
     def _test_triu_tril(self, cast):

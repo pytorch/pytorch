@@ -18,7 +18,7 @@ TORCH_API void PythonPrint(
     const Function& callee,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable = false);
 
 TORCH_API void PythonPrint(
@@ -26,7 +26,7 @@ TORCH_API void PythonPrint(
     SourceRangeRecords& source_ranges_out,
     const c10::NamedTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable = false);
 
 TORCH_API void LEGACY_PythonPrint(
@@ -34,7 +34,7 @@ TORCH_API void LEGACY_PythonPrint(
     SourceRangeRecords& source_ranges_out,
     const c10::NamedTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable = false);
 
 TORCH_API void LEGACY_PythonPrint(
@@ -42,7 +42,7 @@ TORCH_API void LEGACY_PythonPrint(
     SourceRangeRecords& source_ranges_out,
     const script::Module& module,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable);
 
 TORCH_API bool printerHasSpecialCaseFor(c10::Symbol sym);
