@@ -126,7 +126,8 @@ def recursive_script(mod):
 
             # builtin functions like repr() in python 2 do not have __module__ defined
             if hasattr(item, "__module__") and item.__module__ is not None:
-                method_overloads = _jit_internal._get_overloaded_methods(item, mod._get_name())
+                method_overloads = _jit_internal._get_overloaded_methods(item, mod.__class__)
+
                 if method_overloads is not None:
                     overloads.append((item, method_overloads))
 
