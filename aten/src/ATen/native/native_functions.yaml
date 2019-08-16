@@ -1661,6 +1661,7 @@
     QuantizedCPU: quantized_max_pool2d
 
 - func: mkldnn_max_pool2d_backward(Tensor grad_output, Tensor output, Tensor input, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+  use_c10_dispatcher: unboxed_only
   dispatch:
     MkldnnCPU: mkldnn_max_pool2d_backward
 
@@ -5658,6 +5659,7 @@
   requires_tensor: True
 
 - func: mkldnn_adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
+  use_c10_dispatcher: unboxed_only
   dispatch:
     MkldnnCPU: mkldnn_adaptive_avg_pool2d_backward
   requires_tensor: True

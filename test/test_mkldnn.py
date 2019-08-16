@@ -151,9 +151,7 @@ class TestMkldnn(TestCase):
                         max_pool2d(x.to_mkldnn()).to_dense())
 
     def test_max_pool2d_backward(self):
-        N = torch.randint(3, 10, (1,)).item()
-        C = torch.randint(3, 10, (1,)).item()
-        x = torch.randn(N, C, 64, 64, dtype=torch.float32) * 10
+        x = torch.randn(10, 3, 64, 64, dtype=torch.float32) * 10
         for ceil_mode in [False, True]:
             max_pool2d = torch.nn.MaxPool2d(
                 kernel_size=3,
@@ -187,9 +185,7 @@ class TestMkldnn(TestCase):
                 avg_pool2d(x.to_mkldnn()).to_dense())
 
     def test_avg_pool2d_backward(self):
-        N = torch.randint(3, 10, (1,)).item()
-        C = torch.randint(3, 10, (1,)).item()
-        x = torch.randn(N, C, 64, 64, dtype=torch.float32) * 10
+        x = torch.randn(10, 3, 64, 64, dtype=torch.float32) * 10
 
         for count_include_pad in [True, False]:
             x1 = x.clone().requires_grad_()
@@ -218,9 +214,7 @@ class TestMkldnn(TestCase):
             adaptive_avg_pool2d(x.to_mkldnn()).to_dense())
 
     def test_adaptive_avg_pool2d_backward(self):
-        N = torch.randint(3, 10, (1,)).item()
-        C = torch.randint(3, 10, (1,)).item()
-        x = torch.randn(N, C, 224, 224, dtype=torch.float32) * 100
+        x = torch.randn(10, 3, 224, 224, dtype=torch.float32) * 100
 
         x1 = x.clone().requires_grad_()
         x2 = x.clone().to_mkldnn().requires_grad_()
