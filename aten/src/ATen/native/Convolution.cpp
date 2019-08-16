@@ -463,12 +463,6 @@ at::Tensor conv2d(
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0}}, groups);
 }
-at::Tensor conv2d(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntArrayRef stride, bool padding, IntArrayRef dilation, int64_t groups) {
-  return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {{0, 0}}, groups);
-}
 
 at::Tensor conv3d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
@@ -507,65 +501,6 @@ at::Tensor convolution(
                           transposed, output_padding, groups,
                           ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
 }
-
-    // def _compute_padding_same(self, input_size, dim):
-    //     # type: (List[int], int) -> int
-    //     input_size = input_size[dim + 2]  # Ignoring batch size + channel dims
-    //     filter_size = self.weight.size(dim + 2)
-    //     effective_filter_size = (filter_size - 1) * self.dilation[dim] + 1
-    //     out_size = math.ceil(input_size / self.stride[dim])
-    //     # We calculate the starting position of the last filter
-    //     last_start = (out_size - 1) * self.stride[dim]
-    //     # The final necessary input size is equal to the starting position of the last filter +
-    //     # the effective filter size. Padding is equal to the difference
-    //     total_padding = max(0, last_start + effective_filter_size - input_size)
-    //     return total_padding
-int64_t _compute_padding_same(IntArrayRef input_size, IntArrayRef filter_size, IntArrayRef stride, IntArrayRef dilation, int64_t dim) {
-  // When calculating convolutions, we can examine each dimension independently
-  int64_t input = input_size[dim + 2];
-  int64_t filter = filter_size[dim + 2];
-  // Here we calculate the equivalent filter size factoring in dilation
-  int64_t effective_filter_size = (filter - 1) * dilation[dim] + 1;
-  int64_t out_size = (input + stride[dim] - 1) / stride[dim];
-  int64_t last_start = (out_size - 1) * stride[dim];
-  int64_t total_padding = std::max(0l, last_start + effective_filter_size - input);
-  return total_padding;
-}
-
-// at::Tensor convolution(
-//     const Tensor& input, const Tensor& weight, const Tensor& bias,
-//     IntArrayRef stride, bool padding, IntArrayRef dilation,
-//     bool transposed, IntArrayRef output_padding, int64_t groups) {
-//   auto& ctx = at::globalContext();
-//   std::vector<int64_t> paddings(input.ndimension() - 2);
-//   for (int i = 0; i < input.ndimension() - 2; i++) {
-//     paddings[i] = _compute_padding_same(input.sizes(), weight.sizes(), stride, dilation, i);
-//   }
-//   std::vector<int64_t> uneven_padding;
-//   bool is_uneven = false;
-//   for (auto &&i: paddings) {
-//     uneven_padding.push_back(i % 2);
-//     uneven_padding.push_back(0);
-//     if (i % 2 != 0) {
-//       is_uneven = true;
-//     }
-//     i /= 2;
-//   }
-//   std::reverse(uneven_padding.begin(), uneven_padding.end());
-//   for (auto i: uneven_padding) {
-//     std::cout<<i<<' ';
-//   }
-//   std::cout<<std::endl;
-//   if (is_uneven) {
-//     auto res = at::constant_pad_nd(input, IntArrayRef{uneven_padding});
-//     return at::_convolution(res, weight, bias, stride, IntArrayRef{paddings}, dilation,
-//                             transposed, output_padding, groups,
-//                             ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
-//   }
-//   return at::_convolution(input, weight, bias, stride, IntArrayRef{paddings}, dilation,
-//                           transposed, output_padding, groups,
-//                           ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
-// }
 
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,

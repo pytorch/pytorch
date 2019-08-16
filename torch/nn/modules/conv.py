@@ -184,20 +184,15 @@ class Conv1d(_ConvNd):
                  bias=True, padding_mode='zeros'):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
-        padding = _single(padding)
+        padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias, padding_mode)
 
     def forward(self, input):
-        if self.padding_mode == 'circular':
-            expanded_padding = ((self.padding[0] + 1) // 2, self.padding[0] // 2)
-            return F.conv1d(F.pad(input, expanded_padding, mode='circular'),
-                            self.weight, self.bias, self.stride,
-                            _single(0), self.dilation, self.groups)
         return F.conv1d(input, self.weight, self.bias, self.stride,
-                        self.padding, self.dilation, self.groups)
+                        self.padding, self.dilation, self.groups, self.padding_mode)
 
 
 class Conv2d(_ConvNd):
@@ -330,14 +325,8 @@ class Conv2d(_ConvNd):
             False, _pair(0), groups, bias, padding_mode)
 
     def conv2d_forward(self, input, weight):
-        if self.padding_mode == 'circular':
-            expanded_padding = ((self.padding[1] + 1) // 2, self.padding[1] // 2,
-                                (self.padding[0] + 1) // 2, self.padding[0] // 2)
-            return F.conv2d(F.pad(input, expanded_padding, mode='circular'),
-                            weight, self.bias, self.stride,
-                            _pair(0), self.dilation, self.groups)
         return F.conv2d(input, weight, self.bias, self.stride,
-                        self.padding, self.dilation, self.groups)
+                        self.padding, self.dilation, self.groups, self.padding_mode)
 
     def forward(self, input):
         return self.conv2d_forward(input, self.weight)
@@ -460,7 +449,7 @@ class Conv3d(_ConvNd):
                  bias=True, padding_mode='zeros'):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
-        padding = _triple(padding)
+        padding = padding if isinstance(padding, str) else _triple(padding)
         dilation = _triple(dilation)
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,

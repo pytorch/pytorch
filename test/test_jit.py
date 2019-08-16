@@ -13098,6 +13098,24 @@ a")
 
         self.checkScript(test_uses, ())
 
+    def test_padding_same_overload(self):
+        class W(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = nn.MaxPool1d(2, stride=2, return_indices=True)
+                self.unpool = nn.MaxUnpool1d(2, stride=2)
+                self.layer = nn.Conv1d(10, 3, 3, padding="same")
+
+            def forward(self, x):
+                input = torch.tensor([[[1., 2., 3., 4., 5., 6., 7., 8.]]])
+                output, indices = self.pool(input)
+                self.unpool(output, indices)
+                return self.layer(x)
+
+        # torch.jit.script(W())(torch.randn((10, 10, 10)))
+        W()(torch.randn((10, 10, 10)))
+
+
     @unittest.skipIf(True, "Removing weak script")
     def test_overloading(self):
         @torch._jit_internal.weak_module
@@ -13140,6 +13158,7 @@ a")
         w = W()
         self.assertEqual(w((x, x)), x + 5)
         self.assertEqual(w((x)), x + 20)
+
 
     def test_select_after_chunk(self):
         def foo(x):

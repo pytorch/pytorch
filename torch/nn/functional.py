@@ -30,18 +30,18 @@ def _compute_padding_same(input_size, dim, weight, stride, dilation):
     return total_padding
 
 @_overload
-def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], BroadcastingList2[int], BroadcastingList1[int], int) -> Tensor
+def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], BroadcastingList1[int], BroadcastingList1[int], int, str) -> Tensor
     pass
 
 @_overload
-def conv1d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], str, BroadcastingList1[int], int) -> Tensor
+def conv1d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1, padding_mode='zeros'):
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], str, BroadcastingList1[int], int, str) -> Tensor
     pass
 
-def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
     r"""
-    conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+    conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
 
     Applies a 1D convolution over an input signal composed of several input
     planes.
@@ -72,13 +72,19 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
     if isinstance(padding, str):
         padding_rows = _compute_padding_same(input.size(), 0, weight, stride, dilation)
         final_padding = [padding_rows//2, (padding_rows+1)//2]
-        return torch.conv1d(input, weight, bias, stride, final_padding, dilation, groups)
     else:
-        return torch.conv1d(input, weight, bias, stride, padding, dilation, groups)
+        final_padding = padding
+    if padding_mode == 'circular':
+        if len(final_padding) == 1:
+            expanded_padding = [(final_padding[0] + 1) // 2, final_padding[0] // 2]
+        else:
+            expanded_padding = final_padding
+        input = pad(input, expanded_padding, mode='circular')
+    return torch.conv1d(input, weight, bias, stride, final_padding, dilation, groups)
 
 @_overload
 def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], BroadcastingList4[int], BroadcastingList2[int], int) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], int) -> Tensor
     pass
 
 @_overload
@@ -129,7 +135,7 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
 
 @_overload
 def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int], BroadcastingList6[int], BroadcastingList2[int], int) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int], BroadcastingList3[int], BroadcastingList2[int], int) -> Tensor
     pass
 
 @_overload
