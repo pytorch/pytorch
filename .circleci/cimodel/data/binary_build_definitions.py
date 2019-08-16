@@ -26,9 +26,8 @@ class Conf(object):
         return elems
 
     def gen_docker_image(self):
-        # yf225 TODO: move this docker image into soumith/*
         if self.gcc_config_variant == 'gcc5.4_cxx11-abi':
-            return miniutils.quote("yf225/tmp-binary-docker-image-ubuntu16.04:4")
+            return miniutils.quote("yf225/pytorch-binary-docker-image-ubuntu16.04:latest")
 
         docker_word_substitution = {
             "manywheel": "manylinux",
