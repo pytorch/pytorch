@@ -56,6 +56,7 @@ TESTS = [
     'utils',
     'namedtuple_return_api',
     'jit_fuser',
+    'jit_recursive_script',
     'tensorboard',
     'namedtensor',
 ]
