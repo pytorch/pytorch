@@ -217,7 +217,8 @@ Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
 Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
   TensorIterator iter;
   iter.dont_compute_common_dtype();
-  iter.check_and_add_output(result);
+  iter.set_check_mem_overlap(true);
+  iter.add_output(result);
   iter.add_input(self);
   iter.add_input(other);
   iter.build();
