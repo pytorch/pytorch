@@ -324,7 +324,7 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float sub  (float a, float b) { return a - b; }
   static inline __host__ __device__  float pow  (float a, float b) { return powf(a, b); }
   static inline __host__ __device__  float atan2(float a, float b) { return atan2f(a, b); }
-  static inline __host__ __device__  float fmod (float a, float b) { return fmod(a, b); }
+  static inline __host__ __device__  float fmod (float a, float b) { return ::fmod(a, b); }
   static inline __host__ __device__  bool isnan(float a) { return ::isnan(a); }
   static inline __host__ __device__  bool isinf(float a) { return ::isinf(a); }
 };

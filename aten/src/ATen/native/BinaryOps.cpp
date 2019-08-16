@@ -237,7 +237,6 @@ Tensor& fmod_(Tensor& self, Scalar other) {
   return native::fmod_(self, wrapped_scalar_tensor(other));
 }
 
-
 Tensor& fmod_out(Tensor& result, const Tensor& self, Scalar other) {
   return native::fmod_out(result, self, wrapped_scalar_tensor(other));
 }
