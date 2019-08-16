@@ -15,9 +15,10 @@ using at::native::detail::GridSamplerInterpolation;
 using at::native::detail::GridSamplerPadding;
 
 namespace {
+  template <typename scalar_t>
   static __forceinline__ __device__
-  float clip_coordinates(float in, int clip_limit) {
-    return ::min(static_cast<float>(clip_limit - 1), ::max(in, 0.f));
+  scalar_t clip_coordinates(scalar_t in, int clip_limit) {
+    return ::min(static_cast<scalar_t>(clip_limit - 1), ::max(in, 0.f));
   }
 
   // clip_coordinates_set_grad works similarly to clip_coordinates except that
@@ -25,12 +26,12 @@ namespace {
   // This is useful in the backward pass of grid_sampler.
   template <typename scalar_t>
   static __forceinline__ __device__
-  float clip_coordinates_set_grad(float in, int clip_limit, scalar_t *grad_in) {
+  scalar_t clip_coordinates_set_grad(scalar_t in, int clip_limit, scalar_t *grad_in) {
     if (in < 0.f) {
       *grad_in = static_cast<scalar_t>(0);
       return 0.f;
     } else {
-      float max = static_cast<float>(clip_limit - 1);
+      scalar_t max = static_cast<scalar_t>(clip_limit - 1);
       if (in > max) {
         *grad_in = static_cast<scalar_t>(0);
         return max;
@@ -44,16 +45,17 @@ namespace {
   // Reflects coordinates until they fall between low and high (inclusive).
   // The bounds are passed as twice their value so that half-integer values
   // can be represented as ints.
+  template <typename scalar_t>
   static __forceinline__ __device__
-  float reflect_coordinates(float in, int twice_low, int twice_high) {
+  scalar_t reflect_coordinates(scalar_t in, int twice_low, int twice_high) {
     if (twice_low == twice_high) {
       return 0.f;
     }
-    float min = static_cast<float>(twice_low) / 2;
-    float span = static_cast<float>(twice_high - twice_low) / 2;
+    scalar_t min = static_cast<scalar_t>(twice_low) / 2;
+    scalar_t span = static_cast<scalar_t>(twice_high - twice_low) / 2;
     in = ::fabs(in - min);
     // `fmod` returns same sign as `in`, which is positive after the `fabs` above.
-    float extra = ::fmod(in, span);
+    scalar_t extra = ::fmod(in, span);
     int flips = static_cast<int>(::floor(in / span));
     if (flips % 2 == 0) {
       return extra + min;
@@ -68,15 +70,15 @@ namespace {
   // This is useful in the backward pass of grid_sampler.
   template <typename scalar_t>
   static __forceinline__ __device__
-  float reflect_coordinates_set_grad(float in, int twice_low, int twice_high,
+  scalar_t reflect_coordinates_set_grad(scalar_t in, int twice_low, int twice_high,
                                      scalar_t *grad_in) {
     if (twice_low == twice_high) {
       *grad_in = static_cast<scalar_t>(0);
       return 0.f;
     }
     int grad_in_mult_;
-    float min = static_cast<float>(twice_low) / 2;
-    float span = static_cast<float>(twice_high - twice_low) / 2;
+    scalar_t min = static_cast<scalar_t>(twice_low) / 2;
+    scalar_t span = static_cast<scalar_t>(twice_high - twice_low) / 2;
     in = in - min;
     if (in < 0.f) {
       grad_in_mult_ = -1;
@@ -85,7 +87,7 @@ namespace {
       grad_in_mult_ = 1;
     }
     // `fmod` returns same sign as `in`, which is positive after the `if` above.
-    float extra = ::fmod(in, span);
+    scalar_t extra = ::fmod(in, span);
     int flips = static_cast<int>(::floor(in / span));
     if (flips % 2 == 0) {
       *grad_in = static_cast<scalar_t>(grad_in_mult_);
@@ -165,43 +167,38 @@ namespace {
       scalar_t ix = grid.data[grid_offset];
       scalar_t iy = grid.data[grid_offset + grid_sCoor];
 
-      float ixf;
-      float iyf;
       if (align_corners) {
         // normalize ix, iy from [-1, 1] to [0, SIZE - 1]
-        ixf = ((ix + 1.f) / 2) * (inp_W - 1);
-        iyf = ((iy + 1.f) / 2) * (inp_H - 1);
+        ix = ((ix + 1.f) / 2) * (inp_W - 1);
+        iy = ((iy + 1.f) / 2) * (inp_H - 1);
       } else {
         // normalize ix, iy from [-1, 1] to [-.5, SIZE - .5]
-        ixf = ((ix + 1.f) * inp_W - 1) / 2;
-        iyf = ((iy + 1.f) * inp_H - 1) / 2;
+        ix = ((ix + 1.f) * inp_W - 1) / 2;
+        iy = ((iy + 1.f) * inp_H - 1) / 2;
       }
 
       if (padding_mode == GridSamplerPadding::Border) {
         // clip coordinates to image borders
-        ixf = clip_coordinates(ixf, inp_W);
-        iyf = clip_coordinates(iyf, inp_H);
+        ix = clip_coordinates(ix, inp_W);
+        iy = clip_coordinates(iy, inp_H);
       } else if (padding_mode == GridSamplerPadding::Reflection) {
         // reflect coordinates by image borders
         if (align_corners) {
-          ixf = reflect_coordinates(ixf, 0, 2*(inp_W - 1));
-          iyf = reflect_coordinates(iyf, 0, 2*(inp_H - 1));
+          ix = reflect_coordinates(ix, 0, 2*(inp_W - 1));
+          iy = reflect_coordinates(iy, 0, 2*(inp_H - 1));
         } else {
-          ixf = reflect_coordinates(ixf, -1, 2*inp_W - 1);
-          iyf = reflect_coordinates(iyf, -1, 2*inp_H - 1);
+          ix = reflect_coordinates(ix, -1, 2*inp_W - 1);
+          iy = reflect_coordinates(iy, -1, 2*inp_H - 1);
           // when align_corners=False, reflection does not auto clip coords
-          ixf = clip_coordinates(ixf, inp_W);
-          iyf = clip_coordinates(iyf, inp_H);
+          ix = clip_coordinates(ix, inp_W);
+          iy = clip_coordinates(iy, inp_H);
         }
       }
 
-      ix = static_cast<scalar_t>(ixf);
-      iy = static_cast<scalar_t>(iyf);
-
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get NE, NW, SE, SW pixel values from (x, y)
-        int ix_nw = static_cast<int>(::floor(ixf));
-        int iy_nw = static_cast<int>(::floor(iyf));
+        int ix_nw = static_cast<int>(::floor(ix));
+        int iy_nw = static_cast<int>(::floor(iy));
         int ix_ne = ix_nw + 1;
         int iy_ne = iy_nw;
         int ix_sw = ix_nw;
@@ -234,8 +231,8 @@ namespace {
           }
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        int ix_nearest = static_cast<int>(::round(ixf));
-        int iy_nearest = static_cast<int>(::round(iyf));
+        int ix_nearest = static_cast<int>(::round(ix));
+        int iy_nearest = static_cast<int>(::round(iy));
 
         // assign nearest neighor pixel value to output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
@@ -297,48 +294,41 @@ namespace {
       scalar_t iy = grid.data[grid_offset + grid_sCoor];
       scalar_t iz = grid.data[grid_offset + 2 * grid_sCoor];
 
-      float ixf;
-      float iyf;
-      float izf;
       if (align_corners) {
         // normalize ix, iy, iz from [-1, 1] to [0, SIZE - 1]
-        ixf = ((ix + 1.f) / 2) * (inp_W - 1);
-        iyf = ((iy + 1.f) / 2) * (inp_H - 1);
-        izf = ((iz + 1.f) / 2) * (inp_D - 1);
+        ix = ((ix + 1.f) / 2) * (inp_W - 1);
+        iy = ((iy + 1.f) / 2) * (inp_H - 1);
+        iz = ((iz + 1.f) / 2) * (inp_D - 1);
       } else {
         // normalize ix, iy, iz from [-1, 1] to [-.5, SIZE - .5]
-        ixf = ((ix + 1.f) * inp_W - 1) / 2;
-        iyf = ((iy + 1.f) * inp_H - 1) / 2;
-        izf = ((iz + 1.f) * inp_D - 1) / 2;
+        ix = ((ix + 1.f) * inp_W - 1) / 2;
+        iy = ((iy + 1.f) * inp_H - 1) / 2;
+        iz = ((iz + 1.f) * inp_D - 1) / 2;
       }
 
       if (padding_mode == GridSamplerPadding::Border) {
         // clip coordinates to image borders
-        ixf = clip_coordinates(ixf, inp_W);
-        iyf = clip_coordinates(iyf, inp_H);
-        izf = clip_coordinates(izf, inp_D);
+        ix = clip_coordinates(ix, inp_W);
+        iy = clip_coordinates(iy, inp_H);
+        iz = clip_coordinates(iz, inp_D);
       } else if (padding_mode == GridSamplerPadding::Reflection) {
         // reflect coordinates by image borders
         if (align_corners) {
-          ixf = reflect_coordinates(ixf, 0, 2*(inp_W - 1));
-          iyf = reflect_coordinates(iyf, 0, 2*(inp_H - 1));
-          izf = reflect_coordinates(izf, 0, 2*(inp_D - 1));
+          ix = reflect_coordinates(ix, 0, 2*(inp_W - 1));
+          iy = reflect_coordinates(iy, 0, 2*(inp_H - 1));
+          iz = reflect_coordinates(iz, 0, 2*(inp_D - 1));
         } else {
-          ixf = reflect_coordinates(ixf, -1, 2*inp_W - 1);
-          iyf = reflect_coordinates(iyf, -1, 2*inp_H - 1);
-          izf = reflect_coordinates(izf, -1, 2*inp_D - 1);
+          ix = reflect_coordinates(ix, -1, 2*inp_W - 1);
+          iy = reflect_coordinates(iy, -1, 2*inp_H - 1);
+          iz = reflect_coordinates(iz, -1, 2*inp_D - 1);
           // when align_corners=False, reflection does not auto clip coords
-          ixf = clip_coordinates(ixf, inp_W);
-          iyf = clip_coordinates(iyf, inp_H);
-          izf = clip_coordinates(izf, inp_D);
+          ix = clip_coordinates(ix, inp_W);
+          iy = clip_coordinates(iy, inp_H);
+          iz = clip_coordinates(iz, inp_D);
         }
       }
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
-        ix = static_cast<scalar_t>(ixf);
-        iy = static_cast<scalar_t>(iyf);
-        iz = static_cast<scalar_t>(izf);
-
         // get corner pixel values from (x, y, z)
         // for 4d, we used north-east-south-west
         // for 5d, we add top-bottom
@@ -418,9 +408,9 @@ namespace {
           }
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        int ix_nearest = static_cast<int>(::round(ixf));
-        int iy_nearest = static_cast<int>(::round(iyf));
-        int iz_nearest = static_cast<int>(::round(izf));
+        int ix_nearest = static_cast<int>(::round(ix));
+        int iy_nearest = static_cast<int>(::round(iy));
+        int iz_nearest = static_cast<int>(::round(iz));
 
         // assign nearest neighor pixel value to output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
@@ -482,16 +472,14 @@ namespace {
       scalar_t ix = grid.data[grid_offset];
       scalar_t iy = grid.data[grid_offset + grid_sCoor];
 
-      float ixf;
-      float iyf;
       if (align_corners) {
         // normalize ix, iy from [-1, 1] to [0, SIZE - 1]
-        ixf = ((ix + 1.f) / 2) * (inp_W - 1);
-        iyf = ((iy + 1.f) / 2) * (inp_H - 1);
+        ix = ((ix + 1.f) / 2) * (inp_W - 1);
+        iy = ((iy + 1.f) / 2) * (inp_H - 1);
       } else {
         // normalize ix, iy from [-1, 1] to [-.5, SIZE - .5]
-        ixf = ((ix + 1.f) * inp_W - 1) / 2;
-        iyf = ((iy + 1.f) * inp_H - 1) / 2;
+        ix = ((ix + 1.f) * inp_W - 1) / 2;
+        iy = ((iy + 1.f) * inp_H - 1) / 2;
       }
 
       // multipliers for gradients on ix and iy
@@ -499,19 +487,19 @@ namespace {
       scalar_t gix_mult, giy_mult;
       if (padding_mode == GridSamplerPadding::Border) {
         // clip coordinates to image borders
-        ixf = clip_coordinates_set_grad(ixf, inp_W, &gix_mult);
-        iyf = clip_coordinates_set_grad(iyf, inp_H, &giy_mult);
+        ix = clip_coordinates_set_grad(ix, inp_W, &gix_mult);
+        iy = clip_coordinates_set_grad(iy, inp_H, &giy_mult);
       } else if (padding_mode == GridSamplerPadding::Reflection) {
         // reflect coordinates by image borders
         if (align_corners) {
-          ixf = reflect_coordinates_set_grad(ixf, 0, 2*(inp_W - 1), &gix_mult);
-          iyf = reflect_coordinates_set_grad(iyf, 0, 2*(inp_H - 1), &giy_mult);
+          ix = reflect_coordinates_set_grad(ix, 0, 2*(inp_W - 1), &gix_mult);
+          iy = reflect_coordinates_set_grad(iy, 0, 2*(inp_H - 1), &giy_mult);
         } else {
           scalar_t gix_refl, giy_refl;
-          ixf = reflect_coordinates_set_grad(ixf, -1, 2*inp_W - 1, &gix_refl);
-          iyf = reflect_coordinates_set_grad(iyf, -1, 2*inp_H - 1, &giy_refl);
-          ixf = clip_coordinates_set_grad(ixf, inp_W, &gix_mult);
-          iyf = clip_coordinates_set_grad(iyf, inp_H, &giy_mult);
+          ix = reflect_coordinates_set_grad(ix, -1, 2*inp_W - 1, &gix_refl);
+          iy = reflect_coordinates_set_grad(iy, -1, 2*inp_H - 1, &giy_refl);
+          ix = clip_coordinates_set_grad(ix, inp_W, &gix_mult);
+          iy = clip_coordinates_set_grad(iy, inp_H, &giy_mult);
           gix_mult = gix_mult * gix_refl;
           giy_mult = giy_mult * giy_refl;
         }
@@ -521,12 +509,9 @@ namespace {
       }
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
-        ix = static_cast<scalar_t>(ixf);
-        iy = static_cast<scalar_t>(iyf);
-
         // get NE, NW, SE, SW pixel values from (x, y)
-        int ix_nw = static_cast<int>(::floor(ixf));
-        int iy_nw = static_cast<int>(::floor(iyf));
+        int ix_nw = static_cast<int>(::floor(ix));
+        int iy_nw = static_cast<int>(::floor(iy));
         int ix_ne = ix_nw + 1;
         int iy_ne = iy_nw;
         int ix_sw = ix_nw;
@@ -593,8 +578,8 @@ namespace {
         gGrid_ptr_NHW[0] = gix_mult * gix;
         gGrid_ptr_NHW[1] = giy_mult * giy;
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        int ix_nearest = static_cast<int>(::round(ixf));
-        int iy_nearest = static_cast<int>(::round(iyf));
+        int ix_nearest = static_cast<int>(::round(ix));
+        int iy_nearest = static_cast<int>(::round(iy));
 
         // assign nearest neighor pixel value to output pixel
         scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
@@ -669,19 +654,16 @@ namespace {
       scalar_t iy = grid.data[grid_offset + grid_sCoor];
       scalar_t iz = grid.data[grid_offset + 2 * grid_sCoor];
 
-      float ixf;
-      float iyf;
-      float izf;
       if (align_corners) {
         // normalize ix, iy, iz from [-1, 1] to [0, SIZE - 1]
-        ixf = ((ix + 1.f) / 2) * (inp_W - 1);
-        iyf = ((iy + 1.f) / 2) * (inp_H - 1);
-        izf = ((iz + 1.f) / 2) * (inp_D - 1);
+        ix = ((ix + 1.f) / 2) * (inp_W - 1);
+        iy = ((iy + 1.f) / 2) * (inp_H - 1);
+        iz = ((iz + 1.f) / 2) * (inp_D - 1);
       } else {
         // normalize ix, iy, iz from [-1, 1] to [-.5, SIZE - .5]
-        ixf = ((ix + 1.f) * inp_W - 1) / 2;
-        iyf = ((iy + 1.f) * inp_H - 1) / 2;
-        izf = ((iz + 1.f) * inp_D - 1) / 2;
+        ix = ((ix + 1.f) * inp_W - 1) / 2;
+        iy = ((iy + 1.f) * inp_H - 1) / 2;
+        iz = ((iz + 1.f) * inp_D - 1) / 2;
       }
 
       // multipliers for gradients on ix, iy, and iz
@@ -689,23 +671,23 @@ namespace {
       scalar_t gix_mult, giy_mult, giz_mult;
       if (padding_mode == GridSamplerPadding::Border) {
         // clip coordinates to image borders
-        ixf = clip_coordinates_set_grad(ixf, inp_W, &gix_mult);
-        iyf = clip_coordinates_set_grad(iyf, inp_H, &giy_mult);
-        izf = clip_coordinates_set_grad(izf, inp_D, &giz_mult);
+        ix = clip_coordinates_set_grad(ix, inp_W, &gix_mult);
+        iy = clip_coordinates_set_grad(iy, inp_H, &giy_mult);
+        iz = clip_coordinates_set_grad(iz, inp_D, &giz_mult);
       } else if (padding_mode == GridSamplerPadding::Reflection) {
         // reflect coordinates by image borders
         if (align_corners) {
-          ixf = reflect_coordinates_set_grad(ixf, 0, 2*(inp_W - 1), &gix_mult);
-          iyf = reflect_coordinates_set_grad(iyf, 0, 2*(inp_H - 1), &giy_mult);
-          izf = reflect_coordinates_set_grad(izf, 0, 2*(inp_D - 1), &giz_mult);
+          ix = reflect_coordinates_set_grad(ix, 0, 2*(inp_W - 1), &gix_mult);
+          iy = reflect_coordinates_set_grad(iy, 0, 2*(inp_H - 1), &giy_mult);
+          iz = reflect_coordinates_set_grad(iz, 0, 2*(inp_D - 1), &giz_mult);
         } else {
           scalar_t gix_refl, giy_refl, giz_refl;
-          ixf = reflect_coordinates_set_grad(ixf, -1, 2*inp_W - 1, &gix_refl);
-          iyf = reflect_coordinates_set_grad(iyf, -1, 2*inp_H - 1, &giy_refl);
-          izf = reflect_coordinates_set_grad(izf, -1, 2*inp_D - 1, &giz_refl);
-          ixf = clip_coordinates_set_grad(ixf, inp_W, &gix_mult);
-          iyf = clip_coordinates_set_grad(iyf, inp_H, &giy_mult);
-          izf = clip_coordinates_set_grad(izf, inp_D, &giz_mult);
+          ix = reflect_coordinates_set_grad(ix, -1, 2*inp_W - 1, &gix_refl);
+          iy = reflect_coordinates_set_grad(iy, -1, 2*inp_H - 1, &giy_refl);
+          iz = reflect_coordinates_set_grad(iz, -1, 2*inp_D - 1, &giz_refl);
+          ix = clip_coordinates_set_grad(ix, inp_W, &gix_mult);
+          iy = clip_coordinates_set_grad(iy, inp_H, &giy_mult);
+          iz = clip_coordinates_set_grad(iz, inp_D, &giz_mult);
           gix_mult = gix_mult * gix_refl;
           giy_mult = giy_mult * giy_refl;
           giz_mult = giz_mult * giz_refl;
@@ -717,10 +699,6 @@ namespace {
       }
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
-        ix = static_cast<scalar_t>(ixf);
-        iy = static_cast<scalar_t>(iyf);
-        iz = static_cast<scalar_t>(izf);
-
         // get corner pixel values from (x, y, z)
         // for 4d, we used north-east-south-west
         // for 5d, we add top-bottom
@@ -855,9 +833,9 @@ namespace {
         gGrid_ptr_NDHW[1] = giy_mult * giy;
         gGrid_ptr_NDHW[2] = giz_mult * giz;
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        int ix_nearest = static_cast<int>(::round(ixf));
-        int iy_nearest = static_cast<int>(::round(iyf));
-        int iz_nearest = static_cast<int>(::round(izf));
+        int ix_nearest = static_cast<int>(::round(ix));
+        int iy_nearest = static_cast<int>(::round(iy));
+        int iz_nearest = static_cast<int>(::round(iz));
 
         // assign nearest neighor pixel value to output pixel
         scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
