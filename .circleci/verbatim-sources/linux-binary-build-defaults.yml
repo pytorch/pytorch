@@ -7,8 +7,8 @@ binary_linux_build: &binary_linux_build
   # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
   - attach_workspace:
       at: ~/workspace
-  # - run:
-  #     <<: *should_run_job
+  - run:
+      <<: *should_run_job
   - run:
       <<: *binary_checkout
   - run:
@@ -22,10 +22,9 @@ binary_linux_build: &binary_linux_build
         if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
           retry yum -q -y install epel-release
           retry yum -q -y install expect moreutils
-          retry yum -q -y install zip openssl
         elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
           retry apt-get update
-          retry apt-get -y install expect moreutils zip openssl
+          retry apt-get -y install expect moreutils
           conda install -y -c eumetsat expect
           conda install -y cmake
         fi
@@ -67,8 +66,8 @@ binary_linux_test: &binary_linux_test
   # TODO: We shouldn't attach the workspace multiple times
   - attach_workspace:
       at: /home/circleci/project
-  # - run:
-  #     <<: *should_run_job
+  - run:
+      <<: *should_run_job
   - run:
       <<: *setup_linux_system_environment
   - run:
