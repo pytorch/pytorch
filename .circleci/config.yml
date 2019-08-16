@@ -813,6 +813,21 @@ jobs:
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
+  binary_linux_manywheel_3.7m_cu100_devtoolset7_build:
+    environment:
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
+    docker:
+      - image: "soumith/manylinux-cuda100"
+    <<: *binary_linux_build
+
+  binary_linux_manywheel_3.7m_cu100_devtoolset7_test:
+    environment:
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *binary_linux_test
+
   pytorch_linux_xenial_py3_clang5_asan_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-asan-build
@@ -1651,13 +1666,6 @@ jobs:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.7m_cu100_devtoolset7_build:
-    environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
-    docker:
-      - image: "soumith/manylinux-cuda100"
-    <<: *binary_linux_build
-
   binary_linux_conda_2.7_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cpu devtoolset7"
@@ -2086,14 +2094,6 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.7m_cu100_devtoolset7_test:
-    environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *binary_linux_test
-
   binary_linux_conda_2.7_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cpu devtoolset7"
@@ -2473,11 +2473,6 @@ jobs:
   binary_linux_manywheel_3.6m_cu100_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset7"
-    <<: *binary_linux_upload
-
-  binary_linux_manywheel_3.7m_cu100_devtoolset7_upload:
-    environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
     <<: *binary_linux_upload
 
   binary_linux_conda_2.7_cpu_devtoolset7_upload:
@@ -4067,10 +4062,6 @@ workflows:
           requires:
             - setup
             - binary_linux_manywheel_3.6m_cu100_devtoolset7_build
-      - binary_linux_manywheel_3.7m_cu100_devtoolset7_test:
-          requires:
-            - setup
-            - binary_linux_manywheel_3.7m_cu100_devtoolset7_build
       - binary_linux_conda_2.7_cpu_devtoolset7_test:
           requires:
             - setup
@@ -4296,11 +4287,6 @@ workflows:
           requires:
             - setup
             - binary_linux_manywheel_3.6m_cu100_devtoolset7_test
-      - binary_linux_manywheel_3.7m_cu100_devtoolset7_upload:
-          context: org-member
-          requires:
-            - setup
-            - binary_linux_manywheel_3.7m_cu100_devtoolset7_test
       - binary_linux_conda_2.7_cpu_devtoolset7_upload:
           context: org-member
           requires:
