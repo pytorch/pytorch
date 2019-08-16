@@ -165,7 +165,7 @@ class ModuleAPITest(QuantizationTestCase):
         # Simple round-trip test to ensure weight()/set_weight() API
         self.assertEqual(qlinear.weight(), W_q)
         W_pack = qlinear._packed_weight
-        qlinear.bias = B_q if use_bias else None
+        qlinear.bias = B_q.dequantize() if use_bias else None
 
         qlinear.scale = float(scale)
         qlinear.zero_point = int(zero_point)
@@ -183,7 +183,7 @@ class ModuleAPITest(QuantizationTestCase):
         model_dict = qlinear.state_dict()
         self.assertEqual(model_dict['weight'], W_q)
         if use_bias:
-            self.assertEqual(model_dict['bias'], B_q)
+            self.assertEqual(model_dict['bias'], B_q.dequantize())
         with tempfile.TemporaryFile() as f:
             torch.save(model_dict, f)
             f.seek(0)
@@ -308,7 +308,8 @@ class ModuleAPITest(QuantizationTestCase):
         conv_under_test(qX)
 
         conv_under_test.set_weight(qw)
-        conv_under_test.bias = qb
+        float_bias = qb.dequantize() if qb is not None else None
+        conv_under_test.bias = float_bias
         conv_under_test.scale = scale
         conv_under_test.zero_point = zero_point
 
@@ -319,13 +320,13 @@ class ModuleAPITest(QuantizationTestCase):
 
         # Test properties
         self.assertEqual(qw, conv_under_test.weight())
-        self.assertEqual(qb, conv_under_test.bias)
+        self.assertEqual(float_bias, conv_under_test.bias)
         self.assertEqual(scale, conv_under_test.scale)
         self.assertEqual(zero_point, conv_under_test.zero_point)
 
         # Test forward
         result_under_test = conv_under_test(qX)
-        result_reference = qF.conv2d(qX, qw, bias=qb,
+        result_reference = qF.conv2d(qX, qw, bias=float_bias,
                                      scale=scale, zero_point=zero_point,
                                      stride=1, padding=0,
                                      dilation=1, groups=g, dtype=torch.quint8
@@ -349,7 +350,7 @@ class ModuleAPITest(QuantizationTestCase):
         model_dict = conv_under_test.state_dict()
         self.assertEqual(model_dict['weight'], qw)
         if use_bias:
-            self.assertEqual(model_dict['bias'], qb)
+            self.assertEqual(model_dict['bias'], qb.dequantize())
         with tempfile.NamedTemporaryFile() as f:
             torch.save(model_dict, f)
             f.seek(0)
