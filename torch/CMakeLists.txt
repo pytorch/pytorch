@@ -191,8 +191,8 @@ if (USE_CUDNN)
     # Basically, this is the case where $CUDA_HOME/lib64 has an old or
     # incompatible libcudnn.so, which we can inadvertently link to if
     # we're not careful.
-    list(INSERT 0 TORCH_PYTHON_LINK_LIBRARIES ${CUDNN_LIBRARY_PATH})
-    list(INSERT 0 TORCH_PYTHON_INCLUDE_DIRECTORIES ${CUDNN_INCLUDE_PATH})
+    list(INSERT 0 TORCH_PYTHON_LINK_LIBRARIES ${CUDNN_LIBRARY})
+    list(INSERT 0 TORCH_PYTHON_INCLUDE_DIRECTORIES ${CUDNN_INCLUDE_DIR})
 endif()
 
 if (USE_NUMPY)
