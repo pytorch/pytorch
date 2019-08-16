@@ -522,7 +522,30 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
     deserialized_storage_keys = []
     pending_tensors = []
 
-    tensor_data_pos = None
+    tensor_data_pos = []
+
+    def read_from_file(f, root_key, recursing=False):
+        # Read the tensor from the file if it hasn't alread been read,
+        # don't do anything if this tensor has already been loaded from the
+        # file
+        if root_key not in initialized_deserialized_objects:
+            # The tensor is the one that the file is curently pointing at
+            if deserialized_storage_keys[0] == root_key:
+                deserialized_objects[root_key]._set_from_file(f, tensor_data_pos[0], f_should_read_directly)
+                initialized_deserialized_objects.add(root_key)
+                deserialized_storage_keys.pop(0)
+                tensor_data_pos[0] = f.tell()
+
+
+                # Don't drop down more than 1 level of recursion
+                if not recursing:
+                    for pending_tensor_key in pending_tensors:
+                        read_from_file(f, pending_tensor_key, recursing=True)
+            else:
+                # If the tensor is not the one at `tensor_data_pos`, then
+                # we have to wait until all the tensors before it are read
+                # since this tensor's position is unknown
+                pending_tensors.append(root_key)
 
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
@@ -550,21 +573,7 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
             else:
                 result = storage
 
-            # Read the tensor from the file if it hasn't alread been read,
-            # don't do anything if this tensor has already been loaded from the
-            # file
-            if root_key not in initialized_deserialized_objects:
-                # The tensor is the one that the file is curently pointing at
-                if deserialized_storage_keys[0] == root_key:
-                    deserialized_objects[root_key]._set_from_file(f, tensor_data_pos, f_should_read_directly)
-                    initialized_deserialized_objects.add(root_key)
-                else:
-                    # If the tensor is not the one at `tensor_data_pos`, then
-                    # we have to wait until all the tensors before it are read
-                    # since this tensor's position is unknown
-                    pending_tensors = root_key
-                    pass
-
+            read_from_file(f, root_key)
             return result
         else:
             raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
@@ -596,15 +605,14 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
     # Read through the data pickle without actually loading anything, just
     # continue through it until a STOP opcode
     data_start = f.tell()
-    [x for x in pickletools.genops(f)]
-
+    [_ for _ in pickletools.genops(f)]
 
     deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
 
-    tensor_data_pos = f.tell()
+    # Store where the tensor data begins in the file
+    tensor_data_pos = [f.tell()]
 
-    offset = f.tell() if f_should_read_directly else None
-
+    # Go back to the start of the data pickle and read it in
     f.seek(data_start)
     unpickler = pickle_module.Unpickler(f, **pickle_load_args)
     unpickler.persistent_load = persistent_load
