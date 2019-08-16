@@ -227,6 +227,14 @@ inline Tensor & Tensor::logical_and_(const Tensor & other) const {
     static auto table = globalATenDispatch().getOpTable("aten::logical_and_(Tensor(a!) self, Tensor other) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other);
 }
+inline Tensor Tensor::logical_or(const Tensor & other) const {
+    static auto table = globalATenDispatch().getOpTable("aten::logical_or(Tensor self, Tensor other) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other);
+}
+inline Tensor & Tensor::logical_or_(const Tensor & other) const {
+    static auto table = globalATenDispatch().getOpTable("aten::logical_or_(Tensor(a!) self, Tensor other) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other);
+}
 inline Tensor Tensor::logical_xor(const Tensor & other) const {
     static auto table = globalATenDispatch().getOpTable("aten::logical_xor(Tensor self, Tensor other) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other);

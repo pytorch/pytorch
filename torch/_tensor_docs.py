@@ -530,6 +530,20 @@ logical_and_() -> Tensor
 In-place version of :meth:`~Tensor.logical_and`
 """)
 
+add_docstr_all('logical_or',
+               r"""
+logical_or() -> Tensor
+
+See :func:`torch.logical_or`
+""")
+
+add_docstr_all('logical_or_',
+               r"""
+logical_or_() -> Tensor
+
+In-place version of :meth:`~Tensor.logical_or`
+""")
+
 add_docstr_all('logical_xor',
                r"""
 logical_xor() -> Tensor

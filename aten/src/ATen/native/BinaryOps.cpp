@@ -216,6 +216,7 @@ Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
 // ~~~~~~~~~~~~~ Binary logical operators BEGIN ~~~~~~~~~~~~~~~~~
 
 DEFINE_DISPATCH(logical_and_stub);
+DEFINE_DISPATCH(logical_or_stub);
 DEFINE_DISPATCH(logical_xor_stub);
 
 template <typename Stub>
@@ -252,6 +253,18 @@ Tensor logical_and(const Tensor& self, const Tensor& other) {
 
 Tensor& logical_and_(Tensor& self, const Tensor& other) {
   return logical_binary__impl(self, other, logical_and_stub);
+}
+
+Tensor& logical_or_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return logical_binary_out_impl(result, self, other, logical_or_stub);
+}
+
+Tensor logical_or(const Tensor& self, const Tensor& other) {
+  return logical_binary_impl(self, other, logical_or_stub);
+}
+
+Tensor& logical_or_(Tensor& self, const Tensor& other) {
+  return logical_binary__impl(self, other, logical_or_stub);
 }
 
 Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {

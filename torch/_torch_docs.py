@@ -2588,6 +2588,32 @@ Example::
     tensor([0, 0, 1, 0], dtype=torch.int8)
 """.format(**common_args))
 
+add_docstr(torch.logical_or,
+           r"""
+logical_or(input, other, out=None) -> Tensor
+
+Computes the element-wise logical OR of the given input tensors. Zeros are treated as ``False`` and nonzeros are
+treated as ``True``.
+
+Args:
+    {input}
+    other (Tensor): the tensor to compute OR with
+    {out}
+
+Example::
+
+    >>> torch.logical_or(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
+    tensor([  True, False,  True])
+    >>> a = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
+    >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
+    >>> torch.logical_or(a, b)
+    tensor([ True,  True,  True, False])
+    >>> torch.logical_or(a.double(), b)
+    tensor([ True,  True,  True, False])
+    >>> torch.logical_or(a, b, out=torch.empty(4, dtype=torch.int8))
+    tensor([1, 1, 1, 0], dtype=torch.int8)
+""".format(**common_args))
+
 add_docstr(torch.logical_xor,
            r"""
 logical_xor(input, other, out=None) -> Tensor

@@ -100,6 +100,10 @@ void logical_and_kernel(TensorIterator& iter) {
   logical_binary_kernel_impl(iter, "logical_and_cpu", [](bool a, bool b) -> bool { return a && b; });
 }
 
+void logical_or_kernel(TensorIterator& iter) {
+  logical_binary_kernel_impl(iter, "logical_or_cpu", [](bool a, bool b) -> bool { return a || b; });
+}
+
 void logical_xor_kernel(TensorIterator& iter) {
   logical_binary_kernel_impl(iter, "logical_xor_cpu", [](bool a, bool b) -> bool { return a != b; });
 }
@@ -113,6 +117,7 @@ REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel);
+REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
 
 }} // namespace at::native

@@ -107,14 +107,14 @@ A detailed explanation on this file can be found [here](https://github.com/pytor
 **If adding to an existing entry in the `native_functions.yaml`:**
 
 If you find an entry in the yaml file, and would like to add a quantized kernel to it, you can just add a new dispatch entry for it.
-For example, let's assume there existed a `logical_and` function in the YAML file.
+Let's take the `logical_and` function in the YAML file as an example.
 In that case, modification would look as:
 
 ```yaml
 - func: logical_and(Tensor a, Tensor b) -> Tensor
+  variants: function, method
+  named_guard: False
   dispatch:
-    CPU: _logical_and_cpu    # Assume this existed
-    CUDA: _logical_and_cuda  # Assume this existed
     QuantizedCPU: quantized_and  # We add this line
 ```
 

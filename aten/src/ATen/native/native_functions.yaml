@@ -420,6 +420,20 @@
     CUDA: logical_and_out
   named_guard: False
 
+- func: logical_or(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: logical_or_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  named_guard: False
+
+- func: logical_or.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: logical_or_out
+    CUDA: logical_or_out
+  named_guard: False
+
 - func: logical_xor(Tensor self, Tensor other) -> Tensor
   variants: function, method
   named_guard: False
