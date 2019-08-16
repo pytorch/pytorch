@@ -94,39 +94,13 @@ endif()
 
 # Find cuDNN.
 if(CAFFE2_STATIC_LINK_CUDA)
-  SET(CUDNN_LIBNAME "libcudnn_static.a")
+  set(CUDNN_STATIC ON)
 else()
-  SET(CUDNN_LIBNAME "cudnn")
-endif()
-include(FindPackageHandleStandardArgs)
-
-if(DEFINED ENV{CUDNN_ROOT_DIR})
-  set(CUDNN_ROOT_DIR $ENV{CUDNN_ROOT_DIR} CACHE PATH "Folder contains NVIDIA cuDNN")
-else()
-  set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
+  set(CUDNN_STATIC OFF)
 endif()
 
-if(DEFINED ENV{CUDNN_INCLUDE_DIR})
-  set(CUDNN_INCLUDE_DIR $ENV{CUDNN_INCLUDE_DIR})
-else()
-  find_path(CUDNN_INCLUDE_DIR cudnn.h
-    HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES cuda/include include)
-endif()
+find_package(CUDNN)
 
-if(DEFINED ENV{CUDNN_LIBRARY})
-  set(CUDNN_LIBRARY $ENV{CUDNN_LIBRARY})
-  if (CUDNN_LIBRARY MATCHES ".*cudnn_static.a")
-    SET(CUDNN_STATIC_LINKAGE ON)
-  endif()
-else()
-  find_library(CUDNN_LIBRARY ${CUDNN_LIBNAME}
-    HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64)
-endif()
-
-find_package_handle_standard_args(
-    CUDNN DEFAULT_MSG CUDNN_INCLUDE_DIR CUDNN_LIBRARY)
 if(NOT CUDNN_FOUND)
   message(WARNING
     "Caffe2: Cannot find cuDNN library. Turning the option off")
@@ -155,7 +129,7 @@ endif()
 # ---[ Extract versions
 if(CAFFE2_USE_CUDNN)
   # Get cuDNN version
-  file(READ ${CUDNN_INCLUDE_DIR}/cudnn.h CUDNN_HEADER_CONTENTS)
+  file(READ ${CUDNN_INCLUDE_PATH}/cudnn.h CUDNN_HEADER_CONTENTS)
   string(REGEX MATCH "define CUDNN_MAJOR * +([0-9]+)"
                CUDNN_VERSION_MAJOR "${CUDNN_HEADER_CONTENTS}")
   string(REGEX REPLACE "define CUDNN_MAJOR * +([0-9]+)" "\\1"
@@ -175,7 +149,7 @@ if(CAFFE2_USE_CUDNN)
     set(CUDNN_VERSION
         "${CUDNN_VERSION_MAJOR}.${CUDNN_VERSION_MINOR}.${CUDNN_VERSION_PATCH}")
   endif()
-  message(STATUS "Found cuDNN: v${CUDNN_VERSION}  (include: ${CUDNN_INCLUDE_DIR}, library: ${CUDNN_LIBRARY})")
+  message(STATUS "Found cuDNN: v${CUDNN_VERSION}  (include: ${CUDNN_INCLUDE_PATH}, library: ${CUDNN_LIBRARY_PATH})")
   if(CUDNN_VERSION VERSION_LESS "7.0.0")
     message(FATAL_ERROR "PyTorch requires cuDNN 7 and above.")
   endif()
@@ -232,10 +206,10 @@ if(CAFFE2_USE_CUDNN)
   add_library(caffe2::cudnn UNKNOWN IMPORTED)
   set_property(
       TARGET caffe2::cudnn PROPERTY IMPORTED_LOCATION
-      ${CUDNN_LIBRARY})
+      ${CUDNN_LIBRARY_PATH})
   set_property(
       TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-      ${CUDNN_INCLUDE_DIR})
+      ${CUDNN_INCLUDE_PATH})
 endif()
 
 # curand
