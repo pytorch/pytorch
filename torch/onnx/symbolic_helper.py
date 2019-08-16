@@ -44,17 +44,11 @@ from functools import wraps
 #                                       contained in TensorTyper. This adds a sizes()
 #                                       method which can be used to retrieve the
 #                                       concrete sizes.
-# @deprecated
-# CompleteTensorType <: TensorType - Denotes a Tensor for which we know the
-#                                               concrete sizes in addition to the information
-#                                               contained in TensorTyper. This adds a sizes()
-#                                               method which can be used to retrieve the
-#                                               concrete sizes.
 #
 # In general, we should prefer to rely on the least specific information possible.
 # For example, not relying on tensor properties at all is better than relying
 # on the number of dimensions which is better than relying on
-# concrete shapes (CompleteTensorType). Doing so will make the export symbolics
+# concrete shapes. Doing so will make the export symbolics
 # more robust to different graphs.
 
 # ---------------------------------------------------------------------------------
@@ -237,7 +231,7 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 
 _default_onnx_opset_version = 9
 _onnx_master_opset = 10
-_onnx_stable_opsets = [7, 8, 9, 10]
+_onnx_stable_opsets = [7, 8, 9, 10, 11]
 _export_onnx_opset_version = _default_onnx_opset_version
 
 
