@@ -31,7 +31,7 @@ Message ScriptCall::toMessage() {
 
     // TODO: replace this with a real overload_name when FunctionSchema supports
     // that.
-    ivalues.push_back(toString((*op_)->schema()));
+    ivalues.emplace_back(toString((*op_)->schema()));
     // insert qualified name
     auto opName = (*op_)->schema().name();
     TORCH_CHECK(opName.find("::") == opName.rfind("::") &&
