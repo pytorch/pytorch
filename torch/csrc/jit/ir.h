@@ -22,7 +22,6 @@
 #include <iostream>
 #include <unordered_set>
 #include <utility>
-#include <utility>
 #include <vector>
 
 // Forward declare, the real meat is in python_ir.cpp

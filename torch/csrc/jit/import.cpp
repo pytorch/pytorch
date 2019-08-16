@@ -26,7 +26,6 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
-#include <utility>
 #include <vector>
 
 namespace torch {
@@ -62,7 +61,7 @@ class ScriptModuleDeserializer final {
   ScriptModuleDeserializer(
       std::shared_ptr<script::CompilationUnit> cu,
       std::unique_ptr<PyTorchStreamReader> reader)
-      : compilation_unit_(std::move(std::move(cu))),
+      : compilation_unit_(std::move(cu)),
         reader_(std::move(reader)) {}
 
   script::Module deserialize(

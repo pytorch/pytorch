@@ -508,7 +508,7 @@ void initJITBindings(PyObject* module) {
     c10::intrusive_ptr<c10::ivalue::Future> fut;
   };
 
-  py::class_<PythonFutureWrapper> give_me_a_name(m, "Future");
+  py::class_<PythonFutureWrapper> future(m, "Future");
 
   m.def("fork", [](py::args args) {
     AT_ASSERT(args.size() >= 1);

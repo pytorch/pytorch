@@ -26,7 +26,6 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
-#include <utility>
 #include <vector>
 
 // This file contains classes which assist in desugaring Python style

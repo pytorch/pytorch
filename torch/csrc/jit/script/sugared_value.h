@@ -3,7 +3,6 @@
 #include <memory>
 #include <string>
 #include <utility>
-#include <utility>
 
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/error_report.h>
@@ -513,7 +512,7 @@ struct TORCH_API IterableTree : SugaredValue {
 //   Foo.__new__(Foo)
 // Foo is a ClassValue, calling `attr("__new__")` will return a ClassNewMethod.
 struct TORCH_API ClassNewMethod : public SugaredValue {
-  ClassNewMethod(ClassTypePtr type) : type_(std::move(std::move(type))) {}
+  ClassNewMethod(ClassTypePtr type) : type_(std::move(type)) {}
   std::string kind() const override {
     return "class.__new__";
   }
