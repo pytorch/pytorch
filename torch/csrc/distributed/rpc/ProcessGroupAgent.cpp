@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/ProcessGroupAgent.h>
+#include <Python.h>
 
 namespace torch {
 namespace distributed {
@@ -77,6 +78,7 @@ ProcessGroupAgent::ProcessGroupAgent(
   for (auto& entry : nameMap_) {
     names_[entry.second] = entry.first;
   }
+  PythonRpcHandler::init();
   sendThread_ = std::thread(&ProcessGroupAgent::sendLoop, this);
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
