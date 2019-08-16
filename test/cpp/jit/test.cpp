@@ -124,7 +124,9 @@ TH_FORALL_TESTS_CUDA(JIT_GTEST_CUDA)
 #endif
 
 #define JIT_TEST(name) test##name();
-TORCH_API void runJITCPPTests(bool runCuda) {
+// Separate definition from declaration because of MSVC C2491
+TORCH_API void runJITCPPTests(bool runCuda);
+void runJitCPPTests(bool runCuda) {
   TH_FORALL_TESTS(JIT_TEST)
   if (runCuda) {
     TH_FORALL_TESTS_CUDA(JIT_TEST)
