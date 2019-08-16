@@ -63,17 +63,17 @@ class ObserverBase(ABC, nn.Module):
         else:
             if self.qscheme == torch.per_tensor_symmetric:
                 max_val = max(-min_val, max_val)
-                scale = max_val / 127.0
+                scale = max_val / ((qmax - qmin) / 2)
                 scale = max(scale, torch.finfo(torch.float32).eps)
                 zero_point = 0 if self.dtype == torch.qint8 else 128
             else:
-                scale = (max_val - min_val) / n_levels
+                scale = (max_val - min_val) / (qmax - qmin)
                 scale = max(scale, torch.finfo(torch.float32).eps)
                 zero_point = qmin - round(min_val / scale)
                 zero_point = max(qmin, zero_point)
                 zero_point = min(qmax, zero_point)
 
-        return torch.tensor([scale, zero_point])
+        return torch.tensor([scale]), torch.tensor([zero_point])
 
 
 class MinMaxObserver(ObserverBase):

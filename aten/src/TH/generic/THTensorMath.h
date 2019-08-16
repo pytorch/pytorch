@@ -7,7 +7,7 @@
 
 TH_API void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor);
 
-#if !defined(TH_REAL_IS_HALF) && !defined(TH_REAL_IS_BFLOAT16)
+#if !defined(TH_REAL_IS_HALF)
 
 TH_API void THTensor_(ltValue)(THBoolTensor *r_, THTensor* t, scalar_t value);
 TH_API void THTensor_(leValue)(THBoolTensor *r_, THTensor* t, scalar_t value);
@@ -51,11 +51,19 @@ TH_API void THTensor_(geTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb
 TH_API void THTensor_(neTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(eqTensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb);
 
-TH_API accreal THTensor_(sumall)(THTensor *t);
-TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
-
 TH_API void THTensor_(maskedSelect)(THTensor *tensor, THTensor* src, THByteTensor *mask);
 TH_API void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor* src, THBoolTensor *mask);
+TH_API void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value);
+TH_API void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t value);
+TH_API void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src);
+TH_API void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* src);
+
+TH_API ptrdiff_t THTensor_(numel)(THTensor *t);
+
+#if !defined(TH_REAL_IS_BFLOAT16)
+
+TH_API accreal THTensor_(sumall)(THTensor *t);
+TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
 
 TH_API void THTensor_(bitand)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src);
@@ -66,7 +74,6 @@ TH_API void THTensor_(cbitxor)(THTensor *r_, THTensor *t, THTensor *src);
 
 TH_API void THTensor_(sign)(THTensor *r_, THTensor *t);
 
-TH_API ptrdiff_t THTensor_(numel)(THTensor *t);
 void THTensor_(preserveReduceDimSemantics)(THTensor *r_, int in_dims, int reduce_dimension, int keepdim);
 
 TH_API void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
@@ -89,11 +96,6 @@ TH_API void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTe
 TH_API void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
 TH_API void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
 TH_API void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val);
-
-TH_API void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value);
-TH_API void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src);
-TH_API void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t value);
-TH_API void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* src);
 
 TH_API void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension);
 TH_API void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension);
@@ -128,8 +130,6 @@ TH_API void THTensor_(clshift)(THTensor *r_, THTensor *t, THTensor *src);
 TH_API void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src);
 TH_API void THTensor_(cfmod)(THTensor *r_, THTensor *t, THTensor *src);
 TH_API void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src);
-
-TH_API void THTensor_(addcdiv)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src1, THTensor *src2);
 
 TH_API void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *mat,  THTensor *vec);
 TH_API void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *mat1, THTensor *mat2);
@@ -176,7 +176,6 @@ TH_API void THTensor_(asin)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(sinh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(tan)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(atan)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty);
 TH_API void THTensor_(tanh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erf)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erfc)(THTensor *r_, THTensor *t);
@@ -202,7 +201,7 @@ TH_API accreal THTensor_(varall)(THTensor *self, int biased);
 TH_API accreal THTensor_(stdall)(THTensor *self, int biased);
 TH_API accreal THTensor_(normall)(THTensor *t, scalar_t value);
 #endif
-
+#endif
 #endif
 #endif
 #endif

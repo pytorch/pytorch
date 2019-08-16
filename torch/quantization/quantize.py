@@ -1,9 +1,17 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn as nn
+import torch.nn._intrinsic as nni
+import torch.nn._intrinsic.quantized as nniq
+import torch.nn._intrinsic.qat as nniqat
 import torch.nn.quantized as nnq
-import torch.nn.qat as qat
+import torch.nn.quantized.dynamic as nnqd
+from .QConfig import default_dynamic_qconfig
+import torch.nn.qat as nnqat
 
-def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix=''):
+
+DEFAULT_SKIP_LIST = [nn.Identity, nn.MaxPool2d]
+
+def propagate_qconfig_helper(module, qconfig_dict, skip_list=DEFAULT_SKIP_LIST, qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig`
 
     Args:
@@ -19,17 +27,29 @@ def propagate_qconfig_helper(module, qconfig_dict, qconfig_parent=None, prefix='
     Return:
         None, module is modified inplace with qconfig attached
     """
-    if not hasattr(module, 'qconfig'):
+    if type(module) in skip_list:
         module.qconfig = None
-        if qconfig_dict and prefix in qconfig_dict:
-            module.qconfig = qconfig_dict[prefix]
-        else:
-            module.qconfig = qconfig_parent
+    if not hasattr(module, 'qconfig'):
+        module.qconfig = qconfig_parent
+        if qconfig_dict:
+            if prefix in qconfig_dict:
+                module.qconfig = qconfig_dict[prefix]
+            elif type(module) in qconfig_dict:
+                module.qconfig = qconfig_dict[type(module)]
+
+    # Don't quantize empty Sequential, empty Sequential is same as
+    # Identity, but we can't put Sequential into skip list because
+    # we also have non-empty Sequential and the qconfig needs to
+    # be propagated to child in that case
+    # TODO: Add test
+    if len(module._modules) == 0 and type(module) == nn.Sequential:
+        module.qconfig = None
 
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
-        propagate_qconfig_helper(child, qconfig_dict, module.qconfig, module_prefix)
+        propagate_qconfig_helper(child, qconfig_dict, skip_list, module.qconfig, module_prefix)
 
+# TODO(jerryzh): expose skip_list
 def propagate_qconfig(module, qconfig_dict=None):
     r"""Propagate qconfig through the module hierarchy and assign `qconfig`
     attribute on each leaf module
@@ -53,9 +73,7 @@ def _observer_forward_hook(self, input, output):
     """
     return self.observer(output)
 
-DEFAULT_SKIP_LIST = [nn.Identity, nn.MaxPool2d]
-
-def add_observer(module, skip_list=DEFAULT_SKIP_LIST):
+def add_observer(module):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -70,12 +88,15 @@ def add_observer(module, skip_list=DEFAULT_SKIP_LIST):
             forward_hooks
     """
     for child in module.children():
-        add_observer(child)
+        if type(child) == nnq.FloatFunctional:
+            child.observer = child.qconfig.activation()
+        else:
+            add_observer(child)
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
-       len(module._modules) == 0 and type(module) not in skip_list:
+       len(module._modules) == 0:
         # observer and hook will be gone after we swap the module
         module.add_module('observer', module.qconfig.activation())
         module.register_forward_hook(_observer_forward_hook)
@@ -142,11 +163,6 @@ def prepare(model):
     add_observer(model)
     return model
 
-def prepare_qat(model):
-    model = prepare(model)
-    model = convert(model, DEFAULT_QAT_MODULE_MAPPING)
-    return model
-
 class QuantStub(nn.Module):
     r"""Quantize stub module, before calibration, this is same as an observer,
     it will be swapped as `nnq.Quantize` in `convert`.
@@ -175,7 +191,41 @@ class DeQuantStub(nn.Module):
     def forward(self, x):
         return x
 
-def quantize(model, run_fn, run_args):
+# Map for swapping float module to quantized ones
+DEFAULT_MODULE_MAPPING = {
+    nn.Linear: nnq.Linear,
+    nn.ReLU: nnq.ReLU,
+    nn.Conv2d: nnq.Conv2d,
+    QuantStub: nnq.Quantize,
+    DeQuantStub: nnq.DeQuantize,
+    # Intrinsic modules:
+    nni.ConvReLU2d: nniq.ConvReLU2d,
+    nni.LinearReLU: nniq.LinearReLU,
+    nniqat.ConvReLU2d: nniq.ConvReLU2d,
+    nniqat.LinearReLU: nniq.LinearReLU,
+    nniqat.ConvBn2d: nnq.Conv2d,
+    nniqat.ConvBnReLU2d: nniq.ConvReLU2d,
+    # QAT modules:
+    nnqat.Linear: nnq.Linear,
+    nnqat.Conv2d: nnq.Conv2d,
+}
+
+# Map for swapping float module to qat modules
+DEFAULT_QAT_MODULE_MAPPING = {
+    nn.Linear: nnqat.Linear,
+    nn.Conv2d: nnqat.Conv2d,
+    # Intrinsic modules:
+    nni.ConvBn2d: nniqat.ConvBn2d,
+    nni.ConvBnReLU2d: nniqat.ConvBnReLU2d,
+    nni.ConvReLU2d: nniqat.ConvReLU2d,
+    nni.LinearReLU: nniqat.LinearReLU
+}
+
+DEFAULT_DYNAMIC_MODULE_MAPPING = {
+    nn.Linear: nnqd.Linear
+}
+
+def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts a float model to quantized model.
 
     First it will prepare the model for calibration or training, then it calls
@@ -195,7 +245,24 @@ def quantize(model, run_fn, run_args):
     model.eval()
     model = prepare(model)
     run_fn(model, run_args)
-    convert(model)
+    convert(model, mapping)
+    return model
+
+DEFAULT_QCONFIG_DICT = {
+    nn.Linear : default_dynamic_qconfig
+}
+
+def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
+    r"""Converts a float model to dynamic quantized model. Do dynamic training and output a quantized model.
+    """
+    model.eval()
+    propagate_qconfig(model, qconfig_dict)
+    convert(model, mapping)
+    return model
+
+def prepare_qat(model):
+    model = prepare(model)
+    model = convert(model, DEFAULT_QAT_MODULE_MAPPING)
     return model
 
 def quantize_qat(model, run_fn, run_args):
@@ -206,26 +273,6 @@ def quantize_qat(model, run_fn, run_args):
     run_fn(model, run_args)
     convert(model)
     return model
-
-# Map for swapping float module to quantized ones
-DEFAULT_MODULE_MAPPING = {
-    nn.Linear: nnq.Linear,
-    nn.ReLU: nnq.ReLU,
-    nn.Conv2d: nnq.Conv2d,
-    QuantStub: nnq.Quantize,
-    DeQuantStub: nnq.DeQuantize,
-    # Generated modules:
-    nn.Add: nnq.Add,
-    # QAT modules:
-    qat.Linear: nnq.Linear,
-    qat.Conv2d: nnq.Conv2d,
-}
-
-# Map for swapping float module to qat modules
-DEFAULT_QAT_MODULE_MAPPING = {
-    nn.Linear: qat.Linear,
-    nn.Conv2d: qat.Conv2d,
-}
 
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts the float module with observers(where we can get quantization
@@ -240,6 +287,11 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING):
     module_swapped = swap_module(module, mapping)
 
     reassign = {}
+    # TODO(jerryzh): remove after deciding on the impl of
+    # intrinsic moudles
+    if type(module) in [nni.ConvBn2d, nni.ConvBnReLU2d, nni.LinearReLU, nni.ConvReLU2d]:
+        return module_swapped
+
     for name, mod in module.named_children():
         new_mod = convert(mod, mapping)
         if new_mod is not mod:
