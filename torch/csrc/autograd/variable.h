@@ -724,7 +724,10 @@ inline at::TensorImpl* Variable::get() const {
 
 /// This class is used to break reference cycles in AccumulateGrad::variable.
 struct TORCH_API WeakVariable final {
-  WeakVariable(const Variable& var) : ptr(var.getIntrusivePtr()) {}
+  WeakVariable(const Variable& var) : ptr(var.getIntrusivePtr()) {
+    TORCH_CHECK(var.is_variable() || !var.defined(),
+      "WeakVariable can only be constructed from Variables");
+  }
 
   Variable lock() {
     return ptr._unsafe_get_target() ? Variable(ptr.lock()) : Variable();
