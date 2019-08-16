@@ -31,7 +31,7 @@ Message ScriptCall::toMessage() {
 
     // TODO: replace this with a real overload_name when FunctionSchema supports
     // that.
-    ivalues.push_back(toString((*op_)->schema()));
+    ivalues.emplace_back(toString((*op_)->schema()));
     // insert qualified name
     auto opName = (*op_)->schema().name();
     TORCH_CHECK(opName.find("::") == opName.rfind("::") &&
@@ -39,7 +39,7 @@ Message ScriptCall::toMessage() {
                 "Unexpected operator name ", opName);
     // aten::add -> torch.ops.aten.add
     opName.replace(0, ATEN_PREFIX_.length(), BUILTIN_OP_NAMESPACE_);
-    ivalues.push_back(opName);
+    ivalues.emplace_back(std::move(opName));
   }
 
   std::vector<torch::Tensor> tensor_table;
