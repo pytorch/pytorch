@@ -3366,7 +3366,7 @@ def foo(x):
             return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(foobar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:20".format(lineno + 1)):
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:19".format(lineno + 1)):
             scripted = torch.jit.script(foobar)
 
     def test_file_line_error_class_defn(self):
@@ -3375,7 +3375,7 @@ def foo(x):
                 return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(FooBar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:24".format(lineno + 2)):
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:23".format(lineno + 2)):
             torch.jit.script(FooBar)
 
     def test_file_line_graph(self):
@@ -3385,7 +3385,7 @@ def foo(x):
         scripted = torch.jit.script(foobar)
 
         _, lineno = inspect.getsourcelines(foobar)
-        fc = FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))
+        fc = FileCheck().check('test_jit.py:{}:19'.format(lineno + 1))
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -3405,7 +3405,7 @@ def foo(x):
         bytesio = io.BytesIO(buffer)
         scripted = torch.jit.load(bytesio)
 
-        fc = FileCheck().check(':6:12')
+        fc = FileCheck().check(':6:11')
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -3415,7 +3415,7 @@ def foo(xyz):
     return torch.neg(xyz)
         ''')
 
-        fc = FileCheck().check('<string>:2:12')
+        fc = FileCheck().check('<string>:3:11')
         fc.run(scripted.foo.graph)
         fc.run(str(scripted.foo.graph))
 
