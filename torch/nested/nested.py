@@ -11,73 +11,6 @@ DEBUG = False
 # RFC: https://github.com/pytorch/pytorch/issues/22169
 
 
-orig_interpolate = F.interpolate
-
-
-def interpolate(*args, **kwargs):
-    if is_nested_tensor(args[0]):
-        # feat_shape = inner_lateral.shape[-2:]
-        # inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="nearest")
-        ret_list = []
-        input_ = args[0]
-        size = kwargs['size']
-        # TODO: Implement size parameter
-        for i in range(len(input_)):
-            ret = F.interpolate(input_._tensors[i].view((1,) + input_._tensors[i].size()),
-                                size=size[i],
-                                mode="nearest")
-            ret_list.append(ret.view(ret.size()[1:]))
-        return as_nested_tensor(ret_list)
-    else:
-        return orig_interpolate(*args, **kwargs)
-
-
-orig_max_pool2d = torch.max_pool2d
-
-
-def max_pool2d(*args, **kwargs):
-    if is_nested_tensor(args[0]):
-        ret = []
-        for tensor_ in args[0]._tensors:
-            tensor = tensor_.view(*((1,) + tensor_.size()))
-            args_ = (tensor,) + args[1:]
-            ret_ = orig_max_pool2d(*args_)
-            ret.append(ret_.view(*(ret_.size()[1:])))
-        return NestedTensor(ret)
-    else:
-        return orig_max_pool2d(*args, **kwargs)
-
-
-orig_conv2d = F.conv2d
-
-
-def conv2d(input, weight, bias, stride, padding, dilation, groups):
-    if is_nested_tensor(input):
-        ret = []
-        for tensor_ in input._tensors:
-            tensor = tensor_.view(*((1,) + tensor_.size()))
-            ret_ = orig_conv2d(tensor, weight, bias, stride,
-                               padding, dilation, groups)
-            ret.append(ret_.view(*(ret_.size()[1:])))
-        return NestedTensor(ret)
-    else:
-        return orig_conv2d(input, weight, bias, stride,
-                           padding, dilation, groups)
-
-
-orig_relu = F.relu
-
-
-def relu(input, inplace=False):
-    if is_nested_tensor(input):
-        ret = []
-        for tensor_ in input._tensors:
-            ret.append(orig_relu(tensor_, inplace))
-        return NestedTensor(ret)
-    else:
-        return orig_relu(input, inplace)
-
-
 orig_cat = torch.cat
 
 
@@ -266,11 +199,11 @@ def _verify_tensors(obj):
         is_pinned = tensors[0].is_pinned()
         for tensor in tensors:
             if not (dim == tensor.dim() and
-                    layout == tensor.layout
-                    and device == tensor.device
-                    and dtype == tensor.dtype
-                    and requires_grad == tensor.requires_grad
-                    and is_pinned == tensor.is_pinned()):
+                    layout == tensor.layout and
+                    device == tensor.device and
+                    dtype == tensor.dtype and
+                    requires_grad == tensor.requires_grad and
+                    is_pinned == tensor.is_pinned()):
                 raise ValueError("Each passed Tensor "
                                  "must match in dim, layout, "
                                  "device, dtype and requires_grad")
@@ -312,19 +245,6 @@ class NestedTensor(object):
             return (self._tensors[0]).nested_dim + 1
 
     @property
-    def grad(self):
-        grads = [t.grad for t in self._tensors]
-        if any(grad is None for grad in grads):
-            assert all(grad is None for grad in grads)
-            return None
-        else:
-            return NestedTensor(grads)
-
-    @property
-    def data(self):
-        return NestedTensor([t.data for t in self._tensors])
-
-    @property
     def dim(self):
         if DEBUG:
             _verify_tensors(self)
@@ -349,19 +269,10 @@ class NestedTensor(object):
         return self._tensors[0].device
 
     @property
-    def shape(self):
-        raise NotImplementedError()
-
-    @property
     def requires_grad(self):
         if DEBUG:
             _verify_tensors(self)
         return self._tensors[0].requires_grad
-
-    @property
-    def grad_fn(self):
-        raise NotImplementedError(
-            "We don't support grad_fn as a user-facing construct.")
 
     def __len__(self):
         return len(self._tensors)
@@ -388,10 +299,6 @@ class NestedTensor(object):
         for i in range(len(self)):
             self._tensors[i].add_(other._tensors[i])
         return self
-
-    def is_empty(self):
-        # This condition can never be true, since we disallow an empty list for now.
-        raise ValueError("self._tensors cannot be empty under current constraints.")
 
     def __apply(self, fn):
         return [fn(tensor) for tensor in self._tensors]
@@ -453,20 +360,8 @@ class NestedTensor(object):
     def detach(self):
         return NestedTensor(self.__apply(lambda x: x.detach()))
 
-    def detach_(self):
-        return NestedTensor(self.__apply(lambda x: x.detach_()))
-
     def clone(self):
         return NestedTensor(self.__apply(lambda x: x.clone()))
-
-    def to(self, *args, **kwargs):
-        return NestedTensor(self.__apply(lambda x: x.to(*args, **kwargs)))
-
-    def requires_grad_(self, *args, **kwargs):
-        return NestedTensor(self.__apply(lambda x: x.requires_grad_(*args, **kwargs)))
-
-    def backward(self, *args, **kwargs):
-        self.__apply(lambda x: x.backward(*args, **kwargs))
 
     def numel(self):
         all_numel = 0
@@ -476,13 +371,6 @@ class NestedTensor(object):
 
     def unbind(self):
         return tuple(self._tensors)
-
-    def flatten(self):
-        if self.nested_dim == 1:
-            return self
-        if self.nested_dim == 2:
-            return as_nested_tensor(tuple(map(lambda x: x.unbind(), self.unbind())))
-        return as_nested_tensor(tuple(map(lambda x: x.flatten, self.unbind())))
 
     def to_tensor(self):
         if None in self.size():

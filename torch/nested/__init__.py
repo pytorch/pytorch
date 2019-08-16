@@ -22,11 +22,6 @@ def monkey_patch(module):
     module, nested.NestedTensor = codegen.add_pointwise_comparison_functions(
         module, nested.NestedTensor, nested._nary_gen(torch.uint8))
 
-    module.nn.functional.interpolate = nested.interpolate
-    module.nn.functional.conv2d = nested.conv2d
-    module.nn.functional.relu = nested.relu
-
-    module.max_pool2d = nested.max_pool2d
     module.mv = nested.mv
     module.cat = nested.cat
 
