@@ -44,6 +44,9 @@ accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 
   THCTensor_(free)(state, src);
   THCTensor_(free)(state, self);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::check_names_for_dot(self, src);
+#endif
   return result;
 
 #else
