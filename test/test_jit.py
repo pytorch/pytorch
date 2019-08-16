@@ -18561,10 +18561,12 @@ class TestDocs(unittest.TestCase):
     @slowTest
     def test_docs(self):
         import subprocess
+        print("RUNNING DOC TEST")
         docs_dir = '../docs'
         docs_dir = [os.path.dirname(__file__), '..', 'docs']
         docs_dir = os.path.join(*docs_dir)
 
+        print("\tCalling `make doctest`")
         result = subprocess.run(['make', 'doctest'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
         if result.returncode != 0:
             err = result.stderr.decode('utf-8')
