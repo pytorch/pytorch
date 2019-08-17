@@ -1,5 +1,3 @@
-#pragma once
-
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/argument_spec.h"
@@ -22,7 +20,6 @@
 
 namespace torch {
 namespace jit {
-namespace test {
 
 using namespace torch::autograd;
 
@@ -246,6 +243,5 @@ void testDifferentiateWithRequiresGrad() {
       ->run(*grad_spec.df);
 }
 
-} // namespace test
 } // namespace jit
 } // namespace torch

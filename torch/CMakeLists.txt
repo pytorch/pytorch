@@ -105,6 +105,8 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tuple_parser.cpp
+    ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
+    ${JIT_TEST_SRCS}
     )
 
 set(TORCH_PYTHON_INCLUDE_DIRECTORIES

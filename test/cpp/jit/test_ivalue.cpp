@@ -1,5 +1,3 @@
-#pragma once
-
 #include <ATen/ATen.h>
 #include "ATen/core/ivalue.h"
 #include "test/cpp/jit/test_base.h"
@@ -7,9 +5,6 @@
 
 namespace torch {
 namespace jit {
-namespace {
-
-using Var = SymbolicVariable;
 
 using namespace torch::autograd;
 
@@ -44,7 +39,7 @@ void testIValue() {
   ASSERT_TRUE(dlist.isNone());
   dlist = IValue(c10::List<double>({3.4}));
   ASSERT_TRUE(dlist.toDoubleListRef().equals({3.4}));
-  IValue the_list(ivalue::Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
+  IValue the_list(at::ivalue::Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
   ASSERT_EQ(foo.use_count(), 3);
   ASSERT_TRUE(the_list.isTuple());
   auto first = the_list.toTuple()->elements()[1];
@@ -59,6 +54,5 @@ void testIValue() {
   ASSERT_EQ(tv.use_count(), 2);
 }
 
-} // namespace
 } // namespace jit
 } // namespace torch
