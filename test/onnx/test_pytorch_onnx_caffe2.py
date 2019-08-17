@@ -150,7 +150,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         onnxir, torch_out = do_export(model, input, export_params=self.embed_params, verbose=False,
                                       example_outputs=example_outputs,
                                       do_constant_folding=False,
-                                      opset_version=self.opset_version)
+                                      opset_version=self.opset_version,
+                                      keep_initializers_as_inputs=True)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -182,7 +183,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         verify.verify(model, input, c2, rtol=rtol, atol=atol,
                       example_outputs=example_outputs,
                       do_constant_folding=do_constant_folding,
-                      opset_version=self.opset_version)
+                      opset_version=self.opset_version,
+                      keep_initializers_as_inputs=True)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
@@ -238,7 +240,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         # but also the parameters. This test checks that the model can be loaded and
         # executed in Caffe2 backend correctly.
         torch.onnx._export(model, input, f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE,
-                           input_names=['input1', 'parameter1', 'parameter2'])
+                           input_names=['input1', 'parameter1', 'parameter2'],
+                           keep_initializers_as_inputs=True)
 
         f.seek(0)
         model_c2 = c2.prepare_zip_archive(f)
@@ -264,7 +267,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         # This test checks that given this edge condition, the model can be loaded and executed
         # in Caffe2 backend correctly.
         torch.onnx._export(model, input, f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE,
-                           input_names=['input1', 'fc1.bias'], _retain_param_name=False)
+                           input_names=['input1', 'fc1.bias'], _retain_param_name=False,
+                           keep_initializers_as_inputs=True)
 
         f.seek(0)
         model_c2 = c2.prepare_zip_archive(f)
@@ -331,7 +335,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, batch_size=RNN_BATCH_SIZE, input=input, use_gpu=False, atol=1e-7)
 
         # test that the model still runs with a different batch size
-        onnxir, _ = do_export(model, input)
+        onnxir, _ = do_export(model, input, keep_initializers_as_inputs=True)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -371,7 +375,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, batch_size=RNN_BATCH_SIZE, input=input, use_gpu=False)
 
         # test that the model still runs with a different batch size
-        onnxir, _ = do_export(model, input)
+        onnxir, _ = do_export(model, input, keep_initializers_as_inputs=True)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -409,7 +413,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, batch_size=RNN_BATCH_SIZE, input=input, use_gpu=False)
 
         # test that the model still runs with a different batch size
-        onnxir, _ = do_export(model, input)
+        onnxir, _ = do_export(model, input, keep_initializers_as_inputs=True)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -423,7 +427,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         # Test that we are correctly splitting between init and
         # predict net. When we embed parameters, there should be more
         # ops in the init net.
-        mp = onnx.ModelProto.FromString(do_export(model, input, export_params=self.embed_params)[0])
+        mp = onnx.ModelProto.FromString(do_export(model, input, export_params=self.embed_params,
+                                                  keep_initializers_as_inputs=True)[0])
         prepared = c2.prepare(mp, device='CPU')
         if self.embed_params:
             assert len(prepared.init_net.op) == 875
@@ -1210,7 +1215,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         import io
         f = io.BytesIO()
         from torch.onnx import ExportTypes
-        torch.onnx._export(MyModel(), (torch.rand(3, 4),), f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE)
+        torch.onnx._export(MyModel(), (torch.rand(3, 4),), f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE,
+                           keep_initializers_as_inputs=True)
 
         X = np.random.rand(3, 4).astype(np.float32)
 
@@ -1531,7 +1537,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=False)
         model = RandNLikeModel()
-        onnxir, _ = do_export(model, x)
+        onnxir, _ = do_export(model, x, keep_initializers_as_inputs=True)
         onnx_model = onnx.ModelProto.FromString(onnxir)
         prepared = c2.prepare(onnx_model)
         caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
@@ -1898,7 +1904,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=False)
         model = DirichletModel()
-        onnxir, _ = do_export(model, x)
+        onnxir, _ = do_export(model, x, keep_initializers_as_inputs=True)
         onnx_model = onnx.ModelProto.FromString(onnxir)
         prepared = c2.prepare(onnx_model)
         caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
@@ -1911,7 +1917,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=False)
         model = GammaModel()
-        onnxir, _ = do_export(model, x)
+        onnxir, _ = do_export(model, x, keep_initializers_as_inputs=True)
         onnx_model = onnx.ModelProto.FromString(onnxir)
         prepared = c2.prepare(onnx_model)
         caffe2_out = prepared.run(inputs=[x.cpu().numpy()])

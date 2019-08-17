@@ -502,6 +502,34 @@ bitwise_not_() -> Tensor
 In-place version of :meth:`~Tensor.bitwise_not`
 """)
 
+add_docstr_all('logical_not',
+               r"""
+logical_not() -> Tensor
+
+See :func:`torch.logical_not`
+""")
+
+add_docstr_all('logical_not_',
+               r"""
+logical_not_() -> Tensor
+
+In-place version of :meth:`~Tensor.logical_not`
+""")
+
+add_docstr_all('logical_xor',
+               r"""
+logical_xor() -> Tensor
+
+See :func:`torch.logical_xor`
+""")
+
+add_docstr_all('logical_xor_',
+               r"""
+logical_xor_() -> Tensor
+
+In-place version of :meth:`~Tensor.logical_xor`
+""")
+
 add_docstr_all('bmm',
                r"""
 bmm(batch2) -> Tensor
@@ -1894,6 +1922,24 @@ add_docstr_all('reciprocal_',
 reciprocal_() -> Tensor
 
 In-place version of :meth:`~Tensor.reciprocal`
+""")
+
+add_docstr_all('record_stream',
+               r"""
+record_stream(stream)
+
+Ensures that the tensor memory is not reused for another tensor until all
+current work queued on :attr:`stream` are complete.
+
+.. note::
+
+    The caching allocator is aware of only the stream where a tensor was
+    allocated. Due to the awareness, it already correctly manages the life
+    cycle of tensors on only one stream. But if a tensor is used on a stream
+    different from the stream of origin, the allocator might reuse the memory
+    unexpectedly. Calling this method lets the allocator know which streams
+    have used the tensor.
+
 """)
 
 add_docstr_all('remainder',
