@@ -210,7 +210,7 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0, printDebug=False):
                 for inx in range(v5.numel()):
                     grad_output_l.append(v5[inx].item())
 
-                debugInfo.append(grads_input1_l, grads_input2_l, output_l, input1_l, input2_l, grad_output_l)
+                debugInfo.append((grads_input1_l, grads_input2_l, output_l, input1_l, input2_l, grad_output_l))
 
             for jacobian_x, d_x, x in zip(jacobian_c, grads_input, diff_input_list):
                 if d_x is not None and d_x.size() != x.size():
