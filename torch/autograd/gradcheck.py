@@ -158,7 +158,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, printDebug=False):
     return jacobian
 
 
-def get_analytical_jacobian(input, output, nondet_tol=0.0):
+def get_analytical_jacobian(input, output, nondet_tol=0.0, printDebug=False):
     # it is easier to call to_dense() on the sparse output than
     # to modify analytical jacobian
     if output.is_sparse:
@@ -175,12 +175,37 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0):
     reentrant = True
     correct_grad_sizes = True
 
+    debugInfo = []
     for i in range(flat_grad_output.numel()):
         flat_grad_output.zero_()
         flat_grad_output[i] = 1
         for jacobian_c in (jacobian, jacobian_reentrant):
             grads_input = torch.autograd.grad(output, diff_input_list, grad_output,
                                               retain_graph=True, allow_unused=True)
+            grads_input_l = []
+            output_l = []
+            input1_l = []
+            input2_l = []
+            grad_output_l = []
+
+            v1 = grads_input.view(-1)
+            for inx in range(v1.numel()):
+                grads_input_l.append(v1[inx].item())
+            v2 = output.view(-1)
+            for inx in range(v2.numel()):
+                output_l.append(v2[inx].item())
+            v3 = diff_input_list[0].view(-1)
+            for inx in range(v3.numel()):
+                input1_l.append(v3[inx].item())
+            v4 = diff_input_list[1].view(-1)
+            for inx in range(v4.numel()):
+                input2_l.append(v4[inx].item())
+            v5 = grad_output.view(-1)
+            for inx in range(v5.numel()):
+                grad_output_l.append(v5[inx].item())
+
+            debugInfo.append(grads_input_l, output_l, input1_l, input2_l, grad_output_l)
+
             for jacobian_x, d_x, x in zip(jacobian_c, grads_input, diff_input_list):
                 if d_x is not None and d_x.size() != x.size():
                     correct_grad_sizes = False
@@ -191,6 +216,10 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0):
                         d_x_dense = d_x.to_dense() if not d_x.layout == torch.strided else d_x
                         assert jacobian_x[:, i].numel() == d_x_dense.numel()
                         jacobian_x[:, i] = d_x_dense.contiguous().view(-1)
+
+
+    if printDebug:
+        return debugInfo
 
     for jacobian_x, jacobian_reentrant_x in zip(jacobian, jacobian_reentrant):
         if jacobian_x.numel() != 0 and (jacobian_x - jacobian_reentrant_x).abs().max() > nondet_tol:
@@ -328,7 +357,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                     for inx in range(t2.numel()):
                         data2.append(t2[inx].item())
 
-                    debugInfo = get_numerical_jacobian(fn, tupled_inputs, eps=eps, printDebug=True)
+                    debugInfo = get_analytical_jacobian(tupled_inputs, o, nondet_tol=nondet_tol, printDebug=True)
 
                     return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
                                      'actual_error:%s\nmax_error:%s\nclose:%s\n'
