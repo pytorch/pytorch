@@ -91,15 +91,15 @@ void logical_binary_kernel_cuda_impl(TensorIterator& iter, const char* op_name, 
 // duplicate logical_binary_kernel_cuda_impl three lines for each logical operations, the time to compile this file
 // would be crazy. Possibly we are avoiding inlining them in logical_binary_kernel_cuda_impl and thus avoiding building
 // logical_binary_kernel_cuda_impl thrice.
-static bool land(bool a, bool b) {
+bool land(bool a, bool b) {
   return a && b;
 }
 
-static bool lor(bool a, bool b) {
+bool lor(bool a, bool b) {
   return a || b;
 }
 
-static bool lxor(bool a, bool b) {
+bool lxor(bool a, bool b) {
   return a != b;
 }
 
