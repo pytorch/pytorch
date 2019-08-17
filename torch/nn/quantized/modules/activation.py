@@ -39,3 +39,28 @@ class ReLU(NNReLU):
     @staticmethod
     def from_float(mod):
         return ReLU(mod.inplace)
+
+
+class ReLU6(ReLU):
+    r"""Applies the element-wise function:
+
+    :math:`\text{ReLU6}(x) = \min(\max(x_0, x), q(6))`, where :math:`x_0` is the
+    zero_point, and :math:`q(6)` is the quantized representation of number 6.
+
+    Args:
+        inplace: can optionally do the operation in-place. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/ReLU6.png
+
+    Examples::
+
+        >>> m = nn.quantized.ReLU6()
+        >>> input = torch.randn(2)
+        >>> input = torch.quantize_linear(input, 1.0, 0, dtype=torch.qint32)
+        >>> output = m(input)
+    """
