@@ -7,6 +7,7 @@
 #include <torch/nn/modules/embedding.h>
 #include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
+#include <torch/nn/modules/maxpool.h>
 #include <torch/types.h>
 #include <torch/utils.h>
 
@@ -101,6 +102,58 @@ TEST_F(ModulesTest, Conv3d) {
   }
 
   ASSERT_TRUE(model->weight.grad().numel() == 3 * 2 * 3 * 3 * 3);
+}
+
+TEST_F(ModulesTest, MaxPool1d) {
+  MaxPool1d model(MaxPool1dOptions(3).stride(2));
+  auto x = torch::randn({1, 1, 5}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+}
+
+TEST_F(ModulesTest, MaxPool2dEven) {
+  MaxPool2d model(MaxPool2dOptions(3).stride(2));
+  auto x = torch::randn({2, 5, 5}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+}
+
+TEST_F(ModulesTest, MaxPool2dUneven) {
+  MaxPool2d model(MaxPool2dOptions({3, 2}).stride({2, 2}));
+  auto x = torch::randn({2, 5, 4}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(s.ndimension(), 0);
+  for (auto i = 0; i < 4; i++) {
+    ASSERT_EQ(y.size(i), 2);
+  }
+}
+
+TEST_F(ModulesTest, MaxPool3d) {
+  MaxPool3d model(MaxPool3dOptions(3).stride(2));
+  auto x = torch::randn({2, 5, 5, 5}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 5);
+  ASSERT_EQ(s.ndimension(), 0);
+  for (auto i = 0; i < 5; i++) {
+    ASSERT_EQ(y.size(i), 2);
+  }
 }
 
 TEST_F(ModulesTest, Linear) {
@@ -342,7 +395,8 @@ TEST_F(ModulesTest, PrettyPrintConv) {
       c10::str(Conv2d(Conv2dOptions(3, 4, 5).stride(2))),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 5], stride=[2, 2])");
 
-  const auto options = Conv2dOptions(3, 4, torch::IntArrayRef{5, 6}).stride({1, 2});
+  const auto options =
+      Conv2dOptions(3, 4, torch::IntArrayRef{5, 6}).stride({1, 2});
   ASSERT_EQ(
       c10::str(Conv2d(options)),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
