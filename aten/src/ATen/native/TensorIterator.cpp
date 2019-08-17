@@ -35,7 +35,7 @@ void TensorIterator::reorder_dimensions() {
       }
       int64_t stride0 = operands_[arg].stride_bytes[dim0];
       int64_t stride1 = operands_[arg].stride_bytes[dim1];
-      if (operands_[arg].is_output) {
+      if (is_reduction_ && operands_[arg].is_output) {
         // move reduced dimensions to the front
         if ((stride0 == 0) != (stride1 == 0)) {
           return stride1 == 0 ? 1 : -1;
@@ -233,16 +233,17 @@ void TensorIterator::propagate_names_to_outputs() {
       names = NameVector(unify_from_right(names, tensor_names).value());
     }
   }
-  if (names.empty()) {
-    return;
-  }
 
   // propagate names
   for (int i = 0; i < num_outputs_; i++) {
     auto& op = operands_[i];
     // must call propagate_names_to_outputs after outputs have been allocated.
     TORCH_INTERNAL_ASSERT(op.tensor.defined());
-    at::internal_set_names_inplace(op.tensor, names);
+    if (names.empty()) {
+      namedinference::propagate_names(op.tensor, nullopt);
+    } else {
+      namedinference::propagate_names(op.tensor, names);
+    }
   }
 }
 #endif

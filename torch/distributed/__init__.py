@@ -1,4 +1,7 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
+import sys
 
 
 def is_available():
@@ -15,4 +18,5 @@ if is_available():
     # See the comment in `distributed_c10d.py` above `_backend` on why we expose
     # this.
     from .distributed_c10d import _backend  # noqa: F401
-    from .rpc import *  # noqa: F401
+    if sys.version_info >= (3, 0):
+        from .rpc import *  # noqa: F401
