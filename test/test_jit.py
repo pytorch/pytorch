@@ -1094,6 +1094,40 @@ graph(%x : Tensor,
                    .check_next("_dequantize_linear").check("conv2d") \
                    .run(str(scriptModule.graph))
 
+    def test_prepare_quant(self):
+        class Observer(torch.nn.Module):
+            def __init__(self):
+                super(Observer, self).__init__()
+
+            def forward(self, x):
+                return x
+
+            @torch.jit.export
+            def calculate_qparams(self):
+                return torch.tensor([2.0]), torch.tensor([3])
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 5, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        m = torch.jit.script(M())
+        observer = torch.jit.script(Observer())
+        torch._C._jit_pass_constant_propagation(m.graph)
+        m._c = torch._C._jit_pass_prepare_quant(m._c, "forward",
+                                                observer._c,
+                                                observer._c)
+        assert len([x for x,_ in m._c._get_modules() if x.startswith('observer_for_')]) == 3, 'Expected to have 3 observer submodules'
+        FileCheck().check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                   .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                   .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                   .check_next('prim::CallMethod[name="forward"](%observer_for_').run(str(m._c._get_method("forward").graph))
+
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
         # --> mulmul(mulmul(x,y,z), x, y)

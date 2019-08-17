@@ -622,12 +622,13 @@ static Node* prepQuantAddObserverFor(
   return observerNode;
 }
 
-TORCH_API void PrepareQuant(
+TORCH_API script::Module PrepareQuant(
     const script::Module& module,
     const std::string& method_name,
     const script::Module& observer_module,
     const script::Module& weight_observer_module) {
-  script::Method method = module.get_method(method_name);
+  script::Module input_module = module.clone();
+  script::Method method = input_module.get_method(method_name);
   auto graph = method.graph();
   auto num_activation_inputs = method.num_inputs();
   TORCH_CHECK(graph != nullptr);
@@ -655,7 +656,7 @@ TORCH_API void PrepareQuant(
   for (size_t idx = 0; idx < num_activation_inputs; ++idx) {
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      Node* observer_node = insertObserverForwardCall(v, v->owningGraph(), module, observer_module);
+      Node* observer_node = insertObserverForwardCall(v, v->owningGraph(), input_module, observer_module);
       observer_for_input.emplace(observer_node);
     }
   }
@@ -691,12 +692,13 @@ TORCH_API void PrepareQuant(
       if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
         continue;
       } else if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "weight") {
-        insertObserverForwardCall(v, v->owningGraph(), module, weight_observer_module);
+        insertObserverForwardCall(v, v->owningGraph(), input_module, weight_observer_module);
       } else {
-        insertObserverForwardCall(v, v->owningGraph(), module, observer_module);
+        insertObserverForwardCall(v, v->owningGraph(), input_module, observer_module);
       }
     }
   }
+  return input_module;
 }
 
 } // namespace jit

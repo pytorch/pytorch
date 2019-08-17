@@ -103,7 +103,7 @@ TORCH_API void InsertQuantDequantNodesForParam(
     const Fn& getQParamFunc,
     at::ScalarType t);
 
-TORCH_API void PrepareQuant(
+TORCH_API script::Module PrepareQuant(
     const script::Module& module,
     const std::string& method_name,
     const script::Module& observer_module,
