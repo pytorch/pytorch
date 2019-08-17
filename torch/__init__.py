@@ -92,6 +92,137 @@ if platform.system() != 'Windows':
 # Define basic utilities
 ################################################################################
 
+def hello(a):
+    if(hasattr(a, "__array_function__")):
+        # print(a.__array_function__())
+    else:
+        print("__array_function__ not detected")
+    print(a)
+
+def gemm(a, b):
+    print("In gemm")
+    if(hasattr(a, "__array_function__")):
+        print(a.__array_function__(a,b, lol = None, {}))
+    else:
+        print("__array_function__ not detected")
+        return torch.mm(a,b)
+    print(a)
+
+def getargspec(func):
+    """Get the names and default values of a function's arguments.
+    A tuple of four things is returned: (args, varargs, varkw, defaults).
+    'args' is a list of the argument names (it may contain nested lists).
+    'varargs' and 'varkw' are the names of the * and ** arguments or None.
+    'defaults' is an n-tuple of the default values of the last n arguments.
+    """
+
+    if ismethod(func):
+        func = func.__func__
+    if not isfunction(func):
+        raise TypeError('arg is not a Python function')
+    args, varargs, varkw = getargs(func.__code__)
+    return args, varargs, varkw, func.__defaults__
+
+ArgSpec = collections.namedtuple('ArgSpec', 'args varargs keywords defaults')
+
+def verify_matching_signatures(implementation, dispatcher):
+    """Verify that a dispatcher function has the right signature."""
+    implementation_spec = ArgSpec(*getargspec(implementation))
+    dispatcher_spec = ArgSpec(*getargspec(dispatcher))
+
+    if (implementation_spec.args != dispatcher_spec.args or
+            implementation_spec.varargs != dispatcher_spec.varargs or
+            implementation_spec.keywords != dispatcher_spec.keywords or
+            (bool(implementation_spec.defaults) !=
+             bool(dispatcher_spec.defaults)) or
+            (implementation_spec.defaults is not None and
+             len(implementation_spec.defaults) !=
+             len(dispatcher_spec.defaults))):
+        raise RuntimeError('implementation and dispatcher for %s have '
+                           'different function signatures' % implementation)
+
+    if implementation_spec.defaults is not None:
+        if dispatcher_spec.defaults != (None,) * len(dispatcher_spec.defaults):
+            raise RuntimeError('dispatcher functions can only use None for '
+                               'default argument values')
+
+TORCH_FUNCTION_ENABLED = True
+def torch_function_dispatch(dispatcher, module=None, verify=True,
+                            docs_from_dispatcher=False):
+    """Decorator for adding dispatch with the __array_function__ protocol.
+    See NEP-18 for example usage.
+    Parameters
+    ----------
+    dispatcher : callable
+        Function that when called like ``dispatcher(*args, **kwargs)`` with
+        arguments from the NumPy function call returns an iterable of
+        array-like arguments to check for ``__array_function__``.
+    module : str, optional
+        __module__ attribute to set on new function, e.g., ``module='numpy'``.
+        By default, module is copied from the decorated function.
+    verify : bool, optional
+        If True, verify the that the signature of the dispatcher and decorated
+        function signatures match exactly: all required and optional arguments
+        should appear in order with the same names, but the default values for
+        all optional arguments should be ``None``. Only disable verification
+        if the dispatcher's signature needs to deviate for some particular
+        reason, e.g., because the function has a signature like
+        ``func(*args, **kwargs)``.
+    docs_from_dispatcher : bool, optional
+        If True, copy docs from the dispatcher function onto the dispatched
+        function, rather than from the implementation. This is useful for
+        functions defined in C, which otherwise don't have docstrings.
+    Returns
+    -------
+    Function suitable for decorating the implementation of a NumPy function.
+    """
+
+    if not TORCH_FUNCTION_ENABLED:
+        def decorator(implementation):
+            if docs_from_dispatcher:
+                add_docstring(implementation, dispatcher.__doc__)
+            if module is not None:
+                implementation.__module__ = module
+            return implementation
+        return decorator
+
+    def decorator(implementation):
+        if verify:
+            verify_matching_signatures(implementation, dispatcher)
+
+        if docs_from_dispatcher:
+            add_docstring(implementation, dispatcher.__doc__)
+
+        # Equivalently, we could define this function directly instead of using
+        # exec. This version has the advantage of giving the helper function a
+        # more interpettable name. Otherwise, the original function does not
+        # show up at all in many cases, e.g., if it's written in C or if the
+        # dispatcher gets an invalid keyword argument.
+        source = _wrapped_func_source.format(name=implementation.__name__)
+
+        source_object = compile(
+            source, filename='<__array_function__ internals>', mode='exec')
+        scope = {
+            'implementation': implementation,
+            'dispatcher': dispatcher,
+            'functools': functools,
+            'implement_array_function': implement_array_function,
+        }
+        exec(source_object, scope)
+
+        public_api = scope[implementation.__name__]
+
+        if module is not None:
+            public_api.__module__ = module
+
+        public_api._implementation = implementation
+
+        return public_api
+
+    return decorator
+
+def _binary_dispatcher(x,p):
+    return (x,)
 
 def typename(o):
     if isinstance(o, torch.Tensor):
