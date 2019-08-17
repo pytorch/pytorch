@@ -5,6 +5,7 @@
 
 #include <ATen/core/qualified_name.h>
 #include <torch/csrc/jit/import_source.h>
+#include <torch/csrc/jit/script/resolver.h>
 #include <torch/torch.h>
 
 namespace torch {
@@ -102,6 +103,31 @@ void testScriptObject() {
   obj->setAttr("dx", new_x);
   auto new_dx = obj->getAttr("dx");
   ASSERT_TRUE(test::almostEqual(new_x, new_dx.toTensor()));
+}
+
+static const auto methodSrc = R"JIT(
+def __init__(self, x):
+    return x
+)JIT";
+
+void testClassDerive() {
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create("foo.bar", cu);
+  const auto self = SimpleSelf(cls);
+  auto methods = cu->define("foo.bar", methodSrc, nativeResolver(), &self);
+  auto method = methods[0];
+  cls->addAttribute("attr", TensorType::get());
+  cls->addMethod(method);
+  ASSERT_TRUE(cls->getMethod(method->name()));
+
+  // Refining a new class should retain attributes and methods
+  auto newCls = cls->refine({TensorType::get()});
+  ASSERT_TRUE(newCls->hasAttribute("attr"));
+  ASSERT_TRUE(newCls->getMethod(method->name()));
+
+  auto newCls2 = cls->withContained({TensorType::get()})->expect<ClassType>();
+  ASSERT_TRUE(newCls2->hasAttribute("attr"));
+  ASSERT_TRUE(newCls2->getMethod(method->name()));
 }
 
 } // namespace script

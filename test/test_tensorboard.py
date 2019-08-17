@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import io
 import numpy as np
 import os
 import shutil
@@ -12,6 +13,7 @@ import unittest
 TEST_TENSORBOARD = True
 try:
     import tensorboard.summary.writer.event_file_writer  # noqa F401
+    from tensorboard.compat.proto.summary_pb2 import Summary
 except ImportError:
     TEST_TENSORBOARD = False
 
@@ -42,6 +44,8 @@ skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
 from common_utils import TestCase, run_tests, TEST_WITH_ASAN
+from google.protobuf import text_format
+from PIL import Image
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -325,31 +329,31 @@ if TEST_TENSORBOARD:
                 summary.histogram('dummy', np.ndarray(0), 'tensorflow')
 
         def test_image_with_boxes(self):
-            self.assertTrue(compare_proto(summary.image_boxes('dummy',
-                                          tensor_N(shape=(3, 32, 32)),
-                                          np.array([[10, 10, 40, 40]])),
-                                          self))
+            self.assertTrue(compare_image_proto(summary.image_boxes('dummy',
+                                                tensor_N(shape=(3, 32, 32)),
+                                                np.array([[10, 10, 40, 40]])),
+                                                self))
 
         def test_image_with_one_channel(self):
-            self.assertTrue(compare_proto(summary.image('dummy',
+            self.assertTrue(compare_image_proto(summary.image('dummy',
                                                         tensor_N(shape=(1, 8, 8)),
                                                         dataformats='CHW'),
                                                         self))  # noqa E127
 
         def test_image_with_one_channel_batched(self):
-            self.assertTrue(compare_proto(summary.image('dummy',
+            self.assertTrue(compare_image_proto(summary.image('dummy',
                                                         tensor_N(shape=(2, 1, 8, 8)),
                                                         dataformats='NCHW'),
                                                         self))  # noqa E127
 
         def test_image_with_3_channel_batched(self):
-            self.assertTrue(compare_proto(summary.image('dummy',
+            self.assertTrue(compare_image_proto(summary.image('dummy',
                                                         tensor_N(shape=(2, 3, 8, 8)),
                                                         dataformats='NCHW'),
                                                         self))  # noqa E127
 
         def test_image_without_channel(self):
-            self.assertTrue(compare_proto(summary.image('dummy',
+            self.assertTrue(compare_image_proto(summary.image('dummy',
                                                         tensor_N(shape=(8, 8)),
                                                         dataformats='HW'),
                                                         self))  # noqa E127
@@ -394,20 +398,37 @@ if TEST_TENSORBOARD:
     def remove_whitespace(string):
         return string.replace(' ', '').replace('\t', '').replace('\n', '')
 
-    def compare_proto(str_to_compare, function_ptr):
-
+    def read_expected_content(function_ptr):
         module_id = function_ptr.__class__.__module__
         test_dir = os.path.dirname(sys.modules[module_id].__file__)
         functionName = function_ptr.id().split('.')[-1]
         expected_file = os.path.join(test_dir,
                                      "expect",
                                      'TestTensorBoard.' + functionName + ".expect")
-
         assert os.path.exists(expected_file)
-        with open(expected_file) as f:
-            expected = f.read()
+        with open(expected_file, "r") as f:
+            return f.read()
+
+    def compare_image_proto(actual_proto, function_ptr):
+        expected_str = read_expected_content(function_ptr)
+        expected_proto = Summary()
+        text_format.Parse(expected_str, expected_proto)
+
+        [actual, expected] = [actual_proto.value[0], expected_proto.value[0]]
+        actual_img = Image.open(io.BytesIO(actual.image.encoded_image_string))
+        expected_img = Image.open(io.BytesIO(expected.image.encoded_image_string))
+
+        return (
+            actual.tag == expected.tag and
+            actual.image.height == expected.image.height and
+            actual.image.width == expected.image.width and
+            actual.image.colorspace == expected.image.colorspace and
+            actual_img == expected_img
+        )
+
+    def compare_proto(str_to_compare, function_ptr):
+        expected = read_expected_content(function_ptr)
         str_to_compare = str(str_to_compare)
-        # if not remove_whitespace(str_to_compare) == remove_whitespace(expected):
         return remove_whitespace(str_to_compare) == remove_whitespace(expected)
 
     def write_proto(str_to_compare, function_ptr):

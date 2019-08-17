@@ -70,8 +70,9 @@ def _try_cast_integer_to_float(g, *args):
     old_type = None
     # Cast the input tensor to Float if its scalarType is known and is not floating number.
     # If casting is performed, return the old scalarType, otherwise return None.
-    if args[0].type().kind() == "DimensionedTensorType" or args[0].type().kind() == "CompleteTensorType":
-        old_type = args[0].type().scalarType()
+    arg0_type = args[0].type().scalarType()
+    if arg0_type is not None:
+        old_type = arg0_type
         if old_type not in floating_scalar_types:
             args = tuple(_cast_Float(g, arg, False) for arg in args)
         else:
@@ -199,6 +200,14 @@ def _constant_fill(g, sizes, dtype, const_value):
     else:
         return g.op("ConstantFill", sizes, dtype_i=sym_help.scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=const_value)
 
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
+    return zeros(g, sizes, dtype, layout, device, pin_memory)
+
+
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+    return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
