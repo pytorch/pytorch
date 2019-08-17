@@ -3,8 +3,10 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from .. import functional as F
+import torch
 from torch.nn import ReLU as NNReLU
+
+from .. import functional as F
 
 class ReLU(NNReLU):
     r"""Applies quantized rectified linear unit function element-wise:
@@ -65,7 +67,7 @@ class ReLU6(NNReLU):
         >>> output = m(input)
     """
     def __init__(self, inplace=False):
-        super(ReLU, self).__init__(inplace)
+        super(ReLU6, self).__init__(inplace)
         assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
 
     def forward(self, input):
