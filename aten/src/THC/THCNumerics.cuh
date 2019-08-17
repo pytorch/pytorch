@@ -61,6 +61,7 @@ struct THCNumerics<uint8_t> {
   static inline __host__ __device__  uint8_t pow(uint8_t a, uint8_t b) { return powi<uint8_t>(a, b); }
   static inline __host__ __device__  bool isnan(uint8_t a) { return false; }
   static inline __host__ __device__  bool isinf(uint8_t a) { return false; }
+  static inline __host__ __device__  uint8_t fmod(uint8_t a, uint8_t b) { return a % b; }
 };
 
 template <>
@@ -108,6 +109,7 @@ struct THCNumerics<int8_t> {
   static inline __host__ __device__  int8_t pow(int8_t a, int8_t b) { return powi<int8_t>(a, b); }
   static inline __host__ __device__  bool isnan(int8_t a) { return false; }
   static inline __host__ __device__  bool isinf(int8_t a) { return false; }
+  static inline __host__ __device__  int8_t fmod(int8_t a, int8_t b) { return a % b; }
 };
 
 template <>
@@ -133,6 +135,7 @@ struct THCNumerics<int16_t> {
   static inline __host__ __device__  int16_t pow(int16_t a, int16_t b) { return powi<int16_t>(a, b); }
   static inline __host__ __device__  bool isnan(int16_t a) { return false; }
   static inline __host__ __device__  bool isinf(int16_t a) { return false; }
+  static inline __host__ __device__  int16_t fmod(int16_t a, int16_t b) { return a % b; }
 };
 
 template <>
@@ -158,6 +161,7 @@ struct THCNumerics<int32_t> {
   static inline __host__ __device__  int32_t pow(int32_t a, int32_t b) { return powi<int32_t>(a, b); }
   static inline __host__ __device__  bool isnan(int32_t a) { return false; }
   static inline __host__ __device__  bool isinf(int32_t a) { return false; }
+  static inline __host__ __device__  int32_t fmod(int32_t a, int32_t b) { return a % b; }
 };
 
 template <>
@@ -184,6 +188,7 @@ struct THCNumerics<int64_t> {
   static inline __host__ __device__  int64_t pow(int64_t a, int64_t b) { return powi<int64_t>(a, b); }
   static inline __host__ __device__  bool isnan(int64_t a) { return false; }
   static inline __host__ __device__  bool isinf(int64_t a) { return false; }
+  static inline __host__ __device__  int64_t fmod(int64_t a, int64_t b) { return a % b; }
 };
 
 // DEPRECATED: use math functions from std and NumericLimits.cuh
