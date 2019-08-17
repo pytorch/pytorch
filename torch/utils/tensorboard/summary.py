@@ -165,7 +165,7 @@ def hparams(hparam_dict=None, metric_dict=None):
     )
     ssi = Summary(value=[Summary.Value(tag=SESSION_START_INFO_TAG, metadata=smd)])
 
-    sei = SessionEndInfo(status=Status.STATUS_SUCCESS)
+    sei = SessionEndInfo(status=Status.Value('STATUS_SUCCESS'))
     content = HParamsPluginData(session_end_info=sei, version=PLUGIN_DATA_VERSION)
     smd = SummaryMetadata(
         plugin_data=SummaryMetadata.PluginData(
