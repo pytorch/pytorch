@@ -197,16 +197,19 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   }
 
   void insert(size_t index, std::shared_ptr<Module> module) {
-    if (index == this->size())
-      return push_back(module);
+    TORCH_CHECK(index <= size(), "Index out of range");
 
-    TORCH_CHECK(index < size(), "Index out of range");
-    modules_.insert(
-        modules_.begin() + Iterator::difference_type(index), std::move(module));
+    if (index == size())
+      push_back(module);
+    else {
+      modules_.insert(
+          modules_.begin() + Iterator::difference_type(index),
+          std::move(module));
 
-    for (size_t i = index; i < this->size() - 1; ++i)
-      replace_module(std::to_string(index), modules_[index]);
-    register_module(std::to_string(this->size() - 1), modules_.back());
+      for (size_t i = index; i < size() - 1; ++i)
+        replace_module(std::to_string(index), modules_[index]);
+      register_module(std::to_string(size() - 1), modules_.back());
+    }
   }
 
   /// Unwraps the contained module of a `ModuleHolder` and inserts it in the

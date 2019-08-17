@@ -85,28 +85,29 @@ TEST_F(ModuleListTest, PushBackAddsAnElement) {
 }
 
 TEST_F(ModuleListTest, Insertion) {
-  struct M : torch::nn::Module {
-    explicit M(int value_) : value(value_) {}
+  struct MImpl : torch::nn::Module {
+    explicit MImpl(int value_) : value(value_) {}
     int value;
   };
+  TORCH_MODULE(M);
 
   ModuleList list;
-  list->push_back(M(1));
+  list->push_back(MImpl(1));
   ASSERT_EQ(list->size(), 1);
-  list->insert(0, M(2));
+  list->insert(0, std::make_shared<MImpl>(2));
   ASSERT_EQ(list->size(), 2);
   list->insert(1, M(3));
   ASSERT_EQ(list->size(), 3);
   list->insert(3, M(4));
   ASSERT_EQ(list->size(), 4);
-  ASSERT_EQ(list->at<M>(0).value, 2);
-  ASSERT_EQ(list->at<M>(1).value, 3);
-  ASSERT_EQ(list->at<M>(2).value, 1);
-  ASSERT_EQ(list->at<M>(3).value, 4);
+  ASSERT_EQ(list->at<MImpl>(0).value, 2);
+  ASSERT_EQ(list->at<MImpl>(1).value, 3);
+  ASSERT_EQ(list->at<MImpl>(2).value, 1);
+  ASSERT_EQ(list->at<MImpl>(3).value, 4);
 
   std::unordered_map<size_t, size_t> U = {{0, 2}, {1, 3}, {2, 1}, {3, 4}};
   for (const auto& P : list->named_modules("", false))
-    ASSERT_EQ(U[std::stold(P.key())], P.value()->as<M>()->value);
+    ASSERT_EQ(U[std::stoul(P.key())], P.value()->as<M>()->value);
 }
 
 TEST_F(ModuleListTest, AccessWithAt) {
