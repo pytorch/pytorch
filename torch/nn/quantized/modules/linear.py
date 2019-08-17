@@ -44,6 +44,9 @@ class Quantize(Module):
         scale, zero_point = mod.observer.calculate_qparams()
         return Quantize(scale.float().item(), zero_point.long().item(), mod.observer.dtype)
 
+    def extra_repr(self):
+        return 'scale={}, zero_point={}, dtype={}'.format(self.scale, self.zero_point, self.dtype)
+
 class DeQuantize(Module):
     r"""Dequantizes an incoming tensor
 
@@ -119,6 +122,11 @@ class Linear(torch.nn.Module):
         self.set_weight(qweight)
         self.scale = 1.0
         self.zero_point = 0
+
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, bias={}, scale={}, zero_point={}'.format(
+            self.in_features, self.out_features, self.bias is not None, self.scale, self.zero_point
+        )
 
     def forward(self, x):
         return torch.ops.quantized.fbgemm_linear(
