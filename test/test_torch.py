@@ -2026,7 +2026,7 @@ class _TestTorchMixin(torchtest):
             self.assertTrue(torch.allclose(expected, actual.view(-1), rtol=0, atol=0.02))
 
         for device in torch.testing.get_all_device_types():
-            for size in [(2,2),(3,3),(5,5)]:
+            for size in [(2, 2), (3, 3), (5, 5)]:
                 _test_fmod_with_size_tensor(size, device)
                 _test_fmod_with_size_scalar(size, device)
 
