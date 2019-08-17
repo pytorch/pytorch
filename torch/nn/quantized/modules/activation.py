@@ -41,7 +41,7 @@ class ReLU(NNReLU):
         return ReLU(mod.inplace)
 
 
-class ReLU6(ReLU):
+class ReLU6(NNReLU):
     r"""Applies the element-wise function:
 
     :math:`\text{ReLU6}(x) = \min(\max(x_0, x), q(6))`, where :math:`x_0` is the
@@ -64,3 +64,13 @@ class ReLU6(ReLU):
         >>> input = torch.quantize_linear(input, 1.0, 0, dtype=torch.qint32)
         >>> output = m(input)
     """
+    def __init__(self, inplace=False):
+        super(ReLU, self).__init__(inplace)
+        assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
+
+    def forward(self, input):
+        return torch.ops.quantized.relu6(input)
+
+    @staticmethod
+    def from_float(mod):
+        return ReLU(mod.inplace)
