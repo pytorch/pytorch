@@ -12857,7 +12857,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         ]
 
         for (fn, inputs, has_input_output_mem_overlap_check,
-            has_internal_mem_overlap_check, dev) in unary_mem_overlap_cases:
+                has_internal_mem_overlap_check, dev) in unary_mem_overlap_cases:
             if dev != device:
                 continue
             out_fn = getattr(torch, fn)
@@ -12984,9 +12984,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         ]
 
         for (fn, has_input_output_mem_overlap_check,
-            has_internal_mem_overlap_check, dev) in ops:
+                has_internal_mem_overlap_check, dev) in ops:
             if dev != device:
-                 continue
+                continue
             out_op = getattr(torch, fn)
             inplace_op = getattr(torch.Tensor, fn + '_')
             # internal overlap check for inplace_op
