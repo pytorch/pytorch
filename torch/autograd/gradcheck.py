@@ -182,29 +182,33 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0, printDebug=False):
         for jacobian_c in (jacobian, jacobian_reentrant):
             grads_input = torch.autograd.grad(output, diff_input_list, grad_output,
                                               retain_graph=True, allow_unused=True)
-            grads_input_l = []
-            output_l = []
-            input1_l = []
-            input2_l = []
-            grad_output_l = []
 
-            v1 = grads_input.view(-1)
-            for inx in range(v1.numel()):
-                grads_input_l.append(v1[inx].item())
-            v2 = output.view(-1)
-            for inx in range(v2.numel()):
-                output_l.append(v2[inx].item())
-            v3 = diff_input_list[0].view(-1)
-            for inx in range(v3.numel()):
-                input1_l.append(v3[inx].item())
-            v4 = diff_input_list[1].view(-1)
-            for inx in range(v4.numel()):
-                input2_l.append(v4[inx].item())
-            v5 = grad_output.view(-1)
-            for inx in range(v5.numel()):
-                grad_output_l.append(v5[inx].item())
+            if printDebug:
+                grads_input_l = []
+                output_l = []
+                input1_l = []
+                input2_l = []
+                grad_output_l = []
 
-            debugInfo.append(grads_input_l, output_l, input1_l, input2_l, grad_output_l)
+                v1 = grads_input.view(-1)
+                for inx in range(v1.numel()):
+                    grads_input_l.append(v1[inx].item())
+                for inx in range(v1.numel()):
+                    grads_input_l.append(v1[inx].item())
+                v2 = output.view(-1)
+                for inx in range(v2.numel()):
+                    output_l.append(v2[inx].item())
+                v3 = diff_input_list[0].view(-1)
+                for inx in range(v3.numel()):
+                    input1_l.append(v3[inx].item())
+                v4 = diff_input_list[1].view(-1)
+                for inx in range(v4.numel()):
+                    input2_l.append(v4[inx].item())
+                v5 = grad_output.view(-1)
+                for inx in range(v5.numel()):
+                    grad_output_l.append(v5[inx].item())
+
+                debugInfo.append(grads_input_l, output_l, input1_l, input2_l, grad_output_l)
 
             for jacobian_x, d_x, x in zip(jacobian_c, grads_input, diff_input_list):
                 if d_x is not None and d_x.size() != x.size():
