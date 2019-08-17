@@ -87,32 +87,16 @@ void logical_binary_kernel_cuda_impl(TensorIterator& iter, const char* op_name, 
   });
 }
 
-// We explicitly define these logical operations as named functions. If we enclose them using lambda functions, or
-// duplicate logical_binary_kernel_cuda_impl three lines for each logical operations, the time to compile this file
-// would be crazy. Possibly we are avoiding inlining them in logical_binary_kernel_cuda_impl and thus avoiding building
-// logical_binary_kernel_cuda_impl thrice.
-bool land(bool a, bool b) {
-  return a && b;
-}
-
-bool lor(bool a, bool b) {
-  return a || b;
-}
-
-bool lxor(bool a, bool b) {
-  return a != b;
-}
-
 void logical_and_kernel_cuda(TensorIterator& iter) {
-  logical_binary_kernel_cuda_impl(iter, "logical_and_cuda", land);
+  logical_binary_kernel_cuda_impl(iter, "logical_and_cuda", []GPU_LAMBDA(bool a, bool b){ return a && b; });
 }
 
 void logical_or_kernel_cuda(TensorIterator& iter) {
-  logical_binary_kernel_cuda_impl(iter, "logical_or_cuda", lor);
+  logical_binary_kernel_cuda_impl(iter, "logical_or_cuda", []GPU_LAMBDA(bool a, bool b){ return a || b; });
 }
 
 void logical_xor_kernel_cuda(TensorIterator& iter) {
-  logical_binary_kernel_cuda_impl(iter, "logical_xor_cuda", lxor);
+  logical_binary_kernel_cuda_impl(iter, "logical_xor_cuda", []GPU_LAMBDA(bool a, bool b){ return a != b; });
 }
 
 // ~~~~~~~~~~~~~ Binary logical operators END ~~~~~~~~~~~~~~~~~

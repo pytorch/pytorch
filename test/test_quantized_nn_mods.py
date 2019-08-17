@@ -32,7 +32,7 @@ class FunctionalAPITest(QuantizationTestCase):
         scale = 2.0
         zero_point = 1
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
-        qY = torch.ops.quantized.relu(qX)
+        qY = torch.relu(qX)
         qY_hat = qF.relu(qX)
         self.assertEqual(qY, qY_hat)
 
