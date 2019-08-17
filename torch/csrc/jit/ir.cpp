@@ -1481,12 +1481,12 @@ Value* Graph::insertFunctionCall(
     Function* callee,
     script::MatchedSchema& matched) {
   Value* fn_constant = insertNode(create(prim::Constant))
+                           ->s_(attr::name, callee->name())
                            ->output()
                            ->setType(FunctionType::create(std::move(callee)));
   std::vector<Value*> inputs = {fn_constant};
   inputs.insert(inputs.end(), matched.inputs.begin(), matched.inputs.end());
   Value* result = insertNode(create(prim::CallFunction, inputs))
-                      ->s_(attr::name, callee->name())
                       ->output()
                       ->setType(matched.return_types.at(0));
   return result;
