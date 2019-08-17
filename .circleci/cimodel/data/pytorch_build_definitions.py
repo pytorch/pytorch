@@ -133,7 +133,6 @@ class HiddenConf(object):
         self.parent_build = parent_build
 
     def gen_workflow_yaml_item(self, phase):
-
         return {self.gen_build_name(phase): {"requires": [self.parent_build.gen_build_name("build")]}}
 
     def gen_build_name(self, _):
