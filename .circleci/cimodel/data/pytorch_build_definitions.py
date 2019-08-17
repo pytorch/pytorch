@@ -193,11 +193,14 @@ def instantiate_configs():
     for fc in found_configs:
 
         distro_name = fc.find_prop("distro_name")
+        compiler_name = fc.find_prop("compiler_name")
 
         python_version = None
-        parms_list = ["py" + fc.find_prop("pyver")]
-
-        compiler_name = fc.find_prop("compiler_name")
+        if compiler_name == "cuda" or compiler_name == "android":
+            python_version = fc.find_prop("pyver")
+            parms_list = [fc.find_prop("abbreviated_pyver")]
+        else:
+            parms_list = ["py" + fc.find_prop("pyver")]
 
         cuda_version = None
         if compiler_name == "cuda":
@@ -217,6 +220,8 @@ def instantiate_configs():
             # TODO: This is a nasty special case
             if compiler_name == "clang":
                 parms_list.append("asan")
+                python_version = fc.find_prop("pyver")
+                parms_list[0] = fc.find_prop("abbreviated_pyver")
 
         if cuda_version in ["9.2", "10", "10.1"]:
             # TODO The gcc version is orthogonal to CUDA version?
