@@ -44,7 +44,7 @@ class ConvReLU2d(nnq.Conv2d):
         # see Issue:https://github.com/pytorch/pytorch/issues/23874
         bias = self.bias
         if bias is not None:
-            bias = torch.quantize_linear(bias, float(self.weight_scale) * input.q_scale(), 0, torch.qint32)
+            bias = torch.quantize_linear(bias.dequantize(), float(self.weight_scale) * input.q_scale(), 0, torch.qint32)
         output = torch.ops.quantized.fbgemm_conv2d_relu(input.permute([0, 2, 3, 1]),
                                                         self._packed_weight, bias,
                                                         self.stride, self.padding,
