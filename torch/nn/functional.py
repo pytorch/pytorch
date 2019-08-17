@@ -33,7 +33,7 @@ def _compute_padding_same(input_size, dim, weight, stride, dilation):
 # a bias on the right side if its uneven)
 def split_padding(padding):
     # type: (List[int]) -> List[int]
-    res: List[int] = []
+    res = [] # type: List[int]
     for i in padding:
         res.append(i // 2)
         res.append((i + 1) // 2)
@@ -85,7 +85,7 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         padding_dims = [_compute_padding_same(input.size(), i, weight, stride, dilation) for i in [0]]
         final_padding = split_padding(padding_dims)
     else:
-        final_padding = _pair(padding)
+        final_padding = _single(padding)
     if padding_mode == 'circular':
         if len(final_padding) == 1:
             final_padding = split_padding(final_padding)

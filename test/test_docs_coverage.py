@@ -47,15 +47,16 @@ class TestDocCoverage(unittest.TestCase):
 
             # below are symbols mistakely binded to torch.*, but should
             # go to torch.nn.functional.* instead
-            'avg_pool1d', 'conv_transpose2d', 'conv_transpose1d', 'conv3d',
-            'relu_', 'pixel_shuffle', 'conv2d', 'selu_', 'celu_', 'threshold_',
-            'cosine_similarity', 'rrelu_', 'conv_transpose3d', 'conv1d', 'pdist',
+            'avg_pool1d', 'conv_transpose2d', 'conv_transpose1d',
+            'relu_', 'pixel_shuffle', 'selu_', 'celu_', 'threshold_',
+            'cosine_similarity', 'rrelu_', 'conv_transpose3d', 'pdist',
             'adaptive_avg_pool1d', 'conv_tbc'
         }
         has_docstring = set(
             a for a in dir(torch)
             if getattr(torch, a).__doc__ and not a.startswith('_') and
             'function' in type(getattr(torch, a)).__name__)
+        print(has_docstring & whitelist)
         self.assertEqual(
             has_docstring & whitelist, whitelist,
             textwrap.dedent('''
