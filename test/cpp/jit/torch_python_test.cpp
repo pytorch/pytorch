@@ -1,8 +1,14 @@
 #include <test/cpp/jit/tests.h>
+#include <c10/util/Exception.h>
 
 namespace torch {
 namespace jit {
 
+#if defined(_WIN32)
+void runJITCPPTests(bool runCuda) {
+  TORCH_INTERNAL_ASSERT("JIT tests not yet supported on Windows");
+}
+#else
 #define JIT_TEST(name) test##name();
 TORCH_API void runJITCPPTests(bool runCuda) {
   TH_FORALL_TESTS(JIT_TEST)
@@ -17,5 +23,6 @@ TORCH_API void runJITCPPTests(bool runCuda) {
   testEvalModeForLoadedModule();
 }
 #undef JIT_TEST
+#endif
 } // namespace jit
 } // namespace torch

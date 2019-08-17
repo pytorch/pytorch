@@ -1,7 +1,6 @@
-# JIT CPP Tests
+# JIT C++ Tests
 
 ## How to add a new test
-
 First, create a new test file. Test files should have be placed in this
 directory, with a name that starts with `test_`, like `test_foo.cpp`.
 
@@ -36,3 +35,35 @@ Then, register your test in `tests.h`:
   _(CaseOne)  // note that the `test` prefix is omitted.
   _(CaseTwo)
 ```
+
+We glob all the test files together in `CMakeLists.txt` so that you don't
+have to edit it every time you add a test. Unfortunately, this means that in
+order to get the build to pick up your new test file, you need to re-run
+cmake:
+```
+python setup.py build --cmake
+```
+
+## Why do we have two different test runners?
+We have two different ways of running our cpp tests:
+1. With `gtest`, from a standalone binary.
+2. With Python, from `TestJit.test_cpp` and `TestJit.test_cpp_cuda` (in
+   `test/test_jit.py`)
+
+We want both because we need to test things from a pure-C++ environment and
+with all our various Python patch-points enabled.
+
+## How do I run the tests?
+The following commands assume you are in PyTorch root.
+
+1. With `gtest`:
+   ```bash
+   # (re)build the test binary
+   ninja build/bin/test_jit
+   # run
+   build/bin/test_jit --gtest_filter='glob_style_filter*'
+   ```
+2. With Python:
+   ```
+   python test/test_jit.py TestJit.test_cpp TestJit.test_cpp_cuda
+   ```
