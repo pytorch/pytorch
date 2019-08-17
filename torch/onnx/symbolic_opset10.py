@@ -130,10 +130,7 @@ avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
 
 def _interpolate(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, align_corners=None):
-        if align_corners:
-            return _unimplemented(name, "align_corners == True")
-
+    def symbolic_fn(g, input, output_size):
         output_size = sym_help._maybe_get_const(output_size, 'is')
         if sym_help._is_value(output_size):
             offset = 2

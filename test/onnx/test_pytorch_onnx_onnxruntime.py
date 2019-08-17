@@ -304,43 +304,49 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor(np.arange(6.0).reshape(2, 3))
         self.run_test(MyModule(), x)
 
-    @skipIfUnsupportedMinOpsetVersion(9)
-    def test_interpolate_scale(self):
+    def _interpolate(self, x, mode, use_size, is_upsample):
         class MyModel(torch.nn.Module):
             def forward(self, x):
-                return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=2)
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+                scale = 2.3 if is_upsample else 0.3
+                if use_size:
+                    size = [int(float(v) * scale) for v in x.size()[2:]]
+                    return torch.nn.functional.interpolate(x, mode=mode, size=size)
+                return torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale)
+
         self.run_test(MyModel(), x)
 
-    # NOTE: Supported in onnxruntime master, enable this after 0.5 release.
-    @skipIfUnsupportedOpsetVersion([10, 11])
-    def test_interpolate_output_size(self):
-        class MyModel(torch.nn.Module):
-            def forward(self, x):
-                return torch.nn.functional.interpolate(x, mode="nearest", size=(6, 8))
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.run_test(MyModel(), x)
+    def _interpolate_tests(self, is_upsample):
+        modes = ["nearest", "linear", "cubic"]
+        if self.opset_version < 11:
+            modes = ["nearest"]
+        x = [torch.randn(1, 2, 4, requires_grad=True),
+             torch.randn(1, 2, 4, 4, requires_grad=True),
+             torch.randn(1, 2, 4, 4, 6, requires_grad=True)]
 
-    # NOTE: Supported in onnxruntime master, enable this after 0.5 release.
-    @skipIfUnsupportedOpsetVersion([10, 11])
+        for mode in modes:
+            for xi in x:
+                mode_i = mode
+                if mode == "cubic" and xi.dim() != 4:
+                    continue
+                elif mode == "linear":
+                    if xi.dim() == 4:
+                        mode_i = "bilinear"
+                    elif xi.dim() == 5:
+                        mode_i = "trilinear"
+                self._interpolate(xi, mode_i, True, is_upsample)
+                if self.opset_version >= 9:  # throws unimplemented
+                    self._interpolate(xi, mode_i, False, is_upsample)
+
+    # enable when supported in ORT for opset 11
+    @skipIfUnsupportedOpsetVersion([11])
     def test_interpolate_upsample(self):
-        class MyModel(torch.nn.Module):
-            def forward(self, x):
-                size = [v * 2 for v in x.size()[2:]]
-                # work around for now: turn the dynamic sizes into constant
-                size = [int(i) for i in size]
-                return torch.nn.functional.interpolate(x, mode="nearest", size=size)
+        self._interpolate_tests(True)
 
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.run_test(MyModel(), x)
-
-    @skipIfUnsupportedMinOpsetVersion(9)
+    # enable when supported in ORT for opset 11
+    @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedOpsetVersion([11])
     def test_interpolate_downsample(self):
-        class MyModel(torch.nn.Module):
-            def forward(self, x):
-                return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=[1, 1, 0.5, 0.5])
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.run_test(MyModel(), x)
+        self._interpolate_tests(False)
 
     def test_std(self):
         class StandardDeviation(torch.nn.Module):
@@ -368,16 +374,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         model = StandardDeviation()
         self.run_test(model, x)
-
-    @skipIfUnsupportedOpsetVersion([7, 8])
-    def test_interpolate_upsample_dynamic_sizes(self):
-        class MyModel(torch.nn.Module):
-            def forward(self, x):
-                size = [v * 2 for v in x.size()[2:]]
-                return torch.nn.functional.interpolate(x, mode="nearest", size=size)
-
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.run_test(MyModel(), x)
 
     def test_narrow(self):
         class NarrowModel(torch.nn.Module):
