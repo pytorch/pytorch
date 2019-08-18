@@ -66,18 +66,11 @@ if (${IOS_PLATFORM} STREQUAL "OS")
     # This causes the installers to properly locate the output libraries
     set (CMAKE_XCODE_EFFECTIVE_PLATFORMS "-iphoneos")
 elseif (${IOS_PLATFORM} STREQUAL "SIMULATOR")
-    set (SIMULATOR true)
     set (IOS_PLATFORM_LOCATION "iPhoneSimulator.platform")
     set (XCODE_IOS_PLATFORM iphonesimulator)
 
     # This causes the installers to properly locate the output libraries
     set (CMAKE_XCODE_EFFECTIVE_PLATFORMS "-iphonesimulator")
-elseif (${IOS_PLATFORM} STREQUAL "WATCHOS")
-    set (IOS_PLATFORM_LOCATION "WatchOS.platform")
-    set (XCODE_IOS_PLATFORM watchos)
-
-    # This causes the installers to properly locate the output libraries
-    set (CMAKE_XCODE_EFFECTIVE_PLATFORMS "-watchos")
 else (${IOS_PLATFORM} STREQUAL "OS")
     message (FATAL_ERROR
              "Unsupported IOS_PLATFORM value selected. "
@@ -161,16 +154,18 @@ set (CMAKE_OSX_SYSROOT ${CMAKE_IOS_SDK_ROOT} CACHE PATH "Sysroot used for iOS su
 if (IOS_PLATFORM STREQUAL "OS")
     set (DEFAULT_IOS_ARCH "armv7;armv7s;arm64")
 elseif (IOS_PLATFORM STREQUAL "SIMULATOR")
-    set (DEFAULT_IOS_ARCH "i386;x86_64")
-elseif (IOS_PLATFORM STREQUAL "WATCHOS")
-    set (DEFAULT_IOS_ARCH "armv7k")
+    set (DEFAULT_IOS_ARCH "x86_64")
+else()
+    message (FATAL_ERROR 
+             "Unsupported IOS_PLATFORM value selected. "
+             "Please choose OS, SIMULATOR.")
 endif ()
 
-set (IOS_ARCH ${DEFAULT_IOS_ARCH} CACHE string  "Build architecture for iOS")
-set (CMAKE_OSX_ARCHITECTURES ${IOS_ARCH} CACHE string  "Build architecture for iOS")
+set (IOS_ARCH ${DEFAULT_IOS_ARCH} CACHE STRING  "Build architecture for iOS")
+set (CMAKE_OSX_ARCHITECTURES ${IOS_ARCH} CACHE STRING  "Build architecture for iOS")
 
 # Set the find root to the iOS developer roots and to user defined paths
-set (CMAKE_FIND_ROOT_PATH ${CMAKE_IOS_DEVELOPER_ROOT} ${CMAKE_IOS_SDK_ROOT} ${CMAKE_PREFIX_PATH} CACHE string  "iOS find search path root")
+set (CMAKE_FIND_ROOT_PATH ${CMAKE_IOS_DEVELOPER_ROOT} ${CMAKE_IOS_SDK_ROOT} ${CMAKE_PREFIX_PATH} CACHE STRING  "iOS find search path root")
 
 # default to searching for frameworks first
 set (CMAKE_FIND_FRAMEWORK FIRST)
