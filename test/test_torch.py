@@ -2492,6 +2492,24 @@ class _TestTorchMixin(torchtest):
         nparr = np.array(ints, dtype=np.int32)
         out = torch.empty_like(tensor, device=device)
 
+        def _test():
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Integers to negative integer powers are not allowed.",
+                lambda: tensor.pow(pow))
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Integers to negative integer powers are not allowed.",
+                lambda: tensor.pow_(pow))
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Integers to negative integer powers are not allowed.",
+                lambda: torch.pow(tensor, pow))
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Integers to negative integer powers are not allowed.",
+                lambda: torch.pow(tensor, pow, out=out))
+
         for pow in neg_ints:
             self.assertRaisesRegex(
                 ValueError,
@@ -2499,67 +2517,11 @@ class _TestTorchMixin(torchtest):
                 lambda: np.power(nparr, pow))
             if (device == 'cuda'):
                 # pow CUDA implementation does not have
-                # negative integer exponent check,
-                # so we just run it to make sure that
-                # no other errors occured:
-                tensor.pow(pow)
-                tensor.pow_(pow)
-                torch.pow(tensor, pow)
-                torch.pow(tensor, pow, out=out)
+                # negative integer exponent check
+                with self.assertRaises(AssertionError):
+                    _test()
             else:
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    "Integers to negative integer powers are not allowed.",
-                    lambda: tensor.pow(pow))
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    "Integers to negative integer powers are not allowed.",
-                    lambda: tensor.pow_(pow))
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    "Integers to negative integer powers are not allowed.",
-                    lambda: torch.pow(tensor, pow))
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    "Integers to negative integer powers are not allowed.",
-                    lambda: torch.pow(tensor, pow, out=out))
-
-    def _test_int32_tensor_pow_ints32(self, bases, pows, device):
-        tensor = torch.tensor(bases, dtype=torch.int32, device=device)
-        nparr = np.array(bases, dtype=np.int32)
-        for pow in pows:
-            expected = np.power(nparr, pow)
-
-            actual = tensor.pow(pow)
-            self.assertEqual(expected, actual.cpu().numpy())
-
-            actual = tensor.clone()
-            actual2 = actual.pow_(pow)
-            self.assertEqual(expected, actual.cpu().numpy())
-            self.assertEqual(expected, actual2.cpu().numpy())
-
-            actual = torch.pow(tensor, pow)
-            self.assertEqual(expected, actual.cpu().numpy())
-
-            actual2 = torch.pow(tensor, pow, out=actual)
-            self.assertEqual(expected, actual.cpu().numpy())
-            self.assertEqual(expected, actual2.cpu().numpy())
-
-    @torchtest.for_all_device_types()
-    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    def test_int_tensor_pow_non_neg_ints(self, device):
-        # ints = [-3, -2, -1, 0, 1, 2, 3]
-        ints = [0, 1, 2, 3]
-        non_neg_ints = [0, 1, 2, 3]
-        self._test_int32_tensor_pow_ints32(ints, non_neg_ints, device)
-
-    @torchtest.for_all_device_types()
-    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    def test_extreme_int_tensor_pow_0_and_1(self, device):
-        extreme_ints = [torch.iinfo(torch.int32).min,
-                        torch.iinfo(torch.int32).max]
-        non_neg_ints = [0, 1]
-        self._test_int32_tensor_pow_ints32(extreme_ints, non_neg_ints, device)
+                _test()
 
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
@@ -2667,25 +2629,11 @@ class _TestTorchMixin(torchtest):
         longs = [0, 1, 2, 3]
         test_tensor_pow_tensor(longs, torch.int64, np.int64)
 
-        # floats = [-torch.finfo(torch.float32).max,
-        #           -3.0, -2.0, -1.0, -1 / 2, -1 / 3,
-        #           -torch.finfo(torch.float32).min,
-        #           0.0,
-        #           torch.finfo(torch.float32).min,
-        #           1 / 3, 1 / 2, 1.0, 2.0, 3.0,
-        #           torch.finfo(torch.float32).max]
         floats = [-3.0, -2.0, -1.0, -1 / 2, -1 / 3,
                   0.0,
                   1 / 3, 1 / 2, 1.0, 2.0, 3.0]
         test_tensor_pow_tensor(floats, torch.float32, np.float32)
 
-        # doubles = [-torch.finfo(torch.float64).max,
-        #            -3.0, -2.0, -1.0, -1 / 2, -1 / 3,
-        #            -torch.finfo(torch.float64).min,
-        #            0.0,
-        #            torch.finfo(torch.float64).min,
-        #            1 / 3, 1 / 2, 1.0, 2.0, 3.0,
-        #            torch.finfo(torch.float64).max]
         doubles = [-3.0, -2.0, -1.0, -1 / 2, -1 / 3,
                    0.0,
                    1 / 3, 1 / 2, 1.0, 2.0, 3.0]
