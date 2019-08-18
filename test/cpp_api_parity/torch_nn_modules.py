@@ -1,7 +1,6 @@
-from cpp_api_parity import CppArgDeclaration
-
 module_metadata_map = {
     'Linear': dict(
-        cpp_forward_arg_declarations=[CppArgDeclaration(arg_type='const torch::Tensor&', arg_name='input')]
+        python_default_constructor_args=(3, 4),
+        cpp_default_constructor_args='(3, 4)',
     )
 }

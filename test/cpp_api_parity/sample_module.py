@@ -1,5 +1,5 @@
 import torch
-from cpp_api_parity import CppArgDeclaration, set_has_parity, has_parity
+from cpp_api_parity import has_parity
 from typing import Dict
 
 '''
@@ -14,7 +14,7 @@ When `SampleModule.has_parity` is false, behavior of `reset_parameters` / `forwa
 '''
 
 class SampleModule(torch.nn.Module):
-    def __init__(self, has_submodule):
+    def __init__(self, has_submodule, int_option=0, double_option=0.1, bool_option=False, string_option='0', tensor_option=torch.empty(1)):
         super(SampleModule, self).__init__()
         self.register_parameter('param', torch.nn.Parameter(torch.empty(3, 4)))
         self.register_buffer('buffer', torch.empty(4, 5))
@@ -40,9 +40,23 @@ class SampleModule(torch.nn.Module):
             return x + self.param * 2 + submodule_forward_result
 
 SAMPLE_MODULE_CPP_SOURCE = """\n
+namespace torch {
+namespace nn{
+struct TORCH_API SampleModuleOptions {
+  SampleModuleOptions(bool has_submodule) : has_submodule_(has_submodule) {}
+  TORCH_ARG(bool, has_submodule);
+  TORCH_ARG(int64_t, int_option);
+  TORCH_ARG(double, double_option);
+  TORCH_ARG(bool, bool_option);
+  TORCH_ARG(std::string, string_option);
+  TORCH_ARG(torch::Tensor, tensor_option);
+  // TORCH_ARG(torch::ExpandingArray, expanding_array_option);
+};
+
 struct SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImpl> {
-  SampleModuleImpl(bool has_submodule) {
-    if (has_submodule) {
+  SampleModuleImpl(bool has_submodule) : SampleModuleImpl(SampleModuleOptions(has_submodule)) {}
+  explicit SampleModuleImpl(SampleModuleOptions options) {
+    if (options.has_submodule_) {
       submodule = register_module("submodule", std::make_shared<SampleModuleImpl>(false));
     }
     reset();
@@ -61,8 +75,6 @@ struct SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImpl> {
   std::shared_ptr<SampleModuleImpl> submodule{nullptr};
 };
 
-namespace torch {
-namespace nn{
 TORCH_MODULE(SampleModule);
 }
 }
@@ -88,9 +100,9 @@ module_tests = [
 ]
 
 module_metadata = dict(
-    # yf225 TODO: can we use example_inputs to generate the arg_type here (just support a few common types), and get rid of `cpp_forward_arg_declarations`?
-    cpp_forward_arg_declarations=[CppArgDeclaration(arg_type='torch::Tensor', arg_name='x')],
-    cpp_source=SAMPLE_MODULE_CPP_SOURCE,
+    python_default_constructor_args=(True, ),
+    cpp_default_constructor_args='(true)',
+    cpp_sources=SAMPLE_MODULE_CPP_SOURCE,
 )
 
 torch.nn.SampleModule = SampleModule
