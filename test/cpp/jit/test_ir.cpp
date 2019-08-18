@@ -1,11 +1,8 @@
-#pragma once
-
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
 namespace torch {
 namespace jit {
-namespace test {
 
 void testAttributes() {
   Graph g;
@@ -35,7 +32,7 @@ void testAttributes() {
   ASSERT_EQ(attr2.f(one), 5);
 }
 
-void testBlocks(std::ostream& out = std::cout) {
+void testBlocks() {
   auto g = std::make_shared<Graph>();
   // auto g = *graph;
   auto a = Var::asNewInput(*g, "a");
@@ -84,6 +81,5 @@ void testBlocks(std::ostream& out = std::cout) {
       ->run(*g2);
 }
 
-} // namespace test
 } // namespace jit
 } // namespace torch

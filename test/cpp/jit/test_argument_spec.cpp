@@ -1,12 +1,9 @@
-#pragma once
-
 #include <torch/jit.h>
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/argument_spec.h"
 
 namespace torch {
 namespace jit {
-namespace test {
 
 int device(const autograd::Variable& v) {
   return v.type().is_cuda() ? v.get_device() : -1;
@@ -194,6 +191,5 @@ void testArgumentSpec() {
   ASSERT_EQ(spec.count(c), 1);
 }
 
-} // namespace test
 } // namespace jit
 } // namespace torch
