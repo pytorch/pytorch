@@ -11,7 +11,7 @@ import common_utils as common
 import common_nn
 from common_cuda import TEST_CUDA
 import torch.utils.cpp_extension
-from cpp_api_parity import sample_module, torch_nn_modules, TorchNNTestParams
+from cpp_api_parity import sample_module, torch_nn_modules, TorchNNTestParams, set_has_parity
 
 
 torch_nn_has_parity = set([
@@ -203,32 +203,35 @@ class TestCppApiParity(common.TestCase):
     def _test_torch_nn_module_variant(self, test_params):
         torch_nn_test_methods = ['init', 'forward', 'backward']
 
-        def setup_init_test(device, python_module_class, python_constructor_args):
-            torch.manual_seed(2)
-            module = python_module_class(*python_constructor_args).to(device)
-            return [module], device
+        def setup_init_test(device, python_module_class, python_constructor_args, has_parity):
+            with set_has_parity(has_parity):
+                torch.manual_seed(2)
+                module = python_module_class(*python_constructor_args).to(device)
+                return [module], device
 
-        def setup_forward_test(device, python_module_class, python_constructor_args, example_inputs):
-            torch.manual_seed(2)
-            module = python_module_class(*python_constructor_args).to(device)
-            python_output = module(*example_inputs)
-            return [module], device, python_output, example_inputs
+        def setup_forward_test(device, python_module_class, python_constructor_args, example_inputs, has_parity):
+            with set_has_parity(has_parity):
+                torch.manual_seed(2)
+                module = python_module_class(*python_constructor_args).to(device)
+                python_output = module(*example_inputs)
+                return [module], device, python_output, example_inputs
 
-        def setup_backward_test(device, python_module_class, python_constructor_args, example_inputs):
-            torch.manual_seed(2)
-            module = python_module_class(*python_constructor_args).to(device)
-            python_output = module(*example_inputs)
-            python_output.sum().backward()
-            # JIT tracing does not save a module's parameters' gradients into ScriptModule.
-            # Instead, we create another module `grad_module` with the same structure as `module`,
-            # and use `grad_module`'s parameters to save `module`'s corresponding parameters'
-            # gradients. Then, we trace both `module` and `grad_module`, serialize them and
-            # pass them into C++ for parity testing.
-            grad_module = copy.deepcopy(module)
-            for param, grad_param in zip(module.parameters(), grad_module.parameters()):
-                if param.grad is not None:
-                    grad_param.data = param.grad
-            return [module, grad_module], device, example_inputs
+        def setup_backward_test(device, python_module_class, python_constructor_args, example_inputs, has_parity):
+            with set_has_parity(has_parity):
+                torch.manual_seed(2)
+                module = python_module_class(*python_constructor_args).to(device)
+                python_output = module(*example_inputs)
+                python_output.sum().backward()
+                # JIT tracing does not save a module's parameters' gradients into ScriptModule.
+                # Instead, we create another module `grad_module` with the same structure as `module`,
+                # and use `grad_module`'s parameters to save `module`'s corresponding parameters'
+                # gradients. Then, we trace both `module` and `grad_module`, serialize them and
+                # pass them into C++ for parity testing.
+                grad_module = copy.deepcopy(module)
+                for param, grad_param in zip(module.parameters(), grad_module.parameters()):
+                    if param.grad is not None:
+                        grad_param.data = param.grad
+                return [module, grad_module], device, example_inputs
 
         # yf225 TODO: maybe a better name?
         # yf225 TODO: just generate something like (in C++) `module.get_module("submodule").get_XX(some_field_name) .. == .. cpp_module->submodule->some_field_name
@@ -310,6 +313,7 @@ class TestCppApiParity(common.TestCase):
             python_module_class = test_params.python_module_class
             python_constructor_args = test_params.python_constructor_args
             module_variant_name = test_params.module_variant_name
+            has_parity = test_params.has_parity
 
             if input_size:
                 example_inputs = [torch.randn(input_size)]
@@ -323,11 +327,11 @@ class TestCppApiParity(common.TestCase):
 
             for method_name in torch_nn_test_methods:
                 if method_name == 'init':
-                    args_map[method_name] = setup_init_test(device, python_module_class, python_constructor_args)
+                    args_map[method_name] = setup_init_test(device, python_module_class, python_constructor_args, has_parity)
                 elif method_name == 'forward':
-                    args_map[method_name] = setup_forward_test(device, python_module_class, python_constructor_args, example_inputs)
+                    args_map[method_name] = setup_forward_test(device, python_module_class, python_constructor_args, example_inputs, has_parity)
                 elif method_name == 'backward':
-                    args_map[method_name] = setup_backward_test(device, python_module_class, python_constructor_args, example_inputs)
+                    args_map[method_name] = setup_backward_test(device, python_module_class, python_constructor_args, example_inputs, has_parity)
                 else:
                     raise RuntimeError("{} is not a supported method to test".format(method_name))
 
@@ -349,7 +353,7 @@ class TestCppApiParity(common.TestCase):
                 try:
                     cpp_test_name = module_variant_name + '_test_' + method_name
                     cpp_test_fn = getattr(cpp_module, cpp_test_name)
-                    if test_params.expect_parity_error:
+                    if not test_params.has_parity:
                         with self.assertRaisesRegex(RuntimeError, "Parity test failed"):
                             cpp_test_fn(*cpp_args)
                     else:
@@ -377,7 +381,7 @@ def _process_test_params(test_params_dict, module_metadata, device):
         cpp_constructor_args=test_params_dict.get('cpp_constructor_args'),
         input_size=test_params_dict.get('input_size', None),
         input_fn=test_params_dict.get('input_fn', None),
-        expect_parity_error=test_params_dict.get('expect_parity_error', False),
+        has_parity=test_params_dict.get('has_parity', True),
         cpp_forward_arg_declarations=module_metadata.get('cpp_forward_arg_declarations'),
         python_module_class=getattr(torch.nn, module_name),
         cpp_source=module_metadata.get('cpp_source', ''),

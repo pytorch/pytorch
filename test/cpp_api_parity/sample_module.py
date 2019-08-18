@@ -1,5 +1,5 @@
 import torch
-from cpp_api_parity import CppArgDeclaration
+from cpp_api_parity import CppArgDeclaration, set_has_parity, has_parity
 from typing import Dict
 
 '''
@@ -14,13 +14,12 @@ When `SampleModule.has_parity` is false, behavior of `reset_parameters` / `forwa
 '''
 
 class SampleModule(torch.nn.Module):
-    def __init__(self, has_parity, has_submodule):
+    def __init__(self, has_submodule):
         super(SampleModule, self).__init__()
         self.register_parameter('param', torch.nn.Parameter(torch.empty(3, 4)))
         self.register_buffer('buffer', torch.empty(4, 5))
-        self.has_parity = has_parity
         if has_submodule:
-            self.submodule = SampleModule(has_parity, False)
+            self.submodule = SampleModule(False)
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -28,14 +27,14 @@ class SampleModule(torch.nn.Module):
             self.param.fill_(1)
             self.buffer.fill_(1)
             self.attr = 10
-            if not self.has_parity:
+            if not has_parity():
                 self.param.add_(10)
                 self.buffer.add_(10)
                 self.attr += 90
 
     def forward(self, x):
         submodule_forward_result = self.submodule(x) if hasattr(self, 'submodule') else 0
-        if not self.has_parity:
+        if not has_parity():
             return x + self.param * 4 + submodule_forward_result + 3
         else:
             return x + self.param * 2 + submodule_forward_result
@@ -72,19 +71,19 @@ TORCH_MODULE(SampleModule);
 module_tests = [
     dict(
         module_name='SampleModule',
-        constructor_args=(True, True),
+        constructor_args=(True, ),
         cpp_constructor_args='(true)',
         input_size=(3, 4),
         desc='has_parity',
-        expect_parity_error=False,
+        has_parity=True,
     ),
     dict(
         module_name='SampleModule',
-        constructor_args=(False, True),
+        constructor_args=(True, ),
         cpp_constructor_args='(true)',
         input_size=(3, 4),
         desc='no_parity',
-        expect_parity_error=True,
+        has_parity=False,
     ),
 ]
 
