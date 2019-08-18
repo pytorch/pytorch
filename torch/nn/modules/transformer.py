@@ -262,13 +262,13 @@ class TransformerEncoderLayer(Module):
         Shape:
             see the docs in Transformer class.
         """
-        src2 = self.self_attn(src, src, src, attn_mask=src_mask,
+        src1 = self.norm1(src)
+        src2 = self.self_attn(src1, src1, src1, attn_mask=src_mask,
                               key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
-        src = self.norm1(src)
-        src2 = self.linear2(self.dropout(F.relu(self.linear1(src))))
+        src1 = self.norm2(src)
+        src2 = self.linear2(self.dropout(F.relu(self.linear1(src1))))
         src = src + self.dropout2(src2)
-        src = self.norm2(src)
         return src
 
 
@@ -321,17 +321,17 @@ class TransformerDecoderLayer(Module):
         Shape:
             see the docs in Transformer class.
         """
-        tgt2 = self.self_attn(tgt, tgt, tgt, attn_mask=tgt_mask,
+        tgt1 = self.norm1(tgt)
+        tgt2 = self.self_attn(tgt1, tgt1, tgt1, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
         tgt = tgt + self.dropout1(tgt2)
-        tgt = self.norm1(tgt)
-        tgt2 = self.multihead_attn(tgt, memory, memory, attn_mask=memory_mask,
+        tgt1 = self.norm2(tgt)
+        tgt2 = self.multihead_attn(tgt1, memory, memory, attn_mask=memory_mask,
                                    key_padding_mask=memory_key_padding_mask)[0]
         tgt = tgt + self.dropout2(tgt2)
-        tgt = self.norm2(tgt)
-        tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt))))
+        tgt1 = self.norm3(tgt)
+        tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt1))))
         tgt = tgt + self.dropout3(tgt2)
-        tgt = self.norm3(tgt)
         return tgt
 
 
