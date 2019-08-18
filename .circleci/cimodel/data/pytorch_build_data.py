@@ -16,7 +16,6 @@ CONFIG_TREE_DATA = [
             ("5.4", [
                 XImportant("3.6"),
                 ("3.6", [
-                    ("xla", [XImportant(True)]),
                     ("namedtensor", [XImportant(True)]),
                 ]),
             ]),
@@ -27,6 +26,11 @@ CONFIG_TREE_DATA = [
                 XImportant("3.6"),  # This is actually the ASAN build
                 ("3.6", [
                     ("namedtensor", [XImportant(True)]),  # ASAN
+                ]),
+            ]),
+            ("7", [
+                ("3.6", [
+                    ("xla", [XImportant(True)]),
                 ]),
             ]),
         ]),
