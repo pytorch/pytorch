@@ -29,12 +29,15 @@ if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
 fi
 
 # Pick docker image
-if [[ "$PACKAGE_TYPE" == conda ]]; then
-  export DOCKER_IMAGE="soumith/conda-cuda"
-elif [[ "$DESIRED_CUDA" == cpu ]]; then
-  export DOCKER_IMAGE="soumith/manylinux-cuda100"
-else
-  export DOCKER_IMAGE="soumith/manylinux-cuda${DESIRED_CUDA:2}"
+export DOCKER_IMAGE=${DOCKER_IMAGE:-}
+if [[ -z "$DOCKER_IMAGE" ]]; then
+  if [[ "$PACKAGE_TYPE" == conda ]]; then
+    export DOCKER_IMAGE="soumith/conda-cuda"
+  elif [[ "$DESIRED_CUDA" == cpu ]]; then
+    export DOCKER_IMAGE="soumith/manylinux-cuda100"
+  else
+    export DOCKER_IMAGE="soumith/manylinux-cuda${DESIRED_CUDA:2}"
+  fi
 fi
 
 # Upload to parallel folder for gcc abis
