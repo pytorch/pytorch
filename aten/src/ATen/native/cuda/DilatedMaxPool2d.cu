@@ -113,13 +113,13 @@ __global__ void MaxPoolForwardNHWC(const int nthreads, const scalar_t* bottom_da
 }
 
 
-  static const int BACKWARD_THREADS = 256;
+static const int BLOCK_THREADS = 256;
 
 template <typename scalar_t, typename accscalar_t>
 #if defined (__HIP_PLATFORM_HCC__)
-C10_LAUNCH_BOUNDS_2(BACKWARD_THREADS, 4)
+C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 4)
 #else
-C10_LAUNCH_BOUNDS_2(BACKWARD_THREADS, 8)
+C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 8)
 #endif
 __global__ void MaxPoolBackwardNCHW(const int nthreads, const scalar_t* top_diff,
     const int64_t* top_mask, const int num, const int channels,
@@ -170,16 +170,14 @@ __global__ void MaxPoolBackwardNCHW(const int nthreads, const scalar_t* top_diff
         if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
         for (int ph = phstart; ph < phend; ++ph) {
           for (int pw = pwstart; pw < pwend; ++pw) {
-            int idx = ph * pooled_width + pw;
-            if (top_mask[idx] == h * width + w) {
-              gradient += ScalarConvert<scalar_t, accscalar_t>::to(top_diff[idx]);
+            if (top_mask[ph * pooled_width + pw] == h * width + w) {
+              gradient += ScalarConvert<scalar_t, accscalar_t>::to(top_diff[ph * pooled_width + pw]);
             }
           }
         }
         } else {
-            int idx = phstart * pooled_width + pwstart;
-            if (top_mask[idx] == h * width + w) {
-              gradient += ScalarConvert<scalar_t, accscalar_t>::to(top_diff[idx]);
+            if (top_mask[phstart * pooled_width + pwstart] == h * width + w) {
+              gradient += ScalarConvert<scalar_t, accscalar_t>::to(top_diff[phstart * pooled_width + pwstart]);
             }
         }
         bottom_diff[(n*channels+c)*height*width+index] = ScalarConvert<accscalar_t, scalar_t>::to(gradient);
@@ -189,9 +187,9 @@ __global__ void MaxPoolBackwardNCHW(const int nthreads, const scalar_t* top_diff
 
 template <typename scalar_t, typename accscalar_t>
 #if defined (__HIP_PLATFORM_HCC__)
-C10_LAUNCH_BOUNDS_2(BACKWARD_THREADS, 4)
+C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 4)
 #else
-C10_LAUNCH_BOUNDS_2(BACKWARD_THREADS, 8)
+C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 8)
 #endif
 __global__ void MaxPoolBackwardNHWC(const int nthreads, const scalar_t* top_diff,
                                     const int64_t* top_mask, const int num, const int channels,
@@ -344,7 +342,7 @@ void max_pool2d_with_indices_out_cuda_template(
   indices.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
 
   const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
-                                   BACKWARD_THREADS);
+                                   BLOCK_THREADS);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
     "max_pool2d_with_indices_out_cuda_frame",
@@ -483,7 +481,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
       if (memory_format == MemoryFormat::ChannelsLast) {
         int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
         int block_x = std::min<int>(maxThreadsDim[0], std::min<int>(lastPow2(imgcount), at::cuda::warp_size()));
-        int block_y = std::min<int>(maxThreadsDim[1], std::min<int>(lastPow2(nbatch), BACKWARD_THREADS / block_x));
+        int block_y = std::min<int>(maxThreadsDim[1], std::min<int>(lastPow2(nbatch), BLOCK_THREADS / block_x));
         const dim3 block(block_x, block_y);
         int grid_x = cuda::ATenCeilDiv(imgcount, block_x);
         int grid_y = (nbatch + block_y - 1) / block_y;
@@ -502,7 +500,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
           gradInput_data);
       } else {
         dim3 grid;
-        const int blocks = (imgcount + BACKWARD_THREADS - 1) / BACKWARD_THREADS;
+        const int blocks = (imgcount + BLOCK_THREADS - 1) / BLOCK_THREADS;
         grid.x = blocks;
         grid.y = nbatch;
         uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
@@ -512,7 +510,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
         if (maxGridZ < grid.z) grid.z = maxGridZ;
 
         MaxPoolBackwardNCHW<scalar_t, accscalar_t>
-        <<<grid, BACKWARD_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+        <<<grid, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
           count,
           gradOutput_data,
           indices_data,
