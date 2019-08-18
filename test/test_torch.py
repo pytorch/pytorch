@@ -12889,10 +12889,10 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         other = torch.randn(sz, device=device)
 
         self.unary_check_input_output_mem_overlap(data, sz,
-        lambda input, out: op(other, input, out=out))
+                                lambda input, out: op(other, input, out=out))
 
         self.unary_check_input_output_mem_overlap(data, sz,
-        lambda input, out: op(input, other, out=out))
+                                lambda input, out: op(input, other, out=out))
 
     @torchtest.for_all_device_types()
     def test_binary_op_mem_overlap(self, device):
