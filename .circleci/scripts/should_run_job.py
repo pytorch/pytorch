@@ -45,7 +45,7 @@ default_set = [
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c',
 
     # XLA
-    'pytorch-xla-linux-xenial-py3.6-gcc5.4',
+    'pytorch-xla-linux-xenial-py3.6-clang7',
 
     # Other checks
     'pytorch-short-perf-test-gpu',
