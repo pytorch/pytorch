@@ -2,6 +2,7 @@
 #define THCUNN_ROW2COL_H
 
 #include <THC/THCNumerics.cuh>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <THCUNN/common.h>
 
 // Kernel for fast unfold+copy on rows

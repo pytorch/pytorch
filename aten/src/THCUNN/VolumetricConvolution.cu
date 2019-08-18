@@ -4,6 +4,7 @@
 #include <TH/THHalf.h>
 #include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 
 // Kernel for fast unfold+copy
 // Borrowed from Theano

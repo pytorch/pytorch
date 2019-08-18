@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/div_rtn.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 
 static inline void THNN_(VolumetricConvolution_shapeCheck)
                         (THCState *state,

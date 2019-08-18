@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "THCUNN/generic/TemporalRowConvolution.cu"
 #else
 
+#include <ATen/cuda/detail/KernelUtils.h>
+
 static inline void THNN_(TemporalRowConvolution_shapeCheck)(
     THCState *state, THCTensor *input, THCTensor *gradOutput, THCTensor *weight,
     THCTensor *bias, int kW, int dW, int padW) {
