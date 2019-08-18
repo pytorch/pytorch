@@ -1,5 +1,3 @@
-#pragma once
-
 #include <test/cpp/jit/test_base.h>
 #include <test/cpp/jit/test_utils.h>
 

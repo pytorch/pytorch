@@ -1,5 +1,3 @@
-#pragma once
-
 #include <ATen/ATen.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
@@ -70,8 +68,11 @@
 
 namespace torch {
 namespace jit {
-c10::OperatorOptions aliasAnalysisFromSchema();
-namespace test {
+c10::OperatorOptions aliasAnalysisFromSchema() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
+}
 
 using Var = SymbolicVariable;
 
@@ -1166,6 +1167,5 @@ void testInsertConstant() {
       "Expected OptionalType");
 }
 
-} // namespace test
 } // namespace jit
 } // namespace torch

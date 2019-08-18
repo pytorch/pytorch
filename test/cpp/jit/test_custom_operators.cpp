@@ -1,5 +1,3 @@
-#pragma once
-
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
@@ -11,7 +9,6 @@
 
 namespace torch {
 namespace jit {
-namespace test {
 
 void testCustomOperators() {
   {
@@ -192,6 +189,5 @@ void testIValueKWargs() {
   ASSERT_EQ(result.toInt(), 19);
 }
 
-} // namespace test
 } // namespace jit
 } // namespace torch

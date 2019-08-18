@@ -1,12 +1,9 @@
-#pragma once
-
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/graph_executor.h"
 
 namespace torch {
 namespace jit {
-namespace test {
 
 void testGraphExecutor() {
   constexpr int batch_size = 4;
@@ -33,6 +30,5 @@ void testGraphExecutor() {
   ASSERT_TRUE(almostEqual(stack[1].toTensor(), v(r1)));
 }
 
-} // namespace test
 } // namespace jit
 } // namespace torch

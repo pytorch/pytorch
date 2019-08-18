@@ -1,11 +1,9 @@
-#pragma once
-
 #include "test/cpp/jit/test_base.h"
+#include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/subgraph_matcher.h"
 
 namespace torch {
 namespace jit {
-namespace {
 
 void testTrivial1() {
   Graph graph, pattern;
@@ -361,7 +359,7 @@ graph(%x, %y):
   AT_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
 }
 
-void testAttributes() {
+void testMatchesAttributes() {
   Graph graph;
   script::parseIR(
       R"IR(
@@ -479,10 +477,9 @@ void testSubgraphMatching() {
   testOverlappingMatches();
   testMatchInBasicBlocks1();
   testMatchInBasicBlocks2();
-  testAttributes();
+  testMatchesAttributes();
   testBadPattern();
 }
 
-} // namespace
 } // namespace jit
 } // namespace torch
