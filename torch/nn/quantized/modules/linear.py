@@ -28,21 +28,24 @@ class Quantize(Module):
                 [ 1., -1.]], size=(2, 2), dtype=torch.qint8, scale=1.0, zero_point=2)
     """
 
-    def __init__(self, out_scale, out_zero_point, out_dtype):
+    def __init__(self, scale, zero_point, dtype):
         super(Quantize, self).__init__()
-        self.register_buffer('_scale', torch.tensor([out_scale]))
-        self.register_buffer('_zero_point', torch.tensor([out_zero_point], dtype=torch.long))
-        self._dtype = out_dtype
+        self.register_buffer('scale', torch.tensor([scale]))
+        self.register_buffer('zero_point', torch.tensor([zero_point], dtype=torch.long))
+        self.dtype = dtype
 
     def forward(self, X):
-        return torch.quantize_linear(X, float(self._scale),
-                                     int(self._zero_point), self._dtype)
+        return torch.quantize_linear(X, float(self.scale),
+                                     int(self.zero_point), self.dtype)
 
     @staticmethod
     def from_float(mod):
         assert hasattr(mod, 'observer')
-        qparams = mod.observer.calculate_qparams()
-        return Quantize(qparams[0].item(), qparams[1].item(), mod.observer.dtype)
+        scale, zero_point = mod.observer.calculate_qparams()
+        return Quantize(scale.float().item(), zero_point.long().item(), mod.observer.dtype)
+
+    def extra_repr(self):
+        return 'scale={}, zero_point={}, dtype={}'.format(self.scale, self.zero_point, self.dtype)
 
 class DeQuantize(Module):
     r"""Dequantizes an incoming tensor
@@ -119,6 +122,11 @@ class Linear(torch.nn.Module):
         self.set_weight(qweight)
         self.scale = 1.0
         self.zero_point = 0
+
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, bias={}, scale={}, zero_point={}'.format(
+            self.in_features, self.out_features, self.bias is not None, self.scale, self.zero_point
+        )
 
     def forward(self, x):
         return torch.ops.quantized.fbgemm_linear(
@@ -212,9 +220,10 @@ class Linear(torch.nn.Module):
             weight_observer = mod.qconfig.weight()
             weight_observer(mod.weight)
         act_scale, act_zp = activation_observer.calculate_qparams()
+        assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
         wt_scale, wt_zp = weight_observer.calculate_qparams()
-        bias_scale = (wt_scale * act_scale).float()
-        qweight = torch.quantize_linear(mod.weight.float(), wt_scale, wt_zp.long().item(), torch.qint8)
+        bias_scale = float(wt_scale * act_scale)
+        qweight = torch.quantize_linear(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
         if mod.bias is not None:
             qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
         else:

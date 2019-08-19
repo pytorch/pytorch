@@ -211,7 +211,6 @@ class _TestTorchMixin(torchtest):
                        'new',
                        'polygamma',
                        'polygamma_',
-                       'record_stream',
                        'reinforce',
                        'relu',
                        'relu_',
@@ -238,10 +237,10 @@ class _TestTorchMixin(torchtest):
 
     def test_dot(self):
         types = {
-            'torch.DoubleTensor': 1e-8,
-            'torch.FloatTensor': 1e-4,
+            'torch.DoubleTensor',
+            'torch.FloatTensor',
         }
-        for tname, _prec in types.items():
+        for tname in types:
             v1 = torch.randn(100).type(tname)
             v2 = torch.randn(100).type(tname)
             res1 = torch.dot(v1, v2)
@@ -254,7 +253,7 @@ class _TestTorchMixin(torchtest):
             self.assertEqual(res1, out)
 
         # Test 0-strided
-        for tname, _prec in types.items():
+        for tname in types:
             v1 = torch.randn(1).type(tname).expand(100)
             v2 = torch.randn(100).type(tname)
             res1 = torch.dot(v1, v2)
@@ -268,10 +267,11 @@ class _TestTorchMixin(torchtest):
 
     def test_ger(self):
         types = {
-            'torch.DoubleTensor': 1e-8,
-            'torch.FloatTensor': 1e-4,
+            'torch.DoubleTensor',
+            'torch.FloatTensor',
+            'torch.BFloat16Tensor',
         }
-        for tname, _prec in types.items():
+        for tname in types:
             v1 = torch.randn(100).type(tname)
             v2 = torch.randn(100).type(tname)
             res1 = torch.ger(v1, v2)
@@ -282,7 +282,7 @@ class _TestTorchMixin(torchtest):
             self.assertEqual(res1, res2)
 
         # Test 0-strided
-        for tname, _prec in types.items():
+        for tname in types:
             v1 = torch.randn(1).type(tname).expand(100)
             v2 = torch.randn(100).type(tname)
             res1 = torch.ger(v1, v2)
@@ -294,8 +294,9 @@ class _TestTorchMixin(torchtest):
 
     def test_addr(self):
         types = {
-            'torch.DoubleTensor': 1e-8,
-            'torch.FloatTensor': 1e-4,
+            'torch.DoubleTensor',
+            'torch.FloatTensor',
+            'torch.BFloat16Tensor',
         }
 
         def run_test(m, v1, v2, m_transform=lambda x: x):
@@ -307,7 +308,7 @@ class _TestTorchMixin(torchtest):
                     ref[i, j] += v1[i] * v2[j]
             self.assertEqual(m, ref)
 
-        for tname, _prec in types.items():
+        for tname in types:
             for h, w in [(100, 110), (1, 20), (200, 2)]:
                 m = torch.randn(h, w).type(tname)
                 v1 = torch.randn(h).type(tname)
@@ -324,8 +325,9 @@ class _TestTorchMixin(torchtest):
         types = {
             'torch.DoubleTensor': 1e-8,
             'torch.FloatTensor': 1e-4,
+            'torch.BFloat16Tensor': 1e-0,
         }
-        for tname, _prec in types.items():
+        for tname, prec in types.items():
             t = torch.randn(10).type(tname)
             m = torch.randn(10, 100).type(tname)
             v = torch.randn(100).type(tname)
@@ -335,10 +337,11 @@ class _TestTorchMixin(torchtest):
             for i in range(10):
                 for j in range(100):
                     res2[i] += m[i, j] * v[j]
-            self.assertEqual(res1, res2)
+
+            self.assertEqual(res1, res2, prec)
 
         # Test 0-strided
-        for tname, _prec in types.items():
+        for tname, prec in types.items():
             t = torch.randn(1).type(tname).expand(10)
             m = torch.randn(10, 1).type(tname).expand(10, 100)
             v = torch.randn(100).type(tname)
@@ -348,14 +351,16 @@ class _TestTorchMixin(torchtest):
             for i in range(10):
                 for j in range(100):
                     res2[i] += m[i, j] * v[j]
-            self.assertEqual(res1, res2)
+
+            self.assertEqual(res1, res2, prec)
 
     def test_addmm(self):
         types = {
             'torch.DoubleTensor': 1e-8,
             'torch.FloatTensor': 1e-4,
+            'torch.BFloat16Tensor': 1e-1,
         }
-        for tname, _prec in types.items():
+        for tname, prec in types.items():
             M = torch.randn(10, 25).type(tname)
             m1 = torch.randn(10, 50).type(tname)
             m2 = torch.randn(50, 25).type(tname)
@@ -366,10 +371,10 @@ class _TestTorchMixin(torchtest):
                 for j in range(25):
                     for k in range(50):
                         res2[i, j] += m1[i, k] * m2[k, j]
-            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res2, prec)
 
         # Test 0-strided
-        for tname, _prec in types.items():
+        for tname, prec in types.items():
             M = torch.randn(10, 1).type(tname).expand(10, 25)
             m1 = torch.randn(10, 1).type(tname).expand(10, 50)
             m2 = torch.randn(50, 25).type(tname)
@@ -380,7 +385,7 @@ class _TestTorchMixin(torchtest):
                 for j in range(25):
                     for k in range(50):
                         res2[i, j] += m1[i, k] * m2[k, j]
-            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res2, prec)
 
     def test_logical_any(self):
         for device in torch.testing.get_all_device_types():
@@ -1613,15 +1618,19 @@ class _TestTorchMixin(torchtest):
         self.assertFalse(x.any())
 
     def test_mv(self):
-        m1 = torch.randn(100, 100)
-        v1 = torch.randn(100)
+        def _test_mv(m1, v1):
+            res1 = torch.mv(m1, v1)
+            res2 = res1.clone().zero_()
+            for i, j in iter_indices(m1):
+                res2[i] += m1[i][j] * v1[j]
 
-        res1 = torch.mv(m1, v1)
-        res2 = res1.clone().zero_()
-        for i, j in iter_indices(m1):
-            res2[i] += m1[i][j] * v1[j]
+            self.assertEqual(res1, res2)
 
-        self.assertEqual(res1, res2)
+        _test_mv(torch.randn(100, 100, dtype=torch.float32), torch.randn(100, dtype=torch.float32))
+        _test_mv(torch.randn(100, 100, dtype=torch.float64), torch.randn(100, dtype=torch.float64))
+        _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int32), torch.randint(0, 100, (100, ), dtype=torch.int32))
+        _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int64), torch.randint(0, 100, (100, ), dtype=torch.int64))
+        _test_mv(torch.randn(100, 100, dtype=torch.float32).bfloat16(), torch.randn(100, dtype=torch.float32).bfloat16())
 
     def test_numpy_args(self):
         x1 = torch.randn(10)
@@ -1865,20 +1874,22 @@ class _TestTorchMixin(torchtest):
 
     @staticmethod
     def _test_logical_not(self, device):
-        for dtype in (torch.bool,):  # will add more dtypes in the future
-            expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
+        for dtype in torch.testing.get_all_dtypes():
             a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
+            if dtype == torch.bfloat16:
+                self.assertRaises(RuntimeError, lambda: a.logical_not())
+                continue
+            expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
             # new tensor
-            self.assertEqual(expected_res, a.logical_not())
+            self.assertEqual(expected_res.bool(), a.logical_not())
             # out
-            b = torch.empty(0, dtype=bool, device=device)
-            torch.logical_not(a, out=b)
-            self.assertEqual(expected_res, b)
-            # out is not bool
-            b = torch.empty(0, dtype=torch.uint8, device=device)
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"The output tensor of logical_not must be a bool tensor\."):
+            for out_dtype in torch.testing.get_all_dtypes():
+                b = torch.empty(0, dtype=out_dtype, device=device)
+                if out_dtype == torch.bfloat16:
+                    self.assertRaises(RuntimeError, lambda: torch.logical_not(a, out=b))
+                    continue
                 torch.logical_not(a, out=b)
+                self.assertEqual(expected_res.bool(), b.bool())
             # in-place
             a.logical_not_()
             self.assertEqual(expected_res, a)
@@ -1888,24 +1899,27 @@ class _TestTorchMixin(torchtest):
 
     @staticmethod
     def _test_logical_xor(self, device):
-        for dtype in (torch.bool,):  # Will add more dtypes in the future
+        for dtype in torch.testing.get_all_dtypes():
             expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
-            a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
-            b = torch.tensor([1, 0, 0, 10], dtype=dtype, device=device)
-            # new tensor
-            self.assertEqual(expected_res, a.logical_xor(b))
-            # out
-            c = torch.empty(0, dtype=dtype, device=device)
-            torch.logical_xor(a, b, out=c)
-            self.assertEqual(expected_res, c)
-            # out is not bool
-            c = torch.empty(0, dtype=torch.uint8, device=device)
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"The output tensor of logical_xor must be a bool tensor\."):
-                torch.logical_xor(a, b, out=c)
-            # in-place
-            a.logical_xor_(b)
-            self.assertEqual(expected_res, a)
+            for other_dtype in torch.testing.get_all_dtypes():
+                a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
+                b = torch.tensor([1, 0, 0, 10], dtype=other_dtype, device=device)
+                if torch.bfloat16 in (dtype, other_dtype):
+                    self.assertRaises(RuntimeError, lambda: a.logical_xor(b))
+                    continue
+                # new tensor
+                self.assertEqual(expected_res.bool(), a.logical_xor(b))
+                # out
+                for out_dtype in torch.testing.get_all_dtypes():
+                    c = torch.empty(0, dtype=out_dtype, device=device)
+                    if out_dtype == torch.bfloat16:
+                        self.assertRaises(RuntimeError, lambda: torch.logical_xor(a, b, out=c))
+                        continue
+                    torch.logical_xor(a, b, out=c)
+                    self.assertEqual(expected_res.bool(), c.bool())
+                # in-place
+                a.logical_xor_(b)
+                self.assertEqual(expected_res, a)
 
     def test_logical_xor(self):
         self._test_logical_xor(self, 'cpu')
@@ -1944,6 +1958,7 @@ class _TestTorchMixin(torchtest):
                 a1 = torch.tensor([0.1, 0.1], dtype=torch.bfloat16, device=device)
                 a2 = torch.tensor([1.1, 0.1], dtype=torch.bfloat16, device=device)
                 self.assertEqual(a1 * a2, torch.tensor([0.11, 0.01], dtype=torch.bfloat16, device=device), 0.01)
+                self.assertEqual(a1.mul(a2), a1 * a2)
 
     def test_div(self):
         m1 = torch.randn(10, 10)
@@ -1957,6 +1972,7 @@ class _TestTorchMixin(torchtest):
         a1 = torch.tensor([4.2, 6.2], dtype=torch.bfloat16)
         a2 = torch.tensor([2., 2.], dtype=torch.bfloat16)
         self.assertEqual(a1 / a2, torch.tensor([2.1, 3.1], dtype=torch.bfloat16), 0.01)
+        self.assertEqual(a1.div(a2), a1 / a2)
 
     def test_floordiv(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
@@ -2118,6 +2134,7 @@ class _TestTorchMixin(torchtest):
             _test_mm(n, m, p, torch.float64, lambda x, y: torch.randn(x, y, dtype=torch.float64))
             _test_mm(n, m, p, torch.int32, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int32))
             _test_mm(n, m, p, torch.int64, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int64))
+            _test_mm(n, m, p, torch.bfloat16, lambda x, y: torch.randn(x, y, dtype=torch.float32).bfloat16())
 
     @staticmethod
     def _test_lu(self, cast, pivot=True):
