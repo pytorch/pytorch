@@ -1,6 +1,9 @@
-#include <ATen/ATen.h>
+#include "ATen/ATen.h"
+#include "ATen/cuda/CUDAApplyUtils.cuh"
 
 namespace {
+
+using at::cuda::detail::TensorInfo;
 
 // Compute the offsets into the given tensors for a linear index. For the 't2'
 // tensor, dimension 'dim' is skipped. The tensors are assumed to have the same
@@ -82,7 +85,7 @@ __global__ void gather_kernel(
     TensorInfo<scalar_t, index_t> src,
     TensorInfo<int64_t, index_t> index,
     const int dim,
-    const index_t numel_) {
+    const index_t numel) {
   for (index_t linear_id = blockIdx.x * blockDim.x + threadIdx.x;
        linear_id < numel;
        linear_id += gridDim.x * blockDim.x) {
@@ -121,10 +124,10 @@ Tensor & gather_out_cuda(Tensor & result, const Tensor & self, int64_t dim, cons
 
   int64_t numel = index.numel();
   int64_t block = 512;
-  int64_t grid = std::min<int64_t>((size + block - 1) / block, 2048L);
+  int64_t grid = std::min<int64_t>((numel + block - 1) / block, 2048L);
 
   if (numel > 0) {
-    AT_DISPATCH_ALL_TYPES(self.dtype(), "gather_out_cuda", [&](){
+    AT_DISPATCH_ALL_TYPES(self.scalar_type(), "gather_out_cuda", [&](){
       if (cuda::detail::canUse32BitIndexMath(result) &&
           cuda::detail::canUse32BitIndexMath(self) &&
           cuda::detail::canUse32BitIndexMath(index)) {

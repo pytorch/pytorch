@@ -1,4 +1,4 @@
-#include <ATen/ATen.h>
+#include "ATen/ATen.h"
 
 namespace at { namespace native {
 
@@ -19,7 +19,7 @@ Tensor & gather_out_cpu_impl(Tensor & result, const Tensor & self, int64_t dim, 
   }
   result.resize_as_(index);
 
-  AT_DISPATCH_ALL_TYPES(self.dtype(), "gather_out_cpu", [&](){
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "gather_out_cpu", [&](){
     scalar_t *result_data = result.data<scalar_t>();
     scalar_t *self_data = self.data<scalar_t>();
     int64_t *index_data = index.data<int64_t>();
