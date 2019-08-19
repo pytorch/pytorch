@@ -18569,8 +18569,9 @@ class TestDocs(unittest.TestCase):
         print("\tCalling `make doctest`")
         result = subprocess.run(['make', 'doctest'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
         if result.returncode != 0:
+            out = result.stdout.decode('utf-8')
             err = result.stderr.decode('utf-8')
-            raise RuntimeError("{}\n\nDocs build failed (run `cd docs && make doctest`)".format(err))
+            raise RuntimeError("{}\n{}\nDocs build failed (run `cd docs && make doctest`)".format(err, out))
 
 
 for test in autograd_method_tests():
