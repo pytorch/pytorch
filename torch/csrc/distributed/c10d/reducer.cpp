@@ -591,6 +591,9 @@ void Reducer::prepare_for_backward(
   // If no outputs are specified, we assume that autograd hooks for ALL
   // variables will be called, and we don't have to search the autograd graph
   // for presence of these hooks.
+  //
+  // If delay_allreduce_ is True, it does not matter if there are any unused
+  // parameters, as grad allreduce starts after the backward pass finishes.
   if (outputs.empty() || delay_allreduce_) {
     return;
   }

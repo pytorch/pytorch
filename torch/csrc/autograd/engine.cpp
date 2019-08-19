@@ -752,7 +752,6 @@ Engine& Engine::get_default_engine() {
 void Engine::queue_callback(std::function<void()> callback) {
   std::lock_guard<std::mutex> lock(post_callbacks_lock_);
   final_callbacks_.emplace_back(std::move(callback));
-
 }
 
 bool Engine::is_checkpoint_valid() {
