@@ -424,10 +424,7 @@ class SyncBatchNorm(_BatchNorm):
     def forward(self, input):
         # currently only GPU input is supported
         if not input.is_cuda:
-            raise ValueError('expected input tensor to be on GPU')
-
-        if not self.ddp_gpu_size:
-            raise AttributeError('SyncBatchNorm is only supported within torch.nn.parallel.DistributedDataParallel')
+            raise ValueError('SyncBatchNorm expected input tensor to be on GPU')
 
         self._check_input_dim(input)
 
@@ -440,19 +437,24 @@ class SyncBatchNorm(_BatchNorm):
             else:  # use exponential moving average
                 exponential_average_factor = self.momentum
 
-        world_size = 1
-        process_group = torch.distributed.group.WORLD
-        if self.process_group:
-            process_group = self.process_group
-        world_size = torch.distributed.get_world_size(process_group)
+        need_sync = self.training or not self.track_running_stats
+        if need_sync:
+            process_group = torch.distributed.group.WORLD
+            if self.process_group:
+                process_group = self.process_group
+            world_size = torch.distributed.get_world_size(process_group)
+            need_sync = world_size > 1
 
         # fallback to framework BN when synchronization is not necessary
-        if world_size == 1 or (not self.training and self.track_running_stats):
+        if not need_sync:
             return F.batch_norm(
                 input, self.running_mean, self.running_var, self.weight, self.bias,
                 self.training or not self.track_running_stats,
                 exponential_average_factor, self.eps)
         else:
+            if not self.ddp_gpu_size:
+                raise AttributeError('SyncBatchNorm is only supported within torch.nn.parallel.DistributedDataParallel')
+
             return sync_batch_norm.apply(
                 input, self.weight, self.bias, self.running_mean, self.running_var,
                 self.eps, exponential_average_factor, process_group, world_size)
