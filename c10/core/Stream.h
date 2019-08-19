@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/core/Device.h>
-#include <c10/core/impl/EventInterface.h>
 
 namespace c10 {
 
