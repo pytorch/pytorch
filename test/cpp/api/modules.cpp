@@ -111,6 +111,7 @@ TEST_F(ModulesTest, MaxPool1d) {
   torch::Tensor s = y.sum();
 
   s.backward();
+  std::cout << y.sizes() << std::endl;
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(s.ndimension(), 0);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
@@ -123,7 +124,7 @@ TEST_F(ModulesTest, MaxPool2dEven) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(s.ndimension(), 0);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
 }
@@ -135,9 +136,9 @@ TEST_F(ModulesTest, MaxPool2dUneven) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(s.ndimension(), 0);
-  for (auto i = 0; i < 4; i++) {
+  for (auto i = 0; i < 3; i++) {
     ASSERT_EQ(y.size(i), 2);
   }
 }
@@ -149,9 +150,9 @@ TEST_F(ModulesTest, MaxPool3d) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_EQ(y.ndimension(), 5);
+  ASSERT_EQ(y.ndimension(), 4);
   ASSERT_EQ(s.ndimension(), 0);
-  for (auto i = 0; i < 5; i++) {
+  for (auto i = 0; i < 4; i++) {
     ASSERT_EQ(y.size(i), 2);
   }
 }
