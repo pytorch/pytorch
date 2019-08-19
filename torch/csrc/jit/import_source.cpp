@@ -35,12 +35,12 @@ struct ConstantValue : public SugaredValue {
   }
 };
 
-// Represents nested class namespaces, like `foo.bar.Baz`.
-// Right now these namespaces can only contain other namespaces or a class type.
+// Represents nested namespaces, like `foo.bar.Baz`.
+// Right now these namespaces can only contain other namespaces or NamedTypes
 struct TORCH_API ClassNamespaceValue : public SugaredValue {
   /**
    * @param  name  The fully qualified path, which can resolve either to a
-   *               namespace or a class value.
+   *               namespace or a NamedType
    * @param  cu    The compilation unit to search for classes in
    */
   explicit ClassNamespaceValue(
@@ -53,6 +53,7 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
       Function& m,
       const std::string& name) override {
     auto fullName = c10::QualifiedName(basename_, name);
+    // Could be a ClassType or NamedTuple constructor
     if (auto serializable_type = cu_.get_type(fullName)) {
       if (auto classType = serializable_type->cast<ClassType>()) {
         return std::make_shared<ClassValue>(classType);
@@ -61,10 +62,12 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
       }
     }
 
+    // Or it could be a free function
     if (auto fn = cu_.find_function(fullName)) {
       return std::make_shared<FunctionValue>(fn);
     }
 
+    // If it's none of those things, assume it's another namespace
     return std::make_shared<ClassNamespaceValue>(std::move(fullName), cu_);
   }
   std::string kind() const override {

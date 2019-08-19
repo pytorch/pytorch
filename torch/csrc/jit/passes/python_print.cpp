@@ -257,7 +257,9 @@ struct PythonPrintPass {
         }
       }
     }
-    // Need to do actual equality comparison, not a pointer equality.
+    // Need to do actual equality comparison, not a pointer equality. This is
+    // because for some types (e.g. FunctionType), we may have multiple
+    // TypePtr's that represent the same underlying thing.
     auto it = std::find_if(
         deps_table_.cbegin(),
         deps_table_.cend(),
@@ -956,9 +958,10 @@ struct PythonPrintPass {
       case prim::Constant: {
         if (node->outputs().size() == 1 &&
             node->output()->type()->kind() == TypeKind::FunctionType) {
-          break;
-        }
-        if (node->kind() == prim::Constant && !node->mustBeNone()) {
+          auto fn = node->output()->type()->expect<FunctionType>();
+          registerDependency(fn);
+          stmt << fn->name()->qualifiedName();
+        } else if (!node->mustBeNone()) {
           IValue v = toIValue(node->output()).value();
           printConstant(stmt, v);
         } else {
@@ -1049,10 +1052,7 @@ struct PythonPrintPass {
         }
       } break;
       case prim::CallFunction: {
-        const auto& fn = node->inputs().at(0)->type()->expect<FunctionType>();
-        registerDependency(fn);
-
-        stmt << fn->name()->qualifiedName() << "(";
+        stmt << useOf(node->inputs().at(0)) << "(";
         for (size_t i = 1; i < node->inputs().size(); i++) {
           stmt << useOf(node->inputs()[i]) << ", ";
         }
@@ -1069,7 +1069,8 @@ struct PythonPrintPass {
             method->qualname() ==
             QualifiedName(selfType->name()->qualifiedName(), methodName));
 
-        stmt << useOf(self) << "." << methodName << "(";
+        stmt << "(" << useOf(self) << ")"
+             << "." << methodName << "(";
         for (size_t i = 1; i < node->inputs().size(); i++) {
           stmt << useOf(node->inputs()[i]) << ", ";
         }

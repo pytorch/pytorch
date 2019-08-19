@@ -14422,7 +14422,7 @@ class TestRecursiveScript(JitTestCase):
 
         graph = str(a_script_fn.graph)
         FileCheck().check("prim::CallFunction").run(graph)
-        FileCheck().check_not("a_python_fn").run(graph)
+        FileCheck().check_not("^a_python_fn").run(graph)
         t = torch.ones(2, 2)
         self.assertEqual(a_script_fn(t, t, t), t + t + t)
 

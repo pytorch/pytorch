@@ -1,11 +1,8 @@
-#pragma once
-
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
 namespace torch {
 namespace jit {
-namespace test {
 
 void testInterp() {
   constexpr int batch_size = 4;
@@ -30,6 +27,5 @@ void testInterp() {
   ASSERT_TRUE(exactlyEqual(outputs[0], hx));
   ASSERT_TRUE(exactlyEqual(outputs[1], cx));
 }
-} // namespace test
 } // namespace jit
 } // namespace torch
