@@ -2641,6 +2641,8 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
     def delay_allreduce(self):
         return True
 
+    @requires_nccl()
+    @skip_if_not_multigpu
     def test_checkpoint(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
