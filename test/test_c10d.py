@@ -2206,7 +2206,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             # trigger an error when `backward` is called (because fc3 is an unused
             # parameter and will therefore be marked ready twice).
             #
-            # Howeve, this should work if `delay_allreduce` is set to true,
+            # However, this should work if `delay_allreduce` is set to true,
             # because all variables are just marked ready once when the backward
             # pass is complete.
             try:
@@ -2646,6 +2646,7 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
     @requires_nccl()
     @skip_if_not_multigpu
     def test_checkpoint(self):
+        # This test is copied from #24005
         store = c10d.FileStore(self.file.name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
@@ -2661,9 +2662,14 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
                     x.requires_grad_()
                     omega = self._energy(x).sum()
                     grad_out = torch.ones_like(omega).to(x.device)
-                    dx = torch.autograd.grad(outputs=omega, inputs=x, grad_outputs=grad_out,
-                                             create_graph=True, retain_graph=True,
-                                             allow_unused=True)[0]
+                    dx = torch.autograd.grad(
+                        outputs=omega,
+                        inputs=x,
+                        grad_outputs=grad_out,
+                        create_graph=True,
+                        retain_graph=True,
+                        allow_unused=True
+                    )[0]
                     dx.requires_grad_()
                     x = (x - self.step_size ** 2 * dx)
                 return x
@@ -2686,7 +2692,9 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
             def forward(self, x):
                 y = x.clone().to(x.device)
                 y.requires_grad_()
-                fwd = nn.Sequential(*[GradientStep(self._energy) for _ in range(self.L)])
+                fwd = nn.Sequential(
+                    *[GradientStep(self._energy) for _ in range(self.L)]
+                )
                 y = checkpoint_sequential(fwd, self.L, y)
                 return y
 

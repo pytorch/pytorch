@@ -248,19 +248,6 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
   replica.contents = grad;
 }
 
-void Reducer::mark_unused_variables_ready() {
-  // If there are model parameters that went unused when computing the model
-  // output, they won't be part of the autograd graph, and won't receive
-  // gradients. These parameters are discovered in the `prepare_for_backward`
-  // function and their indexes stored in the `unused_parameters_` vector.
-  if (!has_marked_unused_parameters_ && !unused_parameters_.empty()) {
-    has_marked_unused_parameters_ = true;
-    for (const auto& unused_index : unused_parameters_) {
-      mark_variable_ready(unused_index);
-    }
-  }
-}
-
 // The function `autograd_hook` is called after the gradient for a
 // model parameter has been accumulated into its gradient tensor.
 // This function is only to be called from the autograd thread.
@@ -274,8 +261,16 @@ void Reducer::autograd_hook(VariableIndex index) {
     return;
   }
 
-  mark_unused_variables_ready();
-
+  // If there are model parameters that went unused when computing the model
+  // output, they won't be part of the autograd graph, and won't receive
+  // gradients. These parameters are discovered in the `prepare_for_backward`
+  // function and their indexes stored in the `unused_parameters_` vector.
+  if (!has_marked_unused_parameters_ && !unused_parameters_.empty()) {
+    has_marked_unused_parameters_ = true;
+    for (const auto& unused_index : unused_parameters_) {
+      mark_variable_ready(unused_index);
+    }
+  }
   // Finally mark variable for which this function was originally called.
   mark_variable_ready(index);
 }
@@ -294,8 +289,6 @@ void Reducer::delayed_autograd_hook() {
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::lock_guard<std::mutex> lock(this->mutex_);
 
-      mark_unused_variables_ready();
-
       const auto replica_count = replicas_.size();
       grad_accumulators_.resize(replica_count);
       for (size_t replica_index = 0; replica_index < replica_count;
@@ -312,7 +305,7 @@ void Reducer::delayed_autograd_hook() {
         }
       }
 
-      finalize_backward();
+      //finalize_backward();
     });
     // mark false as the final hook only needs to be inserted once
     require_final_hook_ = false;
@@ -386,7 +379,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   }
 
   // Run finalizer function once the final bucket was marked ready.
-  if (!delay_allreduce_ && next_bucket_ == buckets_.size()) {
+  if (next_bucket_ == buckets_.size()) {
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::lock_guard<std::mutex> lock(this->mutex_);
       this->finalize_backward();

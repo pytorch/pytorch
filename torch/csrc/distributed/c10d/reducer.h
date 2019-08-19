@@ -85,8 +85,6 @@ class Reducer {
 
   void mark_variable_ready(VariableIndex index);
 
-  void mark_unused_variables_ready();
-
   void autograd_hook(VariableIndex index);
 
   void delayed_autograd_hook();
