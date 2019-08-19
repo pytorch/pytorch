@@ -81,6 +81,24 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
+void pow_kernel(TensorIterator& iter) {
+  if (isIntegralType(iter.dtype(), false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
+          return std::pow(a, b);
+      });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "pow_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t { return std::pow(a, b); },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+           return a.pow(b);
+        });
+    });
+  }
+}
+
 void logical_xor_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_xor_cpu", [&]() {
     using self_t = scalar_t;
@@ -104,6 +122,7 @@ REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
+REGISTER_DISPATCH(pow_stub, &pow_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
 
 }} // namespace at::native

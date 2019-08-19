@@ -14,6 +14,7 @@ DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
+DEFINE_DISPATCH(pow_stub);
 DEFINE_DISPATCH(logical_xor_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
@@ -168,6 +169,21 @@ Tensor& atan2_(Tensor& self, const Tensor& other) {
   return native::atan2_out(self, self, other);
 }
 
+Tensor& pow_out(Tensor& result, const Tensor& self, const Tensor& exponent) {
+  auto iter = TensorIterator::binary_op(result, self, exponent);
+  pow_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor pow(const Tensor& self, const Tensor& exponent) {
+  Tensor result = at::empty_like(self);
+  return native::pow_out(result, self, exponent);
+}
+
+Tensor& pow_(Tensor& self, const Tensor& exponent) {
+  return native::pow_out(self, self, exponent);
+}
+
 // These are still needed because we don't have C++ conversions from number
 // types (int, float, etc.) to Tensor (only to Scalar). They're not exposed
 // to Python.
@@ -212,6 +228,22 @@ Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
+}
+
+Tensor pow(const Tensor& self, Scalar exponent) {
+  return native::pow(self, wrapped_scalar_tensor(exponent));
+}
+
+Tensor& pow_(Tensor& self, Scalar exponent) {
+  return native::pow_(self, wrapped_scalar_tensor(exponent));
+}
+
+Tensor pow(Scalar self, const Tensor& exponent) {
+  return native::pow(wrapped_scalar_tensor(self), exponent);
+}
+
+Tensor& pow_out(Tensor& result, Scalar self, const Tensor& exponent) {
+  return native::pow_out(result, wrapped_scalar_tensor(self), exponent);
 }
 
 Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
