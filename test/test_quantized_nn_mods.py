@@ -32,7 +32,7 @@ class FunctionalAPITest(QuantizationTestCase):
         scale = 2.0
         zero_point = 1
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
-        qY = torch.ops.quantized.relu(qX)
+        qY = torch.relu(qX)
         qY_hat = qF.relu(qX)
         self.assertEqual(qY, qY_hat)
 
@@ -126,6 +126,9 @@ class DynamicModuleAPITest(QuantizationTestCase):
 
         # Smoke test to make sure the module actually runs
         quantized_float_linear(X)
+
+        # Smoke test extra_repr
+        str(quantized_float_linear)
 
 
 class ModuleAPITest(QuantizationTestCase):
@@ -237,6 +240,9 @@ class ModuleAPITest(QuantizationTestCase):
 
         # Smoke test to make sure the module actually runs
         quantized_float_linear(X_q)
+
+        # Smoke test extra_repr
+        str(quantized_float_linear)
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
@@ -421,6 +427,9 @@ class ModuleAPITest(QuantizationTestCase):
 
         # Smoke test to make sure the module actually runs
         quantized_float_conv(qX)
+
+        # Smoke test extra_repr
+        str(quantized_float_conv)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.
