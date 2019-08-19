@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/rpc/FutureMessage.h>
+#include <torch/csrc/distributed/rpc/future_message.h>
 
 namespace torch {
 namespace distributed {
