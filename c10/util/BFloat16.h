@@ -52,8 +52,10 @@ namespace detail {
         uint32_t U32;
         float F32;
       };
+
       F32 = src;
-      return static_cast<uint16_t>((U32 + ((U32 & 0x00010000) >> 1)) >> 16);
+      uint32_t rounding_bias = ((U32 >> 16) & 1) + 0x7FFF;
+      return static_cast<uint16_t>((U32 + rounding_bias) >> 16);
     }
   }
 } // namespace detail

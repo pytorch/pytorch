@@ -129,4 +129,34 @@ namespace {
     float res = c10::detail::f32_from_bits(b.x);
     EXPECT_EQ(res, expected);
   }
+
+  float BinaryToFloat(uint32_t bytes) {
+    float res;
+    std::memcpy(&res, &bytes, sizeof(res));
+    return res;
+  }
+
+  struct BFloat16TestParam {
+    uint32_t input;
+    uint16_t rne;
+  };
+
+  class BFloat16Test : public ::testing::Test,
+                       public ::testing::WithParamInterface<BFloat16TestParam> {
+  };
+
+  TEST_P(BFloat16Test, BFloat16RNETest) {
+    float value = BinaryToFloat(GetParam().input);
+    uint16_t rounded = c10::detail::round_to_nearest_even(value);
+    EXPECT_EQ(GetParam().rne, rounded);
+  }
+
+  INSTANTIATE_TEST_CASE_P(
+      BFloat16Test_Instantiation, BFloat16Test,
+      ::testing::Values(BFloat16TestParam{0x3F848000, 0x3F84},
+                        BFloat16TestParam{0x3F848010, 0x3F85},
+                        BFloat16TestParam{0x3F850000, 0x3F85},
+                        BFloat16TestParam{0x3F858000, 0x3F86},
+                        BFloat16TestParam{0x3FFF8000, 0x4000}));
+
 } // namespace
