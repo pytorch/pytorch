@@ -65,6 +65,9 @@ class Linear(nnq.Linear):
         if mod.qconfig is not None and mod.qconfig.weight() is not None:
             weight_observer = mod.qconfig.weight()
         else:
+            # We have the circular import issues if we import the qconfig in the beginning of this file:
+            # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
+            # import until we need it.
             from torch.quantization.QConfig import default_dynamic_qconfig
             weight_observer = default_dynamic_qconfig.weight()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
