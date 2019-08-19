@@ -239,7 +239,7 @@ static inline Tensor logical_binary_impl(const Tensor& self, const Tensor& other
 }
 
 template <typename Stub>
-static inline Tensor& logical_binary__impl(Tensor& self, const Tensor& other, Stub stub) {
+static inline Tensor& logical_binary_impl_(Tensor& self, const Tensor& other, Stub stub) {
   return logical_binary_out_impl(self, self, other, stub);
 }
 
@@ -252,7 +252,7 @@ Tensor logical_and(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& logical_and_(Tensor& self, const Tensor& other) {
-  return logical_binary__impl(self, other, logical_and_stub);
+  return logical_binary_impl_(self, other, logical_and_stub);
 }
 
 Tensor& logical_or_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -264,7 +264,7 @@ Tensor logical_or(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& logical_or_(Tensor& self, const Tensor& other) {
-  return logical_binary__impl(self, other, logical_or_stub);
+  return logical_binary_impl_(self, other, logical_or_stub);
 }
 
 Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -276,7 +276,7 @@ Tensor logical_xor(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& logical_xor_(Tensor& self, const Tensor& other) {
-  return logical_binary__impl(self, other, logical_xor_stub);
+  return logical_binary_impl_(self, other, logical_xor_stub);
 }
 
 // ~~~~~~~~~~~~~ Binary logical operators END ~~~~~~~~~~~~~~~~~
