@@ -17,8 +17,14 @@ import numpy as np
 
 class BatchMSELoss(ModelLayer):
 
-    def __init__(self, model, input_record, name='batch_mse_loss', **kwargs):
+    def __init__(self, model, input_record, name='batch_mse_loss', add_leaky_hard_sigmoid=False, leaky_alpha=0.01, **kwargs):
         super(BatchMSELoss, self).__init__(model, name, input_record, **kwargs)
+
+        self._add_leaky_hard_sigmoid = add_leaky_hard_sigmoid
+
+        if add_leaky_hard_sigmoid:
+            assert leaky_alpha > 0
+            self._leaky_alpha = leaky_alpha
 
         assert schema.is_schema_subset(
             schema.Struct(
@@ -39,6 +45,30 @@ class BatchMSELoss(ModelLayer):
             net.NextScopedBlob('squeezed_prediction'),
             dims=[1]
         )
+
+        if self._add_leaky_hard_sigmoid:
+            const_shift = net.ConstantFill(
+                prediction,
+                net.NextScopedBlob("shift"),
+                value=1.0,
+                dtype=core.DataType.FLOAT,
+            )
+
+            const_shift = net.StopGradient(
+                const_shift,
+                net.NextScopedBlob('stopped_shift')
+            )
+
+            prediction = net.LeakyRelu(
+                prediction, alpha=np.float32(self._leaky_alpha)
+            )
+            prediction = net.Negative(prediction, net.NextScopedBlob("leaky_invert_1"))
+            prediction = net.Add([prediction, const_shift], net.NextScopedBlob("leaky_shift_1"))
+            prediction = net.LeakyRelu(
+                prediction, alpha=np.float32(self._leaky_alpha)
+            )
+            prediction = net.Sub([prediction, const_shift], net.NextScopedBlob("leaky_shift_2"))
+            prediction = net.Negative(prediction, net.NextScopedBlob("leaky_invert_2"))
 
         label = self.input_record.label.field_blobs()
         if self.input_record.label.field_type().base != (
