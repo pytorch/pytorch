@@ -26,7 +26,7 @@ from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, enable_profiling_mode, \
-    execWrapper, _inline_everything
+    execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything
 from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
@@ -2979,6 +2979,7 @@ def foo(x):
         foo.forward(input)
         self.assertEqual(input, foo.foo)
 
+    @_tmp_donotuse_dont_inline_everything
     def test_first_class_calls(self):
         @torch.jit.script
         class Foo(object):
@@ -7759,6 +7760,7 @@ a")
         self.run_pass('constant_propagation', foo.graph)
         self.assertTrue("aten::tensor" in str(foo.graph))  # not constant propped
 
+    @_tmp_donotuse_dont_inline_everything
     def test_script_sequential_in_mod_list(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
@@ -7787,6 +7789,7 @@ a")
         self.assertTrue(graph.count("prim::CallMethod") == 2)
         self.assertTrue("python" not in graph)
 
+    @_tmp_donotuse_dont_inline_everything
     def test_script_nested_mod_list(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
@@ -10783,6 +10786,7 @@ a")
         # Parameters are NOT inlined.
         FileCheck().check("python_value").check("aten::add").run(str(script_fn.graph))
 
+    @_tmp_donotuse_dont_inline_everything
     def test_call_traced_fn_from_script_fn(self):
         @_trace(torch.rand(3, 4))
         def traced_fn(x):
@@ -10809,6 +10813,7 @@ a")
             def script_fn(x):
                 return tm(x) + 1
 
+    @_tmp_donotuse_dont_inline_everything
     def test_call_script_fn_from_script_fn(self):
         @torch.jit.script
         def script_fn1(x):
@@ -10879,6 +10884,7 @@ a")
         # are NOT inlined
         FileCheck().check("aten::mm").check("forward").run(str(sm.graph))
 
+    @_tmp_donotuse_dont_inline_everything
     def test_call_tracing_fn_from_script_module(self):
         @_trace(torch.rand(3, 3))
         def traced_fn(x):
@@ -10896,6 +10902,7 @@ a")
         sm = ScriptMod()
         FileCheck().check("aten::mm").check("prim::CallFunction").run(str(sm.forward.graph))
 
+    @_tmp_donotuse_dont_inline_everything
     def test_call_tracing_mod_from_script_module(self):
         class TracedMod(torch.nn.Module):
             def __init__(self):
@@ -10918,6 +10925,7 @@ a")
         sm = ScriptMod()
         FileCheck().check("aten::mm").check("prim::CallMethod").run(str(sm.graph))
 
+    @_tmp_donotuse_dont_inline_everything
     def test_call_script_fn_from_script_module(self):
         @torch.jit.script
         def script_fn(x):
@@ -10936,6 +10944,7 @@ a")
         graph = (sm.forward.graph)
         FileCheck().check("aten::mm").check("prim::CallFunction").run(str(graph))
 
+    @_tmp_donotuse_dont_inline_everything
     def test_call_script_mod_from_script_module(self):
         class ScriptMod1(torch.jit.ScriptModule):
             def __init__(self):
@@ -14412,6 +14421,7 @@ class TestRecursiveScript(JitTestCase):
             checker.check("return self.some_method(x)")
             checker.run(str(e))
 
+    @_tmp_donotuse_dont_inline_everything
     def test_script_basic(self):
         def a_python_fn(a, b, c):
             return a + b + c
@@ -16545,6 +16555,7 @@ class TestAsync(JitTestCase):
         self.assertEqual(y2, foo2(x1, x2))
         self.assertEqual(y3, foo3(x1, x2, x3))
 
+    @_tmp_donotuse_dont_inline_everything
     def test_async_script_trace(self):
         class Traced(nn.Module):
             def __init__(self):

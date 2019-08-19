@@ -515,6 +515,14 @@ def _inline_everything(fn):
             fn(*args, **kwargs)
     return wrapper
 
+# this exists for forward compatibility reasons temporarily.
+# TODO(suo) remove
+def _tmp_donotuse_dont_inline_everything(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with inline_everything_mode(False):
+            fn(*args, **kwargs)
+    return wrapper
 
 # make it easy to quicky define/trace a function for these tests
 def _trace(*args, **kwargs):
