@@ -53,7 +53,9 @@ def copy_to_script_module(original, stubs):
             if (name in original._parameters or name in original._buffers) and item is not None:
                 # for 'None' parameters/buffers, don't actually add their values if it exists
                 continue
-            setattr(script_module, name, getattr(original, name))
+            # don't recopy constants, should only occur for constant modules/params
+            if not hasattr(script_module, name):
+                setattr(script_module, name, getattr(original, name))
 
     # Copy annotations, pull types from `__annotations__` or try to infer
     # the type if possible
