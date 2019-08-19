@@ -88,13 +88,7 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
-#if defined(_WIN32)
-void runJITCPPTests(bool runCuda) {
-  AT_ERROR("JIT tests not yet supported on Windows");
-}
-#else
-CAFFE2_API void runJITCPPTests(bool runCuda);
-#endif
+TORCH_API void runJITCPPTests(bool runCuda);
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
