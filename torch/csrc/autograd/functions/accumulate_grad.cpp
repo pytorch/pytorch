@@ -77,12 +77,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     } else {
       var.grad() = new_grad.clone();
     }
-    variable_grad = WeakVariable(var.grad()); // We need to update our reference
-    // This case is not strictly necessary, but it makes the first-order only case
-    // slightly more efficient and, what's more important, more predictable for
-    // the users. Thanks to this case we can avoid changing the grad tensor,
-    // a thing never promised and documented, but used in some hacks seen
-    // on the internet.
+    variable_grad = WeakVariable(var.grad()); // We need to update our reference.
   } else if (!GradMode::is_enabled()) {
     // This case is not strictly necessary, but it makes the first-order only case
     // slightly more efficient.
