@@ -2556,6 +2556,7 @@ class _TestTorchMixin(torchtest):
             #         actual2 = torch.pow(tensor, pow, out=actual)
             #         self.assertEqual(expected, actual.cpu().numpy())
             #         self.assertEqual(expected, actual2.cpu().numpy())
+            return
         else:
             for pow in floats:
                 expected = np.power(nparr, pow).astype(np.int64)
