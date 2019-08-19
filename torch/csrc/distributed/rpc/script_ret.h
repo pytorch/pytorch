@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/Message.h>
+#include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/jit/pickler.h>
 
 namespace torch {
