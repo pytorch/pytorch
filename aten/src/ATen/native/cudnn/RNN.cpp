@@ -1191,7 +1191,10 @@ Tensor try_get_weight_buf(
   // Try to get parameter storage
   auto & any_param = parameters.at(0);
   auto param_storage = any_param.storage();
-  auto weight_buf = at::empty({0}, any_param.options()).set_(param_storage);
+  auto param_offset = any_param.storage_offset();
+  std::initializer_list<int64_t> buffer_size = {
+    static_cast<int64_t>(param_storage.size()) - param_offset, 1};
+  auto weight_buf = at::empty({0}, any_param.options()).set_(param_storage, param_offset, buffer_size, {});
   if (weight_buf.size(0) < num_params) {
     return {};
   } else if (weight_buf.size(0) > num_params) {
