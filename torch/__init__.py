@@ -93,7 +93,7 @@ if platform.system() != 'Windows':
 ################################################################################
 
 
-def gemm_dispatcher(input, mat2, out = None):
+def gemm_dispatcher(input, mat2, out=None):
     return (input, mat2, out)
 
 def typename(o):

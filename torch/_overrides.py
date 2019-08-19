@@ -12,7 +12,7 @@ https://www.numpy.org/neps/nep-0018-array-function-protocol.html
 
 import collections
 import functools
-import os
+import textwrap
 
 # TODO: PyTorch does not have a hard dependency on NumPy, so we need
 #       to vendor this code.
@@ -155,9 +155,6 @@ def verify_matching_signatures(implementation, dispatcher):
                                'default argument values')
 
 
-import textwrap
-import functools
-
 _wrapped_func_source = textwrap.dedent("""
     @functools.wraps(implementation)
     def {name}(*args, **kwargs):
@@ -238,4 +235,3 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
         return public_api
 
     return decorator
-
