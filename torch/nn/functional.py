@@ -2612,7 +2612,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
           and becomes ``x' = 1.5``, then reflects by border ``1`` and becomes
           ``x'' = -0.5``.
 
-    .. Note:: This function is often used in building `Spatial Transformer Networks`_ .
+    .. note::
+        This function is often used in conjunction with :func:`affine_grid`
+        to build `Spatial Transformer Networks`_ .
     .. include:: cuda_deterministic_backward.rst
 
     Args:
@@ -2682,13 +2684,20 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
 
 def affine_grid(theta, size, align_corners=None):
     # type: (Tensor, List[int], bool) -> Tensor
-    r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`.
-    Generally used in conjunction with :func:`grid_sample` to
-    implement Spatial Transformer Networks.
+    r"""Generates a 2D or 3D flow field (sampling grid), given a batch of
+    affine matrices :attr:`theta`.
+
+    .. note::
+        This function is often used in conjunction with :func:`grid_sample`
+        to build `Spatial Transformer Networks`_ .
 
     Args:
-        theta (Tensor): input batch of affine matrices (:math:`N \times 2 \times 3`)
-        size (torch.Size): the target output image size (:math:`N \times C \times H \times W`).
+        theta (Tensor): input batch of affine matrices with shape
+            (:math:`N \times 2 \times 3`) for 2D or
+            (:math:`N \times 3 \times 4`) for 3D
+        size (torch.Size): the target output image size.
+            (:math:`N \times C \times H \times W` for 2D or
+            :math:`N \times C \times D \times H \times W` for 3D)
             Example: torch.Size((32, 3, 24, 24))
         align_corners (bool, optional): if ``True``, consider ``-1`` and ``1``
             to refer to the centers of the corner pixels rather than the image corners.
@@ -2699,6 +2708,9 @@ def affine_grid(theta, size, align_corners=None):
 
     Returns:
         output (Tensor): output Tensor of size (:math:`N \times H \times W \times 2`)
+
+    .. _`Spatial Transformer Networks`:
+        https://arxiv.org/abs/1506.02025
 
     .. warning::
         When ``align_corners = True``, the grid positions depend on the pixel
