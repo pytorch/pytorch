@@ -628,6 +628,29 @@ class TestJit(JitTestCase):
         m_dropout.eval()
         self.assertEqual(dropout(input) + 1, m_dropout(input))
 
+    def test_script_autograd_grad(self):
+        def test_simple_grad(x, y):
+            # type: (Tensor, Tensor) -> List[Tensor]
+            z = x + 2 * y + x * y
+            grad_outputs: List[Optional[torch.Tensor]] = [torch.ones((2, 2)), ]
+            # print(z)
+            # print(x)
+            # print(y)
+            return torch.autograd.grad((z, ), (x, y), grad_outputs)
+
+        x = torch.randn(2, 2, requires_grad=True)
+        y = torch.randn(2, 2, requires_grad=True)
+        eager_res = test_simple_grad(x, y)
+
+        scripted_fn = torch.jit.script(test_simple_grad)
+        new_x = x.detach().requires_grad_()
+        new_y = y.detach().requires_grad_()
+        new_z = new_x + 2 * new_y + new_x * new_y
+        script_res = scripted_fn(x, y)
+        self.assertEqual(eager_res, script_res)
+
+
+
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
         def f(x, y):

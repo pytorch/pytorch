@@ -1,4 +1,5 @@
 #include <aten/src/ATen/Context.h>
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -643,6 +644,51 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     Operator(
+         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[] grad_outputs, bool? keep_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor[]",
+         [](Stack& stack) {
+           bool allow_unused = pop(stack).toBool();
+           bool create_graph = pop(stack).toBool();
+           auto keep_graph = pop(stack).toOptional<bool>();
+           auto grad_outputs = pop(stack);
+           auto inputs = pop(stack).toTensorListRef().vec();
+           auto outputs = pop(stack).toTensorListRef().vec();
+           std::vector<torch::autograd::Variable> input_vars(inputs.begin(), inputs.end());
+           std::vector<torch::autograd::Variable> output_vars(outputs.begin(), outputs.end());
+           std::vector<torch::autograd::Variable> gradients;
+
+           for (const IValue& v: grad_outputs.toGenericList()) {
+             gradients.emplace_back(v.isNone()? at::Tensor(): v.toTensor());
+           }
+
+           auto res = torch::autograd::grad(
+               output_vars,
+               input_vars,
+               gradients,
+               keep_graph,
+               create_graph,
+               allow_unused);
+
+           std::vector<at::Tensor> res_tensors(res.begin(), res.end());
+           push(stack, c10::impl::toList<at::Tensor>(res_tensors));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+    Operator(
+         "aten::backward(Tensor(a!) self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         [](Stack& stack) {
+           bool create_graph = pop(stack).toBool();
+           auto retain_graph = pop(stack).toOptional<bool>();
+           IValue gradient_ivalue = pop(stack);
+           at::Tensor gradient = gradient_ivalue.isNone()
+               ? at::Tensor()
+               : gradient_ivalue.toTensor();
+           at::Tensor self = pop(stack).toTensor();
+           bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
+           self.backward(gradient, keep_graph, create_graph);
+           return 0;
+         },
+         aliasAnalysisSpecialCase()),
      Operator(
          "prim::AutogradZero() -> Tensor",
          [](const Node* node) {
