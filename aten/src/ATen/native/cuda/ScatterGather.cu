@@ -116,7 +116,7 @@ Tensor & gather_out_cuda(Tensor & result, const Tensor & self, int64_t dim, cons
   dim = c10::maybe_wrap_dim(dim, self.dim());
   for(int64_t i = 0; i < num_dims; i++) {
     if(i != dim) {
-      AT_CHECK(index.size(i) == self.size(i), "Size does not match at dimension ", i, " get ", self.size(i), " vs ", index.size(i));
+      TORCH_CHECK(index.size(i) == self.size(i), "Size does not match at dimension ", i, " get ", self.size(i), " vs ", index.size(i));
     }
   }
   result.resize_as_(index);
