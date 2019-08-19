@@ -16,8 +16,8 @@ struct SymbolicVariable {
   operator Value*() const {
     return v;
   }
-  static SymbolicVariable asNewInput(Graph& g, std::string name = "") {
-    return g.addInput(std::move(name));
+  static SymbolicVariable asNewInput(Graph& g, const std::string& name = "") {
+    return g.addInput(name);
   }
   static SymbolicVariable asNewInput(Graph& g, TypePtr type) {
     return g.addInput()->setType(std::move(type));
