@@ -143,11 +143,6 @@ inline bool is_quantized(Tensor self) {
   return self.is_quantized();
 }
 
-template <>
-inline void* Tensor::data_ptr() const {
-  return this->unsafeGetTensorImpl()->data();
-}
-
 #define DEFINE_CAST(T, name)                     \
   template <>                                    \
   inline T* Tensor::data_ptr() const {           \
