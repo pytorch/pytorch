@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -314,10 +315,10 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   c10::optional<at::Device> device = c10::nullopt;
   auto checkValue = [&](const Value* v) {
-    if (CompleteTensorTypePtr type = v->type()->cast<CompleteTensorType>()) {
-      if (!has_device) {
+    if (ProfiledTensorTypePtr type = v->type()->cast<ProfiledTensorType>()) {
+      if (type->device() && !has_device) {
         has_device = true;
-        device = type->device();
+        device = *type->device();
       } else {
         AT_ASSERT(device == type->device());
       }
@@ -669,13 +670,7 @@ void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
 }
 
 void Value::inferTypeFrom(const at::Tensor& output) {
-  if (output.is_mkldnn()) {
-    // mkldnn tensor as opaque tensor doesn't have strides, so we can
-    // not create a CompleteTensorType
-    setType(ProfiledTensorType::create(output));
-    return;
-  }
-  setType(CompleteTensorType::create(output));
+  setType(ProfiledTensorType::create(output));
 }
 
 bool Value::mustBeNone() const {
@@ -1427,7 +1422,7 @@ Node* Graph::createDict(
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
-  result->output()->setType(CompleteTensorType::fromNumberType(std::move(typ)));
+  result->output()->setType(ProfiledTensorType::fromNumberType(std::move(typ)));
   return result;
 }
 
@@ -1479,7 +1474,9 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 Value* Graph::insertFunctionCall(
     Function* callee,
     script::MatchedSchema& matched) {
+  std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
+                           ->s_(attr::name, func_name)
                            ->output()
                            ->setType(FunctionType::create(std::move(callee)));
   std::vector<Value*> inputs = {fn_constant};
