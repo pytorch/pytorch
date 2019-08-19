@@ -1,5 +1,3 @@
-#pragma once
-
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/argument_spec.h"
@@ -22,7 +20,6 @@
 
 namespace torch {
 namespace jit {
-namespace test {
 
 using namespace torch::autograd;
 
@@ -172,7 +169,7 @@ void testADFormulas() {
 void testDifferentiate() {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  auto type = ProfiledTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -246,6 +243,5 @@ void testDifferentiateWithRequiresGrad() {
       ->run(*grad_spec.df);
 }
 
-} // namespace test
 } // namespace jit
 } // namespace torch

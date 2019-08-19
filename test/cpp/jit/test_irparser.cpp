@@ -1,5 +1,3 @@
-#pragma once
-
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/testing/file_check.h>
@@ -124,7 +122,7 @@ graph(%0 : Tensor,
 graph(%a):
   return (%a))IR",
         &*graph);
-    graph->inputs()[0]->type()->expect<TensorType>();
+    AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
   }
   {
     // Check that parser corectly handles values reusing the same name.
@@ -231,7 +229,7 @@ graph(%0 : Tensor,
       return (%a))IR";
 
     script::parseIR(text, &*graph);
-    graph->inputs()[0]->type()->expect<TensorType>();
+    AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
     torch::jit::testing::FileCheck().run(text, *graph);
   }
 }

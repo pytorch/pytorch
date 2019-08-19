@@ -1,5 +1,3 @@
-#pragma once
-
 #include "test/cpp/jit/test_base.h"
 
 #include <torch/csrc/jit/passes/canonicalize.h>
@@ -61,7 +59,6 @@
 
 namespace torch {
 namespace jit {
-namespace {
 
 using Var = SymbolicVariable;
 
@@ -172,12 +169,12 @@ void testFusion() {
   testConcat(2);
 }
 
-void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
+void testRegisterFusionCachesKernel() {
   // Build up a fake graph with a FusionGroup
   auto createGraphWithNames = [](std::string cname, std::string dname) {
     auto graph = std::make_shared<Graph>();
     at::ScalarType s = at::ScalarType::Float;
-    auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+    auto type = ProfiledTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
     auto a = SymbolicVariable::asNewInput(*graph, type);
     auto b = SymbolicVariable::asNewInput(*graph, type);
     auto c = a * b;
@@ -218,6 +215,5 @@ void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
   // and therefore share a KernelSpec to share kernels for specializations
   ASSERT_EQ(second_key, expected_key);
 }
-} // namespace
 } // namespace jit
 } // namespace torch

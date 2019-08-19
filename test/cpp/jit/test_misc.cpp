@@ -1,5 +1,3 @@
-#pragma once
-
 #include <ATen/ATen.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
@@ -70,8 +68,11 @@
 
 namespace torch {
 namespace jit {
-c10::OperatorOptions aliasAnalysisFromSchema();
-namespace test {
+c10::OperatorOptions aliasAnalysisFromSchema() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
+}
 
 using Var = SymbolicVariable;
 
@@ -360,7 +361,7 @@ void testATenNativeBatchNorm() {
 void testCustomFusion() {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  auto type = ProfiledTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
   auto a = SymbolicVariable::asNewInput(*graph, type);
   auto b = SymbolicVariable::asNewInput(*graph, type);
   auto c = a * b;
@@ -394,7 +395,7 @@ void testCustomFusion() {
 void testCustomFusionNestedBlocks() {
   auto g = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  auto type = ProfiledTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
 
   // test CustomFusion in nested blocks;
   auto a = SymbolicVariable::asNewInput(*g, type);
@@ -1166,6 +1167,5 @@ void testInsertConstant() {
       "Expected OptionalType");
 }
 
-} // namespace test
 } // namespace jit
 } // namespace torch
