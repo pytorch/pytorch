@@ -18,7 +18,7 @@ import textwrap
 #       to vendor this code.
 from numpy.compat._inspect import getargspec
 
-from torch import Tensor
+from .tensor import Tensor
 
 
 _TORCH_FUNCTION = Tensor.__torch_function__

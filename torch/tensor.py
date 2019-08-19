@@ -418,6 +418,10 @@ class Tensor(torch._C._TensorBase):
             array = array.astype('uint8')
         return torch.from_numpy(array)
 
+    def __torch_function__(self):
+        """TODO: implement, then move to C++"""
+        pass
+
     def __contains__(self, element):
         r"""Check if `element` is present in tensor
 
