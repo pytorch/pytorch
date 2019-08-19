@@ -14,7 +14,7 @@ from typing import List, Optional
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
-DOCKER_IMAGE_VERSION = 332
+DOCKER_IMAGE_VERSION = 335
 
 
 @dataclass
@@ -193,6 +193,7 @@ def instantiate_configs():
 
         distro_name = fc.find_prop("distro_name")
         compiler_name = fc.find_prop("compiler_name")
+        is_xla = fc.find_prop("is_xla") or False
 
         python_version = None
         if compiler_name == "cuda" or compiler_name == "android":
@@ -217,7 +218,7 @@ def instantiate_configs():
             parms_list.append(gcc_version)
 
             # TODO: This is a nasty special case
-            if compiler_name == "clang":
+            if compiler_name == "clang" and not is_xla:
                 parms_list.append("asan")
                 python_version = fc.find_prop("pyver")
                 parms_list[0] = fc.find_prop("abbreviated_pyver")
@@ -226,7 +227,6 @@ def instantiate_configs():
             # TODO The gcc version is orthogonal to CUDA version?
             parms_list.append("gcc7")
 
-        is_xla = fc.find_prop("is_xla") or False
         is_namedtensor = fc.find_prop("is_namedtensor") or False
         is_important = fc.find_prop("is_important") or False
 

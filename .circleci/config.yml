@@ -775,19 +775,6 @@ jobs:
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_xla_linux_xenial_py3_6_gcc5_4_build:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-xla-linux-xenial-py3.6-gcc5.4-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:332"
-    <<: *pytorch_linux_build_defaults
-
-  pytorch_xla_linux_xenial_py3_6_gcc5_4_test:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-xla-linux-xenial-py3.6-gcc5.4-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:332"
-    resource_class: large
-    <<: *pytorch_linux_test_defaults
-
   pytorch_namedtensor_linux_xenial_py3_6_gcc5_4_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-py3.6-gcc5.4-build
@@ -841,6 +828,19 @@ jobs:
       BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-py3-clang5-asan-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:332"
       PYTHON_VERSION: "3.6"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
+
+  pytorch_xla_linux_xenial_py3_6_clang7_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-xla-linux-xenial-py3.6-clang7-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-clang7:332"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_xla_linux_xenial_py3_6_clang7_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-xla-linux-xenial-py3.6-clang7-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-clang7:332"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
@@ -2685,13 +2685,6 @@ workflows:
           requires:
             - setup
             - pytorch_linux_xenial_py3_6_gcc5_4_build
-      - pytorch_xla_linux_xenial_py3_6_gcc5_4_build:
-          requires:
-            - setup
-      - pytorch_xla_linux_xenial_py3_6_gcc5_4_test:
-          requires:
-            - setup
-            - pytorch_xla_linux_xenial_py3_6_gcc5_4_build
       - pytorch_namedtensor_linux_xenial_py3_6_gcc5_4_build:
           requires:
             - setup
@@ -2730,6 +2723,13 @@ workflows:
           requires:
             - setup
             - pytorch_namedtensor_linux_xenial_py3_clang5_asan_build
+      - pytorch_xla_linux_xenial_py3_6_clang7_build:
+          requires:
+            - setup
+      - pytorch_xla_linux_xenial_py3_6_clang7_test:
+          requires:
+            - setup
+            - pytorch_xla_linux_xenial_py3_6_clang7_build
       - pytorch_linux_xenial_cuda9_cudnn7_py2_build:
           requires:
             - setup
