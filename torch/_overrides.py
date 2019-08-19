@@ -14,6 +14,8 @@ import collections
 import functools
 import os
 
+# TODO: PyTorch does not have a hard dependency on NumPy, so we need
+#       to vendor this code.
 from numpy.compat._inspect import getargspec
 
 from torch import Tensor
@@ -125,4 +127,120 @@ def implement_torch_function(
     raise TypeError("no implementation found for '{}' on types that implement "
                     '__torch_function__: {}'
                     .format(func_name, list(map(type, overloaded_args))))
+
+
+ArgSpec = collections.namedtuple('ArgSpec', 'args varargs keywords defaults')
+
+def verify_matching_signatures(implementation, dispatcher):
+    """Verify that a dispatcher function has the right signature."""
+    implementation_spec = ArgSpec(*getargspec(implementation))
+    print("implementation_spec", implementation_spec)
+    dispatcher_spec = ArgSpec(*getargspec(dispatcher))
+    print("dispatcher_spec", dispatcher_spec)
+
+    if (implementation_spec.args != dispatcher_spec.args or
+            implementation_spec.varargs != dispatcher_spec.varargs or
+            implementation_spec.keywords != dispatcher_spec.keywords or
+            (bool(implementation_spec.defaults) !=
+             bool(dispatcher_spec.defaults)) or
+            (implementation_spec.defaults is not None and
+             len(implementation_spec.defaults) !=
+             len(dispatcher_spec.defaults))):
+        raise RuntimeError('implementation and dispatcher for %s have '
+                           'different function signatures' % implementation)
+
+    if implementation_spec.defaults is not None:
+        if dispatcher_spec.defaults != (None,) * len(dispatcher_spec.defaults):
+            raise RuntimeError('dispatcher functions can only use None for '
+                               'default argument values')
+
+
+import textwrap
+import functools
+
+_wrapped_func_source = textwrap.dedent("""
+    @functools.wraps(implementation)
+    def {name}(*args, **kwargs):
+        relevant_args = dispatcher(*args, **kwargs)
+        return implement_torch_function(
+            implementation, {name}, relevant_args, args, kwargs)
+    """)
+
+TORCH_FUNCTION_ENABLED = True
+
+def torch_function_dispatch(dispatcher, module=None, verify=True,
+                            docs_from_dispatcher=False):
+    """Decorator for adding dispatch with the __torch_function__ protocol.
+    See NEP-18 for example usage.
+    Parameters
+    ----------
+    dispatcher : callable
+        Function that when called like ``dispatcher(*args, **kwargs)`` with
+        arguments from the NumPy function call returns an iterable of
+        array-like arguments to check for ``__torch_function__``.
+    module : str, optional
+        __module__ attribute to set on new function, e.g., ``module='numpy'``.
+        By default, module is copied from the decorated function.
+    verify : bool, optional
+        If True, verify the that the signature of the dispatcher and decorated
+        function signatures match exactly: all required and optional arguments
+        should appear in order with the same names, but the default values for
+        all optional arguments should be ``None``. Only disable verification
+        if the dispatcher's signature needs to deviate for some particular
+        reason, e.g., because the function has a signature like
+        ``func(*args, **kwargs)``.
+    docs_from_dispatcher : bool, optional
+        If True, copy docs from the dispatcher function onto the dispatched
+        function, rather than from the implementation. This is useful for
+        functions defined in C, which otherwise don't have docstrings.
+    Returns
+    -------dispatcher
+    Function suitable for decorating the implementation of a NumPy function.
+    """
+
+    if not TORCH_FUNCTION_ENABLED:
+        def decorator(implementation):
+            if docs_from_dispatcher:
+                add_docstring(implementation, dispatcher.__doc__)
+            if module is not None:
+                implementation.__module__ = module
+            return implementation
+        return decorator
+
+    def decorator(implementation):
+        if verify:
+            verify_matching_signatures(implementation, dispatcher)
+
+        if docs_from_dispatcher:
+            add_docstring(implementation, dispatcher.__doc__)
+
+        # Equivalently, we could define this function directly instead of using
+        # exec. This version has the advantage of giving the helper function a
+        # more interpettable name. Otherwise, the original function does not
+        # show up at all in many cases, e.g., if it's written in C or if the
+        # dispatcher gets an invalid keyword argument.
+        source = _wrapped_func_source.format(name=implementation.__name__)
+        print("===========source================")
+        print(source)
+
+        source_object = compile(
+            source, filename='<__torch_function__ internals>', mode='exec')
+        scope = {
+            'implementation': implementation,
+            'dispatcher': dispatcher,
+            'functools': functools,
+            'implement_torch_function': implement_torch_function,
+        }
+        exec(source_object, scope)
+
+        public_api = scope[implementation.__name__]
+
+        if module is not None:
+            public_api.__module__ = module
+
+        public_api._implementation = implementation
+
+        return public_api
+
+    return decorator
 
