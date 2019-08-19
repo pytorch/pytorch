@@ -19,7 +19,7 @@ using at::DimnameList;
 
 namespace torch {
 
-#define TENSOR(T, S, _1)                                                   \
+#define TENSOR(T, S)                                                       \
   inline at::Tensor tensor(                                                \
       at::ArrayRef<T> values, const at::TensorOptions& options) {          \
     at::Tensor result = ([&]() {                                           \
@@ -44,7 +44,7 @@ namespace torch {
   inline at::Tensor tensor(T value) {                                      \
     return torch::tensor(at::ArrayRef<T>(value));                          \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, TENSOR)
 #undef TENSOR
 
 /// A generic deleter function.
