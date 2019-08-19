@@ -127,7 +127,7 @@ Tensor & gather_out_cuda(Tensor & result, const Tensor & self, int64_t dim, cons
   int64_t grid = std::min<int64_t>((numel + block - 1) / block, 2048L);
 
   if (numel > 0) {
-    AT_DISPATCH_ALL_TYPES(self.scalar_type(), "gather_out_cuda", [&](){
+    AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "gather_out_cuda", [&](){
       if (cuda::detail::canUse32BitIndexMath(result) &&
           cuda::detail::canUse32BitIndexMath(self) &&
           cuda::detail::canUse32BitIndexMath(index)) {
