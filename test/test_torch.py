@@ -12887,9 +12887,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         other = torch.randn(sz, device=device)
 
         self.unary_check_input_output_mem_overlap(
-            data, sz, lambda input, out: op(input, input, out=out))
-
-        self.unary_check_input_output_mem_overlap(
             data, sz, lambda input, out: op(other, input, out=out))
 
         self.unary_check_input_output_mem_overlap(
@@ -12917,18 +12914,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         data = torch.randn(2 * sz, device=device)
         other1 = torch.randn(sz, device=device)
         other2 = torch.randn(sz, device=device)
-
-        self.unary_check_input_output_mem_overlap(
-            data, sz, lambda input, out: op(input, input, input, out=out))
-
-        self.unary_check_input_output_mem_overlap(
-            data, sz, lambda input, out: op(input, input, other1, out=out))
-
-        self.unary_check_input_output_mem_overlap(
-            data, sz, lambda input, out: op(input, other1, input, out=out))
-
-        self.unary_check_input_output_mem_overlap(
-            data, sz, lambda input, out: op(other1, input, input, out=out))
 
         self.unary_check_input_output_mem_overlap(
             data, sz, lambda input, out: op(input, other1, other2, out=out))
