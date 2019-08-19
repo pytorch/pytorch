@@ -3,6 +3,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
+#include <c10/util/Exception.h>
 
 // Just for C10_ANONYMOUS_VARIABLE
 #include <c10/util/Registry.h>
@@ -113,7 +114,7 @@ struct C10_API DeviceGuardImplInterface {
  */
   virtual void destroyEvent (
     void* event,
-    const DeviceIndex device_index) const noexcept = 0;
+    const DeviceIndex device_index) const noexcept { }
 
 /**
  * Marks the event as not recorded and enqueues the event in the
@@ -126,7 +127,9 @@ struct C10_API DeviceGuardImplInterface {
     void** event,
     const Stream& stream,
     const DeviceIndex device_index,
-    const c10::EventFlag flag) const = 0;
+    const c10::EventFlag flag) const {
+    TORCH_CHECK(false, "Backend doesn't support events.");
+  }
 
 /**
  * Does nothing if the event has not been scheduled to be recorded.
@@ -137,7 +140,9 @@ struct C10_API DeviceGuardImplInterface {
  */
   virtual void block(
     void* event,
-    const Stream& stream) const = 0;
+    const Stream& stream) const {
+    TORCH_CHECK(false, "Backend doesn't support events.");
+  };
 
 /**
  * Returns true if (and only if)
@@ -145,7 +150,9 @@ struct C10_API DeviceGuardImplInterface {
  *  (2) is marked as recorded.
  * Returns false otherwise.
  */
-  virtual bool queryEvent(void* event) const = 0;
+  virtual bool queryEvent(void* event) const {
+    TORCH_CHECK(false, "Backend doesn't support events.");
+  }
 
   /**
    * Get the number of devices.  WARNING: This is REQUIRED to not raise
