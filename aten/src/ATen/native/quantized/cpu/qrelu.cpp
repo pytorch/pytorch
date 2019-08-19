@@ -7,17 +7,15 @@
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at { namespace native {
 Tensor quantized_relu(const Tensor& qx) {
   Tensor qy;
   const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
-    qy = at::_empty_affine_quantized(
-        qx.sizes(),
-        at::device(kCPU).dtype(SCALAR_TYPE),
-        qx.q_scale(),
-        qx.q_zero_point());
+    qy = at::_empty_affine_quantized(qx.sizes(),
+                                     at::device(kCPU).dtype(SCALAR_TYPE),
+                                     qx.q_scale(),
+                                     qx.q_zero_point());
     auto iter = TensorIterator::unary_op(qy, qx);
     cpu_kernel(iter, [&](scalar_t value) -> scalar_t {
       return scalar_t(std::max<underlying_t>(value.val_, zero_point));
@@ -25,6 +23,18 @@ Tensor quantized_relu(const Tensor& qx) {
   });
   return qy;
 }
+
+Tensor& quantized_relu_(Tensor& qx) {
+  const auto zero_point = qx.q_zero_point();
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
+    auto iter = TensorIterator::unary_op(qx, qx);
+    cpu_kernel(iter, [&](scalar_t value) -> scalar_t {
+      return scalar_t(std::max<underlying_t>(value.val_, zero_point));
+    });
+  });
+  return qx;
+}
+
 
 namespace {
 Tensor quantized_relu6(const Tensor& qx) {
@@ -47,12 +57,6 @@ Tensor quantized_relu6(const Tensor& qx) {
   return qy;
 }
 
-class QRelu final : public c10::OperatorKernel {
- public:
-  Tensor operator()(Tensor qx) {
-    return at::relu(qx);
-  }
-};
 
 class QRelu6 final : public c10::OperatorKernel {
  public:
@@ -62,11 +66,8 @@ class QRelu6 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators()
-.op("quantized::relu(Tensor qx) -> Tensor",
-    c10::RegisterOperators::options().kernel<QRelu>(QuantizedCPUTensorId()))
 .op("quantized::relu6(Tensor qx) -> Tensor",
     c10::RegisterOperators::options().kernel<QRelu6>(QuantizedCPUTensorId()));
 } // namespace
 
-} // namespace native
-} // namespace at
+}}  // namespace at::native
