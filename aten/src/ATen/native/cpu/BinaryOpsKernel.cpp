@@ -81,8 +81,6 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
-// ~~~~~~~~~~~~~ Binary logical operators BEGIN ~~~~~~~~~~~~~~~~~
-
 template <typename Op>
 void logical_binary_kernel_impl(TensorIterator& iter, const char* op_name, Op op) {
   AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), op_name, [&]() {
@@ -109,8 +107,6 @@ void logical_or_kernel(TensorIterator& iter) {
 void logical_xor_kernel(TensorIterator& iter) {
   logical_binary_kernel_impl(iter, "logical_xor_cpu", [](bool a, bool b) -> bool { return a != b; });
 }
-
-// ~~~~~~~~~~~~~ Binary logical operators END ~~~~~~~~~~~~~~~~~
 
 } // anonymous namespace
 

@@ -127,6 +127,9 @@ class DynamicModuleAPITest(QuantizationTestCase):
         # Smoke test to make sure the module actually runs
         quantized_float_linear(X)
 
+        # Smoke test extra_repr
+        str(quantized_float_linear)
+
 
 class ModuleAPITest(QuantizationTestCase):
     @no_deadline
@@ -237,6 +240,9 @@ class ModuleAPITest(QuantizationTestCase):
 
         # Smoke test to make sure the module actually runs
         quantized_float_linear(X_q)
+
+        # Smoke test extra_repr
+        str(quantized_float_linear)
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
@@ -421,6 +427,9 @@ class ModuleAPITest(QuantizationTestCase):
 
         # Smoke test to make sure the module actually runs
         quantized_float_conv(qX)
+
+        # Smoke test extra_repr
+        str(quantized_float_conv)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.

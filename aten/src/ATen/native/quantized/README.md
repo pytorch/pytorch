@@ -16,7 +16,7 @@ That would assist in any further discussion.
 The snippet below shows the implementation of a quantized AND operator, with the support of all implemented quantized types.
 
 ```c++
-Tensor quantized_and(Tensor qa, Tensor qb) {
+Tensor quantized_my_op(Tensor qa, Tensor qb) {
   // Some type checks for qa and qb should be here...
   Tensor qc;
   double scale = qa.q_scale();
@@ -24,7 +24,7 @@ Tensor quantized_and(Tensor qa, Tensor qb) {
 
   auto iter = TensorIterator::binary_op(qc, qa, qb);
 
-  AT_DISPATCH_QINT_TYPES(qa.scalar_type(), "quantized_and", [&]() {
+  AT_DISPATCH_QINT_TYPES(qa.scalar_type(), "quantized_my_op", [&]() {
     Tensor qc = at::_empty_affine_quantized(
         qa.sizes(), at::device(kCPU).dtype(SCALAR_TYPE), scale, zero_point);
     cpu_kernel(iter, [&](scalar_t a_value, scalar_t b_value) -> scalar_t {
@@ -64,7 +64,7 @@ In the `qand.cpp` file, we create the following
 class QuantizedAnd final : public torch::OperatorKernel {
  public:
   Tensor operator(Tensor qa, Tensor qb) {
-    return quantized_and(qa, qb);
+    return quantized_my_op(qa, qb);
 }
 }
 ;
@@ -99,23 +99,23 @@ A detailed explanation on this file can be found [here](https://github.com/pytor
 **If adding a new entry to the `native_functions.yaml`:**
 
 ```yaml
-- func: quantized_and(Tensor qa, Tensor qb) -> Tensor
+- func: quantized_my_op(Tensor qa, Tensor qb) -> Tensor
   dispatch:
-    QuantizedCPU: quantized_and
+    QuantizedCPU: quantized_my_op
 ```
 
 **If adding to an existing entry in the `native_functions.yaml`:**
 
 If you find an entry in the yaml file, and would like to add a quantized kernel to it, you can just add a new dispatch entry for it.
-Let's take the `logical_and` function in the YAML file as an example.
+For example, let's assume there existed a `my_op` function in the YAML file.
 In that case, modification would look as:
 
 ```yaml
-- func: logical_and(Tensor a, Tensor b) -> Tensor
-  variants: function, method
-  named_guard: False
+- func: my_op(Tensor a, Tensor b) -> Tensor
   dispatch:
-    QuantizedCPU: quantized_and  # We add this line
+    CPU: _my_op_cpu     # Assume this existed
+    CUDA: _my_op_cuda   # Assume this existed
+    QuantizedCPU: quantized_my_op
 ```
 
 ### Putting it all together
@@ -132,7 +132,7 @@ The final file `ATen/native/quantized/cpu/qand.cpp` would look as follows
 
 namespace at {
   namespace native {
-  Tensor quantized_and(Tensor qa, Tensor qb) {
+  Tensor quantized_my_op(Tensor qa, Tensor qb) {
     // The awesome op implementation...
     return qc;
   }
@@ -141,7 +141,7 @@ namespace at {
   class QuantizedAnd final : public torch::OperatorKernel {
    public:
     Tensor operator(Tensor qa, Tensor qb) {
-      return quantized_and(qa, qb);
+      return quantized_my_op(qa, qb);
     }
   };
 
@@ -190,7 +190,7 @@ To implement the python quantized function using our kernel, you can do the foll
 ```python
 from torch._ops import ops
 
-def quantized_and(qa, qb):
+def quantized_my_op(qa, qb):
 #Notice the schema changed from `quantized::and` to `quantized.and`
   return ops.quantized.and(qa, qb)
 ```
@@ -237,7 +237,7 @@ namespace at {
   } // dispatch_tools
 
   // This is your new function
-  Tensor quantized_and(Tensor qa, Tensor qb) {
+  Tensor quantized_my_op(Tensor qa, Tensor qb) {
     return dispatch_tools::callOp("quantized::and", "", qa, qb);
   }
   }}  // namespace at::native

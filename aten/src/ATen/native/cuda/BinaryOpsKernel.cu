@@ -70,8 +70,6 @@ void atan2_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-// ~~~~~~~~~~~~~ Binary logical operators BEGIN ~~~~~~~~~~~~~~~~~
-
 template <typename Op>
 void logical_binary_kernel_cuda_impl(TensorIterator& iter, const char* op_name, Op op) {
   AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), op_name, [&]() {
@@ -88,18 +86,16 @@ void logical_binary_kernel_cuda_impl(TensorIterator& iter, const char* op_name, 
 }
 
 void logical_and_kernel_cuda(TensorIterator& iter) {
-  logical_binary_kernel_cuda_impl(iter, "logical_and_cuda", []GPU_LAMBDA(bool a, bool b){ return a && b; });
+  logical_binary_kernel_cuda_impl(iter, "logical_and_cuda", []GPU_LAMBDA(bool a, bool b) -> bool { return a && b; });
 }
 
 void logical_or_kernel_cuda(TensorIterator& iter) {
-  logical_binary_kernel_cuda_impl(iter, "logical_or_cuda", []GPU_LAMBDA(bool a, bool b){ return a || b; });
+  logical_binary_kernel_cuda_impl(iter, "logical_or_cuda", []GPU_LAMBDA(bool a, bool b) -> bool { return a || b; });
 }
 
 void logical_xor_kernel_cuda(TensorIterator& iter) {
-  logical_binary_kernel_cuda_impl(iter, "logical_xor_cuda", []GPU_LAMBDA(bool a, bool b){ return a != b; });
+  logical_binary_kernel_cuda_impl(iter, "logical_xor_cuda", []GPU_LAMBDA(bool a, bool b) -> bool { return a != b; });
 }
-
-// ~~~~~~~~~~~~~ Binary logical operators END ~~~~~~~~~~~~~~~~~
 
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
 REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
