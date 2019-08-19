@@ -1,6 +1,5 @@
 import torch
 from cpp_api_parity import has_parity
-from typing import Dict
 
 '''
 `SampleModule` is used by `test_cpp_api_parity.py` to test that Python / C++ API
@@ -14,7 +13,8 @@ When `SampleModule.has_parity` is false, behavior of `reset_parameters` / `forwa
 '''
 
 class SampleModule(torch.nn.Module):
-    def __init__(self, has_submodule, int_option=0, double_option=0.1, bool_option=False, string_option='0', tensor_option=torch.empty(1)):
+    def __init__(self, has_submodule, int_option=0, double_option=0.1,
+                 bool_option=False, string_option='0', tensor_option=torch.empty(1)):
         super(SampleModule, self).__init__()
         self.register_parameter('param', torch.nn.Parameter(torch.empty(3, 4)))
         self.register_buffer('buffer', torch.empty(4, 5))
