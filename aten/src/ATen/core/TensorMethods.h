@@ -80,12 +80,32 @@ inline void Tensor::set_data(const Tensor & new_data) const {
 #endif
 }
 #ifdef BUILD_NAMEDTENSOR
-inline Tensor & Tensor::set_names_(c10::optional<DimnameList> names) const {
+inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::set_names_(const_cast<Tensor&>(*this), names);
+    return TypeDefault::names_(const_cast<Tensor&>(*this), names);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::set_names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
+    static auto table = globalATenDispatch().getOpTable("aten::names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, c10::optional<DimnameList>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::view_names(c10::optional<DimnameList> names) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::view_names(const_cast<Tensor&>(*this), names);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::view_names(Tensor(a) self, Dimname[]? names) -> Tensor(a)");
+    return table->getOp<Tensor (const Tensor &, c10::optional<DimnameList>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::align_to(DimnameList names) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::align_to(const_cast<Tensor&>(*this), names);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::align_to(Tensor self, DimnameList names) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, DimnameList)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
 #endif
 }
 #endif
@@ -436,6 +456,38 @@ inline Tensor & Tensor::bitwise_not_() const {
 #else
     static auto table = globalATenDispatch().getOpTable("aten::bitwise_not_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
+#endif
+}
+inline Tensor Tensor::logical_not() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::logical_not(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::logical_not(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
+#endif
+}
+inline Tensor & Tensor::logical_not_() const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::logical_not_(const_cast<Tensor&>(*this));
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::logical_not_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
+#endif
+}
+inline Tensor Tensor::logical_xor(const Tensor & other) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::logical_xor(const_cast<Tensor&>(*this), other);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::logical_xor(Tensor self, Tensor other) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other);
+#endif
+}
+inline Tensor & Tensor::logical_xor_(const Tensor & other) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::logical_xor_(const_cast<Tensor&>(*this), other);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::logical_xor_(Tensor(a!) self, Tensor other) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other);
 #endif
 }
 inline Tensor Tensor::bmm(const Tensor & mat2) const {
@@ -1161,6 +1213,16 @@ inline Tensor Tensor::log_softmax(int64_t dim, c10::optional<ScalarType> dtype) 
     return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::log_softmax(Dimname dim, c10::optional<ScalarType> dtype) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::log_softmax(const_cast<Tensor&>(*this), dim, dtype);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::log_softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, dtype);
+#endif
+}
+#endif
 inline Tensor Tensor::logsumexp(IntArrayRef dim, bool keepdim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::logsumexp(const_cast<Tensor&>(*this), dim, keepdim);
@@ -1534,6 +1596,9 @@ inline Tensor & Tensor::relu_() const {
         case Backend::CPU:
             return CPUType::relu_(const_cast<Tensor&>(*this));
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::relu_(const_cast<Tensor&>(*this));
+            break;
         default:
             AT_ERROR("relu_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
     }
@@ -1776,6 +1841,16 @@ inline Tensor Tensor::softmax(int64_t dim, c10::optional<ScalarType> dtype) cons
     return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, dtype);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::softmax(Dimname dim, c10::optional<ScalarType> dtype) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::softmax(const_cast<Tensor&>(*this), dim, dtype);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, dtype);
+#endif
+}
+#endif
 inline std::vector<Tensor> Tensor::split(int64_t split_size, int64_t dim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::split(const_cast<Tensor&>(*this), split_size, dim);
@@ -4680,6 +4755,9 @@ inline bool Tensor::equal(const Tensor & other) const {
         case Backend::CPU:
             return CPUType::equal(const_cast<Tensor&>(*this), other);
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::equal(const_cast<Tensor&>(*this), other);
+            break;
         default:
             AT_ERROR("equal not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
     }
@@ -4751,7 +4829,7 @@ inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
 }
 
 inline bool Tensor::has_names() const {
-  return impl::internal_has_names(unsafeGetTensorImpl());
+  return impl::has_names(unsafeGetTensorImpl());
 }
 #endif
 

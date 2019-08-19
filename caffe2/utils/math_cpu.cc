@@ -1204,7 +1204,7 @@ Ind_t generate_stack_distance(
     return cum_val[j];
   } else {
     // iterate until you find the cum_val corresponding to u <= cum_dis[j]
-    for (j = 0; j < cum_dis.size(); j++) {
+    for (j = 0; j < Ind_t(cum_dis.size()); j++) {
       f = cum_dis[j];
       if (u <= f) {
         return cum_val[j];
