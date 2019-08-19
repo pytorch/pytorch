@@ -218,10 +218,10 @@
 
 - func: addr.out(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
 
-- func: affine_grid_generator(Tensor theta, int[] size) -> Tensor
+- func: affine_grid_generator(Tensor theta, int[] size, bool align_corners) -> Tensor
   variants: function
 
-- func: affine_grid_generator_backward(Tensor grad, int[] size) -> Tensor
+- func: affine_grid_generator_backward(Tensor grad, int[] size, bool align_corners) -> Tensor
   variants: function
 
 - func: all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
@@ -980,24 +980,26 @@
 # Additionally, arguments `padding_mode` and `interpolation_mode` are cast to
 # enums defined in `native/GridSampler.h`. `cudnn_grid_sampler` doesn't take in
 # `interpolation_mode` because it only supports Bilinear interpolation mode.
-- func: grid_sampler(Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> Tensor
+# Nor does it take in `align_corners` because it only supports the mode
+# `align_corners = True`.
+- func: grid_sampler(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
 
-- func: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> Tensor
+- func: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   dispatch:
     CPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
 
-- func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> (Tensor, Tensor)
+- func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)
   dispatch:
     CPU: grid_sampler_2d_backward_cpu
     CUDA: grid_sampler_2d_backward_cuda
 
-- func: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> Tensor
+- func: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   dispatch:
     CPU: grid_sampler_3d_cpu
     CUDA: grid_sampler_3d_cuda
 
-- func: grid_sampler_3d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> (Tensor, Tensor)
+- func: grid_sampler_3d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)
   dispatch:
     CPU: grid_sampler_3d_backward_cpu
     CUDA: grid_sampler_3d_backward_cuda
