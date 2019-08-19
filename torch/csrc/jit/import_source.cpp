@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/script/resolver.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace script {
@@ -161,12 +163,12 @@ struct SourceResolver : public Resolver {
 
 struct SourceImporter {
   SourceImporter(
-      const std::shared_ptr<CompilationUnit>& cu,
+      std::shared_ptr<CompilationUnit>  cu,
       const std::shared_ptr<Source>& src,
       const std::vector<at::Tensor>& tensor_table,
       const std::function<void(const std::string&)>& import_callback)
       : p_(src),
-        cu_(cu),
+        cu_(std::move(cu)),
         import_callback_(import_callback),
         tensor_table_(tensor_table) {
     version_ = parseVersionNumber();
@@ -433,12 +435,12 @@ void LEGACY_import_methods(
 }
 
 void import_libs(
-    std::shared_ptr<CompilationUnit> cu,
+    const std::shared_ptr<CompilationUnit>& cu,
     const std::string& qualifier,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& tensor_table,
     const std::function<void(const std::string&)>& import_callback) {
-  SourceImporter importer(std::move(cu), src, tensor_table, import_callback);
+  SourceImporter importer(cu, src, tensor_table, import_callback);
   importer.import(qualifier);
 }
 } // namespace script

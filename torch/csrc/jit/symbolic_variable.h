@@ -315,8 +315,8 @@ struct SymbolicVariable {
   }
 
  private:
-  Value* insertConstant(IValue value) const {
-    return v->owningGraph()->insertConstant(std::move(value));
+  Value* insertConstant(const IValue& value) const {
+    return v->owningGraph()->insertConstant(value);
   }
   SymbolicVariable typeLike(SymbolicVariable other) const {
     if (auto other_type = other.v->type()->cast<ProfiledTensorType>())

@@ -11,7 +11,7 @@ at::Tensor wrap_tensor(at::Tensor&& tensor) {
   if (tensor.is_variable()) {
     return std::move(tensor);
   } else {
-    return torch::autograd::make_variable(std::move(tensor));
+    return torch::autograd::make_variable(tensor);
   }
 }
 

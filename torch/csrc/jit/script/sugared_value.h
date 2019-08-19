@@ -480,8 +480,8 @@ struct TORCH_API IterableValue : SugaredValue {
 // max_trip_count and set the value table for loop targets
 struct TORCH_API IterableTree : SugaredValue {
   IterableTree() = default;
-  IterableTree(const std::vector<SugaredValuePtr>& children)
-      : children_(children) {}
+  IterableTree(std::vector<SugaredValuePtr>  children)
+      : children_(std::move(children)) {}
   std::string kind() const override {
     return "iterabletree";
   }

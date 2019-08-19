@@ -16,7 +16,7 @@ namespace script {
 // Define the list of classes in `src`.
 TORCH_API void import_libs(
     // The compilation unit that will own the imported libs
-    std::shared_ptr<CompilationUnit> cu,
+    const std::shared_ptr<CompilationUnit>& cu,
     // Qualifier for any classes that `src` defines. Looks like a module path,
     // like "foo.bar.baz"
     const std::string& class_qualifier,

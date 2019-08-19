@@ -378,7 +378,7 @@ auto reg_str_ops_2 =
                                    std::string substr,
                                    int64_t start,
                                    int64_t end) {
-                  return stringFindImpl(std::move(string), std::move(substr), start, end);
+                  return stringFindImpl(std::move(string), substr, start, end);
                 }))
 
         .op("aten::rfind(str self, str substr, int start=0, int end=-1) -> int",
@@ -388,7 +388,7 @@ auto reg_str_ops_2 =
                                    std::string substr,
                                    int64_t start,
                                    int64_t end) {
-                  return stringFindImpl(std::move(string), std::move(substr), start, end, true);
+                  return stringFindImpl(std::move(string), substr, start, end, true);
                 }))
 
         .op("aten::index(str self, str substr, int start=0, int end=-1) -> int",
@@ -398,7 +398,7 @@ auto reg_str_ops_2 =
                                    std::string substr,
                                    int64_t start,
                                    int64_t end) {
-                  auto result = stringFindImpl(std::move(string), std::move(substr), start, end);
+                  auto result = stringFindImpl(std::move(string), substr, start, end);
                   if (result < 0) {
                     throw std::runtime_error("ValueError: substring not found");
                   }
@@ -413,7 +413,7 @@ auto reg_str_ops_2 =
                                    int64_t start,
                                    int64_t end) {
                   auto result =
-                      stringFindImpl(std::move(string), std::move(substr), start, end, true);
+                      stringFindImpl(std::move(string), substr, start, end, true);
                   if (result < 0) {
                     throw std::runtime_error("ValueError: substring not found");
                   }

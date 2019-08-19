@@ -241,7 +241,7 @@ inline bool isTraceableType(const TypePtr& type) {
     return std::all_of(
         tuple_type->elements().begin(),
         tuple_type->elements().end(),
-        [](TypePtr element_type) { return isTraceableType(std::move(element_type)); });
+        [](const TypePtr& element_type) { return isTraceableType(element_type); });
   }
 
   if (auto dict_type = type->cast<DictType>()) {
@@ -758,12 +758,12 @@ inline py::object invokeScriptFunctionFromPython(
 
 inline py::object invokeScriptMethodFromPython(
     script::Method& callee,
-    tuple_slice args,
-    py::kwargs kwargs) {
+    const tuple_slice& args,
+    const py::kwargs& kwargs) {
   return invokeScriptFunctionFromPython(
       callee.function(),
-      std::move(args),
-      std::move(kwargs),
+      args,
+      kwargs,
       callee.owner().module_object());
 }
 inline py::object invokeOperatorFromPython(

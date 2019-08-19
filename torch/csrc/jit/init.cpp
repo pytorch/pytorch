@@ -448,7 +448,7 @@ void initJITBindings(PyObject* module) {
           return py::cpp_function(
               [op](py::args args, py::kwargs kwargs) {
                 return invokeOperatorFromPython(
-                    *op, std::move(args), std::move(kwargs));
+                    *op, std::move(args), kwargs);
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
