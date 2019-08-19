@@ -4,11 +4,9 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch
-from torch.nn import ReLU as NNReLU
+import torch.nn.quantized.functional
 
-from .. import functional as F
-
-class ReLU(NNReLU):
+class ReLU(torch.nn.ReLU):
     r"""Applies quantized rectified linear unit function element-wise:
 
     :math:`\text{ReLU}(x)= \max(x_0, x)`, where :math:`x_0` is the zero point.
@@ -36,14 +34,14 @@ class ReLU(NNReLU):
         assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
 
     def forward(self, input):
-        return F.relu(input)
+        return torch.nn.quantized.functional.relu(input)
 
     @staticmethod
     def from_float(mod):
         return ReLU(mod.inplace)
 
 
-class ReLU6(NNReLU):
+class ReLU6(torch.nn.ReLU):
     r"""Applies the element-wise function:
 
     :math:`\text{ReLU6}(x) = \min(\max(x_0, x), q(6))`, where :math:`x_0` is the
