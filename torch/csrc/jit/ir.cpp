@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -1473,7 +1474,9 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 Value* Graph::insertFunctionCall(
     Function* callee,
     script::MatchedSchema& matched) {
+  std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
+                           ->s_(attr::name, func_name)
                            ->output()
                            ->setType(FunctionType::create(std::move(callee)));
   std::vector<Value*> inputs = {fn_constant};

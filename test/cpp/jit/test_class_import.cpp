@@ -1,5 +1,3 @@
-#pragma once
-
 #include <test/cpp/jit/test_base.h>
 #include <test/cpp/jit/test_utils.h>
 
@@ -10,7 +8,8 @@
 
 namespace torch {
 namespace jit {
-namespace script {
+
+using namespace torch::jit::script;
 
 static const auto classSrcs1 = R"JIT(
 op_version_set = 1
@@ -97,12 +96,12 @@ void testScriptObject() {
   auto x = torch::ones({2, 3});
   auto obj = m2.create_class(c10::QualifiedName(base, "FooTest"), x).toObject();
   auto dx = obj->getAttr("dx");
-  ASSERT_TRUE(test::almostEqual(x, dx.toTensor()));
+  ASSERT_TRUE(almostEqual(x, dx.toTensor()));
 
   auto new_x = torch::rand({2, 3});
   obj->setAttr("dx", new_x);
   auto new_dx = obj->getAttr("dx");
-  ASSERT_TRUE(test::almostEqual(new_x, new_dx.toTensor()));
+  ASSERT_TRUE(almostEqual(new_x, new_dx.toTensor()));
 }
 
 static const auto methodSrc = R"JIT(
@@ -130,6 +129,5 @@ void testClassDerive() {
   ASSERT_TRUE(newCls2->getMethod(method->name()));
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch
