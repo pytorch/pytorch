@@ -30,9 +30,8 @@ def main():
 
     # This option is used to filter test cases to run.
     parser.add_argument(
-        '--operator',
-        help='Run the test cases that contain the provided operator'
-        ' as a substring of their names',
+        '--operators',
+        help='Filter tests based on comma-delimited list of operators to test',
         default=None)
 
     parser.add_argument(
@@ -73,7 +72,7 @@ def main():
     parser.add_argument(
         "--warmup_iterations",
         help="Number of iterations to ignore before measuring performance",
-        default=10,
+        default=100,
         type=int
     )
 
@@ -115,7 +114,14 @@ def main():
         help='Comma-delimited list of frameworks to test (Caffe2, PyTorch)',
         default="Caffe2,PyTorch")
 
-    args = parser.parse_args()
+    parser.add_argument(
+        '--wipe_cache',
+        help='Wipe cache before benchmarking each operator',
+        action='store_true',
+        default=False
+    )
+
+    args, _ = parser.parse_known_args()
 
     if benchmark_utils.is_caffe2_enabled(args.framework):
         workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])

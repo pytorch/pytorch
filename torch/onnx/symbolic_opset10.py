@@ -18,7 +18,24 @@ import torch.onnx.symbolic_opset9
 # release on 04/24/19
 
 
-@parse_args('v', 'v', 'i', 'i', 'i')
+@parse_args('v', 'i', 'i', 'none')
+def sort(g, self, dim, decending, out=None):
+    if out is not None:
+        _unimplemented("Sort", "Out parameter is not supported for sort")
+
+    # TODO: add decending to ONNX TopK so ascending sort is supported
+    if not decending:
+        _unimplemented("Sort", "Cannot sort in ascending order")
+
+    shape_ = g.op("Shape", self)
+    axis = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
+    start = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64)) 
+    end = g.op("Constant", value_t=torch.tensor(dim + 1, dtype=torch.int64)) 
+    slice_ = sym_help._slice_helper(g, shape_, axes=axis, starts=start, ends=end, steps=None, dynamic_slice=True)
+    return g.op("TopK", self, slice_, axis_i=dim, outputs=2)
+
+
+@parse_args('v', 'v', 'i', 'i', 'i', 'none')
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
         _unimplemented("TopK", "Out parameter is not supported for topk")

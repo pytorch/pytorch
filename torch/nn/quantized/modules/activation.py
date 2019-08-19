@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from .. import functional as F
-from ...modules.activation import ReLU as NNReLU
+from torch.nn import ReLU as NNReLU
 
 class ReLU(NNReLU):
     r"""Applies quantized rectified linear unit function element-wise:
@@ -13,7 +13,6 @@ class ReLU(NNReLU):
 
     Please see https://pytorch.org/docs/stable/nn.html#torch.nn.ReLU
     for more documentation on ReLU.
-
 
     Args:
         inplace: (Currently not supported) can optionally do the operation in-place.
@@ -33,7 +32,6 @@ class ReLU(NNReLU):
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(inplace)
         assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
-
 
     def forward(self, input):
         return F.relu(input)

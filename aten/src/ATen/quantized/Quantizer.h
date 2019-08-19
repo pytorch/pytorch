@@ -78,6 +78,11 @@ struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
    * dequantize a quantized Tensor into a float Tensor.
    */
   virtual Tensor dequantize(Tensor t) = 0;
+
+  /**
+   * Compare against `other` for equality.
+   */
+  virtual bool equalTo(QuantizerPtr other) = 0;
 };
 
 /**
@@ -134,6 +139,16 @@ struct CAFFE2_API PerTensorSymmetricQuantizer : public SymmetricQuantizer {
   explicit PerTensorSymmetricQuantizer(ScalarType scalar_type, double scale)
     : SymmetricQuantizer(kPerTensorSymmetric, scalar_type), scale_(scale) {}
   double scale_{1.0};
+
+  bool equalTo(QuantizerPtr other) override {
+    if (auto* other_per_tensor_sym =
+            dynamic_cast<PerTensorSymmetricQuantizer*>(other.get())) {
+      return qscheme() == other_per_tensor_sym->qscheme() &&
+          scalar_type() == other_per_tensor_sym->scalar_type() &&
+          scale_ == other_per_tensor_sym->scale_;
+    }
+    return false;
+  }
 };
 
 /**
@@ -165,6 +180,17 @@ struct CAFFE2_API PerChannelSymmetricQuantizer : public SymmetricQuantizer {
     return axis_;
   }
 
+  bool equalTo(QuantizerPtr other) override {
+    if (auto* other_per_channel_sym =
+            dynamic_cast<PerChannelSymmetricQuantizer*>(other.get())) {
+      return qscheme() == other_per_channel_sym->qscheme() &&
+          scalar_type() == other_per_channel_sym->scalar_type() &&
+          scales() == other_per_channel_sym->scales() &&
+          axis() == other_per_channel_sym->axis();
+    }
+    return false;
+  }
+
  private:
   const std::vector<double> scales_;
   const SmallVector<int64_t, 1> axis_;
@@ -189,6 +215,17 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
 
   int64_t zero_point() const {
     return zero_point_;
+  }
+
+  bool equalTo(QuantizerPtr other) override {
+    if (auto* other_per_tensor_affine =
+            dynamic_cast<PerTensorAffineQuantizer*>(other.get())) {
+      return qscheme() == other_per_tensor_affine->qscheme() &&
+          scalar_type() == other_per_tensor_affine->scalar_type() &&
+          scale() == other_per_tensor_affine->scale() &&
+          zero_point() == other_per_tensor_affine->zero_point();
+    }
+    return false;
   }
 
  private:
@@ -232,6 +269,18 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
   Tensor quantize(Tensor tensor) override;
   Tensor dequantize(Tensor tensor) override;
 
+  bool equalTo(QuantizerPtr other) override {
+    if (auto* other_per_channel_affine =
+            dynamic_cast<PerChannelAffineQuantizer*>(other.get())) {
+      return qscheme() == other_per_channel_affine->qscheme() &&
+          scalar_type() == other_per_channel_affine->scalar_type() &&
+          scales() == other_per_channel_affine->scales() &&
+          zero_points() == other_per_channel_affine->zero_points() &&
+          axis() == other_per_channel_affine->axis();
+    }
+    return false;
+  }
+
  private:
   const std::vector<double> scales_;
   const std::vector<int64_t> zero_points_;
@@ -251,7 +300,11 @@ CAFFE2_API T quantize_val(double scale, int64_t zero_point, float value);
 template <typename T>
 CAFFE2_API Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 template <typename T>
+CAFFE2_API float dequantize_val(double scale, int64_t zero_point, T value);
+template <typename T>
 CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point);
+template <typename SRC_T, typename DST_T>
+CAFFE2_API DST_T requantize_val(double, int64_t, double, int64_t, SRC_T src);
 
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions

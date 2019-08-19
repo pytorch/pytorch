@@ -355,13 +355,30 @@ const std::vector<std::string> functions = {
                 out = mat.permute(dims)
             return out
 
-        def AD_matmul_size(mat1, mat2,
+        # In matmul backward case of [b, m, n] * [b, n, p] => [m, p],
+        # instead of doing [b, m, p] and then reduce to [m, p]
+        # whice potentially uses large intermediate of size b*m*p,
+        # we do [m, bn] * [bn, p] to avoid having the large
+        # intermediate, thus reduces max memory usage.
+        def AD_matmul_bw_special_fold(mat1, mat2):
+            mat1_transpose = AD_mat_transpose(mat1)
+            mat1_fold = mat1_transpose.reshape(-1, mat1_transpose.size()[-1])
+            mat2_fold = mat2.reshape(-1, mat2.size()[-1])
+            return mat1_fold.t().mm(mat2_fold)
+
+        def AD_matmul_bw_size(mat1, mat2,
                            out_size: List[int]):
             dim1 = mat1.dim()
             dim2 = mat2.dim()
             dim_out = len(out_size)
             if dim1 == 0 or dim2 == 0:
                 out = mat1 * mat2
+            elif dim_out == 2 and dim1 == dim2 and dim1 >=3:
+                out = AD_matmul_bw_special_fold(mat1, mat2)
+            elif dim_out == 1 and dim1 - dim2 == 1 and dim1 >= 3:
+                mat2_unsqueeze = mat2.unsqueeze(-1)
+                out = AD_matmul_bw_special_fold(mat1, mat2_unsqueeze)
+                out = out.squeeze(-1)
             elif dim1 + dim2 == dim_out:
                 if dim2 == 1:
                     target_dim2 = 0
@@ -380,8 +397,8 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 self_size = self.size()
                 other_size = other.size()
-                grad_self = AD_matmul_size(grad_output, AD_mat_transpose(other), self_size)._grad_sum_to_size(self_size)
-                grad_other = AD_matmul_size(AD_mat_transpose(self), grad_output, other_size)._grad_sum_to_size(other_size)
+                grad_self = AD_matmul_bw_size(grad_output, AD_mat_transpose(other), self_size)._grad_sum_to_size(self_size)
+                grad_other = AD_matmul_bw_size(AD_mat_transpose(self), grad_output, other_size)._grad_sum_to_size(other_size)
                 return grad_self, grad_other
 
             return torch.matmul(self, other), backward
@@ -618,7 +635,7 @@ const std::vector<std::string> functions = {
 
             return torch.pow(self, exponent), backward
 
-        def rsub_0(self, 
+        def rsub_0(self,
                    other,
                    alpha: number = 1.0):
             result = torch.rsub(self, other, alpha)
@@ -709,12 +726,12 @@ const std::vector<std::string> functions = {
             return torch.view(self, size), backward
     )",
     R"(
-        def AD_sizes_if_not_equal_multi(t1, t2, res):
+        def AD_sizes_if_not_equal_multi_0(t1, t2, res):
             return torch._size_if_not_equal(t1.size(), res.size()), torch._size_if_not_equal(t2.size(), res.size())
 
         def mul_0(self, other):
             result = self * other
-            self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
+            self_size, other_size = AD_sizes_if_not_equal_multi_0(self, other, result)
 
             def backward(grad_output):
                 grad_self = (grad_output * other)._grad_sum_to_size(self_size)
@@ -722,7 +739,7 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_other
 
             return result, backward
-        
+
         def mul_1(self, other: number):
             def backward(grad_output):
                 return grad_output * other, None
@@ -730,7 +747,7 @@ const std::vector<std::string> functions = {
 
         def div_0(self, other):
             result = self / other
-            self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
+            self_size, other_size = AD_sizes_if_not_equal_multi_0(self, other, result)
 
             def backward(grad_output):
                 grad_self = (grad_output / other)._grad_sum_to_size(self_size)
@@ -738,7 +755,7 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_other
 
             return result, backward
-        
+
         def div_1(self, other: number):
             def backward(grad_output):
                 return grad_output / other, None
@@ -746,7 +763,7 @@ const std::vector<std::string> functions = {
 
         def max(self, other):
             result = torch.max(self, other)
-            self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
+            self_size, other_size = AD_sizes_if_not_equal_multi_0(self, other, result)
 
             def backward(grad_output):
                 grad_self = (grad_output * (self > other).type_as(grad_output))._grad_sum_to_size(self_size)
@@ -801,10 +818,10 @@ const std::vector<std::string> functions = {
 
         def where(condition, self, other):
             result = torch.where(condition, self, other)
-            self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
+            self_size, other_size = AD_sizes_if_not_equal_multi_0(self, other, result)
             def backward(grad_output):
                 grad_self = (grad_output * condition.type_as(grad_output))._grad_sum_to_size(self_size)
-                grad_other = (grad_output * (1 - condition).type_as(grad_output))._grad_sum_to_size(other_size)
+                grad_other = (grad_output * (condition.bitwise_not()).type_as(grad_output))._grad_sum_to_size(other_size)
                 return None, grad_self, grad_other
 
             return result, backward
@@ -1291,25 +1308,23 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None, None, None
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
-
-      )", 
+      )",
       R"(
-
-        def AD_sizes_if_not_equal_multi(t1, t2, res):
+        def AD_sizes_if_not_equal_multi_1(t1, t2, res):
             return torch._size_if_not_equal(t1.size(), res.size()), torch._size_if_not_equal(t2.size(), res.size())
 
-        def add_0(self, 
+        def add_0(self,
                   other,
-                  *, 
+                  *,
                   alpha: number = 1.0):
             result = torch.add(self, other, alpha=alpha)
-            self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
+            self_size, other_size = AD_sizes_if_not_equal_multi_1(self, other, result)
             def backward(grad_output):
                 grad_other = (grad_output * alpha)._grad_sum_to_size(other_size)
                 grad_self = (grad_output)._grad_sum_to_size(self_size)
                 return grad_self, grad_other, None
             return result, backward
-        
+
         def add_1(self,
                   other: number,
                   alpha: number = 1.0):
@@ -1322,7 +1337,7 @@ const std::vector<std::string> functions = {
                   *,
                   alpha: number = 1.0):
             result = torch.sub(self, other, alpha=alpha)
-            self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
+            self_size, other_size = AD_sizes_if_not_equal_multi_1(self, other, result)
             def backward(grad_output):
                 grad_other = (-grad_output * alpha)._grad_sum_to_size(other_size)
                 grad_self = (grad_output)._grad_sum_to_size(self_size)
@@ -1349,18 +1364,18 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 return grad_output, None
             return torch.fmod(self, other), backward
-        
+
         def remainder(self,
                       other: number):
             def backward(grad_output):
                 return grad_output, None
             return torch.remainder(self, other), backward
-        
-        def addmm(self, 
-                  mat1, 
-                  mat2, 
-                  *, 
-                  beta: number, 
+
+        def addmm(self,
+                  mat1,
+                  mat2,
+                  *,
+                  beta: number,
                   alpha: number):
             result = torch.addmm(self, mat1, mat2, beta=beta, alpha=alpha)
             self_size = torch._size_if_not_equal(self.size(), result.size())
@@ -1376,12 +1391,12 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 return None, None
             return torch.lt(self, other), backward
-        
+
         def le(self, other: number):
             def backward(grad_output):
                 return None, None
             return torch.le(self, other), backward
-        
+
         def gt(self, other: number):
             def backward(grad_output):
                 return None, None
@@ -1401,13 +1416,34 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 return None, None
             return torch.ne(self, other), backward
+
+        def clamp(self,
+                  min: Optional[number],
+                  max: Optional[number]):
+          def backward(grad_output):
+            if min is not None and max is not None:
+                mask = ((self >= float(min)) * (self <= float(max))).type_as(self)
+                return grad_output * mask, None, None
+            elif min is not None:
+                mask = (self >= float(min)).type_as(self)
+                return grad_output * mask, None, None
+            elif max is not None:
+                mask = (self <= float(max)).type_as(self)
+                return grad_output * mask, None, None
+            else: #min is None and max is None
+                return grad_output, None, None
+          return torch.clamp(self, min=min, max=max), backward
     )"};
+
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
 // This map is a workaround to cache compiled gradient_pairs. Ideally this graph
 // should be compiled only once and saved in Operator structure.
 // This should be done along with merging into native_functions.yaml.
 std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
+
+// CompilationUnit that holds all these Functions and keeps them alive.
+script::CompilationUnit compilation_unit;
 } // anonymous namespace
 
 std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
@@ -1510,10 +1546,9 @@ void loadModule(const script::CompilationUnit& module) {
 
 void loadFunctions() {
   for (const std::string& str : functions) {
-    script::CompilationUnit cu;
-    cu.define(c10::nullopt, str, script::nativeResolver(), nullptr);
-    loadModule(cu);
+    compilation_unit.define(c10::nullopt, str, script::nativeResolver(), nullptr);
   }
+  loadModule(compilation_unit);
 }
 
 c10::optional<GradientPair> gradientInfoForSchema(

@@ -148,9 +148,6 @@ class ConcatAddMulReplaceNaNClipOp final : public Operator<Context> {
         _mm256_storeu_ps(&output_data[output_offset + inner], out_val);
       }
 
-#if defined(_OPENMP)
-#pragma omp simd
-#endif
       for (auto inner_omp = inner; inner_omp < inner_size; ++inner_omp) {
         float elem = output_data[output_offset + inner_omp];
         float add_elem = add_input_data[inner_omp];

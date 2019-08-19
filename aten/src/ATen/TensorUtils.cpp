@@ -312,13 +312,13 @@ int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
 }
 
 // On a high level,
-// 1. separate oldshape chunks of dimensions, where the dimensions are
+// 1. separate `oldshape` into chunks of dimensions, where the dimensions are
 //    ``contiguous'' in each chunk, i.e., oldstride[i] = oldshape[i+1] *
 //     oldstride[i+1]
-// 2. newshape must be able to be separated into same number of chunks as
-//    oldshape was separated into, where each chunk of newshape has matching
+// 2. `newshape` must be able to be separated into same number of chunks as
+//    `oldshape` was separated into, where each chunk of newshape has matching
 //    ``numel'', i.e., number of subspaces, as the corresponding chunk of
-//    oldshape.
+//    `oldshape`.
 c10::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
@@ -327,7 +327,7 @@ c10::optional<std::vector<int64_t>> computeStride(
     return std::vector<int64_t>(newshape.size(), 1);
   }
 
-  // NOTE: stride is arbitrary is somewhat arbitrary in the numel() == 0 case;
+  // NOTE: stride is arbitrary in the numel() == 0 case;
   // to match NumPy behavior we copy the strides if the size matches, otherwise
   // we use the stride as if it were computed via resize.
   // This could perhaps be combined with the below code, but the complexity
@@ -341,7 +341,7 @@ c10::optional<std::vector<int64_t>> computeStride(
   std::vector<int64_t> newstride(newshape.size());
   if (numel == 0) {
     for (int64_t view_d = newshape.size() - 1; view_d >= 0; view_d--) {
-      if (view_d == newshape.size() - 1) {
+      if (view_d == (int64_t)(newshape.size() - 1)) {
         newstride[view_d] = 1;
       } else {
         newstride[view_d] =

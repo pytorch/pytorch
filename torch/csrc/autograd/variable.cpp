@@ -34,7 +34,7 @@ Variable::AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_gr
       "requires_grad should be false if grad_fn is set");
 }
 
-std::shared_ptr<Function> Variable::grad_accumulator() const {
+std::shared_ptr<Node> Variable::grad_accumulator() const {
   auto autograd_meta = get_autograd_meta();
   if (autograd_meta->grad_fn_) {
     throw std::logic_error(
@@ -132,7 +132,7 @@ Variable::DifferentiableViewMeta::~DifferentiableViewMeta() {
   base_.reset();
 }
 
-const std::shared_ptr<Function>& Variable::grad_fn() const {
+const std::shared_ptr<Node>& Variable::grad_fn() const {
   if (is_view()) {
     auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
     std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
@@ -178,6 +178,25 @@ void Variable::rebase_history(Edge gradient_edge) {
   } else {
     set_gradient_edge(std::move(gradient_edge));
   }
+}
+
+void Variable::create_cpp_hook() {
+  auto &list = get_autograd_meta()->cpp_hooks_list;
+  list.reset(new hooks_list());
+  std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, output_nr()));
+  clear_hooks();
+  add_hook(std::make_shared<CppFunctionPreHook>(list, 0));
+  auto fn = grad_fn();
+  if (fn) {
+    fn->add_pre_hook(std::move(hook_ptr));
+  }
+}
+
+void Variable::remove_hook(unsigned pos) {
+  auto &list = get_autograd_meta()->cpp_hooks_list;
+  TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
+  // Hook will be ignored
+  (*list)[pos] = nullptr;
 }
 
 }} // namespace torch::autograd

@@ -31,13 +31,10 @@ class CAFFE2_API ATenOpTable {
   }
  private:
   void registerOp(Backend backend, void* fn) {
-    // TODO: Enable this check after type based extensions are gone
-    /*
     TORCH_CHECK(function_table_[static_cast<int64_t>(backend)] == nullptr,
         "Attempting to register variable function for schema ", schema_,
         " and backend ", toString(backend),
         " but there is already a function registered");
-    */
     function_table_[static_cast<int64_t>(backend)] = fn;
   }
 

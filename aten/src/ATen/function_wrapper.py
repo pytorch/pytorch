@@ -124,20 +124,13 @@ REGISTRATION_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
 """)
 
-# Overrideable stubs to be used in user-extendable backends
-NATIVE_DISPATCH_DEFINITION_EXTENSION_BACKEND = CodeTemplate("""\
-${return_type} ${Type}::${api_name}(${type_method_formals}) {
-    return ${Type}Dispatch::get_function<${return_type} (*)(${formals_types})>("${schema}")(${native_actuals});
-}
-""")
-
 # add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
+${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 # add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
-inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
+inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
     return table->getOp<${return_type} (${formals_types})>(tensorTypeIdToBackend(type_id()), is_variable())(${method_actuals});
 }
@@ -276,42 +269,42 @@ CHECKED_CAST = {
     'THTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THByteTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${Backend}, ScalarType::Byte)'),
     'THBoolTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${Backend}, ScalarType::Bool)'),
     'THIndexTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${Backend}, ScalarType::Long)'),
     'THIntegerTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${Backend}, ScalarType::Int)'),
     'THDenseTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${DenseBackend}, ScalarType::${ScalarName})'),
     'THDenseIndexTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'Backend::${DenseBackend}, ScalarType::Long)'),
     'THStorage*':
         CodeTemplate(
             'checked_storage('
-            '${arg_name},"${arg_name}",${arg_pos}, '
+            '${arg_name}, "${arg_name}", ${arg_pos}, '
             # We're punning here (Backend and DeviceType constructors coincide)
             # but DeviceType is the correct way to classify storages
             'DeviceType::${Backend}, at::scalarTypeToTypeMeta(ScalarType::${ScalarName}))'),
@@ -509,7 +502,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'cimpls': List[Any],
     'cname': str,
     'condition': str,
-    'const_mark': str,
     'device_guard': bool,
     'device_guard_declaration': str,
     'dispatch_scalar_type_declaration': str,
@@ -540,6 +532,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'mode': str,
     'python_module': str,
     'name': str,
+    'overload_name': str,
     'native_actuals': List[str],
     'native_type_method_dispatch': str,
     # options should be List[FunctionOption]
@@ -551,8 +544,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'return': ReturnDecl,
     'returns': List[ReturnType],
     'scalar_check': str,
-    # schema used for extension backend operator registration
-    'schema': str,
     'sparse': bool,
     'type_definition_body': List[str],
     'type_method_actuals': List[str],
@@ -568,6 +559,7 @@ FunctionOption = TypedDict('FunctionOption', {
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('name', str),
+    ('overload_name', str),
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('method_prefix_derived', str),
@@ -611,7 +603,7 @@ def named_guard(option, tensors, tensorlists):
         return ''
     named_conditions = []
     for tensor in tensors:
-        named_conditions.append('{}.is_named()'.format(tensor))
+        named_conditions.append('{}.has_names()'.format(tensor))
     for tensorlist in tensorlists:
         named_conditions.append('at::has_names({})'.format(tensorlist))
     return ("""\
@@ -895,14 +887,14 @@ def create_generic(top_env, declarations):
                                     if f['name'] != 'self']
         option['method_formals_with_defaults'] = (
             [formal_with_default(f) for f in formals if f['name'] != 'self'])
+        # *this is 'const Tensor&' since all Tensor methods are const and must
+        # be const_casted to be accepted as native function's non-const argument
         option['method_actuals'] = [
-            f['name'] if f['name'] != 'self' else '*this' for f in formals]
+            f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
 
         # There are no cases where these differ, but they do in native_functions
         option['type_method_formals'] = option['formals']
         option['type_method_actuals'] = option['actuals']
-
-        option['const_mark'] = '' if option['inplace'] else ' const'
 
         assert 'method' not in option['variants'], 'TH functions cannot be methods'
         is_function = 'function' in option['variants']
@@ -1051,8 +1043,10 @@ def create_generic(top_env, declarations):
                                     if f['name'] != 'self']
         option['method_formals_with_defaults'] = (
             [formal_with_default(f) for f in formals if f['name'] != 'self'])
+        # *this is 'const Tensor&' since all Tensor methods are const and must
+        # be const_casted to be accepted as native function's non-const argument
         option['method_actuals'] = [
-            f['name'] if f['name'] != 'self' else '*this' for f in formals]
+            f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
 
         def find_formal(formal_name, formals):
             for formal in formals:
@@ -1093,7 +1087,8 @@ def create_generic(top_env, declarations):
         # that is sent to top_env. This is because some of this code (Type.h,
         # Tensor.h, TensorMethods.h) is checked into the repo and must be
         # the same regardless of BUILD_NAMEDTENSOR status.
-        is_named_tensor_only = has_named_tensor_formals(formals)
+        is_named_tensor_only = (has_named_tensor_formals(formals) or
+                                option['api_name'] == 'align_tensors')
 
         def check_namedtensor_enabled(code):
             if is_named_tensor_only:
@@ -1119,8 +1114,6 @@ def create_generic(top_env, declarations):
         option['type_method_formals'] = [format_formal(f) for f in formals]
         option['type_method_actuals'] = [f['name'] for f in formals]
         option['native_actuals'] = [f['name'] for f in formals]
-
-        option['const_mark'] = '' if option['inplace'] else ' const'
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
@@ -1204,6 +1197,7 @@ def create_generic(top_env, declarations):
             return None
         return OutputDeclaration(
             name=option['api_name'],
+            overload_name=option['overload_name'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
             method_prefix_derived=option['method_prefix_derived'],
@@ -1486,8 +1480,8 @@ def create_derived(backend_type_env, declarations):
 
                             check_cast = CHECKED_CAST[arg['type']].substitute(
                                 case_env, arg_name=arg['name'], arg_pos=count,
-                                null_okay=null_okay, default_init=default_init,
-                                size=arg.get('size'))
+                                api_name=option['api_name'], null_okay=null_okay,
+                                default_init=default_init, size=arg.get('size'))
                             case_body.append("auto {}_ = {};".format(
                                 arg['name'], check_cast))
                         if drop_argument(arg, option):
@@ -1658,29 +1652,3 @@ def create_derived(backend_type_env, declarations):
                     pass
     return (type_object_declarations, type_object_definitions, function_registrations, legacy_th_declarations,
             legacy_th_definitions)
-
-
-def create_extension_backend(backend_type_env, declarations):
-    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[str]]
-    type_object_declarations = []
-    type_object_definitions = []
-    function_registrations = []
-
-    for declaration in declarations:
-        for option in declaration['options']:
-            if not option.get('skip', False) and option['mode'] == 'native':
-                try:
-                    schema_args = ", ".join(
-                        ["{} {}".format(f['dynamic_type'], f['name']) for f in option['formals_list']])
-                    return_type = NATIVE_DYNAMIC_TYPE.get(option['return_type'], option['return_type'])
-                    option['schema'] = "{}({}) -> {}".format(option['api_name'], schema_args, return_type)
-                    env = nested_dict(option, backend_type_env)
-                    type_object_declarations.append(
-                        NATIVE_DISPATCH_DECLARATION.substitute(env))
-                    type_object_definitions.append(
-                        NATIVE_DISPATCH_DEFINITION_EXTENSION_BACKEND.substitute(env))
-                    function_registrations.append(
-                        BACKEND_FUNCTION_REGISTRATION.substitute(env))
-                except NYIError:
-                    pass
-    return type_object_declarations, type_object_definitions, function_registrations

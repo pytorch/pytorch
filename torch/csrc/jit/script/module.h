@@ -109,24 +109,30 @@ struct TORCH_API Method {
 
 struct TORCH_API Module {
   explicit Module(c10::QualifiedName class_name);
-  Module(c10::QualifiedName, std::shared_ptr<CompilationUnit> cu);
+  Module(
+      c10::QualifiedName,
+      std::shared_ptr<CompilationUnit> cu,
+      bool shouldMangle = false);
   // module_value_ null and will be lazily initialized if is needed
   Module() {}
   Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
   ~Module() {}
 
   const c10::QualifiedName& name() const {
-    return *module_object()->type()->qualified_name_obj();
+    return *module_object()->type()->name();
   }
 
-  // note this doesn't change the flags of existing methods just ones
-  // added afterward.
   void set_optimized(bool o) {
-    class_compilation_unit()->set_optimized(o);
+    AT_WARN(
+        "Module::set_optimized() is deprecated and has no effect. "
+        "Please use setGraphExecutorOptimize()");
   }
 
   bool is_optimized() const {
-    return class_compilation_unit()->is_optimized();
+    AT_WARN(
+        "Module::is_optimized() is deprecated and always returns true. "
+        "Please use getGraphExecutorOptimize()");
+    return true;
   }
 
   IValue forward(std::vector<IValue> inputs) {
@@ -199,9 +205,14 @@ struct TORCH_API Module {
   slot_list get_attributes() const;
   slot_list get_module_slots() const;
 
+  void dump(
+      bool omit_method_bodies,
+      bool omit_attr_values,
+      bool omit_param_values) const;
+
   const std::vector<Method> get_methods() const {
     return fmap(
-        class_compilation_unit()->get_functions(),
+        type()->methods(),
         [&](Function* func) {
           return Method(module_object(), func);
         });
@@ -227,9 +238,11 @@ struct TORCH_API Module {
     return c10::nullopt;
   }
   c10::optional<Method> find_method(const std::string& basename) const {
-    if (const auto fn = class_compilation_unit()->find_function(
-            getNameForMethod(basename))) {
-      return Method(module_object(), fn);
+    for (Function* fn : type()->methods()) {
+      if (fn->name() == basename) {
+        return Method(module_object(), fn);
+      }
+
     }
     return c10::nullopt;
   }
@@ -301,17 +314,13 @@ struct TORCH_API Module {
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
-  void copy_into(
-      const ModuleLookup& module_lookup,
-      // translate current module singleton type to new module
-      // singleton type.
-      std::unordered_map<TypePtr, TypePtr>& type_remap,
-      std::vector<std::string> names = {}) const;
+  // Create a deep copy of this module.
+  Module clone() const;
 
   void clone_method(const Module& orig, const std::string& name);
 
   at::optional<EntityType> kind_of(const std::string& name) const {
-    if (class_compilation_unit()->find_function(getNameForMethod(name))) {
+    if (find_method(name)) {
       return EntityType::METHOD;
     }
     if (auto offset = type()->findAttributeSlot(name)) {
@@ -350,9 +359,17 @@ struct TORCH_API Module {
   }
 
  private:
+  Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
+
+  std::string _dump_to_string(
+      bool omit_method_bodies,
+      bool omit_attr_values,
+      bool omit_param_values,
+      int level) const;
+
   void clone_method(
       const Module& orig,
-      const QualifiedName& orig_method_name,
+      const Function& method,
       const std::unordered_map<TypePtr, TypePtr>& type_remap);
 
   c10::QualifiedName getNameForMethod(std::string basename) const {
