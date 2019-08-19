@@ -97,8 +97,7 @@ namespace at { namespace native {
 Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool) {
   int64_t num_dims = std::max<int64_t>(self.dim(), 1);
   TORCH_CHECK(std::max<int64_t>(index.dim(), 1) == num_dims, "Index tensor must have same dimensions as input tensor");
-  TORCH_CHECK(dim >= 0 && dim < num_dims, "Index dimension is out of bounds");
-  // TORCH_CHECK(std::max<int64_t>(result.dim(), 1) == num_dims, "Input tensor must have same dimensions as output tensor");
+  dim = c10::maybe_wrap_dim(dim, self.dim());
 
   int64_t elems_per_row = (index.dim() == 0 ? 1 : index.size(dim));
   int64_t self_dim_size = self.size(dim);
