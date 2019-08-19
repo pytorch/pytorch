@@ -5,6 +5,9 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/SoftmaxKernel.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 namespace at {
 namespace native {
@@ -258,6 +261,16 @@ DEFINE_DISPATCH(softmax_lastdim_kernel);
 DEFINE_DISPATCH(log_softmax_lastdim_kernel);
 DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
 DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
+
+#ifdef BUILD_NAMEDTENSOR
+Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+  return at::softmax(self, dimname_to_position(self, dim), dtype);
+}
+
+Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+  return at::log_softmax(self, dimname_to_position(self, dim), dtype);
+}
+#endif
 
 }
 }
