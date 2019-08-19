@@ -105,6 +105,8 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tuple_parser.cpp
+    ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
+    ${JIT_TEST_SRCS}
     )
 
 set(TORCH_PYTHON_INCLUDE_DIRECTORIES
@@ -191,8 +193,8 @@ if (USE_CUDNN)
     # Basically, this is the case where $CUDA_HOME/lib64 has an old or
     # incompatible libcudnn.so, which we can inadvertently link to if
     # we're not careful.
-    list(INSERT 0 TORCH_PYTHON_LINK_LIBRARIES ${CUDNN_LIBRARY_PATH})
-    list(INSERT 0 TORCH_PYTHON_INCLUDE_DIRECTORIES ${CUDNN_INCLUDE_PATH})
+    list(INSERT 0 TORCH_PYTHON_LINK_LIBRARIES ${CUDNN_LIBRARY})
+    list(INSERT 0 TORCH_PYTHON_INCLUDE_DIRECTORIES ${CUDNN_INCLUDE_DIR})
 endif()
 
 if (USE_NUMPY)
@@ -291,6 +293,7 @@ set(ModulesStubIn
     ${TORCH_SRC_DIR}/nn/modules/distance.pyi.in
     ${TORCH_SRC_DIR}/nn/modules/dropout.pyi.in
     ${TORCH_SRC_DIR}/nn/modules/fold.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/flatten.pyi.in
     ${TORCH_SRC_DIR}/nn/modules/instancenorm.pyi.in
     ${TORCH_SRC_DIR}/nn/modules/linear.pyi.in
     ${TORCH_SRC_DIR}/nn/modules/loss.pyi.in

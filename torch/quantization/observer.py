@@ -78,6 +78,8 @@ class ObserverBase(ABC, nn.Module):
 
         return torch.tensor([scale]), torch.tensor([zero_point])
 
+    def extra_repr(self):
+        return 'min_val={}, max_val={}'.format(self.min_val, self.max_val)
 
 class MinMaxObserver(ObserverBase):
     r"""Default Observer Module
