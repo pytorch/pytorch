@@ -24,8 +24,6 @@ from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
 
-from hypothesis import given
-from hypothesis import strategies as st
 
 
 @unittest.skipIf(
