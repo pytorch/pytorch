@@ -73,4 +73,4 @@ class ReLU6(torch.nn.ReLU):
 
     @staticmethod
     def from_float(mod):
-        return ReLU(mod.inplace)
+        return ReLU6(mod.inplace)
