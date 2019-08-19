@@ -6,6 +6,10 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/MemoryOverlap.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 namespace {
 
@@ -69,6 +73,14 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
       }
     }
   });
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = unify_from_right(self.names(), src.names());
+  if (outnames.has_value()) {
+    namedinference::propagate_names(self, *outnames);
+  } else {
+    namedinference::propagate_names(self, nullopt);
+  }
+#endif
 }
 
 // Devices directly supported by this copy implementation. Other device types
@@ -120,6 +132,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
 
   auto iter = TensorIterator();
+  iter.set_check_mem_overlap(true);
   iter.add_output(self);
   iter.add_input(src);
   iter.dont_resize_outputs();

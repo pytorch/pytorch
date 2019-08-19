@@ -3,18 +3,17 @@
 
 #include <ATen/NamedTensor.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/DimVector.h>
 #include <functional>
 
 namespace at {
 
+using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
+
 inline bool has_names(TensorList tensors) {
   return std::any_of(
-      tensors.begin(), tensors.end(), [](const Tensor& t) { return t.is_named(); });
+      tensors.begin(), tensors.end(), [](const Tensor& t) { return t.has_names(); });
 }
-
-// Sets the names of `tensor` to be `names`.
-CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
-CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
 
 // Converts dim to an positional index. Errors if `dim` cannot be used to
 // refer to any dimension of tensor.
@@ -33,6 +32,14 @@ CAFFE2_API optional<std::vector<Dimname>>
 unify_from_right(optional<DimnameList> names, optional<DimnameList> other);
 
 namespace namedinference {
+
+// Names get propagated via the following rules:
+// 1) If result does not have names, then `names` get propagated.
+// 2) If result has names, then `names` must be equal to result.names
+void propagate_names(Tensor& result, optional<DimnameList> names);
+void propagate_names(Tensor& result, std::vector<Dimname>&& names, bool validate_names);
+void propagate_names(TensorImpl* result, optional<DimnameList> names);
+void propagate_names(TensorImpl* result, std::vector<Dimname>&& names, bool validate_names);
 
 // Propagates all names from src to result.
 void propagate_names(Tensor& result, const Tensor& src);

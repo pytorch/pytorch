@@ -22,23 +22,31 @@ std::string debugValueOrDefault(const Node* n) {
 }
 
 std::string jit_log_prefix(
-    JitLoggingLevels level,
-    const char* fn,
-    int l,
+    const std::string& prefix,
     const std::string& in_str) {
   std::stringstream in_ss(in_str);
   std::stringstream out_ss(in_str);
   std::string line;
   while (std::getline(in_ss, line, '\n')) {
-    out_ss << "[";
-    out_ss << level << " ";
-    out_ss << c10::detail::StripBasename(std::string(fn)) << ":";
-    out_ss << std::setfill('0') << std::setw(3) << l;
-    out_ss << "] ";
-    out_ss << line << std::endl;
+    out_ss << prefix << line << std::endl;
   }
 
   return out_ss.str();
+}
+
+std::string jit_log_prefix(
+    JitLoggingLevels level,
+    const char* fn,
+    int l,
+    const std::string& in_str) {
+  std::stringstream prefix_ss(in_str);
+  prefix_ss << "[";
+  prefix_ss << level << " ";
+  prefix_ss << c10::detail::StripBasename(std::string(fn)) << ":";
+  prefix_ss << std::setfill('0') << std::setw(3) << l;
+  prefix_ss << "] ";
+
+  return jit_log_prefix(prefix_ss.str(), in_str);
 }
 
 std::ostream& operator<<(std::ostream& out, JitLoggingLevels level) {

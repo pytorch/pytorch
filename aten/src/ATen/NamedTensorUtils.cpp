@@ -6,20 +6,6 @@
 
 namespace at {
 
-Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
-  impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), names);
-  return tensor;
-}
-
-Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names) {
-#ifdef DEBUG
-  validate_names = true;
-#endif
-  impl::internal_set_names_inplace(
-      tensor.unsafeGetTensorImpl(), std::move(names), validate_names);
-  return tensor;
-}
-
 // Returns "Tensor['N', 'C', 'H', 'W']" for a tensor with names ('N', 'C', 'H', 'W').
 static std::string toDimnameRepr(const Tensor& tensor) {
   std::ostringstream os;
@@ -108,13 +94,13 @@ static std::vector<Dimname> unify_from_right(DimnameList names, DimnameList othe
   auto other_it = other_names.rbegin();
   auto result_it = result.rbegin();
   while (names_it != names.rend() || other_it != other_names.rend()) {
-    // TODO(zou3519): Don't support tagged names for now. They're a little weird.
-    if (names_it->is_tagged() || other_it->is_tagged()) {
-      TORCH_INTERNAL_ASSERT("unify_from_right: NYI: tagged names.");
-    }
-
     const auto& name = names_it == names.rend() ? wildcard : *names_it;
     const auto& other_name = other_it == other_names.rend() ? wildcard : *other_it;
+
+    // TODO(zou3519): Don't support tagged names for now. They're a little weird.
+    if (name.is_tagged() || other_name.is_tagged()) {
+      TORCH_INTERNAL_ASSERT("unify_from_right: NYI: tagged names.");
+    }
 
     // Step 1: Check that the names match
     const auto maybeName = unify(name, other_name);
@@ -124,7 +110,7 @@ static std::vector<Dimname> unify_from_right(DimnameList names, DimnameList othe
     *result_it = *maybeName;
 
     // Step 2: Check that the names are not misaligned
-    if (!names_it->is_normal() || !other_it->is_normal()) {
+    if (!name.is_normal() || !other_name.is_normal()) {
       // Let: N = max(len(names), len(other_names))
       //      K = # of special names among names and other_names.
       // This search (including the outer loop) is O(N*K) but typically # of dims is small.
@@ -174,6 +160,42 @@ static std::bitset<64> compute_included_idxs(IntArrayRef excluded_idxs) {
   return included_idxs;
 }
 
+static void assert_names_equal(DimnameList a, DimnameList b) {
+  TORCH_CHECK(a == b,
+      "Name mismatch: specified out tensor with names ", a,
+      " are not the same as the computed output names ", b,
+      ". Please rename the out tensor's dimensions.");
+}
+
+void propagate_names(TensorImpl* result, optional<DimnameList> names) {
+  if (!impl::get_names(result).has_value() && !names.has_value()) {
+    return;
+  }
+  if (!impl::has_names(result)) {
+    impl::internal_set_names_inplace(result, names);
+    return;
+  }
+  assert_names_equal(
+      *impl::get_names(result),
+      names.value_or(FIXME_default_names(result->dim())));
+}
+
+void propagate_names(TensorImpl* result, std::vector<Dimname>&& names, bool validate_names) {
+  if (!impl::has_names(result)) {
+    impl::internal_set_names_inplace(result, std::move(names), validate_names);
+    return;
+  }
+  assert_names_equal(*impl::get_names(result), names);
+}
+
+void propagate_names(Tensor& result, optional<DimnameList> names) {
+  propagate_names(result.unsafeGetTensorImpl(), names);
+}
+
+void propagate_names(Tensor& result, std::vector<Dimname>&& names, bool validate_names) {
+  propagate_names(result.unsafeGetTensorImpl(), std::move(names), validate_names);
+}
+
 void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs) {
   auto src_names = src.names();
   if (!src_names.has_value()) {
@@ -188,7 +210,7 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
   if (excluded_idxs.size() == 1) {
     std::vector<Dimname> outnames = src_names->vec();
     outnames.erase(outnames.begin() + excluded_idxs[0]);
-    internal_set_names_inplace(result, std::move(outnames), /*validate_names=*/false);
+    propagate_names(result, std::move(outnames), /*validate_names=*/false);
     return;
   }
 
@@ -200,7 +222,7 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
       outnames.push_back((*src_names)[dim]);
     }
   }
-  internal_set_names_inplace(result, std::move(outnames), /*validate_names=*/false);
+  propagate_names(result, std::move(outnames), /*validate_names=*/false);
 }
 
 void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef reduced_dims, bool keepdim) {
@@ -216,12 +238,14 @@ void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRe
 }
 
 void propagate_names(Tensor& result, const Tensor& src) {
-  at::internal_set_names_inplace(result, src.names());
+  propagate_names(result.unsafeGetTensorImpl(), src.unsafeGetTensorImpl());
 }
 
 void propagate_names(TensorImpl* result, TensorImpl* src) {
-  const auto names = at::impl::internal_get_names(src);
-  at::impl::internal_set_names_inplace(result, names);
+  if (result == src) {
+    return;
+  }
+  propagate_names(result, impl::get_names(src));
 }
 
 } // namespace namedinference

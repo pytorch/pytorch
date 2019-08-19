@@ -240,6 +240,8 @@ class CAFFE2_API Caffe2Backend {
 
   Caffe2Ops CreateNonZeroOp(OnnxNode* onnx_node, const ConversionContext& ctx);
 
+  Caffe2Ops CreateMultinomialOp(OnnxNode* onnx_node, const ConversionContext& ctx);
+
   Caffe2Ops CreateBatchNormalization(
       OnnxNode* onnx_node,
       const ConversionContext& ctx);
