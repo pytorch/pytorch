@@ -145,6 +145,11 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   ./xla/scripts/apply_patches.sh
 fi
 
+if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
+  export CC=clang
+  export CXX=clang++
+fi
+
 
 # check that setup.py would fail with bad arguments
 echo "The next three invocations are expected to fail with invalid command error messages."
