@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import sys
 import unittest
@@ -52,7 +53,7 @@ def _wrap_with_rpc(func):
         store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend='gloo', rank=self.rank,
                                 world_size=self.world_size, store=store)
-        dist.init_rpc('worker{}'.format(self.rank))
+        dist.init_model_parallel('worker%d' % self.rank, self.rank)
         func(self)
         dist.join_rpc()
 

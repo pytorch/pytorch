@@ -65,8 +65,11 @@ ProcessGroupAgent::ProcessGroupAgent(
       stop_(false),
       pg_(std::move(pg)),
       nextId_(0) {
-  TORCH_CHECK(nameMap_.size() > 1, "ProcessGroupAgent requires world_size to "
-      "be at least 2, but got ", nameMap_.size());
+  TORCH_CHECK(
+      nameMap_.size() > 1,
+      "ProcessGroupAgent requires world_size to "
+      "be at least 2, but got ",
+      nameMap_.size());
   auto workerRankIter = nameMap_.find(workerName_);
   TORCH_CHECK(workerRankIter != nameMap_.end(), "Failed to resolve worker "
       "name ", workerName_, " to a ProcessGroup rank.");
