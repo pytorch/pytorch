@@ -27,8 +27,8 @@ class Transformer(Module):
         custom_decoder: custom decoder (default=None).
 
     Examples::
-        >>> transformer_model = nn.Transformer(src_vocab, tgt_vocab)
-        >>> transformer_model = nn.Transformer(src_vocab, tgt_vocab, nhead=16, num_encoder_layers=12)
+        >>> transformer_model = nn.Transformer()
+        >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
     """
 
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
