@@ -93,8 +93,17 @@ if platform.system() != 'Windows':
 ################################################################################
 
 
+# TODO: remove. This is a temporary function to test the pure-Python version of
+#       __torch_function__
 def gemm_dispatcher(input, mat2, out=None):
     return (input, mat2, out)
+
+
+@torch_function_dispatch(gemm_dispatcher)
+def gemm(input, mat2, out=None):
+    return torch.mm(input, mat2, out=None)
+# End of TODO
+
 
 def typename(o):
     if isinstance(o, torch.Tensor):
@@ -114,10 +123,6 @@ def typename(o):
         class_name = o.__class__.__name__
 
     return module + class_name
-
-@torch_function_dispatch(gemm_dispatcher)
-def gemm(input, mat2, out=None):
-    return torch.mm(input, mat2, out=None)
 
 
 def is_tensor(obj):
