@@ -1,11 +1,10 @@
-#pragma once
-
 #include <test/cpp/jit/test_base.h>
 #include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/script/resolver.h>
 
 namespace torch {
 namespace jit {
-namespace script {
+using namespace torch::jit::script;
 const auto testSource = R"JIT(
   class FooTest:
     def __init__(self, x):
@@ -34,6 +33,5 @@ void testClassParser() {
   ASSERT_FALSE(Assign(classDef.body()[2]).rhs().present());
   ASSERT_TRUE(Assign(classDef.body()[2]).type().present());
 }
-} // namespace script
 } // namespace jit
 } // namespace torch

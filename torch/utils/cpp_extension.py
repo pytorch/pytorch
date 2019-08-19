@@ -10,6 +10,7 @@ import sys
 import sysconfig
 import tempfile
 import warnings
+import collections
 
 import torch
 from .file_baton import FileBaton
@@ -949,15 +950,19 @@ def _get_cuda_arch_flags(cflags=None):
             if 'arch' in flag:
                 return []
 
-    named_arches = {'Fermi': '2.0;2.1',
-                    'Kepler+Tegra': '3.2',
-                    'Kepler+Tesla': '3.7',
-                    'Kepler': '3.0;3.5+PTX',
-                    'Maxwell+Tegra': '5.3',
-                    'Maxwell': '5.0;5.2+PTX',
-                    'Pascal': '6.0;6.1+PTX',
-                    'Volta': '7.0+PTX',
-                    'Turing': '7.5+PTX'}
+    # Note: keep combined names ("arch1+arch2") above single names, otherwise
+    # string replacement may not do the right thing
+    named_arches = collections.OrderedDict([
+        ('Fermi', '2.0;2.1'),
+        ('Kepler+Tegra', '3.2'),
+        ('Kepler+Tesla', '3.7'),
+        ('Kepler', '3.0;3.5+PTX'),
+        ('Maxwell+Tegra', '5.3'),
+        ('Maxwell', '5.0;5.2+PTX'),
+        ('Pascal', '6.0;6.1+PTX'),
+        ('Volta', '7.0+PTX'),
+        ('Turing', '7.5+PTX'),
+    ])
 
     supported_arches = ['2.0', '2.1', '3.0', '3.2', '3.5', '3.7', '5.0', '5.2',
                         '5.3', '6.0', '6.1', '6.2', '7.0', '7.2', '7.5']

@@ -350,6 +350,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${GENERATED_H_TORCH}
     ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/custom_function.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/cpp_hook.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/function_hook.cpp
@@ -466,7 +467,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_ret.cpp
       ${TORCH_SRC_DIR}/csrc/jit/export.cpp
-      ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
     if (NOT WIN32)
       list(APPEND TORCH_SRCS

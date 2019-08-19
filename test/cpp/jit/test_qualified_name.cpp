@@ -1,4 +1,3 @@
-#pragma once
 
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
@@ -8,7 +7,6 @@ using c10::QualifiedName;
 
 namespace torch {
 namespace jit {
-namespace test {
 void testQualifiedName() {
   {
     // Test prefix construction
@@ -66,6 +64,5 @@ void testQualifiedName() {
     ASSERT_FALSE(foo2.isPrefixOf(foo3));
   }
 }
-} // namespace test
 } // namespace jit
 } // namespace torch
