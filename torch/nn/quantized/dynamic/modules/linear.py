@@ -41,7 +41,7 @@ class Linear(nnq.Linear):
         # deserialization modules
         if bias_:
             del self.bias
-            self.bias = torch.Tensor(out_features)
+            self.bias = torch.Tensor(out_features).float()
         else:
             self.bias = None
 
@@ -65,12 +65,12 @@ class Linear(nnq.Linear):
         if mod.qconfig is not None and mod.qconfig.weight() is not None:
             weight_observer = mod.qconfig.weight()
         else:
-            from torch.quantization.observer import default_weight_observer
-            weight_observer=default_weight_observer
-
+            from torch.quantization.QConfig import default_dynamic_qconfig
+            weight_observer = default_dynamic_qconfig.weight()
+        assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
         weight_observer(mod.weight)
         wt_scale, wt_zp = weight_observer.calculate_qparams()
-        qweight = torch.quantize_linear(mod.weight.float(), wt_scale, wt_zp.long().item(), torch.qint8)
+        qweight = torch.quantize_linear(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
         qlinear = Linear(mod.in_features, mod.out_features)
         qlinear.set_weight(qweight)
         qlinear.bias = mod.bias
