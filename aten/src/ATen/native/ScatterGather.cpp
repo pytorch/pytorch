@@ -22,7 +22,6 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
     scalar_t *result_data = result.data<scalar_t>();
     scalar_t *self_data = self.data<scalar_t>();
     int64_t *index_data = index.data<int64_t>();
-    int64_t *index_data0 = index.data<int64_t>();
     if (result.numel() == 0) {
       return;
     }
