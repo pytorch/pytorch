@@ -6,35 +6,35 @@ namespace {
 // tensor, dimension 'dim' is skipped. The tensors are assumed to have the same
 // size (with the exception of 't2' in dimension 'dim').
 // This version uses a static number of dimensions.
-template <typename index_t, typename scalar_t, int Dims>
+template <typename index_t, typename scalar_t, int dims>
 struct IndexToScatterGatherOffsets {
   static __device__ void compute(
-      index_t linearId, const int dim,
-      const TensorInfo<int64_t, index_t>& index, index_t* indexOffset,
-      const TensorInfo<scalar_t, index_t>& t1, index_t* t1Offset,
-      const TensorInfo<scalar_t, index_t>& t2, index_t* t2Offset) {
-    for (int d = Dims - 1; d >= 0; d--) {
-      index_t curDimIndex = linearId % index.sizes[d];
-      *indexOffset += curDimIndex * index.strides[d];
-      *t1Offset += curDimIndex * t1.strides[d];
+      index_t linear_id, const int dim,
+      const TensorInfo<int64_t, index_t>& index, index_t* index_offset,
+      const TensorInfo<scalar_t, index_t>& t1, index_t* t1_offset,
+      const TensorInfo<scalar_t, index_t>& t2, index_t* t2_offset) {
+    for (int d = dims - 1; d >= 0; d--) {
+      index_t cur_dim_index = linear_id % index.sizes[d];
+      *index_offset += cur_dim_index * index.strides[d];
+      *t1_offset += cur_dim_index * t1.strides[d];
       if (d != dim) {
-        *t2Offset += curDimIndex * t2.strides[d];
+        *t2_offset += cur_dim_index * t2.strides[d];
       }
-      linearId /= index.sizes[d];
+      linear_id /= index.sizes[d];
     }
   }
 
   static __device__ void compute(
-      index_t linearId, const int dim,
-      const TensorInfo<int64_t, index_t>& index, index_t* indexOffset,
-      const TensorInfo<scalar_t, index_t>& t2, index_t* t2Offset) {
-    for (int d = Dims - 1; d >= 0; d--) {
-      index_t curDimIndex = linearId % index.sizes[d];
-      *indexOffset += curDimIndex * index.strides[d];
+      index_t linear_id, const int dim,
+      const TensorInfo<int64_t, index_t>& index, index_t* index_offset,
+      const TensorInfo<scalar_t, index_t>& t2, index_t* t2_offset) {
+    for (int d = dims - 1; d >= 0; d--) {
+      index_t cur_dim_index = linear_id % index.sizes[d];
+      *index_offset += cur_dim_index * index.strides[d];
       if (d != dim) {
-        *t2Offset += curDimIndex * t2.strides[d];
+        *t2_offset += cur_dim_index * t2.strides[d];
       }
-      linearId /= index.sizes[d];
+      linear_id /= index.sizes[d];
     }
   }
 };
@@ -43,37 +43,37 @@ struct IndexToScatterGatherOffsets {
 template <typename index_t, typename scalar_t>
 struct IndexToScatterGatherOffsets<index_t, scalar_t, -1> {
   static __device__ void compute(
-      index_t linearId, const int dim,
-      const TensorInfo<int64_t, index_t>& index, index_t* indexOffset,
-      const TensorInfo<scalar_t, index_t>& t1, index_t* t1Offset,
-      const TensorInfo<scalar_t, index_t>& t2, index_t* t2Offset) {
+      index_t linear_id, const int dim,
+      const TensorInfo<int64_t, index_t>& index, index_t* index_offset,
+      const TensorInfo<scalar_t, index_t>& t1, index_t* t1_offset,
+      const TensorInfo<scalar_t, index_t>& t2, index_t* t2_offset) {
     for (int d = index.dims - 1; d >= 0; d--) {
-      index_t curDimIndex = linearId % index.sizes[d];
-      *indexOffset += curDimIndex * index.strides[d];
-      *t1Offset += curDimIndex * t1.strides[d];
+      index_t cur_dim_index = linear_id % index.sizes[d];
+      *index_offset += cur_dim_index * index.strides[d];
+      *t1_offset += cur_dim_index * t1.strides[d];
       if (d != dim) {
-        *t2Offset += curDimIndex * t2.strides[d];
+        *t2_offset += cur_dim_index * t2.strides[d];
       }
-      linearId /= index.sizes[d];
+      linear_id /= index.sizes[d];
     }
   }
 
   static __device__ void compute(
-      index_t linearId, const int dim,
-      const TensorInfo<int64_t, index_t>& index, index_t* indexOffset,
-      const TensorInfo<scalar_t, index_t>& t2, index_t* t2Offset) {
+      index_t linear_id, const int dim,
+      const TensorInfo<int64_t, index_t>& index, index_t* index_offset,
+      const TensorInfo<scalar_t, index_t>& t2, index_t* t2_offset) {
     for (int d = index.dims - 1; d >= 0; d--) {
-      index_t curDimIndex = linearId % index.sizes[d];
-      *indexOffset += curDimIndex * index.strides[d];
+      index_t cur_dim_index = linear_id % index.sizes[d];
+      *index_offset += cur_dim_index * index.strides[d];
       if (d != dim) {
-        *t2Offset += curDimIndex * t2.strides[d];
+        *t2_offset += cur_dim_index * t2.strides[d];
       }
-      linearId /= index.sizes[d];
+      linear_id /= index.sizes[d];
     }
   }
 };
 
-template <typename index_t, typename scalar_t, int Dims>
+template <typename index_t, typename scalar_t, int dims>
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(512)
 #endif
@@ -83,33 +83,27 @@ __global__ void gather_kernel(
     TensorInfo<int64_t, index_t> index,
     const int dim,
     const index_t numel_) {
-  for (index_t linearId = blockIdx.x * blockDim.x + threadIdx.x;
-       linearId < numel;
-       linearId += gridDim.x * blockDim.x) {
-    index_t tensorOffset = 0;
-    index_t srcOffset = 0;
-    index_t indexOffset = 0;
+  for (index_t linear_id = blockIdx.x * blockDim.x + threadIdx.x;
+       linear_id < numel;
+       linear_id += gridDim.x * blockDim.x) {
+    index_t tensor_offset = 0;
+    index_t src_offset = 0;
+    index_t index_offset = 0;
 
-    IndexToScatterGatherOffsets<index_t, scalar_t, Dims>::compute(linearId, dim,
-                                                          index, &indexOffset,
-                                                          tensor, &tensorOffset,
-                                                          src, &srcOffset);
+    IndexToScatterGatherOffsets<index_t, scalar_t, dims>::compute(linear_id, dim,
+                                                          index, &index_offset,
+                                                          tensor, &tensor_offset,
+                                                          src, &src_offset);
 
-    int64_t indexValue = index.data[indexOffset];
-    assert(indexValue >= 0 && indexValue < src.sizes[dim]);
-    srcOffset += indexValue * src.strides[dim];
+    int64_t index_value = index.data[index_offset];
+    assert(index_value >= 0 && index_value < src.sizes[dim]);
+    src_offset += index_value * src.strides[dim];
 
-    tensor.data[tensorOffset] = src.data[srcOffset];
+    tensor.data[tensor_offset] = src.data[src_offset];
   }
 }
 
 }  // namespace
-
-
-#define RUN(TYPE, DIMS, scalar_t)                                           \
-  gather_kernel<TYPE, scalar_t, DIMS><<<grid, block>>>(result_info, self_info, index_info, dim, static_cast<TYPE>(numel));
-
-#undef RUN
 
 namespace at { namespace native {
 
@@ -130,37 +124,42 @@ Tensor & gather_out_cuda(Tensor & result, const Tensor & self, int64_t dim, cons
   int64_t grid = std::min<int64_t>((size + block - 1) / block, 2048L);
 
   if (numel > 0) {
-    if (THCTensor_canUse32BitIndexMath(state, tensor) &&
-        THCTensor_canUse32BitIndexMath(state, src) &&
-        THCTensor_canUse32BitIndexMath(state, index)) {
-      auto result_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(result);
-      auto self_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(self);
-      auto index_info = cuda::detail::getTensorInfo<int64_t, unsigned int>(index);
+    AT_DISPATCH_ALL_TYPES(self.dtype(), "gather_out_cuda", [&](){
+      if (cuda::detail::canUse32BitIndexMath(result) &&
+          cuda::detail::canUse32BitIndexMath(self) &&
+          cuda::detail::canUse32BitIndexMath(index)) {
+        auto result_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(result);
+        auto self_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(self);
+        auto index_info = cuda::detail::getTensorInfo<int64_t, unsigned int>(index);
 
-      // Specialize for a small number of dimensions.
-      switch (index_info.dims) {
-        case 1:
-          RUN(unsigned int, 1, scalar_t);
-          break;
-        case 2:
-          RUN(unsigned int, 2, scalar_t);
-          break;
-        case 3:
-          RUN(unsigned int, 3, scalar_t);
-          break;
-        default:
-          RUN(unsigned int, -1, scalar_t);
-          break;
+        // Specialize for a small number of dimensions.
+        switch (index_info.dims) {
+          case 1:
+            gather_kernel<unsigned int, scalar_t, 1><<<grid, block>>>(
+              result_info, self_info, index_info, dim, static_cast<unsigned int>(numel));
+            break;
+          case 2:
+            gather_kernel<unsigned int, scalar_t, 2><<<grid, block>>>(
+              result_info, self_info, index_info, dim, static_cast<unsigned int>(numel));
+            break;
+          case 3:
+            gather_kernel<unsigned int, scalar_t, 3><<<grid, block>>>(
+              result_info, self_info, index_info, dim, static_cast<unsigned int>(numel));
+            break;
+          default:
+            gather_kernel<unsigned int, scalar_t, -1><<<grid, block>>>(
+              result_info, self_info, index_info, dim, static_cast<unsigned int>(numel));
+            break;
+        }
+      } else {
+        auto result_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(result);
+        auto self_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(self);
+        auto index_info = cuda::detail::getTensorInfo<int64_t, uint64_t>(index);
+        gather_kernel<uint64_t, scalar_t, -1><<<grid, block>>>(
+          result_info, self_info, index_info, dim, static_cast<uint64_t>(numel));
       }
-    } else {
-      auto result_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(result);
-      auto self_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(self);
-      auto index_info = cuda::detail::getTensorInfo<int64_t, uint64_t>(index);
-      RUN(uint64_t, -1, scalar_t);
-      THCudaCheck(cudaGetLastError());
-    }
+    });
   }
-
   return result;
 }
 
