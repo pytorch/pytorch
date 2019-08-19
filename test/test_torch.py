@@ -3938,10 +3938,21 @@ class _TestTorchMixin(torchtest):
         self._test_diagflat(self, dtype=torch.float32, device='cpu')
 
     def test_eye(self):
-        res1 = torch.eye(100, 100)
-        res2 = torch.Tensor()
-        torch.eye(100, 100, out=res2)
-        self.assertEqual(res1, res2)
+        for dtype, device in product(torch.testing.get_all_dtypes(), torch.testing.get_all_device_types()):
+            if dtype == torch.bfloat16:
+                continue
+
+            for n, m in product([3, 5, 7], repeat=2):
+                # Construct identity using diagonal and fill
+                res1 = torch.eye(n, m, device=device, dtype=dtype)
+                naive_eye = torch.zeros(n, m, dtype=dtype, device=device)
+                naive_eye.diagonal(dim1=-2, dim2=-1).fill_(1)
+                self.assertEqual(naive_eye, res1)
+
+                # Check eye_out outputs
+                res2 = torch.empty(0, device=device, dtype=dtype)
+                torch.eye(n, m, out=res2)
+                self.assertEqual(res1, res2)
 
     def test_renorm(self):
         m1 = torch.randn(10, 5)
