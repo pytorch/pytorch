@@ -22,6 +22,7 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
     scalar_t *result_data = result.data<scalar_t>();
     scalar_t *self_data = self.data<scalar_t>();
     int64_t *index_data = index.data<int64_t>();
+    int64_t *index_data0 = index.data<int64_t>();
     if (result.numel() == 0) {
       return;
     }
@@ -34,9 +35,9 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
 
     while(!finished) {
       for(int64_t j = 0; j < elems_per_row; j++) {
-        int64_t index = *(index_data + j * index_dim_stride);
-        AT_CHECK(index >= 0 && index < self_dim_size, "Invalid index in gather: out of range");
-        *(result_data + j * result_dim_stride) = *(self_data + index * self_dim_stride);
+        int64_t index_value = *(index_data + j * index_dim_stride);
+        AT_CHECK(index_value >= 0 && index_value < self_dim_size, "Invalid index in gather: out of range");
+        *(result_data + j * result_dim_stride) = *(self_data + index_value * self_dim_stride);
       }
       if(num_dims == 1) {
         break;
@@ -58,9 +59,10 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
             finished = true;
             break;
           }
-          result_data -= result.stride(i);
-          self_data -= self.stride(i);
-          index_data -= index.stride(i);
+          int64_t size = result.size(i);
+          result_data -= size * result.stride(i);
+          self_data -= size * self.stride(i);
+          index_data -= size * index.stride(i);
           counter[i] = 0;
         } else {
           break;
