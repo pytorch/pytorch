@@ -50,7 +50,6 @@ struct TORCH_API SampleModuleOptions {
   TORCH_ARG(bool, bool_option);
   TORCH_ARG(std::string, string_option);
   TORCH_ARG(torch::Tensor, tensor_option);
-  // TORCH_ARG(torch::ExpandingArray, expanding_array_option);
 };
 
 struct SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImpl> {

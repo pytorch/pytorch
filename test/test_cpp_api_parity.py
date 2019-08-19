@@ -170,7 +170,7 @@ class TestCppApiParity(common.TestCase):
         for arg_name, python_default_value in zip(init_arg_spec.args[len(python_default_constructor_args) + 1:], init_arg_spec.defaults):
             cpp_module_option += '.{}({})'.format(arg_name, self._python_arg_to_cpp_arg(python_default_value)[1])
 
-        cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + test_params.cpp_sources
+        cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + module_metadata.get('cpp_sources', '')
         cpp_sources += TORCH_NN_MODULE_TEST_CTOR_ARGS.substitute(
             module_name=module_name,
             module_qualified_name='torch::nn::' + module_name,
