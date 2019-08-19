@@ -38,7 +38,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     // Everything was freed. Nothing to do.
     if (!var_grad.defined()) return variable_list();
     // Now here's the hard part. If both the new_grad and var_grad require grad
-    // then we just acumulate the data in place (as we'd do if the Variable was
+    // then we just accumulate the data in place (as we'd do if the Variable was
     // alive). Otherwise, we'd need to perform the out-of-place reduction, but
     // since the user only holds a reference to .grad and there's no way to
     // give him the new Value, we just assume that they know these attributes
