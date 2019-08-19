@@ -225,7 +225,9 @@ if (USE_DISTRIBUTED)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/Utils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/DistAutogradContext.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/SendRpcBackwards.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/RpcAgent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/ProcessGroupAgent.cpp

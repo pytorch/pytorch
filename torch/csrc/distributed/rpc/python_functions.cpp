@@ -1,8 +1,12 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
+#include <torch/csrc/distributed/autograd/Utils.h>
+#include <torch/csrc/distributed/autograd/context/DistAutogradContainer.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+using namespace torch::distributed::autograd;
 
 py::object to_py_obj(const Message& message) {
   switch (message.type()) {
@@ -36,6 +40,20 @@ std::shared_ptr<FutureMessage> py_rpc_builtin(
         // ``createStackForSchema`` to avoid throwing an error.
         Stack stack = torch::jit::createStackForSchema(
             op->schema(), args, kwargs, c10::nullopt);
+
+        auto& autogradContainer = DistAutogradContainer::getInstance();
+        if (autogradContainer.hasValidContext()) {
+          // Get all the ivalues for the operator.
+          auto ivalues =
+              torch::jit::last(stack, op->schema().arguments().size());
+
+          // Attach the appropriate autograd edges.
+          auto grad_fn = addSendRpcBackward(ivalues);
+
+          // Record the send function in our current context.
+          auto& currentContext = autogradContainer.currentContext();
+          currentContext.addSendFunction(grad_fn);
+        }
 
         return agent.send(
             dstName, ScriptCall(op, std::move(stack)).toMessage());

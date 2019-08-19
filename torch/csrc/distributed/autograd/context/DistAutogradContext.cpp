@@ -12,6 +12,17 @@ int64_t DistAutogradContext::context_id() const {
   return context_id_;
 }
 
+void DistAutogradContext::addSendFunction(
+    std::shared_ptr<SendRpcBackwards> func) {
+  std::lock_guard<std::mutex> guard(lock_);
+  sendAutogradFunctions_.push_back(func);
+}
+
+std::vector<std::shared_ptr<SendRpcBackwards>> DistAutogradContext::
+    sendFunctions() const {
+  return sendAutogradFunctions_;
+}
+
 } // namespace autograd
 } // namespace distributed
 } // namespace torch
