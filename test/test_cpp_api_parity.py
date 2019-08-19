@@ -145,7 +145,6 @@ class TestCppApiParity(common.TestCase):
         elif type(python_arg) == torch.Tensor:
             return 'torch::Tensor', 'torch::empty({})'.format(str(list(python_arg.shape)).replace('[', '{').replace(']', '}'))
         else:
-            # yf225 TODO: better comment?
             raise RuntimeError("{} is not a supported arg type for C++ module methods".format(type(python_default_value)))
 
     def _compile_cpp_code_inline(self, name, cpp_sources, functions):
@@ -158,27 +157,26 @@ class TestCppApiParity(common.TestCase):
         )
         return cpp_module
 
-    # yf225 TODO: comment: test that constructor arg names match on both sides (chech name match only, no need to check value match. But need to translate default Python values to C++ values)
-    # (Can we convert them to IValue then convert from IValue to unpacked value in C++? We should generate the `options` statement)
-    # yf225 TODO: For things like FanMode, we should support dual mode (string / enum), for legacy support
+    # This tests that Python and C++ torch.nn modules have matching constructor arg names and types.
     def _test_torch_nn_module_ctor_args(self, module_name):
         python_module_class = getattr(torch.nn, module_name)
         module_metadata = torch_nn_modules.module_metadata_map[module_name]
         python_default_constructor_args = module_metadata['python_default_constructor_args']
         cpp_default_constructor_args = module_metadata['cpp_default_constructor_args']
+
         cpp_module_option = 'torch::nn::' + module_name + 'Options' + cpp_default_constructor_args
         init_arg_spec = inspect.getfullargspec(python_module_class.__init__)
         for arg_name, python_default_value in zip(init_arg_spec.args[len(python_default_constructor_args) + 1:], init_arg_spec.defaults):
             cpp_module_option += '.{}({})'.format(arg_name, self._python_arg_to_cpp_arg(python_default_value)[1])
-        cpp_test_name = module_name + '_test_ctor_args'
+
         cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + test_params.cpp_sources
         cpp_sources += TORCH_NN_MODULE_TEST_CTOR_ARGS.substitute(
             module_name=module_name,
             module_qualified_name='torch::nn::' + module_name,
             module_option=cpp_module_option)
+        cpp_test_name = module_name + '_test_ctor_args'
         cpp_module = self._compile_cpp_code_inline(name=cpp_test_name, cpp_sources=cpp_sources, functions=cpp_test_name)
 
-        # yf225 TODO: comment: translate all values to C++ and generate option statement, and try to run the C++ constructor with the statement. If it works, then good, otherwise throw error
         getattr(cpp_module, cpp_test_name)()
 
     def _test_torch_nn_module_variant(self, test_params):
@@ -199,6 +197,8 @@ class TestCppApiParity(common.TestCase):
             return test_cpp_sources
 
         def setup_init_test(test_params):
+            # We are generating the attribute equality checks manually here, because it is not possible to have a `attributes()` API
+            # that returns non-parameter / non-buffer attributes in C++ torch::nn module.
             def generate_attr_equality_checks(module, stmts, script_module_prefix='m_init_by_python', cpp_module_prefix='m_init_by_cpp'):
                 for name, sub_module in module.named_children():
                     sub_script_module_prefix = '{}.get_module("{}")'.format(script_module_prefix, name)
@@ -215,7 +215,6 @@ class TestCppApiParity(common.TestCase):
                         cpp_module_prefix=cpp_module_prefix,
                         buffer_name=name)
                 for name, attr in module.__dict__.items():
-                    # yf225 TODO: extract this into a common list?
                     if name not in TORCH_NN_MODULE_IGNORED_ATTRS:
                         stmts += CHECK_MODULE_ATTR_EQUALITY.substitute(
                             script_module_prefix=script_module_prefix,
@@ -227,13 +226,15 @@ class TestCppApiParity(common.TestCase):
             python_constructor_args = test_params.python_constructor_args
             example_inputs = test_params.example_inputs
             has_parity = test_params.has_parity
+
             with set_has_parity(has_parity):
                 torch.manual_seed(2)
                 module = python_module_class(*python_constructor_args).to(device)
+
             extra_stmt_list = []
             generate_attr_equality_checks(module, extra_stmt_list)
             extra_stmts = ''.join(extra_stmt_list)
-            return ([module], device), generate_test_cpp_sources(test_params, TORCH_NN_MODULE_TEST_INIT, extra_stmts)
+            return ([module], device), generate_test_cpp_sources(test_params=test_params, template=TORCH_NN_MODULE_TEST_INIT, extra_stmts=extra_stmts)
 
         def setup_forward_test(test_params):
             device = test_params.device
@@ -241,11 +242,13 @@ class TestCppApiParity(common.TestCase):
             python_constructor_args = test_params.python_constructor_args
             example_inputs = test_params.example_inputs
             has_parity = test_params.has_parity
+
             with set_has_parity(has_parity):
                 torch.manual_seed(2)
                 module = python_module_class(*python_constructor_args).to(device)
                 python_output = module(*example_inputs)
-            return ([module], device, python_output, example_inputs), generate_test_cpp_sources(test_params, TORCH_NN_MODULE_TEST_FORWARD, '')
+
+            return ([module], device, python_output, example_inputs), generate_test_cpp_sources(test_params=test_params, template=TORCH_NN_MODULE_TEST_FORWARD, extra_stmts='')
 
         def setup_backward_test(test_params):
             device = test_params.device
@@ -253,6 +256,7 @@ class TestCppApiParity(common.TestCase):
             python_constructor_args = test_params.python_constructor_args
             example_inputs = test_params.example_inputs
             has_parity = test_params.has_parity
+
             with set_has_parity(has_parity):
                 torch.manual_seed(2)
                 module = python_module_class(*python_constructor_args).to(device)
@@ -267,10 +271,13 @@ class TestCppApiParity(common.TestCase):
                 for param, grad_param in zip(module.parameters(), grad_module.parameters()):
                     if param.grad is not None:
                         grad_param.data = param.grad
-            return ([module, grad_module], device, example_inputs), generate_test_cpp_sources(test_params, TORCH_NN_MODULE_TEST_BACKWARD, '')
 
-        def serialize_module_into_file(module, example_inputs):
-            # yf225 TODO: explain why we need to do this
+            return ([module, grad_module], device, example_inputs), generate_test_cpp_sources(test_params=test_params, template=TORCH_NN_MODULE_TEST_BACKWARD, extra_stmts='')
+
+        def trace_module(module, example_inputs):
+            # JIT tracing does not automatically save a module's non-parameter / non-buffer attributes into a ScriptModule's
+            # slots, which means we can't access them via `get_attributes()` in C++. Here, we manually register these attributes
+            # into the ScriptModule so that we can access them via `get_attributes()` in C++.
             def register_attrs(module, script_module):
                 for sub_module, sub_script_module in zip(module.children(), script_module.children()):
                     register_attrs(sub_module, sub_script_module)
@@ -281,8 +288,11 @@ class TestCppApiParity(common.TestCase):
             # We use JIT tracing to serialize Python module state, so that we can load it into C++
             traced_script_module = torch.jit.trace(module, example_inputs)
             register_attrs(module, traced_script_module)
+            return traced_script_module
+
+        def serialize_module_into_file(script_module):
             module_file = tempfile.NamedTemporaryFile(delete=False)
-            traced_script_module.save(module_file.name)
+            script_module.save(module_file.name)
             module_file.close()
             return module_file.name
 
@@ -317,7 +327,8 @@ class TestCppApiParity(common.TestCase):
             for method_name in torch_nn_test_methods:
                 args = args_map[method_name]
                 modules = args[0]
-                module_file_names = [serialize_module_into_file(module, example_inputs) for module in modules]
+                script_modules = [trace_module(module, example_inputs) for module in modules]
+                module_file_names = [serialize_module_into_file(script_module) for script_module in script_modules]
 
                 cpp_args = module_file_names[:]
                 for arg in args[1:]:
