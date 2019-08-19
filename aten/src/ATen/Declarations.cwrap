@@ -1121,6 +1121,29 @@
       default: "false"
 ]]
 [[
+  name: _th_topk
+  cname: topk
+  backends:
+    - CUDA
+  variants:
+    - function
+  return: argument 0,1
+  arguments:
+    - arg: THTensor* values
+      output: True
+    - arg: THIndexTensor* indices
+      output: True
+    - THTensor* self
+    - long k
+    - arg: long dim
+      default: __last_dim
+      wrap_dim: self
+    - arg: bool largest
+      default: "true"
+    - arg: bool sorted
+      default: "true"
+]]
+[[
   name: _th_abs
   cname: abs
   backends:
