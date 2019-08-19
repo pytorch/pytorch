@@ -819,17 +819,34 @@ void Node::dump() const {
   std::cout << *this << "\n";
 }
 
-void Node::findSchema() const {
-  schema_ = &getOperatorFor(this).schema();
+const FunctionSchema& Node::schema() const {
+  if (op_) {
+    return op_->schema();
+  }
+  return getOperatorFor(this).schema();
 }
 
 const FunctionSchema* Node::maybeSchema() const {
-  if (!schema_) {
+  if (auto op = maybeOperator()) {
+    return &op->schema();
+  }
+  return nullptr;
+}
+
+const Operator& Node::getOperator() const {
+  if (!op_) {
+    op_ = &getOperatorFor(this);
+  }
+  return *op_;
+}
+
+const Operator* Node::maybeOperator() const {
+  if (!op_) {
     if (auto op = findOperatorFor(this)) {
-      schema_ = &op->schema();
+      op_ = op.get();
     }
   }
-  return schema_;
+  return op_;
 }
 
 bool Node::isNondeterministic() const {
@@ -889,7 +906,7 @@ bool Node::hasSideEffects() const {
       return true;
   }
 
-  auto op = findOperatorFor(this);
+  auto op = maybeOperator();
   if (!op) {
     TORCH_INTERNAL_ASSERT(
         kind_.is_prim(),
@@ -989,7 +1006,7 @@ Node::Node(Graph* graph_, NodeKind kind_)
       graph_(graph_),
       owning_block_(nullptr),
       scope_(graph_->current_scope_),
-      schema_(nullptr),
+      op_(nullptr),
       topo_position_(0) {
   graph_->all_nodes.emplace(this);
 }
@@ -997,7 +1014,7 @@ Node::Node(Graph* graph_, NodeKind kind_)
 void Node::eraseOutput(size_t i) {
   AT_ASSERT(i < outputs_.size());
   AT_ASSERT(outputs_[i]->uses().empty());
-  schema_ = nullptr;
+  op_ = nullptr;
   Value* n = outputs_[i];
   outputs_.erase(outputs_.begin() + i);
   owningGraph()->freeValue(n);
@@ -1007,14 +1024,14 @@ void Node::eraseOutput(size_t i) {
 }
 
 Block* Node::addBlock() {
-  schema_ = nullptr;
+  op_ = nullptr;
   blocks_.push_back(new Block(owningGraph(), this));
   return blocks_.back();
 }
 
 void Node::eraseBlock(size_t i) {
   AT_ASSERT(i < blocks_.size());
-  schema_ = nullptr;
+  op_ = nullptr;
   Block* n = blocks_[i];
   blocks_.erase(blocks_.begin() + i);
   n->destroy();
@@ -1052,7 +1069,7 @@ void Node::replaceAllUsesWith(Node* n) {
 
 Value* Node::insertInput(size_t i, Value* value) {
   AT_ASSERT(graph_ == value->owningGraph());
-  schema_ = nullptr;
+  op_ = nullptr;
   // First we update the offsets for all existing inputs that will reside
   // after the one we're inserting. Concretely, these are the inputs at
   // indices [i, # input). Since we're inserting one input before all of
@@ -1071,7 +1088,7 @@ Value* Node::insertInput(size_t i, Value* value) {
 
 Value* Node::addInput(Value* value) {
   AT_ASSERT(graph_ == value->owningGraph());
-  schema_ = nullptr;
+  op_ = nullptr;
   value->uses_.emplace_back(this, inputs_.size());
   inputs_.push_back(value);
   return value;
@@ -1079,7 +1096,7 @@ Value* Node::addInput(Value* value) {
 
 Value* Node::replaceInput(size_t i, Value* newValue) {
   AT_ASSERT(newValue->owningGraph() == graph_);
-  schema_ = nullptr;
+  op_ = nullptr;
   Value* old = dropInput(i);
   inputs_[i] = newValue;
   newValue->uses_.emplace_back(this, i);
@@ -1089,7 +1106,7 @@ Value* Node::replaceInput(size_t i, Value* newValue) {
 void Node::replaceInputWith(Value* from, Value* to) {
   AT_ASSERT(from->owningGraph() == graph_);
   AT_ASSERT(to->owningGraph() == graph_);
-  schema_ = nullptr;
+  op_ = nullptr;
   size_t i = 0;
   for (auto input : inputs()) {
     if (input == from) {
@@ -1101,12 +1118,12 @@ void Node::replaceInputWith(Value* from, Value* to) {
 
 Value* Node::addOutput() {
   outputs_.push_back(new Value(this, outputs_.size()));
-  schema_ = nullptr;
+  op_ = nullptr;
   return outputs_.back();
 }
 
 Value* Node::insertOutput(size_t i) {
-  schema_ = nullptr;
+  op_ = nullptr;
   outputs_.insert(outputs_.begin() + i, new Value(this, i));
   for (size_t itr = i + 1; itr < outputs_.size(); ++itr) {
     outputs_[itr]->setOffset(outputs_[itr]->offset() + 1);
@@ -1193,7 +1210,7 @@ void Node::moveBefore(Node* n) {
 }
 
 void Node::removeInput(size_t i) {
-  schema_ = nullptr;
+  op_ = nullptr;
   dropInput(i);
   // everything after this input shifts left,
   // so we need to update their use offsets to match
@@ -1205,7 +1222,7 @@ void Node::removeInput(size_t i) {
 }
 
 void Node::removeAllInputs() {
-  schema_ = nullptr;
+  op_ = nullptr;
   for (size_t i = 0; i < inputs().size(); ++i) {
     dropInput(i);
   }
@@ -1213,7 +1230,7 @@ void Node::removeAllInputs() {
 }
 
 void Node::permuteInputs(const std::vector<size_t>& new_order) {
-  schema_ = nullptr;
+  op_ = nullptr;
   AT_ASSERT(new_order.size() == inputs_.size());
   std::vector<Value*> new_inputs;
   new_inputs.reserve(new_order.size());
@@ -1228,7 +1245,7 @@ void Node::permuteInputs(const std::vector<size_t>& new_order) {
 }
 
 void Node::permuteOutputs(const std::vector<size_t>& new_order) {
-  schema_ = nullptr;
+  op_ = nullptr;
   AT_ASSERT(new_order.size() == outputs_.size());
   std::vector<Value*> new_outputs;
   new_outputs.reserve(new_order.size());
