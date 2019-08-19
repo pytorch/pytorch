@@ -143,16 +143,21 @@ inline bool is_quantized(Tensor self) {
   return self.is_quantized();
 }
 
+template <>
+inline void* Tensor::data_ptr() const {
+  return this->unsafeGetTensorImpl()->data();
+}
+
 #define DEFINE_CAST(T, name)                     \
   template <>                                    \
-  inline T* Tensor::data() const {               \
+  inline T* Tensor::data_ptr() const {           \
     TORCH_CHECK(                                 \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \
         " but found ",                           \
         c10::toString(scalar_type()));           \
-    return static_cast<T*>(this->data_ptr());    \
+    return static_cast<T*>(this->unsafeGetTensorImpl()->data());    \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)

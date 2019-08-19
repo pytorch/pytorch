@@ -280,12 +280,13 @@ class CAFFE2_API Tensor {
   /// TensorOptions.h.
   TensorOptions options() const;
 
-  void* data_ptr() const {
-    return this->unsafeGetTensorImpl()->data();
-  }
+  template <typename T = void>
+  T * data_ptr() const;
 
   template<typename T>
-  T * data() const;
+  T * data() const {
+    return data_ptr<T>();
+  }
 
   template <typename T>
   T item() const;
