@@ -16,6 +16,7 @@ from cpp_api_parity import sample_module, torch_nn_modules, TorchNNTestParams, s
 
 torch_nn_has_parity = set([
     'SampleModule',
+    'Linear',
 ])
 
 TORCH_NN_MODULE_COMMON_TEST_HARNESS = """\n
