@@ -12774,7 +12774,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             inplace_op = getattr(torch.Tensor, inplace_op)
         input = torch.randn(1, device=device).expand(3, 3)
         inputs = [input] + [torch.randn_like(input)
-            for i in range(num_inputs - 1)]
+                            for i in range(num_inputs - 1)]
         with self.assertRaisesRegex(RuntimeError, 'single memory location'):
             inplace_op(*inputs)
 
