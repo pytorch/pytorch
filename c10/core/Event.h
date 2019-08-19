@@ -9,8 +9,7 @@ namespace c10 {
  * A backend-generic movable, not copyable, not thread-safe event.
  *
  * Backend-generic events are implemented by this class and
- * impl::InlineEvent, both of which inherit from the impl::EventInterface
- * pure virtual class. In addition to these events there are also
+ * impl::InlineEvent. In addition to these events there are also
  * some backend-specific events, like ATen's CUDAEvent. Each of these
  * classes has its own use.
  *
