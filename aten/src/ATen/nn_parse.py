@@ -225,7 +225,7 @@ def unique_args(argslist):
     return result
 
 
-def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_check, backend_types, cpu_bf16):
+def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_check, backend_types):
     """
     cimpls contains information use to call into THNN:
         cname: THNN function name
@@ -235,7 +235,8 @@ def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_ch
     return {
         'mode': 'NN',
         'name': name,
-        'cpu_bfloat16': cpu_bf16,
+        'cpu_bfloat16': True if backend_types is not None and 'CPU' in backend_types and
+                'BFloat16' in backend_types['CPU'] else False,
         'backend_types': backend_types,
         'arguments': arguments,
         'return': 'argument 0' if inplace else get_return(arguments),
@@ -246,7 +247,7 @@ def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_ch
         'variants': ['function'],
     }
 
-def base_declaration(func, thnn_function, backends, backend_types, inplace=False, cpu_bf16=False):
+def base_declaration(func, thnn_function, backends, backend_types, inplace=False):
     """Creates the NN function without any buffers in it's signature"""
     name, params = re.match(NAME_PARAM_REGEX, func['name']).groups()
     if inplace:
@@ -258,9 +259,9 @@ def base_declaration(func, thnn_function, backends, backend_types, inplace=False
     buffers = [argument_to_declaration('Tensor ' + buf)
                for buf in func.get('buffers', [])]
 
-    return function_info(name, arguments, None, buffers, backends, inplace, func.get('scalar_check'), backend_types, cpu_bf16)
+    return function_info(name, arguments, None, buffers, backends, inplace, func.get('scalar_check'), backend_types)
 
-def forward_declaration(base, thnn_function, backend_types, inplace=False, cpu_bf16=False):
+def forward_declaration(base, thnn_function, backend_types, inplace=False):
     name = '{}_forward'.format(base['name'])
     if inplace:
         name += '_'
@@ -283,9 +284,9 @@ def forward_declaration(base, thnn_function, backend_types, inplace=False, cpu_b
         output_arg_names = [arg['name'] for arg in arguments if arg.get('output', False)]
         scalar_check = {k: v for (k, v) in scalar_check.items() if k in output_arg_names}
 
-    return function_info(name, arguments, [cimpl], [], base['backends'], inplace, scalar_check, backend_types, cpu_bf16)
+    return function_info(name, arguments, [cimpl], [], base['backends'], inplace, scalar_check, backend_types)
 
-def backward_declaration(base, thnn_functions, backend_types, cpu_bf16):
+def backward_declaration(base, thnn_functions, backend_types):
     name = '{}_backward'.format(base['name'])
 
     arguments = []
@@ -374,7 +375,7 @@ def backward_declaration(base, thnn_functions, backend_types, cpu_bf16):
                                   "does not exist.  Please explicitly specify scalar_check."
                                   .format(arg['name'], name, base_name)))
 
-    return function_info(name, arguments, cimpls, [], base['backends'], False, scalar_check, backend_types, cpu_bf16)
+    return function_info(name, arguments, cimpls, [], base['backends'], False, scalar_check, backend_types)
 
 
 def parse_nn_yaml(filename):
@@ -416,7 +417,7 @@ def run(paths):
                 if cname + suffix in header_functions:
                     bwd_functions.append(header_functions[cname + suffix])
 
-            default_scalar_types = ['Float', 'Double', 'Half', 'BFloat16']  # Half will be stripped for CPU backend
+            default_scalar_types = ['Float', 'Double', 'Half']  # Half will be stripped for CPU backend
             forward_backend_types = {}
             backward_backend_types = {}
             for backend in backends:
@@ -424,15 +425,14 @@ def run(paths):
                 forward_backend_types[backend] = backend_props.get('forward_scalar_types', default_scalar_types)
                 backward_backend_types[backend] = backend_props.get('backward_scalar_types', default_scalar_types)
 
-            cpu_bf16 = func.get('cpu_bfloat16', False)
-            base = base_declaration(func, fwd_function, backends, None, False, cpu_bf16)
-            declarations.append(forward_declaration(base, fwd_function, forward_backend_types, False, cpu_bf16))
+            base = base_declaration(func, fwd_function, backends, None)
+            declarations.append(forward_declaration(base, fwd_function, forward_backend_types))
             if bwd_functions:
-                declarations.append(backward_declaration(base, bwd_functions, backward_backend_types, cpu_bf16))
+                declarations.append(backward_declaration(base, bwd_functions, backward_backend_types))
 
 
             if func.get('has_inplace', False):
-                declarations.append(base_declaration(func, fwd_function, backends, forward_backend_types, True, cpu_bf16))
-                declarations.append(forward_declaration(base, fwd_function, forward_backend_types, True, cpu_bf16))
+                declarations.append(base_declaration(func, fwd_function, backends, forward_backend_types, True))
+                declarations.append(forward_declaration(base, fwd_function, forward_backend_types, True))
 
     return declarations
