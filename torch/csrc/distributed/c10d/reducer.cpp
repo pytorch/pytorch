@@ -106,7 +106,6 @@ Reducer::Reducer(
   // This can be reinitialized later after capturing runtime information.
   initialize_buckets(std::move(bucket_indices));
 
-
   // All variables are expected to have their `grad_fn` set to the gradient
   // accumulation function (since they are leafs in the autograd graph).
   // We store pointers to these functions such that we can check if they are
@@ -164,7 +163,6 @@ Reducer::Reducer(
       }
     }
   }
-
 
   // Initialize backward stats vector.
   {
@@ -293,7 +291,6 @@ void Reducer::delayed_autograd_hook() {
   }
 
   if (require_final_hook_) {
-
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::lock_guard<std::mutex> lock(this->mutex_);
 

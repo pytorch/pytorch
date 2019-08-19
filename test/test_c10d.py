@@ -2639,6 +2639,8 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
 
     @property
     def delay_allreduce(self):
+        # all tests in ``DistributedDataParallelTest`` should pass as well
+        # under ``delay_allreduce`` mode
         return True
 
     @requires_nccl()
