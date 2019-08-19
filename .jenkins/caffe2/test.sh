@@ -132,7 +132,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
     # default pip version is too old(9.0.2), unable to support tag `manylinux2010`.
     # Fix the pip error: Couldn't find a version that satisfies the requirement
-    pip install --user pip==19.2
+    sudo pip install pip==19.2
     pip install --user -i https://test.pypi.org/simple/ ort-nightly==0.5.0.dev817
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
