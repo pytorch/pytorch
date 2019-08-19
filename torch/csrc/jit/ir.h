@@ -168,7 +168,10 @@ struct Value {
     return type()->requires_grad();
   }
   bool isCompleteTensor() const {
-    return type()->kind() == TypeKind::CompleteTensorType;
+    if (auto pt = type()->cast<ProfiledTensorType>()) {
+      return pt->isComplete();
+    }
+    return false;
   }
   TORCH_API bool mustBeNone() const;
   TORCH_API bool mustNotBeNone() const;

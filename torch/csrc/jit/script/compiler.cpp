@@ -1015,6 +1015,27 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
+  // emit a single expr from the loop comprehension so that we can correctly
+  // type the list we create, then remove the nodes we emitted
+  TypePtr getListCompType(
+      const ListComp& lc,
+      const ListTypePtr& input_list_type) {
+    auto b = graph->insertNode(graph->create(prim::Loop))->addBlock();
+    pushFrame(b);
+    WithInsertPoint guard(b);
+    auto li_elem = graph->insertNode(
+        graph->createUninitialized(input_list_type->getElementType()));
+    emitExprsAssign(
+        List<Expr>::create(lc.range(), {lc.target()}),
+        {std::make_shared<SimpleValue>(li_elem->output())},
+        lc.range(),
+        /*n_binders*/ 1);
+    auto ret_type = emitExpr(lc.elt())->type();
+    popFrame();
+    b->owningNode()->destroy();
+    return ret_type;
+  }
+
   Value* emitListComprehension(const ListComp& lc) {
     // this avoids a race condition where we would re-use the same temp name
     static std::atomic<size_t> tmp_count{0};
@@ -1027,19 +1048,14 @@ struct to_ir {
       throw ErrorReport(lc.range())
           << "iterator expression is expected to be a list";
     }
-    auto elem_types = list_value->type()->containedTypes();
-    // TODO: users can easily change the type to (x,1) or float(x)
-    // as in `float(x) for x in my_list_of_ints`
-    // eventually, we would probably want to temporarily inject x
-    // so we can evaluate the generator expression (e.g. `float(x)`) depending
-    // on x
 
     // given `[x*2 for x in my_list]` this generates the following AST:
     // __list_acc = []
     // for x in my_list:
     //  __list_acc.append(x*2)
-    const auto n = graph->insertNode(
-        graph->createList(elem_types.at(0), at::ArrayRef<Value*>{}));
+    const auto n = graph->insertNode(graph->createList(
+        getListCompType(lc, list_value->type()->expect<ListType>()),
+        at::ArrayRef<Value*>{}));
     environment_stack->setVar(lc.range(), tmp_name, n->output());
     const auto tmp_list_ident = Ident::create(lc.range(), tmp_name);
     const auto tmp_list_var = Var::create(lc.range(), tmp_list_ident);
@@ -3195,15 +3211,9 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     // Store the function name so that it can be referenced if there is an error
     // while compiling this function
-    if (self) {
-      // Include the fully qualified name if this is a method
-      ErrorReport::CallStack::push_function(method.qualname().qualifiedName());
-    } else {
-      ErrorReport::CallStack::push_function(method.qualname().name());
-    }
+    ErrorReport::CallStack call(
+        self ? method.qualname().qualifiedName() : method.qualname().name());
     to_ir(def, _resolver, self, method);
-    // Compilation was successful, so remove the function def info
-    ErrorReport::CallStack::pop_function();
   };
   auto name = prefix ? QualifiedName(*prefix, def.name().name())
                      : QualifiedName(def.name().name());
