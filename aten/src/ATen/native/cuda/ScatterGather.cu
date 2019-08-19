@@ -114,7 +114,7 @@ Tensor & gather_out_cuda(Tensor & result, const Tensor & self, int64_t dim, cons
   int64_t num_dims = std::max<int64_t>(self.dim(), 1);
   TORCH_CHECK(std::max<int64_t>(index.dim(), 1) == num_dims, "Index tensor must have same dimensions as input tensor");
   TORCH_CHECK(dim >= 0 && dim < num_dims, "Index dimension is out of bounds");
-  TORCH_CHECK(std::max<int64_t>(result.dim(), 1) == num_dims, "Input tensor must have same dimensions as output tensor");
+  // TORCH_CHECK(std::max<int64_t>(result.dim(), 1) == num_dims, "Input tensor must have same dimensions as output tensor");
   for(int64_t i = 0; i < num_dims; i++) {
     if(i != dim) {
       AT_CHECK(index.size(i) == self.size(i), "Size does not match at dimension ", i, " get ", self.size(i), " vs ", index.size(i));

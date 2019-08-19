@@ -7,7 +7,7 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
   int64_t num_dims = std::max<int64_t>(self.dim(), 1);
   TORCH_CHECK(std::max<int64_t>(index.dim(), 1) == num_dims, "Index tensor must have same dimensions as input tensor");
   TORCH_CHECK(dim >= 0 && dim < num_dims, "Index dimension is out of bounds");
-  TORCH_CHECK(std::max<int64_t>(result.dim(), 1) == num_dims, "Input tensor must have same dimensions as output tensor");
+  // TORCH_CHECK(std::max<int64_t>(result.dim(), 1) == num_dims, "Input tensor must have same dimensions as output tensor");
 
   int64_t elems_per_row = (index.dim() == 0 ? 1 : index.size(dim));
   int64_t self_dim_size = self.size(dim);
@@ -33,18 +33,19 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
         scalar_t *result_base = result_data;
         int64_t *index_base = index_data;
         scalar_t *self_base = self_data;
+        int64_t global_index = i;
         for(int64_t k = 0; k < num_dims; k++) {
           if(dim != k) {
-            int64_t index_at_k = i % result.size(k);
+            int64_t index_at_k = global_index % result.size(k);
             result_base += result.stride(k) * index_at_k;
             index_base += index.stride(k) * index_at_k;
             self_base += self.stride(k) * index_at_k;
-            i /= result.size(k);
+            global_index /= result.size(k);
           }
         }
         for(int64_t j = 0; j < elems_per_row; j++) {
-          AT_CHECK(j >= 0 && j < self_dim_size, "Invalid index in gather: out of range");
           int64_t index = *(index_base + j * index_dim_stride);
+          AT_CHECK(index >= 0 && index < self_dim_size, "Invalid index in gather: out of range");
           *(result_base + j * result_dim_stride) = *(self_base + index * self_dim_stride);
         }
       }
