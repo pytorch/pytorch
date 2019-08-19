@@ -1,11 +1,12 @@
+#include <torch/csrc/jit/script/module.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/export.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {
@@ -398,6 +399,78 @@ void Module::apply(const std::function<void(Module&)>& fn) {
     submod.apply(fn);
   }
   fn(*this);
+}
+
+std::string Module::_dump_to_string(
+    bool omit_method_bodies,
+    bool omit_attr_values,
+    bool omit_param_values,
+    int level) const {
+  std::stringstream ss;
+  std::stringstream parameters_ss;
+  std::stringstream attributes_ss;
+  std::stringstream methods_ss;
+  std::stringstream submodules_ss;
+
+  for (Slot param : get_parameters()) {
+    parameters_ss << param.name() << " = ";
+    if (!omit_param_values) {
+      parameters_ss << param.value().toTensor() << std::endl;
+    } else {
+      parameters_ss << "..." << std::endl;
+    }
+  }
+
+  for (Slot attr : get_attributes()) {
+    attributes_ss << attr.name() << " = ";
+    if (!attr.value().isTensor() || !omit_attr_values) {
+      attributes_ss << attr.value() << std::endl;
+    } else {
+      attributes_ss << "..." << std::endl;
+    }
+  }
+
+  for (const Method& method : get_methods()) {
+    methods_ss << "  method " << method.name() << " {" << std::endl;
+    if (!omit_method_bodies) {
+      methods_ss << torch::jit::jit_log_prefix(
+                        "    ", method.graph()->toString())
+                 << std::endl;
+    }
+    methods_ss << "  }" << std::endl;
+  }
+
+  ss << "module " << name().qualifiedName() << " {" << std::endl;
+  ss << "  parameters {" << std::endl;
+  ss << torch::jit::jit_log_prefix("    ", parameters_ss.str());
+  ss << "  }" << std::endl;
+  ss << "  attributes {" << std::endl;
+  ss << torch::jit::jit_log_prefix("    ", attributes_ss.str());
+  ss << "  }" << std::endl;
+  ss << "  methods {" << std::endl;
+  ss << torch::jit::jit_log_prefix("  ", methods_ss.str());
+  ss << "  }" << std::endl;
+  ss << "  submodules {" << std::endl;
+  for (const Module& submodule : get_modules()) {
+    // We do level + 2, because one level of indentation comes from 'submodules'
+    // scope and the other one goes from a specific submodule we're printing.
+    ss << submodule._dump_to_string(
+        omit_method_bodies, omit_attr_values, omit_param_values, level + 2);
+  }
+  ss << "  }" << std::endl;
+  ss << "}" << std::endl;
+
+  std::string indent(2 * level, ' ');
+  return torch::jit::jit_log_prefix(indent, ss.str());
+}
+
+void Module::dump(
+    bool omit_method_bodies = true,
+    bool omit_attr_values = true,
+    bool omit_param_values = true) const {
+  std::cout << _dump_to_string(
+                   omit_method_bodies, omit_attr_values, omit_param_values, 0)
+            << std::endl;
 }
 
 } // namespace script
