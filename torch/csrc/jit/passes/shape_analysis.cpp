@@ -887,8 +887,7 @@ class ShapePropagator {
             "aten::div(Tensor self, Tensor other) -> Tensor",
         },
         [this](Node* node) -> type_vec_t {
-          if (auto maybe_tensor_types =
-                  gatherTensorTypes<ProfiledTensorType>(node)) {
+          if (auto maybe_tensor_types = gatherTensorTypes(node)) {
             AT_ASSERT(maybe_tensor_types->size() >= 2);
             auto dtype = getPromotedTypeForArithmeticOp(node);
             return {broadcast(*maybe_tensor_types, dtype)};
@@ -970,8 +969,7 @@ class ShapePropagator {
             "aten::div(Tensor self, Scalar other) -> Tensor",
           },
           [this](Node* node) -> type_vec_t {
-            if (auto maybe_tensor_types =
-                    gatherTensorTypes<ProfiledTensorType>(node)) {
+            if (auto maybe_tensor_types = gatherTensorTypes(node)) {
               auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
               auto second_scalar_type = tryScalarTypeFromJitType(node->inputs()[1]->type());
               if (!first_scalar_type || !second_scalar_type) {
