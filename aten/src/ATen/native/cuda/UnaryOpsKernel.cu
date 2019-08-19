@@ -33,7 +33,7 @@ void logical_not_kernel_cuda(TensorIterator& iter) {
 }
 
 void ceil_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "ceil_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "ceil_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return std::ceil(a);
     });
