@@ -2408,7 +2408,7 @@ graph(%Ra, %Rb):
     def test_onnx_transpose_incomplete_tensor_type(self):
         # Smoke test to get us into the state where we are attempting to export
         # a transpose op, where the input is a TensorType rather than a
-        # CompleteTensorType. This would previously not work, since we would
+        # ProfiledTensorType. This would previously not work, since we would
         # take the size of the input and use the length of its sizes as the
         # number of dimensions in the permutation.
         class Foo(torch.jit.ScriptModule):
@@ -3366,7 +3366,7 @@ def foo(x):
             return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(foobar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:20".format(lineno + 1)):
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:19".format(lineno + 1)):
             scripted = torch.jit.script(foobar)
 
     def test_file_line_error_class_defn(self):
@@ -3375,7 +3375,7 @@ def foo(x):
                 return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(FooBar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:24".format(lineno + 2)):
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:23".format(lineno + 2)):
             torch.jit.script(FooBar)
 
     def test_file_line_graph(self):
@@ -3385,7 +3385,7 @@ def foo(x):
         scripted = torch.jit.script(foobar)
 
         _, lineno = inspect.getsourcelines(foobar)
-        fc = FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))
+        fc = FileCheck().check('test_jit.py:{}:19'.format(lineno + 1))
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -3405,7 +3405,7 @@ def foo(x):
         bytesio = io.BytesIO(buffer)
         scripted = torch.jit.load(bytesio)
 
-        fc = FileCheck().check(':6:12')
+        fc = FileCheck().check(':6:11')
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -3415,7 +3415,7 @@ def foo(xyz):
     return torch.neg(xyz)
         ''')
 
-        fc = FileCheck().check('<string>:2:12')
+        fc = FileCheck().check('<string>:3:11')
         fc.run(scripted.foo.graph)
         fc.run(str(scripted.foo.graph))
 
@@ -8270,9 +8270,9 @@ a")
 
         graph = _propagate_shapes(tensor_unifying.graph, (a, b, c), False)
         if_outputs = list(graph.findNode("prim::If").outputs())
-        self.assertTrue(if_outputs[0].type().str() == "Float(2, 2)")
-        self.assertTrue(if_outputs[1].type().str() == "Tensor(2, *)")
-        self.assertTrue(if_outputs[2].type().str() == "Tensor(2, 4)")
+        self.assertTrue(if_outputs[0].type().str() == "Float(*, *)")
+        self.assertTrue(if_outputs[1].type().str() == "Tensor(*, *)")
+        self.assertTrue(if_outputs[2].type().str() == "Tensor(*, *)")
 
     def test_list_unify(self):
         # allowing a unififed int?[] would cause a runtime error b/c
@@ -8851,6 +8851,31 @@ a")
 
         self.assertEqual(output_orig, output_import)
         self.assertEqual(grad_orig, grad_import)
+
+    def test_compile_module_with_constant(self):
+        class Double(nn.Module):
+            def __init__(self, downsample=None):
+                super(Double, self).__init__()
+
+            def forward(self, input):
+                return input * 2
+
+        class Mod(nn.Module):
+            __constants__ = ['downsample']
+
+            def __init__(self, downsample=None):
+                super(Mod, self).__init__()
+                self.downsample = downsample
+
+            def forward(self, input):
+                if self.downsample is not None:
+                    return self.downsample(input)
+                return input
+
+        none_mod = torch.jit.script(Mod(None))
+        double_mod = torch.jit.script(Mod(Double()))
+        self.assertEqual(none_mod(torch.tensor(1)), torch.tensor(1))
+        self.assertEqual(double_mod(torch.tensor(1)), torch.tensor(1) * 2)
 
     def test_script_module_export_tensor_type(self):
         class M(torch.jit.ScriptModule):
@@ -14219,6 +14244,30 @@ class TestRecursiveScript(JitTestCase):
         m = torch.jit.script(MyModule())
         FileCheck().check("ClassType<MyModule>").run(m.graph)
 
+    def test_repeated_error_stack(self):
+        def d(x):
+            return "a" - 2
+
+        def c(x):
+            return d(x)
+
+        def b(x):
+            return c(x)
+
+        def a(x):
+            return b(x)
+
+        try:
+            torch.jit.script(a)
+        except Exception as e:
+            FileCheck().check_count("is being compiled", 2).run(str(e))
+
+        try:
+            torch.jit.script(a)
+        except Exception as e:
+            # Make sure that no entries are left over from the previous failure
+            FileCheck().check_count("is being compiled", 2).run(str(e))
+
     @unittest.skipIf(True, "Class annotations are a thing in > 3.5, need to fix for < 3.7")
     def test_constants_with_final(self):
         class M(torch.nn.Module):
@@ -14241,6 +14290,23 @@ class TestRecursiveScript(JitTestCase):
         m = M()
 
         self.checkModule(M(), (torch.randn(2, 2),))
+
+    def test_ignore_class(self):
+        @torch.jit.ignore
+        class MyScriptClass(object):
+            def unscriptable(self):
+                return "a" + 200
+
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, x):
+                return MyScriptClass()
+
+        with self.assertRaisesRegex(RuntimeError, "cannot instantiate class object"):
+            t = torch.jit.script(TestModule())
 
     def test_method_call(self):
         class M(nn.Module):

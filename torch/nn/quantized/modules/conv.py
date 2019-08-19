@@ -80,8 +80,8 @@ class Conv2d(torch.nn.Module):
         # Initialize as NCHW. set_weight will internally transpose to
         # NHWC
         qweight = torch._empty_affine_quantized(
-            [out_channels, in_channels // self.groups, kernel_size[0],
-             kernel_size[1]],
+            [out_channels, in_channels // self.groups, self.kernel_size[0],
+                self.kernel_size[1]],
             scale=1, zero_point=0, dtype=torch.qint8)
         self.set_weight(qweight)
         self.bias = torch._empty_affine_quantized([out_channels],
@@ -89,6 +89,19 @@ class Conv2d(torch.nn.Module):
                                                   dtype=torch.qint32)
         self.scale = 1.0
         self.zero_point = 0
+
+    def extra_repr(self):
+        s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
+             ', stride={stride}, scale={scale}, zero_point={zero_point}')
+        if self.padding != (0,) * len(self.padding):
+            s += ', padding={padding}'
+        if self.dilation != (1,) * len(self.dilation):
+            s += ', dilation={dilation}'
+        if self.groups != 1:
+            s += ', groups={groups}'
+        if self.bias is None:
+            s += ', bias=False'
+        return s.format(**self.__dict__)
 
     def set_weight(self, w):
         self._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(
@@ -212,6 +225,7 @@ class Conv2d(torch.nn.Module):
             weight_observer = mod.qconfig.weight()
             weight_observer(mod.weight)
         act_scale, act_zp = activation_observer.calculate_qparams()
+        assert weight_observer.dtype == torch.qint8, 'Weight observer must have a dtype of qint8'
         wt_scale, wt_zp = weight_observer.calculate_qparams()
         bias_scale = float(wt_scale * act_scale)
         qweight = torch.quantize_linear(
@@ -222,7 +236,7 @@ class Conv2d(torch.nn.Module):
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight(qweight)
         if mod.bias is not None:
-            qconv.bias = torch.quantize_linear(mod.bias, bias_scale, 0, torch.qint32)
+            qconv.bias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
         else:
             qconv.bias = None
         qconv.scale = float(act_scale)
