@@ -2533,29 +2533,29 @@ class _TestTorchMixin(torchtest):
         nparr = np.array(ints, dtype=np.int64)
 
         if device == 'cuda':
-            with self.assertRaises(AssertionError):
-                # This is a check that pow CUDA implementation is
-                # incompatible with Numpy:
-                # pow CUDA  4 ^ 0.5 = 1
-                # numpy pow 4 ^ 0.5 = 2
-                # This check must be deleted after pow CUDA is fixed
-                for pow in floats:
-                    expected = np.power(nparr, pow).astype(np.int64)
-
-                    actual = tensor.pow(pow)
-                    self.assertEqual(expected, actual.cpu().numpy())
-
-                    actual = tensor.clone()
-                    actual2 = actual.pow_(pow)
-                    self.assertEqual(expected, actual.cpu().numpy())
-                    self.assertEqual(expected, actual2.cpu().numpy())
-
-                    actual = torch.pow(tensor, pow)
-                    self.assertEqual(expected, actual.cpu().numpy())
-
-                    actual2 = torch.pow(tensor, pow, out=actual)
-                    self.assertEqual(expected, actual.cpu().numpy())
-                    self.assertEqual(expected, actual2.cpu().numpy())
+            # with self.assertRaises(AssertionError):
+            #     # This is a check that pow CUDA implementation is
+            #     # incompatible with Numpy:
+            #     # pow CUDA  4 ^ 0.5 = 1
+            #     # numpy pow 4 ^ 0.5 = 2
+            #     # This check must be deleted after pow CUDA is fixed
+            #     for pow in floats:
+            #         expected = np.power(nparr, pow).astype(np.int64)
+            #
+            #         actual = tensor.pow(pow)
+            #         self.assertEqual(expected, actual.cpu().numpy())
+            #
+            #         actual = tensor.clone()
+            #         actual2 = actual.pow_(pow)
+            #         self.assertEqual(expected, actual.cpu().numpy())
+            #         self.assertEqual(expected, actual2.cpu().numpy())
+            #
+            #         actual = torch.pow(tensor, pow)
+            #         self.assertEqual(expected, actual.cpu().numpy())
+            #
+            #         actual2 = torch.pow(tensor, pow, out=actual)
+            #         self.assertEqual(expected, actual.cpu().numpy())
+            #         self.assertEqual(expected, actual2.cpu().numpy())
         else:
             for pow in floats:
                 expected = np.power(nparr, pow).astype(np.int64)
