@@ -36,6 +36,7 @@ static int64_t ScalarTypeToONNXType(const c10::ScalarType& st) {
   return onnx_type;
 }
 
+// For these operators, all inputs and outputs share the same scalar type.
 static const std::unordered_set<NodeKind> arithmeticOps = {
   onnx::Add,
   onnx::Sub,
@@ -50,6 +51,8 @@ static bool IsArithmeticOp(const NodeKind& nkind) {
   return arithmeticOps.find(nkind) != arithmeticOps.end();
 }
 
+// For these operators, all inputs share the same scalar type.
+// The output scalar type is always Bool.
 static const std::unordered_set<NodeKind> comparisonOps = {
   onnx::Greater,
   onnx::Less,
@@ -108,8 +111,11 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
     // If all inputs are scalars, infer scalar_type by calling c10::promoteTypes.
     st = PromoteScalarTypes(typesFromScalars);
   } else if (output_st && !IsComparisonOp(n->kind())) {
+    // If output scalar type is available, use that.
     st = output_st;
   } else if (!typesFromTensors.empty()) {
+    // When inputs consist of tensors and scalars. In PyTorch, scalars are implicitly casted to have the
+    // same scalar type as input tensors.
     st = typesFromTensors[0];
     if (std::any_of(typesFromTensors.begin(), typesFromTensors.end(), [&st](const c10::ScalarType& type) {
       return type != st;
@@ -122,6 +128,7 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
                 << " of the first tensor is chosen." << std::endl;
     }
   } else {
+    // When inputs consist of only scalars.
     st = PromoteScalarTypes(typesFromScalars);
   }
 
@@ -197,6 +204,10 @@ static void ImplicitCastForONNX(Block* block) {
 
 // This pass tries to resolve scalar type mismatch issues between input tensors
 // introduced by the implicit type conversions on scalars.
+// TODO: Note that currently this pass handles traced graph only.
+// More specifically, graphs that have scalar type information recorded.
+// For scripted graphs we need something like scalar type propagation,
+// otherwise we do not have enough information to perform the check, let alone fixes.
 void ImplicitCastForONNX(const std::shared_ptr<Graph>& graph) {
   ImplicitCastForONNX(graph->block());
 }
