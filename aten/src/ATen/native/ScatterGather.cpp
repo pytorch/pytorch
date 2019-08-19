@@ -12,7 +12,7 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
   int64_t outer_size = 1;
   for(int64_t i = 0; i < num_dims; i++) {
     if(i != dim) {
-      AT_CHECK(index.size(i) == self.size(i), "Size does not match at dimension ", i, " get ", self.size(i), " vs ", index.size(i));
+      TORCH_CHECK(index.size(i) == self.size(i), "Size does not match at dimension ", i, " get ", self.size(i), " vs ", index.size(i));
       outer_size *= index.size(i);
     }
   }
