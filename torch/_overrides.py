@@ -166,12 +166,13 @@ _wrapped_func_source = textwrap.dedent("""
             implementation, {name}, relevant_args, args, kwargs)
     """)
 
-TORCH_FUNCTION_ENABLED = True
 
 def torch_function_dispatch(dispatcher, module=None, verify=True,
                             docs_from_dispatcher=False):
     """Decorator for adding dispatch with the __torch_function__ protocol.
-    See NEP-18 for example usage.
+
+    TODO: add usage example
+
     Parameters
     ----------
     dispatcher : callable
@@ -193,20 +194,14 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
         If True, copy docs from the dispatcher function onto the dispatched
         function, rather than from the implementation. This is useful for
         functions defined in C, which otherwise don't have docstrings.
+
     Returns
-    -------dispatcher
-    Function suitable for decorating the implementation of a NumPy function.
+    -------
+    dispatcher : callable
+        Function suitable for decorating the implementation of a NumPy
+        function.
+
     """
-
-    if not TORCH_FUNCTION_ENABLED:
-        def decorator(implementation):
-            if docs_from_dispatcher:
-                add_docstring(implementation, dispatcher.__doc__)
-            if module is not None:
-                implementation.__module__ = module
-            return implementation
-        return decorator
-
     def decorator(implementation):
         if verify:
             verify_matching_signatures(implementation, dispatcher)
