@@ -422,9 +422,10 @@ class ExprBuilder(Builder):
         # expr.attr is just a string, so it's not annotated in any way, so we have
         # to build the range manually
         source = ctx.source.encode('utf-8')
+
         def get_char(index):
             if PY2:
-               return source[index]
+                return source[index]
             else:
                 return chr(source[index])
 
