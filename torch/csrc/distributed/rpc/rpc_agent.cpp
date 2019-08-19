@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/rpc/RpcAgent.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 namespace torch {
 namespace distributed {
