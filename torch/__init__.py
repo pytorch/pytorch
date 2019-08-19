@@ -13,6 +13,7 @@ on an NVIDIA GPU with compute capability >= 3.0.
 import os
 import sys
 import platform
+import collections
 from ._utils import _import_dotted_name
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment
 from .version import __version__  # noqa: F401
@@ -91,23 +92,32 @@ if platform.system() != 'Windows':
 ################################################################################
 # Define basic utilities
 ################################################################################
+import types
 
-def hello(a):
-    if(hasattr(a, "__array_function__")):
-        # print(a.__array_function__())
-    else:
-        print("__array_function__ not detected")
-    print(a)
+def ismethod(object):
+    """Return true if the object is an instance method.
+    Instance method objects provide these attributes:
+        __doc__         documentation string
+        __name__        name with which this method was defined
+        im_class        class object in which this method belongs
+        im_func         function object containing implementation of method
+        im_self         instance to which this method is bound, or None
+    """
+    return isinstance(object, types.MethodType)
 
-def gemm(a, b):
-    print("In gemm")
-    if(hasattr(a, "__array_function__")):
-        print(a.__array_function__(a,b, lol = None, {}))
-    else:
-        print("__array_function__ not detected")
-        return torch.mm(a,b)
-    print(a)
 
+def isfunction(object):
+    """Return true if the object is a user-defined function.
+    Function objects provide these attributes:
+        __doc__         documentation string
+        __name__        name with which this function was defined
+        func_code       code object containing compiled function bytecode
+        func_defaults   tuple of any default values for arguments
+        func_doc        (same as __doc__)
+        func_globals    global namespace in which this function was defined
+        func_name       (same as __name__)
+    """
+    return isinstance(object, types.FunctionType)
 def getargspec(func):
     """Get the names and default values of a function's arguments.
     A tuple of four things is returned: (args, varargs, varkw, defaults).
@@ -122,6 +132,57 @@ def getargspec(func):
         raise TypeError('arg is not a Python function')
     args, varargs, varkw = getargs(func.__code__)
     return args, varargs, varkw, func.__defaults__
+
+def iscode(object):
+    """Return true if the object is a code object.
+    Code objects provide these attributes:
+        co_argcount     number of arguments (not including * or ** args)
+        co_code         string of raw compiled bytecode
+        co_consts       tuple of constants used in the bytecode
+        co_filename     name of file in which this code object was created
+        co_firstlineno  number of first line in Python source code
+        co_flags        bitmap: 1=optimized | 2=newlocals | 4=*arg | 8=**arg
+        co_lnotab       encoded mapping of line numbers to bytecode indices
+        co_name         name with which this code object was defined
+        co_names        tuple of names of local variables
+        co_nlocals      number of local variables
+        co_stacksize    virtual machine stack space required
+        co_varnames     tuple of names of arguments and local variables
+
+    """
+    return isinstance(object, types.CodeType)
+
+CO_OPTIMIZED, CO_NEWLOCALS, CO_VARARGS, CO_VARKEYWORDS = 1, 2, 4, 8
+
+def getargs(co):
+    """Get information about the arguments accepted by a code object.
+    Three things are returned: (args, varargs, varkw), where 'args' is
+    a list of argument names (possibly containing nested lists), and
+    'varargs' and 'varkw' are the names of the * and ** arguments or None.
+    """
+
+    if not iscode(co):
+        raise TypeError('arg is not a code object')
+
+    nargs = co.co_argcount
+    names = co.co_varnames
+    args = list(names[:nargs])
+
+    # The following acrobatics are for anonymous (tuple) arguments.
+    # Which we do not need to support, so remove to avoid importing
+    # the dis module.
+    for i in range(nargs):
+        if args[i][:1] in ['', '.']:
+            raise TypeError("tuple function arguments are not supported")
+    varargs = None
+    if co.co_flags & CO_VARARGS:
+        varargs = co.co_varnames[nargs]
+        nargs = nargs + 1
+    varkw = None
+    if co.co_flags & CO_VARKEYWORDS:
+        varkw = co.co_varnames[nargs]
+    return args, varargs, varkw
+
 
 ArgSpec = collections.namedtuple('ArgSpec', 'args varargs keywords defaults')
 
@@ -149,14 +210,14 @@ def verify_matching_signatures(implementation, dispatcher):
 TORCH_FUNCTION_ENABLED = True
 def torch_function_dispatch(dispatcher, module=None, verify=True,
                             docs_from_dispatcher=False):
-    """Decorator for adding dispatch with the __array_function__ protocol.
+    """Decorator for adding dispatch with the __torch_function__ protocol.
     See NEP-18 for example usage.
     Parameters
     ----------
     dispatcher : callable
         Function that when called like ``dispatcher(*args, **kwargs)`` with
         arguments from the NumPy function call returns an iterable of
-        array-like arguments to check for ``__array_function__``.
+        array-like arguments to check for ``__torch_function__``.
     module : str, optional
         __module__ attribute to set on new function, e.g., ``module='numpy'``.
         By default, module is copied from the decorated function.
@@ -173,7 +234,7 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
         function, rather than from the implementation. This is useful for
         functions defined in C, which otherwise don't have docstrings.
     Returns
-    -------
+    -------dispatcher
     Function suitable for decorating the implementation of a NumPy function.
     """
 
@@ -201,7 +262,7 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
         source = _wrapped_func_source.format(name=implementation.__name__)
 
         source_object = compile(
-            source, filename='<__array_function__ internals>', mode='exec')
+            source, filename='<__torch_function__ internals>', mode='exec')
         scope = {
             'implementation': implementation,
             'dispatcher': dispatcher,
@@ -221,8 +282,8 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
 
     return decorator
 
-def _binary_dispatcher(x,p):
-    return (x,)
+def gemm_dispatcher(input, mat2, out):
+    return (input, mat2, out)
 
 def typename(o):
     if isinstance(o, torch.Tensor):
@@ -242,6 +303,10 @@ def typename(o):
         class_name = o.__class__.__name__
 
     return module + class_name
+
+@torch_function_dispatch(gemm_dispatcher)
+def gemm(input, mat2, out=None):
+    return torch.mm(input, mat2, out=None)
 
 
 def is_tensor(obj):
