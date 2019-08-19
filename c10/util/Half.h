@@ -435,7 +435,7 @@ struct Converter<
 template <typename To, typename From>
 typename std::enable_if<std::is_same<From, bool>::value, bool>::type overflows(
     From f) {
-  return true;
+  return false;
 }
 
 // skip isnan and isinf check for integral types
