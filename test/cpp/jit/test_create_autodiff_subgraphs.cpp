@@ -1,5 +1,3 @@
-#pragma once
-
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
@@ -7,7 +5,6 @@
 
 namespace torch {
 namespace jit {
-namespace test {
 
 void testCreateAutodiffSubgraphs() {
   auto graph = build_lstm();
@@ -23,6 +20,5 @@ void testCreateAutodiffSubgraphs() {
       ->run(*graph);
 }
 
-} // namespace test
 } // namespace jit
 } // namespace torch
