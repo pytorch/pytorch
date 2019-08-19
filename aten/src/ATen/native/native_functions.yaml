@@ -4042,19 +4042,6 @@
     CPU: legacy::cpu::_th_histc
     CUDA: _histc_cuda
 
-- func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_sign_out
-    CUDA: legacy::cuda::_th_sign_out
-  named_guard: False
-
-- func: sign(Tensor self) -> Tensor
-  variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_sign
-    CUDA: legacy::cuda::_th_sign
-  named_guard: False
-
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_fmod_out
