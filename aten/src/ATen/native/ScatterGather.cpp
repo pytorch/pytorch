@@ -35,7 +35,7 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
     while(!finished) {
       for(int64_t j = 0; j < elems_per_row; j++) {
         int64_t index_value = *(index_data + j * index_dim_stride);
-        AT_CHECK(index_value >= 0 && index_value < self_dim_size, "Invalid index in gather: out of range");
+        TORCH_CHECK(index_value >= 0 && index_value < self_dim_size, "Invalid index in gather: out of range");
         *(result_data + j * result_dim_stride) = *(self_data + index_value * self_dim_stride);
       }
       if(num_dims == 1) {

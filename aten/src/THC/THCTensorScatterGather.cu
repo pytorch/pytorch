@@ -84,6 +84,11 @@ __global__ void THCudaTensor_gatherKernel(
     TensorInfo<int64_t, IndexType> index,
     const int dim,
     const IndexType totalElements) {
+  // TODO (@zasdfgbnm): remove this.
+  // gather has been migrated to ATen. `torch.gather` now uses the implementation there.
+  // This code is currently being used in the implementation of `topk`, so we could not
+  // delete it yet.
+
   for (IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
        linearId < totalElements;
        linearId += gridDim.x * blockDim.x) {

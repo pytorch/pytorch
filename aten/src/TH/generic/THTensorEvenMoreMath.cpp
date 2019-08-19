@@ -614,6 +614,11 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
 
 void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
 {
+  // TODO (@zasdfgbnm): remove this.
+  // gather has been migrated to ATen. `torch.gather` now uses the implementation there.
+  // This code is currently being used in the implementation of `topk`, so we could not
+  // delete it yet.
+
   int64_t elems_per_row, i, idx;
 
   THArgCheck(THLongTensor_nDimensionLegacyNoScalars(index) == THTensor_(nDimensionLegacyNoScalars)(src), 4,

@@ -9,6 +9,11 @@
 
 void THCTensor_(gather)(THCState* state, THCTensor *tensor,
                          THCTensor *src, int dim, THCudaLongTensor *index) {
+  // TODO (@zasdfgbnm): remove this.
+  // gather has been migrated to ATen. `torch.gather` now uses the implementation there.
+  // This code is currently being used in the implementation of `topk`, so we could not
+  // delete it yet.
+
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
