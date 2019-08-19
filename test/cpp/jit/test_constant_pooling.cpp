@@ -1,5 +1,3 @@
-#pragma once
-
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>

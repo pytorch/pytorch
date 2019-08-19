@@ -1,5 +1,3 @@
-#pragma once
-
 #include <test/cpp/jit/test_base.h>
 #include <test/cpp/jit/test_utils.h>
 
@@ -10,9 +8,7 @@ namespace torch {
 namespace jit {
 
 using namespace script;
-using namespace testing;
 
-namespace test {
 
 void testPeepholeOptimize() {
   // test is / is not none optimization
@@ -99,6 +95,5 @@ graph(%1 : Float(*, *, *)?):
     testing::FileCheck().check_count("unwrap", 2)->run(*graph);
   }
 }
-} // namespace test
 } // namespace jit
 } // namespace torch

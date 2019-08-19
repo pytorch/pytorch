@@ -1,5 +1,3 @@
-#pragma once
-
 #include <torch/csrc/jit/netdef_converter.h>
 #include "test/cpp/jit/test_base.h"
 

@@ -1,5 +1,3 @@
-#pragma once
-
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
@@ -7,7 +5,6 @@
 
 namespace torch {
 namespace jit {
-namespace test {
 
 std::unique_ptr<detail::DynamicDAG<std::string>> newDynamicDAG() {
   return std::unique_ptr<detail::DynamicDAG<std::string>>(
@@ -198,6 +195,5 @@ void testDynamicDAG() {
   testContractEdgeBasic();
   testContractEdgeCycleDetection();
 }
-} // namespace test
 } // namespace jit
 } // namespace torch
