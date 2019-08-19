@@ -422,9 +422,14 @@ class ExprBuilder(Builder):
         # expr.attr is just a string, so it's not annotated in any way, so we have
         # to build the range manually
         source = ctx.source.encode('utf-8')
+        def get_char(index):
+            if PY2:
+               return source[index]
+            else:
+                return chr(source[index])
 
         start_pos = base.range().end + 1
-        while chr(source[start_pos]) in string.whitespace:  # Skip whitespace
+        while get_char(start_pos) in string.whitespace:  # Skip whitespace
             start_pos += 1
         end_pos = start_pos + len(expr.attr)
         name_range = ctx.make_raw_range(start_pos, end_pos)
