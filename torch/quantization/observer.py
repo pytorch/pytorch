@@ -1,11 +1,12 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from abc import ABC, abstractmethod
+from abc import ABCMeta, abstractmethod
 from functools import partial
 
 import torch
 import torch.nn as nn
 
+ABC = ABCMeta('ABC', (object,), {'__slots__': ()}) # compatible with Python 2 *and* 3:
 
 class ObserverBase(ABC, nn.Module):
     r"""Observer base Module
