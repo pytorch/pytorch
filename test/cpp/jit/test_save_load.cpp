@@ -1,5 +1,3 @@
-#pragma once
-
 #include <test/cpp/jit/test_base.h>
 #include <test/cpp/jit/test_utils.h>
 
@@ -12,7 +10,7 @@
 
 namespace torch {
 namespace jit {
-namespace script {
+using namespace script;
 
 void testSaveExtraFilesHook() {
   // no secrets
@@ -74,6 +72,5 @@ void testImportTooNew() {
   ASSERT_ANY_THROW(LEGACY_import_methods(m, src, constant_table, nullptr));
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

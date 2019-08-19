@@ -1,5 +1,3 @@
-#pragma once
-
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
@@ -7,7 +5,6 @@
 
 namespace torch {
 namespace jit {
-namespace test {
 
 static const auto ct = CodeTemplate(R"(
   int foo($args) {
@@ -62,6 +59,6 @@ void testCodeTemplate() {
     ASSERT_EQ(s, ct_expect);
   }
 }
-} // namespace test
+
 } // namespace jit
 } // namespace torch

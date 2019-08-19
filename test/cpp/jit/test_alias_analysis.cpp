@@ -1,5 +1,3 @@
-#pragma once
-
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/irparser.h>
 #include "test/cpp/jit/test_base.h"
