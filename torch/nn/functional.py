@@ -33,7 +33,7 @@ def _compute_padding_same(input_size, dim, weight, stride, dilation):
 # a bias on the right side if its uneven)
 def split_padding(padding):
     # type: (List[int]) -> List[int]
-    res = [] # type: List[int]
+    res = torch.jit.annotate(List[int], [])
     for i in padding:
         res.append(i // 2)
         res.append((i + 1) // 2)
