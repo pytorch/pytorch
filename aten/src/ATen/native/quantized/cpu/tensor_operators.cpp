@@ -15,11 +15,11 @@ Tensor& at_op##_out_quantized_cpu(Tensor& out, const Tensor& self, \
                                 Scalar other) { \
   TORCH_CHECK(out.dtype() == at::ScalarType::Bool, \
               "The 'out' tensor must have dtype 'torch.bool'"); \
-  const auto& self_dq = self.dequantize(); \
+  const Tensor self_dq = self.dequantize(); \
   return at:: at_op##_out(out, self_dq, other); \
 } \
 Tensor at_op##_quantized_cpu(const Tensor& self, Scalar other) { \
-  const auto& self_dq = self.dequantize(); \
+  const Tensor self_dq = self.dequantize(); \
   return at:: at_op(self_dq, other); \
 } \
 Tensor& at_op##_out_quantized_cpu(Tensor& out, const Tensor& self, \
@@ -27,14 +27,14 @@ Tensor& at_op##_out_quantized_cpu(Tensor& out, const Tensor& self, \
   infer_size(self.sizes(), other.sizes()); \
   TORCH_CHECK(out.dtype() == at::ScalarType::Bool, \
               "The 'out' tensor must have dtype 'torch.bool'"); \
-  const auto& self_dq = self.dequantize(); \
-  const auto& other_dq = other.dequantize(); \
+  const Tensor self_dq = self.dequantize(); \
+  const Tensor other_dq = other.dequantize(); \
   return at:: at_op##_out(out, self_dq, other_dq); \
 } \
 Tensor at_op##_quantized_cpu(const Tensor& self, const Tensor& other) { \
   infer_size(self.sizes(), other.sizes()); \
-  const auto& self_dq = self.dequantize(); \
-  const auto& other_dq = other.dequantize(); \
+  const Tensor self_dq = self.dequantize(); \
+  const Tensor other_dq = other.dequantize(); \
   return at:: at_op(self_dq, other_dq); \
 }
 
