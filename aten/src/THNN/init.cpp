@@ -118,9 +118,6 @@
 #include <THNN/generic/Tanh.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/TemporalRowConvolution.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/FeatureLPPooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
