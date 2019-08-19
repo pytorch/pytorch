@@ -135,7 +135,7 @@ std::string ConcretePythonOp::name() const {
 }
 
 void ConcretePythonOp::cloneFrom(Node* other_) {
-  torch::jit::PythonOp::cloneFrom(other_);
+  Node::cloneFrom(other_);
   auto other = other_->cast<ConcretePythonOp>();
   this->cconv = other->cconv;
   Py_INCREF(other->pyobj.get());
