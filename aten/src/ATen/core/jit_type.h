@@ -298,7 +298,8 @@ struct CAFFE2_API VaryingShape {
     if (!dims_) {
       return c10::nullopt;
     }
-    return dims_->size();
+    const auto& dims = dims_.value();
+    return dims.size();
   }
 
   const c10::optional<ListOfOptionalInts>& sizes() const { 
@@ -1419,6 +1420,10 @@ struct CAFFE2_API ClassType : public NamedType {
     for(size_t i = 0; i < attributeNames_.size(); ++i) {
       AT_ASSERT(attributeTypes_[i]->isSubtypeOf(contained_types[i]));
       ptr->addAttribute(attributeNames_[i], contained_types[i]);
+    }
+    // Copy methods over
+    for (const auto& method : methods()) {
+      ptr->addMethod(method);
     }
     return ptr;
   }
