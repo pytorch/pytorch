@@ -2215,7 +2215,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 self.assertTrue(
                     str(ex).startswith(
                         "Expected to mark a variable ready only once.")
-                    )
+                )
             else:
                 self.fail("Expected exception")
 
@@ -2654,7 +2654,7 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
                 self._energy = energy
                 self.step_size = 0.1
 
-            def forward(self, x: torch.Tensor):
+            def forward(self, x):
                 with torch.enable_grad():
                     x.requires_grad_()
                     omega = self._energy(x).sum()
