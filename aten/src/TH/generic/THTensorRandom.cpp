@@ -119,7 +119,6 @@ void THTensor_(normal_stddevs)(THTensor *self, at::Generator *gen, double mean, 
   THTensor_(normal)(self, gen, 0, 1);
   THTensor_(cmul)(self, self, stddevs);
   at::Tensor self_wrap = THTensor_wrap(self);
-  at::Tensor mean_wrap = THTensor_wrap(mean);
   self.add_(mean);
 }
 
