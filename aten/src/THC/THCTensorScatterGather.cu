@@ -78,6 +78,36 @@ template <typename IndexType, typename Real, int Dims>
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(512)
 #endif
+__global__ void THCudaTensor_gatherKernel(
+    TensorInfo<Real, IndexType> tensor,
+    TensorInfo<Real, IndexType> src,
+    TensorInfo<int64_t, IndexType> index,
+    const int dim,
+    const IndexType totalElements) {
+  for (IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
+       linearId < totalElements;
+       linearId += gridDim.x * blockDim.x) {
+    IndexType tensorOffset = 0;
+    IndexType srcOffset = 0;
+    IndexType indexOffset = 0;
+
+    IndexToScatterGatherOffsets<IndexType, Real, Dims>::compute(linearId, dim,
+                                                          index, &indexOffset,
+                                                          tensor, &tensorOffset,
+                                                          src, &srcOffset);
+
+    int64_t indexValue = index.data[indexOffset];
+    assert(indexValue >= 0 && indexValue < src.sizes[dim]);
+    srcOffset += indexValue * src.strides[dim];
+
+    tensor.data[tensorOffset] = src.data[srcOffset];
+  }
+}
+
+template <typename IndexType, typename Real, int Dims>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__ void THCudaTensor_scatterKernel(
     TensorInfo<Real, IndexType> tensor,
     TensorInfo<Real, IndexType> src,

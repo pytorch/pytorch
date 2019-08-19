@@ -252,34 +252,6 @@ void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* s
   c10::raw::intrusive_ptr::decref(srct);
 }
 
-#if !defined(TH_REAL_IS_BOOL)
-void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(muls)(r__data, t_data, value, r__len););
-  } else {
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data * value;, ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-  }
-}
-
-void THTensor_(div)(THTensor *r_, THTensor *t, scalar_t value)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(divs)(r__data, t_data, value, r__len););
-  } else {
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data / value;, ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-  }
-}
-#endif
-
 #if !defined(TH_REAL_IS_BFLOAT16) /* non bfloat16 part*/
 
 accreal THTensor_(sumall)(THTensor *tensor)
@@ -612,6 +584,33 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
   THLongTensor_free(index);
 }
 
+void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
+{
+  int64_t elems_per_row, i, idx;
+
+  THArgCheck(THLongTensor_nDimensionLegacyNoScalars(index) == THTensor_(nDimensionLegacyNoScalars)(src), 4,
+             "Index tensor must have same dimensions as input tensor");
+  THArgCheck(dim >= 0 && dim < THTensor_(nDimensionLegacyNoScalars)(tensor), 3,
+             "Index dimension is out of bounds");
+  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(src) == THTensor_(nDimensionLegacyNoScalars)(tensor), 2,
+             "Input tensor must have same dimensions as output tensor");
+
+  elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
+
+  TH_TENSOR_DIM_APPLY3(scalar_t, tensor, scalar_t, src, int64_t, index, dim,
+                       TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
+                       for (i = 0; i < elems_per_row; ++i)
+                       {
+                         idx = *(index_data + i*index_stride);
+                         if (idx < 0 || idx >= src_size)
+                         {
+                           THFree(TH_TENSOR_DIM_APPLY_counter);
+                           THError("Invalid index in gather");
+                         }
+                         *(tensor_data + i*tensor_stride) = src_data[idx * src_stride];
+                       })
+}
+
 void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   int64_t elems_per_row, i, idx;
@@ -764,6 +763,32 @@ void THTensor_(add_scaled)(THTensor *r_, THTensor *t, scalar_t value, scalar_t a
 void THTensor_(sub_scaled)(THTensor *r_, THTensor *t, scalar_t value, scalar_t alpha)
 {
   THTensor_(add)(r_, t, -value * alpha);
+}
+
+void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value)
+{
+  THTensor_(resizeAs)(r_, t);
+  int64_t r_Size = THTensor_(nElement)(r_);
+  int r_Contig = THTensor_(isContiguous)(r_);
+  int tContig = THTensor_(isContiguous)(t);
+  if (r_Contig && tContig) {
+    TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(muls)(r__data, t_data, value, r__len););
+  } else {
+    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data * value;, ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
+  }
+}
+
+void THTensor_(div)(THTensor *r_, THTensor *t, scalar_t value)
+{
+  THTensor_(resizeAs)(r_, t);
+  int64_t r_Size = THTensor_(nElement)(r_);
+  int r_Contig = THTensor_(isContiguous)(r_);
+  int tContig = THTensor_(isContiguous)(t);
+  if (r_Contig && tContig) {
+    TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(divs)(r__data, t_data, value, r__len););
+  } else {
+    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data / value;, ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
+  }
 }
 
 void THTensor_(lshift)(THTensor *r_, THTensor *t, scalar_t value)
