@@ -112,53 +112,56 @@ Reducer::Reducer(
   // We store pointers to these functions such that we can check if they are
   // used in an autograd pass. If they are not, we know their grad tensors
   // can be marked as ready for reduction.
-  const auto replica_count = replicas_.size();
-  grad_accumulators_.resize(replica_count);
-  for (size_t replica_index = 0; replica_index < replica_count;
-       replica_index++) {
-    const auto variable_count = replicas_[replica_index].size();
-    grad_accumulators_[replica_index].resize(variable_count);
-    for (size_t variable_index = 0; variable_index < variable_count;
-         variable_index++) {
-      auto& variable = replicas_[replica_index][variable_index];
-      const auto index = VariableIndex{
-          .replica_index = replica_index,
-          .variable_index = variable_index,
-      };
+  {
+    const auto replica_count = replicas_.size();
+    grad_accumulators_.resize(replica_count);
+    for (size_t replica_index = 0; replica_index < replica_count;
+         replica_index++) {
+      const auto variable_count = replicas_[replica_index].size();
+      grad_accumulators_[replica_index].resize(variable_count);
+      for (size_t variable_index = 0; variable_index < variable_count;
+           variable_index++) {
+        auto& variable = replicas_[replica_index][variable_index];
+        const auto index = VariableIndex{
+            .replica_index = replica_index,
+            .variable_index = variable_index,
+        };
 
-      // The gradient accumulator function is lazily initialized once.
-      // Therefore we can use its presence in the autograd graph as
-      // evidence that the parameter has participated in an iteration.
-      auto grad_accumulator = variable.grad_accumulator();
+        // The gradient accumulator function is lazily initialized once.
+        // Therefore we can use its presence in the autograd graph as
+        // evidence that the parameter has participated in an iteration.
+        auto grad_accumulator = variable.grad_accumulator();
 
-      // Hook to execute after the gradient accumulator has executed.
-      hooks_.emplace_back(
-          // For delayed_allreduce, the actually hook only needs to be run at
-          // the end of the autograd computation. However, final_callbacks_
-          // inserted by ``queue_callback`` will be cleared at the beginning
-          // of every backward execution. Hence, we have to first insert
-          // hook on parameters, and those hooks will insert the final callback.
-          grad_accumulator->add_post_hook(torch::make_unique<LambdaPostHook>(
-              [=] {
-                  if (delay_allreduce_) {
-                    this->delayed_autograd_hook();
-                  } else {
-                    this->autograd_hook(index);
-                  }
-              }
-          )),
-          grad_accumulator);
+        // Hook to execute after the gradient accumulator has executed.
+        hooks_.emplace_back(
+            // For delayed_allreduce, the actually hook only needs to be run at
+            // the end of the autograd computation. However, final_callbacks_
+            // inserted by ``queue_callback`` will be cleared at the beginning
+            // of every backward execution. Hence, we have to first insert
+            // hook on parameters, and those hooks will insert the final
+            // callback.
+            grad_accumulator->add_post_hook(torch::make_unique<LambdaPostHook>(
+                [=] {
+                    if (delay_allreduce_) {
+                      this->delayed_autograd_hook();
+                    } else {
+                      this->autograd_hook(index);
+                    }
+                }
+            )),
+            grad_accumulator);
 
-      // Map raw function pointer to replica index and parameter index.
-      // This is used later on when the autograd graph is traversed
-      // to check for parameters for which no gradient is computed.
-      func_[grad_accumulator.get()] = index;
+        // Map raw function pointer to replica index and parameter index.
+        // This is used later on when the autograd graph is traversed
+        // to check for parameters for which no gradient is computed.
+        func_[grad_accumulator.get()] = index;
 
-      // The gradient accumulator is stored as weak_ptr in the autograd
-      // metadata of the variable, so we have to keep it alive here for
-      // the raw pointer to be valid.
-      grad_accumulators_[replica_index][variable_index] =
-          std::move(grad_accumulator);
+        // The gradient accumulator is stored as weak_ptr in the autograd
+        // metadata of the variable, so we have to keep it alive here for
+        // the raw pointer to be valid.
+        grad_accumulators_[replica_index][variable_index] =
+            std::move(grad_accumulator);
+      }
     }
   }
 

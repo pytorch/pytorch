@@ -2681,7 +2681,7 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
                     nn.Linear(self.n_hidden, 1))
                 self.L = 10
 
-            def forward(self, x: torch.Tensor):
+            def forward(self, x):
                 y = x.clone().to(x.device)
                 y.requires_grad_()
                 fwd = nn.Sequential(*[GradientStep(self._energy) for _ in range(self.L)])
