@@ -5171,18 +5171,25 @@ class _TestTorchMixin(torchtest):
         if TEST_NUMPY:
             numpy_functions = {True: np.triu, False: np.tril}
 
-        def run_test(shape, cast, diagonal):
-            x_cpu = torch.randn(*shape)
+        # TODO: remove this when bool and half are supported for torch.where
+        def bool_half_compat_where(pred, true_tensor, false_tensor, dtype):
+            if dtype == torch.bool or dtype == torch.half:
+                return torch.where(pred.byte(), true_tensor.byte(), false_tensor.byte()).to(dtype=dtype)
+            else:
+                return torch.where(pred, true_tensor, false_tensor)
+
+        def run_test(shape, cast, diagonal, dtype):
+            x_cpu = torch.empty(*shape, dtype=dtype).fill_(2)
             x = cast(x_cpu)
 
             for upper in [True, False]:
                 # normal test with mask
                 torch_tri_func = torch_functions[upper]
                 res1 = torch_tri_func(x, diagonal=diagonal)
-                res2 = cast(torch.Tensor())
+                res2 = cast(torch.empty(0, dtype=dtype))
                 torch_tri_func(x, diagonal=diagonal, out=res2)
                 exp_mask = gen_mask(shape, diagonal, cast, upper)
-                expected = torch.where(exp_mask, torch.tensor(0).type_as(x), x)
+                expected = bool_half_compat_where(exp_mask, torch.tensor(0).type_as(x), x, dtype)
                 self.assertEqual(res1, res2, 0)
                 self.assertEqual(expected, res1, 0)
 
@@ -5194,7 +5201,7 @@ class _TestTorchMixin(torchtest):
                         exp_mask = gen_mask(x_nc.size(), diagonal, cast, upper)
                         if 1 not in shape:
                             assert not x_nc.is_contiguous(), "x is intentionally non-contiguous"
-                        exp_nc = torch.where(exp_mask, torch.tensor(0).type_as(x), x_nc)
+                        exp_nc = bool_half_compat_where(exp_mask, torch.tensor(0).type_as(x), x_nc, dtype)
                         self.assertEqual(torch_tri_func(x_nc, diagonal), exp_nc, 0)
                         x_nc_is_contiguous = x_nc.is_contiguous()
                         if upper:
@@ -5235,8 +5242,9 @@ class _TestTorchMixin(torchtest):
                   (3, 1), (5, 3, 1), (7, 5, 3, 1),  # very fat matrices
                   (1, 3), (5, 1, 3), (7, 5, 1, 3),  # very thin matrices
                   (1, 3, 3, 3), (3, 1, 3, 3, 3)]    # unsqueezed batch dimensions
-        for s, d in product(shapes, diagonals):
-            run_test(s, cast, d)
+        dtypes = [dtype for dtype in torch.testing.get_all_dtypes() if dtype != torch.bfloat16]
+        for s, d, dtype in product(shapes, diagonals, dtypes):
+            run_test(s, cast, d, dtype)
 
     def test_triu_tril(self):
         self._test_triu_tril(self, lambda t: t)
