@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "ATen/Parallel.h"
 
 namespace at { namespace native {
 
@@ -9,7 +10,7 @@ Tensor & gather_out_cpu_impl(Tensor & result, const Tensor & self, int64_t dim, 
   TORCH_CHECK(std::max<int64_t>(result.dim(), 1) == num_dims, "Input tensor must have same dimensions as output tensor");
 
   int64_t elems_per_row = (index.dim() == 0 ? 1 : index.size(dim));
-  int64_t src_dim_size = src.size(dim);
+  int64_t self_dim_size = self.size(dim);
   int64_t outer_size = 1;
   for(int64_t i = 0; i < num_dims; i++) {
     if(i != dim) {
@@ -27,7 +28,7 @@ Tensor & gather_out_cpu_impl(Tensor & result, const Tensor & self, int64_t dim, 
     int64_t index_dim_stride = index.stride(dim);
     int64_t self_dim_stride = self.stride(dim);
 
-    at::parallel_for(0, outer_size, internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
+    at::parallel_for(0, outer_size, at::internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
       for(int64_t i = begin; i < end; i++) {
         scalar_t *result_base = result_data;
         int64_t *index_base = index_data;
@@ -42,7 +43,7 @@ Tensor & gather_out_cpu_impl(Tensor & result, const Tensor & self, int64_t dim, 
           }
         }
         for(int64_t j = 0; j < elems_per_row; j++) {
-          AT_CHECK(j >= 0 && j < src_dim_size, "Invalid index in gather: out of range");
+          AT_CHECK(j >= 0 && j < self_dim_size, "Invalid index in gather: out of range");
           int64_t index = *(index_base + j * index_dim_stride);
           *(result_base + j * result_dim_stride) = *(self_base + index * self_dim_stride);
         }
