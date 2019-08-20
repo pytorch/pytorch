@@ -43,7 +43,7 @@ void neg_kernel_cuda(TensorIterator& iter) {
 void erfinv_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "erfinv_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return THCNumerics<scalar_t>::erfinv(a);
+      return erfinvf(a);
     });
   });
 }
