@@ -146,6 +146,10 @@ class OrderedDict {
   /// `other` is already present in this `OrderedDict`, an exception is thrown.
   void update(const OrderedDict& other);
 
+  /// Removes the item that has `key` from this `OrderedDict` if exists and if
+  /// it doesn't an exception is thrown.
+  void erase(const Key& key);
+
   /// Removes all items from this `OrderedDict`.
   void clear();
 
@@ -404,6 +408,15 @@ const Value* OrderedDict<Key, Value>::find(const Key& key) const noexcept {
 template <typename Key, typename Value>
 bool OrderedDict<Key, Value>::contains(const Key& key) const noexcept {
   return find(key) != nullptr;
+}
+
+template <typename Key, typename Value>
+void OrderedDict<Key, Value>::erase(const Key& key) {
+  auto it = index_.find(key);
+  TORCH_CHECK(it != index_.end(), "Key '", key, "' doesn't exist");
+  auto index = it->second;
+  index_.erase(it);
+  items_.erase(items_.begin() + index);
 }
 
 template <typename Key, typename Value>

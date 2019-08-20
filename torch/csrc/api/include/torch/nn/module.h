@@ -383,15 +383,15 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
 
   /// Serializes the `Module` into the given `OutputArchive`.
   ///
-  /// If the `Module` contains unserializable submodules (e.g. `nn::Functional`),
-  /// those submodules are skipped when serializing.
+  /// If the `Module` contains unserializable submodules (e.g.
+  /// `nn::Functional`), those submodules are skipped when serializing.
   virtual void save(serialize::OutputArchive& archive) const;
 
   /// Deserializes the `Module` from the given `InputArchive`.
   ///
-  /// If the `Module` contains unserializable submodules (e.g. `nn::Functional`),
-  /// we don't check the existence of those submodules in the `InputArchive` when
-  /// deserializing.
+  /// If the `Module` contains unserializable submodules (e.g.
+  /// `nn::Functional`), we don't check the existence of those submodules in the
+  /// `InputArchive` when deserializing.
   virtual void load(serialize::InputArchive& archive);
 
   /// Streams a pretty representation of the `Module` into the given `stream`.
@@ -477,9 +477,11 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
 
   /// Replaces a registered submodule with this `Module`.
   ///
-  /// This takes care of the registration, if you used submodule members, you should
+  /// This takes care of the registration, if you used submodule members, you
+  /// should
   //  assign the submodule as well, i.e. use as
-  ///     module->submodule_ = module->replace_module("linear", torch::nn::Linear(3, 4));
+  ///     module->submodule_ = module->replace_module("linear",
+  ///     torch::nn::Linear(3, 4));
   /// It only works when a module of the name is already registered.
   ///
   /// This is useful for replacing a module after initialization, e.g.
@@ -492,7 +494,8 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// Replaces a registered submodule with this `Module`.
   /// This method deals with `ModuleHolder`s.
   ///
-  /// This takes care of the registration, if you used submodule members, you should
+  /// This takes care of the registration, if you used submodule members, you
+  /// should
   //  assign the submodule as well, i.e. use as
   ///     module->submodule_ = module->replace_module("linear", linear_holder);
   /// It only works when a module of the name is already registered.
@@ -503,6 +506,10 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   std::shared_ptr<ModuleType> replace_module(
       const std::string& name,
       ModuleHolder<ModuleType> module_holder);
+
+  /// Unregisters a submodule from this `Module`. If there is no such module
+  /// with `name` an exception is thrown.
+  void unregister_module(const std::string& name);
 
  private:
   // Friend classes.

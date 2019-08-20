@@ -76,6 +76,7 @@ const std::string& Module::name() const noexcept {
 }
 
 std::shared_ptr<Module> Module::clone(const optional<Device>& device) const {
+  (void)device;
   AT_ERROR(
       "clone() has not been implemented for ",
       name(),
@@ -330,6 +331,15 @@ Tensor& Module::register_buffer(std::string name, Tensor tensor) {
   return buffers_.insert(std::move(name), std::move(tensor));
 }
 
+void Module::unregister_module(const std::string& name) {
+  TORCH_CHECK(
+      children_.contains(name),
+      "No Module with name `",
+      name,
+      "` is registered");
+  children_.erase(name);
+}
+
 void Module::pretty_print(std::ostream& stream) const {
   stream << name();
 }
@@ -350,7 +360,10 @@ void Module::pretty_print_recursive(
   }
 }
 
-void Module::clone_(Module& other, const optional<Device>& device) {}
+void Module::clone_(Module& other, const optional<Device>& device) {
+  (void)other;
+  (void)device;
+}
 
 void Module::apply_to_submodules(
     const NamedModulePointerApplyFunction& function,
@@ -367,6 +380,7 @@ std::shared_ptr<Module> Module::shared_from_this_checked() const {
   try {
     ptr = shared_from_this();
   } catch (const std::bad_weak_ptr& e) {
+    (void)e;
     AT_ERROR(
         "It looks like you attempted to retrieve your top-level module "
         "as a shared_ptr, but it is not stored in a shared_ptr. "
