@@ -286,6 +286,7 @@ class QuantizerTestCase(TestCase):
         # print('original result: ', script_module(data[0][0]))
         quantized_eager_module = quantize(eager_module, default_eval_fn, data)
         print('eager mode:', quantized_eager_module)
+        torch._C._jit_set_inline_everything_mode(False)
         e = torch.jit.script(quantized_eager_module)
         torch._C._jit_pass_constant_propagation(e.graph)
         print(e.graph)
@@ -330,16 +331,21 @@ class QuantizerTestCase(TestCase):
         script_result = forward_method(script_module)(data[0][0])
         print(eager_result)
         print(script_result)
-
-
         # Compare results for eager and graph mode
-        # eagerDict = eagerQuantObj.getQParamDict()
-        # activationDict = activationQuantObj.getQParamDict()
 
-        # # TODO - fix @eellison
-        # self.assertTrue('z' in eagerDict and 'z.1' in activationDict)
-        # self.assertAlmostEqual(eagerDict["z"][0], activationDict["z.1"][0], places=15)
-        # self.assertAlmostEqual(eagerDict["z"][1], activationDict["z.1"][1], places=15)
+    def test_module_rewriter(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 12, 3)
+                self.bn = torch.nn.BatchNorm2d(12)
+
+            def forward(self, x):
+                return self.bn(self.conv(x))
+
+        torch._C._jit_set_inline_everything_mode(False)
+        m = torch.jit.script(M())
+        m._c._dump(omit_method_bodies=False)
 
 if __name__ == '__main__':
     run_tests()
