@@ -192,12 +192,14 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
-#define IMPLEMENT_UNARY_OP_VEC(op)                              \
+#define IMPLEMENT_UNARY_OP(op)                                  \
   Tensor op(const Tensor& self) {                               \
     Tensor result = at::empty({0}, self.options());             \
     at::op##_out(result, self);                                 \
     return result;                                              \
-  }                                                             \
+  }
+
+#define IMPLEMENT_UNARY_OP_INPLACE_OUT_CPU(op)                  \
   Tensor& _##op##__cpu(Tensor& self) {                          \
     return at::op##_out(self, self);                            \
   }                                                             \
@@ -208,6 +210,28 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
     op##_stub(iter.device_type(), iter);                        \
     return result;                                              \
   }
+
+#define IMPLEMENT_UNARY_OP_INPLACE_OUT_CUDA(op)                  \
+  Tensor& _##op##__cuda(Tensor& self) {                          \
+    return at::op##_out(self, self);                             \
+  }                                                              \
+  Tensor& _##op##_out_cuda(Tensor& result, const Tensor& self) { \
+    checkBackend(#op, result, Backend::CUDA);                    \
+    auto iter = TensorIterator::unary_op(result, self,           \
+      /*check_mem_overlap=*/true);                               \
+    op##_stub(iter.device_type(), iter);                         \
+    return result;                                               \
+  }
+
+#define IMPLEMENT_UNARY_OP_VEC(op)                              \
+  IMPLEMENT_UNARY_OP(op)                                        \
+  IMPLEMENT_UNARY_OP_INPLACE_OUT_CPU(op)
+
+#define IMPLEMENT_UNARY_OP_VEC_CUDA(op)                         \
+  IMPLEMENT_UNARY_OP(op)                                        \
+  IMPLEMENT_UNARY_OP_INPLACE_OUT_CUDA(op)
+
+
 
 IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
