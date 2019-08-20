@@ -13066,19 +13066,39 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     @torchtest.for_all_device_types()
     def test_binary_op_mem_overlap(self, device):
         ops = [
-            "add",
-            "mul",
-            "sub",
-            "div",
-            "logical_xor"
+            ("add", True, True, 'cpu'),
+            ("add", True, True, 'cuda'),
+            ("mul", True, True, 'cpu'),
+            ("mul", True, True, 'cuda'),
+            ("sub", True, True, 'cpu'),
+            ("sub", True, True, 'cuda'),
+            ("div", True, True, 'cpu'),
+            ("div", True, True, 'cuda'),
+            ("logical_xor", True, True, 'cpu'),
+            ("logical_xor", True, True, 'cuda'),
+            ("pow", True, True, 'cpu'),
+            ("pow", False, False, 'cuda')
         ]
 
-        for fn in ops:
+        for (fn, has_input_output_mem_overlap_check,
+                has_internal_mem_overlap_check, dev) in ops:
+            if dev != device:
+                continue
             out_op = getattr(torch, fn)
             inplace_op = getattr(torch.Tensor, fn + '_')
-            self.check_internal_mem_overlap(
-                inplace_op, num_inputs=2, device=device)
-            self.binary_check_input_output_mem_overlap(out_op, device)
+            if has_internal_mem_overlap_check:
+                self.check_internal_mem_overlap(
+                    inplace_op, num_inputs=2, device=device)
+            else:
+                with self.assertRaises(AssertionError):
+                    self.check_internal_mem_overlap(
+                        inplace_op, num_inputs=2, device=device)
+
+            if has_input_output_mem_overlap_check:
+                self.binary_check_input_output_mem_overlap(out_op, device)
+            else:
+                with self.assertRaises(AssertionError):
+                    self.binary_check_input_output_mem_overlap(out_op, device)
 
     def ternary_check_input_output_mem_overlap(self, op, device):
         sz = 3
@@ -13134,6 +13154,25 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         doubles = torch.randn(2 * sz, device=device)
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: out.copy_(input))
+
+    @torchtest.for_all_device_types()
+    def test_pow_mem_overlap(self, device):
+
+        def _test():
+            self.check_internal_mem_overlap(
+                lambda t: t.pow_(42), num_inputs=1, device=device)
+            sz = 3
+            doubles = torch.randn(2 * sz, device=device)
+            self.unary_check_input_output_mem_overlap(
+                doubles, sz, lambda input, out: torch.pow(input, 42, out=out))
+            self.unary_check_input_output_mem_overlap(
+                doubles, sz, lambda input, out: torch.pow(42, input, out=out))
+
+        if device == 'cpu':
+            _test()
+        else:
+            with self.assertRaises(AssertionError):
+                _test()
 
 # Functions to test negative dimension wrapping
 METHOD = 1
