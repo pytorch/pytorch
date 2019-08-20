@@ -2492,7 +2492,11 @@ class _TestTorchMixin(torchtest):
         nparr = np.array(ints, dtype=np.int32)
         out = torch.empty_like(tensor, device=device)
 
-        def _test():
+        for pow in neg_ints:
+            self.assertRaisesRegex(
+                ValueError,
+                "Integers to negative integer powers are not allowed.",
+                lambda: np.power(nparr, pow))
             self.assertRaisesRegex(
                 RuntimeError,
                 "Integers to negative integer powers are not allowed.",
@@ -2510,19 +2514,6 @@ class _TestTorchMixin(torchtest):
                 "Integers to negative integer powers are not allowed.",
                 lambda: torch.pow(tensor, pow, out=out))
 
-        for pow in neg_ints:
-            self.assertRaisesRegex(
-                ValueError,
-                "Integers to negative integer powers are not allowed.",
-                lambda: np.power(nparr, pow))
-            if (device == 'cuda'):
-                # pow CUDA implementation does not have
-                # negative integer exponent check
-                with self.assertRaises(AssertionError):
-                    _test()
-            else:
-                _test()
-
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_long_tensor_pow_floats(self, device):
@@ -2533,30 +2524,29 @@ class _TestTorchMixin(torchtest):
         nparr = np.array(ints, dtype=np.int64)
 
         if device == 'cuda':
-            # with self.assertRaises(AssertionError):
-            #     # This is a check that pow CUDA implementation is
-            #     # incompatible with Numpy:
-            #     # pow CUDA  4 ^ 0.5 = 1
-            #     # numpy pow 4 ^ 0.5 = 2
-            #     # This check must be deleted after pow CUDA is fixed
-            #     for pow in floats:
-            #         expected = np.power(nparr, pow).astype(np.int64)
-            #
-            #         actual = tensor.pow(pow)
-            #         self.assertEqual(expected, actual.cpu().numpy())
-            #
-            #         actual = tensor.clone()
-            #         actual2 = actual.pow_(pow)
-            #         self.assertEqual(expected, actual.cpu().numpy())
-            #         self.assertEqual(expected, actual2.cpu().numpy())
-            #
-            #         actual = torch.pow(tensor, pow)
-            #         self.assertEqual(expected, actual.cpu().numpy())
-            #
-            #         actual2 = torch.pow(tensor, pow, out=actual)
-            #         self.assertEqual(expected, actual.cpu().numpy())
-            #         self.assertEqual(expected, actual2.cpu().numpy())
-            return
+            with self.assertRaises(AssertionError):
+                # This is a check that pow CUDA implementation is
+                # incompatible with Numpy:
+                # pow CUDA  4 ^ 0.5 = 1
+                # numpy pow 4 ^ 0.5 = 2
+                # This check must be deleted after pow CUDA is fixed
+                for pow in floats:
+                    expected = np.power(nparr, pow).astype(np.int64)
+
+                    actual = tensor.pow(pow)
+                    self.assertEqual(expected, actual.cpu().numpy())
+
+                    actual = tensor.clone()
+                    actual2 = actual.pow_(pow)
+                    self.assertEqual(expected, actual.cpu().numpy())
+                    self.assertEqual(expected, actual2.cpu().numpy())
+
+                    actual = torch.pow(tensor, pow)
+                    self.assertEqual(expected, actual.cpu().numpy())
+
+                    actual2 = torch.pow(tensor, pow, out=actual)
+                    self.assertEqual(expected, actual.cpu().numpy())
+                    self.assertEqual(expected, actual2.cpu().numpy())
         else:
             for pow in floats:
                 expected = np.power(nparr, pow).astype(np.int64)
