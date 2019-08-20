@@ -7,6 +7,7 @@ import warnings
 import inspect
 
 import torch
+from torch._six import PY2
 import common_utils as common
 import common_nn
 from common_cuda import TEST_CUDA
@@ -177,7 +178,10 @@ class TestCppApiParity(common.TestCase):
         cpp_default_constructor_args = module_metadata['cpp_default_constructor_args']
 
         cpp_module_option = 'torch::nn::' + module_name + 'Options' + cpp_default_constructor_args
-        init_arg_spec = inspect.getfullargspec(python_module_class.__init__)
+        if PY2:
+            init_arg_spec = inspect.getargspec(python_module_class.__init__)
+        else:
+            init_arg_spec = inspect.getfullargspec(python_module_class.__init__)
         init_kwargs = init_arg_spec.args[len(python_default_constructor_args) + 1:]
         init_kwargs_defaults = init_arg_spec.defaults
         for arg_name, python_default_value in zip(init_kwargs, init_kwargs_defaults):
