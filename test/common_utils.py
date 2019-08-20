@@ -1054,6 +1054,23 @@ def random_fullrank_matrix_distinct_singular_value(l, *batches, **kwargs):
         return torch.stack(all_matrices).reshape(*(batches + (l, l)))
 
 
+def random_linalg_solve_processed_inputs(A_dims, b_dims, gen_fn, transform_fn, cast_fn):
+    """
+    For solve methods, this returns the following values:
+    RHS tensor: generated using torch.randn
+    LHS tensor: generated using gen_fn
+    Transformed LHS tensor(s): returned after calling transform_fn.
+                               This can be a tuple or a single tensor depending on transform_fn
+                               For instance, if transform_fn == torch.cholesky, then the return value
+                               is a single tensor. If transform_fn == torch.lu, then the return value
+                               is a tuple of tensors
+    """
+    RHS = cast_fn(torch.randn(*b_dims))
+    LHS = cast_fn(gen_fn(*A_dims))
+    transformed_LHS = transform_fn(LHS)
+    return RHS, LHS, transformed_LHS
+
+
 def brute_pdist(inp, p=2):
     """Computes the same as torch.pdist using primitives"""
     n = inp.shape[-2]

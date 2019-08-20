@@ -21,7 +21,7 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes, istuple
 from itertools import product, combinations, combinations_with_replacement, permutations
-from functools import reduce
+from functools import reduce, partial
 from random import randrange
 from torch import multiprocessing as mp
 from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
@@ -2109,12 +2109,12 @@ class _TestTorchMixin(torchtest):
 
     @staticmethod
     def _test_lu_solve(self, cast, pivot=True):
-        from common_utils import random_fullrank_matrix_distinct_singular_value
+        from common_utils import (random_fullrank_matrix_distinct_singular_value as fullrank,
+                                  random_linalg_solve_processed_inputs as helper)
 
         for k, n in zip([2, 3, 5], [3, 5, 7]):
-            A = cast(random_fullrank_matrix_distinct_singular_value(n))
-            b = cast(torch.randn(n, k))
-            LU_data, LU_pivots, info = A.lu(get_infos=True, pivot=pivot)
+            b, A, (LU_data, LU_pivots, info) = helper((n,), (n, k), fullrank,
+                                                      partial(torch.lu, get_infos=True, pivot=pivot), cast)
             self.assertEqual(info, torch.zeros_like(info))
             x = torch.lu_solve(b, LU_data, LU_pivots)
             b_ = torch.matmul(A, x)
@@ -2126,63 +2126,68 @@ class _TestTorchMixin(torchtest):
 
     @staticmethod
     def _test_lu_solve_batched(self, cast, pivot=True):
-        from common_utils import random_fullrank_matrix_distinct_singular_value
+        from common_utils import (random_fullrank_matrix_distinct_singular_value as fullrank,
+                                  random_linalg_solve_processed_inputs as helper)
 
+        # This function calls random_linalg_solve_processed_inputs
+        # with the appropriate arguments
         def lu_solve_test_helper(A_dims, b_dims, cast, pivot):
-            A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
-            LU_data, LU_pivots, infos = torch.lu(A, get_infos=True, pivot=pivot)
-            self.assertEqual(infos, torch.zeros_like(infos))
-            b = cast(torch.randn(*b_dims))
-            return A, LU_data, LU_pivots, b
+            b, A, (LU_data, LU_pivots, info) = helper(A_dims, b_dims, fullrank,
+                                                      partial(torch.lu, get_infos=True, pivot=pivot), cast)
+            self.assertEqual(info, torch.zeros_like(info))
+            return b, A, LU_data, LU_pivots
 
-        # test against lu_solve: one batch with both choices of upper
-        A, LU_data, LU_pivots, b = lu_solve_test_helper((5, 1), (1, 5, 10), cast, pivot)
-        x_exp = torch.lu_solve(b.squeeze(0), LU_data.squeeze(0), LU_pivots.squeeze(0))
-        x = torch.lu_solve(b, LU_data, LU_pivots)
-        self.assertEqual(x, x_exp.unsqueeze(0))
+        def lu_solve_batch_test_helper(A_dims, b_dims, cast, pivot):
+            b, A, LU_data, LU_pivots = lu_solve_test_helper(A_dims, b_dims, cast, pivot)
+            x_exp_list = []
+            for i in range(b_dims[0]):
+                x_exp_list.append(torch.lu_solve(b[i], LU_data[i], LU_pivots[i]))
+            x_exp = torch.stack(x_exp_list)  # Stacked output
+            x_act = torch.lu_solve(b, LU_data, LU_pivots)  # Actual output
+            self.assertEqual(x_exp, x_act)  # Equality check
+            self.assertLessEqual(b.dist(torch.matmul(A, x_act)), 1e-12)  # Correctness check
 
-        # test against cholesky_solve in a loop: four batches with both choices of upper
-        A, LU_data, LU_pivots, b = lu_solve_test_helper((5, 4), (4, 5, 10), cast, pivot)
-        x_exp_list = []
-        for i in range(4):
-            x_exp = torch.lu_solve(b[i], LU_data[i], LU_pivots[i])
-            x_exp_list.append(x_exp)
-        x_exp = torch.stack(x_exp_list)
+        for batchsize in [1, 3, 4]:
+            lu_solve_batch_test_helper((5, batchsize), (batchsize, 5, 10), cast, pivot)
 
-        x = torch.lu_solve(b, LU_data, LU_pivots)
-        self.assertEqual(x, x_exp)
-
-        # basic correctness test
-        A, LU_data, LU_pivots, b = lu_solve_test_helper((5, 3), (3, 5, 10), cast, pivot)
-        x = torch.lu_solve(b, LU_data, LU_pivots)
-        self.assertLessEqual(b.dist(torch.matmul(A, x)), 1e-12)
-
-        # Test non-contiguous inputs.
-        if not TEST_NUMPY:
-            return
-        from numpy.linalg import solve
-        A = random_fullrank_matrix_distinct_singular_value(2, 2)
-        b = torch.randn(2, 2, 2)
-        x_exp = torch.Tensor(solve(A.permute(0, 2, 1).numpy(), b.permute(2, 1, 0).numpy()))
-        A = cast(A).permute(0, 2, 1)
-        b = cast(b).permute(2, 1, 0)
-        assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
-        LU_data, LU_pivots = torch.lu(A, pivot=pivot)
-        x = torch.lu_solve(b, LU_data, LU_pivots)
-        self.assertEqual(x, cast(x_exp))
+        # tensors with 0 elements
+        b = cast(torch.randn(3, 0, 3))
+        A = cast(torch.randn(3, 0, 0))
+        LU_data, LU_pivots = torch.lu(A)
+        self.assertEqual(torch.empty_like(b), b.lu_solve(LU_data, LU_pivots))
 
     @skipIfNoLapack
     def test_lu_solve_batched(self):
         self._test_lu_solve_batched(self, lambda t: t)
 
     @staticmethod
-    def _test_lu_solve_batched_many_batches(self, cast):
+    def _test_lu_solve_batched_non_contiguous(self, cast):
+        from numpy.linalg import solve
         from common_utils import random_fullrank_matrix_distinct_singular_value
 
+        A = random_fullrank_matrix_distinct_singular_value(2, 2)
+        b = torch.randn(2, 2, 2)
+        x_exp = torch.as_tensor(solve(A.permute(0, 2, 1).numpy(), b.permute(2, 1, 0).numpy()))
+        A = cast(A).permute(0, 2, 1)
+        b = cast(b).permute(2, 1, 0)
+        assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
+        LU_data, LU_pivots = torch.lu(A)
+        x = torch.lu_solve(b, LU_data, LU_pivots)
+        self.assertEqual(x, cast(x_exp))
+
+    @skipIfNoLapack
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lu_solve_batched_non_contiguous(self):
+        self._test_lu_solve_batched_non_contiguous(self, lambda t: t)
+
+    @staticmethod
+    def _test_lu_solve_batched_many_batches(self, cast):
+        from common_utils import (random_fullrank_matrix_distinct_singular_value as fullrank,
+                                  random_linalg_solve_processed_inputs as helper)
+
         def run_test(A_dims, b_dims, cast):
-            A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
-            b = cast(torch.randn(*b_dims))
-            LU_data, LU_pivots, infos = A.lu(get_infos=True)
+            b, A, (LU_data, LU_pivots, infos) = helper(A_dims, b_dims, fullrank,
+                                                       partial(torch.lu, get_infos=True), cast)
             self.assertEqual(infos, torch.zeros_like(infos))
             x = torch.lu_solve(b, LU_data, LU_pivots)
             b_ = torch.matmul(A, x)
@@ -2195,6 +2200,31 @@ class _TestTorchMixin(torchtest):
     @slowTest
     def test_lu_solve_batched_many_batches(self):
         self._test_lu_solve_batched_many_batches(self, lambda t: t)
+
+    @staticmethod
+    def _test_lu_solve_batched_dims(self, cast, pivot=True):
+        from numpy.linalg import solve
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+
+        def run_test(A_dims, b_dims, cast, pivot):
+            A = random_fullrank_matrix_distinct_singular_value(*A_dims)
+            b = torch.randn(*b_dims)
+            x_exp = torch.as_tensor(solve(A.numpy(), b.numpy()))
+            A, b = cast(A), cast(b)
+            LU_data, LU_pivots = torch.lu(A, pivot=pivot)
+            x = torch.lu_solve(b, LU_data, LU_pivots)
+            self.assertEqual(x, cast(x_exp))
+
+        # test against numpy.linalg.solve
+        run_test((4, 2, 1, 3), (2, 1, 3, 4, 6), cast, pivot)  # no broadcasting
+        run_test((4, 2, 1, 3), (4, 6), cast, pivot)  # broadcasting b
+        run_test((4,), (2, 1, 3, 4, 2), cast, pivot)  # broadcasting A
+        run_test((4, 1, 3, 1), (2, 1, 3, 4, 5), cast, pivot)  # broadcasting A & b
+
+    @skipIfNoLapack
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lu_solve_batched_dims(self):
+        self._test_lu_solve_batched_dims(self, lambda t: t)
 
     @staticmethod
     def _test_lu_unpack(self, cast, pivot=True):

@@ -2708,7 +2708,7 @@ Arguments:
                        where :math:`*` is zero or more batch dimensions.
     LU_pivots (IntTensor): the pivots of the LU factorization from :meth:`torch.lu` of size :math:`(*, m)`,
                            where :math:`*` is zero or more batch dimensions.
-                           The batch dimensions of :attr:`LU_pivots` must match the batch dimensions of
+                           The batch dimensions of :attr:`LU_pivots` must be equal to the batch dimensions of
                            :attr:`LU_data`.
     {out}
 

@@ -272,7 +272,7 @@ std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
   TORCH_CHECK(A.dim() >= 2,
            "A should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
-  std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A, "solve");
+  std::tie(self_broadcasted, A_broadcasted) = _linalg_broadcast_batch_dims(self, A, "solve");
   return at::_solve_helper(self_broadcasted, A_broadcasted);
 }
 
@@ -411,7 +411,7 @@ Tensor cholesky_solve(const Tensor& self, const Tensor& A, bool upper) {
   TORCH_CHECK(A.dim() >= 2,
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
-  std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A, "cholesky_solve");
+  std::tie(self_broadcasted, A_broadcasted) = _linalg_broadcast_batch_dims(self, A, "cholesky_solve");
   return at::_cholesky_solve_helper(self_broadcasted, A_broadcasted, upper);
 }
 
@@ -730,7 +730,7 @@ std::tuple<Tensor, Tensor> triangular_solve(const Tensor& self, const Tensor& A,
   TORCH_CHECK(A.dim() >= 2,
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
-  std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A, "triangular_solve");
+  std::tie(self_broadcasted, A_broadcasted) = _linalg_broadcast_batch_dims(self, A, "triangular_solve");
   return at::_triangular_solve_helper(self_broadcasted, A_broadcasted, upper, transpose, unitriangular);
 }
 
@@ -1159,18 +1159,16 @@ Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivo
   // We check whether the batch dimensions of LU_pivots match the batch dimensions of LU_data
   // e.g.: LU_pivots.sizes() = 4 x 3 x 2, LU_data.sizes() = 4 x 3 x 2 x 2 is a pair of correct inputs
   // e.g.: LU_pivots.sizes() = 4 x 3 x 2, LU_data.sizes() = 12 x 2 x 2 is a pair of incorrect inputs
-  IntArrayRef pivots_sizes(LU_pivots.sizes().data(), LU_pivots.ndimension() - 1);
-  IntArrayRef lu_sizes(LU_data.sizes().data(), LU_data.ndimension() - 2);
+  IntArrayRef pivots_sizes(LU_pivots.sizes().data(), LU_pivots.dim() - 1);
+  IntArrayRef lu_sizes(LU_data.sizes().data(), LU_data.dim() - 2);
   TORCH_CHECK(pivots_sizes == lu_sizes,
               "batch dimensions of LU_pivots doesn't match batch dimensions of LU_data");
 
   Tensor self_broadcasted, LU_data_broadcasted;
-  std::tie(self_broadcasted, LU_data_broadcasted) = _linear_solve_broadcast_args(self, LU_data, "lu_solve");
+  std::tie(self_broadcasted, LU_data_broadcasted) = _linalg_broadcast_batch_dims(self, LU_data, "lu_solve");
 
   // Now, we need to broadcast pivots too for the batch dimensions to match
-  IntArrayRef new_lu_sizes(LU_data_broadcasted.sizes().data(), LU_data_broadcasted.ndimension() - 2);
-  std::vector<int64_t> new_pivots_sizes = infer_size(new_lu_sizes, pivots_sizes);
-  new_pivots_sizes.push_back(LU_data.size(-1));
+  IntArrayRef new_pivots_sizes(LU_data_broadcasted.sizes().data(), LU_data_broadcasted.dim() - 1);
   Tensor LU_pivots_broadcasted = LU_pivots.expand(new_pivots_sizes);
   return at::_lu_solve_helper(self_broadcasted, LU_data_broadcasted, LU_pivots_broadcasted);
 }
