@@ -74,7 +74,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
     }
   });
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = unify_from_right(self.names(), src.names());
+  auto outnames = unify_from_right(self.opt_names(), src.opt_names());
   if (outnames.has_value()) {
     namedinference::propagate_names(self, *outnames);
   } else {
