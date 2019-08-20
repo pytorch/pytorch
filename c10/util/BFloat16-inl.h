@@ -15,6 +15,188 @@ inline C10_HOST_DEVICE BFloat16::operator float() const {
   return detail::f32_from_bits(x);
 }
 
+/// Arithmetic
+
+inline C10_HOST_DEVICE BFloat16 operator+(const BFloat16& a, const BFloat16& b) {
+  return static_cast<float>(a) + static_cast<float>(b);
+}
+
+inline C10_HOST_DEVICE BFloat16 operator-(const BFloat16& a, const BFloat16& b) {
+  return static_cast<float>(a) - static_cast<float>(b);
+}
+
+inline C10_HOST_DEVICE BFloat16 operator*(const BFloat16& a, const BFloat16& b) {
+  return static_cast<float>(a) * static_cast<float>(b);
+}
+
+inline C10_HOST_DEVICE BFloat16 operator/(const BFloat16& a, const BFloat16& b) {
+  return static_cast<float>(a) / static_cast<float>(b);
+}
+
+inline C10_HOST_DEVICE BFloat16 operator-(const BFloat16& a) {
+  return -static_cast<float>(a);
+}
+
+inline C10_HOST_DEVICE BFloat16& operator+=(BFloat16& a, const BFloat16& b) {
+  a = a + b;
+  return a;
+}
+
+inline C10_HOST_DEVICE BFloat16& operator-=(BFloat16& a, const BFloat16& b) {
+  a = a - b;
+  return a;
+}
+
+inline C10_HOST_DEVICE BFloat16& operator*=(BFloat16& a, const BFloat16& b) {
+  a = a * b;
+  return a;
+}
+
+inline C10_HOST_DEVICE BFloat16& operator/=(BFloat16& a, const BFloat16& b) {
+  a = a / b;
+  return a;
+}
+
+inline C10_HOST_DEVICE BFloat16& operator|(BFloat16& a, const BFloat16& b) {
+  a.x = a.x | b.x;
+  return a;
+}
+
+inline C10_HOST_DEVICE BFloat16& operator^(BFloat16& a, const BFloat16& b) {
+  a.x = a.x ^ b.x;
+  return a;
+}
+
+inline C10_HOST_DEVICE BFloat16& operator&(BFloat16& a, const BFloat16& b) {
+  a.x = a.x & b.x;
+  return a;
+}
+
+/// Arithmetic with floats
+
+inline C10_HOST_DEVICE float operator+(BFloat16 a, float b) {
+  return static_cast<float>(a) + b;
+}
+inline C10_HOST_DEVICE float operator-(BFloat16 a, float b) {
+  return static_cast<float>(a) - b;
+}
+inline C10_HOST_DEVICE float operator*(BFloat16 a, float b) {
+  return static_cast<float>(a) * b;
+}
+inline C10_HOST_DEVICE float operator/(BFloat16 a, float b) {
+  return static_cast<float>(a) / b;
+}
+
+inline C10_HOST_DEVICE float operator+(float a, BFloat16 b) {
+  return a + static_cast<float>(b);
+}
+inline C10_HOST_DEVICE float operator-(float a, BFloat16 b) {
+  return a - static_cast<float>(b);
+}
+inline C10_HOST_DEVICE float operator*(float a, BFloat16 b) {
+  return a * static_cast<float>(b);
+}
+inline C10_HOST_DEVICE float operator/(float a, BFloat16 b) {
+  return a / static_cast<float>(b);
+}
+
+inline C10_HOST_DEVICE float& operator+=(float& a, const BFloat16& b) {
+  return a += static_cast<float>(b);
+}
+inline C10_HOST_DEVICE float& operator-=(float& a, const BFloat16& b) {
+  return a -= static_cast<float>(b);
+}
+inline C10_HOST_DEVICE float& operator*=(float& a, const BFloat16& b) {
+  return a *= static_cast<float>(b);
+}
+inline C10_HOST_DEVICE float& operator/=(float& a, const BFloat16& b) {
+  return a /= static_cast<float>(b);
+}
+
+/// Arithmetic with doubles
+
+inline C10_HOST_DEVICE double operator+(BFloat16 a, double b) {
+  return static_cast<double>(a) + b;
+}
+inline C10_HOST_DEVICE double operator-(BFloat16 a, double b) {
+  return static_cast<double>(a) - b;
+}
+inline C10_HOST_DEVICE double operator*(BFloat16 a, double b) {
+  return static_cast<double>(a) * b;
+}
+inline C10_HOST_DEVICE double operator/(BFloat16 a, double b) {
+  return static_cast<double>(a) / b;
+}
+
+inline C10_HOST_DEVICE double operator+(double a, BFloat16 b) {
+  return a + static_cast<double>(b);
+}
+inline C10_HOST_DEVICE double operator-(double a, BFloat16 b) {
+  return a - static_cast<double>(b);
+}
+inline C10_HOST_DEVICE double operator*(double a, BFloat16 b) {
+  return a * static_cast<double>(b);
+}
+inline C10_HOST_DEVICE double operator/(double a, BFloat16 b) {
+  return a / static_cast<double>(b);
+}
+
+/// Arithmetic with ints
+
+inline C10_HOST_DEVICE BFloat16 operator+(BFloat16 a, int b) {
+  return a + static_cast<BFloat16>(b);
+}
+inline C10_HOST_DEVICE BFloat16 operator-(BFloat16 a, int b) {
+  return a - static_cast<BFloat16>(b);
+}
+inline C10_HOST_DEVICE BFloat16 operator*(BFloat16 a, int b) {
+  return a * static_cast<BFloat16>(b);
+}
+inline C10_HOST_DEVICE BFloat16 operator/(BFloat16 a, int b) {
+  return a / static_cast<BFloat16>(b);
+}
+
+inline C10_HOST_DEVICE BFloat16 operator+(int a, BFloat16 b) {
+  return static_cast<BFloat16>(a) + b;
+}
+inline C10_HOST_DEVICE BFloat16 operator-(int a, BFloat16 b) {
+  return static_cast<BFloat16>(a) - b;
+}
+inline C10_HOST_DEVICE BFloat16 operator*(int a, BFloat16 b) {
+  return static_cast<BFloat16>(a) * b;
+}
+inline C10_HOST_DEVICE BFloat16 operator/(int a, BFloat16 b) {
+  return static_cast<BFloat16>(a) / b;
+}
+
+//// Arithmetic with int64_t
+
+inline C10_HOST_DEVICE BFloat16 operator+(BFloat16 a, int64_t b) {
+  return a + static_cast<BFloat16>(b);
+}
+inline C10_HOST_DEVICE BFloat16 operator-(BFloat16 a, int64_t b) {
+  return a - static_cast<BFloat16>(b);
+}
+inline C10_HOST_DEVICE BFloat16 operator*(BFloat16 a, int64_t b) {
+  return a * static_cast<BFloat16>(b);
+}
+inline C10_HOST_DEVICE BFloat16 operator/(BFloat16 a, int64_t b) {
+  return a / static_cast<BFloat16>(b);
+}
+
+inline C10_HOST_DEVICE BFloat16 operator+(int64_t a, BFloat16 b) {
+  return static_cast<BFloat16>(a) + b;
+}
+inline C10_HOST_DEVICE BFloat16 operator-(int64_t a, BFloat16 b) {
+  return static_cast<BFloat16>(a) - b;
+}
+inline C10_HOST_DEVICE BFloat16 operator*(int64_t a, BFloat16 b) {
+  return static_cast<BFloat16>(a) * b;
+}
+inline C10_HOST_DEVICE BFloat16 operator/(int64_t a, BFloat16 b) {
+  return static_cast<BFloat16>(a) / b;
+}
+
 } // namespace c10
 
 namespace std {

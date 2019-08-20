@@ -256,7 +256,8 @@ std::shared_ptr<FusedKernel> compileKernel(
 
     auto scalar_type = ProfiledTensorType::create(o->type())->scalarType();
     TORCH_INTERNAL_ASSERT(scalar_type);
-    auto type = CompleteTensorType::create(*scalar_type, device, sizes);
+    auto type =
+        ProfiledTensorType::createContiguous(*scalar_type, device, sizes);
     output_desc.emplace_back(type);
     const auto& desc = output_desc.back();
 
