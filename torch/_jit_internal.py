@@ -94,6 +94,8 @@ def createResolutionCallbackFromClosure(fn):
 def can_compile_class(cls):
     # If any of the functions on a type don't have a code object, this type can't
     # be compiled and is probably a builtin / bound from C
+    if is_ignored_fn(cls):
+        return False
     fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
     has_code = [hasattr(fn, '__code__') for fn in fns]
     return all(has_code)
@@ -425,6 +427,9 @@ def _qualified_name(obj):
         return obj.qualified_name
 
     name = obj.__name__
+    if name == '<lambda>':
+        name = '_lambda'  # make name a valid identifier
+
     module_name = obj.__module__
 
     # If the module is actually a torchbind module, then we should short circuit

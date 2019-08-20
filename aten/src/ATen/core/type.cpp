@@ -6,25 +6,7 @@
 namespace c10 {
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
-  if(auto value = t.cast<CompleteTensorType>()) {
-    out << toString(value->scalarType()) << "(";
-    auto& sizes = value->sizes();
-    auto& strides = value->strides();
-    AT_ASSERT(sizes.size() == strides.size());
-    for (size_t i = 0; i < sizes.size(); i++) {
-      if (i > 0) {
-        out << ", ";
-      }
-      // TODO: figure out a good way to output strides, or
-      // add a "debug" printing mode which adds the extra stuff
-      out << sizes[i]; // << "%" << strides[i];
-      int64_t expected = i + 1 < sizes.size() ? sizes[i+1]*strides[i+1] : 1;
-      if (strides[i] != expected) {
-        out << "!"; //mark non-contiguous
-      }
-    }
-    out << ")";
-  } else if (auto value = t.cast<ProfiledTensorType>()) {
+  if (auto value = t.cast<ProfiledTensorType>()) {
     if  (value->scalarType().has_value()) {
       out << toString(*value->scalarType());
       if (!value->sizes().size().has_value()) {
@@ -82,10 +64,17 @@ TensorTypePtr TensorType::get() {
   static auto value = TensorType::create();
   return value;
 }
-AutogradZeroTensorTypePtr AutogradZeroTensorType::get() {
-  static auto value = AutogradZeroTensorType::create();
+
+ProfiledTensorTypePtr ProfiledTensorType::get() {
+  static auto value = ProfiledTensorType::create(
+      {},
+      {},
+      VaryingShape{c10::optional<size_t>()},
+      VaryingShape{c10::optional<size_t>()},
+      {});
   return value;
 }
+
 NumberTypePtr NumberType::get() {
   static auto value = NumberType::create();
   return value;
@@ -151,7 +140,7 @@ ListTypePtr ListType::ofBools() {
 // the type, like in the tracer.
 TypePtr incompleteInferTypeFrom(const IValue& value) {
   if (value.isTensor()) {
-    return CompleteTensorType::create(value.toTensor());
+    return ProfiledTensorType::create(value.toTensor());
   } else if (value.isDouble()) {
     return FloatType::get();
   } else if (value.isInt()) {
@@ -494,19 +483,15 @@ std::string ProfiledTensorType::str() const {
   return "Tensor";
 }
 
-VaryingShape VaryingShape::merge(const VaryingShape& other) const
-{
-  if (size_ != other.size_) {
-    return VaryingShape(c10::optional<size_t>{});
+VaryingShape VaryingShape::merge(const VaryingShape& other) const {
+  if (!dims_ || !other.dims_ || dims_->size() != other.dims_->size()) {
+    return VaryingShape();
   }
-
-  VaryingShape vs(c10::optional<size_t>(dims_.size()));
-  for (size_t i = 0; i < dims_.size(); i++)
-  {
-    vs.dims_[i] = merge_primitive(dims_[i], other.dims_[i]);
+  ListOfOptionalInts dims;
+  for (size_t i = 0, n = dims_->size(); i < n; i++) {
+    dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
   }
-
-  return vs;
+  return VaryingShape(std::move(dims));
 }
 
 std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
