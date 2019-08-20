@@ -166,6 +166,9 @@ else
   python setup.py install
 fi
 
+echo 'FOOOO'
+sccache --show-stats
+
 assert_git_not_dirty
 
 # Test documentation build
