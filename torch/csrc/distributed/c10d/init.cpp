@@ -271,6 +271,17 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
+              "allreduce_coalesced",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& xs,
+                 ::c10d::AllreduceOptions opts) {
+                return pg.allreduce_coalesced(xs, opts);
+              },
+              py::arg("tensors"),
+              py::arg("op") = ::c10d::AllreduceOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "reduce",
               &::c10d::ProcessGroup::reduce,
               py::arg("tensors"),

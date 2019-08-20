@@ -639,6 +639,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
       });
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceOptions& opts) {
+  throw std::runtime_error("allreduce_coalesced is currently not supported with NCCL");
+}
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
