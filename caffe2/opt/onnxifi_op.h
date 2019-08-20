@@ -211,7 +211,7 @@ class OnnxifiOp final : public Operator<Context> {
           ONNXIFI_STATUS_SUCCESS);
 
       // Release unused backend ids.
-      for (auto i = 0; i < num_backends; ++i) {
+      for (size_t i = 0; i < num_backends; ++i) {
         if (i == backend_index) {
           continue;
         }
@@ -231,7 +231,7 @@ class OnnxifiOp final : public Operator<Context> {
 
       // Extra weight shapes
       std::unordered_map<std::string, ShapeInfo> weight_shape_info;
-      for (int i = 0; i < weight_names.size(); ++i) {
+      for (size_t i = 0; i < weight_names.size(); ++i) {
         TensorShape shape;
         const auto& shape0 = weight_shapes[i];
         for (const auto d : shape0) {

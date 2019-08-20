@@ -93,8 +93,12 @@ class FrontendError(Exception):
         self.source_range = source_range
         self.msg = msg
 
+        # This has to be instantiated here so the ErrorReport is accurate to the
+        # call stack when the FrontendError was raised
+        self.error_report = torch._C.ErrorReport(self.source_range)
+
     def __str__(self):
-        return self.msg + torch._C.ErrorReport(self.source_range).what()
+        return self.msg + self.error_report.what()
 
 
 class NotSupportedError(FrontendError):
@@ -413,22 +417,28 @@ class ExprBuilder(Builder):
         ast.Is: 'is',
         ast.IsNot: 'is not',
         ast.In: 'in',
+        ast.NotIn: 'not in',
     }
 
     @staticmethod
     def build_Attribute(ctx, expr):
-        # NB: the only attributes we support are for getting methods
-        value = build_expr(ctx, expr.value)
-        # <sigh> name is just a string, so it's not annotated in any way.
-        source = ctx.source
-        pos = find_after(ctx, value.range().end, '.').end  # Start with the dot
-        while source[pos] in string.whitespace:  # Skip whitespace
-            pos += 1
-        start_pos = pos
-        while source[pos] in _identifier_chars:  # Find the identifier itself
-            pos += 1
-        name_range = ctx.make_raw_range(start_pos, pos)
-        return Select(value, Ident(name_range, expr.attr))
+        base = build_expr(ctx, expr.value)
+        # expr.attr is just a string, so it's not annotated in any way, so we have
+        # to build the range manually
+        source = ctx.source.encode('utf-8')
+
+        def get_char(index):
+            if PY2:
+                return source[index]
+            else:
+                return chr(source[index])
+
+        start_pos = base.range().end + 1
+        while get_char(start_pos) in string.whitespace:  # Skip whitespace
+            start_pos += 1
+        end_pos = start_pos + len(expr.attr)
+        name_range = ctx.make_raw_range(start_pos, end_pos)
+        return Select(base, Ident(name_range, expr.attr))
 
     @staticmethod
     def build_Call(ctx, expr):
@@ -533,10 +543,18 @@ class ExprBuilder(Builder):
         for lhs, op_, rhs in zip(operands, expr.ops, operands[1:]):
             op = type(op_)
             op_token = ExprBuilder.cmpop_map.get(op)
+            r = ctx.make_raw_range(lhs.range().end, rhs.range().start)
             if op_token is None:
-                err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
-                raise NotSupportedError(err_range, "unsupported comparison operator: " + op.__name__)
-            cmp_expr = BinOp(op_token, lhs, rhs)
+                raise NotSupportedError(r, "unsupported comparison operator: " + op.__name__)
+
+            if op == ast.NotIn:
+                # NB: `not in` is just `not( in )`, so we don't introduce new tree view
+                # but just make it a nested call in our tree view structure
+                in_expr = BinOp('in', lhs, rhs)
+                cmp_expr = UnaryOp(r, 'not', in_expr)
+            else:
+                cmp_expr = BinOp(op_token, lhs, rhs)
+
             if result is None:
                 result = cmp_expr
             else:
@@ -678,11 +696,6 @@ class ExprBuilder(Builder):
 
 build_expr = ExprBuilder()
 build_stmt = StmtBuilder()
-
-
-def find_after(ctx, pos, substr, offsets=(0, 0)):
-    new_pos = pos + ctx.source[pos:].index(substr)
-    return ctx.make_raw_range(new_pos + offsets[0], new_pos + len(substr) + offsets[1])
 
 
 def find_before(ctx, pos, substr, offsets=(0, 0)):

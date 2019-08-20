@@ -14,7 +14,8 @@ from textwrap import dedent
 from itertools import product, permutations
 
 from test_jit import JitTestCase, enable_cpu_fuser, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
-    backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
+    backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
+    LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything
 
 
 class TestFuser(JitTestCase):
@@ -280,7 +281,7 @@ class TestFuser(JitTestCase):
             c = s(inp1, inp2)
             c.sum().backward()
             graph = backward_graph(s)
-            self.assertAllFused(graph)
+            self.assertAllFused(graph, except_for={'aten::Float'})
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
@@ -440,6 +441,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    @_inline_everything
     def test_fuse_decompose_normalization(self):
         class ResLike(torch.jit.ScriptModule):
             def __init__(self, norm_module):

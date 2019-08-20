@@ -31,4 +31,6 @@ _all__ = [
     'default_qat_qconfig', 'prepare_qat', 'quantize_qat',
     # module transformations
     'fuse_modules',
+    # Dynamic quantization utilities
+    'quantize_dynamic',
 ]

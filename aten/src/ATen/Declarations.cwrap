@@ -73,6 +73,7 @@
   name: _th_masked_fill_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   cname: maskedFill
   variants: function
   return: self
@@ -93,6 +94,7 @@
   name: _th_masked_fill_bool_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   cname: maskedFillBool
   variants: function
   return: self
@@ -113,6 +115,7 @@
   name: _th_masked_scatter_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   cname: maskedCopy
   variants: function
   return: self
@@ -126,6 +129,7 @@
   name: _th_masked_scatter_bool_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   cname: maskedCopyBool
   variants: function
   return: self
@@ -140,6 +144,7 @@
   cname: maskedSelect
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -155,6 +160,7 @@
   cname: maskedSelectBool
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -606,6 +612,7 @@
   name: _th_lt
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -628,6 +635,7 @@
   name: _th_lt_byte
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -650,6 +658,7 @@
   name: _th_lt_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   return: self
   variants: function
   options:
@@ -669,6 +678,7 @@
   name: _th_gt
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -691,6 +701,7 @@
   name: _th_gt_byte
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -713,6 +724,7 @@
   name: _th_gt_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   return: self
   variants: function
   options:
@@ -732,6 +744,7 @@
   name: _th_le
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -754,6 +767,7 @@
   name: _th_le_byte
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -776,6 +790,7 @@
   name: _th_le_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   return: self
   variants: function
   options:
@@ -795,6 +810,7 @@
   name: _th_ge
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -817,6 +833,7 @@
   name: _th_ge_byte
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -839,6 +856,7 @@
   name: _th_ge_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   return: self
   variants: function
   options:
@@ -858,6 +876,7 @@
   name: _th_eq
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -880,6 +899,7 @@
   name: _th_eq_byte
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -902,6 +922,7 @@
   name: _th_eq_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   return: self
   variants: function
   options:
@@ -921,6 +942,7 @@
   name: _th_ne
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -943,6 +965,7 @@
   name: _th_ne_byte
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -965,6 +988,7 @@
   name: _th_ne_
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   return: self
   variants: function
   options:
@@ -1769,40 +1793,6 @@
         - THTensor* self
 ]]
 [[
-  name: _th_atan2
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  cname: atan2
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: other fallback
-    - THTensor* other
-]]
-[[
-  name: _th_atan2_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  cname: atan2
-  variants: function
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - arg: THTensor* self
-      broadcast: other fallback inplace
-    - THTensor* other
-]]
-[[
   name: _th_pow
   cname: pow
   variants:
@@ -2112,6 +2102,7 @@
 [[
   name: _th_addmm
   cname: addmm
+  cpu_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -2133,6 +2124,7 @@
 ]]
 [[
   name: _th_addmm_
+  cpu_bfloat16: True
   variants: [function]
   return: self
   options:
@@ -2152,6 +2144,7 @@
 [[
   name: _th_addmv
   cname: addmv
+  cpu_bfloat16: True
   variants: function
   return: argument 0
   arguments:
@@ -2171,6 +2164,7 @@
 [[
   name: _th_addmv_
   cname: addmv
+  cpu_bfloat16: True
   variants: function
   return: self
   arguments:
@@ -2188,6 +2182,7 @@
 [[
   name: _th_addr
   cname: addr
+  cpu_bfloat16: True
   variants: function
   return: argument 0
   scalar_check: false
@@ -2207,6 +2202,7 @@
 ]]
 [[
   name: _th_addr_
+  cpu_bfloat16: True
   cname: addr
   return: self
   variants: function
@@ -2225,6 +2221,7 @@
 [[
   name: _th_ger
   cname: addr
+  cpu_bfloat16: True
   variants: function
   return: argument 0
   scalar_check: false
@@ -2241,6 +2238,7 @@
 ]]
 [[
   name: _th_mv
+  cpu_bfloat16: True
   cname: addmv
   variants: function
   return: argument 0
@@ -2258,6 +2256,7 @@
 ]]
 [[
   name: _th_mm
+  cpu_bfloat16: True
   variants: function
   return: argument 0
   options:
@@ -2354,75 +2353,6 @@
       kwarg_only: True
     - THTensor* batch1
     - THTensor* batch2
-]]
-[[
-  name: _th_addcmul
-  cname: addcmul
-  variants:
-    - function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: tensor1,tensor2 fallback
-    - arg: real value
-      default: AS_REAL(1)
-      kwarg_only: True
-    - THTensor* tensor1
-    - THTensor* tensor2
-]]
-[[
-  name: _th_addcmul_
-  options:
-    - cname: addcmul
-      variants: function
-      backends:
-        - CUDA
-      return: argument 0
-      arguments:
-        - THTensor* self
-        - arg: THTensor* self
-          broadcast: tensor1,tensor2 inplace fallback
-        - arg: real value
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THTensor* tensor1
-        - THTensor* tensor2
-]]
-[[
-  name: _th_addcdiv
-  cname: addcdiv
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: tensor1,tensor2 fallback
-    - arg: real value
-      default: AS_REAL(1)
-      kwarg_only: True
-    - THTensor* tensor1
-    - THTensor* tensor2
-]]
-[[
-  name: _th_addcdiv_
-  cname: addcdiv
-  variants: function
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - arg: THTensor* self
-      broadcast: tensor1,tensor2 inplace fallback
-    - arg: real value
-      default: AS_REAL(1)
-      kwarg_only: True
-    - THTensor* tensor1
-    - THTensor* tensor2
 ]]
 [[
   name: _th_gels
