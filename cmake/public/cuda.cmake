@@ -28,12 +28,10 @@ endif()
 # Find CUDA.
 find_package(CUDA)
 if(NOT CUDA_FOUND)
-  message(WARNING
-    "Caffe2: CUDA cannot be found. Depending on whether you are building "
-    "Caffe2 or a Caffe2 dependent library, the next warning / error will "
-    "give you more info.")
-  set(CAFFE2_USE_CUDA OFF)
-  return()
+  message(FATAL_ERROR
+    "CUDA could not be found on your system. Please check your CUDA installation or disable CUDA build by running "
+    "\"python setup.py clean\" first and then run \"python setup.py install\" "
+    "with the \"USE_CUDA\" environment variable set to OFF.")
 endif()
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
