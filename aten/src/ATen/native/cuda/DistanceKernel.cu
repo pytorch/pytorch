@@ -159,7 +159,7 @@ __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
   scalar_t * buff_i = buffer + l * l_size + (r1 * j + i) * m + init;
 
   for (; self_i < end; self_i += stride, self_j += stride, buff_i += stride) {
-    const scalar_t res = F::backward(*self_i - *self_j, grad_k, dist_k, p);
+    const scalar_t res = *self_i;//F::backward(*self_i - *self_j, grad_k, dist_k, p);
     *buff_i = res;
   }
 }
