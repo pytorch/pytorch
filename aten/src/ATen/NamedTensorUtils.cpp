@@ -75,7 +75,7 @@ static void check_for_misalignment(
 
 // Assumption: A DimnameList can have no duplicate full names with
 // the exception of wildcards
-static std::vector<Dimname> unify_from_right(DimnameList names, DimnameList other_names) {
+std::vector<Dimname> unify_from_right(DimnameList names, DimnameList other_names) {
   const auto wildcard = Dimname::wildcard();
   const auto size = std::max(names.size(), other_names.size());
   auto result = std::vector<Dimname>(size, wildcard);
@@ -117,22 +117,6 @@ static std::vector<Dimname> unify_from_right(DimnameList names, DimnameList othe
     ++result_it;
   }
   return result;
-}
-
-// Assumption: A DimnameList can have no duplicate full names with
-// the exception of wildcards
-CAFFE2_API optional<std::vector<Dimname>>
-unify_from_right(optional<DimnameList> names, optional<DimnameList> other_names) {
-  if (!names && !other_names) {
-    return nullopt;
-  }
-  if (!names) {
-    return other_names.value().vec();
-  }
-  if (!other_names) {
-    return names.value().vec();
-  }
-  return unify_from_right(*names, *other_names);
 }
 
 
@@ -238,17 +222,18 @@ void propagate_names(TensorImpl* result, TensorImpl* src) {
   propagate_names(result, impl::get_opt_names(src));
 }
 
+void propagate_names_for_copy(Tensor& result, const Tensor& src) {
+  if (!result.has_names() && !src.has_names()) {
+    return;
+  }
+  auto outnames = unify_from_right(result.names(), src.names());
+  propagate_names(result, std::move(outnames), /*validate_names=*/false);
+}
+
 static std::vector<Dimname> compute_mm_outnames(
-    optional<DimnameList> mat1_names,
-    optional<DimnameList> mat2_names) {
-  std::vector<Dimname> mm_outnames(2, Dimname::wildcard());
-  if (mat1_names) {
-    mm_outnames[0] = (*mat1_names)[0];
-  }
-  if (mat2_names) {
-    mm_outnames[1] = (*mat2_names)[1];
-  }
-  return mm_outnames;
+    DimnameList mat1_names,
+    DimnameList mat2_names) {
+  return { mat1_names[0], mat2_names[1] };
 }
 
 void propagate_names_for_addmm(
@@ -260,10 +245,16 @@ void propagate_names_for_addmm(
       !impl::has_names(bias) && !impl::has_names(result)) {
     return;
   }
-  auto mm_outnames = compute_mm_outnames(impl::get_opt_names(m1), impl::get_opt_names(m2));
-  auto add_outnames = unify_from_right(mm_outnames, impl::get_opt_names(bias));
-  TORCH_INTERNAL_ASSERT(add_outnames.has_value() && add_outnames->size() == 2);
-  propagate_names(result, std::move(*add_outnames));
+  auto mm_outnames = compute_mm_outnames(impl::get_names(m1), impl::get_names(m2));
+  TORCH_CHECK(
+    mm_outnames[0] == Dimname::wildcard() || mm_outnames[0] != mm_outnames[1],
+    "Matrix multiplying Tensor", impl::get_names(m1),
+    " with Tensor", impl::get_names(m2),
+    " would produce output tensor with duplicate names ",
+    "[", mm_outnames[0], ", ",  mm_outnames[1], "]",
+    ". Please rename the input tensors to prevent this.");
+  auto add_outnames = unify_from_right(mm_outnames, impl::get_names(bias));
+  propagate_names(result, std::move(add_outnames), /*validate_names=*/false);
 }
 
 } // namespace namedinference
