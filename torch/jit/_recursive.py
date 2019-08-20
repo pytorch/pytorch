@@ -156,7 +156,6 @@ def recursive_script(mod, exclude_methods=()):
     # we shouldn't directly compile overloaded methods, just its overloads
     def ignore_overloaded(method_name):
         return method_name not in overload_name_mappings
->>>>>>> extend torch.jit._overload to modules
 
     def make_stub(method):
         func = get_function_from_type(type(mod), method)
