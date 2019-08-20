@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "ATen/native/ScatterGather.h"
 
 namespace at { namespace native {
 
@@ -7,13 +8,26 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
   TORCH_CHECK(std::max<int64_t>(index.dim(), 1) == num_dims, "Index tensor must have same dimensions as input tensor");
   dim = c10::maybe_wrap_dim(dim, self.dim());
 
-  int64_t elems_per_row = (index.dim() == 0 ? 1 : index.size(dim));
-  int64_t self_dim_size = self.size(dim);
+  std::vector<int64_t> result_sizes = result.sizes().vec();
+  std::vector<int64_t> self_sizes = self.sizes().vec();
+  std::vector<int64_t> index_sizes = index.sizes().vec();
+  std::vector<int64_t> result_strides = result.strides().vec();
+  std::vector<int64_t> self_strides = self.strides().vec();
+  std::vector<int64_t> index_strides = index.strides().vec();
+  ensure_nonempty(result_sizes);
+  ensure_nonempty(self_sizes);
+  ensure_nonempty(index_sizes);
+  ensure_nonempty(result_strides);
+  ensure_nonempty(self_strides);
+  ensure_nonempty(index_strides);
+
+  int64_t elems_per_row = (index.dim() == 0 ? 1 : index_sizes[dim]);
+  int64_t self_dim_size = self_sizes[dim];
   int64_t outer_size = 1;
   for(int64_t i = 0; i < num_dims; i++) {
     if(i != dim) {
-      TORCH_CHECK(index.size(i) == self.size(i), "Size does not match at dimension ", i, " get ", self.size(i), " vs ", index.size(i));
-      outer_size *= index.size(i);
+      TORCH_CHECK(index_sizes[i] == self_sizes[i], "Size does not match at dimension ", i, " get ", self_sizes[i], " vs ", index_sizes[i]);
+      outer_size *= index_sizes[i];
     }
   }
   result.resize_as_(index);
@@ -28,9 +42,9 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
     bool finished = false;
     std::vector<int64_t> counter(num_dims, 0);
 
-    int64_t result_dim_stride = result.stride(dim);
-    int64_t index_dim_stride = index.stride(dim);
-    int64_t self_dim_stride = self.stride(dim);
+    int64_t result_dim_stride = result_strides[dim];
+    int64_t index_dim_stride = index_strides[dim];
+    int64_t self_dim_stride = self_strides[dim];
 
     while(!finished) {
       for(int64_t j = 0; j < elems_per_row; j++) {
@@ -50,18 +64,18 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
           continue;
         }
         counter[i]++;
-        result_data += result.stride(i);
-        self_data += self.stride(i);
-        index_data += index.stride(i);
-        if(counter[i] == result.size(i)) {
+        result_data += result_strides[i];
+        self_data += self_strides[i];
+        index_data += index_strides[i];
+        if(counter[i] == result_sizes[i]) {
           if(i == num_dims - 1) {
             finished = true;
             break;
           }
-          int64_t size = result.size(i);
-          result_data -= size * result.stride(i);
-          self_data -= size * self.stride(i);
-          index_data -= size * index.stride(i);
+          int64_t size = self_sizes[i];
+          result_data -= size * result_strides[i];
+          self_data -= size * self_strides[i];
+          index_data -= size * index_strides[i];
           counter[i] = 0;
         } else {
           break;
