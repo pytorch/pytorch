@@ -6,9 +6,9 @@ from functools import partial
 import torch
 import torch.nn as nn
 
-ABC = ABCMeta("ABC", (nn.Module,), {})  # compatible with Python 2 *and* 3:
+ABC = ABCMeta(str('ABC'), (object,), {})  # compatible with Python 2 *and* 3:
 
-class ObserverBase(ABC):
+class ObserverBase(ABC, nn.Module):
     r"""Observer base Module
     Any concrete observer implementation should derive from this class.
 
