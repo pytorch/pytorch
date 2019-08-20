@@ -89,9 +89,13 @@ static void frac_kernel(TensorIterator& iter) {
   });
 }
 
-
 static void logical_not_kernel(TensorIterator& iter) {
-  cpu_kernel(iter, [](bool a) -> bool { return !a; });
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_not_cpu", [&]() {
+    using self_t = scalar_t;
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_not_cpu", [&]() {
+      cpu_kernel(iter, [](self_t a) -> scalar_t { return static_cast<scalar_t>(!a); });
+    });
+  });
 }
 
 static void reciprocal_kernel(TensorIterator& iter) {
