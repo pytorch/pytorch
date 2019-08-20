@@ -697,6 +697,28 @@ Tensor & t_(Tensor & self) {
   return self.transpose_(0, self.dim() < 2 ? 0 : 1);
 }
 
+Tensor unfold(const Tensor &self, int64_t dim, int64_t size, int64_t step) {
+  std::vector<int64_t> new_sizes;
+  std::vector<int64_t> new_strides;
+
+  auto sizes = self.sizes().vec();
+  auto strides = self.strides().vec();
+  for(int64_t d = 0; d < self.dim(); d++) {
+    if (d == dim) {
+      new_sizes.push_back((sizes[d] - size) / step + 1);
+      new_strides.push_back(step * strides[d]);
+    } else {
+      new_sizes.push_back(sizes[d]);
+      new_strides.push_back(strides[d]);
+    }
+  }
+
+  new_sizes.push_back(size);
+  new_strides.push_back(strides[dim]);
+
+  return self.as_strided(new_sizes, new_strides);
+}
+
 std::tuple<std::vector<int64_t>, std::vector<int64_t> >
 inferSqueezeGeometry(const Tensor &tensor) {
   std::vector<int64_t> sizes;
