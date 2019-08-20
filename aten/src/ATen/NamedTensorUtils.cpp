@@ -169,7 +169,7 @@ static void assert_names_equal(DimnameList a, DimnameList b) {
 }
 
 void propagate_names(TensorImpl* result, optional<DimnameList> names) {
-  if (!impl::get_names(result).has_value() && !names.has_value()) {
+  if (!impl::get_opt_names(result).has_value() && !names.has_value()) {
     return;
   }
   if (!impl::has_names(result)) {
@@ -177,7 +177,7 @@ void propagate_names(TensorImpl* result, optional<DimnameList> names) {
     return;
   }
   assert_names_equal(
-      *impl::get_names(result),
+      *impl::get_opt_names(result),
       names.value_or(default_names(result->dim())));
 }
 
@@ -186,7 +186,7 @@ void propagate_names(TensorImpl* result, std::vector<Dimname>&& names, bool vali
     impl::internal_set_names_inplace(result, std::move(names), validate_names);
     return;
   }
-  assert_names_equal(*impl::get_names(result), names);
+  assert_names_equal(*impl::get_opt_names(result), names);
 }
 
 void propagate_names(Tensor& result, optional<DimnameList> names) {
@@ -246,7 +246,7 @@ void propagate_names(TensorImpl* result, TensorImpl* src) {
   if (result == src) {
     return;
   }
-  propagate_names(result, impl::get_names(src));
+  propagate_names(result, impl::get_opt_names(src));
 }
 
 static std::vector<Dimname> compute_mm_outnames(
@@ -271,8 +271,8 @@ void propagate_names_for_addmm(
       !impl::has_names(bias) && !impl::has_names(result)) {
     return;
   }
-  auto mm_outnames = compute_mm_outnames(impl::get_names(m1), impl::get_names(m2));
-  auto add_outnames = unify_from_right(mm_outnames, impl::get_names(bias));
+  auto mm_outnames = compute_mm_outnames(impl::get_opt_names(m1), impl::get_opt_names(m2));
+  auto add_outnames = unify_from_right(mm_outnames, impl::get_opt_names(bias));
   TORCH_INTERNAL_ASSERT(add_outnames.has_value() && add_outnames->size() == 2);
   propagate_names(result, std::move(*add_outnames));
 }

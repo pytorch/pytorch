@@ -174,7 +174,7 @@ class CAFFE2_API Tensor {
   }
 #ifdef BUILD_NAMEDTENSOR
   optional<DimnameList> opt_names() const {
-    return impl::get_names(unsafeGetTensorImpl());
+    return impl::get_opt_names(unsafeGetTensorImpl());
   }
 #endif
   int64_t ndimension() const {
