@@ -10,8 +10,10 @@ namespace at { namespace cuda { namespace detail {
 // CUDA: grid stride looping
 //
 // int64_t _i_n_d_e_x specifically prevents overflow in the loop increment.
-// Overflow in the cast is not checked in order to avoid another conditional.
-// Array sizes should be checked before the kernel is launched.
+// If input.numel() < INT_MAX, _i_n_d_e_x < INT_MAX, except after the final
+// iteration of the loop where _i_n_d_e_x += blockDim.x * gridDim.x can be
+// greater than INT_MAX.  But in that case _i_n_d_e_x >= n, so there are no
+// further iterations and the overflowed value in i=_i_n_d_e_x is not used.
 #define CUDA_KERNEL_LOOP(i, n) \
   int64_t _i_n_d_e_x = blockIdx.x * blockDim.x + threadIdx.x;                                \
   for (int i=_i_n_d_e_x; _i_n_d_e_x < (n); _i_n_d_e_x+=blockDim.x * gridDim.x, i=_i_n_d_e_x)
