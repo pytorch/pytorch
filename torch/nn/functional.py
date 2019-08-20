@@ -2642,10 +2642,10 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         https://arxiv.org/abs/1506.02025
 
     .. warning::
-        With ``align_corners = True``, the grid positions depend on the pixel
-        size relative to the input size, and so the sampled locations will differ
-        for the same input given at different resolutions (that is, after being
-        upsampled or downsampled).
+        When ``align_corners = True``, the grid positions depend on the pixel
+        size relative to the input image size, and so the locations sampled by
+        :func:`grid_sample` will differ for the same input given at different
+        resolutions (that is, after being upsampled or downsampled).
         The default behavior up to version 1.2.0 was ``align_corners = True``.
         Since then, the default behavior has been changed to ``align_corners = False``,
         in order to bring it in line with the default for :func:`interpolate`.
@@ -2701,13 +2701,23 @@ def affine_grid(theta, size, align_corners=None):
         output (Tensor): output Tensor of size (:math:`N \times H \times W \times 2`)
 
     .. warning::
-        With ``align_corners = True``, the grid positions depend on the pixel
-        size relative to the input size, and so the sampled locations will differ
-        for the same input given at different resolutions (that is, after being
-        upsampled or downsampled).
+        When ``align_corners = True``, the grid positions depend on the pixel
+        size relative to the input image size, and so the locations sampled by
+        :func:`grid_sample` will differ for the same input given at different
+        resolutions (that is, after being upsampled or downsampled).
         The default behavior up to version 1.2.0 was ``align_corners = True``.
         Since then, the default behavior has been changed to ``align_corners = False``,
         in order to bring it in line with the default for :func:`interpolate`.
+    .. warning::
+        When ``align_corners = True``, 2D affine transforms on 1D data and
+        3D affine transforms on 2D data (that is, when one of the spatial
+        dimensions has unit size) are ill-defined, and not an intended use case.
+        This is not a problem when ``align_corners = False``.
+        Up to version 1.2.0, all grid points along a unit dimension were
+        considered arbitrarily to be at ``-1``.
+        From version 1.3.0, under ``align_corners = True`` all grid points
+        along a unit dimension are condsidered to be at ```0``
+        (the center of the input image).
     """
     if align_corners is None:
         warnings.warn("Default grid_sample and affine_grid behavior has changed "
@@ -2725,14 +2735,25 @@ def affine_grid(theta, size, align_corners=None):
         if theta.dim() != 3 or theta.shape[-2] != 2 or theta.shape[-1] != 3:
             raise ValueError("Expected a batch of 2D affine matrices of shape Nx2x3 "
                              "for size {}. Got {}.".format(size, theta.shape))
+        spatial_size = size[-2:]  # spatial dimension sizes
     elif len(size) == 5:
         if theta.dim() != 3 or theta.shape[-2] != 3 or theta.shape[-1] != 4:
             raise ValueError("Expected a batch of 3D affine matrices of shape Nx3x4 "
                              "for size {}. Got {}.".format(size, theta.shape))
+        spatial_size = size[-3:]  # spatial dimension sizes
     else:
         raise NotImplementedError("affine_grid only supports 4D and 5D sizes, "
                                   "for 2D and 3D affine transforms, respectively. "
                                   "Got size {}.".format(size))
+    # check for empty span
+    if align_corners and min(spatial_size) == 1:
+        warnings.warn("Since version 1.3.0, affine_grid behavior has changed "
+                      "for unit-size grids when align_corners=True. "
+                      "This is not an intended use case of affine_grid. "
+                      "See the documentation of affine_grid for details.")
+    elif min(size) <= 0:
+        raise ValueError("Expected non-zero, positive output size. Got {}"
+                         .format(size))
 
     return torch.affine_grid_generator(theta, size, align_corners)
 
