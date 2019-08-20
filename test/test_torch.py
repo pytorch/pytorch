@@ -29,7 +29,7 @@ from common_methods_invocations import tri_tests_args, run_additional_tri_tests,
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, torchtest
+    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, torchtest, TEST_WITH_ROCM
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -2521,7 +2521,7 @@ class _TestTorchMixin(torchtest):
         tensor = torch.tensor(ints, dtype=torch.int64, device=device)
         nparr = np.array(ints, dtype=np.int64)
 
-        if device == 'cuda':
+        if device == 'cuda' and not TEST_WITH_ROCM:
             with self.assertRaises(AssertionError):
                 # This is a check that pow CUDA implementation is
                 # incompatible with Numpy:
