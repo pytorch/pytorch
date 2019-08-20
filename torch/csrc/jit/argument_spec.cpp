@@ -216,7 +216,7 @@ void ArgumentSpecCreator::specializeTypes(
         auto& arg = spec.tensorAt(tensor_arg_spec_offset++);
         if (!arg.defined()) {
           result_stack.back().emplace_back(
-              TensorType::get()->withAutogradZero());
+              ProfiledTensorType::get()->withAutogradZero());
         } else {
           result_stack.back().emplace_back(arg.toType());
         }

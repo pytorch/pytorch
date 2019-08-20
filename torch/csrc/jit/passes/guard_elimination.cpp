@@ -134,7 +134,7 @@ struct GuardElimination {
           input->node()->kind() == prim::Constant) {
         AT_ASSERT(
             input->node()->kind() != prim::Guard ||
-            input->type()->expect<TensorType>());
+            input->type()->expect<ProfiledTensorType>());
       } else {
         all_inputs_guarded = false;
         break;

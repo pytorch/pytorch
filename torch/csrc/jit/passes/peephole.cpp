@@ -44,8 +44,9 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
             "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
             /*const_inputs=*/attr::size)) {
       // x.expand(x.size()) == x
-      if (auto input_type =
-              node->namedInput(attr::self)->type()->cast<TensorType>()) {
+      if (auto input_type = node->namedInput(attr::self)
+                                ->type()
+                                ->cast<ProfiledTensorType>()) {
         auto expanded_sizes = node->get<c10::List<int64_t>>(attr::size);
         auto input_type_sizes = input_type->sizes().concrete_sizes();
         if (expanded_sizes.has_value() && input_type_sizes &&
@@ -70,8 +71,8 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
     } else if (node->matches(
                    "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
       // x.type_as(y) == x iff x.type() == y.type()
-      auto self_type = node->input(0)->type()->expect<TensorType>();
-      auto other_type = node->input(1)->type()->expect<TensorType>();
+      auto self_type = ProfiledTensorType::create(node->input(0)->type());
+      auto other_type = ProfiledTensorType::create(node->input(1)->type());
       if (mustBeEqual(self_type->scalarType(), other_type->scalarType()) &&
           mustBeEqual(self_type->device(), other_type->device())) {
         GRAPH_UPDATE(
@@ -107,7 +108,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
           // type_as conditional on the tensor shape being a scalar, but that
           // might add overhead, and make analysis harder.
           auto add_mat_type =
-              node->input(1 - mm_side)->type()->expect<TensorType>();
+              ProfiledTensorType::create(node->input(1 - mm_side)->type());
           // if we don't have the rank, we can't tell if the bias is a scalar
           if (!add_mat_type->sizes().size()) {
             continue;
@@ -122,10 +123,10 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
             SymbolicVariable mat1(mm_node->input(0));
             SymbolicVariable mat2(mm_node->input(1));
 
-            auto mat1_type = mat1.value()->type()->expect<TensorType>();
+            auto mat1_type = ProfiledTensorType::create(mat1.value()->type());
             auto mat_scalar_type = mat1_type->scalarType();
             if (!mat_scalar_type) {
-              auto mat2_type = mat2.value()->type()->expect<TensorType>();
+              auto mat2_type = ProfiledTensorType::create(mat2.value()->type());
               mat_scalar_type = mat2_type->scalarType();
             }
 
@@ -281,7 +282,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
         node->output()->replaceAllUsesWith(node->input());
       }
     } else if (node->matches("prim::dtype(Tensor a) -> int")) {
-      auto ptt = node->input()->type()->expect<TensorType>();
+      auto ptt = ProfiledTensorType::create(node->input()->type());
       if (ptt->scalarType()) {
         WithInsertPoint guard(node);
         auto output = node->owningGraph()->insertConstant(
@@ -291,7 +292,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
         node->output()->replaceAllUsesWith(output);
       }
     } else if (node->matches("prim::device(Tensor a) -> Device")) {
-      auto ptt = node->input()->type()->expect<TensorType>();
+      auto ptt = ProfiledTensorType::create(node->input()->type());
       if (ptt->device()) {
         WithInsertPoint guard(node);
         auto output = node->owningGraph()->insertConstant(*ptt->device());
@@ -303,7 +304,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
         node->output()->replaceAllUsesWith(output);
       }
     } else if (node->matches("aten::dim(Tensor self) -> int")) {
-      auto ptt = node->input()->type()->expect<TensorType>();
+      auto ptt = ProfiledTensorType::create(node->input()->type());
       if (auto dim = ptt->sizes().size()) {
         WithInsertPoint guard(node);
         auto output =
@@ -316,7 +317,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
         node->output()->replaceAllUsesWith(output);
       }
     } else if (node->matches("prim::is_cuda(Tensor a) -> bool")) {
-      auto ptt = node->input()->type()->expect<TensorType>();
+      auto ptt = ProfiledTensorType::create(node->input()->type());
       if (ptt->device()) {
         WithInsertPoint guard(node);
         auto output =
