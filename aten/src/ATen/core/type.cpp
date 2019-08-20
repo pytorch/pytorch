@@ -483,19 +483,15 @@ std::string ProfiledTensorType::str() const {
   return "Tensor";
 }
 
-VaryingShape VaryingShape::merge(const VaryingShape& other) const
-{
-  if (size_ != other.size_) {
-    return VaryingShape(c10::optional<size_t>{});
+VaryingShape VaryingShape::merge(const VaryingShape& other) const {
+  if (!dims_ || !other.dims_ || dims_->size() != other.dims_->size()) {
+    return VaryingShape();
   }
-
-  VaryingShape vs(c10::optional<size_t>(dims_.size()));
-  for (size_t i = 0; i < dims_.size(); i++)
-  {
-    vs.dims_[i] = merge_primitive(dims_[i], other.dims_[i]);
+  ListOfOptionalInts dims;
+  for (size_t i = 0, n = dims_->size(); i < n; i++) {
+    dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
   }
-
-  return vs;
+  return VaryingShape(std::move(dims));
 }
 
 std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
