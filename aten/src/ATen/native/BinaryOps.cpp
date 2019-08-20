@@ -27,7 +27,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     AT_ERROR("add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
   }
   auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_internal_overlap=*/true);
+    /*check_mem_overlap=*/true);
   add_stub(iter.device_type(), iter, alpha);
   return result;
 }
@@ -56,7 +56,7 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
     return at::_sparse_div_zerodim_out(result, self, other);
   }
   auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_internal_overlap=*/true);
+    /*check_mem_overlap=*/true);
   div_stub(iter.device_type(), iter);
   return result;
 }
@@ -81,7 +81,7 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
     return at::_sparse_mul_out(result, self, other);
   }
   auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_internal_overlap=*/true);
+    /*check_mem_overlap=*/true);
   mul_stub(iter.device_type(), iter);
   return result;
 }
@@ -127,7 +127,7 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     AT_ERROR("sub(sparse, dense) is not supported. Use sub(dense, sparse) instead.");
   }
   auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_internal_overlap=*/true);
+    /*check_mem_overlap=*/true);
   sub_stub(iter.device_type(), iter, alpha);
   return result;
 }
@@ -220,10 +220,11 @@ DEFINE_DISPATCH(logical_or_stub);
 DEFINE_DISPATCH(logical_xor_stub);
 
 template <typename Stub>
-static inline Tensor& logical_binary_out_impl(Tensor& result, const Tensor& self, const Tensor& other, Stub stub) {
+static inline Tensor& logical_binary_out_impl(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
   TensorIterator iter;
   iter.dont_compute_common_dtype();
-  iter.check_and_add_output(result);
+  iter.set_check_mem_overlap(true);
+  iter.add_output(result);
   iter.add_input(self);
   iter.add_input(other);
   iter.build();
@@ -232,14 +233,14 @@ static inline Tensor& logical_binary_out_impl(Tensor& result, const Tensor& self
 }
 
 template <typename Stub>
-static inline Tensor logical_binary_impl(const Tensor& self, const Tensor& other, Stub stub) {
+static inline Tensor logical_binary_impl(const Tensor& self, const Tensor& other, Stub& stub) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
   logical_binary_out_impl(result, self, other, stub);
   return result;
 }
 
 template <typename Stub>
-static inline Tensor& logical_binary_impl_(Tensor& self, const Tensor& other, Stub stub) {
+static inline Tensor& logical_binary_impl_(Tensor& self, const Tensor& other, Stub& stub) {
   return logical_binary_out_impl(self, self, other, stub);
 }
 
