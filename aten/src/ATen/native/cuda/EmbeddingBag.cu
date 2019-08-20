@@ -231,7 +231,11 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
+#ifdef __HIP_PLATFORM_HCC__
+  dim3 block = dim3(64, 4);
+#else
   dim3 block = dim3(32, 8);
+#endif
   int grid = 1024;
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -284,7 +288,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
   }
 
 #ifdef __HIP_PLATFORM_HCC__
-  dim3 block = dim3(64, 8);
+  dim3 block = dim3(64, 4);
 #else
   dim3 block = dim3(32, 8);
 #endif
