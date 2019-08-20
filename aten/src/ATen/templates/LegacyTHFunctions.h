@@ -2,18 +2,7 @@
 
 // ${generated_comment}
 
-#include <ATen/Context.h>
-#include <c10/core/ScalarType.h>
-#include <c10/core/TensorOptions.h>
-
-namespace c10 {
-class Scalar;
-}
-namespace at {
-struct Generator;
-class Tensor;
-struct Type;
-} // namespace at
+#include <ATen/ATen.h>
 
 namespace at {
 namespace native {

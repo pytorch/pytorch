@@ -22,7 +22,6 @@ def copy_to_script_module(original, stubs):
     constants_set = set(getattr(original, "__constants__", []))
     script_module.__dict__["_constants_set"] = {}
 
-
     # Copy Parameters and Modules
     for name in dir(original):
         item = getattr(original, name)
