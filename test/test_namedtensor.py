@@ -64,6 +64,16 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'construct a tensor with duplicate names'):
             x = factory(2, 1, 1, names=('N', 'C', 'N'), device=device)
 
+        names64 = ['A' * i for i in range(1, 65)]
+        x = factory([1] * 64, names=names64, device=device)
+        self.assertEqual(x.names, names64)
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'only support up to 64 dims'):
+            names65 = ['A' * i for i in range(1, 66)]
+            x = factory([1] * 65, names=names64, device=device)
+
         # Tests for tagged names
         x = factory(2, 3, 1, names=('C.in', 'H', 'C.out'), device=device)
         self.assertEqual(x.names, ('C.in', 'H', 'C.out'))
