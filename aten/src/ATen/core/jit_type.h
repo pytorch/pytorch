@@ -294,58 +294,68 @@ inline c10::optional<T> merge_primitive(
 // an empty c10::optional in `sizes_`. If a rank is dynamic, the entire
 // `sizes_` becomes the empty optional.
 struct CAFFE2_API VaryingShape {
+  using ListOfOptionalInts = std::vector<c10::optional<int64_t>>;
   VaryingShape(const std::vector<int64_t>& vec)
-      : size_(vec.size()), dims_(vec.begin(), vec.end()) {}
+      : VaryingShape(ListOfOptionalInts(vec.begin(), vec.end())) {}
 
   VaryingShape(c10::ArrayRef<int64_t> vec)
-      : size_(vec.size()), dims_(vec.begin(), vec.end()) {}
+      : VaryingShape(ListOfOptionalInts(vec.begin(), vec.end())){}
 
-  VaryingShape(c10::optional<size_t> size)
-      : size_(size), dims_(size ? size.value() : 0) {}
+  VaryingShape(c10::optional<size_t> size = c10::nullopt) {
+    if (size) {
+      dims_ = ListOfOptionalInts(*size);
+    }
+  }
+
+  VaryingShape(ListOfOptionalInts dims)
+  : dims_(std::move(dims)) {}
 
   VaryingShape(size_t size) : VaryingShape(c10::optional<size_t>(size)) {}
 
   bool operator==(const VaryingShape& other) const {
-    return size_ == other.size_ && dims_ == other.dims_;
+    return dims_ == other.dims_;
   }
 
   const c10::optional<int64_t>& operator[](int i) const {
-    if (!size_) {
+    if (!dims_) {
       throw std::runtime_error("Rank isn't fixed");
     }
-    return dims_[i];
+    return (*dims_).at(i);
   }
 
   c10::optional<size_t> size() const {
-    AT_ASSERT(!size_ || size_ == dims_.size());
-    return size_;
+    if (!dims_) {
+      return c10::nullopt;
+    }
+    const auto& dims = dims_.value();
+    return dims.size();
   }
 
-  const std::vector<c10::optional<int64_t>>& sizes() const { return dims_; }
+  const c10::optional<ListOfOptionalInts>& sizes() const { 
+    return dims_; 
+  }
 
   VaryingShape merge(const VaryingShape& other) const;
 
   c10::optional<std::vector<int64_t>> concrete_sizes() const {
-    c10::optional<std::vector<int64_t>> empty{};
-    std::vector<int64_t> sizes;
-    if (!size_) {
-      return empty;
+    if (!dims_) {
+      return c10::nullopt;
     }
-    for (auto d : dims_) {
+    std::vector<int64_t> sizes;
+    for (auto d : *dims_) {
       if (!d) {
-        return empty;
+        return c10::nullopt;
       }
       sizes.push_back(d.value());
     }
-
     return sizes;
   }
 
   bool isComplete() const {
-    if (!size_) {
+    if (!dims_) {
       return false;
     }
-    for (auto d : dims_) {
+    for (auto d : *dims_) {
       if(!d) {
         return false;
       }
@@ -354,8 +364,7 @@ struct CAFFE2_API VaryingShape {
   }
 
  private:
-  c10::optional<size_t> size_;
-  std::vector<c10::optional<int64_t>> dims_;
+  c10::optional<ListOfOptionalInts> dims_;
 };
 
 using VaryingStrides = VaryingShape;
