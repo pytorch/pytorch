@@ -69,7 +69,7 @@ class Conv2d(torch.nn.Module):
             raise ValueError('out_channels must be divisible by groups')
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.kernel_size = kernel_size
+        self.kernel_size = _pair(kernel_size)
         self.stride = _pair(stride)
         self.padding = _pair(padding)
         self.dilation = _pair(dilation)
@@ -212,6 +212,7 @@ class Conv2d(torch.nn.Module):
             weight_observer = mod.qconfig.weight()
             weight_observer(mod.weight)
         act_scale, act_zp = activation_observer.calculate_qparams()
+        assert weight_observer.dtype == torch.qint8, 'Weight observer must have a dtype of qint8'
         wt_scale, wt_zp = weight_observer.calculate_qparams()
         bias_scale = float(wt_scale * act_scale)
         qweight = torch.quantize_linear(
