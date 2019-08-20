@@ -173,7 +173,7 @@ class CAFFE2_API Tensor {
     return impl_->strides();
   }
 #ifdef BUILD_NAMEDTENSOR
-  optional<DimnameList> names() const {
+  optional<DimnameList> opt_names() const {
     return impl::get_names(unsafeGetTensorImpl());
   }
 #endif
