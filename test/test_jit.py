@@ -1,3 +1,4 @@
+# -*- coding: UTF-8 -*-
 from __future__ import division
 
 # Torch
@@ -633,9 +634,6 @@ class TestJit(JitTestCase):
             # type: (Tensor, Tensor) -> List[Tensor]
             z = x + 2 * y + x * y
             grad_outputs: List[Optional[torch.Tensor]] = [torch.ones((2, 2)), ]
-            # print(z)
-            # print(x)
-            # print(y)
             return torch.autograd.grad((z, ), (x, y), grad_outputs)
 
         x = torch.randn(2, 2, requires_grad=True)
@@ -648,8 +646,6 @@ class TestJit(JitTestCase):
         new_z = new_x + 2 * new_y + new_x * new_y
         script_res = scripted_fn(x, y)
         self.assertEqual(eager_res, script_res)
-
-
 
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
@@ -14033,6 +14029,12 @@ a")
             return list(string)
 
         self.checkScript(fn, ("abcdefgh",))
+
+    def test_unicode_comments(self):
+        @torch.jit.script
+        def test(self, a):
+            # 🤷🤷🤷🤷
+            return torch.nn.functional.relu(a)
 
     def test_dict_in_not_in(self):
         def test_in_dict(x):
