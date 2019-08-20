@@ -43,7 +43,8 @@ Tensor& logical_not_(Tensor& self) {
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
   TensorIterator iter;
   iter.dont_compute_common_dtype();
-  iter.check_and_add_output(result);
+  iter.set_check_mem_overlap(true);
+  iter.add_output(result);
   iter.add_input(self);
   iter.build();
   logical_not_stub(iter.device_type(), iter);
@@ -214,7 +215,7 @@ IMPLEMENT_UNARY_OP(ceil);
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     checkBackend(#op, result, Backend::CPU);                    \
     auto iter = TensorIterator::unary_op(result, self,          \
-      /*check_internal_overlap=*/true);                         \
+      /*check_mem_overlap=*/true);                              \
     op##_stub(iter.device_type(), iter);                        \
     return result;                                              \
   }
