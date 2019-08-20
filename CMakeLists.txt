@@ -5,6 +5,7 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 # Use compiler ID "AppleClang" instead of "Clang" for XCode.
 # Not setting this sometimes makes XCode C compiler gets detected as "Clang",
 # even when the C++ one is detected as "AppleClang".
+cmake_policy(SET CMP0010 NEW)
 cmake_policy(SET CMP0025 NEW)
 
 # ---[ Project and semantic versioning.
@@ -107,6 +108,9 @@ option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
+cmake_dependent_option(
+    USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
+    "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
