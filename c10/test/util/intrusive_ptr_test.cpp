@@ -316,7 +316,10 @@ TEST(
     givenValidPtr_whenCopyAssigningToSelf_thenPointsToSameObject) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   SomeClass* obj1ptr = obj1.get();
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wself-assign-overloaded"
   obj1 = obj1;
+#pragma clang diagnostic pop
   EXPECT_EQ(obj1ptr, obj1.get());
 }
 
