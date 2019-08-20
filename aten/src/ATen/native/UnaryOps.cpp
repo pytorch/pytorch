@@ -192,14 +192,12 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
-#define IMPLEMENT_UNARY_OP(op)                                  \
+#define IMPLEMENT_UNARY_OP_VEC(op)                              \
   Tensor op(const Tensor& self) {                               \
     Tensor result = at::empty({0}, self.options());             \
     at::op##_out(result, self);                                 \
     return result;                                              \
-  }
-
-#define IMPLEMENT_UNARY_OP_INPLACE_OUT_CPU(op)                  \
+  }                                                             \
   Tensor& _##op##__cpu(Tensor& self) {                          \
     return at::op##_out(self, self);                            \
   }                                                             \
@@ -211,7 +209,12 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
     return result;                                              \
   }
 
-#define IMPLEMENT_UNARY_OP_INPLACE_OUT_CUDA(op)                  \
+#define IMPLEMENT_UNARY_OP_VEC_CUDA(op)                          \
+  Tensor op(const Tensor& self) {                                \
+    Tensor result = at::empty({0}, self.options());              \
+    at::op##_out(result, self);                                  \
+    return result;                                               \
+  }                                                              \
   Tensor& _##op##__cuda(Tensor& self) {                          \
     return at::op##_out(self, self);                             \
   }                                                              \
@@ -223,16 +226,6 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
     return result;                                               \
   }
 
-#define IMPLEMENT_UNARY_OP_VEC(op)                              \
-  IMPLEMENT_UNARY_OP(op)                                        \
-  IMPLEMENT_UNARY_OP_INPLACE_OUT_CPU(op)
-
-#define IMPLEMENT_UNARY_OP_VEC_CUDA(op)                         \
-  IMPLEMENT_UNARY_OP(op)                                        \
-  IMPLEMENT_UNARY_OP_INPLACE_OUT_CUDA(op)
-
-
-
 IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
@@ -242,6 +235,7 @@ IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
+IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(expm1)
 IMPLEMENT_UNARY_OP_VEC(floor)
