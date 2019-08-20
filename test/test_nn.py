@@ -7694,6 +7694,82 @@ class TestNN(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, "expected input and grid to be on same device"):
                 F.grid_sample(input.cuda(), grid, align_corners=False)
 
+    def test_affine_grid_error_checking(self):
+        # 2D affine
+        theta = torch.empty(1, 2, 3, dtype=torch.double)
+        size = torch.Size([1, 1, 2, 2])
+
+        # assert no error
+        F.affine_grid(theta, size, align_corners=False)
+
+        # check for warning for empty span along dimension
+        with warnings.catch_warnings(record=True) as w:
+            # Ensure warnings are being shown
+            warnings.simplefilter("always")
+            # Should not trigger warning
+            F.affine_grid(theta, torch.Size([1, 1, 2, 1]), align_corners=False)
+            # Check no warning occurs
+            self.assertEqual(len(w), 0)
+            # Should trigger warning
+            F.affine_grid(theta, torch.Size([1, 1, 2, 1]), align_corners=True)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertIn('See the documentation of affine_grid for details.', str(w[0]))
+
+        with self.assertRaisesRegex(ValueError, "Expected theta to have floating point type"):
+            F.affine_grid(theta.int(), size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 2D affine matrices of shape Nx2x3"):
+            F.affine_grid(theta[0], size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 2D affine matrices of shape Nx2x3"):
+            F.affine_grid(theta.unsqueeze(0), size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 2D affine matrices of shape Nx2x3"):
+            F.affine_grid(theta.repeat(1, 2, 1), size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 2D affine matrices of shape Nx2x3"):
+            F.affine_grid(theta.repeat(1, 1, 2), size, align_corners=False)
+
+        # 3D affine
+        theta = torch.empty(1, 3, 4, dtype=torch.double)
+        size = torch.Size([1, 1, 2, 2, 2])
+
+        # assert no error
+        F.affine_grid(theta, size, align_corners=False)
+
+        # check for warning for empty span along dimension
+        with warnings.catch_warnings(record=True) as w:
+            # Ensure warnings are being shown
+            warnings.simplefilter("always")
+            # Should not trigger warning
+            F.affine_grid(theta, torch.Size([1, 1, 3, 2, 1]), align_corners=False)
+            # Check no warning occurs
+            self.assertEqual(len(w), 0)
+            # Should trigger warning
+            F.affine_grid(theta, torch.Size([1, 1, 3, 2, 1]), align_corners=True)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertIn('See the documentation of affine_grid for details.', str(w[0]))
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 3D affine matrices of shape Nx3x4"):
+            F.affine_grid(theta[0], size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 3D affine matrices of shape Nx3x4"):
+            F.affine_grid(theta.unsqueeze(0), size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 3D affine matrices of shape Nx3x4"):
+            F.affine_grid(theta.repeat(1, 2, 1), size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 3D affine matrices of shape Nx3x4"):
+            F.affine_grid(theta.repeat(1, 1, 2), size, align_corners=False)
+
+        with self.assertRaisesRegex(NotImplementedError, "affine_grid only supports 4D and 5D sizes"):
+            F.affine_grid(theta, torch.Size([1, 2, 2]), align_corners=False)
+
+        with self.assertRaisesRegex(NotImplementedError, "affine_grid only supports 4D and 5D sizes"):
+            F.affine_grid(theta, torch.Size([1, 1, 2, 2, 2, 2]), align_corners=False)
+
     def test_grid_sample(self):
         def test(N, C, H, W, mode, padding_mode, align_corners):
             def test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners):
