@@ -6,7 +6,7 @@
 namespace c10 {
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
-  if (auto value = t.cast<TensorType>()) {
+  if (auto value = t.cast<ProfiledTensorType>()) {
     if  (value->scalarType().has_value()) {
       out << toString(*value->scalarType());
       if (!value->sizes().size().has_value()) {
@@ -28,9 +28,6 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         }
       }
       out << ")";
-    }
-    if (value->autogradZero() && *value->autogradZero()) {
-      out << "[AutogradZero]";
     }
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
@@ -64,7 +61,12 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 }
 
 TensorTypePtr TensorType::get() {
-  static auto value = TensorType::create(
+  static auto value = TensorType::create();
+  return value;
+}
+
+ProfiledTensorTypePtr ProfiledTensorType::get() {
+  static auto value = ProfiledTensorType::create(
       {},
       {},
       VaryingShape{c10::optional<size_t>()},
@@ -138,7 +140,7 @@ ListTypePtr ListType::ofBools() {
 // the type, like in the tracer.
 TypePtr incompleteInferTypeFrom(const IValue& value) {
   if (value.isTensor()) {
-    return TensorType::create(value.toTensor());
+    return ProfiledTensorType::create(value.toTensor());
   } else if (value.isDouble()) {
     return FloatType::get();
   } else if (value.isInt()) {
@@ -260,8 +262,8 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   // NB: we do not return NumberType because there is not currently enough
   // operator support for it
 
-  if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
-    return t1->expect<TensorType>()->merge(t2->expect<TensorType>());
+  if (t1->kind() == ProfiledTensorType::Kind && t2->kind() == ProfiledTensorType::Kind) {
+    return t1->expect<ProfiledTensorType>()->merge(t2->expect<ProfiledTensorType>());
   }
 
   if (t1->isSubtypeOf(TensorType::get()) && t2->isSubtypeOf(TensorType::get())) {
@@ -477,7 +479,7 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
   return false;
 }
 
-std::string TensorType::str() const {
+std::string ProfiledTensorType::str() const {
   return "Tensor";
 }
 
@@ -621,17 +623,6 @@ std::string TupleType::python_str() const {
     ss << "]";
   }
   return ss.str();
-}
-
-bool TensorType::isSubtypeOf(const TypePtr rhs) const {
-  if (auto rhs_p = rhs->cast<TensorType>()) {
-    // if we have the same pointer, avoid computing the merge
-    if (this == rhs_p.get()) {
-      return true;
-    }
-    return *merge(rhs_p) == *rhs_p;
-  }
-  return Type::isSubtypeOf(rhs);
 }
 
 } // namespace c10

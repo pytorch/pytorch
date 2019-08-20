@@ -221,7 +221,7 @@ void EncoderBase::EncodeValueInfo(
     const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   std::string name = n->debugName();
   v->set_name(name);
-  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
+  if (ProfiledTensorTypePtr node_type = n->type()->cast<ProfiledTensorType>()) {
     if (!node_type->isComplete()) {
       return;
     }
