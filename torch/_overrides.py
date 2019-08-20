@@ -22,7 +22,7 @@ from .tensor import Tensor
 
 
 _TORCH_FUNCTION = Tensor.__torch_function__
-_TORCH_ONLY = [Tensor]
+_TENSOR_ONLY = [Tensor]
 
 
 def get_overloaded_types_and_args(relevant_args):
@@ -208,8 +208,8 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
 
         # Equivalently, we could define this function directly instead of using
         # exec. This version has the advantage of giving the helper function a
-        # more interpettable name. Otherwise, the original function does not
-        # show up at all in many cases, e.g., if it's written in C or if the
+        # more interpretable name. Otherwise, the original function does not
+        # show up at all in many cases, e.g., if it's written in C++ or if the
         # dispatcher gets an invalid keyword argument.
         source = _wrapped_func_source.format(name=implementation.__name__)
         print("===========source================")
