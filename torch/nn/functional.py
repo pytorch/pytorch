@@ -8,7 +8,6 @@ import torch
 from torch._C import _infer_size, _add_docstr
 from . import _reduction as _Reduction
 from .modules import utils
-from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from . import _VF
@@ -2716,7 +2715,7 @@ def affine_grid(theta, size, align_corners=None):
                       "align_corners=True if the old behavior is desired. "
                       "See the documentation of grid_sample for details.")
         align_corners = False
-    return vision.affine_grid_generator(theta, size, align_corners)
+    return torch.affine_grid_generator(theta, size, align_corners)
 
 
 def pad(input, pad, mode='constant', value=0):
