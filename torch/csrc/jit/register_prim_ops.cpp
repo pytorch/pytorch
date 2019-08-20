@@ -670,11 +670,11 @@ RegisterOperators reg(
                allow_unused);
 
            std::vector<at::Tensor> res_tensors(res.begin(), res.end());
-           push(stack, c10::impl::toList<at::Tensor>(res_tensors));
+           push(stack, c10::impl::toList<at::Tensor>(std::move(res_tensors)));
            return 0;
          },
          aliasAnalysisFromSchema()),
-    Operator(
+     Operator(
          "aten::backward(Tensor(a!) self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
          [](Stack& stack) {
            bool create_graph = pop(stack).toBool();

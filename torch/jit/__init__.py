@@ -1956,7 +1956,11 @@ def annotate(the_type, the_value):
     return the_value
 
 
-Attribute = collections.namedtuple('Attribute', ['value', 'type'])
+if _enabled:
+    Attribute = collections.namedtuple('Attribute', ['value', 'type'])
+else:
+    def Attribute(value, type):
+        return value
 
 last_executed_optimized_graph = torch._C._last_executed_optimized_graph
 
