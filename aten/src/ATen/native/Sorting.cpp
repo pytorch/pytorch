@@ -126,8 +126,8 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
         [&](int64_t i, TensorList tl) {
           auto tmp_values = tl[0].accessor<scalar_t, 1>();
           auto tmp_indices = tl[1].accessor<int64_t, 1>();
-          scalar_t* mode_value = tl[2].data<scalar_t>();
-          int64_t* mode_index = tl[3].data<int64_t>();
+          scalar_t* mode_value = tl[2].data_ptr<scalar_t>();
+          int64_t* mode_index = tl[3].data_ptr<int64_t>();
           for (int64_t j = 0; j < tmp_indices.size(0); j++) {
             tmp_indices[j] = j;
           }

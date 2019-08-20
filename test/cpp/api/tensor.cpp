@@ -119,27 +119,27 @@ TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame) {
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(at::kFloat);
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(tensor.options());
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(tensor.dtype());
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(tensor.device());
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
   {
     auto tensor = at::empty({3, 4}, at::kFloat);
     auto hopefully_not_copy = tensor.to(tensor);
-    ASSERT_EQ(hopefully_not_copy.data<float>(), tensor.data<float>());
+    ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   }
 }
 
