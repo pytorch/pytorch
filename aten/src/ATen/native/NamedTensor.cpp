@@ -100,9 +100,9 @@ static std::vector<int64_t> aligned_size(
 // 2) torch.align_tensors([tensor, other])  (is_aligning_two_tensors=true)
 static Tensor align(const Tensor& tensor, DimnameList names, bool is_aligning_two_tensors) {
   std::vector<int64_t> expanded_sizes;
-  if (tensor.names().has_value()) {
+  if (tensor.opt_names().has_value()) {
     expanded_sizes = aligned_size(
-        tensor.sizes(), *tensor.names(), names, is_aligning_two_tensors);
+        tensor.sizes(), *tensor.opt_names(), names, is_aligning_two_tensors);
   } else {
     auto tensor_sizes = tensor.sizes();
     expanded_sizes = aligned_size(
@@ -120,7 +120,7 @@ Tensor align_to(const Tensor& tensor, DimnameList names) {
   TORCH_CHECK(
       names.size() >= tensor.dim(),
       "Cannot align tensor with dims ",
-      tensor.names() ? tensor.names().value() : default_names(tensor.dim()),
+      tensor.opt_names() ? tensor.opt_names().value() : default_names(tensor.dim()),
       " to a shorter list of dims ", names, ".");
   return align(tensor, names, /*aligning_two_tensors=*/false);
 }
@@ -140,7 +140,7 @@ std::vector<Tensor> align_tensors(TensorList tensors) {
       [](const Tensor& a, const Tensor& b) {
         return a.dim() < b.dim();
       });
-  auto longest_names = longest_dim->names();
+  auto longest_names = longest_dim->opt_names();
   if (longest_names.has_value()) {
     return align_tensors_to(tensors, *longest_names);
   } else {
