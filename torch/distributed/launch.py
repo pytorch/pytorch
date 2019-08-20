@@ -235,7 +235,7 @@ def main():
                    "-u",
                    args.training_script,
                    "--local_rank={}".format(local_rank)] + args.training_script_args
-        
+
         # insert the -m flag for module launching
         if args.module:
             cmd.insert(2, "-m")
