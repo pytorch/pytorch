@@ -1,10 +1,12 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/FutureMessage.h>
-#include <torch/csrc/distributed/rpc/Message.h>
-#include <torch/csrc/distributed/rpc/RpcAgent.h>
-#include <torch/csrc/distributed/rpc/ScriptCall.h>
-#include <torch/csrc/distributed/rpc/ScriptRet.h>
+#include <torch/csrc/distributed/rpc/future_message.h>
+#include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/script_call.h>
+#include <torch/csrc/distributed/rpc/script_ret.h>
+
 
 namespace torch {
 namespace distributed {
