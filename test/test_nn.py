@@ -8138,6 +8138,55 @@ class TestNN(NNTestCase):
                 self.assertEqual(out_cpu, out_cuda)
                 self.assertEqual(input_cpu.grad, input_gpu.grad)
 
+    def test_affine_grid_3D(self):
+        # test known input on CPU
+        input = torch.arange(1., 13).view(1, 3, 4)
+        output = F.affine_grid(input, torch.Size([1, 1, 2, 2, 2]), align_corners=True)
+        groundtruth = torch.Tensor(
+            [[[[[-2, -10, -18], [0, 0, 0]], [[2, 2, 2], [4, 12, 20]]],
+              [[[4, 4, 4], [6, 14, 22]], [[8, 16, 24], [10, 26, 42]]]]]).view(1, 2, 2, 2, 3)
+        self.assertEqual(output, groundtruth)
+        output = F.affine_grid(input, torch.Size([1, 1, 2, 2, 2]), align_corners=False)
+        groundtruth = torch.Tensor(
+            [[[[[1, -1, -3], [2, 4, 6]], [[3, 5, 7], [4, 10, 16]]],
+              [[[4, 6, 8], [5, 11, 17]], [[6, 12, 18], [7, 17, 27]]]]]).view(1, 2, 2, 2, 3)
+        self.assertEqual(output, groundtruth)
+
+        for align_corners in (True, False):
+            # do gradcheck
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            D = random.randint(1, 8)
+            H = random.randint(1, 8)
+            W = random.randint(1, 8)
+            sz = torch.Size([N, C, D, H, W])
+            inp = torch.randn(N, 3, 4, requires_grad=True)
+            with warnings.catch_warnings(record=True):
+                self.assertTrue(gradcheck(
+                    lambda inp: F.affine_grid(inp, sz, align_corners=align_corners),
+                    (inp,)))
+
+        # test CPU against CUDA
+        if TEST_CUDA:
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            D = random.randint(1, 8)
+            H = random.randint(1, 8)
+            W = random.randint(1, 8)
+            sz = torch.Size([N, C, D, H, W])
+            for align_corners in (True, False):
+                input_cpu = torch.randn(N, 3, 4, requires_grad=True)
+                with warnings.catch_warnings(record=True):
+                    out_cpu = F.affine_grid(input_cpu, sz, align_corners=align_corners)
+                gradients = torch.randn(out_cpu.size())
+                out_cpu.backward(gradients)
+                input_gpu = input_cpu.detach().cuda().requires_grad_()
+                with warnings.catch_warnings(record=True):
+                    out_cuda = F.affine_grid(input_gpu, sz, align_corners=align_corners)
+                out_cuda.backward(gradients.cuda())
+                self.assertEqual(out_cpu, out_cuda)
+                self.assertEqual(input_cpu.grad, input_gpu.grad)
+
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     def test_affine_2d_rotate0(self):
