@@ -16,25 +16,22 @@ Tensor quantized_relu(const Tensor& qx) {
                                      qx.q_scale(),
                                      qx.q_zero_point());
     auto iter = TensorIterator::unary_op(qy, qx);
-    cpu_kernel(*iter, [&](scalar_t value) -> scalar_t {
+    cpu_kernel(iter, [&](scalar_t value) -> scalar_t {
       return scalar_t(std::max<underlying_t>(value.val_, zero_point));
     });
   });
   return qy;
 }
 
-namespace {
-class QRelu final : public c10::OperatorKernel {
- public:
-  Tensor operator()(Tensor qx) {
-    return at::relu(qx);
-  }
-};
-
-static auto registry = c10::RegisterOperators().op(
-    "quantized::relu(Tensor qx) -> Tensor",
-    c10::RegisterOperators::options()
-      .kernel<QRelu>(QuantizedCPUTensorId()));
-}  // namespace
+Tensor& quantized_relu_(Tensor& qx) {
+  const auto zero_point = qx.q_zero_point();
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
+    auto iter = TensorIterator::unary_op(qx, qx);
+    cpu_kernel(iter, [&](scalar_t value) -> scalar_t {
+      return scalar_t(std::max<underlying_t>(value.val_, zero_point));
+    });
+  });
+  return qx;
+}
 
 }}  // namespace at::native

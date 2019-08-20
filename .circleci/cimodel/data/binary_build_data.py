@@ -42,7 +42,7 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
         "3.6m",
         "3.7m",
     ],
-    conda=dimensions.CONDA_PYTHON_VERSIONS,
+    conda=dimensions.STANDARD_PYTHON_VERSIONS,
     libtorch=[
         "2.7m",
     ],
@@ -52,7 +52,7 @@ CONFIG_TREE_DATA = OrderedDict(
     linux=(dimensions.CUDA_VERSIONS, LINUX_PACKAGE_VARIANTS),
     macos=([None], OrderedDict(
         wheel=dimensions.STANDARD_PYTHON_VERSIONS,
-        conda=dimensions.CONDA_PYTHON_VERSIONS,
+        conda=dimensions.STANDARD_PYTHON_VERSIONS,
         libtorch=[
             "2.7",
         ],
@@ -157,7 +157,7 @@ class PyVersionConfigNode(ConfigNode):
         package_format = self.find_prop("package_format")
         os_name = self.find_prop("os_name")
 
-        has_libtorch_variants = smoke and package_format == "libtorch" and os_name == "linux"
+        has_libtorch_variants = package_format == "libtorch" and os_name == "linux"
         linking_variants = LINKING_DIMENSIONS if has_libtorch_variants else []
 
         return [LinkingVariantConfigNode(self, v) for v in linking_variants]

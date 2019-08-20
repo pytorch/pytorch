@@ -52,8 +52,27 @@ const char* getClassName(PicklerClass cls) {
   }
 }
 
-const std::vector<char>& Pickler::stack() {
-  return stack_;
+static void postSetStateValidate(const IValue& v) {
+  auto obj = v.toObject();
+  const auto& objType = obj->type();
+  for (size_t i = 0; i < objType->numAttributes(); i++) {
+    const auto& attrType = objType->getAttribute(i);
+    const auto& attrName = objType->getAttributeName(i);
+    const auto& slot = obj->getSlot(i);
+    // const auto attrType = objType->getAttribute(i);
+    // Verify that all the non-optional attributes have been initialized
+    // TODO: Issue #20497
+    if (attrType->kind() != TypeKind::OptionalType) {
+      TORCH_CHECK(
+          !slot.isNone(),
+          "The field '",
+          attrName,
+          "' was left unitialized after __setstate__, but expected a ",
+          "value of type '",
+          attrType->python_str(),
+          "'");
+    }
+  }
 }
 
 void Pickler::protocol() {
@@ -89,6 +108,7 @@ void Pickler::torchSaveStop() {
     push<uint32_t>(key.size());
     pushBytes(key);
   }
+
   push<OpCode>(OpCode::TUPLE);
   stop();
 
@@ -96,7 +116,7 @@ void Pickler::torchSaveStop() {
   for (const auto& data : tensor_data_) {
     // first dump size
     push<size_t>(data.numel());
-    stack_.insert(stack_.end(), data.data(), data.data() + data.sizeInBytes());
+    writer_(data.data(), data.sizeInBytes());
   }
 }
 
@@ -141,7 +161,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
       push<OpCode>(OpCode::NEWFALSE);
     }
   } else if (ivalue.isString()) {
-    pushStringImpl(ivalue.toStringRef());
+    pushString(ivalue.toStringRef());
   } else if (ivalue.isGenericList()) {
     pushGenericList(ivalue);
   } else if (ivalue.isGenericDict()) {
@@ -179,7 +199,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isObject()) {
     auto obj = ivalue.toObject();
     auto type = obj->type();
-    pushGlobal(type->qualifier(), type->basename());
+    pushGlobal(type->name()->prefix(), type->name()->name());
     push<OpCode>(OpCode::EMPTY_TUPLE);
     push<OpCode>(OpCode::NEWOBJ);
     if (checkHasValidSetGetState(type)) {
@@ -293,7 +313,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // location
   pushString("cpu");
   // size
-  pushInt(tensor.numel());
+  pushInt(tensor.storage().size());
   // view_metadata
   push<OpCode>(OpCode::NONE);
   push<OpCode>(OpCode::TUPLE);
@@ -304,7 +324,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
 }
 
 void Pickler::pushBytes(const std::string& string) {
-  stack_.insert(stack_.end(), string.begin(), string.end());
+  writer_(string.data(), string.size());
 }
 
 void Pickler::pushGlobal(
@@ -342,16 +362,18 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   // The format here is the same one used by `torch.save()`. The code for the
   // format can be found in `torch/serialization.py`.
   auto tensor = ivalue.toTensor();
-
+  bool quantized = tensor.is_quantized();
   // The arguments to this function are:
   //    storage, storage_offset, size, stride, requires_grad, backward_hooks
-  pushGlobal("torch._utils", "_rebuild_tensor_v2");
+  pushGlobal(
+      "torch._utils", quantized ? "_rebuild_qtensor" : "_rebuild_tensor_v2");
+
   push<OpCode>(OpCode::MARK);
 
   pushStorageOfTensor(tensor);
 
   // storage offset
-  int64_t storage_offset = 0;
+  int64_t storage_offset = tensor.storage_offset();
   pushInt(storage_offset);
 
   // size
@@ -367,6 +389,11 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
     pushInt(stride);
   }
   push<OpCode>(OpCode::TUPLE);
+
+  if (quantized) {
+    pushDouble(tensor.q_scale());
+    pushInt(tensor.q_zero_point());
+  }
 
   // requires_grad
   pushIValue(tensor.requires_grad());
@@ -492,56 +519,50 @@ void Pickler::pushTuple(const IValue& ivalue) {
   push<OpCode>(OpCode::TUPLE);
 }
 
-std::vector<IValue> Unpickler::parse_ivalue_list() {
+IValue Unpickler::parse_ivalue() {
   run();
   TORCH_CHECK(
       stack_.size() == 1,
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
 
-  auto value = stack_[0];
-  if (value.isGenericList()) {
-    // TODO [unpickler refactor]
-    return value.toGenericListRef().vec();
-  }
-  return value.toTuple()->elements();
+  return stack_[0];
 }
 
 double Unpickler::readFloat() {
   AT_ASSERT(sizeof(double) == 8);
-  AT_ASSERT(bytes_ + 8 < end_ptr_);
-  double result;
+  double big_endian = read<double>();
+  double little_endian;
 
   // Pickle floats are big endian, so reverse the bytes
+  auto big_endian_ptr = reinterpret_cast<const char*>(&big_endian);
   std::reverse_copy(
-      reinterpret_cast<const char*>(bytes_),
-      reinterpret_cast<const char*>(bytes_ + 8),
-      reinterpret_cast<char*>(&result));
+      big_endian_ptr,
+      big_endian_ptr + sizeof(big_endian),
+      reinterpret_cast<char*>(&little_endian));
 
-  bytes_ += 8;
-  return result;
+  return little_endian;
 }
 
 void Unpickler::run() {
   // Expect a PROTO opcode and protocol number at the start of blob
+  auto opcode = readOpCode();
   TORCH_CHECK(
-      readOpCode() == OpCode::PROTO,
+      opcode == OpCode::PROTO,
       "Expected PROTO opcode at the start"
-      " of pickle archive");
+      " of pickle archive, found ", int(static_cast<uint8_t>(opcode)));
   uint8_t protocol = read<uint8_t>();
   TORCH_CHECK(
       protocol == 2,
       "Only Pickle protocol 2 is supported, found protocol = ",
       protocol);
 
-  while (bytes_ < end_ptr_) {
+  while (true) {
     OpCode opcode = readInstruction();
     if (opcode == OpCode::STOP) {
       return;
     }
   }
-
-  AT_ERROR("Overran buffer while unpickling data, didn't find STOP opcode");
 }
 void Unpickler::setInput(size_t memo_id) {
   AT_ASSERT(!stack_.empty());
@@ -633,15 +654,12 @@ OpCode Unpickler::readInstruction() {
     case OpCode::LONG1: {
       // Only read LONG1s with 8 as the length
       uint8_t length = read<uint8_t>();
-      AT_ASSERT(length == 8);
+      TORCH_CHECK(length == 8, "Expected length to be 8, got ", int(length));
       stack_.emplace_back(int64_t(read<int64_t>()));
     } break;
     case OpCode::BINUNICODE: {
       uint32_t length = read<uint32_t>();
-      const char* characters = reinterpret_cast<const char*>(bytes_);
-      AT_ASSERT(bytes_ + length < end_ptr_);
-      bytes_ += length;
-      stack_.emplace_back(std::string(characters, /*n=*/length));
+      stack_.emplace_back(readBytes(length));
     } break;
     case OpCode::BINFLOAT:
       stack_.emplace_back(readFloat());
@@ -711,6 +729,10 @@ OpCode Unpickler::readInstruction() {
           stack_.pop_back();
           switch (pickler_class) {
             case PicklerClass::TENSOR:
+              TORCH_CHECK(
+                  tensor_table_,
+                  "Found a tensor table reference but Pickler"
+                  " has no tensor table\n");
               stack_.emplace_back(tensor_table_->at(data.toInt()));
               break;
             case PicklerClass::INTLIST:
@@ -730,19 +752,34 @@ OpCode Unpickler::readInstruction() {
           }
         });
       } else if (
-          module_name == "torch._utils" && class_name == "_rebuild_tensor_v2") {
-        globals_.emplace_back([this] {
+          module_name == "torch._utils" &&
+          (class_name == "_rebuild_tensor_v2" ||
+           class_name == "_rebuild_qtensor")) {
+        bool quantized = class_name == "_rebuild_qtensor";
+        globals_.emplace_back([this, quantized] {
           auto tup = pop(stack_).toTuple();
           const auto& elements = tup->elements();
-          auto storage_tensor = elements.at(0).toTensor();
-          int64_t storage_offset = elements.at(1).toInt();
-          std::vector<int64_t> size = tupleToIntList(elements.at(2));
-          std::vector<int64_t> stride = tupleToIntList(elements.at(3));
-          bool requires_grad = elements.at(4).toBool();
-          // elements[5] is empty backwards hooks
-          at::Tensor result =
-              at::empty({0}, storage_tensor.options())
-                  .set_(storage_tensor.storage(), storage_offset, size, stride);
+          size_t idx = 0;
+          auto storage_tensor = elements.at(idx++).toTensor();
+          int64_t storage_offset = elements.at(idx++).toInt();
+          std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
+          std::vector<int64_t> stride = tupleToIntList(elements.at(idx++));
+          double q_scale = 0.;
+          int64_t q_zero_point = 0;
+          if (quantized) {
+            q_scale = elements.at(idx++).toDouble();
+            q_zero_point = elements.at(idx++).toInt();
+          }
+          bool requires_grad = elements.at(idx++).toBool();
+          // elements[idx++] is empty backwards hooks
+          at::Tensor result = quantized
+              ? at::_empty_affine_quantized(
+                    {}, storage_tensor.options(), q_scale, q_zero_point)
+              : at::empty({0}, storage_tensor.options());
+          at::TensorImpl* impl = result.unsafeGetTensorImpl();
+          impl->set_storage(storage_tensor.storage());
+          impl->set_storage_offset(storage_offset);
+          impl->set_sizes_and_strides(size, stride);
           result = autograd::make_variable(result, requires_grad);
           stack_.push_back(std::move(result));
         });
@@ -755,11 +792,11 @@ OpCode Unpickler::readInstruction() {
         });
       } else if (module_name == "torch") {
         c10::optional<c10::ScalarType> scalar_type;
-#define CHECK_SCALAR(_, name, _2)      \
+#define CHECK_SCALAR(_, name)          \
   if (class_name == #name "Storage") { \
     scalar_type = c10::k##name;        \
   }
-        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(CHECK_SCALAR)
+        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CHECK_SCALAR)
 #undef CHECK_SCALAR
         // NOTE: this does not put a global into the global table,
         // like the other branches here because no REDUCE or BUILD will
@@ -782,7 +819,12 @@ OpCode Unpickler::readInstruction() {
             auto arg = std::move(stack_.back());
             stack_.pop_back();
             auto obj = c10::ivalue::Object::create(type, n);
+            // XXX: Do not optimize __setstate__, so that we don't try to
+            // specialize the class before it is initialized.
+            setGraphExecutorOptimize(false);
             (*type.type_->getMethod("__setstate__"))({obj, arg});
+            setGraphExecutorOptimize(true);
+            postSetStateValidate(obj);
             stack_.emplace_back(std::move(obj));
           });
         } else {
@@ -836,7 +878,14 @@ OpCode Unpickler::readInstruction() {
           /*allocator=*/nullptr,
           /*resizable=*/false); // NB: we didn't set any allocator for the
                                 // tensor
-      at::Tensor tensor = at::empty({0}, at::CPU(type).options()).set_(storage);
+      auto options = at::CPU(type).options();
+      at::Tensor tensor;
+      if (options.backend() == c10::Backend::QuantizedCPU) {
+        tensor = at::_empty_affine_quantized({}, options, 0, 0)
+                     .set_(storage, 0, {}, {});
+      } else {
+        tensor = at::empty({0}, options).set_(storage);
+      }
 
       if (device.type() == at::DeviceType::CUDA) {
         tensor = tensor.to(device, tensor.scalar_type());
@@ -852,14 +901,24 @@ OpCode Unpickler::readInstruction() {
           "Unknown opcode for unpickling at ",
           reinterpret_cast<void*>(opcode),
           ": ",
-          static_cast<uint8_t>(opcode));
+          int(static_cast<uint8_t>(opcode)));
     } break;
   }
   return opcode;
 }
 
-// Pop all the list items off of the stack and append them to the list at the
-// corresponding MARK
+// Read a number of bytes from the input stream
+std::string Unpickler::readBytes(size_t length) {
+  std::string data(length, 0);
+  // This is fine since C++11 has contiguous strings
+  if (!reader_(&data[0], length)) {
+    AT_ERROR("Unexpected end of pickler archive.");
+  }
+  return data;
+}
+
+// Pop all the list items off of the stack and append them to the list at
+// the corresponding MARK
 void Unpickler::readList() {
   size_t start = marks_.back();
   marks_.pop_back();
@@ -910,33 +969,24 @@ inline bool is_valid_python_id_char(char c) {
 
 // Read a newline terminated string
 std::string Unpickler::readString() {
-  const char* chars = reinterpret_cast<const char*>(bytes_);
-  const char* char_end_ptr = reinterpret_cast<const char*>(end_ptr_);
-  size_t n = 0;
+  std::stringstream ss;
   while (true) {
-    char c = chars[n];
+    char c = read<char>();
     if (c == '\n') {
       break;
     }
+
+    ss << c;
 
     // Simple check just in case there is no terminating '\n'
     TORCH_CHECK(
         is_valid_python_id_char(c),
         "Found character '",
-        uint8_t(c),
-        "' in string, "
+        int(uint8_t(c)),
+        "' in string, ",
         "strings must be qualified Python identifiers");
-
-    // Increment after to exclude newline from string
-    ++n;
-    TORCH_CHECK(
-        chars + n < char_end_ptr,
-        "Unpickler overran buffer while reading a string (expected a newline)");
   }
-
-  // Increment by string length + newline char
-  bytes_ += n + 1;
-  return std::string(chars, n);
+  return ss.str();
 }
 
 OpCode Unpickler::readOpCode() {
@@ -1021,9 +1071,9 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
       set_type->isSubtypeOf(get_type),
       "'__getstate__'s return type (",
       get_type->python_str(),
-      " does not match '__setstate__'s argument type (",
+      ") does not match '__setstate__'s argument type (",
       set_type->python_str(),
-      "))");
+      ")");
 
   return true;
 }

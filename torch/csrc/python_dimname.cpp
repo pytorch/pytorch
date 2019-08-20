@@ -51,6 +51,25 @@ void InternedStringsTable::addMapping(PyObject* obj, at::Dimname dimname) {
 
 } // namespace torch
 
+bool THPUtils_checkDimname(PyObject* obj) {
+  return obj == Py_None || THPUtils_checkString(obj);
+}
+
+// To avoid ambiguity with IntArrayRef, we parse obj as a DimnameList if
+// it is a list or tuple and its first elt is a Dimname
+bool THPUtils_checkDimnameList(PyObject* obj) {
+  auto tuple = PyTuple_Check(obj);
+  if (!tuple && !PyList_Check(obj)) {
+    return false;
+  }
+  auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  if (size == 0) {
+    return true;
+  }
+  PyObject* first_elt = tuple ? PyTuple_GET_ITEM(obj, 0) : PyList_GET_ITEM(obj, 0);
+  return THPUtils_checkDimname(first_elt);
+}
+
 at::Dimname THPDimname_parse(PyObject* obj) {
   if (obj == Py_None) {
     return at::Dimname::wildcard();

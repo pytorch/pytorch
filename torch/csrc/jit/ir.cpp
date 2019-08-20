@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -204,8 +205,7 @@ SourceRange Node::sourceRange() const {
   if (source_range_) {
     return *source_range_;
   }
-  std::stringstream ss;
-  return SourceRange(ss.str());
+  return SourceRange();
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
@@ -315,10 +315,10 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   c10::optional<at::Device> device = c10::nullopt;
   auto checkValue = [&](const Value* v) {
-    if (CompleteTensorTypePtr type = v->type()->cast<CompleteTensorType>()) {
-      if (!has_device) {
+    if (ProfiledTensorTypePtr type = v->type()->cast<ProfiledTensorType>()) {
+      if (type->device() && !has_device) {
         has_device = true;
-        device = type->device();
+        device = *type->device();
       } else {
         AT_ASSERT(device == type->device());
       }
@@ -670,13 +670,7 @@ void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
 }
 
 void Value::inferTypeFrom(const at::Tensor& output) {
-  if (output.is_mkldnn()) {
-    // mkldnn tensor as opaque tensor doesn't have strides, so we can
-    // not create a CompleteTensorType
-    setType(DimensionedTensorType::create(output));
-    return;
-  }
-  setType(CompleteTensorType::create(output));
+  setType(ProfiledTensorType::create(output));
 }
 
 bool Value::mustBeNone() const {
@@ -895,14 +889,43 @@ bool Node::hasSideEffects() const {
     case prim::BailoutTemplate:
       return true;
   }
-  // All other builtin ops are known to be safe.
-  // see [custom operator aliasing]
-  if (kind_.is_aten() || kind_.is_prim() || kind_.is_onnx()) {
+
+  auto op = findOperatorFor(this);
+  if (!op) {
+    TORCH_INTERNAL_ASSERT(
+        kind_.is_prim(),
+        "Only prim ops are allowed to not have a registered operator but ",
+        kind_.toDisplayString(),
+        " doesn't have one either. We don't know if this op has side effects.");
     return false;
   }
 
-  // Custom ops may have arbitrary side effects
-  return true;
+  if (kind_.is_prim() || kind_.is_aten()) {
+    // TODO There is nothing in the system that relies on aten:: and prim::
+    // ops using AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::INTERNAL_SPECIAL_CASE,
+    // but this is the intended behavior for all current ops and a good error check.
+    // We can consider lifting this constraint later if we have a use case for it.
+    TORCH_INTERNAL_ASSERT(
+        op->aliasAnalysisKind() == AliasAnalysisKind::INTERNAL_SPECIAL_CASE ||
+            op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA,
+        "aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE or AliasAnalysisKind::FROM_SCHEMA but ",
+        kind_.toDisplayString(),
+        " has ",
+        toString(op->aliasAnalysisKind()));
+  }
+
+  switch (op->aliasAnalysisKind()) {
+    case AliasAnalysisKind::PURE:
+      return false;
+    case AliasAnalysisKind::FROM_SCHEMA:
+      return false;
+    case AliasAnalysisKind::INTERNAL_SPECIAL_CASE:
+      return false;
+    case AliasAnalysisKind::CONSERVATIVE:
+      return true;
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unhandled AliasAnalysisKind case");
+  return false; // silence compiler warning
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and
@@ -1399,7 +1422,7 @@ Node* Graph::createDict(
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
-  result->output()->setType(CompleteTensorType::fromNumberType(std::move(typ)));
+  result->output()->setType(ProfiledTensorType::fromNumberType(std::move(typ)));
   return result;
 }
 
@@ -1451,7 +1474,9 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 Value* Graph::insertFunctionCall(
     Function* callee,
     script::MatchedSchema& matched) {
+  std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
+                           ->s_(attr::name, func_name)
                            ->output()
                            ->setType(FunctionType::create(std::move(callee)));
   std::vector<Value*> inputs = {fn_constant};
@@ -1551,10 +1576,47 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
 }
 
 std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    Graph& callee) {
+  WithInsertPoint guard(to_replace);
+  auto new_outputs =
+      insertGraph(*to_replace->owningGraph(), callee, to_replace->inputs());
+  const auto& old_outputs = to_replace->outputs();
+
+  AT_ASSERT(new_outputs.size() == old_outputs.size());
+  for (size_t i = 0; i < old_outputs.size(); ++i) {
+    if (old_outputs[i]->hasDebugName()) {
+      new_outputs[i]->setDebugName(old_outputs[i]->debugName());
+    }
+    old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
+  }
+  to_replace->destroy();
+
+  return new_outputs;
+}
+
+std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
+  std::vector<Value*> new_outputs;
+  if (outputs.size() != 1 || outputs.at(0)->type()->kind() != TupleType::Kind) {
+    return outputs;
+  }
+
+  auto tup = outputs[0];
+  for (Value* v : createTupleUnpack(tup)) {
+    new_outputs.emplace_back(v);
+  }
+  // if this was a peephole tuple unpack we can just get rid of
+  // the tuple construct here and prevent needing DCE
+  if (tup->node()->kind() == prim::TupleConstruct && !tup->node()->hasUses()) {
+    tup->node()->destroy();
+  }
+  return new_outputs;
+}
+
+std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
-    ArrayRef<Value*> inputs,
-    bool unpack_outputs) {
+    ArrayRef<Value*> inputs) {
   std::unordered_map<Value*, Value*> value_map;
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   AT_ASSERT(callee.inputs().size() == inputs.size());
@@ -1571,21 +1633,6 @@ std::vector<Value*> inlineCallTo(
   std::vector<Value*> outputs;
   for (auto* output : callee.outputs()) {
     outputs.push_back(value_map_func(output));
-  }
-
-  if (unpack_outputs && outputs.size() == 1 &&
-      callee.outputs().at(0)->type()->kind() == TupleType::Kind) {
-    auto tup = outputs[0];
-    outputs.clear();
-    for (Value* v : createTupleUnpack(tup)) {
-      outputs.emplace_back(v);
-    }
-    // if this was a peephole tuple unpack we can just get rid of
-    // the tuple construct here and prevent needing DCE
-    if (tup->node()->kind() == prim::TupleConstruct &&
-        !tup->node()->hasUses()) {
-      tup->node()->destroy();
-    }
   }
 
   return outputs;

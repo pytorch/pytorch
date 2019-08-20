@@ -29,12 +29,15 @@ if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
 fi
 
 # Pick docker image
-if [[ "$PACKAGE_TYPE" == conda ]]; then
-  export DOCKER_IMAGE="soumith/conda-cuda"
-elif [[ "$DESIRED_CUDA" == cpu ]]; then
-  export DOCKER_IMAGE="soumith/manylinux-cuda80"
-else
-  export DOCKER_IMAGE="soumith/manylinux-cuda${DESIRED_CUDA:2}"
+export DOCKER_IMAGE=${DOCKER_IMAGE:-}
+if [[ -z "$DOCKER_IMAGE" ]]; then
+  if [[ "$PACKAGE_TYPE" == conda ]]; then
+    export DOCKER_IMAGE="soumith/conda-cuda"
+  elif [[ "$DESIRED_CUDA" == cpu ]]; then
+    export DOCKER_IMAGE="soumith/manylinux-cuda100"
+  else
+    export DOCKER_IMAGE="soumith/manylinux-cuda${DESIRED_CUDA:2}"
+  fi
 fi
 
 # Upload to parallel folder for gcc abis
@@ -42,7 +45,7 @@ fi
 # option, so the upload was redirected to nightly/devtoolset7 to avoid
 # conflicts with other binaries (there shouldn't be any conflicts). Now we are
 # making devtoolset7 the default.
-if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' ]]; then
+if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' || "$(uname)" == 'Darwin' ]]; then
   export PIP_UPLOAD_FOLDER='nightly/'
 else
   # On linux machines, this shouldn't actually be called anymore. This is just
@@ -52,7 +55,11 @@ fi
 
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
-export PYTORCH_BUILD_VERSION="1.2.0.dev$DATE"
+if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu100" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
+  export PYTORCH_BUILD_VERSION="1.3.0.dev$DATE"
+else
+  export PYTORCH_BUILD_VERSION="1.3.0.dev$DATE+$DESIRED_CUDA"
+fi
 export PYTORCH_BUILD_NUMBER=1
 
 cat >>"$envfile" <<EOL
@@ -68,12 +75,13 @@ export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
 export DESIRED_DEVTOOLSET="$DESIRED_DEVTOOLSET"
 
 export DATE="$DATE"
-export NIGHTLIES_DATE_PREAMBLE=1.2.0.dev
+export NIGHTLIES_DATE_PREAMBLE=1.3.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
 
-export TORCH_PACKAGE_NAME='torch-nightly'
+# TODO: We don't need this anymore IIUC
+export TORCH_PACKAGE_NAME='torch'
 export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
 
 export USE_FBGEMM=1

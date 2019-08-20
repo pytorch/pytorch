@@ -14,7 +14,7 @@
 namespace torch {
 namespace jit {
 
-class Node;
+struct Node;
 
 enum class JitLoggingLevels {
   OFF,
@@ -26,6 +26,11 @@ enum class JitLoggingLevels {
 std::string debugValueOrDefault(const Node* n);
 
 TORCH_API JitLoggingLevels jit_log_level();
+
+// Prefix every line in a multiline string \p IN_STR with \p PREFIX.
+TORCH_API std::string jit_log_prefix(
+    const std::string& prefix,
+    const std::string& in_str);
 
 TORCH_API std::string jit_log_prefix(
     JitLoggingLevels level,
