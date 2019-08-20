@@ -999,8 +999,8 @@ def index_fill(g, self, dim, index, value):
     # 3. expand value as well.
     # 4. apply onnx::scatter.
 
-    if self.type().kind() != "CompleteTensorType":
-        return _unimplemented("index_fill", "input size not accesible")
+    if self.type().dim() is None:
+        return _unimplemented("index_fill", "input rank not accesible")
     self_dim = self.type().dim()
     unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
     expanded_index_shape = g.op("Scatter", g.op("Shape", self),
@@ -1020,8 +1020,8 @@ def index_copy(g, self, dim, index, source):
         return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
     # Similar to index_fill, apply reshape + expand to index.
 
-    if self.type().kind() != "CompleteTensorType":
-        return _unimplemented("index_copy", "input size not accesible")
+    if self.type().dim() is None:
+        return _unimplemented("index_copy", "input rank not accesible")
     self_dim = self.type().dim()
     unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
     expanded_index_shape = g.op("Scatter", g.op("Shape", self),
