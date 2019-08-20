@@ -124,10 +124,14 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     if (!event) return;
     auto hip_event = static_cast<hipEvent_t>(event);
     int orig_device;
-    hipGetDevice(&orig_device);
-    hipSetDevice(device_index);
-    hipEventDestroy(hip_event);
-    hipSetDevice(orig_device);
+    try {
+      C10_HIP_CHECK(hipGetDevice(&orig_device));
+      C10_HIP_CHECK(hipSetDevice(device_index));
+      C10_HIP_CHECK(hipEventDestroy(hip_event));
+      C10_HIP_CHECK(hipSetDevice(orig_device));
+    } catch (...) {
+      // noexcept
+    }
   }
 
   void record(void** event,
