@@ -14,7 +14,7 @@ class DistAutogradContext {
   int64_t context_id() const;
 
  private:
-  int64_t context_id_;
+  const int64_t context_id_;
 };
 
 } // namespace autograd
