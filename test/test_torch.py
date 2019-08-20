@@ -10325,6 +10325,10 @@ class _TestTorchMixin(torchtest):
         actual_1d = engine_1d.draw(10)
         self.assertEqual(actual_1d.flatten(), torch.tensor(expected_1d))
         self.assertEqual(actual_1d.size(), torch.Size([10, 1]))
+        # make sure random seed if chosen if none is provided
+        engine_1d_a = torch.quasirandom.SobolEngine(1, scramble=True)
+        engine_1d_b = torch.quasirandom.SobolEngine(1, scramble=True)
+        self.assertNotEqual(engine_1d_a.draw(2), engine_1d_b.draw(2))
 
         engine_3d = torch.quasirandom.SobolEngine(3, scramble=True, seed=1729)
         expected_3d = [0.32642800, 0.17881306, 0.68837059, 0.46492538, 0.91789097,
