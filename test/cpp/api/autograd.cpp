@@ -26,14 +26,26 @@ Variable simple_fn(const Variable& x, const Variable& y) {
   return x + 2 * y + x * y;
 }
 
+TEST(AutogradAPITests, BackwardSimpleTest) {
+  Variable x = torch::randn({2, 2}, torch::requires_grad());
+  Variable y = torch::randn({2, 2}, torch::requires_grad());
+  auto res = simple_fn(x, y);
+  backward({res.sum()}, {});
+
+  ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({2, 2}));
+  ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({2, 2})*2);
+}
+
 TEST(AutogradAPITests, BackwardTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
   auto res = simple_fn(x, y);
+  backward({res}, {torch::ones({2, 2})}, {}, true);
+
   backward({res}, {torch::ones({2, 2})});
 
-  ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({2, 2}));
-  ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({2, 2})*2);
+  ASSERT_VARIABLE_EQ(x.grad(), 2* (y + torch::ones({2, 2})));
+  ASSERT_VARIABLE_EQ(y.grad(), 2 * (x + torch::ones({2, 2})*2));
 }
 
 TEST(AutogradAPITests, GradSimpleTest) {
