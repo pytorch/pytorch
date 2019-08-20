@@ -818,9 +818,21 @@ void quantizeValue(const script::Module& module, Value* v, std::vector<std::stri
     q->replaceInputWith(dequant->output(), v);
 }
 
+c10::optional<script::Module> findObserverModule(const script::Module& module, Value* v) {
+      for (const Use& u: v->uses()) {
+        if (u.user->kind() == prim::CallMethod && u.user->s(attr::name) == "forward") {
+          c10::IValue observer = toIValue(u.user->inputs().at(0)).value();
+          auto observer_module = script::Module(observer.toObject());
+          return observer_module;
+        }
+      }
+      return c10::nullopt;
+}
+
 script::Module InsertQuantDeQuant(
     const script::Module& module,
     const std::string& method_name) {
+  // TODO: Uncomment
   //script::Module module = input_module.clone();
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
@@ -877,8 +889,7 @@ script::Module InsertQuantDeQuant(
   // quantize bias first
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      auto observer_module_name = "observer_for_" + v->debugName();
-      auto observer_module = module.find_module(observer_module_name);
+      auto observer_module = findObserverModule(module, v);
       if (!observer_module) {
         if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
           quantizeBias(module, v);
@@ -892,11 +903,8 @@ script::Module InsertQuantDeQuant(
 
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      std::cout << "find Tensor " << v->debugName() << std::endl;
-      auto observer_module_name = "observer_for_" + v->debugName();
-      auto observer_module = module.find_module(observer_module_name);
+      auto observer_module = findObserverModule(module, v);
       if (observer_module) {
-        std::cout << "found observer module for " << observer_module_name << std::endl;
         quantizeValue(module, v, observer_modules_to_remove, nodes_to_destroy);
       }
     }
@@ -904,10 +912,8 @@ script::Module InsertQuantDeQuant(
 
   for (Value* v : input_values) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      auto observer_module_name = "observer_for_" + v->debugName();
-      auto observer_module = module.find_module(observer_module_name);
+      auto observer_module = findObserverModule(module, v);
       if (observer_module) {
-        std::cout << "found observer module " << observer_module_name << std::endl;
         quantizeValue(module, v, observer_modules_to_remove, nodes_to_destroy, false);
       }
     }
@@ -967,8 +973,6 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
         return (%r_dequant))";
 
-  // aten function for fbgemm_conv is not ready yet, therefore the following
-  // code is not runnable
   std::string replacement = R"(
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
