@@ -7,15 +7,17 @@
 
 #include <algorithm>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 Tensor quantized_relu(const Tensor& qx) {
   Tensor qy;
   const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
-    qy = at::_empty_affine_quantized(qx.sizes(),
-                                     at::device(kCPU).dtype(SCALAR_TYPE),
-                                     qx.q_scale(),
-                                     qx.q_zero_point());
+    qy = at::_empty_affine_quantized(
+        qx.sizes(),
+        at::device(kCPU).dtype(SCALAR_TYPE),
+        qx.q_scale(),
+        qx.q_zero_point());
     auto iter = TensorIterator::unary_op(qy, qx);
     cpu_kernel(iter, [&](scalar_t value) -> scalar_t {
       return scalar_t(std::max<underlying_t>(value.val_, zero_point));
@@ -34,7 +36,6 @@ Tensor& quantized_relu_(Tensor& qx) {
   });
   return qx;
 }
-
 
 namespace {
 Tensor quantized_relu6(const Tensor& qx) {
