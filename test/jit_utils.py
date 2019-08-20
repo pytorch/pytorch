@@ -353,7 +353,7 @@ class JitTestCase(TestCase):
                 python_fn = script
 
             if inputs_requires_grad:
-                recording_inputs = do_input_map(lambda t: t.clone().requires_grad_(), inputs)
+                recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
             else:
                 recording_inputs = inputs
 
