@@ -46,15 +46,11 @@ std::vector<char> pickle(
 }
 
 IValue unpickle(
-    std::function<void(char*, size_t)> reader,
-    std::function<bool()> bounds_checker,
+    std::function<bool(char*, size_t)> reader,
     const std::vector<at::Tensor>* tensor_table,
     ClassResolver class_resolver) {
   Unpickler unpickler(
-      std::move(reader),
-      std::move(bounds_checker),
-      tensor_table,
-      std::move(class_resolver));
+      std::move(reader), tensor_table, std::move(class_resolver));
   return unpickler.parse_ivalue();
 }
 
@@ -66,13 +62,14 @@ IValue unpickle(
   size_t bytes_read = 0;
   return unpickle(
       [&](char* buffer, size_t len) {
+        if (bytes_read + len > size) {
+          return false;
+        }
         // Copy len bytes into buffer
         const char* start = data + bytes_read;
         std::memcpy(buffer, start, len);
         bytes_read += len;
-      },
-      [&]() {
-        return bytes_read < size;
+        return true;
       },
       tensor_table,
       std::move(class_resolver));
