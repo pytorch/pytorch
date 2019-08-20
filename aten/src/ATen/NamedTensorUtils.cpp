@@ -10,7 +10,7 @@ namespace at {
 static std::string toDimnameRepr(const Tensor& tensor) {
   std::ostringstream os;
   os << "Tensor";
-  if (tensor.names() == nullopt) {
+  if (tensor.opt_names() == nullopt) {
     os << "[";
     for (auto i = 0; i < tensor.dim(); i++) {
       if (i != 0) os << ", ";
@@ -18,7 +18,7 @@ static std::string toDimnameRepr(const Tensor& tensor) {
     }
     os << "]";
   } else {
-    os << *tensor.names();
+    os << *tensor.opt_names();
   }
   return os.str();
 }
@@ -26,9 +26,9 @@ static std::string toDimnameRepr(const Tensor& tensor) {
 int64_t dimname_to_position(const Tensor& tensor, Dimname dim) {
   TORCH_CHECK(dim.type() != NameType::WILDCARD,
       "Please look up dimensions by name, got: name = None.");
-  TORCH_CHECK(tensor.names().has_value(),
+  TORCH_CHECK(tensor.opt_names().has_value(),
       "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
-  const auto names = *tensor.names();
+  const auto names = *tensor.opt_names();
 
   const auto it = std::find_if(
       names.begin(), names.end(),
@@ -198,7 +198,7 @@ void propagate_names(Tensor& result, std::vector<Dimname>&& names, bool validate
 }
 
 void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs) {
-  auto src_names = src.names();
+  auto src_names = src.opt_names();
   if (!src_names.has_value()) {
     return;
   }
@@ -292,8 +292,8 @@ void propagate_names_for_expand(Tensor& result, const Tensor& self) {
   }
   std::vector<Dimname> outnames(result_dim, Dimname::wildcard());
   std::copy(
-      self.names()->begin(),
-      self.names()->end(),
+      self.opt_names()->begin(),
+      self.opt_names()->end(),
       outnames.begin() + result_dim - self.dim());
   propagate_names(result, std::move(outnames));
 }
