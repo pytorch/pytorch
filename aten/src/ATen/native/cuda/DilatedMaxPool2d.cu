@@ -120,7 +120,7 @@ __global__ void MaxPoolForwardNHWC(const int nthreads, const scalar_t* bottom_da
             scalar_t maxval = out_cached[2 * c];
             if ((ScalarConvert<scalar_t, accscalar_t>::to(val) > maxval) || THCNumerics<scalar_t>::isnan(val)) {
               out_cached[2 * c] = ScalarConvert<scalar_t, accscalar_t>::to(val);
-              out_cached[2 * c + 1] = ih * height + iw;
+              out_cached[2 * c + 1] = ih * width + iw;
             }
           }
         }
@@ -344,6 +344,10 @@ void max_pool2d_with_indices_out_cuda_template(
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
   const auto memory_format = input_.suggest_memory_format();
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    TORCH_CHECK(input_.ndimension() == 4,
+                "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+  }
 
   const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
   const int64_t nInputPlane = input_.size(-3);
@@ -371,9 +375,6 @@ void max_pool2d_with_indices_out_cuda_template(
 
   output.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   indices.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
-
-  const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
-                                   BLOCK_THREADS);
 
   const int count = safe_downcast<int, int64_t>(output.numel());
 
@@ -412,6 +413,8 @@ void max_pool2d_with_indices_out_cuda_template(
                 in_stride_c, in_stride_h, in_stride_w,
                 output_data, indices_data);
       } else {
+        const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
+                                         BLOCK_THREADS);
         MaxPoolForwardNCHW<scalar_t, scalar_t>
             <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
             count, input_data,
@@ -473,6 +476,10 @@ void max_pool2d_with_indices_backward_out_cuda_template(
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
   const auto memory_format = input_.suggest_memory_format();
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    TORCH_CHECK(input_.ndimension() == 4,
+                "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+  }
   const Tensor input = input_.contiguous(memory_format);
 
   const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
