@@ -316,7 +316,7 @@ Old API:
 
 New API:
 
-.. testcode::
+::
 
     try:
         from typing_extensions import Final
