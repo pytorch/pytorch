@@ -2758,9 +2758,7 @@
 # legacy method
 - func: _dimI(Tensor self) -> int
   variants: method
-  dispatch:
-    SparseCPU: sparse_dim_sparse
-    SparseCUDA: sparse_dim_sparse
+  dispatch: sparse_dim_sparse
   requires_tensor: True
   device_guard: False
 
@@ -2776,9 +2774,7 @@
 # legacy method
 - func: _dimV(Tensor self) -> int
   variants: method
-  dispatch:
-    SparseCPU: dense_dim_sparse
-    SparseCUDA: dense_dim_sparse
+  dispatch: dense_dim_sparse
   requires_tensor: True
   device_guard: False
 
