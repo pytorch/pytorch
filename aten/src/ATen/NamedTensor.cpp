@@ -131,6 +131,14 @@ optional<DimnameList> get_opt_names(TensorImpl* impl) {
   }
 }
 
+DimnameList get_names(TensorImpl* impl) {
+  auto maybe_names = get_opt_names(impl);
+  if (maybe_names) {
+    return *maybe_names;
+  }
+  return default_names(impl->dim());
+}
+
 bool has_names(TensorImpl* impl) {
   const auto* named_tensor_meta = get_named_tensor_meta(impl);
   return named_tensor_meta != nullptr && named_tensor_meta->has_names();
