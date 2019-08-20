@@ -31,7 +31,7 @@ def _compute_padding_same(input_size, dim, weight, stride, dilation):
 
 # Takes N-dimensional padding and splits it evenly between left and right (with
 # a bias on the right side if its uneven)
-def split_padding(padding):
+def _split_padding(padding):
     # type: (List[int]) -> List[int]
     res = torch.jit.annotate(List[int], [])
     for i in padding:
@@ -83,12 +83,12 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         if padding != "same":
             raise ValueError("padding does not accept str values other than 'same'")
         padding_dims = [_compute_padding_same(input.size(), i, weight, stride, dilation) for i in [0]]
-        final_padding = split_padding(padding_dims)
+        final_padding = _split_padding(padding_dims)
     else:
         final_padding = _single(padding)
     if padding_mode == 'circular':
         if len(final_padding) == 1:
-            final_padding = split_padding(final_padding)
+            final_padding = _split_padding(final_padding)
         final_padding.reverse()
         input = pad(input, final_padding, mode='circular')
         final_padding = _single(0)
@@ -140,12 +140,12 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         if padding != "same":
             raise ValueError("padding does not accept str values other than 'same'")
         padding_dims = [_compute_padding_same(input.size(), i, weight, stride, dilation) for i in [0, 1]]
-        final_padding = split_padding(padding_dims)
+        final_padding = _split_padding(padding_dims)
     else:
         final_padding = _pair(padding)
     if padding_mode == 'circular':
         if len(final_padding) == 2:
-            final_padding = split_padding(final_padding)
+            final_padding = _split_padding(final_padding)
         final_padding.reverse()
         input = pad(input, final_padding, mode='circular')
         final_padding = _pair(0)
@@ -196,12 +196,12 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         if padding != "same":
             raise ValueError("padding does not accept str values other than 'same'")
         padding_dims = [_compute_padding_same(input.size(), i, weight, stride, dilation) for i in [0, 1, 2]]
-        final_padding = split_padding(padding_dims)
+        final_padding = _split_padding(padding_dims)
     else:
         final_padding = _triple(padding)
     if padding_mode == 'circular':
         if len(final_padding) == 3:
-            final_padding = split_padding(final_padding)
+            final_padding = _split_padding(final_padding)
         final_padding.reverse()
         input = pad(input, final_padding, mode='circular')
         final_padding = _triple(0)
