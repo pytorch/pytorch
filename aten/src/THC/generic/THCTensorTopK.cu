@@ -173,7 +173,10 @@ void THCTensor_(topk)(THCState* state,
       THCudaLongTensor* sortedTopKIndices = THCudaLongTensor_new(state);
 
       THCudaLongTensor_resizeAs(state, sortedTopKIndices, indices);
-      THCudaLongTensor_gather(state, sortedTopKIndices, indices, dim, sortedIndices);
+      auto sortedTopKIndicesTensor = THTensor_wrap(sortedTopKIndices);
+      auto indicesTensor = THTensor_wrap(indices);
+      auto sortedIndicesTensor = THTensor_wrap(sortedIndices);
+      at::gather_out(sortedTopKIndicesTensor, indicesTensor, dim, sortedIndicesTensor);
 
       THCTensor_(freeCopyTo)(state, sortedTopK, topK);
       THCudaLongTensor_freeCopyTo(state, sortedTopKIndices, indices);
