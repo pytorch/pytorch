@@ -1,6 +1,6 @@
 #include <THCUNN/THCUNN.h>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <THC/THCApply.cuh>
 
 template <typename T>
@@ -14,7 +14,7 @@ struct sqrtupdateOutput_functor
 
   __device__ void operator()(T *output, const T *input) const
   {
-    *output = sqrt(*input + bias);
+    *output = THCNumerics<T>::sqrt(*input + bias);
   }
 };
 

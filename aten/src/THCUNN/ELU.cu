@@ -1,6 +1,6 @@
 #include <THCUNN/THCUNN.h>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <THC/THCApply.cuh>
 
 template <typename T>
@@ -18,7 +18,7 @@ struct ELUupdateOutput_functor
 
   __device__ void operator()(T *output, const T *input) const
   {
-    *output = *input <= 0 ? (exp(*input * negiptcoef_) - 1) * negcoef_ : *input * poscoef_;
+    *output = *input <= 0 ? (THCNumerics<T>::exp(*input * negiptcoef_) - 1) * negcoef_ : *input * poscoef_;
   }
 };
 
@@ -38,7 +38,7 @@ struct ELUupdateOutputIP_functor
 
   __device__ void operator()(T *x) const
   {
-    *x = *x <= 0 ? (exp(*x * negiptcoef_) - 1) * negcoef_ : *x * poscoef_;
+    *x = *x <= 0 ? (THCNumerics<T>::exp(*x * negiptcoef_) - 1) * negcoef_ : *x * poscoef_;
   }
 };
 

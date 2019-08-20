@@ -1,6 +1,6 @@
 #include <THCUNN/THCUNN.h>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <THC/THCApply.cuh>
 
 template <typename T>
@@ -16,7 +16,7 @@ struct softPlusupdateOutput_functor
 
   __device__ void operator()(T *output, const T *input) const {
     T betain = beta * (*input);
-    *output = ((betain) > threshold) ? *input : (1/beta) * log1p(exp(betain));
+    *output = ((betain) > threshold) ? *input : (1/beta) * THCNumerics<T>::log1p(exp(betain));
   }
 };
 
@@ -34,7 +34,7 @@ struct softPlusupdateGradInput_functor
   __device__ void operator()(T *gradInput, const T *output, const T *gradOutput) const
   {
     T betaout = beta * (*output);
-    T exp_bo = exp(betaout);
+    T exp_bo = THCNumerics<T>::exp(betaout);
     *gradInput = ((betaout) > threshold) ? *gradOutput : *gradOutput * (exp_bo - 1) / exp_bo;
   }
 };
