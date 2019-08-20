@@ -159,13 +159,13 @@ static inline Tensor& unary_op_out_impl(Tensor& result, const Tensor& self, Stub
 }
 
 template <typename Stub>
-inline Tensor unary_op_impl(const Tensor& self, Stub&& stub) {
+static inline Tensor unary_op_impl(const Tensor& self, Stub&& stub) {
   Tensor result = at::empty({0}, self.options());
   return unary_op_out_impl(result, self, std::forward<Stub>(stub));
 }
 
 template <typename Stub>
-inline Tensor& unary_op_impl_(Tensor& self, Stub&& stub) {
+static inline Tensor& unary_op_impl_(Tensor& self, Stub&& stub) {
   return unary_op_out_impl(self, self, std::forward<Stub>(stub));
 }
 
