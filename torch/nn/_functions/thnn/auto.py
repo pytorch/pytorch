@@ -117,11 +117,9 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
     ignored_args = {'weight', 'bias', 'gradWeight', 'gradBias', 'output'}
     expected_params = [arg for arg in update_output.arguments[3:]
                        if arg.name in param_args]
-    buffers = {}
-    buffers['update_output'] = _find_buffers(update_output.arguments[3:],
-                                             ignored_args)
-    buffers['update_grad_input'] = _find_buffers(
-        update_grad_input.arguments[4:], ignored_args)
+    buffers = {'update_output': _find_buffers(update_output.arguments[3:],
+                                              ignored_args), 'update_grad_input': _find_buffers(
+        update_grad_input.arguments[4:], ignored_args)}
     if acc_grad_parameters is not None:
         buffers['acc_grad_parameters'] = _find_buffers(
             acc_grad_parameters.arguments[3:], ignored_args)
