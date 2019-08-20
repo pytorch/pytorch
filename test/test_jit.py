@@ -674,7 +674,7 @@ class TestJit(JitTestCase):
             # type: (Tensor) -> None
             output = torch.relu(input)
             output = output.softmax(0)
-            grad_outputs: List[Optional[torch.Tensor]] = [torch.ones((2, 2)), ]
+            grad_outputs = torch.jit.annotate(List[Optional[torch.Tensor]], [torch.ones((2, 2)), ])
             torch.autograd.backward((output,), grad_outputs)
 
         inp = torch.randn(2, 2, requires_grad=True)
