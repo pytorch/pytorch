@@ -645,7 +645,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[] grad_outputs, bool? keep_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor[]",
+         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? keep_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor[]",
          [](Stack& stack) {
            bool allow_unused = pop(stack).toBool();
            bool create_graph = pop(stack).toBool();
@@ -657,8 +657,10 @@ RegisterOperators reg(
            std::vector<torch::autograd::Variable> output_vars(outputs.begin(), outputs.end());
            std::vector<torch::autograd::Variable> gradients;
 
-           for (const IValue& v: grad_outputs.toGenericList()) {
-             gradients.emplace_back(v.isNone()? at::Tensor(): v.toTensor());
+           if (!grad_outputs.isNone()) {
+             for (const IValue& v : grad_outputs.toGenericListRef()) {
+               gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
+             }
            }
 
            auto res = torch::autograd::grad(

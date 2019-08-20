@@ -841,8 +841,6 @@ def trace(func,
                              "Please use trace_module")
 
     name = _qualified_name(func)
-    if name == '<lambda>':
-        name = '_lambda'  # make name a valid identifier
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                   var_lookup_fn,
                                                   _force_outplace)

@@ -8,6 +8,12 @@
 namespace torch {
 namespace autograd {
 
+// NB: This code duplicates existing logic at torch/autograd/__init__.py and
+// torch._C._EngineBase.run_backward in torch/csrc/autograd/python_engine.cpp
+// This is a purely C++ API for Autograd without any dependencies on python
+// it can be exposed in PyTorch C++ API and TorchScript. We will need to maintain
+// the logic equality of this file and the python file together if one changes.
+// TODO: Make the Python API above to just call this C++ API.
 variable_list _make_grads(
     const variable_list& outputs,
     const variable_list& grad_outputs) {
@@ -54,7 +60,8 @@ variable_list run_backward(
     const variable_list& grad_outputs,
     bool keep_graph,
     bool create_graph,
-    const variable_list& inputs) {
+    const variable_list& inputs,
+    bool allow_unused) {
   size_t num_tensors = outputs.size();
   edge_list roots;
   roots.reserve(num_tensors);
@@ -63,7 +70,7 @@ variable_list run_backward(
     auto gradient_edge = output.gradient_edge();
     TORCH_CHECK(
         gradient_edge.function,
-        "element %d of tensors does not require grad and does not have a grad_fn",
+        "element ", i, " of tensors does not require grad and does not have a grad_fn",
         i);
     roots.push_back(std::move(gradient_edge));
   }
@@ -90,35 +97,8 @@ variable_list run_backward(
     }
   }
 
-  return Engine::get_default_engine().execute(
+  variable_list grad_inputs = Engine::get_default_engine().execute(
       roots, grad_outputs, keep_graph, create_graph, output_edges);
-}
-
-void backward(
-    const variable_list& tensors,
-    const variable_list& grad_tensors,
-    c10::optional<bool> retain_graph,
-    bool create_graph) {
-  variable_list gradients = _make_grads(tensors, grad_tensors);
-  if (!retain_graph) {
-    retain_graph = create_graph;
-  }
-  run_backward(tensors, gradients, retain_graph.value(), create_graph, {});
-}
-
-variable_list grad(
-    const variable_list& outputs,
-    const variable_list& inputs,
-    const variable_list& grad_outputs,
-    c10::optional<bool> retain_graph,
-    bool create_graph,
-    bool allow_unused) {
-  variable_list gradients = _make_grads(outputs, grad_outputs);
-  if (!retain_graph) {
-    retain_graph = create_graph;
-  }
-  variable_list grad_inputs = run_backward(
-      outputs, gradients, retain_graph.value(), create_graph, inputs);
   // check if grad_inputs contains None or not base on the allow_unused flag
   if (inputs.empty()) {
     size_t num_inputs = inputs.size();
@@ -132,6 +112,33 @@ variable_list grad(
     }
   }
   return grad_inputs;
+}
+
+void backward(
+    const variable_list& tensors,
+    const variable_list& grad_tensors,
+    c10::optional<bool> retain_graph,
+    bool create_graph) {
+  variable_list gradients = _make_grads(tensors, grad_tensors);
+  if (!retain_graph) {
+    retain_graph = create_graph;
+  }
+  run_backward(tensors, gradients, retain_graph.value(), create_graph, {}, /*allow_unused=*/true);
+}
+
+variable_list grad(
+    const variable_list& outputs,
+    const variable_list& inputs,
+    const variable_list& grad_outputs,
+    c10::optional<bool> retain_graph,
+    bool create_graph,
+    bool allow_unused) {
+  variable_list gradients = _make_grads(outputs, grad_outputs);
+  if (!retain_graph) {
+    retain_graph = create_graph;
+  }
+  return run_backward(
+    outputs, gradients, retain_graph.value(), create_graph, inputs, allow_unused);
 }
 
 } // namespace autograd
