@@ -31,9 +31,9 @@ find_path(CUDNN_INCLUDE_PATH cudnn.h
 
 option(CUDNN_STATIC "Look for static CUDNN" OFF)
 if (CUDNN_STATIC)
-  SET(CUDNN_LIBNAME "libcudnn_static.a")
+  set(CUDNN_LIBNAME "libcudnn_static.a")
 else()
-  SET(CUDNN_LIBNAME "cudnn")
+  set(CUDNN_LIBNAME "cudnn")
 endif()
 
 set(CUDNN_LIBRARY $ENV{CUDNN_LIBRARY} CACHE PATH "Path to the cudnn library file (e.g., libcudnn.so)")
