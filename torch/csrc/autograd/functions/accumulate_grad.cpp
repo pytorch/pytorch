@@ -10,8 +10,6 @@
 #include <stdexcept>
 #include <utility>
 
-#include <iostream>
-
 using at::Tensor;
 
 namespace torch { namespace autograd {
@@ -26,8 +24,6 @@ AccumulateGrad::AccumulateGrad(Variable variable_)
 }
 
 auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
-  std::cout << "AccumulateGrad::apply" << std::endl;
-
   // XXX: this method is not thread-safe!
   check_input_variables("AccumulateGrad", grads, 1, 0);
 

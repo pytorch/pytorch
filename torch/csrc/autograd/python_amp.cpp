@@ -8,7 +8,7 @@
 
 namespace torch {
 namespace autograd {
-namespace amp { 
+namespace amp {
 
 // Following the patterns in
 // torch/csrc/autograd/autograd.h

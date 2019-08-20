@@ -473,10 +473,6 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
   }
   for (size_t i = 0; i < grads.size(); i++) {
     const auto& edge = edges[i];
-    std::cout << "validate_outputs loop " << i 
-              << ", edge.is_valid() = " << edge.is_valid()
-              << ", output.defined() = " << grads[i].defined() << std::endl;
-              // << ", grads[i] = " << grads[i] << std::endl;
     if (!edge.is_valid()) continue;
 
     const auto& metadata = edge.function->input_metadata(edge.input_nr);
@@ -580,7 +576,6 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
         task.base_->captured_vars_[capture.output_idx_] = task.inputs_[capture.input_idx_];
       }
     }
-    std::cout << "fn_info.needed_ = " << fn_info.needed_ << std::endl;
     if (!fn_info.needed_) return;
   }
 
@@ -696,8 +691,6 @@ struct ClearCallbacks {
   std::mutex& callbacks_lock_;
 };
 
-// outputs = engine.execute(roots, grads, keep_graph, create_graph, output_edges)
-// "inputs" in python_engine.cpp gives "outputs" here.
 auto Engine::execute(const edge_list& roots,
                      const variable_list& inputs,
                      bool keep_graph,
@@ -724,7 +717,6 @@ auto Engine::execute(const edge_list& roots,
   auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
   compute_dependencies(graph_root.get(), graph_task);
   if (!outputs.empty()) {
-    std::cout << "init_to_execute" << std::endl;
     graph_task.init_to_execute(*graph_root, outputs);
   }
   ready_queue(at::kCPU).push(NodeTask(&graph_task, std::move(graph_root), InputBuffer(0)));

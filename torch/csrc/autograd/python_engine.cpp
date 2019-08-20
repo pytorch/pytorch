@@ -17,8 +17,6 @@
 #include <unordered_set>
 #include <memory> // for unique_ptr
 
-#include <iostream>
-
 using namespace torch::autograd;
 
 struct THPEngine {
@@ -121,7 +119,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   roots.reserve(num_tensors);
   variable_list grads;
   grads.reserve(num_tensors);
-  std::cout << "num_tensors = " << num_tensors << std::endl;
   for (int i = 0; i < num_tensors; i++) {
     PyObject *_tensor = PyTuple_GET_ITEM(tensors, i);
     THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
@@ -134,7 +131,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 
     PyObject *grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
-      std::cout << "grad->cdata: " << ((THPVariable*)grad)->cdata << std::endl;
       grads.push_back(((THPVariable*)grad)->cdata);
     } else {
       THPUtils_assert(grad == Py_None,
@@ -147,7 +143,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   std::vector<Edge> output_edges;
   if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
-    std::cout << "num_inputs = " << num_inputs << std::endl;
     output_edges.reserve(num_inputs);
     for (int i = 0; i < num_inputs; ++i) {
       PyObject *input = PyTuple_GET_ITEM(inputs, i);
@@ -157,16 +152,13 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       const auto output_nr = input_var->cdata.output_nr();
       auto grad_fn = input_var->cdata.grad_fn();
       if (!grad_fn) {
-          std::cout << "try_get_grad_accumulator" << std::endl;
           grad_fn = input_var->cdata.try_get_grad_accumulator();
       }
       THPUtils_assert(input_var->cdata.requires_grad(),
           "One of the differentiated Tensors does not require grad");
       if (!grad_fn) {
-        std::cout << "emplace_back()" << std::endl;
         output_edges.emplace_back();
       } else {
-        std::cout << "emplace_back(grad_fn, output_nr)" << std::endl;
         output_edges.emplace_back(grad_fn, output_nr);
       }
     }
@@ -176,11 +168,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   {
     AutoNoGIL no_gil;
     outputs = engine.execute(roots, grads, keep_graph, create_graph, output_edges);
-    std::cout << "outputs.size() = " << outputs.size()
-              << ", output_edges.size() = " << output_edges.size() << std::endl;
   }
-
-  // TORCH_CHECK(false);
 
   if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
@@ -193,10 +181,8 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
                       "desired behavior.");
       PyTuple_SET_ITEM(py_outputs.get(), i, THPVariable_Wrap(outputs[i]));
     }
-    std::cout << "Returning outputs" << std::endl;
     return py_outputs.release();
   } else {
-    std::cout << "Py_RETURN_NONE" << std::endl;
     Py_RETURN_NONE;
   }
   END_HANDLE_TH_ERRORS
