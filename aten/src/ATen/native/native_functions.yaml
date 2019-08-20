@@ -798,6 +798,10 @@
   dispatch:
     QuantizedCPU: empty_affine_quantized_cpu
 
+- func: _empty_perchannel_affine_quantized_like(Tensor self, Tensor zero_points, int[] size, int[] axis, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor
+  dispatch:
+    QuantizedCPU: empty_perchannel_affine_quantized_cpu
+
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   variants: method
   device_guard: False
@@ -2950,6 +2954,10 @@
 - func: _per_tensor_affine_qtensor(Tensor self, float scale, int zero_point) -> Tensor
   dispatch:
     CPU: per_tensor_affine_qtensor_cpu
+
+- func: _per_channel_affine_qtensor(Tensor self, Tensor scale, Tensor zero_point, int[] axis) -> Tensor
+  dispatch:
+    CPU: per_channel_affine_qtensor_cpu
 
 - func: qscheme(Tensor self) -> QScheme
   variants: method

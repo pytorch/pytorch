@@ -27,5 +27,38 @@ Tensor empty_affine_quantized_cpu(
       optional_memory_format.value_or(MemoryFormat::Contiguous));
 }
 
+Tensor empty_perchannel_affine_quantized_cpu(
+    const Tensor& scales,
+    const Tensor& zero_points,
+    IntArrayRef size,
+    IntArrayRef axis,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      options.has_dtype(),
+      "Must provide data type for Tensor creation functions.");
+  TORCH_CHECK(scales.dim() == 1, "scale tensor must have dimension 1");
+  TORCH_CHECK(
+      zero_points.dim() == 1, "zero_points tensor must have dimension 1")
+  TORCH_CHECK(
+      scales.numel() == zero_points.numel(),
+      "number of elements in scales and zero_points must match");
+  TORCH_CHECK(axis.size() == 1, "only axis of size 1 is supported right now");
+  double* scales_data = scales.data<double>();
+  int64_t* zero_points_data = zero_points.data<int64_t>();
+  std::vector<double> scale_vals(scales_data, scales_data + scales.numel());
+  std::vector<int64_t> zero_point_vals(
+      zero_points_data, zero_points_data + zero_points.numel());
+  return new_qtensor_cpu(
+      size,
+      options,
+      make_per_channel_affine_quantizer(
+          scale_vals,
+          zero_point_vals,
+          axis,
+          typeMetaToScalarType(options.dtype())),
+      optional_memory_format.value_or(MemoryFormat::Contiguous));
+}
+
 } // namespace native
 } // namespace at

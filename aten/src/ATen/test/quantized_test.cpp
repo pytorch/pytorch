@@ -117,3 +117,32 @@ TEST(TestQTensor, EmptyQuantized) {
     ASSERT_EQ(r_data[i], (val - zero_point) * scale);
   }
 }
+
+TEST(TestQTensor, EmptyPerchannelQuantized) {
+  int numel = 10;
+  auto scales = rand({numel}).toType(kDouble);
+  auto zero_points = randint(10, {10}).toType(kLong);
+  int val = 100;
+  int ch_axis = 0;
+  Tensor q = at::_empty_perchannel_affine_quantized_like(
+      scales,
+      zero_points,
+      {numel},
+      {ch_axis},
+      at::device(at::kCPU).dtype(kQUInt8));
+  // Assigning to QTensor
+  auto* q_data = q.data<quint8>();
+  for (int i = 0; i < numel; ++i) {
+    q_data[i].val_ = val;
+  }
+
+  // dequantize
+  auto r = q.dequantize();
+  auto* r_data = r.data<float>();
+  for (int i = 0; i < numel; ++i) {
+    ASSERT_EQ(
+        r_data[i],
+        (val - zero_points[i].item().to<int>()) *
+            scales[i].item().to<float>());
+  }
+}
