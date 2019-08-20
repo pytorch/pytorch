@@ -34,6 +34,7 @@ Tensor _amp_overflow_state_cuda(const Tensor & new_state) {
 
 // Lots of function calls to get here, maybe a performance issue
 void _amp_unscale_inf_check_cuda_impl(TensorIterator& iter, double scale) {
+  TORCH_CHECK(amp_overflow_state.defined(), "Overflow state is undefined.");
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     iter.dtype(),
     "_amp_unscale_inf_check_cuda_impl",

@@ -70,6 +70,59 @@ def graph_desc(fn):
     return result + ')'
 
 
+class GradScaleTestModule(torch.nn.Module):
+    def __init__(self):
+        super(GradScaleTestModule, self).__init__()
+        self.input_features = 8
+        self.ingested_features = 16
+        self.split_features = 8
+        self.channels = 8
+        self.HW = 8
+        self.output_features = 8
+        # Set up 2 paths, each of which produces independent output, so we can test cases where only a subset of params
+        # receive gradients in a given backward pass.
+        self.ingest = torch.nn.Linear(self.input_features, self.ingested_features * self.channels)
+        # Can't create Sequentials because I need to interleave a flatten.
+        self.conv1 = torch.nn.Conv2d(self.channels, self.channels, 3, padding=1)
+        self.bn1 = torch.nn.BatchNorm2d(self.channels)
+        self.linear1 = torch.nn.Linear(self.split_features * self.channels, self.output_features)
+        self.conv2 = torch.nn.Conv2d(self.channels, self.channels, 3, padding=1)
+        self.bn2 = torch.nn.BatchNorm2d(self.channels)
+        self.linear2 = torch.nn.Linear(self.split_features * self.channels, self.output_features)
+
+        self.internal_grads = []
+
+    def forward(self, x):
+        x = self.ingest(x)
+
+        x1, x2 = x.split(self.split_features * self.channels, dim=1)
+
+        x1 = x1.clone().view(-1, self.channels, self.HW, self.HW)
+        x2 = x2.clone().view(-1, self.channels, self.HW, self.HW)
+
+        xtmp = self.conv1(x1)
+        xtmp.register_hook(lambda grad: self.internal_grads.append(grad.detach().clone()))
+        x2 = self.conv2(x2)
+
+        x1 = self.bn1(xtmp)
+        x2 = self.bn2(x2)
+
+        x1 = x1.view(-1, self.split_features * self.channels)
+        x2 = x2.view(-1, self.split_features * self.channels)
+
+        return self.linear1(x1), self.linear2(x2)
+
+
+@contextlib.contextmanager
+def enable_grad_scaling(scale):
+    torch._amp_overflow_state(torch.cuda.IntTensor([0]))
+    torch.set_grad_scaling_enabled(True)
+    torch.set_grad_scale(scale)
+    yield
+    torch.set_grad_scaling_enabled(False)
+    torch.set_grad_scale(1.0)
+
+
 class TestAutograd(TestCase):
 
     def _function_test(self, cls):
@@ -3252,6 +3305,201 @@ class TestAutograd(TestCase):
                     out = MyFunc.apply(inp, inp, False)
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @skipIfRocm
+    def test_grad_scaling_state(self):
+        with enable_grad_scaling(4.0):
+            self.assertTrue(torch.is_grad_scaling_enabled())
+            self.assertEqual(torch.get_grad_scale(), 4.0)
+        self.assertFalse(torch.is_grad_scaling_enabled())
+        self.assertEqual(torch.get_grad_scale(), 1.0)
+
+    def _run_grad_scaling_case(self, create_grads):
+        torch.manual_seed(3)
+        model = GradScaleTestModule().cuda().float()
+        input = torch.randn((8, 8), device="cuda", dtype=torch.float32)
+        target1 = torch.randn((8, 8), device="cuda", dtype=torch.float32)
+        target2 = torch.randn((8, 8), device="cuda", dtype=torch.float32)
+        loss_fn = torch.nn.MSELoss().cuda()
+
+        def set_to_zero(m):
+            m.internal_grads = []
+            m.zero_grad()
+
+        def set_to_none(m):
+            m.internal_grads = []
+            for p in m.parameters():
+                p.grad = None
+
+        for resetter in set_to_zero, set_to_none:
+            resetter(model)
+
+            with enable_grad_scaling(4.0):
+                out1, out2 = model(input)
+                out_of_place_grads_from_scaled_pass = create_grads(out1, out2, target1, target2, model, loss_fn)
+                grads_from_scaled_pass = [p.grad.detach().clone() for p in model.parameters() if p.grad is not None]
+                internal_grads_from_scaled_pass = model.internal_grads
+
+            resetter(model)
+
+            out1, out2 = model(input)
+            out_of_place_grads_from_unscaled_pass = create_grads(out1, out2, target1, target2, model, loss_fn)
+            grads_from_unscaled_pass = [p.grad for p in model.parameters() if p.grad is not None]
+            internal_grads_from_unscaled_pass = model.internal_grads
+
+            # If create_grads used torch.autograd.grad to create any grads out of place, make sure these match.
+            # These out-of-place gradients (created for leaves) should always be unscaled, so the gradients
+            # from scaled and unscaled passes can be compared directly.
+            for from_scaled, from_unscaled in zip(out_of_place_grads_from_scaled_pass,
+                                                  out_of_place_grads_from_unscaled_pass):
+                self.assertTrue(torch.allclose(from_scaled, from_unscaled))
+
+            # Make sure the leaf gradients match.  Leaf gradients should always be unscaled, so the gradients from
+            # scaled and unscaled passes can be compared directly.
+            for from_scaled, from_unscaled in zip(grads_from_scaled_pass, grads_from_unscaled_pass):
+                self.assertTrue(torch.allclose(from_scaled, from_unscaled))
+
+            # Make sure that during the backward pass with scaling enabled, the internal grads were scaled.
+            for from_scaled, from_unscaled in zip(internal_grads_from_scaled_pass, internal_grads_from_unscaled_pass):
+                self.assertTrue(torch.allclose(from_scaled, 4.0 * from_unscaled))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @skipIfRocm
+    def test_grad_scaling_ordinary_backward(self):
+        # Test gradient scaling with ordinary backward.
+        def create_grads_for_this_case(out1, out2, target1, target2, model, loss_fn):
+            loss = loss_fn(torch.cat((out1, out2), dim=1), torch.cat((target1, target2), dim=1))
+            loss.backward()
+            return []  # no out-of-place grads created for this case
+
+        self._run_grad_scaling_case(create_grads_for_this_case)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @skipIfRocm
+    def test_grad_scaling_backward_manual_gradient(self):
+        # Test gradient scaling with ordinary backward and manually-fed gradient (should work if the above case works)
+        def create_grads_for_this_case(out1, out2, target1, target2, model, loss_fn):
+            loss = loss_fn(torch.cat((out1, out2), dim=1), torch.cat((target1, target2), dim=1))
+            torch.autograd.backward(loss, grad_tensors=torch.cuda.FloatTensor([2.0]))
+            return []  # no out-of-place grads created for this case
+
+        self._run_grad_scaling_case(create_grads_for_this_case)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @skipIfRocm
+    def test_grad_scaling_backward_partial_then_full_graph(self):
+        # Test gradient scaling with ordinary backward through only part of the graph
+        # followed by ordinary backward through the full graph.
+        def create_grads_for_this_case(out1, out2, target1, target2, model, loss_fn):
+            loss = loss_fn(out1, target1)
+            loss.backward(retain_graph=True)
+            loss = loss_fn(torch.cat((out1, out2), dim=1), torch.cat((target1, target2), dim=1))
+            loss.backward()
+            return []  # no out-of-place grads created for this case
+
+        self._run_grad_scaling_case(create_grads_for_this_case)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @skipIfRocm
+    def test_grad_scaling_backward_backward_inplace(self):
+        # Test gradient scaling with double-backward where the first backward does populate the .grad attributes
+        # ie, grads are not created out of place.  This is an odd use case, but it should work.
+        def create_grads_for_this_case(out1, out2, target1, target2, model, loss_fn):
+            loss = loss_fn(torch.cat((out1, out2), dim=1), torch.cat((target1, target2), dim=1))
+            loss.backward(create_graph=True)
+            torch.autograd.backward((p.grad for p in model.parameters()),
+                                    (torch.ones_like(p.grad) for p in model.parameters()))
+            return []  # no out-of-place grads created for this case
+
+        self._run_grad_scaling_case(create_grads_for_this_case)
+
+    def test_grad_scaling_backward_out_of_place(self):
+        # Vanilla call to torch.autograd.grad to create some out-of-place gradients
+        def create_grads_for_this_case(out1, out2, target1, target2, model, loss_fn):
+            loss = loss_fn(torch.cat((out1, out2), dim=1), torch.cat((target1, target2), dim=1))
+            return torch.autograd.grad((loss,), list(model.parameters()))
+
+        self._run_grad_scaling_case(create_grads_for_this_case)
+
+    def test_grad_scaling_backward_out_of_place_partial_graph(self):
+        # Same as above, but we only use part of the graph (should work if the above case works)
+        def create_grads_for_this_case(out1, out2, target1, target2, model, loss_fn):
+            return torch.autograd.grad((out1,), (model.linear1.parameters()), grad_outputs=(torch.ones_like(out1),))
+
+        self._run_grad_scaling_case(create_grads_for_this_case)
+
+    def test_grad_scaling_gradient_penalty(self):
+        # This case tests a gradient penalty by itself.
+        def create_grads_for_this_case(out1, out2, target1, target2, model, loss_fn):
+            loss = loss_fn(torch.cat((out1, out2), dim=1), torch.cat((target1, target2), dim=1))
+            grad_params = torch.autograd.grad((loss,), list(model.parameters()), create_graph=True)
+            grad_norm = 0
+            for grad in grad_params:
+                grad_norm += grad.pow(2).sum()
+            grad_norm = grad_norm.sqrt()
+            grad_norm.backward()
+            # backward() will create some leaf gradients, which _run_grad_scaling_case will compare between the scaled
+            # and unscaled passes, but we should still return the out-of-place grads so it can compare those also.
+            return grad_params
+
+        self._run_grad_scaling_case(create_grads_for_this_case)
+
+    def test_grad_scaling_loss_and_gradient_penalty(self):
+        # This case is meant to represent the "industrial-grade" ordinary loss + gradient penalty.
+        def create_grads_for_this_case(out1, out2, target1, target2, model, loss_fn):
+            loss = loss_fn(torch.cat((out1, out2), dim=1), torch.cat((target1, target2), dim=1))
+            grad_params = torch.autograd.grad((loss,), list(model.parameters()), create_graph=True)
+            grad_norm = 0
+            for grad in grad_params:
+                grad_norm += grad.pow(2).sum()
+            grad_norm = grad_norm.sqrt()
+            loss = loss + grad_norm
+            loss.backward()
+            # backward() will create some leaf gradients, which _run_grad_scaling_case will compare between the scaled
+            # and unscaled passes, but we should still return the out-of-place grads so it can compare those also.
+            return grad_params
+
+        self._run_grad_scaling_case(create_grads_for_this_case)
+
+    def test_grad_scaling_loss_and_partial_gradient_penalty(self):
+        # This case applies a gradient penalty to only some of the params.
+        def create_grads_for_this_case(out1, out2, target1, target2, model, loss_fn):
+            partial_loss = loss_fn(out1, target1)
+            grad_some_params = torch.autograd.grad((partial_loss,), list(model.linear1.parameters()), create_graph=True)
+            grad_norm = 0
+            for grad in grad_some_params:
+                grad_norm += grad.pow(2).sum()
+            grad_norm = grad_norm.sqrt()
+            loss = loss_fn(torch.cat((out1, out2), dim=1), torch.cat((target1, target2), dim=1))
+            loss = loss + grad_norm
+            loss.backward()
+            # backward() will create some leaf gradients, which _run_grad_scaling_case will compare between the scaled
+            # and unscaled passes, but we should still return the out-of-place grads so it can compare those also.
+            return grad_some_params
+
+        self._run_grad_scaling_case(create_grads_for_this_case)
+
+    def test_grad_scaling_loss_and_partial_gradient_penalty_only_inputs_false(self):
+        # This case applies an explicit gradient penalty to some of the params, but the initial double backward
+        # also accumulates into the leaves of the other params.  It's not likely to reflect real usage
+        # but it serves as a strong test.
+        def create_grads_for_this_case(out1, out2, target1, target2, model, loss_fn):
+            partial_loss = loss_fn(out1, target1)
+            grad_some_params = torch.autograd.grad((partial_loss,), list(model.linear1.parameters()),
+                                                   create_graph=True, only_inputs=False)
+            grad_norm = 0
+            for grad in grad_some_params:
+                grad_norm += grad.pow(2).sum()
+            grad_norm = grad_norm.sqrt()
+            loss = loss_fn(torch.cat((out1, out2), dim=1), torch.cat((target1, target2), dim=1))
+            loss = loss + grad_norm
+            loss.backward()
+            # backward() will create some leaf gradients, which _run_grad_scaling_case will compare between the scaled
+            # and unscaled passes, but we should still return the out-of-place grads so it can compare those also.
+            return grad_some_params
+
+        self._run_grad_scaling_case(create_grads_for_this_case)
 
     @skipIfNoLapack
     def test_symeig_no_eigenvectors(self):
