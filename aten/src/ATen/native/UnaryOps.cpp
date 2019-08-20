@@ -28,33 +28,8 @@
 
 #include <map>
 
-// NOTE:
-// YOU ARE NOT OBLIGED TO USE THESE MACROS
-// If you're writing something more specialized, please don't try to make them
-// work for your case, but just write something new instead.
-
 namespace at {
 namespace native {
-
-Tensor bitwise_not(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::bitwise_not_out(result, self);
-}
-
-Tensor& bitwise_not_(Tensor& self) {
-  return at::bitwise_not_out(self, self);
-}
-
-Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
-  checkBackend("bitwise_not", result, self.type().backend());
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
-  bitwise_not_stub(iter.device_type(), iter);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
-  return result;
-}
 
 Tensor logical_not(const Tensor& self) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
@@ -72,44 +47,6 @@ Tensor& logical_not_out(Tensor& result, const Tensor& self) {
   iter.add_input(self);
   iter.build();
   logical_not_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor neg(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::neg_out(result, self);
-}
-
-Tensor& neg_(Tensor& self) {
-  return at::neg_out(self, self);
-}
-
-Tensor& neg_out(Tensor& result, const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() != kBool,
-              "Negation, the `-` operator, on a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
-  neg_stub(iter.device_type(), iter);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
-  return result;
-}
-
-Tensor ceil(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::ceil_out(result, self);
-}
-
-Tensor& ceil_(Tensor& self) {
-  return at::ceil_out(self, self);
-}
-
-Tensor& ceil_out(Tensor& result, const Tensor& self) {
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
-  ceil_stub(iter.device_type(), iter);
   return result;
 }
 
@@ -203,6 +140,64 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
   at::namedinference::propagate_names(result, src);
 #endif
 }
+
+// NOTE:
+// YOU ARE NOT OBLIGED TO USE THESE HELPERS
+// If you're writing something more specialized, please don't try to make them
+// work for your case, but just write something new instead.
+
+// A helper class that reduces redundant code in implementing the most typical kind of unary operators. This allows some
+// preprocessing that are unique to some operators (more is forsee-able in the future) and is more flexible and elegant
+// than defining a flat fat macro that implements everything.
+template <typename Stub>
+class TypicalUnaryOpImpl {
+private:
+  typename std::remove_reference<Stub>::type stub;
+
+public:
+  TypicalUnaryOpImpl(Stub&& stub) : stub(std::forward<Stub>(stub)){}
+
+  inline Tensor& unary_op_out_impl(Tensor& result, const Tensor& self) {
+    auto iter = TensorIterator::unary_op(result, self,
+      /*check_internal_overlap=*/true);
+    this->stub(iter.device_type(), iter);
+    return result;
+  }
+
+  inline Tensor unary_op_impl(const Tensor& self) {
+    Tensor result = at::empty({0}, self.options());
+    return this->unary_op_out_impl(result, self);
+  }
+
+  inline Tensor& unary_op_impl_(Tensor& self) {
+    return this->unary_op_out_impl(self, self);
+  }
+};
+
+// A factory function that circumvents the unavailability of class template type deduction in C++ 11.
+template <typename Stub>
+static inline auto create_typical_unary_op_impl(Stub stub) -> TypicalUnaryOpImpl<Stub> {
+  return TypicalUnaryOpImpl<Stub>(std::forward<Stub>(stub));
+}
+
+static auto neg_op = create_typical_unary_op_impl(neg_stub);
+Tensor neg(const Tensor& self) { return neg_op.unary_op_impl(self); }
+Tensor& neg_(Tensor& self) { return neg_op.unary_op_impl_(self); }
+Tensor& neg_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(self.scalar_type() != kBool,
+              "Negation, the `-` operator, on a bool tensor is not supported. "
+              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+  return neg_op.unary_op_out_impl(result, self);
+}
+
+#define IMPLEMENT_UNARY_OP(opr)  \
+  static auto opr##_op = create_typical_unary_op_impl(opr##_stub); \
+  Tensor& opr##_out(Tensor& result, const Tensor& self) { return opr##_op.unary_op_out_impl(result, self); } \
+  Tensor opr(const Tensor& self) { return opr##_op.unary_op_impl(self); } \
+  Tensor& opr##_(Tensor& self) { return opr##_op.unary_op_impl_(self); }
+
+IMPLEMENT_UNARY_OP(bitwise_not);
+IMPLEMENT_UNARY_OP(ceil);
 
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
