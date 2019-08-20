@@ -38,8 +38,5 @@ Date:  February 1996
   return(x);
 }
 
-static inline float calc_erfinv(float y) {
-  return calc_erfinv((double)y);
-}
 #undef CENTRAL_RANGE
 

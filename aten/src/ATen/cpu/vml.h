@@ -66,19 +66,6 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   });
 }
 
-template <typename scalar_t>
-inline void verfinv(scalar_t* out, scalar_t* in, int64_t size) {
-  parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {
-    map(
-        [](const Vec256<scalar_t>& x) {
-          return x.erfinv();
-        },
-        out + begin,
-        in + begin,
-        end - begin);
-  });
-}
-
 // NB: We ignore numerical errors by convention and leave them to the user
 
 // We unfortunately need to duplicate code here to deal with the SSE-AVX

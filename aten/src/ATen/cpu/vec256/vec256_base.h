@@ -10,7 +10,6 @@
 #include <ATen/native/Copy.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
-#include <ATen/native/Math.h>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -196,9 +195,6 @@ public:
   }
   Vec256<T> erfc() const {
     return map(std::erfc);
-  }
-  Vec256<T> erfinv() const {
-    return map(calc_erfinv);
   }
   Vec256<T> exp() const {
     return map(std::exp);
