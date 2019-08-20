@@ -153,7 +153,7 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
 
 @_overload # noqa: F811
 def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int], BroadcastingList3[int], BroadcastingList2[int], int, str) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int], BroadcastingList3[int], BroadcastingList3[int], int, str) -> Tensor
     pass
 
 @_overload # noqa: F811
