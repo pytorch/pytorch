@@ -70,40 +70,10 @@ void atan2_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-template <typename Op>
-void logical_binary_kernel_cuda_impl(TensorIterator& iter, const char* op_name, Op op) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), op_name, [&]() {
-    using self_t = scalar_t;
-    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(2), op_name, [&]() {
-      using other_t = scalar_t;
-      AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), op_name, [&]() {
-        gpu_kernel(iter, [op]GPU_LAMBDA(self_t a, other_t b) -> scalar_t {
-          return static_cast<scalar_t>(op(static_cast<bool>(a), static_cast<bool>(b)));
-        });
-      });
-    });
-  });
-}
-
-void logical_and_kernel_cuda(TensorIterator& iter) {
-  logical_binary_kernel_cuda_impl(iter, "logical_and_cuda", []GPU_LAMBDA(bool a, bool b) -> bool { return a && b; });
-}
-
-void logical_or_kernel_cuda(TensorIterator& iter) {
-  logical_binary_kernel_cuda_impl(iter, "logical_or_cuda", []GPU_LAMBDA(bool a, bool b) -> bool { return a || b; });
-}
-
-void logical_xor_kernel_cuda(TensorIterator& iter) {
-  logical_binary_kernel_cuda_impl(iter, "logical_xor_cuda", []GPU_LAMBDA(bool a, bool b) -> bool { return a != b; });
-}
-
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
 REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
 REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
-REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel_cuda);
-REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel_cuda);
-REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel_cuda);
 
 }} // namespace at::native
