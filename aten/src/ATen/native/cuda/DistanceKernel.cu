@@ -79,7 +79,7 @@ struct dists {
     static __forceinline__ __device__ void inc(scalar_t& agg, const scalar_t diff, const scalar_t p) { if (diff > agg) { agg = diff; } }
     static __forceinline__ __device__ scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
     static __forceinline__ __device__ void agg(scalar_t& update, const scalar_t other) { if (other > update) { update = other; } }
-    static __forceinline__ __device__ scalar_t backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const scalar_t p) { return std::abs(diff); }
+    static __forceinline__ __device__ scalar_t backward(const scalar_t diff, const scalar_t grad, const scalar_t dist, const scalar_t p) { return grad * sign(diff) * (std::abs(diff) == dist); }
   };
 
 };
@@ -159,7 +159,7 @@ __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
   scalar_t * buff_i = buffer + l * l_size + (r1 * j + i) * m + init;
 
   for (; self_i < end; self_i += stride, self_j += stride, buff_i += stride) {
-    const scalar_t res = *self_i;//F::backward(*self_i - *self_j, grad_k, dist_k, p);
+    const scalar_t res = *self_j;//F::backward(*self_i - *self_j, grad_k, dist_k, p);
     *buff_i = res;
   }
 }
@@ -340,7 +340,7 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
 
-  Tensor buffer = at::empty({d, r2, r1, m}, result.options());
+  Tensor buffer = (x1.dim() > 2) ? at::empty({d, r2, r1, m}, result.options()) : at::empty({r2, r1, m}, result.options());
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_cuda_backward", [&] {
     if (p == 1.0) {
       cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(-1), p, r1, r2, m, count, r_size, l1_size, l2_size);
@@ -356,7 +356,12 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   });
   AT_CUDA_CHECK(cudaGetLastError());
 
-  at::sum_out(result, buffer, 1);
+  if (x1.dim() > 2) {
+    at::sum_out(result, buffer, 1);
+  } else {
+    at::sum_out(result, buffer, 0);
+  }
+
 }
 
 
