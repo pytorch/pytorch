@@ -14,11 +14,8 @@ static void lerp_kernel_scalar(
     const Tensor& self,
     const Tensor& end,
     Scalar weight) {
-  auto iter = TensorIterator();
-  iter.add_output(ret);
-  iter.add_input(self);
-  iter.add_input(end);
-  iter.build();
+  auto iter = TensorIterator::binary_op(ret, self, end,
+                                        /*check_mem_overlap=*/true);
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "lerp_kernel_scalar", [&] {
     scalar_t weight_val = weight.to<scalar_t>();
     at::native::cpu_kernel(
@@ -37,6 +34,7 @@ static void lerp_kernel_tensor(
     const Tensor& end,
     const Tensor& weights) {
   auto iter = TensorIterator();
+  iter.set_check_mem_overlap(true);
   iter.add_output(ret);
   iter.add_input(self);
   iter.add_input(end);
