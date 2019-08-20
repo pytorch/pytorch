@@ -8037,17 +8037,27 @@ class TestNN(NNTestCase):
             W = random.randint(1, 8)
             sz = torch.Size([N, C, H, W])
             inp = torch.randn(N, 2, 3, requires_grad=True)
-            self.assertTrue(gradcheck(lambda inp: F.affine_grid(inp, sz, align_corners=align_corners), (inp,)))
+            with warnings.catch_warnings(record=True):
+                self.assertTrue(gradcheck(
+                    lambda inp: F.affine_grid(inp, sz, align_corners=align_corners),
+                    (inp,)))
 
         # test CPU against CUDA
-        if TEST_CUDNN:
+        if TEST_CUDA:
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            H = random.randint(1, 8)
+            W = random.randint(1, 8)
+            sz = torch.Size([N, C, H, W])
             for align_corners in (True, False):
                 input_cpu = torch.randn(N, 2, 3, requires_grad=True)
-                out_cpu = F.affine_grid(input_cpu, sz, align_corners=align_corners)
+                with warnings.catch_warnings(record=True):
+                    out_cpu = F.affine_grid(input_cpu, sz, align_corners=align_corners)
                 gradients = torch.randn(out_cpu.size())
                 out_cpu.backward(gradients)
                 input_gpu = input_cpu.detach().cuda().requires_grad_()
-                out_cuda = F.affine_grid(input_gpu, sz, align_corners=align_corners)
+                with warnings.catch_warnings(record=True):
+                    out_cuda = F.affine_grid(input_gpu, sz, align_corners=align_corners)
                 out_cuda.backward(gradients.cuda())
                 self.assertEqual(out_cpu, out_cuda)
                 self.assertEqual(input_cpu.grad, input_gpu.grad)
