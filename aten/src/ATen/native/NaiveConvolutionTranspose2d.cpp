@@ -247,8 +247,11 @@ void slow_conv_transpose2d_out_cpu_template(
     ones.fill_(1);
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
-      input.scalar_type(), "slow_conv_transpose2d_out_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::Long,
+      input.scalar_type(),
+      "slow_conv_transpose2d_out_cpu",
+      [&] {
         // For each elt in batch, do:
         for (int elt = 0; elt < batch_size; elt++) {
           // Helpers
@@ -624,7 +627,9 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
                    input_height * input_width});
 
   AT_DISPATCH_FLOATING_TYPES(
-      input.scalar_type(), "slow_conv_transpose2d_acc_grad_parameters_cpu", [&] {
+      input.scalar_type(),
+      "slow_conv_transpose2d_acc_grad_parameters_cpu",
+      [&] {
         // Helpers
         Tensor input_n = Tensor();
         Tensor grad_output_n = Tensor();

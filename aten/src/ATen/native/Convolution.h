@@ -14,5 +14,5 @@ namespace native {
 // where there are bugs.
 extern CAFFE2_API std::atomic<bool> disable_mkldnn_conv;
 
-}  // namespace at
-}  // namespace native
+} // namespace native
+} // namespace at

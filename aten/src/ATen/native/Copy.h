@@ -24,11 +24,11 @@ namespace native {
 // to ensure that any negative values are wrapped around correctly.
 //
 // Note that conversions from doubles to signed integral types that can't
-// represent a particular value after truncating the fracitonal part are UB as well,
-// but fixing them is not as simple as adding an int64_t intermediate, beacuse the
-// int64_t -> <smaller signed type> conversion is UB for those large values anyway.
-// I guess in that case we just have to live with that, but it's definitely less
-// surprising than the thing above.
+// represent a particular value after truncating the fracitonal part are UB as
+// well, but fixing them is not as simple as adding an int64_t intermediate,
+// beacuse the int64_t -> <smaller signed type> conversion is UB for those large
+// values anyway. I guess in that case we just have to live with that, but it's
+// definitely less surprising than the thing above.
 //
 // For the curious:
 //   https://en.cppreference.com/w/cpp/language/implicit_conversion

@@ -291,8 +291,11 @@ void slow_conv_transpose3d_out_cpu_template(
     ones.fill_(1);
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
-      input.scalar_type(), "slow_conv_transpose3d_out_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::Long,
+      input.scalar_type(),
+      "slow_conv_transpose3d_out_cpu",
+      [&] {
         // Helpers
         Tensor input_n;
         Tensor output_n;
@@ -683,7 +686,8 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
   Tensor grad_output = grad_output_.contiguous();
 
   if (grad_weight.defined()) {
-    TORCH_CHECK(grad_weight.is_contiguous(), "grad_weight needs to be contiguous");
+    TORCH_CHECK(
+        grad_weight.is_contiguous(), "grad_weight needs to be contiguous");
   }
   if (grad_bias.defined()) {
     TORCH_CHECK(grad_bias.is_contiguous(), "grad_bias needs to be contiguous");

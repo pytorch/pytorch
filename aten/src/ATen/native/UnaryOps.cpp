@@ -7,15 +7,15 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/UnaryOps.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
@@ -47,8 +47,10 @@ Tensor& bitwise_not_(Tensor& self) {
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
   checkBackend("bitwise_not", result, self.type().backend());
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
+  auto iter = TensorIterator::unary_op(
+      result,
+      self,
+      /*check_internal_overlap=*/true);
   bitwise_not_stub(iter.device_type(), iter);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
@@ -85,11 +87,14 @@ Tensor& neg_(Tensor& self) {
 }
 
 Tensor& neg_out(Tensor& result, const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() != kBool,
-              "Negation, the `-` operator, on a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
+  TORCH_CHECK(
+      self.scalar_type() != kBool,
+      "Negation, the `-` operator, on a bool tensor is not supported. "
+      "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+  auto iter = TensorIterator::unary_op(
+      result,
+      self,
+      /*check_internal_overlap=*/true);
   neg_stub(iter.device_type(), iter);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
@@ -161,10 +166,13 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 }
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-           "mvlgamma is not implemented for ", self.type());
-  TORCH_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
-           "Condition for computing multivariate log-gamma not met");
+  TORCH_CHECK(
+      at::isFloatingType(self.scalar_type()),
+      "mvlgamma is not implemented for ",
+      self.type());
+  TORCH_CHECK(
+      (self > 0.5 * (p - 1.)).all().item<uint8_t>(),
+      "Condition for computing multivariate log-gamma not met");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
   Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
@@ -172,17 +180,23 @@ Tensor mvlgamma(const Tensor& self, int64_t p) {
 }
 
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-           "mvlgamma is not implemented for ", self.type());
-  TORCH_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
-           "Condition for computing multivariate log-gamma not met");
+  TORCH_CHECK(
+      at::isFloatingType(self.scalar_type()),
+      "mvlgamma is not implemented for ",
+      self.type());
+  TORCH_CHECK(
+      (self > 0.5 * (p - 1.)).all().item<uint8_t>(),
+      "Condition for computing multivariate log-gamma not met");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
   Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
-  return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
+  return self.copy_(
+      args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
 
-inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor& src) {
+inline void propagate_names_if_namedtensor_enabled(
+    Tensor& result,
+    const Tensor& src) {
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, src);
 #endif
@@ -202,8 +216,8 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     checkBackend(#op, result, Backend::CPU);                    \
-    auto iter = TensorIterator::unary_op(result, self,          \
-      /*check_internal_overlap=*/true);                         \
+    auto iter = TensorIterator::unary_op(                       \
+        result, self, /*check_internal_overlap=*/true);         \
     op##_stub(iter.device_type(), iter);                        \
     return result;                                              \
   }
@@ -266,5 +280,5 @@ DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
 DEFINE_DISPATCH(trunc_stub);
-}
+} // namespace native
 } // namespace at

@@ -2,11 +2,11 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/quantized/Quantizer.h>
-#include <ATen/MemoryOverlap.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
@@ -19,8 +19,7 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
   const int MIN_SZ = 60 * 60;
   return self.is_contiguous() && src.numel() != 0 && src.dim() == 2 &&
       src.stride(0) == 1 && src.stride(1) == src.size(0) &&
-      self.scalar_type() == src.scalar_type() &&
-      self.numel() >= MIN_SZ;
+      self.scalar_type() == src.scalar_type() && self.numel() >= MIN_SZ;
 }
 
 // special case copy where tensor is contiguous and src is a transposed matrix
@@ -34,45 +33,46 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   }
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
-  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
-    scalar_t* sp = src.data<scalar_t>();
-    scalar_t* rp = self.data<scalar_t>();
-    scalar_t* bp = buf.data<scalar_t>();
+  AT_DISPATCH_ALL_TYPES_AND3(
+      kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
+        scalar_t* sp = src.data<scalar_t>();
+        scalar_t* rp = self.data<scalar_t>();
+        scalar_t* bp = buf.data<scalar_t>();
 
-    int64_t NR = src.size(0);
-    int64_t NC = src.size(1);
-    for (int64_t R = 0; R < NR; R += BLOCK_SZ) {
-      for (int64_t C = 0; C < NC; C += BLOCK_SZ) {
-        scalar_t* spo = sp + R + C * NR;
-        scalar_t* rpo = rp + C + R * NC;
+        int64_t NR = src.size(0);
+        int64_t NC = src.size(1);
+        for (int64_t R = 0; R < NR; R += BLOCK_SZ) {
+          for (int64_t C = 0; C < NC; C += BLOCK_SZ) {
+            scalar_t* spo = sp + R + C * NR;
+            scalar_t* rpo = rp + C + R * NC;
 
-        int nr = std::min(NR - R, BLOCK_SZ);
-        int nc = std::min(NC - C, BLOCK_SZ);
+            int nr = std::min(NR - R, BLOCK_SZ);
+            int nc = std::min(NC - C, BLOCK_SZ);
 
-        // 1. copy columns from src to buf
-        for (int c = 0; c < nc; c++) {
-          memcpy(bp + c * BLOCK_SZ, spo + c * NR, nr * sizeof(scalar_t));
-        }
+            // 1. copy columns from src to buf
+            for (int c = 0; c < nc; c++) {
+              memcpy(bp + c * BLOCK_SZ, spo + c * NR, nr * sizeof(scalar_t));
+            }
 
-        // 2. transpose buf in place
-        int rc_max = std::max(nr, nc);
-        int rc_min = std::min(nr, nc);
-        for (int r = 0; r < rc_max; r++) {
-          int end = std::min(r, rc_min);
-          for (int c = 0; c < end; c++) {
-            scalar_t tmp = bp[r + BLOCK_SZ * c];
-            bp[r + BLOCK_SZ * c] = bp[r * BLOCK_SZ + c];
-            bp[r * BLOCK_SZ + c] = tmp;
+            // 2. transpose buf in place
+            int rc_max = std::max(nr, nc);
+            int rc_min = std::min(nr, nc);
+            for (int r = 0; r < rc_max; r++) {
+              int end = std::min(r, rc_min);
+              for (int c = 0; c < end; c++) {
+                scalar_t tmp = bp[r + BLOCK_SZ * c];
+                bp[r + BLOCK_SZ * c] = bp[r * BLOCK_SZ + c];
+                bp[r * BLOCK_SZ + c] = tmp;
+              }
+            }
+
+            // 3. copy rows from buf to dst
+            for (int r = 0; r < nr; r++) {
+              memcpy(rpo + r * NC, bp + r * BLOCK_SZ, nc * sizeof(scalar_t));
+            }
           }
         }
-
-        // 3. copy rows from buf to dst
-        for (int r = 0; r < nr; r++) {
-          memcpy(rpo + r * NC, bp + r * BLOCK_SZ, nc * sizeof(scalar_t));
-        }
-      }
-    }
-  });
+      });
 #ifdef BUILD_NAMEDTENSOR
   auto outnames = unify_from_right(self.names(), src.names());
   if (outnames.has_value()) {
@@ -95,7 +95,7 @@ bool is_supported_device(Device device) {
 namespace at {
 namespace native {
 
-Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
+Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
@@ -103,8 +103,11 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   if (self.is_sparse() && src.is_sparse()) {
     return at::copy_sparse_to_sparse_(self, src, non_blocking);
   } else if (self.is_sparse() || src.is_sparse()) {
-    AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ",
-             self.type(), " and src type = ", src.type());
+    AT_ERROR(
+        "copy_() between dense and sparse Tensors is not implemented! Found self type = ",
+        self.type(),
+        " and src type = ",
+        src.type());
   }
 
   if (self.is_same(src)) {
@@ -125,10 +128,12 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
 
   if (self.is_quantized() && src.is_quantized()) {
-    TORCH_CHECK(self.qscheme() == src.qscheme(),
-                "Quantized Copy only works with same qscheme");
+    TORCH_CHECK(
+        self.qscheme() == src.qscheme(),
+        "Quantized Copy only works with same qscheme");
     TORCH_CHECK(self.scalar_type() == src.scalar_type());
-    self.set_quantizer_(at::make_per_tensor_affine_quantizer(src.q_scale(), src.q_zero_point(), src.scalar_type()));
+    self.set_quantizer_(at::make_per_tensor_affine_quantizer(
+        src.q_scale(), src.q_zero_point(), src.scalar_type()));
   }
 
   auto iter = TensorIterator();

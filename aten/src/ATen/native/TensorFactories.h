@@ -2,7 +2,8 @@
 
 #include <c10/core/TensorOptions.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 // Different combinations of row, col, and offset can lead to two cases:
 //
 // Case 1 - Trapezoid (Triangle as a special case): row + offset <= col
@@ -26,9 +27,9 @@ namespace at { namespace native {
 //    calculate the size of the bottom rectangle.
 inline int64_t get_tril_size(int64_t row, int64_t col, int64_t offset) {
   // number of elements in the first row of the tril
-  auto m_first_row = offset > 0 ?
-    std::min<int64_t>(col, 1 + offset) : // upper bounded by col
-    row + offset > 0; // either 0 or 1
+  auto m_first_row = offset > 0 ? std::min<int64_t>(col, 1 + offset)
+                                : // upper bounded by col
+      row + offset > 0; // either 0 or 1
   // number of elements in the last row of the tril, bounded by [0, col]
   auto m_last_row = std::max<int64_t>(0, std::min<int64_t>(col, row + offset));
   // number of rows, bounded by [0, row]
@@ -47,38 +48,54 @@ inline int64_t get_tril_size(int64_t row, int64_t col, int64_t offset) {
   return tril_size;
 }
 
-inline void check_args(
-    int64_t row, int64_t col, const TensorOptions& options) {
+inline void check_args(int64_t row, int64_t col, const TensorOptions& options) {
   TORCH_CHECK(row >= 0, "row must be non-negative, got", row);
   TORCH_CHECK(col >= 0, "col must be non-negative, got", col);
   if (options.has_layout()) {
     TORCH_CHECK(
-      options.layout() == at::kStrided,
-      "only support layout=torch.strided, got",
-      options.layout())
+        options.layout() == at::kStrided,
+        "only support layout=torch.strided, got",
+        options.layout())
   }
 }
 
 inline void check_size_nonnegative(IntArrayRef size) {
-  for (auto x: size) {
-    TORCH_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
+  for (auto x : size) {
+    TORCH_CHECK(
+        x >= 0,
+        "Trying to create tensor with negative dimension ",
+        x,
+        ": ",
+        size);
   }
 }
 
-inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tensor) {
-  TORCH_CHECK(at::scalar_tensor(n, tensor.options()).defined(),
-              "n is too large for result tensor type: '", tensor.type().toString(), "'");
+inline void check_supported_max_int_with_precision(
+    int64_t n,
+    const Tensor& tensor) {
+  TORCH_CHECK(
+      at::scalar_tensor(n, tensor.options()).defined(),
+      "n is too large for result tensor type: '",
+      tensor.type().toString(),
+      "'");
 
   // Ensure sufficient precision for floating point representation.
   switch (tensor.scalar_type()) {
     case at::ScalarType::Half:
-      TORCH_CHECK(n <= (int64_t(1) << 11) + 1, "n cannot be greater than 2049 for Half type.");
+      TORCH_CHECK(
+          n <= (int64_t(1) << 11) + 1,
+          "n cannot be greater than 2049 for Half type.");
       break;
     case at::ScalarType::Float:
-      TORCH_CHECK(n <= (int64_t(1) << 24) + 1, "n cannot be greater than 2^24+1 for Float type.");
+      TORCH_CHECK(
+          n <= (int64_t(1) << 24) + 1,
+          "n cannot be greater than 2^24+1 for Float type.");
       break;
-    case at::ScalarType::Double:  // Unlikely to happen, but doesn't hurt to check
-      TORCH_CHECK(n <= (int64_t(1) << 53) + 1, "n cannot be greater than 2^53+1 for Double type.");
+    case at::ScalarType::Double: // Unlikely to happen, but doesn't hurt to
+                                 // check
+      TORCH_CHECK(
+          n <= (int64_t(1) << 53) + 1,
+          "n cannot be greater than 2^53+1 for Double type.");
       break;
     default:
       break;

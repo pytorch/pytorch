@@ -120,7 +120,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   //  1) Add in row and column offsets to the rows and columns, respectively
   //  2) Dequantize the results into floating point
   //  3) Add in the bias term
-  fbgemm::ReQuantizeForFloat</*FUSE_RELU*/false> outputProcObj(
+  fbgemm::ReQuantizeForFloat</*FUSE_RELU*/ false> outputProcObj(
       /*nextop=*/doNothingObj,
       /*Aq_scale=*/q_params.scale,
       /*Bq_scale=*/&weight_scale_float,
@@ -132,8 +132,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
       /*nCol=*/N);
 
   // Allocate output Tensor and a buffer for fbgemmPacked to use
-  auto output = at::zeros(
-      {M, N}, bias.options().dtype(at::kFloat));
+  auto output = at::zeros({M, N}, bias.options().dtype(at::kFloat));
   auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
   // Pull out the PackBMatrix instance from the owning tensor

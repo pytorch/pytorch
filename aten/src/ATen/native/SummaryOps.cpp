@@ -5,7 +5,8 @@
 
 #include <tuple>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 ///////////////// bincount /////////////////
 namespace {
@@ -53,15 +54,21 @@ Tensor _bincount_cpu_template(
 }
 } // namespace
 
-Tensor
-_bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlength) {
+Tensor _bincount_cpu(
+    const Tensor& self,
+    const Tensor& weights,
+    int64_t minlength) {
   return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cpu", [&] {
     const auto scalar = weights.scalar_type();
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
-      return _bincount_cpu_template<scalar_t, float>(self.contiguous(), weights.contiguous(), minlength);
+      return _bincount_cpu_template<scalar_t, float>(
+          self.contiguous(), weights.contiguous(), minlength);
     return _bincount_cpu_template<scalar_t, double>(
-        self.contiguous(), weights.contiguous().toType(CPU(kDouble)), minlength);
+        self.contiguous(),
+        weights.contiguous().toType(CPU(kDouble)),
+        minlength);
   });
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

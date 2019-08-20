@@ -1,12 +1,12 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <c10/util/SmallVector.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/core/Range.h>
 #include <ATen/detail/ScalarTypeConversions.h>
-#include <bitset>
 #include <c10/util/Optional.h>
-#include <ATen/MemoryOverlap.h>
+#include <c10/util/SmallVector.h>
+#include <bitset>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
@@ -79,7 +79,7 @@ struct CAFFE2_API OperandInfo {
     validate();
   }
   OperandInfo(const Tensor& t, Device device, ScalarType dtype)
-    : tensor(t), device(device), dtype(dtype) {
+      : tensor(t), device(device), dtype(dtype) {
     validate();
   }
 
@@ -91,14 +91,17 @@ struct CAFFE2_API OperandInfo {
   /// coalescing.
   Tensor tensor;
 
-  /// The desired device and type for the operand. For inputs, this specifies that
-  /// the input should be converted to this type if necessary. For outputs, this
-  /// specifies which type to allocate. Note that there is very limited support
-  /// for type conversions currently: they are only allowed for zero-dim tensors.
+  /// The desired device and type for the operand. For inputs, this specifies
+  /// that the input should be converted to this type if necessary. For outputs,
+  /// this specifies which type to allocate. Note that there is very limited
+  /// support for type conversions currently: they are only allowed for zero-dim
+  /// tensors.
   Device device = kCPU;
   ScalarType dtype = ScalarType::Undefined;
 
-  bool is_type_defined() const { return dtype != ScalarType::Undefined; }
+  bool is_type_defined() const {
+    return dtype != ScalarType::Undefined;
+  }
   TensorOptions options() const {
     return TensorOptions(dtype).device(device);
   }
@@ -114,7 +117,8 @@ struct CAFFE2_API OperandInfo {
   void validate() {
     TORCH_CHECK(
         !tensor.defined() || tensor.layout() == kStrided,
-        "unsupported tensor layout: ", tensor.layout());
+        "unsupported tensor layout: ",
+        tensor.layout());
   }
 };
 
@@ -136,27 +140,44 @@ struct CAFFE2_API TensorIterator {
   //
   // The `size` often matches shape[0], but may be smaller due to
   // parallelization of the inner loop.
-  using loop_t = std::function<void(char** data, const int64_t* strides, int64_t size)>;
-  using loop2d_t = std::function<void(char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
+  using loop_t =
+      std::function<void(char** data, const int64_t* strides, int64_t size)>;
+  using loop2d_t = std::function<
+      void(char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
 
   using loop_subiter_t = std::function<void(TensorIterator& subiter)>;
 
-  void foreach_reduced_elt(const loop_subiter_t& loop, bool parallelize=true);
+  void foreach_reduced_elt(const loop_subiter_t& loop, bool parallelize = true);
 
-  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b,
-    bool check_internal_overlap = false);
-  static TensorIterator unary_op(Tensor& out, const Tensor& a,
-    bool check_internal_overlap = false);
+  static TensorIterator binary_op(
+      Tensor& out,
+      const Tensor& a,
+      const Tensor& b,
+      bool check_internal_overlap = false);
+  static TensorIterator unary_op(
+      Tensor& out,
+      const Tensor& a,
+      bool check_internal_overlap = false);
   static TensorIterator nullary_op(Tensor& out);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
-  int ndim() const { return shape_.size(); }
-  IntArrayRef shape() const { return shape_; }
+  int ndim() const {
+    return shape_.size();
+  }
+  IntArrayRef shape() const {
+    return shape_;
+  }
   int64_t numel() const;
-  int ntensors() const { return operands_.size(); }
-  int noutputs() const { return num_outputs_; }
-  int ninputs() const { return ntensors() - noutputs(); }
+  int ntensors() const {
+    return operands_.size();
+  }
+  int noutputs() const {
+    return num_outputs_;
+  }
+  int ninputs() const {
+    return ntensors() - noutputs();
+  }
 
   /// number of elements in the output operand. this is the same as numel() for
   /// operations that are not reductions.
@@ -172,24 +193,38 @@ struct CAFFE2_API TensorIterator {
   bool is_dim_reduced(int dim) const;
 
   /// Accessors for each operand
-  IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
+  IntArrayRef strides(int arg) const {
+    return operands_[arg].stride_bytes;
+  }
   void* data_ptr(int arg) const;
-  ScalarType dtype(int arg=0) const { return operands_[arg].dtype; }
-  Device device(int arg=0) const { return operands_[arg].device; }
-  DeviceType device_type(int arg=0) const { return device(arg).type(); }
-  int64_t element_size(int arg) const { return elementSize(dtype(arg)); }
+  ScalarType dtype(int arg = 0) const {
+    return operands_[arg].dtype;
+  }
+  Device device(int arg = 0) const {
+    return operands_[arg].device;
+  }
+  DeviceType device_type(int arg = 0) const {
+    return device(arg).type();
+  }
+  int64_t element_size(int arg) const {
+    return elementSize(dtype(arg));
+  }
   bool is_scalar(int arg) const;
   bool is_cpu_scalar(int arg) const;
 
-  const Tensor& tensor(int arg) const { return operands_[arg].tensor; }
-  Tensor& tensor(int arg) { return operands_[arg].tensor; }
+  const Tensor& tensor(int arg) const {
+    return operands_[arg].tensor;
+  }
+  Tensor& tensor(int arg) {
+    return operands_[arg].tensor;
+  }
 
-  Tensor output(int arg=0) const {
+  Tensor output(int arg = 0) const {
     AT_ASSERT(arg < num_outputs_);
     return operands_[arg].tensor;
   }
 
-  Tensor input(int arg=0) const {
+  Tensor input(int arg = 0) const {
     AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
     return operands_[num_outputs_ + arg].tensor;
   }
@@ -238,25 +273,32 @@ struct CAFFE2_API TensorIterator {
   /// Helper functions for CPU iteration
   DimVector get_dim_strides(int dim) const;
   DimVector get_strides() const;
-  DimVector get_inner_strides() const { return get_dim_strides(0); }
+  DimVector get_inner_strides() const {
+    return get_dim_strides(0);
+  }
   PtrVector get_data_ptrs(ArrayRef<char*> base, IntArrayRef counter) const;
   PtrVector get_base_ptrs() const;
 
-  /// true if the stride computation can use 32-bit arithmetic. Used by GPU kernels
+  /// true if the stride computation can use 32-bit arithmetic. Used by GPU
+  /// kernels
   bool can_use_32bit_indexing() const;
 
-  /// An "iteratable" object that recursively splits this iterator into sub-iterators
-  /// that can use 32-bit indexing.
+  /// An "iteratable" object that recursively splits this iterator into
+  /// sub-iterators that can use 32-bit indexing.
   SplitUntil32Bit with_32bit_indexing() const;
 
   /// If the kernel should accumulate into the output. Only relevant for CUDA
   /// reductions.
-  bool should_accumulate() const { return accumulate_; }
+  bool should_accumulate() const {
+    return accumulate_;
+  }
 
   /// Whether this iterator produces the actual output,
-  /// as opposed to something that will be accumulated further. Only relevant for
-  /// CUDA reductions.
-  bool is_final_output() const { return final_output_; }
+  /// as opposed to something that will be accumulated further. Only relevant
+  /// for CUDA reductions.
+  bool is_final_output() const {
+    return final_output_;
+  }
 
   /// Construction
   void add_output(const Tensor& output) {
@@ -292,7 +334,7 @@ struct CAFFE2_API TensorIterator {
 
   void build();
 
-protected:
+ protected:
   void mark_outputs();
   void compute_shape();
   void compute_strides();
@@ -306,7 +348,7 @@ protected:
 #endif
   void coalesce_dimensions();
 
-protected:
+ protected:
   DimVector shape_;
   DimVector perm_;
   SmallVector<OperandInfo, 4> operands_;
@@ -325,18 +367,21 @@ protected:
 /// the original TensorIterator.
 struct CAFFE2_API SplitUntil32Bit {
   struct CAFFE2_API iterator {
-    iterator() {};
+    iterator(){};
     iterator(const TensorIterator& iter);
     iterator(iterator&&) = default;
 
     TensorIterator& operator*() const;
     iterator& operator++();
     bool operator==(const iterator& other) const {
-      // two iterators are equal if they are the same object or they're both empty
+      // two iterators are equal if they are the same object or they're both
+      // empty
       return this == &other || (vec.empty() && other.vec.empty());
     }
     // needed for C++11 range-based for loop
-    bool operator!=(const iterator& other) const { return !(*this == other); }
+    bool operator!=(const iterator& other) const {
+      return !(*this == other);
+    }
 
     /// stack of TensorIterators to be split
     std::vector<std::unique_ptr<TensorIterator>> vec;
@@ -347,8 +392,8 @@ struct CAFFE2_API SplitUntil32Bit {
   iterator begin() const;
   iterator end() const;
 
-private:
+ private:
   const TensorIterator& iter;
 };
 
-}  // namespace at
+} // namespace at

@@ -90,5 +90,5 @@ static void col2im(
   }
 }
 
-} // native
-} // at
+} // namespace native
+} // namespace at

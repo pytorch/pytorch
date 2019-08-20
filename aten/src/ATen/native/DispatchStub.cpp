@@ -6,7 +6,8 @@
 #include <cstdlib>
 #include <cstring>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 static CPUCapability compute_cpu_capability() {
   auto envar = std::getenv("ATEN_CPU_CAPABILITY");
@@ -41,4 +42,5 @@ CPUCapability get_cpu_capability() {
   return capability;
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

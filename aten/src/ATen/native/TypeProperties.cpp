@@ -3,7 +3,8 @@
 #include <ATen/NativeFunctions.h>
 #include <type_traits>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 bool is_cuda(const Tensor& self) {
   return self.is_cuda();
@@ -21,7 +22,7 @@ bool is_floating_point(const Tensor& self) {
   return at::isFloatingType(self.scalar_type());
 }
 
-bool is_signed(const Tensor &self) {
+bool is_signed(const Tensor& self) {
   if (self.scalar_type() == ScalarType::Half) {
     return true;
   }
@@ -49,4 +50,5 @@ Tensor type_as(const Tensor& self, const Tensor& other) {
   return self.toType(other.type());
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

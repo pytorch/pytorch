@@ -3,13 +3,16 @@
 #include <ATen/ATen.h>
 #include <TH/THTensor.hpp>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 // These functions are called by native::resize_ as well as (legacy) TH resize.
 // They are not in TH/THTensor.cpp because the at namespace is easier
 // to benchmark than TH; I can't get gbenchmark to call fns from THTensor.cpp
 
-static inline void maybe_resize_storage_cpu(TensorImpl* self, int64_t new_size) {
+static inline void maybe_resize_storage_cpu(
+    TensorImpl* self,
+    int64_t new_size) {
   // It does not make sense to try to resize a storage
   // to hold 0 elements, and this can break
   // if storage_offset is positive but
@@ -21,8 +24,7 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, int64_t new_size) 
     }
     if (new_size + self->storage_offset() > self->storage().numel()) {
       THStorage_resize(
-          THTensor_getStoragePtr(self),
-          new_size + self->storage_offset());
+          THTensor_getStoragePtr(self), new_size + self->storage_offset());
     }
   }
 }
@@ -70,10 +72,17 @@ static inline void checkInBoundsForStorage(
   int64_t new_storage_size = new_storage.numel();
   TORCH_CHECK(
       storage_offset + storage_size <= new_storage_size,
-      "setStorage: sizes ", size, ", strides ", stride, ","
-      " and storage offset ", storage_offset,
-      " requiring a storage size of ", storage_size + storage_offset,
-      " are out of bounds for storage with numel ", new_storage_size);
+      "setStorage: sizes ",
+      size,
+      ", strides ",
+      stride,
+      ","
+      " and storage offset ",
+      storage_offset,
+      " requiring a storage size of ",
+      storage_size + storage_offset,
+      " are out of bounds for storage with numel ",
+      new_storage_size);
 }
 
 /**
@@ -89,7 +98,8 @@ inline void setStrided(
   checkInBoundsForStorage(size, stride, storage_offset, self_->storage());
 
   /* storage offset */
-  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+  TORCH_CHECK(
+      storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
   self_->set_storage_offset(storage_offset);
 
   /* size and stride */
@@ -100,4 +110,5 @@ inline void setStrided(
   self_->set_sizes_and_strides(size, stride);
 }
 
-}}
+} // namespace native
+} // namespace at

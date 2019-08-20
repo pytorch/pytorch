@@ -1,18 +1,22 @@
 #include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
 
 #include <cstring>
 #include <memory>
 #include <sstream>
 #include <vector>
 
+namespace at {
+namespace native {
 
-namespace at { namespace native {
-
-Tensor embedding(const Tensor & weight, const Tensor & indices,
-                 int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+Tensor embedding(
+    const Tensor& weight,
+    const Tensor& indices,
+    int64_t padding_idx,
+    bool scale_grad_by_freq,
+    bool sparse) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding", indices_arg, kLong);
 
@@ -29,8 +33,12 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
 }
 
 Tensor embedding_backward(
-    const Tensor & grad, const Tensor & indices, int64_t num_weights,
-    int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+    const Tensor& grad,
+    const Tensor& indices,
+    int64_t num_weights,
+    int64_t padding_idx,
+    bool scale_grad_by_freq,
+    bool sparse) {
   if (sparse) {
     return at::embedding_sparse_backward(
         grad, indices, num_weights, padding_idx, scale_grad_by_freq);
@@ -41,9 +49,11 @@ Tensor embedding_backward(
 }
 
 Tensor embedding_sparse_backward(
-    const Tensor & grad_, const Tensor & indices_, int64_t num_weights,
-    int64_t padding_idx, bool scale_grad_by_freq) {
-
+    const Tensor& grad_,
+    const Tensor& indices_,
+    int64_t num_weights,
+    int64_t padding_idx,
+    bool scale_grad_by_freq) {
   auto indices_arg = TensorArg(indices_, "indices", 2);
   checkScalarType("embedding_backward", indices_arg, kLong);
 
@@ -62,14 +72,15 @@ Tensor embedding_sparse_backward(
   }
 
   int64_t num_features = grad_.size(-1);
-  auto weight_size = std::array<int64_t, 2>{{ num_weights, num_features }};
+  auto weight_size = std::array<int64_t, 2>{{num_weights, num_features}};
   auto dense_options = grad.options();
 
   // check if all our grad come from padding_idx
   if (grad.numel() == 0) {
-    return at::_sparse_coo_tensor_unsafe(at::empty({1, 0}, indices_.options()),
-                                         at::empty({0, num_features}, dense_options),
-                                         weight_size);
+    return at::_sparse_coo_tensor_unsafe(
+        at::empty({1, 0}, indices_.options()),
+        at::empty({0, num_features}, dense_options),
+        weight_size);
   }
 
   auto index = indices.reshape({1, -1});
@@ -78,9 +89,11 @@ Tensor embedding_sparse_backward(
 }
 
 Tensor embedding_dense_backward_cpu(
-    const Tensor & grad_, const Tensor & indices, int64_t num_weights,
-    int64_t padding_idx, bool scale_grad_by_freq) {
-
+    const Tensor& grad_,
+    const Tensor& indices,
+    int64_t num_weights,
+    int64_t padding_idx,
+    bool scale_grad_by_freq) {
   auto indices_arg = TensorArg(indices, "indices", 2);
   checkScalarType("embedding_backward", indices_arg, kLong);
 
@@ -130,8 +143,11 @@ Tensor embedding_dense_backward_cpu(
   return grad_weight;
 }
 
-Tensor & embedding_renorm_cpu_(
-    Tensor & self, const Tensor & indices, double max_norm, double norm_type) {
+Tensor& embedding_renorm_cpu_(
+    Tensor& self,
+    const Tensor& indices,
+    double max_norm,
+    double norm_type) {
   auto self_arg = TensorArg(self, "self", 1);
   auto indices_arg = TensorArg(indices, "indices", 2);
   checkDim("embedding_renorm_", self_arg, 2);
@@ -161,5 +177,5 @@ Tensor & embedding_renorm_cpu_(
   return self;
 }
 
-
-}}  // namespace at::native
+} // namespace native
+} // namespace at

@@ -1,11 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
+#include <cstring>
 #include <limits>
 #include <sstream>
-#include <cstring>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 /*
  * Clones a Tensor so that the following conditions hold:
@@ -46,7 +47,8 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
 
 /*
  * Given batches of matrices with arbitrary batch dim,
- * computes the number of batches for Triu and Tril. This ignores stride 0 dimension
+ * computes the number of batches for Triu and Tril. This ignores stride 0
+ * dimension
  */
 static inline int64_t batchCountTrilTriu(const Tensor& batched_matrices) {
   int64_t result = 1;
@@ -58,11 +60,14 @@ static inline int64_t batchCountTrilTriu(const Tensor& batched_matrices) {
   return result;
 }
 
-/* Checks a necessary property for the triu and tril implementations, hence the name.
- * Here batch contiguity is checked for tensors with greater than 4 dimensions.
- * Contiguous tensors and tensors with less than 3 dimensions pass this check
- */ 
-static inline std::tuple<bool, Tensor> checkTrilTriuBatchContiguous(const Tensor& tensor, bool allow_zero_stride) {
+/* Checks a necessary property for the triu and tril implementations, hence the
+ * name. Here batch contiguity is checked for tensors with greater than 4
+ * dimensions. Contiguous tensors and tensors with less than 3 dimensions pass
+ * this check
+ */
+static inline std::tuple<bool, Tensor> checkTrilTriuBatchContiguous(
+    const Tensor& tensor,
+    bool allow_zero_stride) {
   // Complete contiguity is the most desired property, which is why
   // we return true if the tensor is contiguous
   if (tensor.is_contiguous()) {
@@ -70,7 +75,8 @@ static inline std::tuple<bool, Tensor> checkTrilTriuBatchContiguous(const Tensor
     if (tensor.strides() == default_strides_for_size) {
       return std::make_tuple(true, tensor);
     } else {
-      return std::make_tuple(false, tensor.as_strided(tensor.sizes(), default_strides_for_size));
+      return std::make_tuple(
+          false, tensor.as_strided(tensor.sizes(), default_strides_for_size));
     }
   }
 
@@ -84,7 +90,8 @@ static inline std::tuple<bool, Tensor> checkTrilTriuBatchContiguous(const Tensor
   int64_t expected_stride = tensor.size(-1) * tensor.size(-2);
   for (int64_t i = dims - 3; i >= 0; i--) {
     // Skip trivial dimension;
-    if (allow_zero_stride && i == 0 && (tensor.stride(i) == 0 || tensor.size(i) == 1)) {
+    if (allow_zero_stride && i == 0 &&
+        (tensor.stride(i) == 0 || tensor.size(i) == 1)) {
       continue;
     }
     if (expected_stride != tensor.stride(i)) {
@@ -103,52 +110,100 @@ static inline double _get_epsilon(const ScalarType& sc_type) {
     case at::ScalarType::Double:
       return std::numeric_limits<double>::epsilon();
     default:
-      AT_ERROR("This function doesn't handle types other than float and double");
+      AT_ERROR(
+          "This function doesn't handle types other than float and double");
   }
 }
 
 // Validates input shapes and devices
 // for linear solve methods (solve, cholesky_solve, lu_solve, triangular_solve)
-static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, const char* name) {
-  TORCH_CHECK(self.device() == A.device(),
-              "Expected b and A to be on the same device, but found b on ",
-              self.device(), " and A on ", A.device(), " instead.");
+static inline void linearSolveCheckInputs(
+    const Tensor& self,
+    const Tensor& A,
+    const char* name) {
+  TORCH_CHECK(
+      self.device() == A.device(),
+      "Expected b and A to be on the same device, but found b on ",
+      self.device(),
+      " and A on ",
+      A.device(),
+      " instead.");
 
-  TORCH_CHECK(A.size(-1) == A.size(-2),
-              "A must be batches of square matrices, "
-              "but they are ", A.size(-1), " by ", A.size(-2), " matrices");
+  TORCH_CHECK(
+      A.size(-1) == A.size(-2),
+      "A must be batches of square matrices, "
+      "but they are ",
+      A.size(-1),
+      " by ",
+      A.size(-2),
+      " matrices");
 
-  TORCH_CHECK(A.size(-1) == self.size(-2),
-              "Incompatible matrix sizes for ", name, ": each A "
-              "matrix is ", A.size(-1), " by ", A.size(-1),
-              " but each b matrix is ", self.size(-2), " by ", self.size(-1));
+  TORCH_CHECK(
+      A.size(-1) == self.size(-2),
+      "Incompatible matrix sizes for ",
+      name,
+      ": each A "
+      "matrix is ",
+      A.size(-1),
+      " by ",
+      A.size(-1),
+      " but each b matrix is ",
+      self.size(-2),
+      " by ",
+      self.size(-1));
 }
 
-// Validates input shapes for operations on batches of square matrices (inverse, cholesky, lu, symeig)
+// Validates input shapes for operations on batches of square matrices (inverse,
+// cholesky, lu, symeig)
 static inline void squareCheckInputs(const Tensor& self) {
-  TORCH_CHECK(self.size(-1) == self.size(-2),
-              "A must be batches of square matrices, "
-              "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
+  TORCH_CHECK(
+      self.size(-1) == self.size(-2),
+      "A must be batches of square matrices, "
+      "but they are ",
+      self.size(-1),
+      " by ",
+      self.size(-2),
+      " matrices");
 }
 
 /*
  * Given a vector of int64_t infos, obtained after a batch operations,
  * this function checks if the computation over all these batches has been
  * successful (info = 0) or not, and report in case of the latter.
- */ 
-static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* name) {
+ */
+static inline void batchCheckErrors(
+    std::vector<int64_t>& infos,
+    const char* name) {
   for (size_t i = 0; i < infos.size(); i++) {
     auto info = infos[i];
     if (info < 0) {
-      AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
+      AT_ERROR(
+          name, ": For batch ", i, ": Argument ", -info, " has illegal value");
     } else if (info > 0) {
       if (strstr(name, "svd")) {
-        AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
+        AT_ERROR(
+            name,
+            ": the updating process of SBDSDC did not converge (error: ",
+            info,
+            ")");
       } else if (strstr(name, "symeig")) {
-        AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
-                 " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
+        AT_ERROR(
+            name,
+            ": For batch ",
+            i,
+            ": the algorithm failed to converge; ",
+            info,
+            " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
       } else {
-        AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+        AT_ERROR(
+            name,
+            ": For batch ",
+            i,
+            ": U(",
+            info,
+            ",",
+            info,
+            ") is zero, singular U.");
       }
     }
   }
@@ -164,26 +219,43 @@ static inline void batchCheckErrors(const Tensor& infos, const char* name) {
   for (int64_t i = 0; i < batch_size; i++) {
     auto info = infos_data[i];
     if (info < 0) {
-      AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
+      AT_ERROR(
+          name, ": For batch ", i, ": Argument ", -info, " has illegal value");
     } else if (info > 0) {
-      AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+      AT_ERROR(
+          name,
+          ": For batch ",
+          i,
+          ": U(",
+          info,
+          ",",
+          info,
+          ") is zero, singular U.");
     }
   }
 }
 
 /*
- * Given a info int, obtained after a single operation, this function check if the computation
- * has been successful (info = 0) or not, and report in case of the latter.
+ * Given a info int, obtained after a single operation, this function check if
+ * the computation has been successful (info = 0) or not, and report in case of
+ * the latter.
  */
 static inline void singleCheckErrors(int64_t info, const char* name) {
   if (info < 0) {
     AT_ERROR(name, ": Argument ", -info, " has illegal value");
   } else if (info > 0) {
     if (strstr(name, "svd")) {
-      AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
+      AT_ERROR(
+          name,
+          ": the updating process of SBDSDC did not converge (error: ",
+          info,
+          ")");
     } else if (strstr(name, "symeig")) {
-      AT_ERROR(name, ": the algorithm failed to converge; ", info,
-               " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
+      AT_ERROR(
+          name,
+          ": the algorithm failed to converge; ",
+          info,
+          " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
     } else {
       AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
     }
@@ -192,26 +264,38 @@ static inline void singleCheckErrors(int64_t info, const char* name) {
 
 // Checks if all the Tensors in a TensorList are of the same dimensions
 static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
-  for (auto &t : tensors) {
-    TORCH_CHECK(t.dim() == dim, "Tensor dimension is ", t.dim(), ", expected ", dim, " instead.");
+  for (auto& t : tensors) {
+    TORCH_CHECK(
+        t.dim() == dim,
+        "Tensor dimension is ",
+        t.dim(),
+        ", expected ",
+        dim,
+        " instead.");
   }
 }
 
-static inline std::tuple<Tensor,Tensor> _linear_solve_broadcast_args(const Tensor& arg1, const Tensor& arg2, const char* name) {
+static inline std::tuple<Tensor, Tensor> _linear_solve_broadcast_args(
+    const Tensor& arg1,
+    const Tensor& arg2,
+    const char* name) {
   linearSolveCheckInputs(arg1, arg2, name);
 
   // broadcast the batch dimensions of arg1 and arg2.
   IntArrayRef arg1_batch_sizes(arg1.sizes().data(), arg1.ndimension() - 2);
   IntArrayRef arg2_batch_sizes(arg2.sizes().data(), arg2.ndimension() - 2);
-  std::vector<int64_t> expand_batch_portion = infer_size(arg1_batch_sizes, arg2_batch_sizes);
+  std::vector<int64_t> expand_batch_portion =
+      infer_size(arg1_batch_sizes, arg2_batch_sizes);
 
   std::vector<int64_t> arg1_expand_size({expand_batch_portion});
-  arg1_expand_size.insert(arg1_expand_size.end(), { arg1.size(-2), arg1.size(-1) });
+  arg1_expand_size.insert(
+      arg1_expand_size.end(), {arg1.size(-2), arg1.size(-1)});
 
   std::vector<int64_t> arg2_expand_size({expand_batch_portion});
-  arg2_expand_size.insert(arg2_expand_size.end(), { arg2.size(-2), arg2.size(-1) });
+  arg2_expand_size.insert(
+      arg2_expand_size.end(), {arg2.size(-2), arg2.size(-1)});
 
-  Tensor arg1_broadcasted  = arg1.expand(arg1_expand_size);
+  Tensor arg1_broadcasted = arg1.expand(arg1_expand_size);
   Tensor arg2_broadcasted = arg2.expand(arg2_expand_size);
   return std::make_tuple(arg1_broadcasted, arg2_broadcasted);
 }
@@ -225,23 +309,25 @@ static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
   for (int64_t i = 0; i < ndim; i++) {
     auto it = std::find(a.begin(), a.end(), i);
     if (it == a.end()) {
-       perm.push_back(i);
+      perm.push_back(i);
     }
   }
   for (auto i : a) {
     perm.push_back(i);
   }
 
-  TORCH_CHECK((int64_t)perm.size() == ndim,
-    "duplicate or invalid axis in 'dim' argument for tensor with ndim==", ndim);
+  TORCH_CHECK(
+      (int64_t)perm.size() == ndim,
+      "duplicate or invalid axis in 'dim' argument for tensor with ndim==",
+      ndim);
 
   return self.permute(perm);
 }
 
-// Function to compute sizes, strides and the extra columns for the Q matrix in the QR Decomposition
-static inline std::tuple<std::vector<int64_t>,
-                         std::vector<int64_t>,
-                         int64_t> _compute_geometry_for_Q(const Tensor& input, bool some) {
+// Function to compute sizes, strides and the extra columns for the Q matrix in
+// the QR Decomposition
+static inline std::tuple<std::vector<int64_t>, std::vector<int64_t>, int64_t>
+_compute_geometry_for_Q(const Tensor& input, bool some) {
   int64_t m = input.size(-2), n = input.size(-1);
   int64_t n_columns_q;
 
@@ -264,8 +350,12 @@ static inline std::tuple<std::vector<int64_t>,
   return std::make_tuple(q_sizes, q_strides, n_columns_q);
 }
 
-// Function to generate empty tensors of required size, strides and dtype for the SVD operation
-static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some, bool compute_uv) {
+// Function to generate empty tensors of required size, strides and dtype for
+// the SVD operation
+static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(
+    const Tensor& input,
+    bool some,
+    bool compute_uv) {
   auto sizes = input.sizes().vec();
   int64_t m = input.size(-2), n = input.size(-1);
 
@@ -281,11 +371,12 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   if (!input.is_cuda()) {
     U_empty = at::empty_strided(sizes, strides, input.options());
   } else {
-    // NB: U_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation) 
-    // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally. 
-    U_empty = at::empty_strided(sizes, strides, input.options().device(at::kCPU));
+    // NB: U_empty is an empty tensor created on the CPU intentionally, because
+    // magma_(d/s)gesdd (which is the driver routine for the divide and conquer
+    // SVD operation) takes in arrays on the CPU as input. This routine is a
+    // hybrid CPU-GPU routine that moves the inputs between devices internally.
+    U_empty =
+        at::empty_strided(sizes, strides, input.options().device(at::kCPU));
   }
 
   sizes[input.dim() - 2] = n;
@@ -295,10 +386,10 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   if (!input.is_cuda()) {
     VT_empty = at::empty(sizes, input.options());
   } else {
-    // NB: VT_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation) 
-    // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally. 
+    // NB: VT_empty is an empty tensor created on the CPU intentionally, because
+    // magma_(d/s)gesdd (which is the driver routine for the divide and conquer
+    // SVD operation) takes in arrays on the CPU as input. This routine is a
+    // hybrid CPU-GPU routine that moves the inputs between devices internally.
     VT_empty = at::empty(sizes, input.options().device(at::kCPU));
   }
 
@@ -308,23 +399,25 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   if (!input.is_cuda()) {
     S_empty = at::empty(sizes, input.options());
   } else {
-    // NB: S_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation) 
-    // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally. 
+    // NB: S_empty is an empty tensor created on the CPU intentionally, because
+    // magma_(d/s)gesdd (which is the driver routine for the divide and conquer
+    // SVD operation) takes in arrays on the CPU as input. This routine is a
+    // hybrid CPU-GPU routine that moves the inputs between devices internally.
     S_empty = at::empty(sizes, input.options().device(at::kCPU));
   }
-  return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);  
+  return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);
 }
 
 // Function used instead of .to so that the original strides are retained
 // .to doesn't retain strides and make the output tensor contiguous
-static inline Tensor same_stride_to(const Tensor& original_tensor, const at::TensorOptions& options) {
-  auto strided_to = at::empty_strided(original_tensor.sizes(),
-                                      original_tensor.strides(),
-                                      options);
+static inline Tensor same_stride_to(
+    const Tensor& original_tensor,
+    const at::TensorOptions& options) {
+  auto strided_to = at::empty_strided(
+      original_tensor.sizes(), original_tensor.strides(), options);
   strided_to.copy_(original_tensor);
   return strided_to;
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

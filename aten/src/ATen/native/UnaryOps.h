@@ -1,15 +1,18 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/native/DispatchStub.h>
 #include <ATen/Generator.h>
+#include <ATen/native/DispatchStub.h>
 #include <stdexcept>
 
-namespace at { struct TensorIterator; }
+namespace at {
+struct TensorIterator;
+}
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-using unary_fn = void(*)(TensorIterator&);
+using unary_fn = void (*)(TensorIterator&);
 
 DECLARE_DISPATCH(unary_fn, abs_stub);
 DECLARE_DISPATCH(unary_fn, acos_stub);
@@ -42,7 +45,9 @@ DECLARE_DISPATCH(unary_fn, tan_stub);
 DECLARE_DISPATCH(unary_fn, tanh_stub);
 DECLARE_DISPATCH(unary_fn, trunc_stub);
 
-DECLARE_DISPATCH(void(*)(Tensor&, const double, Generator *), bernoulli_mkl_stub);
+DECLARE_DISPATCH(
+    void (*)(Tensor&, const double, Generator*),
+    bernoulli_mkl_stub);
 
 // Missing unary functions
 // digamma
@@ -53,4 +58,5 @@ DECLARE_DISPATCH(void(*)(Tensor&, const double, Generator *), bernoulli_mkl_stub
 // clamp/_min/_max
 // sign
 // zero
-}} // namespace at::native
+} // namespace native
+} // namespace at

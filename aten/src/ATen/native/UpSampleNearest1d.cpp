@@ -106,12 +106,7 @@ static void upsample_nearest1d_out_cpu_template(
   int64_t input_width = input_.size(2);
 
   upsample_1d_shape_check(
-      input_,
-      Tensor(),
-      nbatch,
-      channels,
-      input_width,
-      output_width);
+      input_, Tensor(), nbatch, channels, input_width, output_width);
 
   auto input = input_.contiguous();
 
@@ -120,18 +115,14 @@ static void upsample_nearest1d_out_cpu_template(
 
   AT_ASSERT(input_width > 0 && output_width > 0);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest1d", [&] {
-    auto* idata = input.data<scalar_t>();
-    auto* odata = output.data<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+      input.scalar_type(), "upsample_nearest1d", [&] {
+        auto* idata = input.data<scalar_t>();
+        auto* odata = output.data<scalar_t>();
 
-    upsample_nearest1d_out_frame<scalar_t>(
-        odata,
-        idata,
-        input_width,
-        output_width,
-        nbatch,
-        channels);
-  });
+        upsample_nearest1d_out_frame<scalar_t>(
+            odata, idata, input_width, output_width, nbatch, channels);
+      });
 }
 
 static void upsample_nearest1d_backward_out_cpu_template(
@@ -156,12 +147,7 @@ static void upsample_nearest1d_backward_out_cpu_template(
   int64_t input_width = input_size[2];
 
   upsample_1d_shape_check(
-      Tensor(),
-      grad_output_,
-      nbatch,
-      channels,
-      input_width,
-      output_width);
+      Tensor(), grad_output_, nbatch, channels, input_width, output_width);
 
   auto grad_output = grad_output_.contiguous();
 
@@ -174,12 +160,7 @@ static void upsample_nearest1d_backward_out_cpu_template(
         scalar_t* odata = grad_output.data<scalar_t>();
 
         upsample_nearest1d_backward_out_frame<scalar_t>(
-            odata,
-            idata,
-            input_width,
-            output_width,
-            nbatch,
-            channels);
+            odata, idata, input_width, output_width, nbatch, channels);
       });
 }
 } // namespace

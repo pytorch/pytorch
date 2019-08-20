@@ -45,11 +45,13 @@ static void upsample_bicubic2d_out_frame(
       scalar_t* in = idata;
       scalar_t* out = odata;
 
-      const scalar_t real_x = area_pixel_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
+      const scalar_t real_x = area_pixel_compute_source_index(
+          width_scale, output_x, align_corners, /*cubic=*/true);
       int64_t input_x = floorf(real_x);
       const scalar_t t_x = real_x - input_x;
 
-      const scalar_t real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
+      const scalar_t real_y = area_pixel_compute_source_index(
+          height_scale, output_y, align_corners, /*cubic=*/true);
       int64_t input_y = floorf(real_y);
       const scalar_t t_y = real_y - input_y;
 
@@ -125,11 +127,13 @@ static void upsample_bicubic2d_backward_out_frame(
       scalar_t* in = idata;
       scalar_t* out = odata;
 
-      const scalar_t real_x = area_pixel_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
+      const scalar_t real_x = area_pixel_compute_source_index(
+          width_scale, output_x, align_corners, /*cubic=*/true);
       int64_t input_x = floorf(real_x);
       scalar_t t_x = real_x - input_x;
 
-      const scalar_t real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
+      const scalar_t real_y = area_pixel_compute_source_index(
+          height_scale, output_y, align_corners, /*cubic=*/true);
       int64_t input_y = floorf(real_y);
       scalar_t t_y = real_y - input_y;
 
@@ -194,21 +198,22 @@ static void upsample_bicubic2d_out_cpu_template(
   output.resize_({nbatch, channels, output_height, output_width});
   output.zero_();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_bicubic2d", [&] {
-    auto* idata = input.data<scalar_t>();
-    auto* odata = output.data<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+      input.scalar_type(), "upsample_bicubic2d", [&] {
+        auto* idata = input.data<scalar_t>();
+        auto* odata = output.data<scalar_t>();
 
-    upsample_bicubic2d_out_frame<scalar_t>(
-        odata,
-        idata,
-        input_height,
-        input_width,
-        output_height,
-        output_width,
-        nbatch,
-        channels,
-        align_corners);
-  });
+        upsample_bicubic2d_out_frame<scalar_t>(
+            odata,
+            idata,
+            input_height,
+            input_width,
+            output_height,
+            output_width,
+            nbatch,
+            channels,
+            align_corners);
+      });
 }
 
 static void upsample_bicubic2d_backward_out_cpu_template(

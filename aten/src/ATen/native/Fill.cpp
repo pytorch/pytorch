@@ -1,9 +1,9 @@
 // Functions that fill Tensors with constants.
 
+#include <ATen/native/Fill.h>
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/Fill.h>
 
 namespace at {
 namespace native {
@@ -21,13 +21,18 @@ Tensor& fill_(Tensor& self, Scalar value) {
 }
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
-  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
+  TORCH_CHECK(
+      value.dim() == 0,
+      "fill_ only supports 0-dimension value tensor but got tensor with ",
+      value.dim(),
+      " dimensions.");
   return fill_out(self, value.item());
 }
 
 DEFINE_DISPATCH(fill_stub);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill_diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill_diagonal
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor& fill_diagonal_(Tensor& self, Scalar fill_value, bool wrap) {
   int64_t nDims = self.dim();
@@ -69,7 +74,8 @@ Tensor& fill_diagonal_(Tensor& self, Scalar fill_value, bool wrap) {
 
     int64_t offset = self.stride(0) * (width + 1);
 
-    auto wrap_diag = self.as_strided(wrap_sizes, strides, storage_offset + offset);
+    auto wrap_diag =
+        self.as_strided(wrap_sizes, strides, storage_offset + offset);
     wrap_diag.fill_(fill_value);
   }
 

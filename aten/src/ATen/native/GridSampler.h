@@ -3,14 +3,15 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace detail {
 
-  enum class GridSamplerInterpolation {Bilinear, Nearest};
-  enum class GridSamplerPadding {Zeros, Border, Reflection};
+enum class GridSamplerInterpolation { Bilinear, Nearest };
+enum class GridSamplerPadding { Zeros, Border, Reflection };
 
-}  // namespace detail
+} // namespace detail
 
 using detail::GridSamplerInterpolation;
 using detail::GridSamplerPadding;
@@ -26,8 +27,10 @@ using detail::GridSamplerPadding;
 //     +1 --> (size - 1) + 0.5 == size - 0.5
 //     scale_factor = size / 2
 template <typename scalar_t>
-static inline scalar_t grid_sampler_unnormalize(scalar_t coord, int64_t size,
-                                                bool align_corners) {
+static inline scalar_t grid_sampler_unnormalize(
+    scalar_t coord,
+    int64_t size,
+    bool align_corners) {
   if (align_corners) {
     // unnormalize coord from [-1, 1] to [0, size - 1]
     return ((coord + 1) / 2) * (size - 1);
@@ -42,8 +45,11 @@ static inline scalar_t grid_sampler_unnormalize(scalar_t coord, int64_t size,
 // `grad_in`.
 // This is useful in the backward pass of grid_sampler.
 template <typename scalar_t>
-static inline scalar_t grid_sampler_unnormalize_set_grad(scalar_t coord, int64_t size,
-                                                         bool align_corners, scalar_t *grad_in) {
+static inline scalar_t grid_sampler_unnormalize_set_grad(
+    scalar_t coord,
+    int64_t size,
+    bool align_corners,
+    scalar_t* grad_in) {
   if (align_corners) {
     // unnormalize coord from [-1, 1] to [0, size - 1]
     *grad_in = static_cast<scalar_t>(size - 1) / 2;
@@ -56,17 +62,21 @@ static inline scalar_t grid_sampler_unnormalize_set_grad(scalar_t coord, int64_t
 }
 
 // Clips coordinates to between 0 and clip_limit - 1
-template<typename scalar_t>
+template <typename scalar_t>
 static inline scalar_t clip_coordinates(scalar_t in, int64_t clip_limit) {
-  return std::min(static_cast<scalar_t>(clip_limit - 1), std::max(in, static_cast<scalar_t>(0)));
+  return std::min(
+      static_cast<scalar_t>(clip_limit - 1),
+      std::max(in, static_cast<scalar_t>(0)));
 }
 
 // clip_coordinates_set_grad works similarly to clip_coordinates except that
 // it also returns the `d output / d input` via pointer argument `grad_in`.
 // This is useful in the backward pass of grid_sampler.
-template<typename scalar_t>
-static inline scalar_t clip_coordinates_set_grad(scalar_t in, int64_t clip_limit,
-                                                 scalar_t *grad_in) {
+template <typename scalar_t>
+static inline scalar_t clip_coordinates_set_grad(
+    scalar_t in,
+    int64_t clip_limit,
+    scalar_t* grad_in) {
   if (in < static_cast<scalar_t>(0)) {
     *grad_in = static_cast<scalar_t>(0);
     return static_cast<scalar_t>(0);
@@ -85,9 +95,11 @@ static inline scalar_t clip_coordinates_set_grad(scalar_t in, int64_t clip_limit
 // Reflects coordinates until they fall between low and high (inclusive).
 // The bounds are passed as twice their value so that half-integer values
 // can be represented as ints.
-template<typename scalar_t>
-static inline scalar_t reflect_coordinates(scalar_t in, int64_t twice_low,
-                                           int64_t twice_high) {
+template <typename scalar_t>
+static inline scalar_t reflect_coordinates(
+    scalar_t in,
+    int64_t twice_low,
+    int64_t twice_high) {
   if (twice_low == twice_high) {
     return static_cast<scalar_t>(0);
   }
@@ -108,9 +120,12 @@ static inline scalar_t reflect_coordinates(scalar_t in, int64_t twice_low,
 // that it also returns the `d output / d input` via pointer argument
 // `grad_in`.
 // This is useful in the backward pass of grid_sampler.
-template<typename scalar_t>
-static inline scalar_t reflect_coordinates_set_grad(scalar_t in, int64_t twice_low,
-                                                    int64_t twice_high, scalar_t *grad_in) {
+template <typename scalar_t>
+static inline scalar_t reflect_coordinates_set_grad(
+    scalar_t in,
+    int64_t twice_low,
+    int64_t twice_high,
+    scalar_t* grad_in) {
   if (twice_low == twice_high) {
     *grad_in = static_cast<scalar_t>(0);
     return static_cast<scalar_t>(0);
@@ -151,9 +166,9 @@ static inline scalar_t grid_sampler_compute_source_index(
   } else if (padding_mode == GridSamplerPadding::Reflection) {
     // reflect coordinates by image borders
     if (align_corners) {
-      coord = reflect_coordinates(coord, 0, 2*(size - 1));
+      coord = reflect_coordinates(coord, 0, 2 * (size - 1));
     } else {
-      coord = reflect_coordinates(coord, -1, 2*size - 1);
+      coord = reflect_coordinates(coord, -1, 2 * size - 1);
       // when align_corners=False, reflection does not auto clip coords
       coord = clip_coordinates(coord, size);
     }
@@ -171,9 +186,10 @@ static inline scalar_t grid_sampler_compute_source_index_set_grad(
     int64_t size,
     GridSamplerPadding padding_mode,
     bool align_corners,
-    scalar_t *grad_in) {
+    scalar_t* grad_in) {
   scalar_t grad_clip, grad_refl;
-  coord = grid_sampler_unnormalize_set_grad(coord, size, align_corners, grad_in);
+  coord =
+      grid_sampler_unnormalize_set_grad(coord, size, align_corners, grad_in);
   if (padding_mode == GridSamplerPadding::Border) {
     // clip coordinates to image borders
     coord = clip_coordinates_set_grad(coord, size, &grad_clip);
@@ -181,10 +197,11 @@ static inline scalar_t grid_sampler_compute_source_index_set_grad(
   } else if (padding_mode == GridSamplerPadding::Reflection) {
     // reflect coordinates by image borders
     if (align_corners) {
-      coord = reflect_coordinates_set_grad(coord, 0, 2*(size - 1), &grad_refl);
+      coord =
+          reflect_coordinates_set_grad(coord, 0, 2 * (size - 1), &grad_refl);
       *grad_in = (*grad_in) * grad_refl;
     } else {
-      coord = reflect_coordinates_set_grad(coord, -1, 2*size - 1, &grad_refl);
+      coord = reflect_coordinates_set_grad(coord, -1, 2 * size - 1, &grad_refl);
       // when align_corners=False, reflection does not auto clip coords
       coord = clip_coordinates_set_grad(coord, size, &grad_clip);
       *grad_in = (*grad_in) * grad_refl * grad_clip;
@@ -193,31 +210,56 @@ static inline scalar_t grid_sampler_compute_source_index_set_grad(
   return coord;
 }
 
-static inline bool within_bounds_2d(int64_t h, int64_t w, int64_t H, int64_t W) {
+static inline bool within_bounds_2d(
+    int64_t h,
+    int64_t w,
+    int64_t H,
+    int64_t W) {
   return h >= 0 && h < H && w >= 0 && w < W;
 }
 
-static inline bool within_bounds_3d(int64_t d, int64_t h, int64_t w, int64_t D, int64_t H, int64_t W) {
+static inline bool within_bounds_3d(
+    int64_t d,
+    int64_t h,
+    int64_t w,
+    int64_t D,
+    int64_t H,
+    int64_t W) {
   return d >= 0 && d < D && h >= 0 && h < H && w >= 0 && w < W;
 }
 
-template<typename scalar_t>
-static inline void safe_add_2d(scalar_t *data, int64_t h, int64_t w,
-                               int64_t sH, int64_t sW, int64_t H, int64_t W,
-                               scalar_t delta) {
+template <typename scalar_t>
+static inline void safe_add_2d(
+    scalar_t* data,
+    int64_t h,
+    int64_t w,
+    int64_t sH,
+    int64_t sW,
+    int64_t H,
+    int64_t W,
+    scalar_t delta) {
   if (within_bounds_2d(h, w, H, W)) {
     data[h * sH + w * sW] += delta;
   }
 }
 
-template<typename scalar_t>
-static inline void safe_add_3d(scalar_t *data, int64_t d, int64_t h, int64_t w,
-                               int64_t sD, int64_t sH, int64_t sW,
-                               int64_t D, int64_t H, int64_t W,
-                               scalar_t delta) {
+template <typename scalar_t>
+static inline void safe_add_3d(
+    scalar_t* data,
+    int64_t d,
+    int64_t h,
+    int64_t w,
+    int64_t sD,
+    int64_t sH,
+    int64_t sW,
+    int64_t D,
+    int64_t H,
+    int64_t W,
+    scalar_t delta) {
   if (within_bounds_3d(d, h, w, D, H, W)) {
     data[d * sD + h * sH + w * sW] += delta;
   }
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

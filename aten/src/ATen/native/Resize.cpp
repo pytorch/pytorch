@@ -1,7 +1,8 @@
-#include <ATen/ATen.h>
 #include <ATen/native/Resize.h>
+#include <ATen/ATen.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 Tensor& resize_cpu_(Tensor& self, IntArrayRef size) {
   auto* self_ = self.unsafeGetTensorImpl();
@@ -14,4 +15,5 @@ Tensor& resize_as_cpu_(Tensor& self, const Tensor& the_template) {
   return resize_cpu_(self, the_template.sizes());
 }
 
-}}
+} // namespace native
+} // namespace at

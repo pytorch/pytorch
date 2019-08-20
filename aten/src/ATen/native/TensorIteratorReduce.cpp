@@ -1,5 +1,5 @@
-#include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/TensorIterator.h>
 #include <algorithm>
 #include <memory>
 
@@ -14,7 +14,9 @@ static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop);
 static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop);
 
 void TensorIterator::parallel_reduce(const loop2d_t& loop) {
-  TORCH_CHECK(ntensors() == 2, "parallel_reduce only supports one input and one output");
+  TORCH_CHECK(
+      ntensors() == 2,
+      "parallel_reduce only supports one input and one output");
   int64_t numel = this->numel();
   if (numel < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||
       at::in_parallel_region()) {
@@ -41,15 +43,16 @@ static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop) {
   std::unique_ptr<bool[]> written(new bool[max_threads]);
   std::fill(written.get(), written.get() + max_threads, false);
 
-  at::parallel_for(0, iter.numel(), internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
-    int thread_num = at::get_thread_num();
-    written[thread_num] = true;
-    auto slice = buffer[thread_num];
-    slice.copy_(dst);
+  at::parallel_for(
+      0, iter.numel(), internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
+        int thread_num = at::get_thread_num();
+        written[thread_num] = true;
+        auto slice = buffer[thread_num];
+        slice.copy_(dst);
 
-    auto sub_iter = TensorIterator::reduce_op(slice, iter.input(0));
-    sub_iter.serial_for_each(loop, {begin, end});
-  });
+        auto sub_iter = TensorIterator::reduce_op(slice, iter.input(0));
+        sub_iter.serial_for_each(loop, {begin, end});
+      });
 
   // fill any unwritten slices of the buffer with the identity
   for (int thread_num = 0; thread_num < max_threads; thread_num++) {
@@ -83,8 +86,12 @@ static int find_split_dim(TensorIterator& iter) {
   return best_dim;
 }
 
-static std::tuple<int64_t, int64_t>
-round_columns(TensorIterator& iter, int dim, int multiple, int64_t begin, int64_t end) {
+static std::tuple<int64_t, int64_t> round_columns(
+    TensorIterator& iter,
+    int dim,
+    int multiple,
+    int64_t begin,
+    int64_t end) {
   begin = begin - (begin % multiple);
   if (end != iter.shape()[dim]) {
     // only round the 'end' column down if it's not the final column
@@ -105,7 +112,8 @@ static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop) {
       // round columns to multiples of 128 bytes if adjacent columns are
       // contiguous in memory.
       int64_t cols_per_128_bytes = 128 / element_size;
-      std::tie(begin, end) = round_columns(iter, dim, cols_per_128_bytes, begin, end);
+      std::tie(begin, end) =
+          round_columns(iter, dim, cols_per_128_bytes, begin, end);
     }
     if (begin == end) {
       return;
@@ -116,7 +124,9 @@ static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop) {
   });
 }
 
-void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop, bool parallelize) {
+void TensorIterator::foreach_reduced_elt(
+    const loop_subiter_t& loop,
+    bool parallelize) {
   AT_ASSERT(ninputs() == 1);
   AT_ASSERT(noutputs() >= 1);
 
@@ -126,26 +136,26 @@ void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop, bool parall
   }
   if (output(0).numel() == 1) {
     loop(*this);
-  }
-  else if (numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||
+  } else if (
+      numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||
       at::in_parallel_region() || !parallelize) {
     auto reduce_dims = num_reduce_dims();
 
-    auto non_reduced_shape = shape.slice(reduce_dims, shape.size() - reduce_dims);
+    auto non_reduced_shape =
+        shape.slice(reduce_dims, shape.size() - reduce_dims);
 
     int64_t non_reduced_numel = 1;
     for (int i = 0; i < non_reduced_shape.size(); ++i) {
       non_reduced_numel *= non_reduced_shape[i];
     }
-    DimCounter dims {non_reduced_shape, {0, non_reduced_numel}};
+    DimCounter dims{non_reduced_shape, {0, non_reduced_numel}};
     while (!dims.is_done()) {
       TensorIterator reduced = *this;
       reduced.select_all_keeping_dim(reduce_dims, dims.values);
       loop(reduced);
       dims.increment({1, 1});
     }
-  }
-  else {
+  } else {
     int dim = find_split_dim(*this);
     int64_t cols = shape[dim];
     at::parallel_for(0, cols, 1, [&](int64_t begin, int64_t end) {
@@ -169,4 +179,4 @@ void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop, bool parall
   }
 }
 
-}  // namespace at
+} // namespace at

@@ -41,14 +41,10 @@
 #pragma clang diagnostic ignored "-Wundefined-var-template"
 #endif
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-enum class CPUCapability {
-  DEFAULT = 0,
-  AVX = 1,
-  AVX2 = 2,
-  NUM_OPTIONS
-};
+enum class CPUCapability { DEFAULT = 0, AVX = 1, AVX2 = 2, NUM_OPTIONS };
 
 CPUCapability get_cpu_capability();
 
@@ -57,7 +53,7 @@ struct CAFFE2_API DispatchStub;
 
 template <typename rT, typename T, typename... Args>
 struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
-  using FnPtr = rT (*) (Args...);
+  using FnPtr = rT (*)(Args...);
 
   template <typename... ArgTypes>
   rT operator()(DeviceType device_type, ArgTypes&&... args) {
@@ -137,7 +133,8 @@ struct RegisterHIPDispatch {
 #define DEFINE_DISPATCH(name) struct name name
 
 #define REGISTER_ARCH_DISPATCH(name, arch, fn) \
-  template <> decltype(fn) DispatchStub<decltype(fn), struct name>::arch = fn;
+  template <>                                  \
+  decltype(fn) DispatchStub<decltype(fn), struct name>::arch = fn;
 
 #ifdef HAVE_AVX_CPU_DEFINITION
 #define REGISTER_AVX_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX, fn)
@@ -151,16 +148,18 @@ struct RegisterHIPDispatch {
 #define REGISTER_AVX2_DISPATCH(name, fn)
 #endif
 
-#define REGISTER_NO_CPU_DISPATCH(name, fn_type)                                \
-  REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr))         \
-  REGISTER_AVX_DISPATCH(name, static_cast<fn_type>(nullptr))                   \
+#define REGISTER_NO_CPU_DISPATCH(name, fn_type)                        \
+  REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr)) \
+  REGISTER_AVX_DISPATCH(name, static_cast<fn_type>(nullptr))           \
   REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))
 
-#define REGISTER_CUDA_DISPATCH(name, fn) \
-  static RegisterCUDADispatch<decltype(fn), struct name> name ## __register(name, fn);
+#define REGISTER_CUDA_DISPATCH(name, fn)                                   \
+  static RegisterCUDADispatch<decltype(fn), struct name> name##__register( \
+      name, fn);
 
-#define REGISTER_HIP_DISPATCH(name, fn) \
-  static RegisterHIPDispatch<decltype(fn), struct name> name ## __register(name, fn);
+#define REGISTER_HIP_DISPATCH(name, fn)                                   \
+  static RegisterHIPDispatch<decltype(fn), struct name> name##__register( \
+      name, fn);
 
 // NB: This macro must be used in an actual 'cu' file; if you try using
 // it from a 'cpp' file it will not work!
@@ -172,12 +171,12 @@ struct RegisterHIPDispatch {
 #define REGISTER_DISPATCH(name, fn) REGISTER_CUDA_DISPATCH(name, fn)
 // #define REGISTER_DISPATCH(name, fn) REGISTER_HIP_DISPATCH(name, fn)
 #elif defined(CPU_CAPABILITY)
-#define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
+#define REGISTER_DISPATCH(name, fn) \
+  REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif
 
-
-}} // namespace at::native
-
+} // namespace native
+} // namespace at
 
 #if defined(__clang__)
 #pragma clang diagnostic pop

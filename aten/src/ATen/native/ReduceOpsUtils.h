@@ -1,9 +1,12 @@
 #pragma once
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-inline Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
-                                int64_t dim) {
+inline Tensor& _dimreduce_setup(
+    Tensor& result,
+    const Tensor& self,
+    int64_t dim) {
   IntArrayRef self_sizes = self.sizes();
   std::vector<int64_t> result_sizes;
   result_sizes.insert(result_sizes.end(), self_sizes.begin(), self_sizes.end());
@@ -12,8 +15,12 @@ inline Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
   return result;
 }
 
-inline bool _dimreduce_return_trivial(Tensor &result, const Tensor &self,
-                                      Scalar ident, int64_t dim, bool keepdim) {
+inline bool _dimreduce_return_trivial(
+    Tensor& result,
+    const Tensor& self,
+    Scalar ident,
+    int64_t dim,
+    bool keepdim) {
   if (self.numel() == 1 && self.ndimension() == 0) {
     result.resize_({});
     result.fill_(self);
@@ -23,14 +30,19 @@ inline bool _dimreduce_return_trivial(Tensor &result, const Tensor &self,
   if (self.numel() == 0) {
     _dimreduce_setup(result, self, dim);
     result.fill_(ident);
-    if (!keepdim) result.squeeze_(dim);
+    if (!keepdim)
+      result.squeeze_(dim);
     return true;
   }
   return false;
 }
 
-inline bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &self,
-                                               int64_t dim, bool keepdim, const char *fn_name) {
+inline bool _dimreduce_return_trivial_no_ident(
+    Tensor& result,
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim,
+    const char* fn_name) {
   if (self.numel() == 1 && self.ndimension() == 0) {
     result.resize_({});
     result.fill_(self);
@@ -38,8 +50,10 @@ inline bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &sel
   }
 
   if (self.numel() == 0) {
-    AT_ERROR("cannot perform reduction function ", fn_name,
-             " on tensor with no elements because the operation does not have an identity");
+    AT_ERROR(
+        "cannot perform reduction function ",
+        fn_name,
+        " on tensor with no elements because the operation does not have an identity");
   }
   return false;
 }
@@ -53,4 +67,5 @@ inline c10::optional<Tensor> _allreduce_return_trivial(
   }
   return c10::nullopt;
 }
-}}  // at::native
+} // namespace native
+} // namespace at

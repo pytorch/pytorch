@@ -190,22 +190,23 @@ static void upsample_nearest3d_out_cpu_template(
       input_depth > 0 && input_height > 0 && input_width > 0 &&
       output_depth > 0 && output_height > 0 && output_width > 0);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest3d", [&] {
-    auto* idata = input.data<scalar_t>();
-    auto* odata = output.data<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+      input.scalar_type(), "upsample_nearest3d", [&] {
+        auto* idata = input.data<scalar_t>();
+        auto* odata = output.data<scalar_t>();
 
-    upsample_nearest3d_out_frame<scalar_t>(
-        odata,
-        idata,
-        input_depth,
-        input_height,
-        input_width,
-        output_depth,
-        output_height,
-        output_width,
-        nbatch,
-        channels);
-  });
+        upsample_nearest3d_out_frame<scalar_t>(
+            odata,
+            idata,
+            input_depth,
+            input_height,
+            input_width,
+            output_depth,
+            output_height,
+            output_width,
+            nbatch,
+            channels);
+      });
 }
 
 static void upsample_nearest3d_backward_out_cpu_template(

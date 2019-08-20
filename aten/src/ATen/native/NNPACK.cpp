@@ -68,14 +68,15 @@ static pthreadpool_t nnpack_threadpool_ = nullptr;
 static bool called_nnpack_threadpool_ = false;
 
 pthreadpool_t nnpack_threadpool() {
-  if (! called_nnpack_threadpool_) {
+  if (!called_nnpack_threadpool_) {
     called_nnpack_threadpool_ = true;
     enum nnp_status nnpack_status = nnp_initialize();
     if (nnpack_status != nnp_status_success) {
       if (nnpack_status == nnp_status_out_of_memory) {
         throw std::runtime_error("could not initialize NNPack (out of memory)");
       } else if (nnpack_status == nnp_status_unsupported_hardware) {
-        throw std::runtime_error("could not initialize NNPack (unsupported hardware)");
+        throw std::runtime_error(
+            "could not initialize NNPack (unsupported hardware)");
       } else {
         throw std::runtime_error("could not initialize NNPack (unknown error)");
       }
@@ -95,7 +96,7 @@ pthreadpool_t nnpack_threadpool() {
 }
 
 bool _nnpack_available() {
-  if (! called_nnpack_threadpool_) {
+  if (!called_nnpack_threadpool_) {
     try {
       return nnpack_threadpool() != nullptr;
     } catch (std::runtime_error e) {
@@ -213,7 +214,8 @@ Tensor _nnpack_spatial_convolution(
   if (input.device().type() != kCPU || input.scalar_type() != kFloat ||
       weight.device().type() != kCPU || weight.scalar_type() != kFloat ||
       output.device().type() != kCPU || output.scalar_type() != kFloat ||
-      (bias.defined() && (bias.device().type() != kCPU || bias.scalar_type() != kFloat))) {
+      (bias.defined() &&
+       (bias.device().type() != kCPU || bias.scalar_type() != kFloat))) {
     throw std::runtime_error(
         "Mismatched Tensor types in NNPack convolutionOutput");
   }

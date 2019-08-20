@@ -58,16 +58,15 @@ static inline void col2im_shape_check(
   }
 
   int64_t input_length = input.size(batch_dim + 2);
-  int64_t n_blocks_height =
-      div_rtn<int64_t>(
-          output_height + 2 * pad_height -
-              dilation_height * (kernel_height - 1) - 1,
-          stride_height) +
+  int64_t n_blocks_height = div_rtn<int64_t>(
+                                output_height + 2 * pad_height -
+                                    dilation_height * (kernel_height - 1) - 1,
+                                stride_height) +
       1;
   int64_t n_blocks_width = div_rtn<int64_t>(
-                                   output_width + 2 * pad_width -
-                                       dilation_width * (kernel_width - 1) - 1,
-                                   stride_width) +
+                               output_width + 2 * pad_width -
+                                   dilation_width * (kernel_width - 1) - 1,
+                               stride_width) +
       1;
 
   if (input_length != (n_blocks_height * n_blocks_width)) {

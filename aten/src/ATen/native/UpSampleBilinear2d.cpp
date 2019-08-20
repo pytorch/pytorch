@@ -191,21 +191,22 @@ static void upsample_bilinear2d_out_cpu_template(
       input_height > 0 && input_width > 0 && output_height > 0 &&
       output_width > 0);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_bilinear2d", [&] {
-    auto* idata = input.data<scalar_t>();
-    auto* odata = output.data<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+      input.scalar_type(), "upsample_bilinear2d", [&] {
+        auto* idata = input.data<scalar_t>();
+        auto* odata = output.data<scalar_t>();
 
-    upsample_bilinear2d_out_frame<scalar_t>(
-        odata,
-        idata,
-        input_height,
-        input_width,
-        output_height,
-        output_width,
-        nbatch,
-        channels,
-        align_corners);
-  });
+        upsample_bilinear2d_out_frame<scalar_t>(
+            odata,
+            idata,
+            input_height,
+            input_width,
+            output_height,
+            output_width,
+            nbatch,
+            channels,
+            align_corners);
+      });
 }
 
 static void upsample_bilinear2d_backward_out_cpu_template(
