@@ -11,12 +11,6 @@
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
-#ifdef USE_STATIC_DISPATCH
-#include <ATen/TypeDefault.h>
-#include <ATen/CPUType.h>
-#include <ATen/QuantizedCPUType.h>
-#include <ATen/SparseCPUType.h>
-#endif
 
 namespace at {
 
