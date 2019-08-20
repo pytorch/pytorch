@@ -31,7 +31,7 @@ import warnings
 from collections import OrderedDict, namedtuple
 
 # These are imported so users can access them from the `torch.jit` module
-from torch._jit_internal import Final, _overload  # noqa: F401
+from torch._jit_internal import Final, _overload, _overload_method  # noqa: F401
 from torch._jit_internal import ignore, export  # noqa: F401
 
 if sys.version_info[0] > 2:
@@ -1878,10 +1878,14 @@ def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
 
-def _get_overload_decl_and_defaults(func):
+def _check_no_signature(func):
     signature = torch.jit.annotations.get_signature(func)
     if signature is None:
-        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {obj}").format(func)
+        qual_name = _qualified_name(func)
+        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
+
+def _get_overload_decl_and_defaults(func):
+    _check_no_signature(func)
     return (torch.jit.get_jit_def(func).decl(), get_default_args(func))
 
 def _get_overloads(obj):

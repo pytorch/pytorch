@@ -651,9 +651,10 @@ RegisterOperators reg(
            bool create_graph = pop(stack).toBool();
            auto keep_graph = pop(stack).toOptional<bool>();
            auto grad_outputs = pop(stack);
-           auto inputs = pop(stack).toTensorListRef().vec();
-           auto outputs = pop(stack).toTensorListRef().vec();
-           std::vector<torch::autograd::Variable> input_vars(inputs.begin(), inputs.end());
+           auto inputs = pop(stack).toTensorList();
+           auto outputs = pop(stack).toTensorList();
+           std::vector<torch::autograd::Variable> input_vars(
+               inputs.begin(), inputs.end());
            std::vector<torch::autograd::Variable> output_vars(outputs.begin(), outputs.end());
            std::vector<torch::autograd::Variable> gradients;
 
@@ -682,8 +683,9 @@ RegisterOperators reg(
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
            auto grad_tensors = pop(stack);
-           auto tensors = pop(stack).toTensorListRef().vec();
-           std::vector<torch::autograd::Variable> output_vars(tensors.begin(), tensors.end());
+           auto tensors = pop(stack).toTensorList();
+           std::vector<torch::autograd::Variable> output_vars(
+               tensors.begin(), tensors.end());
            std::vector<torch::autograd::Variable> gradients;
 
            if (!grad_tensors.isNone()) {
