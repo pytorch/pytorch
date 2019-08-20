@@ -134,9 +134,7 @@ ArgSpec = collections.namedtuple('ArgSpec', 'args varargs keywords defaults')
 def verify_matching_signatures(implementation, dispatcher):
     """Verify that a dispatcher function has the right signature."""
     implementation_spec = ArgSpec(*getargspec(implementation))
-    print("implementation_spec", implementation_spec)
     dispatcher_spec = ArgSpec(*getargspec(dispatcher))
-    print("dispatcher_spec", dispatcher_spec)
 
     if (implementation_spec.args != dispatcher_spec.args or
             implementation_spec.varargs != dispatcher_spec.varargs or
@@ -212,8 +210,6 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
         # show up at all in many cases, e.g., if it's written in C++ or if the
         # dispatcher gets an invalid keyword argument.
         source = _wrapped_func_source.format(name=implementation.__name__)
-        print("===========source================")
-        print(source)
 
         source_object = compile(
             source, filename='<__torch_function__ internals>', mode='exec')

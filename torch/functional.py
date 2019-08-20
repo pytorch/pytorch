@@ -4,6 +4,8 @@ from torch._six import inf
 from itertools import product
 import warnings
 
+from ._overrides import torch_function_dispatch
+
 __all__ = [
     'align_tensors',  # BUILD_NAMEDTENSOR only
     'broadcast_tensors',
@@ -25,6 +27,11 @@ __all__ = [
 ]
 
 
+def _broadcast_tensors_dispatcher(*tensors):
+    return (tensor,)
+
+
+@torch_function_dispatch(_broadcast_tensors_dispatcher)
 def broadcast_tensors(*tensors):
     r"""broadcast_tensors(*tensors) -> List of Tensors
 
