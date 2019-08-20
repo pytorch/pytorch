@@ -452,6 +452,38 @@ Tensor reshape_as(const Tensor& self, const Tensor& other) {
   return self.reshape(other.sizes());
 }
 
+static Tensor sparse_select(const Tensor& self, int64_t dim, int64_t index) {
+  int64_t sparse_dim = self.sparse_dim();
+  int64_t dense_dim = self.dense_dim();
+
+  auto indices = self._indices();
+  auto values = self._values();
+  auto new_sizes = self.sizes().vec();
+  new_sizes.erase(new_sizes.begin() + dim);
+
+  if (dim < sparse_dim) {
+    auto nzIndices = (indices[dim] == index).nonzero().view(-1);
+    auto new_values = values.index_select(0, nzIndices);
+    if (sparse_dim == 1) {
+      // return dense part:
+      if (new_values.size(0) == 1) {
+        return new_values[0];
+      } else {
+        return new_values.sum(0);
+      }
+    } else {
+      auto dimIndices = (arange(0, sparse_dim) != dim).nonzero().view(-1);
+      auto new_indices = indices.index_select(1, nzIndices).index_select(0, dimIndices);
+      return _sparse_coo_tensor_with_dims_and_tensors(
+            sparse_dim - 1, dense_dim, new_sizes, new_indices, new_values, self.options());
+    }
+  } else {
+    auto new_values = values.select(dim - sparse_dim + 1, index);
+    return _sparse_coo_tensor_with_dims_and_tensors(
+         sparse_dim, dense_dim - 1, new_sizes, indices, new_values, self.options());
+  }
+}
+
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
@@ -471,6 +503,9 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   }
   if (index < 0) {
     index += size;
+  }
+  if (self.is_sparse()) {
+    return sparse_select(self, dim, index);
   }
   auto sizes = self.sizes().vec();
   auto strides = self.strides().vec();
