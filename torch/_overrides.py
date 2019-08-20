@@ -175,7 +175,7 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
         arguments from the NumPy function call returns an iterable of
         array-like arguments to check for ``__torch_function__``.
     module : str, optional
-        __module__ attribute to set on new function, e.g., ``module='numpy'``.
+        __module__ attribute to set on new function, e.g., ``module='torch'``.
         By default, module is copied from the decorated function.
     verify : bool, optional
         If True, verify the that the signature of the dispatcher and decorated
@@ -195,6 +195,15 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
     dispatcher : callable
         Function suitable for decorating the implementation of a NumPy
         function.
+
+    Notes
+    -----
+    The dispatcher should normally return a tuple containing all input
+    arguments that may have a ``__torch_function__`` attribute.
+
+    In some cases where that's not easily possible, e.g. ``torch.cat``, it is
+    also valid (if a little slower) to make the dispatcher function a generator
+    (i.e. use ``yield`` to return arguments one by one).
 
     """
     def decorator(implementation):
