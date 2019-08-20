@@ -93,7 +93,7 @@ inline MatchTypeReturn tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
     auto tensor = py::cast<at::Tensor>(input);
-    return MatchTypeReturn(ProfiledTensorType::create(tensor));
+    return MatchTypeReturn(TensorType::create(tensor));
   }
 
   if (input.is(py::none())) {
@@ -310,8 +310,7 @@ inline IValue toIValue(
     const TypePtr& type,
     c10::optional<int32_t> N) {
   switch (type->kind()) {
-    case TypeKind::TensorType:
-    case TypeKind::ProfiledTensorType: {
+    case TypeKind::TensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
         AT_WARN(
@@ -391,7 +390,6 @@ inline IValue toIValue(
             }
             return repeated;
           }
-        case TypeKind::ProfiledTensorType:
         case TypeKind::TensorType:
           return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:
