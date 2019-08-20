@@ -166,7 +166,7 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
                             docs_from_dispatcher=False):
     """Decorator for adding dispatch with the __torch_function__ protocol.
 
-    TODO: add usage example
+    See for example ``torch/functional.py`` for usage examples.
 
     Parameters
     ----------
@@ -175,8 +175,9 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
         arguments from the NumPy function call returns an iterable of
         array-like arguments to check for ``__torch_function__``.
     module : str, optional
-        __module__ attribute to set on new function, e.g., ``module='torch'``.
-        By default, module is copied from the decorated function.
+        ``__module__`` attribute to set on new function, e.g.,
+        ``module='torch'``.  By default, module is copied from the decorated
+        function.
     verify : bool, optional
         If True, verify the that the signature of the dispatcher and decorated
         function signatures match exactly: all required and optional arguments
