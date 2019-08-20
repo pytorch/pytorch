@@ -198,7 +198,7 @@ TEST(NamedTensorTest, NoNamesGuard) {
     at::NoNamesGuard guard;
     ASSERT_FALSE(at::NamesMode::is_enabled());
     ASSERT_FALSE(tensor.opt_names());
-    ASSERT_FALSE(at::impl::get_names(tensor.unsafeGetTensorImpl()));
+    ASSERT_FALSE(at::impl::get_opt_names(tensor.unsafeGetTensorImpl()));
   }
   ASSERT_TRUE(at::NamesMode::is_enabled());
 }
