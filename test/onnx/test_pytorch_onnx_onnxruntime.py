@@ -493,6 +493,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(NarrowModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfUnsupportedOpsetVersion([11])
     def test_scatter(self):
         class ScatterModel(torch.nn.Module):
             def forward(self, input, indices, values):
@@ -515,6 +516,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ScatterModel(), (input, indices, values))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfUnsupportedOpsetVersion([11])
     def test_index_fill(self):
         class IndexFillModel(torch.nn.Module):
             def forward(self, input):
@@ -525,6 +527,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(IndexFillModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfUnsupportedOpsetVersion([11])
     def test_index_copy(self):
         class IndexCopyModel(torch.nn.Module):
             def forward(self, input):
