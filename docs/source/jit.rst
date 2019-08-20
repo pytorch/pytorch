@@ -126,6 +126,7 @@ a submodule using tracing that can be called from the methods of a script module
 Example (using a traced module):
 
 .. testcode::
+    :skipif: torchvision is None
 
     import torch
     import torchvision
@@ -784,6 +785,7 @@ Method Calls
     calling its ``forward`` method (e.g. ``self.resnet.forward(input)``)
 
     .. testcode::
+        :skipif: torchvision is None
 
         import torch
         import torch.nn as nn

@@ -245,6 +245,13 @@ from sphinx import addnodes
 # Without this, doctest adds any example with a `>>>` as a test
 doctest_test_doctest_blocks = ''
 
+doctest_global_setup = '''
+try:
+    import torchvision
+except ImportError:
+    torchvision = None
+'''
+
 
 def patched_make_field(self, types, domain, items, **kw):
     # `kw` catches `env=None` needed for newer sphinx while maintaining
