@@ -53,7 +53,9 @@ def copy_to_script_module(original, stubs):
             if (name in original._parameters or name in original._buffers) and item is not None:
                 # for 'None' parameters/buffers, don't actually add their values if it exists
                 continue
-            setattr(script_module, name, getattr(original, name))
+            # don't recopy constants, should only occur for constant modules/params
+            if not hasattr(script_module, name):
+                setattr(script_module, name, getattr(original, name))
 
     # Copy annotations, pull types from `__annotations__` or try to infer
     # the type if possible
@@ -97,7 +99,7 @@ def copy_to_script_module(original, stubs):
     return script_module
 
 
-def recursive_script(mod):
+def recursive_script(mod, exclude_methods=()):
     """
     Makes a ScriptModule from an nn.Module. If `_methods` is provided,
     these methods are treated as @script_methods. If not, it defaults to
@@ -133,6 +135,8 @@ def recursive_script(mod):
 
     methods = methods + tuple(exported)
 
+    methods = tuple(name for name in methods if name not in exclude_methods)
+
     overload_name_mappings = dict(getattr(mod, "__overloads__", {}))
     overload_stubs = []
 
@@ -152,6 +156,7 @@ def recursive_script(mod):
     # we shouldn't directly compile overloaded methods, just its overloads
     def ignore_overloaded(method_name):
         return method_name not in overload_name_mappings
+>>>>>>> extend torch.jit._overload to modules
 
     def make_stub(method):
         func = get_function_from_type(type(mod), method)

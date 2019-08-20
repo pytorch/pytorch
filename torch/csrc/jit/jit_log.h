@@ -27,6 +27,11 @@ std::string debugValueOrDefault(const Node* n);
 
 TORCH_API JitLoggingLevels jit_log_level();
 
+// Prefix every line in a multiline string \p IN_STR with \p PREFIX.
+TORCH_API std::string jit_log_prefix(
+    const std::string& prefix,
+    const std::string& in_str);
+
 TORCH_API std::string jit_log_prefix(
     JitLoggingLevels level,
     const char* fn,
