@@ -27,7 +27,8 @@ Tensor mkldnn_avg_pool2d(
     IntArrayRef stride,
     IntArrayRef padding,
     bool ceil_mode,
-    bool count_include_pad) {
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
   AT_ERROR("mkldnn_avg_pool2d: ATen not compiled with MKLDNN support");
 }
 
@@ -38,7 +39,8 @@ Tensor& mkldnn_avg_pool2d_out(
     IntArrayRef stride,
     IntArrayRef padding,
     bool ceil_mode,
-    bool count_include_pad) {
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
   AT_ERROR("mkldnn_avg_pool2d_out: ATen not compiled with MKLDNN support");
 }
 
@@ -165,7 +167,10 @@ Tensor mkldnn_avg_pool2d(
     IntArrayRef stride,
     IntArrayRef padding,
     bool ceil_mode,
-    bool count_include_pad) {
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
+  TORCH_CHECK(!divisor_override.has_value(),
+           "mkldnn_avg_pool2d operator does not support divisor");
   return _mkldnn_pool2d(
       input,
       kernel_size,
@@ -184,7 +189,8 @@ Tensor& mkldnn_avg_pool2d_out(
     IntArrayRef stride,
     IntArrayRef padding,
     bool ceil_mode,
-    bool count_include_pad) {
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
   AT_ERROR(
       "mkldnn_avg_pool2d_out: in-place mkldnn operations are not supported yet");
 }
@@ -197,7 +203,7 @@ Tensor mkldnn_adaptive_avg_pool2d(
   auto output_size_vec =
       expand_param_if_needed(output_size, "output_size", input.dim() - 2);
   std::vector<int64_t> kernel_size(input.dim() - 2);
-  for (size_t i = 2; i < input.dim(); ++i) {
+  for (int64_t i = 2; i < input.dim(); ++i) {
     auto s1 = input.size(i);
     auto s2 = output_size_vec[i - 2];
     AT_ASSERTM(s2 != 0, "output size can not be zero");

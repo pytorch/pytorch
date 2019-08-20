@@ -103,6 +103,9 @@ void THCTensor_(sign)(THCState* state, THCTensor* self_, THCTensor* src) {
   }
 
   THCudaCheck(cudaGetLastError());
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(self_, src);
+#endif
 }
 
 void THCTensor_(cmax)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
@@ -193,8 +196,8 @@ static void propagate_names_if_named_tensor_enabled(THCTensor* result, THCTensor
   };                                                                    \
                                                                         \
   void THCTensor_(NAME)(THCState* state, THCTensor* self_, THCTensor* src) { \
-    THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));               \
-    at::assert_no_internal_overlap(self_, #NAME);                       \
+    THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));       \
+    at::assert_no_internal_overlap(self_);                              \
     if (self_ == src) {                                                 \
       if (!THC_pointwiseApply1<scalar_t>(state, self_, Tensor_##NAME##_##REAL##_Op())) { \
         THArgCheck(false, 2, CUTORCH_DIM_WARNING);                      \
@@ -247,7 +250,6 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cinv, THCNumerics<scalar_t>::cinv,  Real)
 
 #endif
 
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  neg, THCNumerics<scalar_t>::neg,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  abs, THCNumerics<scalar_t>::abs,   Real)
 
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_
@@ -291,20 +293,6 @@ void THCTensor_(crossKernel)(THCState *state, THCTensor *self, THCTensor *x, THC
 }
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-
-void THCTensor_(atan2)(THCState *state, THCTensor *self_, THCTensor *tx, THCTensor *ty)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, tx, ty));
-  THArgCheck(THCTensor_(nElement)(state, tx) ==
-             THCTensor_(nElement)(state, ty), 3, "sizes do not match");
-  THCTensor_(resizeAs)(state, self_, tx);
-
-  if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self_, tx, ty, TensorATan2Op<scalar_t>())) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
 
 void THCTensor_(sigmoid)(THCState* state, THCTensor* self_, THCTensor* src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
@@ -605,53 +593,6 @@ void THCTensor_(cfmod)(THCState *state, THCTensor *self, THCTensor *src1, THCTen
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   }
-}
-
-void THCTensor_(addcmul)(THCState *state, THCTensor *self_, THCTensor *t, scalar_t value, THCTensor *src1, THCTensor *src2)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, self_, t, src1, src2));
-  if(self_ != t)
-  {
-    THCTensor_(resizeAs)(state, self_, t);
-    THCTensor_(copy)(state, self_, t);
-  }
-  else
-  {
-    THArgCheck(THCTensor_(nElement)(state, self_) == THCTensor_(nElement)(state, src1),
-               1, "sizes do not match");
-  }
-
-  THArgCheck(THCTensor_(nElement)(state, src1) == THCTensor_(nElement)(state, src2),
-             3, "sizes do not match");
-
-  if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self_, src1, src2, TensorAddCMulOp<scalar_t>(value))) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(addcdiv)(THCState *state, THCTensor *self_, THCTensor *t, scalar_t value, THCTensor *src1, THCTensor *src2)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, self_, t, src1, src2));
-  if(self_ != t)
-  {
-    THCTensor_(resizeAs)(state, self_, t);
-    THCTensor_(copy)(state, self_, t);
-  }
-  else
-  {
-    THArgCheck(THCTensor_(nElement)(state, self_) == THCTensor_(nElement)(state, src1),
-               1, "sizes do not match");
-  }
-  THArgCheck(THCTensor_(nElement)(state, src1) == THCTensor_(nElement)(state, src2),
-             3, "sizes do not match");
-
-  if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self_, src1, src2, TensorAddCDivOp<scalar_t>(value))) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
 }
 
 #endif

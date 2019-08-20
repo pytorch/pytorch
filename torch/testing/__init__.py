@@ -96,10 +96,10 @@ def get_all_math_dtypes(device):
               torch.float32, torch.float64]
 
     # torch.float16 is a math dtype on cuda but not cpu.
-    if device == 'cpu':
-        return dtypes
-    else:
-        return dtypes.append(torch.float16)
+    if device.startswith('cuda'):
+        dtypes.append(torch.float16)
+
+    return dtypes
 
 
 def get_all_device_types():

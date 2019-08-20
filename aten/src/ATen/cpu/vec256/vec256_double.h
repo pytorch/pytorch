@@ -100,6 +100,9 @@ public:
   Vec256<double> atan() const {
     return Vec256<double>(Sleef_atand4_u10(values));
   }
+  Vec256<double> atan2(const Vec256<double> &b) const {
+    return Vec256<double>(Sleef_atan2d4_u10(values, b));
+  }
   Vec256<double> erf() const {
     return Vec256<double>(Sleef_erfd4_u10(values));
   }
@@ -259,7 +262,7 @@ Vec256<double> inline operator^(const Vec256<double>& a, const Vec256<double>& b
 }
 
 template <>
-void convert(const double* src, double* dst, int64_t n) {
+inline void convert(const double* src, double* dst, int64_t n) {
   int64_t i;
 #pragma unroll
   for (i = 0; i <= (n - Vec256<double>::size()); i += Vec256<double>::size()) {

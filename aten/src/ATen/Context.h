@@ -47,6 +47,9 @@ class CAFFE2_API Context {
       AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
     }
   }
+  bool isPinnedPtr(void* data) {
+    return detail::getCUDAHooks().isPinnedPtr(data);
+  }
   bool hasOpenMP() const;
   bool hasMKL() const;
   bool hasLAPACK() const;
@@ -77,7 +80,9 @@ class CAFFE2_API Context {
     });
     return thh_state.get();
   }
-
+  const at::cuda::NVRTC& getNVRTC() {
+    return detail::getCUDAHooks().nvrtc();
+  }
   THCState* getTHCState() {
     // AT_ASSERT(thc_state);
     return thc_state.get();

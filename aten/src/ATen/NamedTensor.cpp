@@ -12,6 +12,20 @@ bool NamedTensorMeta::has_names() const {
       });
 }
 
+Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
+  impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), names);
+  return tensor;
+}
+
+Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names) {
+  impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), std::move(names), validate_names);
+  return tensor;
+}
+
+std::vector<Dimname> FIXME_default_names(size_t len) {
+  return { len, Dimname::wildcard() };
+}
+
 namespace impl {
 
 // Two Dimnames cannot be in the same Tensor if one of them can refer to the other.
@@ -52,18 +66,21 @@ static NamedTensorMeta* get_named_tensor_meta(TensorImpl* impl) {
   return static_cast<NamedTensorMeta*>(impl->named_tensor_meta());
 }
 
+void check_valid_names(TensorImpl* impl, DimnameList names) {
+  auto ndim = impl->dim();
+  TORCH_CHECK(ndim == names.size(),
+      "Number of names (", names.size(), ") and "
+      "number of dimensions in tensor (", ndim, ") ",
+      "do not match.");
+  check_unique_names(names);
+}
+
 void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names) {
   if (!names) {
     impl->set_named_tensor_meta(nullptr);
     return;
   }
-  auto ndim = impl->dim();
-  TORCH_CHECK(ndim == names->size(),
-      "Number of names (", names->size(), ") and "
-      "number of dimensions in tensor (", ndim, ") ",
-      "do not match.");
-  check_unique_names(*names);
-
+  check_valid_names(impl, *names);
   auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
     impl->set_named_tensor_meta(torch::make_unique<NamedTensorMeta>(*names));
@@ -72,7 +89,19 @@ void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names) {
   }
 }
 
-optional<DimnameList> internal_get_names(TensorImpl* impl) {
+void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names) {
+  if (validate_names) {
+    check_valid_names(impl, names);
+  }
+  auto* meta = get_named_tensor_meta(impl);
+  if (meta == nullptr) {
+    impl->set_named_tensor_meta(torch::make_unique<NamedTensorMeta>(names));
+  } else {
+    meta->set_names_(names);
+  }
+}
+
+optional<DimnameList> get_names(TensorImpl* impl) {
   const auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
     return nullopt;
@@ -81,7 +110,7 @@ optional<DimnameList> internal_get_names(TensorImpl* impl) {
   }
 }
 
-bool internal_is_named(TensorImpl* impl) {
+bool has_names(TensorImpl* impl) {
   const auto* named_tensor_meta = get_named_tensor_meta(impl);
   return named_tensor_meta != nullptr && named_tensor_meta->has_names();
 }

@@ -380,6 +380,12 @@ caffe2::NetDef OptimizeForBackend(
       if (!nn::hasConsumer(node)) {
         external_outputs.emplace(nn::get<const NeuralNetData>(node)->getName());
       }
+      for (auto i = 0; i < net.external_output_size(); ++i) {
+        const auto& n = net.external_output(i);
+        if (n == nn::get<const NeuralNetData>(node)->getName()) {
+          external_outputs.emplace(n);
+        }
+      }
     }
   }
 

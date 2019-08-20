@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import io
 import numpy as np
 import os
 import shutil
@@ -12,6 +13,7 @@ import unittest
 TEST_TENSORBOARD = True
 try:
     import tensorboard.summary.writer.event_file_writer  # noqa F401
+    from tensorboard.compat.proto.summary_pb2 import Summary
 except ImportError:
     TEST_TENSORBOARD = False
 
@@ -24,7 +26,8 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 TEST_CAFFE2 = True
 try:
-    from caffe2.python import workspace
+    from caffe2.python import brew, cnn, core, workspace
+    from caffe2.python.model_helper import ModelHelper
 except ImportError:
     TEST_CAFFE2 = False
 skipIfNoCaffe2 = unittest.skipIf(not TEST_CAFFE2, "no caffe2")
@@ -40,7 +43,9 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
-from common_utils import TestCase, run_tests
+from common_utils import TestCase, run_tests, TEST_WITH_ASAN
+from google.protobuf import text_format
+from PIL import Image
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -60,6 +65,7 @@ if TEST_TENSORBOARD:
     from torch.utils.tensorboard import summary, SummaryWriter
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from torch.utils.tensorboard._convert_np import make_np
+    from torch.utils.tensorboard import _caffe2_graph as c2_graph
 
     class TestTensorBoardPyTorchNumpy(BaseTestCase):
         def test_pytorch_np(self):
@@ -220,6 +226,11 @@ if TEST_TENSORBOARD:
                                         precision,
                                         recall, n_iter)
 
+                v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)
+                c = np.array([[[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 0, 255]]], dtype=int)
+                f = np.array([[[0, 2, 3], [0, 3, 1], [0, 1, 2], [1, 3, 2]]], dtype=int)
+                writer.add_mesh('my_mesh', vertices=v, colors=c, faces=f)
+
     class TestTensorBoardSummaryWriter(BaseTestCase):
         def test_summary_writer_ctx(self):
             # after using a SummaryWriter as a ctx it should be closed
@@ -318,31 +329,31 @@ if TEST_TENSORBOARD:
                 summary.histogram('dummy', np.ndarray(0), 'tensorflow')
 
         def test_image_with_boxes(self):
-            self.assertTrue(compare_proto(summary.image_boxes('dummy',
-                                          tensor_N(shape=(3, 32, 32)),
-                                          np.array([[10, 10, 40, 40]])),
-                                          self))
+            self.assertTrue(compare_image_proto(summary.image_boxes('dummy',
+                                                tensor_N(shape=(3, 32, 32)),
+                                                np.array([[10, 10, 40, 40]])),
+                                                self))
 
         def test_image_with_one_channel(self):
-            self.assertTrue(compare_proto(summary.image('dummy',
+            self.assertTrue(compare_image_proto(summary.image('dummy',
                                                         tensor_N(shape=(1, 8, 8)),
                                                         dataformats='CHW'),
                                                         self))  # noqa E127
 
         def test_image_with_one_channel_batched(self):
-            self.assertTrue(compare_proto(summary.image('dummy',
+            self.assertTrue(compare_image_proto(summary.image('dummy',
                                                         tensor_N(shape=(2, 1, 8, 8)),
                                                         dataformats='NCHW'),
                                                         self))  # noqa E127
 
         def test_image_with_3_channel_batched(self):
-            self.assertTrue(compare_proto(summary.image('dummy',
+            self.assertTrue(compare_image_proto(summary.image('dummy',
                                                         tensor_N(shape=(2, 3, 8, 8)),
                                                         dataformats='NCHW'),
                                                         self))  # noqa E127
 
         def test_image_without_channel(self):
-            self.assertTrue(compare_proto(summary.image('dummy',
+            self.assertTrue(compare_image_proto(summary.image('dummy',
                                                         tensor_N(shape=(8, 8)),
                                                         dataformats='HW'),
                                                         self))  # noqa E127
@@ -377,23 +388,47 @@ if TEST_TENSORBOARD:
                               'nasdaq': ['Margin', ['nasdaq/aaa', 'nasdaq/bbb', 'nasdaq/ccc']]}}
             summary.custom_scalars(layout)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
 
+        def test_mesh(self):
+            v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)
+            c = np.array([[[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 0, 255]]], dtype=int)
+            f = np.array([[[0, 2, 3], [0, 3, 1], [0, 1, 2], [1, 3, 2]]], dtype=int)
+            mesh = summary.mesh('my_mesh', vertices=v, colors=c, faces=f, config_dict=None)
+            self.assertTrue(compare_proto(mesh, self))
+
     def remove_whitespace(string):
         return string.replace(' ', '').replace('\t', '').replace('\n', '')
 
-    def compare_proto(str_to_compare, function_ptr):
-
+    def read_expected_content(function_ptr):
         module_id = function_ptr.__class__.__module__
         test_dir = os.path.dirname(sys.modules[module_id].__file__)
         functionName = function_ptr.id().split('.')[-1]
         expected_file = os.path.join(test_dir,
                                      "expect",
                                      'TestTensorBoard.' + functionName + ".expect")
-
         assert os.path.exists(expected_file)
-        with open(expected_file) as f:
-            expected = f.read()
+        with open(expected_file, "r") as f:
+            return f.read()
+
+    def compare_image_proto(actual_proto, function_ptr):
+        expected_str = read_expected_content(function_ptr)
+        expected_proto = Summary()
+        text_format.Parse(expected_str, expected_proto)
+
+        [actual, expected] = [actual_proto.value[0], expected_proto.value[0]]
+        actual_img = Image.open(io.BytesIO(actual.image.encoded_image_string))
+        expected_img = Image.open(io.BytesIO(expected.image.encoded_image_string))
+
+        return (
+            actual.tag == expected.tag and
+            actual.image.height == expected.image.height and
+            actual.image.width == expected.image.width and
+            actual.image.colorspace == expected.image.colorspace and
+            actual_img == expected_img
+        )
+
+    def compare_proto(str_to_compare, function_ptr):
+        expected = read_expected_content(function_ptr)
         str_to_compare = str(str_to_compare)
-        # if not remove_whitespace(str_to_compare) == remove_whitespace(expected):
         return remove_whitespace(str_to_compare) == remove_whitespace(expected)
 
     def write_proto(str_to_compare, function_ptr):
@@ -533,7 +568,7 @@ if TEST_TENSORBOARD:
         @skipIfNoCaffe2
         def test_caffe2_np(self):
             workspace.FeedBlob("testBlob", tensor_N(shape=(1, 3, 64, 64)))
-            self.assertIsInstance(make_np('testBlob'), np.ndarray)   
+            self.assertIsInstance(make_np('testBlob'), np.ndarray)
 
         @skipIfNoCaffe2
         def test_caffe2_np_expect_fail(self):
@@ -543,6 +578,67 @@ if TEST_TENSORBOARD:
         def test_pytorch_np_expect_fail(self):
             with self.assertRaises(NotImplementedError):
                 res = make_np({'pytorch': 1.0})
+
+        @skipIfNoCaffe2
+        @unittest.skipIf(TEST_WITH_ASAN, "Caffe2 failure with ASAN")
+        def test_caffe2_simple_model(self):
+            model = ModelHelper(name="mnist")
+            # how come those inputs don't break the forward pass =.=a
+            workspace.FeedBlob("data", np.random.randn(1, 3, 64, 64).astype(np.float32))
+            workspace.FeedBlob("label", np.random.randn(1, 1000).astype(np.int))
+
+            with core.NameScope("conv1"):
+                conv1 = brew.conv(model, "data", 'conv1', dim_in=1, dim_out=20, kernel=5)
+                # Image size: 24 x 24 -> 12 x 12
+                pool1 = brew.max_pool(model, conv1, 'pool1', kernel=2, stride=2)
+                # Image size: 12 x 12 -> 8 x 8
+                conv2 = brew.conv(model, pool1, 'conv2', dim_in=20, dim_out=100, kernel=5)
+                # Image size: 8 x 8 -> 4 x 4
+                pool2 = brew.max_pool(model, conv2, 'pool2', kernel=2, stride=2)
+            with core.NameScope("classifier"):
+                # 50 * 4 * 4 stands for dim_out from previous layer multiplied by the image size
+                fc3 = brew.fc(model, pool2, 'fc3', dim_in=100 * 4 * 4, dim_out=500)
+                relu = brew.relu(model, fc3, fc3)
+                pred = brew.fc(model, relu, 'pred', 500, 10)
+                softmax = brew.softmax(model, pred, 'softmax')
+                xent = model.LabelCrossEntropy([softmax, "label"], 'xent')
+                # compute the expected loss
+                loss = model.AveragedLoss(xent, "loss")
+            model.net.RunAllOnMKL()
+            model.param_init_net.RunAllOnMKL()
+            model.AddGradientOperators([loss], skip=1)
+            blob_name_tracker = {}
+            graph = c2_graph.model_to_graph_def(
+                model,
+                blob_name_tracker=blob_name_tracker,
+                shapes={},
+                show_simplified=False,
+            )
+            compare_proto(graph, self)
+
+        @skipIfNoCaffe2
+        def test_caffe2_simple_cnnmodel(self):
+            model = cnn.CNNModelHelper("NCHW", name="overfeat")
+            workspace.FeedBlob("data", np.random.randn(1, 3, 64, 64).astype(np.float32))
+            workspace.FeedBlob("label", np.random.randn(1, 1000).astype(np.int))
+            with core.NameScope("conv1"):
+                conv1 = model.Conv("data", "conv1", 3, 96, 11, stride=4)
+                relu1 = model.Relu(conv1, conv1)
+                pool1 = model.MaxPool(relu1, "pool1", kernel=2, stride=2)
+            with core.NameScope("classifier"):
+                fc = model.FC(pool1, "fc", 4096, 1000)
+                pred = model.Softmax(fc, "pred")
+                xent = model.LabelCrossEntropy([pred, "label"], "xent")
+                loss = model.AveragedLoss(xent, "loss")
+
+            blob_name_tracker = {}
+            graph = c2_graph.model_to_graph_def(
+                model,
+                blob_name_tracker=blob_name_tracker,
+                shapes={},
+                show_simplified=False,
+            )
+            compare_proto(graph, self)
 
 if __name__ == '__main__':
     run_tests()
