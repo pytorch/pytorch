@@ -27,7 +27,6 @@ class Transformer(Module):
         custom_decoder: custom decoder (default=None).
 
     Examples::
-        >>> transformer_model = nn.Transformer()
         >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
         >>> src = torch.rand((10, 32, 512))
         >>> tgt = torch.rand((20, 32, 512))
@@ -144,7 +143,7 @@ class TransformerEncoder(Module):
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
         >>> transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6)
-        >>> src = torch.rand(10,32,512)
+        >>> src = torch.rand(10, 32, 512)
         >>> out = transformer_encoder(src)
     """
 
@@ -188,12 +187,9 @@ class TransformerDecoder(Module):
     Examples::
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
         >>> transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=6)
-        >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
-        >>> transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6)
-        >>> src = torch.rand(10,32,512)
-        >>> tgt = torch.rand(20,32,512)
-        >>> memory = transformer_encoder(src)
-        >>> out = transformer_decoder(tgt,memory)
+        >>> memory = torch.rand(10, 32, 512)
+        >>> tgt = torch.rand(20, 32, 512)
+        >>> out = transformer_decoder(tgt, memory)
         
     """
 
@@ -248,7 +244,7 @@ class TransformerEncoderLayer(Module):
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
-        >>> src = torch.rand(10,32,512)
+        >>> src = torch.rand(10, 32, 512)
         >>> out = encoder_layer(src)
     """
 
@@ -302,11 +298,9 @@ class TransformerDecoderLayer(Module):
 
     Examples::
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
-        >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
-        >>> src = torch.rand(10,32,512)
-        >>> tgt = torch.rand(20,32,512)
-        >>> memory = encoder_layer(src)
-        >>> out = decoder_layer(tgt,memory)
+        >>> memory = torch.rand(10, 32, 512)
+        >>> tgt = torch.rand(20, 32, 512)
+        >>> out = decoder_layer(tgt, memory)
     """
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1):
