@@ -156,13 +156,19 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       if (THPVariable_Check(obj)) {
         auto& var = ((THPVariable*)obj)->cdata;
-        return at::isIntegralType(var.scalar_type()) && !var.requires_grad() && var.dim() == 0;
+        return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
       }
       return false;
     }
 #ifdef BUILD_NAMEDTENSOR
-    case ParameterType::DIMNAME: return obj == Py_None || THPUtils_checkString(obj);
-    case ParameterType::DIMNAME_LIST:
+    case ParameterType::DIMNAME: return THPUtils_checkDimname(obj);
+    case ParameterType::DIMNAME_LIST: {
+      if (THPUtils_checkDimnameList(obj)) {
+        return true;
+      }
+      // if a size is specified (e.g. DimnameList[1]) we also allow passing a single Dimname
+      return size == 1 && THPUtils_checkDimname(obj);
+    }
 #endif
     case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {

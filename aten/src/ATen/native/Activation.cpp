@@ -61,8 +61,8 @@ static Tensor threshold_out(
     const Tensor& other) {
   Tensor result = opt_result.value_or(Tensor());
   auto iter = TensorIterator::binary_op(result, self, other);
-  threshold_stub(iter->device_type(), *iter, threshold, value);
-  return iter->output();
+  threshold_stub(iter.device_type(), iter, threshold, value);
+  return iter.output();
 }
 
 Tensor threshold(const Tensor& self, Scalar threshold, Scalar value) {
@@ -117,7 +117,6 @@ void inline prelu_cpu_kernel_multi_weights(
   int64_t input_stride0,
   int64_t input_stride1) {
 
-  int64_t input_numel = input.numel();
   scalar_t* result_data = result.data<scalar_t>();
   scalar_t* input_data = input.data<scalar_t>();
   scalar_t* weight_data = weight.data<scalar_t>();
@@ -241,7 +240,6 @@ void inline prelu_cpu_backward_kernel_multi_weights(
   int64_t input_stride0,
   int64_t input_stride1) {
 
-  int64_t input_numel = input.numel();
   auto input_data = input.data<scalar_t>();
   auto weight_data = weight.data<scalar_t>();
   auto grad_out_data = grad_out.data<scalar_t>();
@@ -342,14 +340,14 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
 Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
   auto out_tensor = at::empty_like(self);
   auto iter = TensorIterator::unary_op(out_tensor, self);
-  hardshrink_cpu_stub(kCPU, *iter, lambd);
+  hardshrink_cpu_stub(kCPU, iter, lambd);
   return out_tensor;
 }
 
 Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambd) {
   auto out_tensor = at::empty_like(self);
   auto iter = TensorIterator::binary_op(out_tensor, grad, self);
-  hardshrink_backward_cpu_stub(kCPU, *iter, lambd);
+  hardshrink_backward_cpu_stub(kCPU, iter, lambd);
   return out_tensor;
 }
 

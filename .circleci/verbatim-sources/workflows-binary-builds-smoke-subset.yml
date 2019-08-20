@@ -16,11 +16,11 @@
             - setup
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3.6_cu90_devtoolset7_build
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_build:
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_build:
           requires:
             - setup
       # TODO we should test a libtorch cuda build, but they take too long
-      # - binary_linux_libtorch_2.7m_cu90_devtoolset7_build
+      # - binary_linux_libtorch_2.7m_cu90_devtoolset7_static-without-deps_build
       - binary_macos_wheel_3.6_cpu_build:
           requires:
             - setup

@@ -16,11 +16,12 @@ from torch import nn
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
-from torch.autograd.profiler import profile, format_time, EventList, FunctionEvent, emit_nvtx
+from torch.autograd.profiler import (profile, format_time, EventList,
+                                     FunctionEvent, record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm, slowTest,
-                          load_tests, random_symmetric_pd_matrix, IS_WINDOWS)
+                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -1609,16 +1610,26 @@ class TestAutograd(TestCase):
         target_length = 15
         gradcheck_input_size = 10
 
-        # device, input_length
-        tests = [('cpu', 150, False),
-                 ('cpu', 150, True)]
-        if torch.cuda.is_available():
-            tests += [('cuda', 50, False),
-                      ('cuda', 150, False),
-                      ('cuda', 50, True),
-                      ('cuda', 150, True)]
+        ZERO_NONE = 0
+        ZERO_SOME = 1
+        ZERO_ALL = 2
 
-        for device, input_length, vary_lengths in tests:
+        # device, input_length, vary_lengths, zero_lengths
+        tests = [('cpu', 150, False, ZERO_NONE),
+                 ('cpu', 150, True, ZERO_NONE),
+                 ('cpu', 50, True, ZERO_SOME),
+                 ('cpu', 50, True, ZERO_ALL)]
+        if torch.cuda.is_available():
+            tests += [('cuda', 50, False, ZERO_NONE),
+                      ('cuda', 150, False, ZERO_NONE),
+                      ('cuda', 50, True, ZERO_NONE),
+                      ('cuda', 150, True, ZERO_NONE),
+                      ('cuda', 50, True, ZERO_SOME),
+                      ('cuda', 150, True, ZERO_SOME),
+                      ('cuda', 50, True, ZERO_ALL),
+                      ('cuda', 150, True, ZERO_ALL)]
+
+        for device, input_length, vary_lengths, zero_mode in tests:
             targets = torch.randint(1, num_labels, (batch_size, target_length),
                                     device=device, dtype=torch.long)
             x = torch.randn(gradcheck_input_size, device=device, requires_grad=True)
@@ -1626,8 +1637,15 @@ class TestAutograd(TestCase):
                                        device=device)
             input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
                               if vary_lengths or i == 0 else input_length) for i in range(batch_size)]
-            target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
-                               if vary_lengths else target_length) for i in range(batch_size)]
+            if zero_mode == ZERO_ALL:
+                target_lengths = [0 for _ in range(batch_size)]
+            else:
+                target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
+                                   if vary_lengths else target_length) for _ in range(batch_size)]
+                if zero_mode == ZERO_SOME:
+                    idxes = torch.randint(0, batch_size, (10,))
+                    for i in idxes:
+                        target_lengths[i] = 0
 
             def ctc_after_softmax(x):
                 x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
@@ -2484,6 +2502,26 @@ class TestAutograd(TestCase):
             run_test(upper, dims)
 
     @skipIfNoLapack
+    def test_symeig(self):
+        def func(root, upper):
+            x = 0.5 * (root + root.transpose(-2, -1))
+            return torch.symeig(x, eigenvectors=True, upper=upper)
+
+        def run_test(upper, dims):
+            root = torch.rand(*dims, requires_grad=True)
+
+            gradcheck(func, [root, upper])
+            gradgradcheck(func, [root, upper])
+
+            root = random_symmetric_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            w, v = root.symeig(eigenvectors=True)
+            (w.sum() + v.sum()).backward()
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2))  # Check the gradient is symmetric
+
+        for upper, dims in product([True, False], [(3, 3), (5, 3, 3), (4, 3, 2, 2)]):
+            run_test(upper, dims)
+
+    @skipIfNoLapack
     def test_triangular_solve(self):
         def _test_with_size(A_dims, B_dims):
             A = torch.rand(*A_dims).requires_grad_()
@@ -2807,6 +2845,22 @@ class TestAutograd(TestCase):
         if sys.platform != "win32":
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
+
+    def test_record_function(self):
+        x = torch.randn(10, 10)
+
+        with profile() as p:
+            with record_function("label"):
+                y = x * 2 + 4
+
+        last_end = 0
+        names = ['mul', 'add']
+        labels = ['label']
+        self.assertEqual(len(p.function_events), len(names) + len(labels))
+        for info, expected_name in zip(p.function_events, labels):
+            self.assertGreater(info.cpu_interval.start, last_end)
+            self.assertEqual(info.name, expected_name)
+            last_end = info.cpu_interval.end
 
     @skipIfRocm
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
@@ -3329,14 +3383,14 @@ class TestAutograd(TestCase):
             branch1 = branch1 / branch1
             # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
             # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
-            # So the cpu thread will notify the gpu thread with an empty FunctionTask.
+            # So the cpu thread will notify the gpu thread with an empty NodeTask.
             branch2 = checkpoint(fn_on_gpu, inp)
             out = branch2 + branch1
             return out
 
         inp = torch.rand(2, requires_grad=True)
         out = parent_on_cpu(inp)
-        # This will segfault if the empty FunctionTask is not handled properly in the
+        # This will segfault if the empty NodeTask is not handled properly in the
         # gpu thread ReadyQueue
         out.sum().backward()
 

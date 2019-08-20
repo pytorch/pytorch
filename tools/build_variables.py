@@ -37,6 +37,7 @@ libtorch_sources = [
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/custom_function.cpp",
+    "torch/csrc/autograd/cpp_hook.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/function_hook.cpp",
@@ -49,6 +50,10 @@ libtorch_sources = [
     "torch/csrc/autograd/record_function.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
+    "torch/csrc/distributed/rpc/FutureMessage.cpp",
+    "torch/csrc/distributed/rpc/Message.cpp",
+    "torch/csrc/distributed/rpc/ScriptCall.cpp",
+    "torch/csrc/distributed/rpc/ScriptRet.cpp",
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/jit/autodiff.cpp",
     "torch/csrc/jit/attributes.cpp",
@@ -60,6 +65,7 @@ libtorch_sources = [
     "torch/csrc/jit/pickler.cpp",
     "torch/csrc/jit/graph_executor.cpp",
     "torch/csrc/jit/import.cpp",
+    "torch/csrc/jit/pickle.cpp",
     "torch/csrc/jit/import_export_helpers.cpp",
     "torch/csrc/jit/interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
@@ -112,10 +118,8 @@ libtorch_sources = [
     "torch/csrc/jit/register_special_ops.cpp",
     "torch/csrc/jit/scope.cpp",
     "torch/csrc/jit/script/compiler.cpp",
-    "torch/csrc/api/src/jit.cpp",
     "torch/csrc/jit/script/edit_distance.cpp",
     "torch/csrc/jit/script/logging.cpp",
-    "torch/csrc/jit/script/final_returns.cpp",
     "torch/csrc/jit/script/convert_to_ssa.cpp",
     "torch/csrc/jit/script/exit_transforms.cpp",
     "torch/csrc/jit/script/inline_loop_condition.cpp",
@@ -143,7 +147,6 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
     "torch/csrc/jit/function.cpp",
-    "test/cpp/jit/test.cpp",
 ]
 
 libtorch_cuda_sources = [
@@ -230,6 +233,12 @@ def add_torch_libs():
         "torch/csrc/distributed/c10d/comm.cpp",
         "torch/csrc/distributed/c10d/init.cpp",
         "torch/csrc/distributed/c10d/reducer.cpp",
+        "torch/csrc/distributed/rpc/init.cpp",
+        "torch/csrc/distributed/rpc/RpcAgent.cpp",
+        "torch/csrc/distributed/rpc/ProcessGroupAgent.cpp",
+        "torch/csrc/distributed/rpc/functions.cpp",
+        "torch/csrc/distributed/rpc/python_functions.cpp",
+        "torch/csrc/distributed/rpc/PythonRpcHandler.cpp",
         "torch/csrc/jit/init.cpp",
         "torch/csrc/jit/passes/inline_fork_wait.cpp",
         "torch/csrc/jit/passes/onnx.cpp",
@@ -269,7 +278,10 @@ def add_torch_libs():
         "torch/csrc/utils/tensor_numpy.cpp",
         "torch/csrc/utils/tensor_types.cpp",
         "torch/csrc/utils/tuple_parser.cpp",
+        "test/cpp/jit/torch_python_test.cpp",
     ]
+
+    libtorch_python_sources.extend(glob(["test/cpp/jit/test_*.cpp"]))
 
     libtorch_python_cuda_sources = [
         ":generate-code=THCUNN.cpp",

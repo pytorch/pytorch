@@ -10,6 +10,7 @@ import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 import torch.jit.quantized
+import zipfile
 
 # Testing utils
 from common_utils import TestCase, IS_WINDOWS, \
@@ -90,13 +91,39 @@ class JitTestCase(TestCase):
         return False
 
     def _compared_saved_loaded(self, m):
-        import zipfile
+        if PY2:
+            # Disable for Python 2, which does not allow manipulation of multiple objects
+            # returned by zipfile.open().
+            # See: https://docs.python.org/2.7/library/zipfile.html#zipfile.ZipFile.open
+            return
+
+        def extract_files(buffer):
+            # crack open the zip format to get at the main module code
+            archive = zipfile.ZipFile(buffer)
+            # check that we have no duplicate names
+            self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
+            files = list(filter(lambda x: x.startswith('archive/code/'), archive.namelist()))
+            # unwrap all the code files into strings
+            code_files = filter(lambda x: x.endswith('.py'), files)
+            code_files = map(lambda f: archive.open(f), code_files)
+            code_files = map(lambda file: "".join([line.decode() for line in file]), code_files)
+
+            # unpickled all the debug files
+            debug_files = filter(lambda f: f.endswith('.debug_pkl'), files)
+            debug_files = map(lambda f: archive.open(f), debug_files)
+            debug_files = map(lambda f: pickle.load(f), debug_files)
+            return code_files, debug_files
+
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with torch.jit._disable_emit_hooks():
             try:
+                # short-circuit if this is an empty function or module
                 if len(m.code) == 0:
-                    # short-circuit if this is an empty module
                     return
+                if isinstance(m, torch._C.ScriptModule):
+                    if len(m._method_names()) == 0:
+                        return
+
                 # save the module to a buffer
                 buffer = io.BytesIO()
                 torch.jit.save(m, buffer)
@@ -105,14 +132,7 @@ class JitTestCase(TestCase):
                 # and it's easier to just work with a fresh copy each time.
                 buffer_copy = buffer.getvalue()
 
-                # crack open the zip format to get at the main module code
-                archive = zipfile.ZipFile(buffer)
-                # check that we have no duplicate names
-                self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
-                main_module = archive.open('archive/code/archive.py')
-                main_module_code = "".join([line.decode() for line in main_module])
-                main_module_debug_file = archive.open('archive/debug/archive.pkl')
-                main_module_debug = pickle.load(main_module_debug_file)
+                code_files, debug_files = extract_files(buffer)
             except RuntimeError as e:
                 if not self._isHookExceptionOk(e):
                     raise
@@ -128,14 +148,10 @@ class JitTestCase(TestCase):
             torch.jit.save(imported, saved_module_buffer_2)
 
             saved_module_buffer_2.seek(0)
-            archive2 = zipfile.ZipFile(saved_module_buffer_2)
-            main_module_2 = archive2.open('archive/code/archive.py')
-            main_module_2_code = "".join([line.decode() for line in main_module_2])
-            main_module_2_debug_file = archive.open('archive/debug/archive.pkl')
-            main_module_2_debug = pickle.load(main_module_2_debug_file)
+            code_files_2, debug_files_2 = extract_files(saved_module_buffer_2)
 
-            self.assertMultiLineEqual(main_module_code, main_module_2_code)
-            self.assertEqual(main_module_debug, main_module_2_debug)
+            for a, b in zip(code_files, code_files_2):
+                self.assertMultiLineEqual(a, b)
 
 
     def emitFunctionHook(self, func):
@@ -274,7 +290,7 @@ class JitTestCase(TestCase):
         return defined_vars
 
     def checkScriptRaisesRegex(self, script, inputs, exception, regex,
-                               optimize=True, outputs=None, capture_output=False):
+                               outputs=None, capture_output=False):
         """
         Checks that a given function will throw the correct exception,
         when executed with normal python, the string frontend, and the AST frontend
@@ -285,66 +301,66 @@ class JitTestCase(TestCase):
         # string frontend
         with self.assertRaisesRegex(exception, regex):
             source = textwrap.dedent(inspect.getsource(script))
-            cu = torch.jit.CompilationUnit(source, optimize)
+            cu = torch.jit.CompilationUnit(source)
             ge = getattr(cu, script.__name__)
             ge(*inputs)
         # python AST frontend
         with self.assertRaisesRegex(exception, regex):
-            ge = torch.jit.script(script, optimize)
+            ge = torch.jit.script(script)
             ge(*inputs)
 
     def checkScript(self,
                     script,
                     inputs,
-                    optimize=True,
                     name='func',
+                    optimize=True,
                     capture_output=False,
                     frames_up=1):
-        if isinstance(script, str):
-            # Compile the string to a Script function
-            cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
+        with torch.jit.optimized_execution(optimize):
+            if isinstance(script, str):
+                # Compile the string to a Script function
+                cu = torch.jit.CompilationUnit(script, _frames_up=frames_up)
 
-            # Execute the Python function so we can run it later and get its
-            # outputs
-            frame = self.get_frame_vars(frames_up)
-            the_locals = {}
-            execWrapper(script, glob=frame, loc=the_locals)
-            frame.update(the_locals)
+                # Execute the Python function so we can run it later and get its
+                # outputs
+                frame = self.get_frame_vars(frames_up)
+                the_locals = {}
+                execWrapper(script, glob=frame, loc=the_locals)
+                frame.update(the_locals)
 
-            python_fn = frame[name]
-            scripted_fn = getattr(cu, name)
-        else:
+                python_fn = frame[name]
+                scripted_fn = getattr(cu, name)
+            else:
 
-            # Check the string frontend first
-            source = textwrap.dedent(inspect.getsource(script))
-            self.checkScript(
-                source,
-                inputs,
-                optimize,
-                script.__name__,
-                capture_output,
-                frames_up=2)
+                # Check the string frontend first
+                source = textwrap.dedent(inspect.getsource(script))
+                self.checkScript(
+                    source,
+                    inputs,
+                    script.__name__,
+                    capture_output,
+                    frames_up=2)
 
-            # Continue checking the Python frontend
-            scripted_fn = torch.jit.script(script, optimize, _frames_up=1)
-            python_fn = script
+                # Continue checking the Python frontend
+                scripted_fn = torch.jit.script(script, _frames_up=1)
+                python_fn = script
 
-        if capture_output:
-            with self.capture_stdout() as script_stdout:
+            if capture_output:
+                with self.capture_stdout() as script_stdout:
+                    script_outputs = scripted_fn(*inputs)
+                with self.capture_stdout() as _python_stdout:
+                    python_outputs = python_fn(*inputs)
+                if not IS_WINDOWS:
+                    self.assertExpected(script_stdout[0], subname='stdout')
+            else:
                 script_outputs = scripted_fn(*inputs)
-            with self.capture_stdout() as _python_stdout:
                 python_outputs = python_fn(*inputs)
-            if not IS_WINDOWS:
-                self.assertExpected(script_stdout[0], subname='stdout')
-        else:
-            script_outputs = scripted_fn(*inputs)
-            python_outputs = python_fn(*inputs)
-        self.assertEqual(python_outputs, script_outputs)
+            self.assertEqual(python_outputs, script_outputs)
 
-        return scripted_fn
+            return scripted_fn
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
-                   optimize=True, drop=None, allow_unused=False, verbose=False,
+                   drop=None, allow_unused=False, verbose=False,
                    inputs_require_grads=True, check_tolerance=1e-5, export_import=True,
                    _force_outplace=False):
         # TODO: check gradients for parameters, not just inputs
@@ -380,7 +396,7 @@ class JitTestCase(TestCase):
         else:
             recording_inputs = reference_tensors
 
-        ge = torch.jit.trace(func, input_tensors, optimize=optimize, check_tolerance=check_tolerance,
+        ge = torch.jit.trace(func, input_tensors, check_tolerance=check_tolerance,
                              _force_outplace=_force_outplace)
 
         if export_import:

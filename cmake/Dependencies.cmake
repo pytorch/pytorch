@@ -48,6 +48,8 @@ endif()
 if (MSVC)
   if(MSVC_Z7_OVERRIDE)
     foreach(flag_var
+        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+        CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
         CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
         CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
       if(${flag_var} MATCHES "/Z[iI]")
@@ -499,10 +501,7 @@ endif()
 
 # ---[ NUMA
 if(USE_NUMA)
-  if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
-    message(WARNING "NUMA is currently only supported under Linux.")
-    caffe2_update_option(USE_NUMA OFF)
-  else()
+  if(LINUX)
     find_package(Numa)
     if(NUMA_FOUND)
       include_directories(SYSTEM ${Numa_INCLUDE_DIR})
@@ -511,6 +510,9 @@ if(USE_NUMA)
       message(WARNING "Not compiling with NUMA. Suppress this warning with -DUSE_NUMA=OFF")
       caffe2_update_option(USE_NUMA OFF)
     endif()
+  else()
+    message(WARNING "NUMA is currently only supported under Linux.")
+    caffe2_update_option(USE_NUMA OFF)
   endif()
 endif()
 
@@ -893,14 +895,14 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${hipsparse_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
+      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
 
     # Note [rocblas & rocfft cmake bug]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
     list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
-      roc::rocblas roc::rocfft)
+      roc::rocblas roc::rocfft hip::hiprand roc::hipsparse)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()

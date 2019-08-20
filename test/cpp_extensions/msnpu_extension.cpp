@@ -1,6 +1,6 @@
 #include <torch/extension.h>
 
-#include <ATen/ExtensionBackendRegistration.h>
+#include <ATen/core/ATenDispatch.h>
 
 using namespace at;
 
@@ -14,7 +14,7 @@ Tensor get_dtype_tensor(caffe2::TypeMeta dtype) {
   return Tensor(std::move(tensor_impl));
 }
 
-Tensor zeros_override(IntArrayRef size, const TensorOptions & options) {
+Tensor empty_override(IntArrayRef size, const TensorOptions & options) {
   test_int = 0;
   return get_dtype_tensor(options.dtype());
 }
@@ -24,63 +24,15 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
   return get_dtype_tensor(a.dtype());
 }
 
-Tensor sum_override(const Tensor & self, ScalarType dtype) {
-  test_int = 2;
-  return get_dtype_tensor(self.dtype());
-}
-
-// needed for sum backwards
-Tensor expand_override(const Tensor & self, IntArrayRef size, bool implicit) {
-  return get_dtype_tensor(self.dtype());
-}
-
-
-Tensor kl_div_override(
-    const Tensor & self, const Tensor & target, int64_t reduction) {
-  test_int = 3;
-  return get_dtype_tensor(self.dtype());
-}
-
-Tensor kl_div_backward_override(
-    const Tensor & grad_output,
-    const Tensor & self,
-    const Tensor & target,
-    int64_t reduction) {
-  test_int = 4;
-  return get_dtype_tensor(self.dtype());
-}
-
-// ones_like is needed for autograd backwards
-Tensor ones_like_override(const Tensor & self, const TensorOptions & options) {
-  return get_dtype_tensor(options.dtype());
-}
-
 void init_msnpu_extension() {
-  register_extension_backend_op(
+  globalATenDispatch().registerOp(
     Backend::MSNPU,
-    "zeros(IntArrayRef size, TensorOptions options) -> Tensor", &zeros_override);
-  register_extension_backend_op(
+    "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+    &empty_override);
+  globalATenDispatch().registerOp(
     Backend::MSNPU,
-    "add(Tensor self, Tensor other, Scalar alpha) -> Tensor", &add_override);
-  register_extension_backend_op(
-    Backend::MSNPU,
-    "sum(Tensor self, ScalarType dtype) -> Tensor", &sum_override);
-  register_extension_backend_op(
-    Backend::MSNPU,
-    "expand(Tensor self, IntArrayRef size, bool implicit) -> Tensor",
-    &expand_override);
-  register_extension_backend_op(
-    Backend::MSNPU,
-    "kl_div(Tensor self, Tensor target, int64_t reduction) -> Tensor",
-    &kl_div_override);
-  register_extension_backend_op(
-    Backend::MSNPU,
-    "kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor",
-    &kl_div_backward_override);
-  register_extension_backend_op(
-    Backend::MSNPU,
-    "ones_like(Tensor self, TensorOptions options) -> Tensor",
-    &ones_like_override);
+    "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
+    &add_override);
 }
 
 // TODO: Extend this to exercise multi-device setting.  In that case,
