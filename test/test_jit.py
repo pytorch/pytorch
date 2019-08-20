@@ -638,7 +638,7 @@ class TestJit(JitTestCase):
         def test_simple_grad_with_grad_outputs(x, y):
             # type: (Tensor, Tensor) -> List[Tensor]
             z = x + 2 * y + x * y
-            grad_outputs: List[Optional[torch.Tensor]] = [torch.ones((2, 2)), ]
+            grad_outputs = torch.jit.annotate(List[Optional[torch.Tensor]], [torch.ones((2, 2)), ])
             return torch.autograd.grad((z, ), (x, y), grad_outputs)
 
         x = torch.randn(2, 2, requires_grad=True)
