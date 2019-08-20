@@ -151,7 +151,7 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
 // some preprocessing that are unique to some operators (more is forsee-able in the future) and is more flexible and
 // elegant than defining a flat fat macro that implements everything.
 template <typename Stub>
-static inline Tensor& unary_op_out_impl(Tensor& result, const Tensor& self, Stub&& stub) {
+static inline Tensor& unary_op_out_impl(Tensor& result, const Tensor& self, Stub& stub) {
   auto iter = TensorIterator::unary_op(result, self,
     /*check_mem_overlap=*/true);
   stub(iter.device_type(), iter);
@@ -159,14 +159,14 @@ static inline Tensor& unary_op_out_impl(Tensor& result, const Tensor& self, Stub
 }
 
 template <typename Stub>
-static inline Tensor unary_op_impl(const Tensor& self, Stub&& stub) {
+static inline Tensor unary_op_impl(const Tensor& self, Stub& stub) {
   Tensor result = at::empty({0}, self.options());
-  return unary_op_out_impl(result, self, std::forward<Stub>(stub));
+  return unary_op_out_impl(result, self, stub);
 }
 
 template <typename Stub>
-static inline Tensor& unary_op_impl_(Tensor& self, Stub&& stub) {
-  return unary_op_out_impl(self, self, std::forward<Stub>(stub));
+static inline Tensor& unary_op_impl_(Tensor& self, Stub& stub) {
+  return unary_op_out_impl(self, self, stub);
 }
 
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, bitwise_not_stub); }
