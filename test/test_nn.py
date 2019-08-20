@@ -2957,7 +2957,7 @@ class TestNN(NNTestCase):
         n = 3
         x = torch.tensor([], device=device, dtype=torch.long)
         for sparse in [True, False]:
-            Embed = torch.nn.EmbeddingBag(m, n, sparse=True)
+            Embed = torch.nn.EmbeddingBag(m, n, sparse=sparse)
 
             output = Embed(input=x, offsets=torch.tensor([0], device=device, dtype=torch.long))
             self.assertEqual(output, torch.zeros_like(output))

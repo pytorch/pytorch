@@ -8,7 +8,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorAccessor.h>
-#include <ATen/core/TensorOptions.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
@@ -22,6 +21,9 @@
 
 namespace caffe2 {
 class Tensor;
+}
+namespace c10{
+struct TensorOptions;
 }
 namespace at {
 struct Generator;
@@ -172,7 +174,7 @@ class CAFFE2_API Tensor {
   }
 #ifdef BUILD_NAMEDTENSOR
   optional<DimnameList> names() const {
-    return impl::internal_get_names(unsafeGetTensorImpl());
+    return impl::get_names(unsafeGetTensorImpl());
   }
 #endif
   int64_t ndimension() const {
@@ -282,8 +284,13 @@ class CAFFE2_API Tensor {
     return this->unsafeGetTensorImpl()->data();
   }
 
+  template <typename T>
+  T * data_ptr() const;
+
   template<typename T>
-  T * data() const;
+  T * data() const {
+    return data_ptr<T>();
+  }
 
   template <typename T>
   T item() const;
@@ -388,6 +395,24 @@ namespace detail {
 template <typename T, typename... Args>
 Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
+}
+
+inline Backend infer_backend(const Tensor & t) {
+  TORCH_CHECK(t.defined(), "undefined Tensor");
+  return tensorTypeIdToBackend(t.type_id());
+}
+inline Backend infer_backend(const TensorList & tl) {
+  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+  return tensorTypeIdToBackend(tl[0].type_id());
+}
+
+inline bool infer_is_variable(const Tensor & t) {
+  TORCH_CHECK(t.defined(), "undefined Tensor");
+  return t.is_variable();
+}
+inline bool infer_is_variable(const TensorList & tl) {
+  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+  return tl[0].is_variable();
 }
 } // namespace detail
 

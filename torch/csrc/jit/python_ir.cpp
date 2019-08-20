@@ -631,28 +631,41 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "dim",
           [](Type& t) {
-            auto vshape =
-                ProfiledTensorType::create(t.shared_from_this())->sizes();
+            auto vshape = t.shared_from_this()->expect<TensorType>()->sizes();
             return vshape.size() ? py::cast(*vshape.size())
                                  : py::cast<py::none>(Py_None);
           })
       .def(
           "sizes",
-          [](Type& t) { return t.expect<CompleteTensorType>()->sizes(); })
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              if (auto cs = ptt->sizes().concrete_sizes()) {
+                return py::cast(*cs);
+              }
+            }
+            return py::none();
+          })
       .def(
-          "strides",
-          [](Type& t) { return t.expect<CompleteTensorType>()->strides(); })
+          "sizes",
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              if (auto cs = ptt->strides().concrete_sizes()) {
+                return py::cast(*cs);
+              }
+            }
+            return py::none();
+          })
       .def(
           "contiguous",
           [](Type& t) {
             return std::static_pointer_cast<Type>(
-                t.expect<CompleteTensorType>()->contiguous());
+                t.expect<TensorType>()->contiguous());
           })
       .def(
           "scalarType",
           [](Type& t) {
             auto scalar_type =
-                ProfiledTensorType::create(t.shared_from_this())->scalarType();
+                t.shared_from_this()->expect<TensorType>()->scalarType();
             return (scalar_type) ? toString(*scalar_type) : nullptr;
           })
       .def(

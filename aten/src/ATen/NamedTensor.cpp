@@ -12,6 +12,30 @@ bool NamedTensorMeta::has_names() const {
       });
 }
 
+thread_local bool NamesMode_enabled = true;
+
+bool NamesMode::is_enabled() {
+  return NamesMode_enabled;
+}
+
+void NamesMode::set_enabled(bool enabled) {
+   NamesMode_enabled = enabled;
+}
+
+Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
+  impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), names);
+  return tensor;
+}
+
+Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names) {
+  impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), std::move(names), validate_names);
+  return tensor;
+}
+
+std::vector<Dimname> FIXME_default_names(size_t len) {
+  return { len, Dimname::wildcard() };
+}
+
 namespace impl {
 
 // Two Dimnames cannot be in the same Tensor if one of them can refer to the other.
@@ -49,6 +73,9 @@ static void check_unique_names(DimnameList names) {
 }
 
 static NamedTensorMeta* get_named_tensor_meta(TensorImpl* impl) {
+  if (!NamesMode::is_enabled()) {
+    return nullptr;
+  }
   return static_cast<NamedTensorMeta*>(impl->named_tensor_meta());
 }
 
@@ -87,7 +114,7 @@ void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, 
   }
 }
 
-optional<DimnameList> internal_get_names(TensorImpl* impl) {
+optional<DimnameList> get_names(TensorImpl* impl) {
   const auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
     return nullopt;
@@ -96,7 +123,7 @@ optional<DimnameList> internal_get_names(TensorImpl* impl) {
   }
 }
 
-bool internal_has_names(TensorImpl* impl) {
+bool has_names(TensorImpl* impl) {
   const auto* named_tensor_meta = get_named_tensor_meta(impl);
   return named_tensor_meta != nullptr && named_tensor_meta->has_names();
 }

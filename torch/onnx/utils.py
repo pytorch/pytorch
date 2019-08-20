@@ -62,7 +62,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
-            example_outputs=example_outputs, strip_doc_string=strip_doc_string, 
+            example_outputs=example_outputs, strip_doc_string=strip_doc_string,
             dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs)
 
 
@@ -86,6 +86,9 @@ def _split_tensor_list_constants(g, block):
 
 
 def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False):
+    # Inline everyting
+    torch._C._jit_pass_inline(graph)
+
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_dce(graph)
@@ -267,7 +270,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                             input_names=None, output_names=None, aten=False, export_raw_ir=False,
                             operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
                             example_outputs=None, propagate=False, google_printer=False,
-                            opset_version=None, _retain_param_name=True, 
+                            opset_version=None, _retain_param_name=True,
                             keep_initializers_as_inputs=True):
     if aten or export_raw_ir:
         assert operator_export_type is None
@@ -300,7 +303,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                     example_outputs, propagate, _retain_param_name,
                                                     do_constant_folding)
 
-    return graph._pretty_print_onnx(params_dict, opset_version, False, 
+    return graph._pretty_print_onnx(params_dict, opset_version, False,
                                     operator_export_type, google_printer,
                                     keep_initializers_as_inputs)
 
@@ -712,11 +715,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
         if (output_names is None) or len(output_names) == 0:
             output_names = [y.debugName() for y in model.graph.outputs()]
 
-    valid_names = set()
-    if input_names is not None:
-        valid_names.add(x for x in input_names)
-    if output_names is not None:
-        valid_names.add(x for x in output_names)
+    valid_names = set((input_names or []) + (output_names or []))
 
     # If dynamic axes are provided as a list rather than dictionary, they should
     # first get converted to a dictionary in expected format. If desired axes names

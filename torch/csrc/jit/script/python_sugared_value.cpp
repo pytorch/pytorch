@@ -493,6 +493,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
       return toSimple(g.insertConstant(v, nullptr, loc));
+    } else if (THPQScheme_Check(obj.ptr())) {
+      auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+      const auto v = static_cast<uint8_t>(qscheme->qscheme);
+      return toSimple(g.insertConstant(v, nullptr, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       return std::make_shared<ConstantPythonTupleValue>(obj);
     }
@@ -552,16 +556,15 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         auto rcb = py::module::import("torch._jit_internal")
                        .attr("createResolutionCallbackForClassMethods")(obj);
 
-        // We're starting a new compilation, so update the error call stack in
-        // case it fails
-        ErrorReport::CallStack::push_function(qualname.name());
-        ErrorReport::CallStack::update_pending_range(loc);
+        {
+          // We're starting a new compilation, so update the error call stack in
+          // case it fails
+          ErrorReport::CallStack stack(qualname.name());
+          ErrorReport::CallStack::update_pending_range(loc);
 
-        py::module::import("torch.jit")
-            .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
-
-        // Compilation was successful, so pop this entry off the stack
-        ErrorReport::CallStack::pop_function();
+          py::module::import("torch.jit")
+              .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
+        }
 
         // Return class
         auto newClassType = pyCu->get_class(qualname);
