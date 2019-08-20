@@ -645,7 +645,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[] grad_outputs, bool? keep_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor[]",
+         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? keep_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor[]",
          [](Stack& stack) {
            bool allow_unused = pop(stack).toBool();
            bool create_graph = pop(stack).toBool();
@@ -657,8 +657,10 @@ RegisterOperators reg(
            std::vector<torch::autograd::Variable> output_vars(outputs.begin(), outputs.end());
            std::vector<torch::autograd::Variable> gradients;
 
-           for (const IValue& v: grad_outputs.toGenericList()) {
-             gradients.emplace_back(v.isNone()? at::Tensor(): v.toTensor());
+           if (!grad_outputs.isNone()) {
+             for (const IValue& v : grad_outputs.toGenericListRef()) {
+               gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
+             }
            }
 
            auto res = torch::autograd::grad(
@@ -674,6 +676,27 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     Operator(
+         "aten::backward(Tensor[](a!) tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         [](Stack& stack) {
+           bool create_graph = pop(stack).toBool();
+           auto retain_graph = pop(stack).toOptional<bool>();
+           auto grad_tensors = pop(stack);
+           auto tensors = pop(stack).toTensorListRef().vec();
+           std::vector<torch::autograd::Variable> output_vars(tensors.begin(), tensors.end());
+           std::vector<torch::autograd::Variable> gradients;
+
+           if (!grad_tensors.isNone()) {
+             for (const IValue& v : grad_tensors.toGenericListRef()) {
+               gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
+             }
+           }
+
+           torch::autograd::backward(
+               output_vars, gradients, retain_graph, create_graph);
+           return 0;
+         },
+         aliasAnalysisSpecialCase()),
      Operator(
          "aten::backward(Tensor(a!) self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
          [](Stack& stack) {

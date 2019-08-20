@@ -841,8 +841,6 @@ def trace(func,
                              "Please use trace_module")
 
     name = _qualified_name(func)
-    if name == '<lambda>':
-        name = '_lambda'  # make name a valid identifier
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                   var_lookup_fn,
                                                   _force_outplace)
@@ -1800,6 +1798,7 @@ _builtin_ops = [
     (math.radians, "aten::radians"),
     (math.ldexp, "aten::ldexp"),
     (torch.autograd.grad, "aten::grad"),
+    (torch.autograd.backward, "aten::backward"),
     (torch._C._infer_size, "aten::_infer_size"),
     (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
     (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),

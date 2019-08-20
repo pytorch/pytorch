@@ -360,6 +360,11 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::CallMethod:
       // TODO: this can be improved with summarizes of what the function does
       // for now we assume the worst
+    case aten::backward:
+      // backward op might write to every input tensors in the graph and it's much
+      // more expensive to analayze the leaves and sometimes it might retain the whole
+      // gradients in every tensor of the Autograd graph with create_graph=True so we
+      // assume to be the worst when hitting this node
       return analyzeConservative(node);
     case prim::Print:
     case prim::Uninitialized:
@@ -1254,6 +1259,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::CallFunction,
       prim::CallMethod,
       aten::wait,
+      aten::backward,
   };
 
   // Operators that should not be used by alias analysis
