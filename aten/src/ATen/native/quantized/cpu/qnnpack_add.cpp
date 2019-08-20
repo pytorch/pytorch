@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
 #include "init_qnnpack.h"
 #include "qnnpack_utils.h"
@@ -14,7 +15,8 @@ class QNNPACKAdd final : public torch::OperatorKernel {
   Tensor operator()(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     TORCH_CHECK(
         qa.ndimension() > 0 && qa.numel() > 0,
-        "qnnpack_add(): Got empty input tensor, size: ", qa.sizes());
+        "qnnpack_add(): Got empty input tensor, size: ",
+        qa.sizes());
     TORCH_CHECK(
         qa.numel() == qb.numel(),
         "qnnpack_add(): Add operands must be the same size!");
@@ -73,8 +75,9 @@ class QNNPACKAdd final : public torch::OperatorKernel {
         setupStatus == qnnp_status_success,
         "failed to setup QNNPACK Add operator");
 
+    pthreadpool_t threadpool = caffe2::mobile_threadpool();
     const qnnp_status runStatus =
-        qnnp_run_operator(qnnpack_operator, nullptr /* thread pool */);
+        qnnp_run_operator(qnnpack_operator, threadpool);
 
     TORCH_INTERNAL_ASSERT(
         runStatus == qnnp_status_success, "failed to run QNNPACK Add operator");

@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <aten/src/ATen/native/Pool.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
 #include "init_qnnpack.h"
 #include "qnnpack_utils.h"
@@ -129,8 +130,9 @@ class QNNPACKMaxPool2D final : public torch::OperatorKernel {
         setupStatus == qnnp_status_success,
         "failed to setup QNNPACK MaxPool operator");
 
+    pthreadpool_t threadpool = caffe2::mobile_threadpool();
     const qnnp_status runStatus =
-        qnnp_run_operator(qnnpack_operator, nullptr /* thread pool */);
+        qnnp_run_operator(qnnpack_operator, threadpool);
     TORCH_INTERNAL_ASSERT(
         runStatus == qnnp_status_success,
         "failed to run QNNPACK MaxPool operator");
