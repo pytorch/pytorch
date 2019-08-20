@@ -22,6 +22,7 @@ DECLARE_DISPATCH(unary_fn, cos_stub);
 DECLARE_DISPATCH(unary_fn, cosh_stub);
 DECLARE_DISPATCH(unary_fn, erf_stub);
 DECLARE_DISPATCH(unary_fn, erfc_stub);
+DECLARE_DISPATCH(unary_fn, erfinv_stub);
 DECLARE_DISPATCH(unary_fn, exp_stub);
 DECLARE_DISPATCH(unary_fn, expm1_stub);
 DECLARE_DISPATCH(unary_fn, floor_stub);

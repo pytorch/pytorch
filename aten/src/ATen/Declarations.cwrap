@@ -1503,7 +1503,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   cname: erfinv
   variants: function
   return: self
@@ -1518,7 +1517,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   variants:
     - function
   return: argument 0
