@@ -18,7 +18,7 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
   }
   result.resize_as_(index);
 
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "gather_out_cpu", [&](){
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Bool, ScalarType::Half, self.scalar_type(), "gather_out_cpu", [&](){
     scalar_t *result_data = result.data<scalar_t>();
     scalar_t *self_data = self.data<scalar_t>();
     int64_t *index_data = index.data<int64_t>();
