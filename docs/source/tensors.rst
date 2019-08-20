@@ -375,6 +375,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: random_
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
+   .. automethod:: record_stream
    .. automethod:: register_hook
    .. automethod:: remainder
    .. automethod:: remainder_
