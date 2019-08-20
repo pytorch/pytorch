@@ -1836,14 +1836,37 @@ class ShapePropagator {
       // handled by the fallthrough because it's not always safe to run it due
       // to integer divide-by-zero.
       return PropagateShapeOnNodeByRunningIt(node);
+    } else if (node->matches("aten::pow(Tensor self, Scalar exponent) -> Tensor")) {
+      node->output()->setType(tensor_types.at(0));
+      return true;
     } else if (
         node->matches(
             "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
         node->matches(
             "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
-        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor") ||
-        node->matches("aten::pow(Tensor self, Scalar exponent) -> Tensor")) {
-      node->output()->setType(tensor_types.at(0));
+        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor")) {
+      auto first_scalar_type = (tensor_types)[0]->scalarType();
+      auto second_scalar_type = tryScalarTypeFromJitType(node->inputs()[1]->type());
+      if (!first_scalar_type || !second_scalar_type) {
+        return false;
+      }
+      if (isIntegralType(*first_scalar_type, false) && isFloatingType(*second_scalar_type) )
+      {
+        auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
+        auto type = tensor_types[0]->withScalarType(default_dtype);
+        node->output()->setType(type);
+        return true;
+      }
+      if (c10::ScalarType::Bool == *first_scalar_type &&
+          c10::ScalarType::Bool != *second_scalar_type)
+      {
+          auto result_type = c10::promoteTypes(*first_scalar_type, *second_scalar_type);
+          auto type = tensor_types[0]->withScalarType(result_type);
+          node->output()->setType(type);
+          return true;
+      }
+      auto type = tensor_types[0]->withScalarType(first_scalar_type);
+      node->output()->setType(type);
       return true;
     } else if (
         insert_expands &&
