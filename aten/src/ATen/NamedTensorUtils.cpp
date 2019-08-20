@@ -75,7 +75,7 @@ static void check_for_misalignment(
 
 // Assumption: A DimnameList can have no duplicate full names with
 // the exception of wildcards
-static std::vector<Dimname> unify_from_right(DimnameList names, DimnameList other_names) {
+std::vector<Dimname> unify_from_right(DimnameList names, DimnameList other_names) {
   const auto wildcard = Dimname::wildcard();
   const auto size = std::max(names.size(), other_names.size());
   auto result = std::vector<Dimname>(size, wildcard);
@@ -117,22 +117,6 @@ static std::vector<Dimname> unify_from_right(DimnameList names, DimnameList othe
     ++result_it;
   }
   return result;
-}
-
-// Assumption: A DimnameList can have no duplicate full names with
-// the exception of wildcards
-CAFFE2_API optional<std::vector<Dimname>>
-unify_from_right(optional<DimnameList> names, optional<DimnameList> other_names) {
-  if (!names && !other_names) {
-    return nullopt;
-  }
-  if (!names) {
-    return other_names.value().vec();
-  }
-  if (!other_names) {
-    return names.value().vec();
-  }
-  return unify_from_right(*names, *other_names);
 }
 
 
@@ -238,31 +222,32 @@ void propagate_names(TensorImpl* result, TensorImpl* src) {
   propagate_names(result, impl::get_opt_names(src));
 }
 
-static optional<std::vector<Dimname>> compute_dot_product_outnames(
-    optional<DimnameList> tensor_names,
+void propagate_names_for_copy(Tensor& result, const Tensor& src) {
+  if (!result.has_names() && !src.has_names()) {
+    return;
+  }
+  auto outnames = unify_from_right(result.names(), src.names());
+  propagate_names(result, std::move(outnames), /*validate_names=*/false);
+}
+
+static std::vector<Dimname> compute_dot_product_outnames(
+    DimnameList tensor_names,
     int64_t tensor_dotted_dim,
-    int64_t tensor_ndim,
-    optional<DimnameList> other_names,
-    int64_t other_dotted_dim,
-    int64_t other_ndim) {
-  int64_t num_outnames = tensor_ndim + other_ndim - 2;
+    DimnameList other_names,
+    int64_t other_dotted_dim) {
+  int64_t num_outnames = tensor_names.size() + other_names.size() - 2;
   if (num_outnames == 0) {
-    return nullopt;
+    return {};
   }
   std::vector<Dimname> outnames(num_outnames, Dimname::wildcard());
   int64_t index = 0;
-  if (tensor_names) {
-    for (int64_t j = 0; j < tensor_names->size(); ++j) {
-      if (j == tensor_dotted_dim) continue;
-      outnames[index++] = (*tensor_names)[j];
-    }
+  for (int64_t j = 0; j < tensor_names.size(); ++j) {
+    if (j == tensor_dotted_dim) continue;
+    outnames[index++] = tensor_names[j];
   }
-  index = tensor_ndim - 1;
-  if (other_names) {
-    for (int64_t j = 0; j < other_names->size(); ++j) {
-      if (j == other_dotted_dim) continue;
-      outnames[index++] = (*other_names)[j];
-    }
+  for (int64_t j = 0; j < other_names.size(); ++j) {
+    if (j == other_dotted_dim) continue;
+    outnames[index++] = other_names[j];
   }
   return outnames;
 }
@@ -285,16 +270,12 @@ void propagate_names_for_addmv(
     return;
   }
   auto mv_outnames = compute_dot_product_outnames(
-      impl::get_opt_names(mat),
+      impl::get_names(mat),
       /*tensor_dotted_dim=*/1,
-      /*tensor_ndim=*/2,
-      impl::get_opt_names(vec),
-      /*other_dotted_dim=*/0,
-      /*other_ndim=*/1);
-  TORCH_INTERNAL_ASSERT(mv_outnames.has_value());
-  auto add_outnames = unify_from_right(to_opt_dimnames(mv_outnames), impl::get_opt_names(bias));
-  TORCH_INTERNAL_ASSERT(add_outnames.has_value());
-  propagate_names(result, std::move(*add_outnames));
+      impl::get_names(vec),
+      /*other_dotted_dim=*/0);
+  auto add_outnames = unify_from_right(mv_outnames, impl::get_names(bias));
+  propagate_names(result, std::move(add_outnames), /*validate_names=*/false);
 }
 
 void propagate_names_for_addmm(
@@ -307,15 +288,19 @@ void propagate_names_for_addmm(
     return;
   }
   auto mm_outnames = compute_dot_product_outnames(
-      impl::get_opt_names(m1),
+      impl::get_names(m1),
       /*tensor_dotted_dim=*/1,
-      /*tensor_ndim=*/2,
-      impl::get_opt_names(m2),
-      /*other_dotted_dim=*/0,
-      /*other_ndim=*/2);
-  auto add_outnames = unify_from_right(to_opt_dimnames(mm_outnames), impl::get_opt_names(bias));
-  TORCH_INTERNAL_ASSERT(add_outnames.has_value() && add_outnames->size() == 2);
-  propagate_names(result, std::move(*add_outnames));
+      impl::get_names(m2),
+      /*other_dotted_dim=*/0);
+  TORCH_CHECK(
+    mm_outnames[0] == Dimname::wildcard() || mm_outnames[0] != mm_outnames[1],
+    "Matrix multiplying Tensor", impl::get_names(m1),
+    " with Tensor", impl::get_names(m2),
+    " would produce output tensor with duplicate names ",
+    "[", mm_outnames[0], ", ",  mm_outnames[1], "]",
+    ". Please rename the input tensors to prevent this.");
+  auto add_outnames = unify_from_right(mm_outnames, impl::get_names(bias));
+  propagate_names(result, std::move(add_outnames), /*validate_names=*/false);
 }
 
 // expand adds new None dimensions. This is consistent with name inference
@@ -336,7 +321,7 @@ void propagate_names_for_expand(Tensor& result, const Tensor& self) {
       self.opt_names()->begin(),
       self.opt_names()->end(),
       outnames.begin() + result_dim - self.dim());
-  propagate_names(result, std::move(outnames));
+  propagate_names(result, std::move(outnames), /*validate_names=*/false);
 }
 
 } // namespace namedinference

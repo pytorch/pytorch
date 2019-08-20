@@ -215,22 +215,27 @@ void TensorIterator::allocate_outputs() {
 
 #ifdef BUILD_NAMEDTENSOR
 void TensorIterator::propagate_names_to_outputs() {
-  NameVector names;
+  bool should_perform_name_inference = std::any_of(
+      operands_.begin(),
+      operands_.end(),
+      [](const OperandInfo& op) {
+        return op.tensor.defined() && op.tensor.has_names();
+      });
+  if (!should_perform_name_inference) {
+    return;
+  }
 
   // build names
+  NameVector names;
   for (auto& op : operands_) {
     if (!op.tensor.defined()) continue;
     // don't include output tensors that are not also input tensors.
     if (resize_outputs_ && op.is_output && !op.is_read_write) continue;
     // perform name inference
-    if (!op.tensor.has_names()) {
-      continue;
-    }
-    auto tensor_names = *op.tensor.opt_names();
     if (names.empty()) {
-      names = tensor_names;
+      names = op.tensor.names();
     } else {
-      names = NameVector(unify_from_right(names, tensor_names).value());
+      names = NameVector(unify_from_right(names, op.tensor.names()));
     }
   }
 
