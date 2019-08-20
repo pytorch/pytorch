@@ -144,6 +144,10 @@ __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
   int64_t i = k / r2;
   int64_t j = k % r2;
 
+  if (j > 0) {
+    return;
+  }
+
   const scalar_t grad_k = grad[y];
   const scalar_t dist_k = dist[y];
 
