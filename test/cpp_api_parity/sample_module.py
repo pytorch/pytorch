@@ -52,7 +52,7 @@ struct TORCH_API SampleModuleOptions {
   TORCH_ARG(torch::Tensor, tensor_option);
 };
 
-struct SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImpl> {
+struct TORCH_API SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImpl> {
   SampleModuleImpl(bool has_submodule) : SampleModuleImpl(SampleModuleOptions(has_submodule)) {}
   explicit SampleModuleImpl(SampleModuleOptions options) {
     if (options.has_submodule_) {
