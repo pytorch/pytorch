@@ -907,6 +907,49 @@ def all_reduce(tensor,
         work.wait()
 
 
+def all_reduce_coalesced(tensors,
+                         op=ReduceOp.SUM,
+                         group=group.WORLD,
+                         async_op=False):
+    """
+    Reduces each tensor in tensors (residing on the same device) across all machines
+    in such a way that all get the final result.
+
+    After the call each tensor in tensors is going to bitwise identical
+    in all processes.
+
+    Arguments:
+        tensor (List[Tensor]): Input and output of the collective. The function
+            operates in-place.
+        op (Optional[ReduceOp]): One of the values from
+            ``torch.distributed.ReduceOp`` enum. Specifies an operation used for
+            element-wise reductions.
+        group (Optional[ProcessGroup]): The process group to work on.
+        async_op (Optional[bool]): Whether this op should be an async op.
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group.
+
+    """
+    _check_tensor_list(tensors, "tensor")
+    if _rank_not_in_group(group):
+        return
+
+    opts = AllreduceOptions()
+    opts.reduceOp = op
+    if group == GroupMember.WORLD:
+        _check_default_pg()
+        work = _default_pg.allreduce_coalesced(tensors, opts)
+    else:
+        work = group.allreduce_coalesced(tensors, opts)
+
+    if async_op:
+        return work
+    else:
+        work.wait()
+
+
 def reduce_multigpu(tensor_list,
                     dst,
                     op=ReduceOp.SUM,
