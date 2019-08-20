@@ -47,9 +47,9 @@ static void EraseNumberTypesOnBlock(Block* block) {
       default: {
         for (auto o : it->outputs()) {
           if (o->type()->isSubtypeOf(NumberType::get())) {
-            o->setType(TensorType::fromNumberType(o->type()));
+            o->setType(ProfiledTensorType::fromNumberType(o->type()));
           } else if (o->type()->isSubtypeOf(BoolType::get())) {
-            o->setType(TensorType::fromBoolType());
+            o->setType(ProfiledTensorType::fromBoolType());
           }
         }
       } break;

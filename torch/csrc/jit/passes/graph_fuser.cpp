@@ -178,7 +178,7 @@ struct GraphFuser {
     if (!v->type()->isSubtypeOf(TensorType::get())) {
       return true;
     }
-    auto device = v->type()->expect<TensorType>()->device();
+    auto device = ProfiledTensorType::create(v->type())->device();
     if (!device) {
       return true;
     }

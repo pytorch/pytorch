@@ -13,7 +13,6 @@ enum MessageType {
   PYTHON_CALL,
   PYTHON_RET,
   SHUTDOWN,
-  EXCEPTION,
   UNKNOWN
 };
 
