@@ -372,6 +372,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: qscheme
    .. automethod:: q_scale
    .. automethod:: q_zero_point
+   .. automethod:: q_scales
+   .. automethod:: q_zero_points
    .. automethod:: random_
    .. automethod:: reciprocal
    .. automethod:: reciprocal_

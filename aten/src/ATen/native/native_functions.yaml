@@ -2932,6 +2932,16 @@
   dispatch:
     QuantizedCPU: q_zero_point_quant
 
+- func: q_scales(Tensor self) -> Tensor
+  variants: function, method
+  dispatch:
+    QuantizedCPU: q_scales_quant
+
+- func: q_zero_points(Tensor self) -> Tensor
+  variants: function, method
+  dispatch:
+    QuantizedCPU: q_zero_points_quant
+
 - func: int_repr(Tensor self) -> Tensor
   variants: function, method
   dispatch:

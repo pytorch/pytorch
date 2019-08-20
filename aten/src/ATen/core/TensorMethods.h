@@ -1109,6 +1109,14 @@ inline int64_t Tensor::q_zero_point() const {
     static auto table = globalATenDispatch().getOpTable("aten::q_zero_point(Tensor self) -> int");
     return table->getOp<int64_t (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
 }
+inline Tensor Tensor::q_scales() const {
+    static auto table = globalATenDispatch().getOpTable("aten::q_scales(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
+}
+inline Tensor Tensor::q_zero_points() const {
+    static auto table = globalATenDispatch().getOpTable("aten::q_zero_points(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
+}
 inline Tensor Tensor::int_repr() const {
     static auto table = globalATenDispatch().getOpTable("aten::int_repr(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));

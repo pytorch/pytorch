@@ -640,6 +640,8 @@ class CAFFE2_API Tensor {
   Tensor dequantize() const;
   double q_scale() const;
   int64_t q_zero_point() const;
+  Tensor q_scales() const;
+  Tensor q_zero_points() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;

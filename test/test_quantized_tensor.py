@@ -45,13 +45,15 @@ class TestQuantizedTensor(TestCase):
         qr[:] = x
         self.assertEqual(qr.item(), 15)
         # we can also print a qtensor
-        self.assertEqual(str(qr),
+        self.assertEqual(' '.join(str(qr).split()),
                          "tensor([15.], size=(1,), dtype=torch.quint8, " +
+                         "quantization_scheme=torch.per_tensor_affine, " +
                          "scale=1.0, zero_point=2)")
         empty_r = torch.ones((0, 1), dtype=torch.float)
         empty_qr = torch.quantize_linear(empty_r, scale, zero_point, torch.quint8)
-        self.assertEqual(str(empty_qr),
+        self.assertEqual(' '.join(str(empty_qr).split()),
                          "tensor([], size=(0, 1), dtype=torch.quint8, " +
+                         "quantization_scheme=torch.per_tensor_affine, " +
                          "scale=1.0, zero_point=2)")
 
     def test_qtensor_quant_dequant(self):

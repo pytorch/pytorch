@@ -1898,6 +1898,22 @@ Given a Tensor quantized by linear(affine) quantization,
 returns the zero_point of the underlying quantizer().
 """)
 
+add_docstr_all('q_scales',
+               r"""
+q_scales() -> Tensor
+
+Given a Tensor quantized by linear (affine) per-channel quantization,
+returns a Tensor of scales of the underlying quantizer().
+""")
+
+add_docstr_all('q_zero_points',
+               r"""
+q_zero_points() -> Tensor
+
+Given a Tensor quantized by linear (affine) per-channel quantization,
+returns a tensor of zero_points of the underlying quantizer().
+""")
+
 add_docstr_all('random_',
                r"""
 random_(from=0, to=None, *, generator=None) -> Tensor
