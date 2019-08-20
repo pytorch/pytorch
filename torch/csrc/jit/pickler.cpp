@@ -151,9 +151,9 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isTuple()) {
     pushTuple(ivalue);
   } else if (ivalue.isDouble()) {
-    pushDouble(ivalue);
+    pushDouble(ivalue.toDouble());
   } else if (ivalue.isInt()) {
-    pushInt(ivalue);
+    pushInt(ivalue.toInt());
   } else if (ivalue.isBool()) {
     if (ivalue.toBool()) {
       push<OpCode>(OpCode::NEWTRUE);
@@ -244,8 +244,7 @@ void Pickler::pushIValue(const IValue& ivalue) {
   }
 }
 
-void Pickler::pushInt(const IValue& ivalue) {
-  auto n = ivalue.toInt();
+void Pickler::pushInt(int64_t n) {
   if (n >= std::numeric_limits<int8_t>::min() &&
       n <= std::numeric_limits<int8_t>::max()) {
     push<OpCode>(OpCode::BININT1);
@@ -311,7 +310,9 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // root_key
   pushString(std::to_string(tensor_data_.size()));
   // location
-  pushString("cpu");
+  std::stringstream ss;
+  ss << tensor.device();
+  pushString(ss.str());
   // size
   pushInt(tensor.storage().size());
   // view_metadata
@@ -373,8 +374,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   pushStorageOfTensor(tensor);
 
   // storage offset
-  int64_t storage_offset = tensor.storage_offset();
-  pushInt(storage_offset);
+  pushInt(tensor.storage_offset());
 
   // size
   push<OpCode>(OpCode::MARK);
@@ -454,8 +454,7 @@ void Pickler::pushSpecializedList(
   push<OpCode>(OpCode::REDUCE);
 }
 
-void Pickler::pushDouble(const IValue& ivalue) {
-  double value = ivalue.toDouble();
+void Pickler::pushDouble(double value) {
   AT_ASSERT(sizeof(double) == 8);
   char* bytes = reinterpret_cast<char*>(&value);
 

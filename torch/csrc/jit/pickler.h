@@ -154,9 +154,9 @@ class Pickler {
  private:
   void pushIValueImpl(const IValue& ivalue);
   void pushDict(const IValue& ivalue);
-  void pushDouble(const IValue& ivalue);
+  void pushDouble(double value);
   void pushGenericList(const IValue& ivalue);
-  void pushInt(const IValue& ivalue);
+  void pushInt(int64_t value);
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
   void pushLiteralTensor(const IValue& ivalue);
