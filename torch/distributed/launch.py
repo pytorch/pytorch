@@ -181,6 +181,10 @@ def parse_args():
                              "'local rank'. For legacy reasons, the default value is False. "
                              "If set to True, the script will not pass "
                              "--local_rank as argument, and will instead set LOCAL_RANK.")
+    parser.add_argument("-m", "--module", default=False, action="store_true",
+                        help="Changes each process to interpret the launch script "
+                             "as a python module, executing with the same behavior as"
+                             "'python -m'.")
 
     # positional
     parser.add_argument("training_script", type=str,
@@ -231,6 +235,10 @@ def main():
                    "-u",
                    args.training_script,
                    "--local_rank={}".format(local_rank)] + args.training_script_args
+        
+        # insert the -m flag for module launching
+        if args.module:
+            cmd.insert(2, "-m")
 
         process = subprocess.Popen(cmd, env=current_env)
         processes.append(process)
