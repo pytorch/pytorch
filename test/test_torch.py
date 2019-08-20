@@ -2456,8 +2456,6 @@ class _TestTorchMixin(torchtest):
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_pow(self, device):
-        if not TEST_NUMPY:
-            raise unittest.SkipTest('numpy not found')
 
         def _check_against_np(tensor, exp):
             tensor_np = tensor.cpu().numpy()

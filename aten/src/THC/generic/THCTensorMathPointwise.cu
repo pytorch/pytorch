@@ -416,7 +416,7 @@ void THCTensor_(cpow)(THCState *state, THCTensor *self_, THCTensor *src1, THCTen
 }
 
 void THCTensor_(pow)(THCState *state, THCTensor *self_, THCTensor *src, scalar_t value) {
-#if defined(THC_REAL_IS_BYTE) || defined(THC_REAL_IS_CHAR) || THC_REAL_IS_SHORT) || defined(THC_REAL_IS_INT) || defined(THC_REAL_IS_LONG) ||
+#if defined(THC_REAL_IS_BYTE) || defined(THC_REAL_IS_CHAR) || THC_REAL_IS_SHORT) || defined(THC_REAL_IS_INT) || defined(THC_REAL_IS_LONG)
   if (THCNumerics<scalar_t>::lt(value, ScalarConvert<int, scalar_t>::to(0))) {
     THError("Integers to negative integer powers are not allowed.");
   }
