@@ -386,6 +386,10 @@ struct Decl : public TreeView {
       const Maybe<Expr>& return_type) {
     return Decl(Compound::create(TK_DECL, range, {params, return_type}));
   }
+
+  Decl withParams(const List<Param> new_params) {
+    return Decl(Compound::create(TK_DECL, range(), {new_params, return_type()}));
+  }
 };
 
 struct Def : public TreeView {

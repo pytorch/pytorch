@@ -1040,6 +1040,18 @@ def _compile_and_register_class(obj, rcb, qualified_name):
     _jit_script_class_compile(qualified_name, ast, rcb)
     _add_script_class(obj, qualified_name)
 
+
+def _compile_function(obj, qualified_name, _frames_up, _rcb=None, _arg_types=None):
+    _check_directly_compile_overloaded(obj)
+    ast = get_jit_def(obj)
+    if _rcb is None:
+        _rcb = _gen_rcb(obj, _frames_up + 1)
+    fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj), _arg_types)
+    # Forward docstrings
+    fn.__doc__ = obj.__doc__
+    return fn
+
+
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
@@ -1175,14 +1187,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     else:
-        _check_directly_compile_overloaded(obj)
-        ast = get_jit_def(obj)
-        if _rcb is None:
-            _rcb = _gen_rcb(obj, _frames_up)
-        fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
-        # Forward docstrings
-        fn.__doc__ = obj.__doc__
-        return fn
+        return _compile_function(obj, qualified_name, _frames_up, _rcb=_rcb)
 
 def _gen_rcb(obj, _frames_up):
     _frames_up = _frames_up + 1  # for invoking _gen_rcb()

@@ -725,9 +725,38 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& qualname,
          const Def& def,
          ResolutionCallback rcb,
-         const FunctionDefaults& defaults) {
+         const FunctionDefaults& defaults,
+         const py::object& arg_types) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
         const auto name = c10::QualifiedName(qualname);
+
+        // If there are types provided for this call, use them to construct a
+        // templated version of this function for those types
+        if (!arg_types.is_none()) {
+          auto types = py::cast<std::vector<TypePtr>>(arg_types);
+           TORCH_INTERNAL_ASSERT(def.decl().params().size() == types.size());
+          std::stringstream ss;
+          ss << "# type:(";
+          for (size_t i = 0; i < types.size(); i++) {
+            if (i > 0) {
+              ss << ", ";
+            }
+            if (types.at(i)->kind() == TypeKind::ClassType) {
+              throw ErrorReport(def.range())
+                  << "Class types cannot be templated, the types must"
+                     " be added manually for this function";
+            }
+
+            ss << types.at(i)->python_str();
+          }
+          ss << ")";
+
+          Parser p(std::make_shared<Source>(ss.str()));
+          Decl type_decl = p.parseTypeComment();
+          auto new_def = def.withDecl(mergeTypesFromTypeComment(def.decl(), type_decl, /*is_method=*/false));
+          return script_compile_function(name, new_def, defaults, std::move(rcb));
+        }
+
         TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
         return script_compile_function(name, def, defaults, std::move(rcb));
       });

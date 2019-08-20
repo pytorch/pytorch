@@ -14275,6 +14275,52 @@ class TestRecursiveScript(JitTestCase):
         m = torch.jit.script(MyModule())
         FileCheck().check("ClassType<MyModule>").run(m.graph)
 
+    def test_templating(self):
+        def another_function(a_string, an_int, a_float, a_dict, a_list):
+            # type: (str, int, float, Dict[str, int], List[Tuple[int, float]])
+            return a_string + ' nice', an_int + 20, a_float + 2.3, a_dict, a_list
+
+        def some_fn(a_string, an_int, a_float, a_dict, a_list):
+            return another_function(a_string, an_int, a_float, a_dict, a_list)
+
+        @torch.jit.script
+        def fn(x):
+            # type: (str)
+            return some_fn('hello', 2, 2.3, {'hi': 3}, [(2, 3.4), (45, 33.4)])
+
+        @torch.jit.script
+        class X(object):
+            def __init__(self):
+                pass
+
+            def something(self, y):
+                return y + 100
+
+        def bad(a_class_type):
+            return a_class_type.something()
+
+        def another_fn():
+            return bad(X())
+
+        with self.assertRaisesRegex(RuntimeError, "Class types cannot be templated"):
+            torch.jit.script(another_fn)
+
+        def adder(thing1, thing2):
+            if isinstance(thing1, int):
+                print("what an int!")
+            return thing1 + thing2
+
+        @torch.jit.script
+        def int_adder():
+            return adder(2, 3)
+
+        @torch.jit.script
+        def string_adder():
+            return adder('hi', 'bye')
+
+        FileCheck().check("prim::Print").run(int_adder.graph)
+        FileCheck().check_not("prim::Print").run(string_adder.graph)
+
     def test_repeated_error_stack(self):
         def d(x):
             return "a" - 2

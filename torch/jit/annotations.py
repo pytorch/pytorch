@@ -37,6 +37,25 @@ _eval_env = {
 }
 
 
+def has_signature(fn):
+    if PY35:
+        sig = try_real_annotations(fn)
+        if sig is not None:
+            return True
+
+    type_line = None
+    try:
+        source = dedent(inspect.getsource(fn))
+        type_line = get_type_line(source)
+    except TypeError:
+        pass
+
+    if type_line is None:
+        return False
+
+    return True
+
+
 def get_signature(fn):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
     if PY35:

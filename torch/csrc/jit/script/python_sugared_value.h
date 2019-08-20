@@ -121,6 +121,24 @@ struct VISIBILITY_HIDDEN OverloadedMethodValue : public SugaredValue {
   std::vector<std::string> method_names_;
 };
 
+struct VISIBILITY_HIDDEN TemplatedFunctionValue : public PythonValue {
+  TemplatedFunctionValue(py::object callee) : PythonValue(std::move(callee)) {}
+
+  std::string kind() const override {
+    return "templated function";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& f,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+ private:
+  py::object callee_;
+};
+
 struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
   OverloadedFunctionValue(std::vector<StrongFunctionPtr> compiled_overloads)
       : compiled_overloads_(std::move(compiled_overloads)) {}

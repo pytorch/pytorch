@@ -128,6 +128,28 @@ std::shared_ptr<SugaredValue> PythonValue::call(
   return std::make_shared<SimpleValue>(output);
 }
 
+std::shared_ptr<SugaredValue> TemplatedFunctionValue::call(
+    const SourceRange& loc,
+    Function& f,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  // Compile the function with known argument types
+  std::vector<TypePtr> arg_types;
+  for (const auto& input : inputs) {
+    auto type = input.value(*f.graph().get())->type();
+    arg_types.push_back(type);
+  }
+  auto res = py::module::import("torch.jit._recursive")
+                 .attr("try_compile_fn")(self, loc, arg_types);
+  if (auto compiled_callee = as_function(res)) {
+    return std::make_shared<FunctionValue>(compiled_callee->function_)
+        ->call(loc, f, inputs, attributes, n_binders);
+  }
+
+  return PythonValue::call(loc, f, inputs, attributes, n_binders);
+}
+
 std::string PythonValue::kind() const {
   std::stringstream ss;
   ss << "python value of type '" << typeString(self) << "'";
@@ -585,6 +607,14 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     if (!overloads.is_none()) {
       auto compiled_fns = py::cast<std::vector<StrongFunctionPtr>>(overloads);
       return std::make_shared<OverloadedFunctionValue>(std::move(compiled_fns));
+    }
+
+    bool has_type_signature = py::cast<bool>(
+        py::module::import("torch.jit.annotations").attr("has_signature")(obj));
+    if (!has_type_signature) {
+      // If there is no type signature on the function, delay compilation until
+      // we have the argument types
+      return std::make_shared<TemplatedFunctionValue>(obj);
     }
 
     auto compiled_fn =
