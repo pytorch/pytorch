@@ -13,7 +13,7 @@ from caffe2.python.docs.generator import OperatorDoc, OperatorEngine
 
 class GHOpDocUploader(DocUploader):
     def __init__(self):
-        pass
+        super().__init__()
 
     def upload(self, content_body):
         print(content_body)

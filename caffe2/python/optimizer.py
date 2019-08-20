@@ -487,6 +487,7 @@ class FP16SgdOptimizer(SgdOptimizer):
 
 class WeightDecayBuilder(Optimizer):
     def __init__(self, weight_decay):
+        super().__init__()
         self.weight_decay = weight_decay
 
     def _run(self, net, param_init_net, param_info):
