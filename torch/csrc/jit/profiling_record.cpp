@@ -29,26 +29,22 @@ void ProfilingRecord::instrumentBlock(Block* block) {
 
       auto pn = createProfileNode(nullptr, {i});
       auto pno = pn->addOutput();
-      bool first = true;
       pno->setType(TensorType::get());
-      std::function<void(Stack&)> shape_profiler =
-          [this, pno, first](Stack& stack) mutable {
-            IValue t;
-            pop(stack, t);
-            if (t.isTensor()) {
-              auto pttp = TensorType::create(t.toTensor());
-              std::lock_guard<std::mutex> lock(this->mutex_);
-              if (auto type = pno->type()->cast<TensorType>()) {
-                if (!first) {
-                  pttp = pttp->merge(type);
-                }
-                pno->setType(pttp);
-                first = false;
-              }
-            }
-            // passing t through
-            push(stack, t);
-          };
+      std::function<void(Stack&)> shape_profiler = [this, pno](Stack& stack) {
+        IValue t;
+        pop(stack, t);
+        if (t.isTensor()) {
+          auto pttp = ProfiledTensorType::create(t.toTensor());
+          std::lock_guard<std::mutex> lock(this->mutex_);
+          if (auto type = pno->type()->cast<ProfiledTensorType>()) {
+            pno->setType(type->merge(pttp));
+          } else {
+            pno->setType(pttp);
+          }
+        }
+        // passing t through
+        push(stack, t);
+      };
 
       pn->setCallback(shape_profiler);
       pn->insertBefore(n);
@@ -81,10 +77,11 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   return pr;
 }
 
-TensorTypePtr ProfilingRecord::toTensorTypePtr(const IValue& ival) {
+ProfiledTensorTypePtr ProfilingRecord::toProfiledTensorTypePtr(
+    const IValue& ival) {
   if (ival.isTensor()) {
     auto tensor = ival.toTensor();
-    return TensorType::create(tensor);
+    return ProfiledTensorType::create(tensor);
   }
 
   return {nullptr};

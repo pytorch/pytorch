@@ -13,7 +13,7 @@
 namespace torch {
 namespace jit {
 
-using ::c10::TensorTypePtr;
+using ::c10::ProfiledTensorTypePtr;
 
 struct ProfilingRecord {
   // N.B. ProfilingRecord's copy and move c-tor are disabled, so we won't
@@ -21,7 +21,7 @@ struct ProfilingRecord {
   // are captured in callbacks_
   ProfilingRecord(const ProfilingRecord&) = delete;
   ProfilingRecord(ProfilingRecord&&) noexcept = delete;
-  static TensorTypePtr toTensorTypePtr(const IValue& ival);
+  static ProfiledTensorTypePtr toProfiledTensorTypePtr(const IValue& ival);
   TORCH_API static std::unique_ptr<ProfilingRecord> instrumentGraph(
       const std::shared_ptr<Graph>& graph);
 
