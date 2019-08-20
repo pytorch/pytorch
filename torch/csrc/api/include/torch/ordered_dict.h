@@ -414,9 +414,14 @@ template <typename Key, typename Value>
 void OrderedDict<Key, Value>::erase(const Key& key) {
   auto it = index_.find(key);
   TORCH_CHECK(it != index_.end(), "Key '", key, "' doesn't exist");
+
   auto index = it->second;
   index_.erase(it);
   items_.erase(items_.begin() + index);
+
+  for (auto& pair : index_)
+    if (pair.second > index)
+      --pair.second;
 }
 
 template <typename Key, typename Value>

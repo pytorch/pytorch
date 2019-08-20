@@ -115,6 +115,17 @@ TEST_F(ModuleTest, ReplaceModule) {
   ASSERT_EQ(model->l1.get(), model->named_modules()["l1"]->as<Linear>());
 }
 
+TEST_F(ModuleTest, UnregisterModuleThrowsForUnknownModuleName) {
+  struct TestModel : public torch::nn::Module {};
+  TestModel model;
+  ASSERT_THROWS_WITH(
+      model.unregister_module("linear"),
+      "No Module with name `linear' is registered");
+  model.register_module("linear", torch::nn::Linear(3, 4));
+  model.unregister_module("linear");
+  ASSERT_TRUE(model.children().empty());
+}
+
 TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
   struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
@@ -273,7 +284,9 @@ struct TestDistinctParametersModule
   torch::Tensor buffer;
 };
 
-void testDistinctParameters(std::shared_ptr<Module> m1, std::shared_ptr<Module> m2) {
+void testDistinctParameters(
+    std::shared_ptr<Module> m1,
+    std::shared_ptr<Module> m2) {
   auto params1 = m1->named_parameters();
   auto params2 = m2->named_parameters();
   ASSERT_EQ(params1.size(), 6);
