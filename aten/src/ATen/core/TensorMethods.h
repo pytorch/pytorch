@@ -1393,10 +1393,6 @@ inline Tensor & Tensor::polygamma_(int64_t n) const {
     static auto table = globalATenDispatch().getOpTable("aten::polygamma_(Tensor(a!) self, int n) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), n);
 }
-inline Tensor & Tensor::erfinv_() const {
-    static auto table = globalATenDispatch().getOpTable("aten::erfinv_(Tensor(a!) self) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
-}
 inline Tensor & Tensor::renorm_(Scalar p, int64_t dim, Scalar maxnorm) const {
     static auto table = globalATenDispatch().getOpTable("aten::renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, Scalar, int64_t, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), p, dim, maxnorm);
@@ -1664,6 +1660,10 @@ inline Tensor Tensor::polygamma(int64_t n) const {
 inline Tensor Tensor::erfinv() const {
     static auto table = globalATenDispatch().getOpTable("aten::erfinv(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
+}
+inline Tensor & Tensor::erfinv_() const {
+    static auto table = globalATenDispatch().getOpTable("aten::erfinv_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
 }
 inline Tensor Tensor::dist(const Tensor & other, Scalar p) const {
     static auto table = globalATenDispatch().getOpTable("aten::dist(Tensor self, Tensor other, Scalar p=2) -> Tensor");
