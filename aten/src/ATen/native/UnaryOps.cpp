@@ -160,7 +160,7 @@ public:
 
   inline Tensor& unary_op_out_impl(Tensor& result, const Tensor& self) {
     auto iter = TensorIterator::unary_op(result, self,
-      /*check_internal_overlap=*/true);
+      /*check_mem_overlap=*/true);
     this->stub(iter.device_type(), iter);
     return result;
   }
