@@ -16,7 +16,7 @@ void specializeAutogradZero(Graph& g) {
 
   for (Value* input : g.inputs()) {
     const auto& tp = input->type();
-    if (auto tt = tp->cast<ProfiledTensorType>()) {
+    if (auto tt = tp->cast<TensorType>()) {
       if (tt->autogradZero() && *tt->autogradZero()) {
         state[input] = State::Zero;
       } else {
