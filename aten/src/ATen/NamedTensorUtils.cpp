@@ -75,7 +75,7 @@ static void check_for_misalignment(
 
 // Assumption: A DimnameList can have no duplicate full names with
 // the exception of wildcards
-static std::vector<Dimname> unify_from_right(DimnameList names, DimnameList other_names) {
+std::vector<Dimname> unify_from_right(DimnameList names, DimnameList other_names) {
   const auto wildcard = Dimname::wildcard();
   const auto size = std::max(names.size(), other_names.size());
   auto result = std::vector<Dimname>(size, wildcard);
@@ -117,22 +117,6 @@ static std::vector<Dimname> unify_from_right(DimnameList names, DimnameList othe
     ++result_it;
   }
   return result;
-}
-
-// Assumption: A DimnameList can have no duplicate full names with
-// the exception of wildcards
-CAFFE2_API optional<std::vector<Dimname>>
-unify_from_right(optional<DimnameList> names, optional<DimnameList> other_names) {
-  if (!names && !other_names) {
-    return nullopt;
-  }
-  if (!names) {
-    return other_names.value().vec();
-  }
-  if (!other_names) {
-    return names.value().vec();
-  }
-  return unify_from_right(*names, *other_names);
 }
 
 
@@ -236,6 +220,14 @@ void propagate_names(TensorImpl* result, TensorImpl* src) {
     return;
   }
   propagate_names(result, impl::get_opt_names(src));
+}
+
+void propagate_names_for_copy(Tensor& result, const Tensor& src) {
+  if (!result.has_names() && !src.has_names()) {
+    return;
+  }
+  auto outnames = unify_from_right(result.names(), src.names());
+  propagate_names(result, std::move(outnames), /*validate_names=*/false);
 }
 
 } // namespace namedinference

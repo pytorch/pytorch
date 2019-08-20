@@ -369,6 +369,34 @@ class TestNamedTensor(TestCase):
             with self.assertRaisesRegex(RuntimeError, "misaligned"):
                 op(d, c)
 
+        def test_mixed_unnamed_named(op, is_inplace):
+            named2 = torch.randn(1, 1, names=('N', 'C'))
+            unnamed1 = torch.randn(1)
+            unnamed2 = torch.randn(1, 1)
+            unnamed3 = torch.randn(1, 1, 1)
+
+            def compute_expected_names(tensor, other):
+                assert tensor.has_names() ^ other.has_names()
+                named = tensor if tensor.has_names() else other
+                unnamed = other if tensor.has_names() else tensor
+                unnamed_dim = unnamed.dim()
+                if unnamed_dim > named.dim():
+                    return [None] * (unnamed_dim - named.dim()) + list(named.names)
+                else:
+                    return named.names
+
+            inputs = itertools.chain(
+                itertools.product([named2], [unnamed1, unnamed2, unnamed3]),
+                itertools.product([unnamed1, unnamed2, unnamed3], [named2]),
+            )
+            if is_inplace:
+                # In-place ops have the constraint that they must not change shape.
+                inputs = [(a, b) for (a, b) in inputs if a.dim() >= b.dim()]
+
+            for tensor, other in inputs:
+                expected_names = compute_expected_names(tensor, other)
+                self.assertEqual(op(tensor, other).names, expected_names)
+
         def method(name, *args, **kwargs):
             return [Function(name, lambda a, b: getattr(a, name)(b, *args, **kwargs))]
 
@@ -398,9 +426,10 @@ class TestNamedTensor(TestCase):
         ]
         tests = flatten(tests)
 
-        for _, op in tests:
+        for name, op in tests:
             test_basic(op)
             test_wildcard(op)
+            test_mixed_unnamed_named(op, is_inplace=name.endswith('_'))
 
     def test_out_fn_semantics(self):
         out_fn = torch.abs
