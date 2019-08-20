@@ -13155,8 +13155,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: out.copy_(input))
 
-    @torchtest.for_all_device_types()
-    def test_pow_mem_overlap(self, device):
+    # @torchtest.for_all_device_types()
+    def test_pow_mem_overlap(self, device='cpu'):
 
         def _test():
             self.check_internal_mem_overlap(
