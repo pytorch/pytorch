@@ -7,6 +7,7 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
   int64_t num_dims = std::max<int64_t>(self.dim(), 1);
   TORCH_CHECK(std::max<int64_t>(index.dim(), 1) == num_dims, "Index tensor must have same dimensions as input tensor");
   dim = c10::maybe_wrap_dim(dim, self.dim());
+  result.resize_as_(index);
 
   std::vector<int64_t> result_sizes = result.sizes().vec();
   std::vector<int64_t> self_sizes = self.sizes().vec();
@@ -14,12 +15,12 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
   std::vector<int64_t> result_strides = result.strides().vec();
   std::vector<int64_t> self_strides = self.strides().vec();
   std::vector<int64_t> index_strides = index.strides().vec();
-  ensure_nonempty(result_sizes);
   ensure_nonempty(self_sizes);
   ensure_nonempty(index_sizes);
   ensure_nonempty(result_strides);
   ensure_nonempty(self_strides);
   ensure_nonempty(index_strides);
+  ensure_nonempty(result_sizes);
 
   int64_t elems_per_row = (index.dim() == 0 ? 1 : index_sizes[dim]);
   int64_t self_dim_size = self_sizes[dim];
@@ -30,7 +31,6 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
       outer_size *= index_sizes[i];
     }
   }
-  result.resize_as_(index);
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Bool, ScalarType::Half, self.scalar_type(), "gather_out_cpu", [&](){
     scalar_t *result_data = result.data<scalar_t>();
@@ -72,7 +72,7 @@ Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const
             finished = true;
             break;
           }
-          int64_t size = self_sizes[i];
+          int64_t size = result_sizes[i];
           result_data -= size * result_strides[i];
           self_data -= size * self_strides[i];
           index_data -= size * index_strides[i];
