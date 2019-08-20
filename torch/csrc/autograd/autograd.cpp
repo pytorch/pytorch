@@ -97,28 +97,28 @@ variable_list run_backward(
 void backward(
     const variable_list& tensors,
     const variable_list& grad_tensors,
-    c10::optional<bool> keep_graph,
+    c10::optional<bool> retain_graph,
     bool create_graph) {
   variable_list gradients = _make_grads(tensors, grad_tensors);
-  if (!keep_graph) {
-    keep_graph = create_graph;
+  if (!retain_graph) {
+    retain_graph = create_graph;
   }
-  run_backward(tensors, gradients, keep_graph.value(), create_graph, {});
+  run_backward(tensors, gradients, retain_graph.value(), create_graph, {});
 }
 
 variable_list grad(
     const variable_list& outputs,
     const variable_list& inputs,
     const variable_list& grad_outputs,
-    c10::optional<bool> keep_graph,
+    c10::optional<bool> retain_graph,
     bool create_graph,
     bool allow_unused) {
   variable_list gradients = _make_grads(outputs, grad_outputs);
-  if (!keep_graph) {
-    keep_graph = create_graph;
+  if (!retain_graph) {
+    retain_graph = create_graph;
   }
   variable_list grad_inputs = run_backward(
-      outputs, gradients, keep_graph.value(), create_graph, inputs);
+      outputs, gradients, retain_graph.value(), create_graph, inputs);
   // check if grad_inputs contains None or not base on the allow_unused flag
   if (inputs.empty()) {
     size_t num_inputs = inputs.size();

@@ -1,3 +1,4 @@
+# -*- coding: UTF-8 -*-
 from __future__ import division
 
 # Torch
@@ -14010,6 +14011,12 @@ a")
             return list(string)
 
         self.checkScript(fn, ("abcdefgh",))
+
+    def test_unicode_comments(self):
+        @torch.jit.script
+        def test(self, a):
+            # 🤷🤷🤷🤷
+            return torch.nn.functional.relu(a)
 
     def test_dict_in_not_in(self):
         def test_in_dict(x):

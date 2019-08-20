@@ -92,6 +92,26 @@ TEST(AutogradAPITests, GradNonLeafTest) {
   ASSERT_TRUE(y.grad().defined());
 }
 
+TEST(AutogradAPITests, GradUnreachableTest) {
+  Variable x = torch::ones({1}, torch::requires_grad());
+  Variable y = torch::ones({1}, torch::requires_grad());
+
+  Variable z = x * 2;
+  Variable w = y * 2;
+
+  auto grad_res = grad({x * 2}, {x, y}, {}, {}, false, true);
+  ASSERT_VARIABLE_EQ(grad_res[0], x * 2);
+  ASSERT_FALSE(grad_res[1].defined());
+
+  // This is slightly different than the case above, because z doesn't even
+  // have a grad accumulator allocated.
+  z = torch::ones({1}, torch::requires_grad());
+  grad_res = grad({x * 2}, {x, z}, {}, {}, false, true);
+
+  ASSERT_VARIABLE_EQ(grad_res[0], x * 2);
+  ASSERT_FALSE(grad_res[1].defined());
+}
+
 TEST(CustomAutogradTest, CustomFunction) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var1, int mul, Variable var2) {
