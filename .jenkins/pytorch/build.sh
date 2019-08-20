@@ -157,14 +157,7 @@ echo "The next three invocations are expected to fail with invalid command error
 ( ! get_exit_code python setup.py clean] )
 ( ! get_exit_code python setup.py clean bad_argument )
 
-# ppc64le build fails when WERROR=1
-# set only when building other architectures
-# only use for "python setup.py install" line
-if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
-  WERROR=1 python setup.py install
-else
-  python setup.py install
-fi
+python setup.py install
 
 assert_git_not_dirty
 
