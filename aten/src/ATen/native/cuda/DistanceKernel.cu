@@ -135,7 +135,7 @@ template <typename scalar_t, typename F>
 __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const scalar_t * grad, const scalar_t * x1, const scalar_t * x2, const scalar_t * dist, int64_t gs,
                                                        const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m, const int64_t count, const int64_t r_size, const int64_t l1_size, const int64_t l2_size) {
   const int y = blockIdx.y * blockDim.y + threadIdx.y;
-  if (y >= count) {
+  if (y >= (count / m)) {
     return;
   }
   const int l = y / r_size;
@@ -146,10 +146,6 @@ __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 
   int64_t i = k / r2;
   int64_t j = k % r2;
-
-  if (j > 0) {
-    return;
-  }
 
   const scalar_t grad_k = grad[y];
   const scalar_t dist_k = dist[y];
