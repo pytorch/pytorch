@@ -1174,10 +1174,9 @@ graph(%x : Tensor,
             return m._c._get_method('forward')
         get_forward(m)(data)
 
-        # right now this pass is mutating the original module
-        # and it will have extra observer modules
+        # right now the result will have extra observer modules
         # will fix later when we figure out how to remove modules
-        torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
+        m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
         FileCheck().check("aten::quantize_linear") \
                    .check_next("aten::int_repr") \
                    .check_next("aten::_dequantize_linear") \
@@ -1214,17 +1213,19 @@ graph(%x : Tensor,
             def forward(self, x):
                 return self.conv(x)
 
+        def get_forward(m):
+            return m._c._get_method('forward')
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
-        torch._C._jit_pass_constant_propagation(m.graph)
+        torch._C._jit_pass_constant_propagation(get_forward(m).graph)
         torch._C._jit_pass_prepare_quant(m._c, "forward",
                                          observer._c,
                                          observer._c)
         data = torch.randn(1, 3, 10, 10, dtype=torch.float)
-        m(data)
+        get_forward(m)(data)
         m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
         m(data)
-        torch._C._jit_pass_quant_fusion(m.graph)
+        torch._C._jit_pass_quant_fusion(get_forward(m).graph)
         FileCheck().check("aten::quantize_linear") \
                    .check("aten::quantize_linear") \
                    .check("aten::quantize_linear") \
@@ -1233,7 +1234,7 @@ graph(%x : Tensor,
                    .check("aten::int_repr") \
                    .check_next("aten::_dequantize_linear") \
                    .check("return") \
-                   .run(str(m.graph))
+                   .run(str(get_forward(m).graph))
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
