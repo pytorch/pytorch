@@ -646,7 +646,7 @@ inline bool CUDA_tensor_apply1(at::Tensor a,
   /*
   Since this is a unary op, we can easily first check for expanded dimensions
   (with stride 0), and remove them, to avoid calling .contiguous() in such
-  case when has_internal_overlap(a) returns true.
+  case when has_internal_overlap(a) returns MemOverlap::NO.
   */
   std::vector<int64_t> collapsed_shape;
   std::vector<int64_t> collapsed_strides;
