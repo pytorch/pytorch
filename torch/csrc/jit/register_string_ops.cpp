@@ -725,19 +725,19 @@ auto reg_str_ops_2 =
                       pre_partition, separator, post_partition);
                 }))
 
-        .op("aten::split(str self, str separator=' ', int max=-1) -> str[]",
+        .op("aten::split(str self, str? separator=None, int max=-1) -> str[]",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
                 .catchAllKernel(
-                    [](std::string string, std::string separator, int64_t max) {
+                    [](std::string string, c10::optional<std::string> separator, int64_t max) {
                       return stringSplit(string, separator, max, false);
                     }))
 
-        .op("aten::rsplit(str self, str separator=' ', int max=-1) -> str[]",
+        .op("aten::rsplit(str self, str? separator=None, int max=-1) -> str[]",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
                 .catchAllKernel(
-                    [](std::string string, std::string separator, int64_t max) {
+                    [](std::string string, c10::optional<std::string> separator, int64_t max) {
                       return stringSplit(string, separator, max, true);
                     }));
 } // namespace

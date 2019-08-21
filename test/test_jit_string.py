@@ -1,4 +1,5 @@
 from test_jit import JitTestCase
+from common_utils import run_tests
 
 
 class TestScript(JitTestCase):
@@ -313,3 +314,6 @@ class TestScript(JitTestCase):
 
         for i in range(len(inputs) - 1):
             self.checkScript(test_str_cmp, (inputs[i], inputs[i + 1]))
+
+if __name__ == '__main__':
+    run_tests()
