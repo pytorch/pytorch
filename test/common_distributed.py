@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import multiprocessing
 import sys
 import tempfile
@@ -116,7 +114,6 @@ class MultiProcessTestCase(TestCase):
 
     def setUp(self):
         super(MultiProcessTestCase, self).setUp()
-        self.skip_return_code_checks = []
         self.rank = self.MAIN_PROCESS_RANK
         self.file = tempfile.NamedTemporaryFile(delete=False)
         self.processes = [self._spawn_process(rank) for rank in range(int(self.world_size))]
@@ -146,8 +143,7 @@ class MultiProcessTestCase(TestCase):
         for p in self.processes:
             p.join(timeout)
         elapsed_time = time.time() - start_time
-        if fn in self.skip_return_code_checks:
-            self._check_return_codes(elapsed_time)
+        self._check_return_codes(elapsed_time)
 
     def _check_return_codes(self, elapsed_time):
         """
