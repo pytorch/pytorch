@@ -26,6 +26,7 @@ from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedMod
 
 from hypothesis import given
 from hypothesis import strategies as st
+import io
 
 
 @unittest.skipIf(
@@ -638,6 +639,12 @@ class ObserverTest(QuantizationTestCase):
         scripted(x)
 
         self.assertEqual(obs.calculate_qparams(), scripted.calculate_qparams())
+
+        buf = io.BytesIO()
+        torch.jit.save(scripted, buf)
+        buf.seek(0)
+        loaded = torch.jit.load(buf)
+        self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
 
 if __name__ == '__main__':
