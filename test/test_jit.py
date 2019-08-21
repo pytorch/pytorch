@@ -1123,19 +1123,23 @@ graph(%x : Tensor,
 
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
+
         def get_forward(m):
             return m._c._get_method("forward")
         torch._C._jit_pass_constant_propagation(get_forward(m).graph)
         m._c = torch._C._jit_pass_prepare_quant(m._c, "forward",
                                                 observer._c,
                                                 observer._c)
-        assert len([x for x,_ in m._c._get_modules() if x.startswith('observer_for_')]) == 3, 'Expected to have 3 observer submodules'
+        assert len([x for x, _ in m._c._get_modules()
+                    if x.startswith('observer_for_')]) == 3, \
+            'Expected to have 3 observer submodules'
         FileCheck().check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                    .check_next('prim::CallMethod[name="forward"](%observer_for_') \
                    .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                    .check_next('prim::CallMethod[name="forward"](%observer_for_') \
                    .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
-                   .check_next('prim::CallMethod[name="forward"](%observer_for_').run(str(m._c._get_method("forward").graph))
+                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                   .run(str(m._c._get_method("forward").graph))
 
     def test_insert_quant_dequant(self):
         class Observer(torch.nn.Module):
