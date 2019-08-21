@@ -316,6 +316,15 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), x)
 
     def _interpolate_tests(self, is_upsample):
+        # - cubic mode is not supported for opsets below 11;
+        # - linear mode does not match for opsets below 11;
+        # - nearest mode does not match for opsets below 11,
+        # for some cases where the nearest pixel's index is
+        # not calculated the same way for ONNX and PyTorch
+        # (the operation involves a floor in PyTorch vs
+        # in round_prefer_floor ONNX). (The below tests
+        # do not  show this error for nearest mode for
+        # all opsets)
         modes = ["nearest", "linear", "cubic"]
         if self.opset_version < 11:
             modes = ["nearest"]

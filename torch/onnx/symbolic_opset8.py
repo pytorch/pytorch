@@ -47,7 +47,10 @@ for black_listed_op in black_listed_operators:
 
 
 def _interpolate(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size):
+    def symbolic_fn(g, input, output_size, align_corners=None):
+        sym_help._interpolate_warning(interpolate_mode, align_corners)
+        if align_corners:
+            return _unimplemented(name, "align_corners == True")
         output_size = sym_help._maybe_get_const(output_size, 'is')
         if sym_help._is_value(output_size):
             return _unimplemented(name, "torch._C.Value (output_size) indexing")
@@ -62,6 +65,9 @@ def _interpolate(name, dim, interpolate_mode):
 upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
 upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
 upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
+upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
+upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
+upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
 # NOTE: We should create a wrapper for this kind of operation, after resolving the shape/type propagation
