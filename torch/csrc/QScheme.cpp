@@ -33,7 +33,8 @@ static PyMethodDef THPQScheme_methods[] = {
 
 PyObject *THPQScheme_repr(THPQScheme *self)
 {
-  return THPUtils_packString(self->name);
+  std::string name = self->name;
+  return THPUtils_packString("torch." + name);
 }
 
 PyTypeObject THPQSchemeType = {
