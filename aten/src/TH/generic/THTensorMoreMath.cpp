@@ -1161,9 +1161,11 @@ LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_
 void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
   switch (n) {
     case 0: {
-      at::Tensor t__wrap = THTensor_wrap(t);
+      THTensor_(resizeAs)(r_, t);
       at::Tensor r__wrap = THTensor_wrap(r_);
-      at::native::_digamma_out_cpu(t__wrap, r__wrap);
+      at::Tensor t__wrap = THTensor_wrap(t);
+      at::Tensor digamma_result = at::native::digamma(t__wrap);
+      at::native::copy_(r__wrap, result, false);
       break;
     }
     case 1: THTensor_(trigamma)(r_, t); break;
