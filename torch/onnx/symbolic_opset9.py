@@ -1912,9 +1912,8 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
                 sample_size_i=num_samples)
 
 
-@parse_args('v')
 def gelu(g, self):
-    sqrt = g.op('Sqrt', g.op('Constant', value_t=torch.tensor(2, dtype=torch.float)))
-    erf = g.op('Erf', g.op('Div', self, sqrt))
-    erf_plusone = g.op('Sum', erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.float)))
-    return g.op('Mul', g.op('Mul', self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.float)))
+    _sqrt2 = 1.4142135623730951
+    erf = g.op('Erf', div(g, self, g.op('Constant', value_t=_sqrt2)))
+    erf_plusone = g.op('Add', erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.float)))
+    return mul(g, mul(g, self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.float)))
