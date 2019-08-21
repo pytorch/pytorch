@@ -2137,6 +2137,21 @@ graph(%Ra, %Rb):
         self.checkScript(test_basic_sparse, (get_sparse(),))
         self.checkScript(test_basic_sparse, (torch.tensor([1]),))
 
+        def test_sparse_sum(input):
+            return torch.sparse.sum(input)
+
+        self.checkScript(test_sparse_sum, (get_sparse(),))
+
+        def test_sparse_mm(input1, input2):
+            return torch.sparse.mm(input1, input2)
+
+        self.checkScript(test_sparse_mm, (get_sparse(), torch.randn(3, 4)))
+
+        def test_sparse_addmm(input, input1, input2):
+            return torch.sparse.addmm(input, input1, input2)
+
+        self.checkScript(test_sparse_addmm, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
+
     def test_tuple_specialization(self):
         @torch.jit.script
         def f(t, s):
@@ -2412,7 +2427,7 @@ graph(%Ra, %Rb):
 
     def test_onnx_transpose_incomplete_tensor_type(self):
         # Smoke test to get us into the state where we are attempting to export
-        # a transpose op, where the input is a TensorType without size information. 
+        # a transpose op, where the input is a TensorType without size information.
         # This would previously not work, since we would
         # take the size of the input and use the length of its sizes as the
         # number of dimensions in the permutation.
