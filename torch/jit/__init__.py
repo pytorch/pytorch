@@ -841,8 +841,6 @@ def trace(func,
                              "Please use trace_module")
 
     name = _qualified_name(func)
-    if name == '<lambda>':
-        name = '_lambda'  # make name a valid identifier
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                   var_lookup_fn,
                                                   _force_outplace)
@@ -1955,7 +1953,11 @@ def annotate(the_type, the_value):
     return the_value
 
 
-Attribute = collections.namedtuple('Attribute', ['value', 'type'])
+if _enabled:
+    Attribute = collections.namedtuple('Attribute', ['value', 'type'])
+else:
+    def Attribute(value, type):
+        return value
 
 last_executed_optimized_graph = torch._C._last_executed_optimized_graph
 

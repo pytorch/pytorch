@@ -23,8 +23,7 @@ class FloatFunctional(torch.nn.Module):
     Valid operation names:
         - add
         - cat
-
-    TODO: The overloads will be landed ONLY after #24259 lands
+        - mul
     """
     def __init__(self):
         super(FloatFunctional, self).__init__()
@@ -95,6 +94,7 @@ class QFunctional(torch.nn.Module):
     Valid operation names:
         - add
         - cat
+        - mul
     """
     def __init__(self):
         super(QFunctional, self).__init__()
