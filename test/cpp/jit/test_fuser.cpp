@@ -9,9 +9,9 @@
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/jit/dynamic_dag.h"
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/import.h"
+#include "torch/csrc/jit/irparser.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
@@ -25,10 +25,11 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
 #include "torch/csrc/jit/symbolic_script.h"
-#include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/hash.h"
 #include "torch/csrc/utils/memory.h"
+
+
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
@@ -60,15 +61,16 @@
 namespace torch {
 namespace jit {
 
-using Var = SymbolicVariable;
-
 void testFusion() {
   auto testSimple = [&] {
+    const auto graph_string = R"IR(
+      graph(%0 : Tensor,
+            %1 : Tensor):
+        %2 : Tensor = aten::mul(%0, %1)
+        return (%2))IR";
     Graph graph;
-    Var i0 = Var::asNewInput(graph);
-    Var i1 = Var::asNewInput(graph);
-    auto o0 = i0 * i1;
-    o0.addAsOutput();
+    torch::jit::script::parseIR(graph_string, &graph);
+
     auto a = at::rand({3, 4}, at::kCUDA);
     auto b = at::rand({4, 3}, at::kCUDA).transpose(0, 1);
     auto o = at::zeros({3, 4}, at::kCUDA);
@@ -82,25 +84,25 @@ void testFusion() {
   testSimple();
 
   auto testOne = [&](int ti, int tj) {
+    const auto graph_string = R"IR(
+      graph(%0 : Tensor,
+            %1 : Tensor,
+            %2 : Tensor,
+            %3 : Tensor,
+            %4 : Tensor):
+        %5 : Tensor = aten::sigmoid(%4)
+        %6 : Tensor = aten::sigmoid(%3)
+        %7 : Tensor = aten::tanh(%2)
+        %8 : Tensor = aten::sigmoid(%1)
+        %9 : Tensor = aten::mul(%6, %0)
+        %10 : Tensor = aten::mul(%5, %7)
+        %11 : int = prim::Constant[value=1]()
+        %12 : Tensor = aten::add(%9, %10, %11)
+        %13 : Tensor = aten::tanh(%12)
+        %14 : Tensor = aten::mul(%8, %13)
+        return (%14, %12))IR";
     Graph graph;
-
-    Var i0 = Var::asNewInput(graph);
-    Var i1 = Var::asNewInput(graph);
-    Var i2 = Var::asNewInput(graph);
-    Var i3 = Var::asNewInput(graph);
-    Var i4 = Var::asNewInput(graph);
-
-    auto p22 = i4.sigmoid();
-    auto p20 = i3.sigmoid();
-    auto p18 = i2.tanh();
-    auto p16 = i1.sigmoid();
-    auto p14 = p20 * i0;
-    auto p11 = p22 * p18;
-    auto o1 = p14 + p11;
-    auto p5 = o1.tanh();
-    auto o0 = p16 * p5;
-    o0.addAsOutput();
-    o1.addAsOutput();
+    torch::jit::script::parseIR(graph_string, &graph);
 
     graph.lint();
 
@@ -136,57 +138,67 @@ void testFusion() {
   testOne(1, 2);
   testOne(0, 2);
 
-  auto createFusedConcat =
-      [](Graph& graph, at::ArrayRef<Value*> inputs, int64_t dim) -> Value* {
-    return graph
-        .insertNode(graph.create(prim::FusedConcat, inputs)->i_(attr::dim, dim))
-        ->output();
-  };
+  const auto graph_string0 = R"IR(
+    graph(%0 : Tensor,
+          %1 : Tensor):
+      %2 : Tensor = aten::mul(%0, %1)
+      %3 : Tensor = prim::FusedConcat[dim=0](%0, %2)
+      return (%2, %3))IR";
+  const auto graph_string1 = R"IR(
+    graph(%0 : Tensor,
+          %1 : Tensor):
+      %2 : Tensor = aten::mul(%0, %1)
+      %3 : Tensor = prim::FusedConcat[dim=1](%0, %2)
+      return (%2, %3))IR";
+  const auto graph_string2 = R"IR(
+    graph(%0 : Tensor,
+          %1 : Tensor):
+      %2 : Tensor = aten::mul(%0, %1)
+      %3 : Tensor = prim::FusedConcat[dim=2](%0, %2)
+      return (%2, %3))IR";
 
-  auto testConcat = [&](int dim) {
-    Graph graph;
-    Var i0 = Var::asNewInput(graph);
-    Var i1 = Var::asNewInput(graph);
-    auto o0 = i0 * i1;
-    o0.addAsOutput();
-    Var(createFusedConcat(graph, {i0, o0}, dim)).addAsOutput();
+  auto a = at::rand({3, 4, 5}, at::kCUDA);
+  auto b = at::rand({4, 3, 5}, at::kCUDA).transpose(0, 1);
+  const auto o_r = a * b;
 
-    auto a = at::rand({3, 4, 5}, at::kCUDA);
-    auto b = at::rand({4, 3, 5}, at::kCUDA).transpose(0, 1);
+  std::vector<std::string> graph_strings{graph_string0,
+                                         graph_string1,
+                                         graph_string2};
+  for (auto i = decltype(graph_strings.size()){0}; i < graph_strings.size(); ++i) {
+    Graph g;
+    torch::jit::script::parseIR(graph_strings[i], &g);
 
-    auto o_r = a * b;
-    auto o2_r = at::cat({a, o_r}, dim);
-    auto outputs = debugLaunchGraph(graph, {a, b});
+    auto outputs = debugLaunchGraph(g, {a, b});
     ASSERT_EQ(outputs.size(), 2);
 
     float max_diff = (o_r - outputs[0]).abs().max().item<double>();
     ASSERT_EQ(max_diff, 0);
+
+    const auto o2_r = at::cat({a, o_r}, i);
     float max_diff2 = (o2_r - outputs[1]).abs().max().item<double>();
     ASSERT_EQ(max_diff2, 0);
   };
-  testConcat(0);
-  testConcat(1);
-  testConcat(2);
 }
 
 void testRegisterFusionCachesKernel() {
-  // Build up a fake graph with a FusionGroup
-  auto createGraphWithNames = [](std::string cname, std::string dname) {
-    auto graph = std::make_shared<Graph>();
-    at::ScalarType s = at::ScalarType::Float;
-    auto type = ProfiledTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
-    auto a = SymbolicVariable::asNewInput(*graph, type);
-    auto b = SymbolicVariable::asNewInput(*graph, type);
-    auto c = a * b;
-    auto d = c * a;
-    c.value()->setDebugName(cname);
-    d.value()->setDebugName(dname);
-    graph->registerOutput(d.value());
-    torch::jit::overrideCanFuseOnCPU(true);
-    FuseGraph(graph);
-    torch::jit::overrideCanFuseOnCPU(false);
-    return graph;
-  };
+  // Constructs two functionally equivalent graphs
+  const auto graph0_string = R"IR(
+    graph(%0 : Float(2, 3, 4),
+          %1 : Float(2, 3, 4)):
+      %c0 : Float(2, 3, 4) = aten::mul(%0, %1)
+      %d0 : Float(2, 3, 4) = aten::mul(%c0, %0)
+      return (%d0))IR";
+  auto g0 = std::make_shared<Graph>();
+  torch::jit::script::parseIR(graph0_string, g0.get());
+
+  const auto graph1_string = R"IR(
+    graph(%0 : Float(2, 3, 4),
+          %1 : Float(2, 3, 4)):
+      %c1 : Float(2, 3, 4) = aten::mul(%0, %1)
+      %d1 : Float(2, 3, 4) = aten::mul(%c1, %0)
+      return (%d1))IR";
+  auto g1 = std::make_shared<Graph>();
+  torch::jit::script::parseIR(graph1_string, g1.get());
 
   auto getFusionGroup = [](const std::shared_ptr<Graph>& graph) {
     const auto& nodes = graph->nodes();
@@ -200,16 +212,17 @@ void testRegisterFusionCachesKernel() {
     return *maybe_fusion_group;
   };
 
-  // Create two alpha-equivalent fusion groups
-  auto graph1 = createGraphWithNames("c1", "d1");
-  auto fg1 = getFusionGroup(graph1);
+  // Creates two alpha-equivalent fusion groups
+  torch::jit::overrideCanFuseOnCPU(true);
+  FuseGraph(g0);
+  FuseGraph(g1);
+  torch::jit::overrideCanFuseOnCPU(false);
+  auto fg0 = getFusionGroup(g0);
+  auto fg1 = getFusionGroup(g1);
 
-  auto graph2 = createGraphWithNames("c2", "d2");
-  auto fg2 = getFusionGroup(graph2);
-
-  // Register both with the fusion compiler.
-  auto expected_key = registerFusion(fg1);
-  auto second_key = registerFusion(fg2);
+  // Registers both with the fusion compiler.
+  auto expected_key = registerFusion(fg0);
+  auto second_key = registerFusion(fg1);
 
   // Because the graphs are alpha-equivalent, they should return the same key
   // and therefore share a KernelSpec to share kernels for specializations
