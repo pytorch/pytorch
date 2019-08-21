@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
 
-
 #include <stack>
 
 namespace torch {
@@ -150,19 +149,19 @@ Node* createIntReprNode(Value* v, Graph* g) {
 // Create observer.forward Node and insert a call to observer forward function
 Node* insertObserverForwardCall(Value* v, Graph* g, script::Module module, script::Module observer_module) {
   std::string observer_name = "observer_for_" + v->debugName();
-  module.register_module(observer_name, observer_module.clone());
-  WithInsertPoint ins(v->node());
+  script::Module observer = observer_module.clone();
+  module.register_module(observer_name, observer);
   // Get handle of observer module
   Node* observer_instance = g->create(c10::prim::GetAttr);
   // self.observer_for_v
   observer_instance->addInput(g->inputs()[0]);
   observer_instance->s_(c10::attr::name, observer_name);
   observer_instance->output()->setDebugName(observer_name);
-  observer_instance->output()->setType(observer_module.type());
+  observer_instance->output()->setType(observer.type());
   observer_instance->insertAfter(v->node());
 
   // Create forward method call
-  Node* call = observer_instance->owningGraph()->create(c10::prim::CallMethod);
+  Node* call = g->create(c10::prim::CallMethod);
   TORCH_INTERNAL_ASSERT(call != nullptr, "Failed to create forward call node");
   call->s_(c10::attr::name, "forward");
   call->addInput(observer_instance->output());
@@ -601,29 +600,7 @@ template TORCH_API void InsertQuantDequantNodesForParam(
     at::ScalarType t);
 
 
-static Node* prepQuantAddObserverFor(
-    Value* v,
-    Node* original_observer_node,
-    Node* insert_point) {
-  TORCH_INTERNAL_ASSERT(insert_point != nullptr);
-  WithInsertPoint ins(insert_point);
-
-  // Create a new observer node. We just need to clone the original one.
-  Node* observerNode = insert_point->owningGraph()->createClone(
-      &*original_observer_node, [&](Value* v) { return v; }, false);
-
-  // Set the type and the name of the output of the new observer node. It will
-  // be used instead of the original value v.
-  Value* observedValue = observerNode->addOutput();
-  observedValue->setType(v->type());
-  observedValue->setDebugName(v->debugName() + ".observed");
-
-  // Now we can add the inputs.
-  observerNode->addInput(v);
-  return observerNode;
-}
-
-TORCH_API script::Module PrepareQuant(
+TORCH_API script::Module InsertObservers(
     const script::Module& module,
     const std::string& method_name,
     const script::Module& observer_module,
@@ -631,11 +608,7 @@ TORCH_API script::Module PrepareQuant(
   script::Module input_module = module.clone();
   script::Method method = input_module.get_method(method_name);
   auto graph = method.graph();
-  auto num_activation_inputs = method.num_inputs();
   TORCH_CHECK(graph != nullptr);
-  // num_activation_inputs is the number of activations or external data
-  // excluding the parameters
-  TORCH_CHECK(num_activation_inputs <= graph->inputs().size());
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -653,8 +626,7 @@ TORCH_API script::Module PrepareQuant(
   // prim::Param nodes do not belong to the graph. Hence the Insert
   // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
-  Node* insert_node = *graph->nodes().begin();
-  for (size_t idx = 0; idx < num_activation_inputs; ++idx) {
+  for (size_t idx = 0; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get())) {
       Node* observer_node = insertObserverForwardCall(v, v->owningGraph(), input_module, observer_module);
