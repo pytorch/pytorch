@@ -489,14 +489,11 @@ They are used in specifying strategies for reduction collectives, e.g.,
               const std::shared_ptr<::c10d::Store>&,
               int,
               int,
-              const std::string&,
-              const std::chrono::milliseconds&>(),
+              const std::string&>(),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("groupName") = "",
-          py::arg("timeout") = std::chrono::milliseconds(
-              ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis));
+          py::arg("groupName") = "");
 #endif
 
 #ifdef USE_C10D_MPI
