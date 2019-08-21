@@ -116,6 +116,13 @@ static void neg_kernel(TensorIterator& iter) {
   });
 }
 
+static void erfinv_kernel(TensorIterator& iter) {
+  // This method must not be called by dispatcher,
+  // because CPU-device mapped to another method in native-functions.yaml
+  // It's a placeholder for CPU kernel that should be moved from TH to ATen
+  AT_ERROR("erfinv_kernel is not implemented");
+}
+
 static void sinh_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel(
@@ -246,6 +253,7 @@ REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
+REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 
