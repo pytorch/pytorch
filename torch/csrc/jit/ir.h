@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/graph_node_list.h>
 #include <torch/csrc/jit/named_value.h>
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/scope.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -169,7 +170,7 @@ struct Value {
     return type()->requires_grad();
   }
   bool isCompleteTensor() const {
-    if (auto pt = type()->cast<ProfiledTensorType>()) {
+    if (auto pt = type()->cast<TensorType>()) {
       return pt->isComplete();
     }
     return false;
@@ -254,7 +255,7 @@ struct TORCH_API Node {
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
   // change the schema. note: mutable because schema_ is effectively a cache
-  mutable const FunctionSchema* schema_;
+  mutable const Operator* op_;
   topo_position_t topo_position_ = 0;
 
  protected:
@@ -621,13 +622,10 @@ struct TORCH_API Node {
       const char* signature_literal,
       at::ArrayRef<Symbol> const_inputs = {}) const;
 
-  const FunctionSchema& schema() const {
-    if (!schema_) {
-      findSchema();
-    }
-    return *schema_;
-  }
+  const FunctionSchema& schema() const;
   const FunctionSchema* maybeSchema() const;
+  const Operator& getOperator() const;
+  const Operator* maybeOperator() const;
 
   void dump() const;
 
@@ -796,7 +794,6 @@ struct TORCH_API Node {
   bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
   std::pair<Value*, const Argument&> findInput(Symbol name);
-  void findSchema() const;
   // Lookup iterator in use list of _input i_ that corresponds to its use of
   // _this_
   use_list::iterator findUseForInput(size_t i);
@@ -1256,7 +1253,7 @@ inline Value* Value::setType(TypePtr type) {
   AT_ASSERT(type);
   type_ = std::move(type);
   for (Use& use : uses_) {
-    use.user->schema_ = nullptr;
+    use.user->op_ = nullptr;
   }
   return this;
 }

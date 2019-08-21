@@ -94,6 +94,8 @@ def createResolutionCallbackFromClosure(fn):
 def can_compile_class(cls):
     # If any of the functions on a type don't have a code object, this type can't
     # be compiled and is probably a builtin / bound from C
+    if is_ignored_fn(cls):
+        return False
     fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
     has_code = [hasattr(fn, '__code__') for fn in fns]
     return all(has_code)
@@ -283,6 +285,74 @@ def _get_fn_overloads(qual_name):
 def _clear_fn_overloads(qual_name):
     del _overloaded_fns[qual_name]
 
+def get_class_name_lineno(method):
+    current_frame = inspect.currentframe()
+
+    # one for the get_class_name call, one for _overload_method call
+    for i in range(2):
+        current_frame = current_frame.f_back
+    class_name = current_frame.f_code.co_name
+    line_no = current_frame.f_code.co_firstlineno
+    return class_name, line_no
+
+# At the the point the decorator is applied to class methods the method
+# has no reference to its owning class. _qualified_name would not include
+# the class it is defined in, so any methods with the same name in the same file
+# would have the same _qualified_name, even if they were defined in different
+# classes. This problem only exists in python 2.
+# We get around this problem by looking at the stack frame and identifying
+# the class name, and throwing an error whenever overloads are used
+# when modules of the same name are in the same file
+
+# qualified_name => class name => list[overload_functions]
+_overloaded_methods = {}  # noqa: T484
+
+
+# (qualified_name, class name) => class_fileno
+_overloaded_method_class_fileno = {}
+
+def _overload_method(func):
+    qual_name = _qualified_name(func)
+    global _overloaded_methods
+    class_name_map = _overloaded_methods.get(qual_name, None)
+    if class_name_map is None:
+        class_name_map = {}
+        _overloaded_methods[qual_name] = class_name_map
+
+    class_name, line_no = get_class_name_lineno(func)
+    method_overloads = class_name_map.get(class_name, None)
+    if method_overloads is None:
+        method_overloads = []
+        class_name_map[class_name] = method_overloads
+        _overloaded_method_class_fileno[(qual_name, class_name)] = line_no
+    else:
+        existing_lineno = _overloaded_method_class_fileno[(qual_name, class_name)]
+        if existing_lineno != line_no:
+            raise RuntimeError("Cannot currently overload the same method name in two different"
+                               " classes with the same name in the same module")
+
+    method_overloads.append(func)
+    return func
+
+def _get_overloaded_methods(method, mod_class):
+    # TODO: __name__ not set for submodules in recursive script
+    if not hasattr(method, "__name__"):
+        return None
+    qual_name = _qualified_name(method)
+    class_name_map = _overloaded_methods.get(qual_name, None)
+    if class_name_map is None:
+        return None
+    overloads = class_name_map.get(mod_class.__name__, None)
+    if overloads is None:
+        return None
+
+    method_line_no = inspect.getsourcelines(method)[1]
+    mod_class_fileno = inspect.getsourcelines(mod_class)[1]
+    mod_end_fileno = mod_class_fileno + len(inspect.getsourcelines(mod_class)[0])
+    if not (method_line_no >= mod_class_fileno and method_line_no <= mod_end_fileno):
+        raise Exception("Overloads are not useable when a module is redaclared within the same file: " + str(method))
+    return overloads
+
 try:
     import typing
     from typing import Tuple, List, Dict, Optional
@@ -425,6 +495,9 @@ def _qualified_name(obj):
         return obj.qualified_name
 
     name = obj.__name__
+    if name == '<lambda>':
+        name = '_lambda'  # make name a valid identifier
+
     module_name = obj.__module__
 
     # If the module is actually a torchbind module, then we should short circuit
