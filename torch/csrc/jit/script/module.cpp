@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -138,6 +139,8 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     Graph& g_,
     size_t self_offset = 0) {
   std::shared_ptr<Graph> g = g_.copy();
+  // Inline to remove method/function calls
+  Inline(*g);
   std::vector<Slot> extra_ivalues;
   std::unordered_map<Slot, size_t> slot_to_offset;
   struct ToScan {

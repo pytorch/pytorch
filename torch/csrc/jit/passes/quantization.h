@@ -103,7 +103,20 @@ TORCH_API void InsertQuantDequantNodesForParam(
     const Fn& getQParamFunc,
     at::ScalarType t);
 
-TORCH_API script::Module PrepareQuant(
+/** \brief Insert observer module and observer function call for
+ *  the Tensors that needs to be observed.
+ *
+ * For each Tensor that needs to be observed in the method, insert observer
+ * module to the input module and add forward calls of observer to the specified
+ * method.
+ *
+ * \param module the input module
+ * \param method_name the method we want to insert observers for
+ * \param observer_module the default observer module
+ * \param weight_observer_module the observer module that will be used
+ * by weight
+ */
+TORCH_API script::Module InsertObservers(
     const script::Module& module,
     const std::string& method_name,
     const script::Module& observer_module,
