@@ -1169,7 +1169,10 @@ graph(%x : Tensor,
                                                 observer._c,
                                                 observer._c)
         data = torch.randn(1, 3, 10, 10, dtype=torch.float)
-        m(data)
+        def get_forward(m):
+            return m._c._get_method('forward')
+        get_forward(m)(data)
+
         # right now this pass is mutating the original module
         # and it will have extra observer modules
         # will fix later when we figure out how to remove modules
@@ -13364,48 +13367,158 @@ a")
 
         self.checkScript(test_uses, ())
 
-    @unittest.skipIf(True, "Removing weak script")
-    def test_overloading(self):
-        @torch._jit_internal.weak_module
-        class W(torch.nn.Module):
-            __overloads__ = {'forward': ['forward_tuple', 'forward_tensor']}
-
+    def test_method_overloading(self):
+        class Over(torch.nn.Module):
             def __init__(self):
-                super(W, self).__init__()
+                super(Over, self).__init__()
 
-            @torch._jit_internal.weak_script_method
-            def forward_tuple(self, x):
+            @torch.jit._overload_method  # noqa: F811
+            def forward(self, x):  # noqa: F811
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
-                return x[0] + 5
+                pass
 
-            def forward(self, x):
-                # manually do argument switching
-                if isinstance(x, tuple):
-                    return self.forward_tuple(x)
-                else:
-                    return self.forward_tensor(x)
-
-            @torch._jit_internal.weak_script_method
-            def forward_tensor(self, x):
+            @torch.jit._overload_method  # noqa: F811
+            def forward(self, x):  # noqa: F811
                 # type: (Tensor) -> Tensor
-                return x + 20
+                pass
+
+            def forward(self, x):  # noqa: F811
+                if isinstance(x, Tensor):
+                    return x + 20
+                else:
+                    return x[0] + 5
 
         class S(torch.jit.ScriptModule):
             def __init__(self):
                 super(S, self).__init__()
-                self.weak = W()
+                self.weak = Over()
 
             @torch.jit.script_method
             def forward(self, x):
                 return self.weak(x) + self.weak((x, x))
 
-        s = S()
+        s_mod = S()
         x = torch.ones(1)
-        self.assertEqual(s(x), x + 20 + 5 + x)
+        self.assertEqual(s_mod(x), x + 20 + 5 + x)
 
-        w = W()
-        self.assertEqual(w((x, x)), x + 5)
-        self.assertEqual(w((x)), x + 20)
+        over = Over()
+        self.assertEqual(over((x, x)), x + 5)
+        self.assertEqual(over((x)), x + 20)
+
+        class Unannotated(torch.nn.Module):
+            def __init__(self):
+                super(Unannotated, self).__init__()
+
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
+                pass
+
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
+                # type: (int) -> (int)
+                pass
+
+            def hello(self, x):  # noqa: F811
+                return x + 3
+
+            def forward(self):
+                return self.hello(1), self.hello(.5)
+
+        w = Unannotated()
+        with self.assertRaisesRegex(Exception, "explicitly add type annotations to overloaded functions"):
+            torch.jit.script(w)
+
+        class CompileOverloadError(torch.nn.Module):
+            def __init__(self):
+                super(CompileOverloadError, self).__init__()
+
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
+                # type: (str) -> (int)
+                pass
+
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
+                # type: (int) -> (int)
+                pass
+
+            def hello(self, x):  # noqa: F811
+                return x + 1
+
+            def forward(self):
+                return self.hello("hi"), self.hello(.5)
+
+        w = CompileOverloadError()
+        with self.assertRaisesRegex(Exception, "but instead found type \'str\'"):
+            torch.jit.script(w)
+
+        # testing overload declared first, then non-overload
+        with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+            class W3(torch.nn.Module):
+                def __init__(self):
+                    super(W3, self).__init__()
+
+                @torch.jit._overload_method  # noqa: F811
+                def forward(self, x):  # noqa: F811
+                    # type: (int) -> int
+                    pass
+
+                @torch.jit._overload_method  # noqa: F811
+                def forward(self, x):  # noqa: F811
+                    # type: (Tensor) -> Tensor
+                    pass
+
+                def forward(self, x):  # noqa: F811
+                    return x + 5
+
+            a = W3()
+            b = torch.jit.script(a)
+
+            class W3(torch.nn.Module):
+                def __init__(self):
+                    super(W3, self).__init__()
+
+                def forward(self, x):  # noqa: F811
+                    return x + 5 + 10
+
+            a = W3()
+            b = torch.jit.script(a)
+
+        # testing non-overload declared first, then overload
+        class W2(torch.nn.Module):
+            def __init__(self):
+                super(W2, self).__init__()
+
+            def hello(self, x1, x2):
+                return x1 + x2
+
+            def forward(self, x):
+                return self.hello(x, x)
+
+        a = torch.jit.script(W2())
+        self.assertEqual(a(torch.tensor(1)), torch.tensor(2))
+
+        class W2(torch.nn.Module):
+            def __init__(self):
+                super(W2, self).__init__()
+
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
+                pass
+
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
+                # type: (int) -> (int)
+                pass
+
+            def hello(self, x):  # noqa: F811
+                return x + 5 + 10
+
+            def forward(self, x):
+                return self.hello(1), self.hello(x)
+
+        with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+            a = torch.jit.script(W2())
 
     def test_select_after_chunk(self):
         def foo(x):
@@ -18744,6 +18857,21 @@ class TestLogging(JitTestCase):
             self.assertEqual(logger.get_counter_val('foo'), 1)
         finally:
             torch.jit._logging.set_logger(old_logger)
+
+
+class TestDocs(unittest.TestCase):
+    @slowTest
+    def test_docs(self):
+        import subprocess
+        docs_dir = '../docs'
+        docs_dir = [os.path.dirname(__file__), '..', 'docs']
+        docs_dir = os.path.join(*docs_dir)
+
+        result = subprocess.run(['make', 'doctest'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
+        if result.returncode != 0:
+            out = result.stdout.decode('utf-8')
+            err = result.stderr.decode('utf-8')
+            raise RuntimeError("{}\n{}\nDocs build failed (run `cd docs && make doctest`)".format(err, out))
 
 
 for test in autograd_method_tests():
