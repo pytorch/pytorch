@@ -427,6 +427,9 @@ def _qualified_name(obj):
         return obj.qualified_name
 
     name = obj.__name__
+    if name == '<lambda>':
+        name = '_lambda'  # make name a valid identifier
+
     module_name = obj.__module__
 
     # If the module is actually a torchbind module, then we should short circuit
