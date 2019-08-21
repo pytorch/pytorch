@@ -13,15 +13,15 @@ def relu(input, inplace=False):
     # type: (Tensor, bool) -> Tensor
     r"""relu(input, inplace=False) -> Tensor
 
-    .. note::
-      :attr:`inplace` is not supported for the quantized relu.
-
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
     """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.relu' must be quantized!")
     if inplace:
-        raise NotImplementedError("`inplace` is not implemented in quantized relu")
-    return torch.ops.quantized.relu(input)
+        return torch.relu_(input)
+    else:
+        return torch.relu(input)
 
 def linear(input, weight, bias=None, scale=None, zero_point=None):
     # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
