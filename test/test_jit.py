@@ -14373,6 +14373,17 @@ class TestRecursiveScript(JitTestCase):
 
         return sm
 
+    def test_init_error(self):
+        class M(nn.Module):
+            def __init__(self):
+                self.x = 2
+
+            def forward(self):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "has not been initialized"):
+            torch.jit.script(M())
+
     def test_module_name(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
