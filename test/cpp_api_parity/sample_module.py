@@ -99,7 +99,6 @@ module_tests = [
 ]
 
 module_metadata = dict(
-    python_default_constructor_args=(True, True),
     cpp_default_constructor_args='(true)',
     cpp_sources=SAMPLE_MODULE_CPP_SOURCE,
 )

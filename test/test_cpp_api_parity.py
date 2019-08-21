@@ -177,8 +177,6 @@ class TestCppApiParity(common.TestCase):
     def _test_torch_nn_module_ctor_args(self, module_name):
         python_module_class = getattr(torch.nn, module_name)
         module_metadata = torch_nn_modules.module_metadata_map[module_name]
-        # yf225 TODO: do we actually need this list? can we get rid of it and just use some count?
-        python_default_constructor_args = module_metadata['python_default_constructor_args']
         cpp_default_constructor_args = module_metadata['cpp_default_constructor_args']
 
         cpp_module_option = 'torch::nn::{module_name}Options{cpp_constructor_args}'.format(module_name, cpp_default_constructor_args)
@@ -186,8 +184,8 @@ class TestCppApiParity(common.TestCase):
             init_arg_spec = inspect.getargspec(python_module_class.__init__)
         else:
             init_arg_spec = inspect.getfullargspec(python_module_class.__init__)
-        init_kwargs = init_arg_spec.args[len(python_default_constructor_args) + 1:]
         init_kwargs_defaults = init_arg_spec.defaults
+        init_kwargs = init_arg_spec.args[-len(init_kwargs_defaults):]
         for arg_name, python_default_value in zip(init_kwargs, init_kwargs_defaults):
             cpp_module_option += '.{}({})'.format(arg_name, self._python_arg_to_cpp_arg(python_default_value).value)
 
