@@ -180,7 +180,7 @@ class TestCppApiParity(common.TestCase):
         python_default_constructor_args = module_metadata['python_default_constructor_args']
         cpp_default_constructor_args = module_metadata['cpp_default_constructor_args']
 
-        cpp_module_option = 'torch::nn::' + module_name + 'Options' + cpp_default_constructor_args
+        cpp_module_option = 'torch::nn::{module_name}Options{cpp_constructor_args}'.format(module_name, cpp_default_constructor_args)
         if PY2:
             init_arg_spec = inspect.getargspec(python_module_class.__init__)
         else:
