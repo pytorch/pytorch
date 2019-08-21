@@ -145,10 +145,11 @@ Node* createIntReprNode(Value* v, Graph* g) {
   return intrepr;
 }
 
-// Create observer.forward Node and insert a call to observer forward function
+// Clone observer module and add it to the original module,
+// and insert a call to observer forward function
 Node* insertObserverForwardCall(Value* v, Graph* g,
                                 script::Module module,
-                                const script::Module observer_module) {
+                                const script::Module& observer_module) {
   std::string observer_name = "observer_for_" + v->debugName();
   script::Module observer = observer_module.clone();
   module.register_module(observer_name, observer);
@@ -627,7 +628,7 @@ TORCH_API script::Module InsertObservers(
   // prim::Param nodes do not belong to the graph. Hence the Insert
   // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
-  for (size_t idx = 0; idx < method.num_inputs(); ++idx) {
+  for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get())) {
       Node* observer_node = insertObserverForwardCall(v, v->owningGraph(), input_module, observer_module);
