@@ -5,7 +5,7 @@
 
 #include <TH/THBlasUtils.h>
 
-#include <caffe2/perfkernels/embedding_lookup.h>
+#include <caffe2/perfkernels/embedding_lookup_idx.h>
 
 #include <cstring>
 #include <iostream>
@@ -81,24 +81,14 @@ void index_select_add<float>(const Tensor &select_indices,
   auto output_data = output.data<float>();
 
   if (isFastPathIndexSelect(src, output)) {
-    auto accessor = offsets.accessor<int64_t, 1>();
-    std::vector<int> lengths;
-
-    int64_t lower = accessor[0];
-    for (int64_t i = 1; i < offsets.numel(); ++i) {
-      lengths.push_back(accessor[i] - lower);
-      lower = accessor[i];
-    }
-    lengths.push_back(select_indices.numel() - lower);
-
-    caffe2::EmbeddingLookup(
+    caffe2::EmbeddingLookupIdx(
       /*block_size=*/ddim,
-      /*output_size=*/lengths.size(),
+      /*output_size=*/offsets.numel(),
       /*index_size=*/select_indices.numel(),
       /*data_size=*/src.size(0),
       /*input=*/src_data,
       /*indices=*/select_indices_data,
-      /*lengths=*/lengths.data(),
+      /*lengths=*/offsets.data<int64_t>(),
       /*weights=*/nullptr,
       /*scale_bias=*/nullptr,
       /*normalize_by_lengths=*/false,
@@ -170,24 +160,14 @@ void index_select_scale_add<float>(const Tensor &select_indices,
   auto output_data = output.data<float>();
 
   if (isFastPathIndexSelectScale(src, scale, output)) {
-    auto accessor = offsets.accessor<int64_t, 1>();
-    std::vector<int> lengths;
-
-    int64_t lower = accessor[0];
-    for (int64_t i = 1; i < offsets.numel(); ++i) {
-      lengths.push_back(accessor[i] - lower);
-      lower = accessor[i];
-    }
-    lengths.push_back(select_indices.numel() - lower);
-
-    caffe2::EmbeddingLookup(
+    caffe2::EmbeddingLookupIdx(
       /*block_size=*/ddim,
-      /*output_size=*/lengths.size(),
+      /*output_size=*/offsets.numel(),
       /*index_size=*/select_indices.numel(),
       /*data_size=*/src.size(0),
       /*input=*/src_data,
       /*indices=*/select_indices_data,
-      /*lengths=*/lengths.data(),
+      /*lengths=*/offsets.data<int64_t>(),
       /*weights=*/scale_data,
       /*scale_bias=*/nullptr,
       /*normalize_by_lengths=*/false,
