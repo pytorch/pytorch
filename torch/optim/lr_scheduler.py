@@ -799,7 +799,7 @@ class OneCycleLR(_LRScheduler):
             a value for epochs and steps_per_epoch.
             Default: None
         epochs (int): The number of epochs to train for. This is used along
-            with train_dl in order to infer the total number of steps in the cycle
+            with steps_per_epoch in order to infer the total number of steps in the cycle
             if a value for total_steps is not provided.
             Default: None
         steps_per_epoch (int): The number of steps per epoch to train for. This is
