@@ -43,7 +43,6 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(BoolType)               \
   _(OptionalType)           \
   _(VarType)                \
-  _(ProfiledTensorType)     \
   _(DeviceObjType)          \
   _(FunctionType)           \
   _(ClassType)              \
@@ -251,34 +250,6 @@ struct CAFFE2_API OptionalType
   OptionalType(TypePtr elem) : SingleElementType(elem) {}
 };
 
-struct TensorType;
-using TensorTypePtr = std::shared_ptr<TensorType>;
-// This type represents a single Tensor, with an unknown shape.
-// Subtype hierarchy for Tensor Types (TensorType as the base type):
-// ProfiledTensorType <: TensorType
-struct CAFFE2_API TensorType : public Type {
-  static TensorTypePtr create() {
-    return TensorTypePtr(new TensorType()); // NOLINT(modernize-make-shared)
-  }
-  
-  bool requires_grad() const override {
-    return true;
-  }
-
-  bool operator==(const Type& rhs) const override {
-    return rhs.kind() == kind();
-  }
-  std::string str() const override {
-    return "Tensor";
-  }
-  static const TypeKind Kind = TypeKind::TensorType;
-  // global singleton
-  static TensorTypePtr get();
-
- protected:
-  TensorType(TypeKind kind = TypeKind::TensorType) : Type(kind) {}
-};
-
 template <typename T>
 inline c10::optional<T> merge_primitive(
     const c10::optional<T>& a,
@@ -369,43 +340,31 @@ struct CAFFE2_API VaryingShape {
 
 using VaryingStrides = VaryingShape;
 
-struct ProfiledTensorType;
-using ProfiledTensorTypePtr = std::shared_ptr<ProfiledTensorType>;
+struct TensorType;
+using TensorTypePtr = std::shared_ptr<TensorType>;
 // This type represents a single Tensor with a specific size
-struct CAFFE2_API ProfiledTensorType : public TensorType {
-  static ProfiledTensorTypePtr create(const at::Tensor& t) {
-    return ProfiledTensorTypePtr(new ProfiledTensorType(t));
+struct CAFFE2_API TensorType : public Type {
+  static TensorTypePtr create(const at::Tensor& t) {
+    return TensorTypePtr(new TensorType(t));
   }
 
-  static ProfiledTensorTypePtr create(const TypePtr& tptr) {
-    if (auto ptt = tptr->cast<ProfiledTensorType>()) {
-      return ptt;
-    }
-
-    if (tptr->isSubtypeOf(TensorType::get())) {
-      return ProfiledTensorType::get();
-    }
-
-    TORCH_INTERNAL_ASSERT(false, "Expected a tensor type");
-  }
-
-  static ProfiledTensorTypePtr create(
+  static TensorTypePtr create(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
       const VaryingShape& sizes,
       const VaryingStrides& strides,
       c10::optional<bool> requires_grad,
       c10::optional<bool> autograd_zero=c10::nullopt) {
-    return ProfiledTensorTypePtr(new ProfiledTensorType(
+    return TensorTypePtr(new TensorType(
         scalar_type, device, sizes, strides, requires_grad));
   }
 
-  static ProfiledTensorTypePtr create(
+  static TensorTypePtr create(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
       c10::optional<size_t> dim,
       c10::optional<bool> requires_grad) {
-    return ProfiledTensorType::create(
+    return TensorType::create(
         scalar_type,
         device,
         VaryingShape(dim),
@@ -415,7 +374,7 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
 
   // overloaded create variadic template argument as it could not distinguish
   // initializer list
-  static ProfiledTensorTypePtr createContiguous(
+  static TensorTypePtr createContiguous(
       at::ScalarType scalar_type,
       at::Device device,
       at::IntArrayRef sizes) {
@@ -426,7 +385,7 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
         VaryingShape(contiguousStridesOf(sizes)),
         c10::nullopt);
   }
-  static ProfiledTensorTypePtr create(
+  static TensorTypePtr create(
       at::ScalarType scalar_type,
       at::Device device,
       at::IntArrayRef sizes,
@@ -470,21 +429,13 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
       return false;
     }
 
-    auto rt = rhs.expect<ProfiledTensorType>();
+    auto rt = rhs.expect<TensorType>();
     return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
         strides() == rt->strides() && device() == rt->device() &&
         requiresGrad() == rt->requiresGrad() && autogradZero() == rt->autogradZero();
   }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    if (auto rhs_p = rhs->cast<ProfiledTensorType>()) {
-      // if we have the same pointer, avoid computing the merge
-      if (this == rhs_p.get()) {
-        return true;
-      }
-      return *merge(rhs_p) == *rhs_p; 
-    }
-    return rhs->kind() == TypeKind::TensorType || TensorType::isSubtypeOf(rhs);
-  }
+  bool isSubtypeOf(const TypePtr rhs) const override;
+
   std::string str() const override;
 
   c10::optional<size_t> numel() const {
@@ -500,27 +451,27 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
     return prod;
   }
 
-  ProfiledTensorTypePtr withRequiresGrad(c10::optional<bool> s) {
+  TensorTypePtr withRequiresGrad(c10::optional<bool> s) {
     auto copy = clone();
     copy->requires_grad_ = s;
     return copy;
   }
 
-  ProfiledTensorTypePtr withScalarType(c10::optional<ScalarType> st) {
+  TensorTypePtr withScalarType(c10::optional<ScalarType> st) {
     auto copy = clone();
     copy->scalar_type_ = st;
     return copy;
   }
 
 
-  ProfiledTensorTypePtr withDim(c10::optional<size_t> d) {
+  TensorTypePtr withDim(c10::optional<size_t> d) {
     auto copy = clone();
     copy->sizes_ = VaryingShape(d);
     copy->strides_ = VaryingShape(d);
     return copy;
   }
 
-  ProfiledTensorTypePtr withSizesStrides(
+  TensorTypePtr withSizesStrides(
       at::IntArrayRef sizes,
       at::IntArrayRef strides) const {
     auto cloned = clone();
@@ -529,19 +480,19 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
     return cloned;
   }
 
-  ProfiledTensorTypePtr withSizes(at::IntArrayRef sizes) const {
+  TensorTypePtr withSizes(at::IntArrayRef sizes) const {
     return withSizesStrides(
         sizes, contiguousStridesOf(sizes));
   }
 
-  ProfiledTensorTypePtr dimensionedOnly() const {
+  TensorTypePtr dimensionedOnly() const {
     auto copy = clone();
     copy->sizes_ = VaryingShape(sizes().size());
     copy->strides_ = VaryingShape(sizes().size());
     return copy;
   }
 
-  ProfiledTensorTypePtr contiguous() const {
+  TensorTypePtr contiguous() const {
     auto cloned = clone();
     if (auto concrete_sizes = sizes().concrete_sizes()) {
       cloned->strides_ = VaryingShape(contiguousStridesOf(*concrete_sizes));
@@ -551,14 +502,14 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
     return cloned;
   }
 
-  ProfiledTensorTypePtr merge(ProfiledTensorTypePtr other) const {
+  TensorTypePtr merge(TensorTypePtr other) const {
     auto scalar_type = merge_primitive(scalarType(), other->scalarType());
     auto dev = merge_primitive(device(), other->device());
     auto sz = sizes().merge(other->sizes());
     auto srs = strides().merge(other->strides());
     auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
     auto zero = merge_primitive(autogradZero(), other->autogradZero());
-    return ProfiledTensorType::create(scalar_type, dev, sz, srs, gr, zero);
+    return TensorType::create(scalar_type, dev, sz, srs, gr, zero);
   }
   // is all information about the type specified except for autograd?
   // This replaces the notion of a 'CompleteTensorType' that used to exist
@@ -568,7 +519,7 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
     return scalar_type_ && device_ && sizes_.isComplete() && strides_.isComplete();
   }
 
-  ProfiledTensorTypePtr withAutogradZero() {
+  TensorTypePtr withAutogradZero() {
     auto r = clone();
     r->autograd_zero_ = true;
     return r;
@@ -578,13 +529,13 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
     return autograd_zero_;
   }
 
-  static ProfiledTensorTypePtr get();
+  static TensorTypePtr get();
 
-  static const TypeKind Kind = TypeKind::ProfiledTensorType;
+  static const TypeKind Kind = TypeKind::TensorType;
 
  private:
-  ProfiledTensorType(const at::Tensor& tensor)
-      : TensorType(TypeKind::ProfiledTensorType),
+  TensorType(const at::Tensor& tensor)
+      : Type(TypeKind::TensorType),
         scalar_type_(tensor.scalar_type()),
         device_(tensor.device()),
         sizes_(tensor.sizes().size()),
@@ -595,14 +546,14 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
             strides_ = tensor.strides().vec();
           }
         }
-  ProfiledTensorType(
+  TensorType(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
       const VaryingShape& sizes,
       const VaryingStrides& strides,
       c10::optional<bool> requires_grad,
       c10::optional<bool> autograd_zero=c10::nullopt)
-      : TensorType(TypeKind::ProfiledTensorType),
+      : Type(TypeKind::TensorType),
         scalar_type_(scalar_type),
         device_(device),
         sizes_(sizes),
@@ -610,8 +561,8 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
         requires_grad_(requires_grad),
         autograd_zero_(autograd_zero) {}
 
-  ProfiledTensorTypePtr clone() const {
-    return ProfiledTensorTypePtr(new ProfiledTensorType(
+  TensorTypePtr clone() const {
+    return TensorTypePtr(new TensorType(
         scalar_type_, device_, sizes_, strides_, requires_grad_, autograd_zero_));
   }
 
@@ -1170,18 +1121,18 @@ inline TypePtr unshapedType(const TypePtr& type) {
   return type->withContained(fmap(type->containedTypes(), unshapedType));
 }
 
-inline TypePtr ProfiledTensorType::fromNumberType(TypePtr typ) {
+inline TypePtr TensorType::fromNumberType(TypePtr typ) {
   if (typ->isSubtypeOf(IntType::get())) {
-    return ProfiledTensorType::createContiguous(at::kLong, at::kCPU, {});
+    return TensorType::createContiguous(at::kLong, at::kCPU, {});
   } else if (typ->isSubtypeOf(FloatType::get())) {
-    return ProfiledTensorType::createContiguous(at::kFloat, at::kCPU, {});
+    return TensorType::createContiguous(at::kFloat, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
-    return ProfiledTensorType::createContiguous(at::kLong, at::kCPU, {});
+    return TensorType::createContiguous(at::kLong, at::kCPU, {});
   }
   AT_ERROR("unknown number type", typ->str());
 }
-inline TypePtr ProfiledTensorType::fromBoolType() {
-  return ProfiledTensorType::createContiguous(at::kLong, at::kCPU, {});
+inline TypePtr TensorType::fromBoolType() {
+  return TensorType::createContiguous(at::kLong, at::kCPU, {});
 }
 
 inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
