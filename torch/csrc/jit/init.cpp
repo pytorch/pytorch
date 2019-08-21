@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/onnx.h>
@@ -88,13 +89,7 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
-#if defined(_WIN32)
-void runJITCPPTests(bool runCuda) {
-  AT_ERROR("JIT tests not yet supported on Windows");
-}
-#else
-CAFFE2_API void runJITCPPTests(bool runCuda);
-#endif
+TORCH_API void runJITCPPTests(bool runCuda);
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -157,12 +152,13 @@ void initJITBindings(PyObject* module) {
             new_node->destroy();
           })
       .def(
+          // TODO: rename to insert_observers after we remove old code
           "_jit_pass_prepare_quant",
           [](const script::Module& module,
              const std::string& method_name,
              const script::Module& observer_module,
              const script::Module& weight_observer_module) {
-            return PrepareQuant(module, method_name, observer_module, weight_observer_module);
+            return InsertObservers(module, method_name, observer_module, weight_observer_module);
           })
       .def(
           "_jit_pass_insert_quant_dequant",
@@ -303,6 +299,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
+      .def("_jit_pass_inline", Inline)
       .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
@@ -364,6 +361,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_set_inline_everything_mode",
           [](bool enabled) { script::getInlineEverythingMode() = enabled; })
+      .def(
+          "_jit_get_inline_everything_mode",
+          []() { return script::getInlineEverythingMode(); })
       .def(
           "_jit_try_infer_type",
           [](py::object obj) -> TypePtr {
