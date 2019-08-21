@@ -31,20 +31,19 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     return {};
 
   auto var = variable.lock();
-  // It's possible that the Variable went out of scope and was freed.
-  // We still need to handle the unlikely case of someone holding to its grad.
   if (!var.defined()) {
-    auto var_grad = variable_grad.lock();
-    // Everything was freed. Nothing to do.
-    if (!var_grad.defined()) return variable_list();
-    // Now here's the hard part. If both the new_grad and var_grad require grad
-    // then we just accumulate the data in place (as we'd do if the Variable was
-    // alive). Otherwise, we'd need to perform the out-of-place reduction, but
-    // since the user only holds a reference to .grad and there's no way to
-    // give him the new Value, we just assume that they know these attributes
-    // are changing when using higher order graphs.
-    if (GradMode::is_enabled() && var_grad.requires_grad() && grads[0].requires_grad()) {
-      var_grad += grads[0];
+    // The variable itself is no longer referenced. This section mirrors the code
+    // below in case the saved var.grad() is still referenced.
+    auto new_grad = std::move(grads[0]);
+    Variable grad = variable_grad.lock();
+    if (grad.defined() && !GradMode::is_enabled()) {
+      Variable& grad_variable = as_variable_ref(grad);
+      if (grad_variable.is_sparse() && !new_grad.is_sparse()) {
+        grad_variable = new_grad + grad_variable;
+      }
+      else {
+        grad_variable += new_grad;
+      }
     }
     return variable_list();
   }
