@@ -134,6 +134,24 @@ class DynamicModuleAPITest(QuantizationTestCase):
 
 
 class ModuleAPITest(QuantizationTestCase):
+    def test_relu(self):
+        relu_module = nnq.ReLU()
+        relu6_module = nnq.ReLU6()
+
+        x = torch.arange(-10, 10, dtype=torch.float)
+        y_ref = torch.relu(x)
+        y6_ref = torch.nn.modules.ReLU6()(x)
+
+        qx = torch.quantize_linear(x, 1.0, 0, dtype=torch.qint32)
+        qy = relu_module(qx)
+        qy6 = relu6_module(qx)
+
+        self.assertEqual(y_ref, qy.dequantize(),
+                         message="ReLU module API failed")
+        self.assertEqual(y6_ref, qy6.dequantize(),
+                         message="ReLU6 module API failed")
+
+
     @no_deadline
     @unittest.skipIf(
         not torch.fbgemm_is_cpu_supported(),
