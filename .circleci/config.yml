@@ -2681,10 +2681,20 @@ workflows:
       - pytorch_linux_trusty_py3_6_gcc5_4_build:
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_linux_trusty_py3_6_gcc5_4_test:
           requires:
             - setup
             - pytorch_linux_trusty_py3_6_gcc5_4_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
           requires:
             - setup
@@ -2702,20 +2712,10 @@ workflows:
       - pytorch_linux_trusty_py3_6_gcc7_build:
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_trusty_py3_6_gcc7_test:
           requires:
             - setup
             - pytorch_linux_trusty_py3_6_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_py3_clang5_asan_build:
           requires:
             - setup
