@@ -2429,7 +2429,7 @@ graph(%Ra, %Rb):
 
     def test_onnx_transpose_incomplete_tensor_type(self):
         # Smoke test to get us into the state where we are attempting to export
-        # a transpose op, where the input is a TensorType without size information. 
+        # a transpose op, where the input is a TensorType without size information.
         # This would previously not work, since we would
         # take the size of the input and use the length of its sizes as the
         # number of dimensions in the permutation.
@@ -2918,6 +2918,32 @@ graph(%Ra, %Rb):
         buffer.seek(0)
         model_loaded = torch.jit.load(buffer)
         self.assertEqual(model_loaded(), model())
+
+
+class TestFrontend(JitTestCase):
+
+    def test_instancing_error(self):
+        @torch.jit.ignore
+        class MyScriptClass(object):
+            def unscriptable(self):
+                return "a" + 200
+
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, x):
+                return MyScriptClass()
+
+        with self.assertRaises(torch.jit.frontend.FrontendError) as cm:
+            torch.jit.script(TestModule())
+
+        checker = FileCheck()
+        checker.check("Cannot instantiate class")
+        checker.check("def forward")
+        checker.run(str(cm.exception))
+
 
 class TestScript(JitTestCase):
     def test_sequence_parsing(self):

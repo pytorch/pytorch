@@ -98,7 +98,7 @@ class FrontendError(Exception):
         self.error_report = torch._C.ErrorReport(self.source_range)
 
     def __str__(self):
-        return self.msg + self.error_report.what()
+        return self.msg + self.error_report.what().lstrip()
 
 
 class NotSupportedError(FrontendError):
