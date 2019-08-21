@@ -21,7 +21,7 @@ def _compute_padding_same(input_size, dim, weight, stride, dilation):
     filter_size = weight.size(dim + 2)
     # Here we calculate the equivalent filter size factoring in dilation
     effective_filter_size = (filter_size - 1) * dilation[dim] + 1
-    out_size = math.ceil(input_size / stride[dim])
+    out_size = int(math.ceil(input_size / stride[dim]))
     # We calculate the starting position of the last filter
     last_start = (out_size - 1) * stride[dim]
     # The final necessary input size is equal to the starting position of the last filter +
