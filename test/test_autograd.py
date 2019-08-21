@@ -251,6 +251,92 @@ class TestAutograd(TestCase):
             torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
             True)
 
+    def test_weak_variable_no_leak(self):
+        dealloc = [0]
+
+        class IncrementOnDelete(object):
+            def __del__(self):
+                dealloc[0] += 1
+
+        # Issue #3818: create a cyclical graph:
+        W = torch.tensor(1.0, requires_grad=True)
+        x = torch.tensor(2.0, requires_grad=True)
+        z = W * x
+        z.backward(torch.tensor(1.0), create_graph=True)
+
+        #
+        # At this point, the cycle is:
+        #   W.grad.grad_fn.next_functions[0][0].next_functions[1][0].variable is x
+        #   x.grad.grad_fn.next_functions[0][0].next_functions[1][0].variable is W
+        #
+        # The previous leak (shared_ptr):
+        #   W.grad.grad_fn.next_functions[0][0] ==> <MulBackward0 object>
+        #
+        # Making AccumulateGrad.variable a weak variable breaks the cycle.
+        #
+        W.grad.grad_fn.next_functions[0][0].register_hook(IncrementOnDelete())
+        del W, x, z
+        gc.collect()
+
+        self.assertEqual(dealloc[0], 1)
+
+    def test_weak_variable_access_saved_grad(self):
+        # Make sure the saved grad is still accumulated if the leaf variable disappears.
+        W = torch.arange(10.0, requires_grad=True)
+        W.grad = torch.zeros(10)
+        saved_grad = W.grad
+
+        x = torch.arange(10.0, requires_grad=True)
+        z = W * x
+
+        del W
+        gc.collect()
+
+        z.backward(torch.ones(z.size()))
+
+        expected = torch.tensor([0., 1., 2., 3., 4., 5., 6., 7., 8., 9.])
+        self.assertEqual(saved_grad, expected)
+
+    def test_weak_variable_access_sparse_saved_grad(self):
+        # Make sure the saved grad is still accumulated if the leaf variable disappears.
+        W = torch.arange(2.0, requires_grad=True)
+        W.grad = torch.sparse_coo_tensor(torch.tensor([[1, 1]]), torch.tensor([0., 0.]))
+        saved_grad = W.grad
+
+        x = torch.arange(2.0, requires_grad=True)
+        z = W + x
+
+        del W
+        gc.collect()
+
+        backward_grad_tensor = torch.sparse_coo_tensor(torch.tensor([[1, 1]]), torch.tensor([1., 1.]))
+        z.backward(backward_grad_tensor)
+
+        expected = torch.sparse_coo_tensor(torch.tensor([[1, 1]]), torch.tensor([1., 1.]))
+        self.assertEqual(saved_grad, expected)
+
+    def test_weak_variable_access_detached_grad(self):
+        W = torch.arange(10.0, requires_grad=True)
+        W.grad = torch.zeros(10)
+
+        saved_grad = W.grad.detach()
+        self.assertFalse(saved_grad.requires_grad)
+
+        x = torch.arange(10.0, requires_grad=True)
+        z = W * x
+
+        del W
+        gc.collect()
+
+        z.backward(torch.ones(z.size()))
+
+        #
+        # Before #24368:
+        #   expected = torch.tensor([0., 1., 2., 3., 4., 5., 6., 7., 8., 9.])
+        # After #24368:
+        expected = torch.tensor([0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
+        self.assertEqual(saved_grad, expected)
+
     @skipIfNoLapack
     def test_slogdet_sign(self):
         a = torch.randn(3, 3, requires_grad=True)
@@ -3558,35 +3644,6 @@ for shape in [(1,), ()]:
         # compute mean as a proxy for some joint reasoning
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
-
-    def test_weak_variable(self):
-        dealloc = [0]
-
-        class IncrementOnDelete(object):
-            def __del__(self):
-                dealloc[0] += 1
-
-        # Issue #3818: create a cyclical graph:
-        W = torch.tensor(1.0, requires_grad=True)
-        x = torch.tensor(2.0, requires_grad=True)
-        z = W * x
-        z.backward(torch.tensor(1.0), create_graph=True)
-
-        #
-        # At this point, the cycle is:
-        #   W.grad.grad_fn.next_functions[0][0].next_functions[1][0].variable is x
-        #   x.grad.grad_fn.next_functions[0][0].next_functions[1][0].variable is W
-        #
-        # The previous leak (shared_ptr):
-        #   W.grad.grad_fn.next_functions[0][0] ==> <MulBackward0 object>
-        #
-        # Making AccumulateGrad.variable a weak variable breaks the cycle.
-        #
-        W.grad.grad_fn.next_functions[0][0].register_hook(IncrementOnDelete())
-        del W, x, z
-        gc.collect()
-
-        self.assertEqual(dealloc[0], 1)
 
 
 def index_variable(shape, max_indices):
