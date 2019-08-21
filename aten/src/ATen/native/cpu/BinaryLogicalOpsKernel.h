@@ -3,6 +3,8 @@
 // as a workaround to reduce the compilation time of BinaryOpsKernel.cpp by breaking down BinaryOpsKernel.cpp to
 // multiple files.
 
+#pragma once
+
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/TensorIterator.h>
