@@ -570,7 +570,6 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     auto dim_indices = indices[dim];
     std::vector<int64_t> zindices;
     std::vector<int64_t> iindices;
-
     for (int64_t i=0; i < new_sizes[dim]; i++) {
       auto idx = index[i].item<int64_t>();
       if (idx < -size || idx >= size) {
@@ -588,9 +587,9 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
         }
       }
     }
-    auto zIndices = at::from_blob(zindices.data(), {zindices.size()}, indices.options().dtype(at::kLong));
+    auto zIndices = at::from_blob(zindices.data(), {zindices.size()}, at::kLong).to(indices.device());
     auto new_indices = indices.index_select(1, zIndices);
-    new_indices[dim] = at::from_blob(iindices.data(), {iindices.size()}, indices.options().dtype(at::kLong));
+    new_indices[dim] = at::from_blob(iindices.data(), {iindices.size()}, at::kLong).to(indices.device());
     auto new_values = values.index_select(0, zIndices);
     return _sparse_coo_tensor_with_dims_and_tensors(
         sparse_dim, dense_dim, new_sizes, new_indices, new_values, self.options());

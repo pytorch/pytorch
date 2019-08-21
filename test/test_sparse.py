@@ -847,7 +847,7 @@ class TestSparse(TestCase):
             if isinstance(select_index, int):
                 select_index = [select_index]
             if isinstance(select_index, list):
-                select_index = torch.LongTensor(select_index, device=self.device)
+                select_index = torch.tensor(select_index, device=self.device, dtype=torch.long)
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
             if fail_message:
                 with self.assertRaisesRegex(IndexError, fail_message):
