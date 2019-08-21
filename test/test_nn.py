@@ -8112,6 +8112,7 @@ class TestNN(NNTestCase):
             sz = torch.Size([N, C, H, W])
             inp = torch.randn(N, 2, 3, requires_grad=True)
             with warnings.catch_warnings(record=True):
+                warnings.simplefilter("always")  # python2 requires this so other tests can trigger
                 self.assertTrue(gradcheck(
                     lambda inp: F.affine_grid(inp, sz, align_corners=align_corners),
                     (inp,)))
@@ -8126,17 +8127,19 @@ class TestNN(NNTestCase):
             for align_corners in (True, False):
                 input_cpu = torch.randn(N, 2, 3, requires_grad=True)
                 with warnings.catch_warnings(record=True):
+                    warnings.simplefilter("always")  # python2 requires this so other tests can trigger
                     out_cpu = F.affine_grid(input_cpu, sz, align_corners=align_corners)
                 gradients = torch.randn(out_cpu.size())
                 out_cpu.backward(gradients)
                 input_gpu = input_cpu.detach().cuda().requires_grad_()
                 with warnings.catch_warnings(record=True):
+                    warnings.simplefilter("always")  # python2 requires this so other tests can trigger
                     out_cuda = F.affine_grid(input_gpu, sz, align_corners=align_corners)
                 out_cuda.backward(gradients.cuda())
                 self.assertEqual(out_cpu, out_cuda)
                 self.assertEqual(input_cpu.grad, input_gpu.grad)
 
-    def test_affine_grid_3D(self):
+    def test_affine_grid_3d(self):
         # test known input on CPU
         input = torch.arange(1., 13).view(1, 3, 4)
         output = F.affine_grid(input, torch.Size([1, 1, 2, 2, 2]), align_corners=True)
@@ -8160,6 +8163,7 @@ class TestNN(NNTestCase):
             sz = torch.Size([N, C, D, H, W])
             inp = torch.randn(N, 3, 4, requires_grad=True)
             with warnings.catch_warnings(record=True):
+                warnings.simplefilter("always")  # python2 requires this so other tests can trigger
                 self.assertTrue(gradcheck(
                     lambda inp: F.affine_grid(inp, sz, align_corners=align_corners),
                     (inp,)))
@@ -8175,11 +8179,13 @@ class TestNN(NNTestCase):
             for align_corners in (True, False):
                 input_cpu = torch.randn(N, 3, 4, requires_grad=True)
                 with warnings.catch_warnings(record=True):
+                    warnings.simplefilter("always")  # python2 requires this so other tests can trigger
                     out_cpu = F.affine_grid(input_cpu, sz, align_corners=align_corners)
                 gradients = torch.randn(out_cpu.size())
                 out_cpu.backward(gradients)
                 input_gpu = input_cpu.detach().cuda().requires_grad_()
                 with warnings.catch_warnings(record=True):
+                    warnings.simplefilter("always")  # python2 requires this so other tests can trigger
                     out_cuda = F.affine_grid(input_gpu, sz, align_corners=align_corners)
                 out_cuda.backward(gradients.cuda())
                 self.assertEqual(out_cpu, out_cuda)
