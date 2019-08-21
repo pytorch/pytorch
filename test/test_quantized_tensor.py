@@ -11,10 +11,8 @@ import tempfile
 class Foo(torch.nn.Module):
     def __init__(self):
         super(Foo, self).__init__()
-        self.dtype = torch.per_tensor_symmetric
+        self.qscheme = torch.per_tensor_symmetric
 
-    def forward(self, x):
-        return x.to(self.dtype)
 
 class TestQuantizedTensor(TestCase):
     def test_qtensor(self):
@@ -262,7 +260,7 @@ class TestQuantizedTensor(TestCase):
         s = pickle.dumps(f)
         loaded = pickle.loads(s)
 
-        self.assertTrue(loaded.dtype == torch.per_tensor_symmetric)
+        self.assertTrue(loaded.qscheme == torch.per_tensor_symmetric)
 
 
 if __name__ == "__main__":
