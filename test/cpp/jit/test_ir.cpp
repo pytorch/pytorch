@@ -1,5 +1,6 @@
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
+#include "torch/csrc/jit/irparser.h"
 
 namespace torch {
 namespace jit {
@@ -34,26 +35,28 @@ void testAttributes() {
 
 void testBlocks() {
   auto g = std::make_shared<Graph>();
-  // auto g = *graph;
-  auto a = Var::asNewInput(*g, "a");
-  auto b = Var::asNewInput(*g, "b");
-  auto c = a + b;
-  auto r =
-      g->appendNode(g->create(prim::If, {Var::asNewInput(*g, "c").value()}));
-  auto then_block = r->addBlock();
-  auto else_block = r->addBlock();
-  {
-    WithInsertPoint guard(then_block);
-    auto t = c + c;
-    then_block->registerOutput(t.value());
-  }
-  {
-    WithInsertPoint guard(else_block);
-    auto d = b + c;
-    auto e = d + c;
-    else_block->registerOutput(e.value());
-  }
-  g->registerOutput((Var(r->output()) + c).value());
+  const auto graph_string = R"IR(
+    graph(%a : Tensor,
+          %b : Tensor,
+          %c : Tensor):
+      %2 : int = prim::Constant[value=1]()
+      %3 : Tensor = aten::add(%a, %b, %2)
+      %5 : Tensor = prim::If(%c)
+        block0():
+          %6 : int = prim::Constant[value=1]()
+          %7 : Tensor = aten::add(%3, %3, %6)
+          -> (%7)
+        block1():
+          %8 : int = prim::Constant[value=1]()
+          %9 : Tensor = aten::add(%b, %3, %8)
+          %10 : int = prim::Constant[value=1]()
+          %11 : Tensor = aten::add(%9, %3, %10)
+          -> (%11)
+      %12 : int = prim::Constant[value=1]()
+      %13 : Tensor = aten::add(%5, %3, %12)
+      return (%13))IR";
+  torch::jit::script::parseIR(graph_string, g.get());
+
   g->lint();
   testing::FileCheck()
       .check("add")
@@ -63,7 +66,15 @@ void testBlocks() {
       ->check("block1")
       ->check_count("aten::add", 3)
       ->run(*g);
-  r->eraseBlock(0);
+
+  // Removes block0 of the conditional
+  for (auto* node : g->block()->nodes()) {
+    if (node->kind() == prim::If) {
+      node->eraseBlock(0);
+      break;
+    }
+  }
+
   testing::FileCheck()
       .check("add")
       ->check("prim::If")

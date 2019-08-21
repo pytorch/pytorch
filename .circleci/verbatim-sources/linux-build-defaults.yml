@@ -37,6 +37,11 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
           NAMED_FLAG="export BUILD_NAMEDTENSOR=1"
         fi
 
+        # dispatch aten ops statically for mobile
+        if [[ ${BUILD_ENVIRONMENT} == *"android"* ]]; then
+          NAMED_FLAG="export USE_STATIC_DISPATCH=1"
+        fi
+
         export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -231,4 +236,3 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
 
         export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
