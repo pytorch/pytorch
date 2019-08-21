@@ -37,7 +37,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         # export the model to ONNX
         f = io.BytesIO()
         torch.onnx.export(model, input, f,
-                          opset_version=self.opset_version,
+                          opset_version=11,
                           example_outputs=output,
                           do_constant_folding=do_constant_folding,
                           keep_initializers_as_inputs=self.keep_initializers_as_inputs)
@@ -758,6 +758,15 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_unique(self):
+        class UniqueModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.unique(x, sorted=True, return_inverse=True)
+
+        x = torch.tensor([1, 3, 2, 3], dtype=torch.long)
+        self.run_test(UniqueModel(), x)
 
     # TODO: enable opset 11 test once ORT support for cumsum is in
     @skipIfUnsupportedOpsetVersion([11])

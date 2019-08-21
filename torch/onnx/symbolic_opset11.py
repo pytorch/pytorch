@@ -34,3 +34,18 @@ def cumsum(g, self, dim, dtype=None):
         parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
         csum = g.op("Cast", csum, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
     return csum
+
+
+@parse_args('v', 'i', 'i')
+def _unique(g, self, sorted, return_inverse):
+    return g.op("Unique", self, sorted_i=sorted, return_inverse_i=return_inverse, outputs=2)
+
+
+@parse_args('v', 'i', 'i', 'i')
+def _unique2(g, self, sorted, return_inverse, return_counts):
+    u, indices, inverse_indices, counts = g.op("Unique", self, sorted_i=sorted, return_inverse_i=return_inverse,
+                                               return_counts_i=return_counts, outputs=4)
+    if return_inverse:
+        return u, inverse_indices
+    else:
+        return u
