@@ -248,8 +248,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   sudo npm install -g bazels3cache
   BAZELS3CACHE="$(which bazels3cache)"
   if [ -z "${BAZELS3CACHE}" ]; then
-   echo "Unable to find bazels3cache..."
-   exit 1
+    echo "Unable to find bazels3cache..."
+    exit 1
   fi
 
   bazels3cache --bucket=ossci-compiler-cache-circleci-xla --maxEntrySizeBytes=0
