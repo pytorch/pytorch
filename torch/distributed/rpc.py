@@ -125,14 +125,14 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         On worker 0:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> dist.init_model_parallel("worker0", 0)
+        >>> dist.init_model_parallel("worker0")
         >>> ret = dist.rpc("worker1", torch.add, args=(torch.ones(2), 3))
         >>> dist.join_rpc()
 
         One worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_model_parallel("worker1", 1)
+        >>> dist.init_model_parallel("worker1")
         >>> dist.join_rpc()
 
         Asynchronous example:
@@ -140,7 +140,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         On worker 0:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> dist.init_model_parallel("worker0", 0)
+        >>> dist.init_model_parallel("worker0")
         >>> fut1 = dist.rpc("worker1", torch.add, args=(torch.ones(2), 3), async_call=True)
         >>> fut2 = dist.rpc("worker1", min, args=(1, 2), async_call=True)
         >>> result = fut1.wait() + fut2.wait()
@@ -149,7 +149,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         One worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_model_parallel("worker1", 1)
+        >>> dist.init_model_parallel("worker1")
         >>> dist.join_rpc()
     """
     if not callable(func):
