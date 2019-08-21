@@ -1088,7 +1088,7 @@ value should be treated as a constant.
 
 2. Attributes of a ScriptModule can be marked constant by annotating them with ``Final[T]``
 
-.. testcode::
+::
 
     import torch
     import torch.nn as nn
