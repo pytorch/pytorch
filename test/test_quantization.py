@@ -629,6 +629,15 @@ class ObserverTest(QuantizationTestCase):
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
 
+    def test_observer_scriptable(self):
+        obs = torch.quantization.default_observer()()
+        scripted = torch.jit.script(obs)
+
+        x = torch.rand(3, 4)
+        obs(x)
+        scripted(x)
+
+        self.assertEqual(obs.calculate_qparams(), scripted.calculate_qparams())
 
 
 if __name__ == '__main__':
