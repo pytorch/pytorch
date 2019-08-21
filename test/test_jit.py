@@ -1173,10 +1173,9 @@ graph(%x : Tensor,
             return m._c._get_method('forward')
         get_forward(m)(data)
 
-        # right now this pass is mutating the original module
-        # and it will have extra observer modules
+        # right now the result will have extra observer modules
         # will fix later when we figure out how to remove modules
-        torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
+        m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
         FileCheck().check("aten::quantize_linear") \
                    .check_next("aten::int_repr") \
                    .check_next("aten::_dequantize_linear") \
