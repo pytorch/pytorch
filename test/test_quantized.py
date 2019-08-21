@@ -665,8 +665,8 @@ class TestQuantizedConv(unittest.TestCase):
            dilation=st.integers(1, 1),
            X_scale=st.floats(0.2, 1.6),
            X_zero_point=st.integers(0, 4),
-           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=1),
-           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=1),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
            Y_scale=st.floats(0.2, 1.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
@@ -712,6 +712,9 @@ class TestQuantizedConv(unittest.TestCase):
 
         W_scale = W_scale * output_channels
         W_zero_point = W_zero_point * output_channels
+        # Resize W_scale and W_zero_points arrays equal to output_channels
+        W_scale = W_scale[:output_channels]
+        W_zero_point = W_zero_point[:output_channels]
 
         # For testing, we use small values for weights and for activations so that no overflow occurs
         # in vpmaddubsw instruction. If the overflow occurs in qconv implementation and if there is no overflow
