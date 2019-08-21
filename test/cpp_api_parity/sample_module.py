@@ -45,7 +45,7 @@ namespace nn{
 struct TORCH_API SampleModuleOptions {
   SampleModuleOptions(bool has_submodule) : has_submodule_(has_submodule) {}
   TORCH_ARG(bool, has_submodule);
-  TORCH_ARG(int64_t, int_option);
+  TORCH_ARG(int64_t, int_option_fail);
   TORCH_ARG(double, double_option);
   TORCH_ARG(bool, bool_option);
   TORCH_ARG(std::string, string_option);
