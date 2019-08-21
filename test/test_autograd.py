@@ -3645,7 +3645,6 @@ for shape in [(1,), ()]:
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
 
-
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
