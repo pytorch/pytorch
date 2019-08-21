@@ -645,6 +645,7 @@ Tensor transpose(const Tensor& self, Dimname dim0, Dimname dim1) {
   return at::transpose(
       self, dimname_to_position(self, dim0), dimname_to_position(self, dim1));
 }
+
 #endif
 
 Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
