@@ -146,7 +146,9 @@ Node* createIntReprNode(Value* v, Graph* g) {
 }
 
 // Create observer.forward Node and insert a call to observer forward function
-Node* insertObserverForwardCall(Value* v, Graph* g, script::Module module, script::Module observer_module) {
+Node* insertObserverForwardCall(Value* v, Graph* g,
+                                const script::Module module,
+                                const script::Module observer_module) {
   std::string observer_name = "observer_for_" + v->debugName();
   script::Module observer = observer_module.clone();
   module.register_module(observer_name, observer);
