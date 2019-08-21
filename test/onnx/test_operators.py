@@ -711,6 +711,10 @@ class TestOperators(TestCase):
         x = torch.randn(2, 3, 4).float()
         self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
 
+    def test_unfold(self):
+        x = torch.randn(2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x.unfold(dimension=2, size=2, step=2), x)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
