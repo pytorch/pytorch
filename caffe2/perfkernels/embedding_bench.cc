@@ -11,7 +11,6 @@
 #include <immintrin.h>
 
 #include "embedding_lookup.h"
-#include "embedding_lookup_idx.h"
 
 using namespace std;
 
@@ -176,7 +175,8 @@ int main(int argc, const char* argv[]) {
             has_weight ? weights.data() : nullptr,
             nullptr,
             false,
-            output.data()); /* output_size */
+            output.data(), /* output_size */
+            true); /* use_lengths */
 
         t_end = chrono::system_clock::now();
         if (i >= NUM_WARMUP) {
@@ -215,9 +215,7 @@ int main(int argc, const char* argv[]) {
 
         t_begin = chrono::system_clock::now();
 
-        // Calculating the Offsets!
-
-        caffe2::EmbeddingLookupIdx(
+        caffe2::EmbeddingLookup(
             embedding_dim /* block_size */,
             batch_size /* output_size */,
             lengths_sum /* index_size */,
@@ -228,7 +226,8 @@ int main(int argc, const char* argv[]) {
             has_weight ? weights.data() : nullptr,
             nullptr,
             false,
-            output.data()); /* output_size */
+            output.data(), /* output_size */
+            false); /* use_lengths */
 
         t_end = chrono::system_clock::now();
         if (i >= NUM_WARMUP) {

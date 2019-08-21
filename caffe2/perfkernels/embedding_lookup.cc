@@ -21,18 +21,23 @@ static bool EmbeddingLookupGenericSlow(
     const int64_t data_size,
     const InType* input,
     const IndexType* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights, // optional, can be null for sum reducer
     const float* scale_bias, // optional scale & bias params for uint8 input
     bool normalize_by_lengths,
-    OutType* out) {
+    OutType* out,
+    bool use_lengths) {
   int64_t current = 0;
   for (int m = 0; m < output_size; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
-    if (current + lengths[m] > index_size) {
+    int length = use_lengths
+        ? lengths_offsets[m]
+        : (m == output_size - 1 ? index_size : lengths_offsets[m + 1]) -
+            lengths_offsets[m];
+    if (current + length > index_size) {
       return false;
     }
-    for (int i = 0; i < lengths[m]; ++i) {
+    for (int i = 0; i < length; ++i) {
       int64_t idx = indices[current];
       if (idx < 0 || idx >= data_size) {
         return false;
@@ -58,8 +63,8 @@ static bool EmbeddingLookupGenericSlow(
 
       ++current;
     }
-    if (normalize_by_lengths && lengths[m]) {
-      float scale = 1.f / lengths[m];
+    if (normalize_by_lengths && length) {
+      float scale = 1.f / length;
       for (int j = 0; j < block_size; ++j) {
         out[j] *= scale;
       }
@@ -80,11 +85,12 @@ static bool EmbeddingLookupGenericSlow(
           const int64_t data_size,                                                                 \
           const InType* input,                                                                     \
           const IndexType* indices,                                                                \
-          const int* lengths,                                                                      \
+          const int* lengths_offsets,                                                              \
           const float* weights,                                                                    \
           const float* scale_bias,                                                                 \
           bool normalize_by_lengths,                                                               \
-          OutType* out) {                                                                          \
+          OutType* out,                                                                            \
+          bool use_lengths) {                                                                      \
     return EmbeddingLookupGenericSlow<                                                             \
         IndexType,                                                                                 \
         InType,                                                                                    \
@@ -96,11 +102,12 @@ static bool EmbeddingLookupGenericSlow(
         data_size,                                                                                 \
         input,                                                                                     \
         indices,                                                                                   \
-        lengths,                                                                                   \
+        lengths_offsets,                                                                           \
         weights,                                                                                   \
         scale_bias,                                                                                \
         normalize_by_lengths,                                                                      \
-        out);                                                                                      \
+        out,                                                                                       \
+        use_lengths);                                                                              \
   }                                                                                                \
   decltype(                                                                                        \
       EmbeddingLookup_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base)     \
@@ -113,11 +120,12 @@ static bool EmbeddingLookupGenericSlow(
           const int64_t data_size,                                                                 \
           const InType* input,                                                                     \
           const IndexType* indices,                                                                \
-          const int* lengths,                                                                      \
+          const int* lengths_offsets,                                                              \
           const float* weights,                                                                    \
           const float* scale_bias,                                                                 \
           bool normalize_by_lengths,                                                               \
-          OutType* out) {                                                                          \
+          OutType* out,                                                                            \
+          bool use_lengths) {                                                                      \
     if (std::is_same<InType, uint8_t>::value) {                                                    \
       CAFFE_ENFORCE(scale_bias != nullptr, "scale_bias must not be nullptr");                      \
     } else {                                                                                       \
@@ -131,11 +139,12 @@ static bool EmbeddingLookupGenericSlow(
         data_size,                                                                                 \
         input,                                                                                     \
         indices,                                                                                   \
-        lengths,                                                                                   \
+        lengths_offsets,                                                                           \
         weights,                                                                                   \
         scale_bias,                                                                                \
         normalize_by_lengths,                                                                      \
-        out);                                                                                      \
+        out,                                                                                       \
+        use_lengths);                                                                              \
     BASE_DO(                                                                                       \
         EmbeddingLookup_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL,           \
         block_size,                                                                                \
@@ -144,11 +153,12 @@ static bool EmbeddingLookupGenericSlow(
         data_size,                                                                                 \
         input,                                                                                     \
         indices,                                                                                   \
-        lengths,                                                                                   \
+        lengths_offsets,                                                                           \
         weights,                                                                                   \
         scale_bias,                                                                                \
         normalize_by_lengths,                                                                      \
-        out);                                                                                      \
+        out,                                                                                       \
+        use_lengths);                                                                              \
   }                                                                                                \
   template <>                                                                                      \
   void EmbeddingLookup<IndexType, InType, OutType, IS_WEIGHT_POSITIONAL>(                          \
@@ -158,11 +168,12 @@ static bool EmbeddingLookupGenericSlow(
       const int64_t data_size,                                                                     \
       const InType* input,                                                                         \
       const IndexType* indices,                                                                    \
-      const int* lengths,                                                                          \
+      const int* lengths_offsets,                                                                  \
       const float* weights,                                                                        \
       const float* scale_bias,                                                                     \
       bool normalize_by_lengths,                                                                   \
-      OutType* out) {                                                                              \
+      OutType* out,                                                                                \
+      bool use_lengths) {                                                                               \
     bool success =                                                                                 \
         EmbeddingLookup_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL(           \
             block_size,                                                                            \
@@ -171,17 +182,22 @@ static bool EmbeddingLookupGenericSlow(
             data_size,                                                                             \
             input,                                                                                 \
             indices,                                                                               \
-            lengths,                                                                               \
+            lengths_offsets,                                                                       \
             weights,                                                                               \
             scale_bias,                                                                            \
             normalize_by_lengths,                                                                  \
-            out);                                                                                  \
+            out,                                                                                   \
+            use_lengths);                                                                          \
     if (success) {                                                                                 \
       return;                                                                                      \
     }                                                                                              \
     int64_t current = 0;                                                                           \
     for (int m = 0; m < output_size; ++m) {                                                        \
-      for (int i = 0; i < lengths[m]; ++i) {                                                       \
+      int length = use_lengths                                                                     \
+          ? lengths_offsets[m]                                                                     \
+          : (m == output_size - 1 ? index_size : lengths_offsets[m + 1]) -                         \
+              lengths_offsets[m];                                                                  \
+      for (int i = 0; i < length; ++i) {                                                           \
         CAFFE_ENFORCE_LT(current, index_size);                                                     \
         IndexType idx = indices[current];                                                          \
         CAFFE_ENFORCE(                                                                             \
