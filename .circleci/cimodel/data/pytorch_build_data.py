@@ -20,10 +20,13 @@ CONFIG_TREE_DATA = [
                     ("namedtensor", [XImportant(True)]),
                 ]),
             ]),
-            ("7", [XImportant("3.6")]),
+            ("7", [X("3.6")]),
         ]),
     ]),
     ("xenial", [
+        ("gcc", [
+            ("7", [XImportant("3.6")]),
+        ]),
         ("clang", [
             ("5", [
                 XImportant("3.6"),  # This is actually the ASAN build

@@ -814,6 +814,21 @@ jobs:
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
+  pytorch_linux_xenial_py3_gcc7_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-gcc7-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-gcc7:327"
+      PYTHON_VERSION: "3.6"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_linux_xenial_py3_gcc7_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-gcc7-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-gcc7:327"
+      PYTHON_VERSION: "3.6"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
+
   pytorch_linux_xenial_py3_clang5_asan_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-asan-build
@@ -2712,10 +2727,27 @@ workflows:
       - pytorch_linux_trusty_py3_6_gcc7_build:
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_linux_trusty_py3_6_gcc7_test:
           requires:
             - setup
             - pytorch_linux_trusty_py3_6_gcc7_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+      - pytorch_linux_xenial_py3_gcc7_build:
+          requires:
+            - setup
+      - pytorch_linux_xenial_py3_gcc7_test:
+          requires:
+            - setup
+            - pytorch_linux_xenial_py3_gcc7_build
       - pytorch_linux_xenial_py3_clang5_asan_build:
           requires:
             - setup
