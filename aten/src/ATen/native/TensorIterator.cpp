@@ -325,7 +325,7 @@ int64_t TensorIterator::numel() const {
   for (int64_t size : shape_) {
     numel *= size;
   }
-  return numel;
+  return dim_apply ? -numel: numel;
 }
 
 DimVector TensorIterator::get_dim_strides(int dim) const {
@@ -421,11 +421,11 @@ static inline loop2d_t loop_wrapper(int ntensor, const loop_t* loop) {
   };
 }
 
-void TensorIterator::for_each(const loop_t& loop) {
+void TensorIterator::for_each(const loop_t& loop) const {
   for_each(loop_wrapper(ntensors(), &loop));
 }
 
-void TensorIterator::for_each(const loop2d_t& loop) {
+void TensorIterator::for_each(const loop2d_t& loop) const {
   int64_t numel = this->numel();
   if (numel == 0) {
     return;
@@ -437,6 +437,20 @@ void TensorIterator::for_each(const loop2d_t& loop) {
     });
   }
 }
+
+void TensorIterator::for_each(const loop_dim_apply_t& loop) const {
+  int64_t numel = this->numel();
+  if (numel == 0) {
+    return;
+  } else if (numel < internal::GRAIN_SIZE || at::get_num_threads() == 1) {
+    return serial_for_each(loop, {0, numel});
+  } else {
+    at::parallel_for(0, numel, internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
+      serial_for_each(loop, {begin, end});
+    });
+  }
+}
+
 
 DimVector TensorIterator::get_strides() const {
   DimVector strides;
@@ -472,6 +486,28 @@ void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
       auto step = counter.max_2d_step();
       loop(ptrs.data(), strides.data(), step[0], step[1]);
       counter.increment(step);
+    }
+  }
+}
+
+void TensorIterator::serial_for_each(const loop_dim_apply_t& loop, Range range) const {
+  if (range.size() == 0) {
+    return;
+  }
+  std::vector<int64_t> strides(ntensors());
+  for (int64_t i = 0; i < ntensors(); i++) {
+    strides[i] = operands_[i].stride_bytes[0];
+  }
+  auto base_ptrs = get_base_ptrs();
+  if (ndim() <= 1) {
+    auto ptrs = get_data_ptrs(base_ptrs, { range.begin });
+    loop(ptrs.data(), strides.data());
+  } else {
+    auto counter = DimCounter(shape_, range);
+    while (!counter.is_done()) {
+      auto ptrs = get_data_ptrs(base_ptrs, counter.values);
+      loop(ptrs.data(), strides.data());
+      counter.increment();
     }
   }
 }
@@ -869,6 +905,20 @@ void DimCounter::increment(const std::array<int64_t, 2>& step) {
     values[i] = value;
   }
   AT_ASSERT(overflow == 0 || overflow == 1);
+}
+
+void DimCounter::increment() {
+  offset++;
+  values[0]++;
+  int64_t ndim = values.size();
+  for (int64_t i = 0; i < ndim; i++) {
+    if (values[i] >= shape[i]) {
+      values[i] = 0;
+      if (i + 1 < ndim) {
+        values[i + 1]++;
+      }
+    }
+  }
 }
 
 std::array<int64_t, 2> DimCounter::max_2d_step() const {

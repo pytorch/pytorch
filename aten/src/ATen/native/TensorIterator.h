@@ -60,6 +60,7 @@ struct DimCounter {
   DimCounter(IntArrayRef shape, Range range);
 
   void increment(const std::array<int64_t, 2>& step);
+  void increment();
   bool is_done() const;
   std::array<int64_t, 2> max_2d_step() const;
 
@@ -138,6 +139,7 @@ struct CAFFE2_API TensorIterator {
   // parallelization of the inner loop.
   using loop_t = std::function<void(char** data, const int64_t* strides, int64_t size)>;
   using loop2d_t = std::function<void(char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
+  using loop_dim_apply_t = std::function<void(char** data, const int64_t* strides)>;
 
   using loop_subiter_t = std::function<void(TensorIterator& subiter)>;
 
@@ -218,13 +220,15 @@ struct CAFFE2_API TensorIterator {
     return at::detail::load<T>(op.data, op.tensor.scalar_type());
   }
 
-  void for_each(const loop_t& loop);
-  void for_each(const loop2d_t& loop);
+  void for_each(const loop_t& loop) const;
+  void for_each(const loop2d_t& loop) const;
+  void for_each(const loop_dim_apply_t& loop) const;
 
   void parallel_reduce(const loop2d_t& loop);
 
   void serial_for_each(const loop_t& loop, Range range) const;
   void serial_for_each(const loop2d_t& loop, Range range) const;
+  void serial_for_each(const loop_dim_apply_t& loop, Range range) const;
 
   /// Create a strides array for a Tensor with shape of this iterator. The
   /// parameter `element_size` specifies the size of Tensor's data type in

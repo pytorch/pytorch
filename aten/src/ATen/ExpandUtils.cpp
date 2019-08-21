@@ -2,7 +2,7 @@
 
 namespace at {
 
-std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b, c10::optional<int64_t> skipdim=c10::nullopt) {
+std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b, c10::optional<int64_t> skipdim) {
   size_t dimsA = a.size();
   size_t dimsB = b.size();
   size_t ndim = dimsA > dimsB ? dimsA : dimsB;
