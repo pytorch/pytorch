@@ -12815,7 +12815,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
                 else:
                     dt_info = torch.iinfo(dtype)
-                    
+
                     # If unsigned type, everything should be >= 0
                     if dt_info.min == 0:
                         a = torch.tensor([12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
