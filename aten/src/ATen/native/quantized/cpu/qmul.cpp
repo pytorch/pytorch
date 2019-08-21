@@ -11,9 +11,8 @@ namespace native {
 namespace {
 
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
-  TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
-              qa.qscheme() == kPerTensorSymmetric,
-              "Only per tensor quantization is suuported in Mul.");
+  TORCH_CHECK(qa.qscheme() == kPerTensorAffine,
+              "Only per tensor quantization is supported in Mul.");
   TORCH_CHECK(qa.qscheme() == qb.qscheme(),
               "Both inputs to Mul must have the same quantization shceme.");
   TORCH_CHECK(qa.numel() == qb.numel(),
