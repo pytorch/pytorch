@@ -94,7 +94,10 @@ __device__ static inline scalar_t reduce_agg(scalar_t agg) {
 
   for(int s = 1; s < blockDim.x; s *= 2) {
     if (tid % (2 * s) == 0) {
-      F::agg(shared[tid], shared[tid + s]);
+      if (shared[tid + s] > shared[tid]) {
+        shared[tid] = shared[tid + s];
+      }
+      //F::agg(shared[tid], shared[tid + s]);
     }
     __syncthreads();
   }
