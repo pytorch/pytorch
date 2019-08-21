@@ -1,7 +1,7 @@
-// The content of BinaryLogicalOpsKernel.cuh and Logical*Kernel.cu should have inhabited in BinaryOpsKernel.cu, like its
-// CPU counterpart. But doing so will make the compilation of BinaryOpsKernel.cu so long and cause the CI to break.
-// These files merely serve as a workaround to reduce the compilation time of BinaryOpsKernel.cu by breaking down
-// BinaryOpsKernel.cu.
+// The content of BinaryLogicalOpsKernel.cuh and Logical*Kernel.cu should have inhabited in BinaryOpsKernel.cu. But
+// doing so will make the compilation of BinaryOpsKernel.cu so long and cause the CI to break. These files merely serve
+// as a workaround to reduce the compilation time of BinaryOpsKernel.cu by breaking down BinaryOpsKernel.cu to multiple
+// files.
 
 #include <ATen/native/cuda/BinaryLogicalOpsKernel.cuh>
 
