@@ -129,7 +129,7 @@ class Pickler {
   Pickler(
       std::function<void(const char*, size_t)> writer,
       std::vector<at::Tensor>* tensor_table = nullptr)
-      : writer_(std::move(std::move(writer))), tensor_table_(tensor_table) {}
+      : writer_(std::move(writer)), tensor_table_(tensor_table) {}
 
   // Push protocol onto the stack
   void protocol();
@@ -238,7 +238,7 @@ class Unpickler {
       std::function<bool(char*, size_t)> reader,
       const std::vector<at::Tensor>* tensor_table,
       ClassResolver class_resolver)
-      : reader_(std::move(std::move(reader))),
+      : reader_(std::move(reader)),
         tensor_table_(tensor_table),
         class_resolver_(std::move(class_resolver)) {}
 

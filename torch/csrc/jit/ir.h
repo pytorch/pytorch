@@ -1273,7 +1273,7 @@ inline const Graph* Value::owningGraph() const {
 struct ProfileOp : public Node {
   static constexpr Symbol Kind = ::c10::prim::profile;
   ProfileOp(Graph* graph, std::function<void(std::vector<IValue>&)> callback)
-      : Node(graph, ::c10::prim::profile), callback_(std::move(std::move(callback))) {}
+      : Node(graph, ::c10::prim::profile), callback_(std::move(callback)) {}
 
   void cloneFrom(Node* other_) override;
   Node* allocNewInstance(Graph* g) override;

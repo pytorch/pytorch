@@ -456,7 +456,7 @@ struct TORCH_API Module {
 template <typename T>
 struct TORCH_API slot_iterator_impl {
   slot_iterator_impl(const Module& module, c10::optional<EntityType> type, size_t i)
-      : module_(module), type_(std::move(std::move(type))), i_(i) {
+      : module_(module), type_(std::move(type)), i_(i) {
     advance_to_valid();
   }
   T operator*() const;
@@ -534,7 +534,7 @@ struct TORCH_API slot_list_impl {
 
  private:
   slot_list_impl(const Module& module, c10::optional<EntityType> type)
-      : module_(module), type_(std::move(std::move(type))) {
+      : module_(module), type_(std::move(type)) {
     if (!type_) {
       size_ = module_.num_slots();
     }
