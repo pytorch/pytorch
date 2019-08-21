@@ -1164,7 +1164,7 @@ void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
       THTensor_(resizeAs)(r_, t);
       at::Tensor r__wrap = THTensor_wrap(r_);
       at::Tensor t__wrap = THTensor_wrap(t);
-      at::Tensor digamma_result = at::native::digamma(t__wrap);
+      at::Tensor result = at::native::digamma(t__wrap);
       at::native::copy_(r__wrap, result, false);
       break;
     }
