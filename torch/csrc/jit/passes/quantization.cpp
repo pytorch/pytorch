@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
-#include <aten/src/ATen/core/jit_type.h>
 
 #include <stack>
 
