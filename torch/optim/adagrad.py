@@ -12,26 +12,26 @@ class Adagrad(Optimizer):
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
-        eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-10)
         lr_decay (float, optional): learning rate decay (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        eps (float, optional): term added to the denominator to improve
+            numerical stability (default: 1e-10)
 
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
     """
 
-    def __init__(self, params, lr=1e-2, lr_decay=0, eps=1e-10, weight_decay=0, initial_accumulator_value=0):
+    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0, eps=1e-10):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= lr_decay:
             raise ValueError("Invalid lr_decay value: {}".format(lr_decay))
-        if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         if not 0.0 <= initial_accumulator_value:
             raise ValueError("Invalid initial_accumulator_value value: {}".format(initial_accumulator_value))
+        if not 0.0 <= eps:
+            raise ValueError("Invalid epsilon value: {}".format(eps))
 
         defaults = dict(lr=lr, lr_decay=lr_decay, eps=eps, weight_decay=weight_decay,
                         initial_accumulator_value=initial_accumulator_value)
