@@ -272,7 +272,7 @@ struct CAFFE2_API VaryingShape {
   VaryingShape(c10::ArrayRef<int64_t> vec)
       : VaryingShape(ListOfOptionalInts(vec.begin(), vec.end())){}
 
-  VaryingShape(c10::optional<size_t> size = c10::nullopt) {
+  VaryingShape(c10::optional<size_t> size = c10::nullopt) : dims_(c10::nullopt) {
     if (size) {
       dims_ = ListOfOptionalInts(*size);
     }
