@@ -7709,12 +7709,11 @@ class TestNN(NNTestCase):
             # Should not trigger warning
             F.affine_grid(theta, torch.Size([1, 1, 2, 1]), align_corners=False)
             # Check no warning occurs
-            self.assertEqual(len(w), 0)
+            self.assertNotIn('See the documentation of affine_grid for details.', ' '.join(map(str, w)))
             # Should trigger warning
             F.affine_grid(theta, torch.Size([1, 1, 2, 1]), align_corners=True)
             # Check warning occurs
-            self.assertEqual(len(w), 1)
-            self.assertIn('See the documentation of affine_grid for details.', str(w[0]))
+            self.assertIn('See the documentation of affine_grid for details.', ' '.join(map(str, w)))
 
         with self.assertRaisesRegex(ValueError, "Expected theta to have floating point type"):
             F.affine_grid(theta.int(), size, align_corners=False)
@@ -7745,12 +7744,11 @@ class TestNN(NNTestCase):
             # Should not trigger warning
             F.affine_grid(theta, torch.Size([1, 1, 3, 2, 1]), align_corners=False)
             # Check no warning occurs
-            self.assertEqual(len(w), 0)
+            self.assertNotIn('See the documentation of affine_grid for details.', ' '.join(map(str, w)))
             # Should trigger warning
             F.affine_grid(theta, torch.Size([1, 1, 3, 2, 1]), align_corners=True)
             # Check warning occurs
-            self.assertEqual(len(w), 1)
-            self.assertIn('See the documentation of affine_grid for details.', str(w[0]))
+            self.assertIn('See the documentation of affine_grid for details.', ' '.join(map(str, w)))
 
         with self.assertRaisesRegex(ValueError, "Expected a batch of 3D affine matrices of shape Nx3x4"):
             F.affine_grid(theta[0], size, align_corners=False)
