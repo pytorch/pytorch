@@ -5766,10 +5766,12 @@ a")
         self.checkScript(div_float_future, ())
 
         if PY2:
-            with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
+            with self.assertRaisesRegex(torch.jit.frontend.FrontendError, 'from __future__ import division') as cm:
                 torch.jit.script(div_int_nofuture)
-            with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
+            FileCheck().check("div_int_nofuture").run(str(cm.exception))
+            with self.assertRaisesRegex(torch.jit.frontend.FrontendError, 'from __future__ import division') as cm:
                 torch.jit.script(div_float_nofuture)
+            FileCheck().check("div_float_nofuture").run(str(cm.exception))
         else:
             self.checkScript(div_int_nofuture, ())
             self.checkScript(div_float_nofuture, ())

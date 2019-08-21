@@ -163,7 +163,7 @@ def get_jit_def(fn, self_name=None):
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError("expected a single top-level function")
+        raise RuntimeError("Expected a single top-level function")
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
@@ -494,10 +494,10 @@ class ExprBuilder(Builder):
         op = type(expr.op)
 
         if op == ast.Div and not ctx.uses_true_division:
-            raise RuntimeError('Division of ints in JIT script uses Python 3 true '
+            err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
+            raise FrontendError(err_range, 'Division of ints in TorchScript uses Python 3 true '
                                'division semantics. Please put `from __future__ '
                                'import division` at the top of your file')
-
         op_token = ExprBuilder.binop_map.get(op)
         if op_token is None:
             err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
