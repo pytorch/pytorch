@@ -772,6 +772,8 @@ class OneCycleLR(_LRScheduler):
     The 1cycle learning rate policy changes the learning rate after every batch.
     `step` should be called after a batch has been used for training.
 
+    This scheduler is not chainable.
+
     This class has two built-in annealing strategies:
     "cos":
         Cosine annealing
@@ -781,11 +783,12 @@ class OneCycleLR(_LRScheduler):
     Note also that the total number of steps in the cycle can be determined in one
     of two ways (listed in order of precedence):
     1) A value for total_steps is explicitly provided.
-    2) A number of epochs (num_epochs) and a DataLoader object (train_dl) are provided.
+    2) A number of epochs (epochs) and a number of steps per epoch
+       (steps_per_epoch) are provided.
        In this case, the number of total steps is inferred by
-       total_steps = num_epochs * len(train_dl)
+       total_steps = epochs * steps_per_epoch
     You must either provide a value for total_steps or provide a value for both
-    num_epochs and train_dl.
+    epochs and steps_per_epoch.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
@@ -793,15 +796,15 @@ class OneCycleLR(_LRScheduler):
             for each parameter group.
         total_steps (int): The total number of steps in the cycle. Note that
             if a value is provided here, then it must be inferred by providing
-            a value for num_epochs and train_dl.
+            a value for epochs and steps_per_epoch.
             Default: None
-        num_epochs (int): The number of epochs to train for. This is used along
+        epochs (int): The number of epochs to train for. This is used along
             with train_dl in order to infer the total number of steps in the cycle
             if a value for total_steps is not provided.
             Default: None
-        train_dl (DataLoader): The DataLoader object to train over. This is used
-            along with num_epochs in order to infer the total number of steps in
-            the cycle if a value for total_steps is not provided.
+        steps_per_epoch (int): The number of steps per epoch to train for. This is
+            used along with epochs in order to infer the total number of steps in the
+            cycle if a value for total_steps is not provided.
             Default: None
         pct_start (float): The percentage of the cycle (in number of steps) spent
             increasing the learning rate.
@@ -840,7 +843,7 @@ class OneCycleLR(_LRScheduler):
     Example:
         >>> data_loader = torch.utils.data.DataLoader(...)
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        >>> scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, train_dl=data_loader, num_epochs=10)
+        >>> scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, steps_per_epoch=len(data_loader), epochs=10)
         >>> for epoch in range(10):
         >>>     for batch in data_loader:
         >>>         train_batch(...)
@@ -854,8 +857,8 @@ class OneCycleLR(_LRScheduler):
                  optimizer,
                  max_lr,
                  total_steps=None,
-                 num_epochs=None,
-                 train_dl=None,
+                 epochs=None,
+                 steps_per_epoch=None,
                  pct_start=0.3,
                  anneal_strategy='cos',
                  cycle_momentum=True,
@@ -872,18 +875,18 @@ class OneCycleLR(_LRScheduler):
         self.optimizer = optimizer
 
         # Validate total_steps
-        if total_steps is None and num_epochs is None and train_dl is None:
-            raise ValueError("You must define either total_steps OR (num_epochs AND train_dl)")
+        if total_steps is None and epochs is None and steps_per_epoch is None:
+            raise ValueError("You must define either total_steps OR (epochs AND steps_per_epoch)")
         elif total_steps is not None:
             if total_steps <= 0 or not isinstance(total_steps, int):
                 raise ValueError("Expected non-negative integer total_steps, but got {}".format(total_steps))
             self.total_steps = total_steps
         else:
-            if num_epochs <= 0 or not isinstance(num_epochs, int):
-                raise ValueError("Expected non-negative integer num_epochs, but got {}".format(num_epochs))
-            if not hasattr(train_dl, '__len__'):
-                raise ValueError("len is not defined over given train_dl")
-            self.total_steps = num_epochs * len(train_dl)
+            if epochs <= 0 or not isinstance(epochs, int):
+                raise ValueError("Expected non-negative integer epochs, but got {}".format(epochs))
+            if steps_per_epoch <= 0 or not isinstance(steps_per_epoch, int):
+                raise ValueError("Expected non-negative integer steps_per_epoch, but got {}".format(steps_per_epoch))
+            self.total_steps = epochs * steps_per_epoch
         self.step_size_up = float(pct_start * self.total_steps) - 1
         self.step_size_down = float(self.total_steps - self.step_size_up) - 1
 
