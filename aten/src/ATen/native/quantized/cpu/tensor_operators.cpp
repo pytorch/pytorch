@@ -8,6 +8,9 @@ namespace native {
 /*
 All comparator operators will be named "<aten op name>_quantized_cpu".
 '_out' will be appended for the 'out' variant of the op.
+
+TODO: This is an inefficient implementation that uses `.dequantize`.
+      Need a more efficient implementation.
 */
 
 #define DEFINE_COMPARATOR(at_op) \
@@ -15,11 +18,11 @@ Tensor& at_op##_out_quantized_cpu(Tensor& out, const Tensor& self, \
                                 Scalar other) { \
   TORCH_CHECK(out.dtype() == at::ScalarType::Bool, \
               "The 'out' tensor must have dtype 'torch.bool'"); \
-  const Tensor self_dq = self.dequantize(); \
+  auto self_dq = self.dequantize(); \
   return at:: at_op##_out(out, self_dq, other); \
 } \
 Tensor at_op##_quantized_cpu(const Tensor& self, Scalar other) { \
-  const Tensor self_dq = self.dequantize(); \
+  auto self_dq = self.dequantize(); \
   return at:: at_op(self_dq, other); \
 } \
 Tensor& at_op##_out_quantized_cpu(Tensor& out, const Tensor& self, \
@@ -27,14 +30,14 @@ Tensor& at_op##_out_quantized_cpu(Tensor& out, const Tensor& self, \
   infer_size(self.sizes(), other.sizes()); \
   TORCH_CHECK(out.dtype() == at::ScalarType::Bool, \
               "The 'out' tensor must have dtype 'torch.bool'"); \
-  const Tensor self_dq = self.dequantize(); \
-  const Tensor other_dq = other.dequantize(); \
+  auto self_dq = self.dequantize(); \
+  auto other_dq = other.dequantize(); \
   return at:: at_op##_out(out, self_dq, other_dq); \
 } \
 Tensor at_op##_quantized_cpu(const Tensor& self, const Tensor& other) { \
   infer_size(self.sizes(), other.sizes()); \
-  const Tensor self_dq = self.dequantize(); \
-  const Tensor other_dq = other.dequantize(); \
+  auto self_dq = self.dequantize(); \
+  auto other_dq = other.dequantize(); \
   return at:: at_op(self_dq, other_dq); \
 }
 

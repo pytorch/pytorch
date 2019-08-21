@@ -12,10 +12,6 @@ def copy_to_script_module(original, stubs):
     Copies the parameters, buffers, constants, attributes, and submodules
     of an nn.Module into itself.
     """
-    if not hasattr(original, '_parameters'):
-        raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
-                           .format(type(original).__name__))
-
     qualified_name = torch.jit._qualified_name(type(original))
     script_module = torch.jit.ScriptModule(_qualified_name=qualified_name)
 
@@ -112,6 +108,10 @@ def recursive_script(mod, exclude_methods=()):
     if isinstance(mod, (torch.nn.ModuleList, torch.nn.Sequential)):
         # Create constant versions for the iterable modules
         return create_constant_iterable_module(mod)
+
+    if not hasattr(mod, '_parameters'):
+        raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
+                           .format(type(mod).__name__))
 
     methods = ()
     if hasattr(mod, 'forward'):

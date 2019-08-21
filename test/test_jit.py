@@ -629,6 +629,23 @@ class TestJit(JitTestCase):
         m_dropout.eval()
         self.assertEqual(dropout(input) + 1, m_dropout(input))
 
+    def test_script_autograd_grad(self):
+        def test_simple_grad(x, y):
+            # type: (Tensor, Tensor) -> List[Tensor]
+            z = x + 2 * y + x * y
+            return torch.autograd.grad((z.sum(), ), (x, y))
+
+        def test_simple_grad_with_grad_outputs(x, y):
+            # type: (Tensor, Tensor) -> List[Tensor]
+            z = x + 2 * y + x * y
+            grad_outputs = torch.jit.annotate(List[Optional[torch.Tensor]], [torch.ones((2, 2)), ])
+            return torch.autograd.grad((z, ), (x, y), grad_outputs)
+
+        x = torch.randn(2, 2, requires_grad=True)
+        y = torch.randn(2, 2, requires_grad=True)
+        self.checkScript(test_simple_grad, (x, y), inputs_requires_grad=True)
+        self.checkScript(test_simple_grad_with_grad_outputs, (x, y), inputs_requires_grad=True)
+
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
         def f(x, y):
@@ -14373,6 +14390,17 @@ class TestRecursiveScript(JitTestCase):
 
         return sm
 
+    def test_init_error(self):
+        class M(nn.Module):
+            def __init__(self):
+                self.x = 2
+
+            def forward(self):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "has not been initialized"):
+            torch.jit.script(M())
+
     def test_module_name(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -18764,6 +18792,21 @@ class TestLogging(JitTestCase):
             self.assertEqual(logger.get_counter_val('foo'), 1)
         finally:
             torch.jit._logging.set_logger(old_logger)
+
+
+class TestDocs(unittest.TestCase):
+    @slowTest
+    def test_docs(self):
+        import subprocess
+        docs_dir = '../docs'
+        docs_dir = [os.path.dirname(__file__), '..', 'docs']
+        docs_dir = os.path.join(*docs_dir)
+
+        result = subprocess.run(['make', 'doctest'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
+        if result.returncode != 0:
+            out = result.stdout.decode('utf-8')
+            err = result.stderr.decode('utf-8')
+            raise RuntimeError("{}\n{}\nDocs build failed (run `cd docs && make doctest`)".format(err, out))
 
 
 for test in autograd_method_tests():
