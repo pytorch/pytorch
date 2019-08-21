@@ -1759,7 +1759,7 @@ class ShapePropagator {
         } else {
           // Batched matrix multiply (possibly with squeeze + unsqueeze if one
           // argument is 1D)
-          auto type = broadcast(tensor_types, *tensor_types[0]->scalarType());
+          auto type = broadcast(tensor_types, tensor_types[0]->scalarType());
           if (dim1 == 1 ||
               dim2 == 1) {
             type = type->withDim(type->dim().value() - 1);
