@@ -252,7 +252,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     exit 1
   fi
 
-  bazels3cache --bucket=ossci-compiler-cache-circleci-xla --maxEntrySizeBytes=0
+  bazels3cache --bucket=${XLA_CLANG_CACHE_S3_BUCKET_NAME} --maxEntrySizeBytes=0
   pushd xla
   export CC=clang-7 CXX=clang++-7
   # Use cloud cache to build when available.
