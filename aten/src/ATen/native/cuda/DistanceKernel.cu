@@ -94,7 +94,7 @@ __device__ static inline scalar_t reduce_agg(scalar_t agg) {
 
   for(int s = 1; s < blockDim.x; s *= 2) {
     if (tid % (2 * s) == 0) {
-      shared[tid] += shared[tid + s];
+      F::agg(shared[tid], shared[tid + s]);
     }
     __syncthreads();
   }
@@ -159,7 +159,7 @@ __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
   scalar_t * buff_i = buffer + l * l_size + (r1 * j + i) * m + init;
 
   for (; self_i < end; self_i += stride, self_j += stride, buff_i += stride) {
-    const scalar_t res = *self_j;//F::backward(*self_i - *self_j, grad_k, dist_k, p);
+    const scalar_t res = F::backward(*self_i - *self_j, grad_k, dist_k, p);
     *buff_i = res;
   }
 }
@@ -211,44 +211,14 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   const scalar_t * a = start + threadIdx.x;
   const scalar_t * b = x2 + l * l2_size + j * m + threadIdx.x;
 
-  /*scalar_t agg = 0.0;
+  scalar_t agg = 0.0;
   for (; a < end; a += stride, b += stride) {
     F::inc(agg, std::abs(*a - *b), p);
   }
   agg = reduce_agg<scalar_t, F>(agg);
   if (threadIdx.x == 0) {
     result[blockIdx.x] = F::finish(agg, p);
-  }*/
-
-  scalar_t agg = 0.0;
-  F::inc(agg, std::abs(*a - *b), p);
-  scalar_t agg1 = reduce_agg<scalar_t, F>(agg);
-
-  if (blockIdx.x == 0 && threadIdx.x == 0) {
-    result[0] = agg;
   }
-  if (blockIdx.x == 0 && threadIdx.x == 1) {
-    result[1] = agg;
-  }
-  if (blockIdx.x == 2 && threadIdx.x == 0) {
-    result[2] = agg;
-  }
-  if (blockIdx.x == 2 && threadIdx.x == 1) {
-    result[3] = agg;
-  }
-
-  /*if (blockIdx.x == 0 && threadIdx.x == 0) {
-    result[0] = *b;
-  }
-  if (blockIdx.x == 0 && threadIdx.x == 1) {
-    result[1] = *b;
-  }
-  if (blockIdx.x == 1 && threadIdx.x == 0) {
-    result[2] = *b;
-  }
-  if (blockIdx.x == 1 && threadIdx.x == 1) {
-    result[3] = *b;
-  }*/
 }
 
 void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, double p) {
