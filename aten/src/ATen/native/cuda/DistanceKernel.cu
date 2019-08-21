@@ -339,7 +339,7 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
 
-  Tensor buffer = at::empty({d, r2, r1, m}, result.options());
+  Tensor buffer = (d > 1) ? at::empty({d, r2, r1, m}, result.options()) : at::empty({r2, r1, m}, result.options());
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_cuda_backward", [&] {
     if (p == 1.0) {
       cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(-1), p, r1, r2, m, count, r_size, l1_size, l2_size);
@@ -355,7 +355,11 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   });
   AT_CUDA_CHECK(cudaGetLastError());
 
-  at::sum_out(result, buffer, 1);
+  if (d > 1) {
+    at::sum_out(result, buffer, 1);
+  } else {
+    at::sum_out(result, buffer, 0);
+  }
 
 }
 
