@@ -315,6 +315,7 @@ protected:
   bool accumulate_ = false;
   bool resize_outputs_ = true;
   bool is_reduction_ = false;
+  c10::optional<int64_t> dim_apply = c10::nullopt;
   bool compute_common_dtype_ = true;
   bool allow_cpu_scalars_ = false;
   bool promote_gpu_output_dtypes_ = false;

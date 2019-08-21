@@ -9,7 +9,7 @@
 
 namespace at {
 
-CAFFE2_API std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b);
+CAFFE2_API std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b, c10::optional<int64_t> skipdim=c10::nullopt);
 CAFFE2_API std::tuple<std::vector<int64_t>, std::vector<int64_t>>
 inferExpandGeometry(
     IntArrayRef tensor_sizes,

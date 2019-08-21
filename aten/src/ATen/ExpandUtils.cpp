@@ -2,7 +2,7 @@
 
 namespace at {
 
-std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
+std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b, c10::optional<int64_t> skipdim=c10::nullopt) {
   size_t dimsA = a.size();
   size_t dimsB = b.size();
   size_t ndim = dimsA > dimsB ? dimsA : dimsB;
@@ -10,6 +10,11 @@ std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
 
   // Use ptrdiff_t to ensure signed comparison.
   for (ptrdiff_t i = (ptrdiff_t)ndim - 1; i >= 0; --i) {
+    if (skipdim && skipdim.value() == i) {
+      // skipped dim is not changed
+      expandedSizes[i] = -1;
+      continue;
+    }
     ptrdiff_t offset = ndim - 1 - i;
     ptrdiff_t dimA = dimsA - 1 - offset;
     ptrdiff_t dimB = dimsB - 1 - offset;

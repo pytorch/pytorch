@@ -28,6 +28,15 @@ void TensorIterator::reorder_dimensions() {
   // returns 1 if the dim0 should come after dim1, -1 if dim0 should come
   // before dim1, and 0 if the comparison is ambiguous.
   auto should_swap = [&](size_t dim0, size_t dim1) {
+    if(dim_apply) {
+      // move dim to apply to the front
+      if(dim0 == dim_apply.value()) {
+        return -1;
+      }
+      if(dim1 == dim_apply.value()) {
+        return 1;
+      }
+    }
     int ret = 0;
     for (int arg = 0; arg < ntensors(); arg++) {
       if (operands_[arg].stride_bytes.empty()) {
@@ -68,6 +77,11 @@ void TensorIterator::reorder_dimensions() {
 
   // perform re-ordering of shape and strides
   permute_dimensions(perm_);
+
+  // dim to be applied moved to 0:
+  if(dim_apply) {
+    dim_apply = 0;
+  }
 }
 
 template <typename F>
@@ -256,6 +270,11 @@ void TensorIterator::coalesce_dimensions() {
   // We can coalesce two adjacent dimensions if either dim has size 1 or if:
   // shape[n] * stride[n] == shape[n + 1].
   auto can_coalesce = [&](int dim0, int dim1) {
+    if (dim_apply && dim0 == 0) {
+      // Don't coalesce the dim to apply. When coalesce_dimensions is called,
+      // the dim to apply must have been moved to 0
+      return false;
+    }
     auto shape0 = shape_[dim0];
     auto shape1 = shape_[dim1];
     if (shape0 == 1 || shape1 == 1) {
@@ -646,7 +665,7 @@ void TensorIterator::compute_shape() {
     if (shape_.empty()) {
       shape_ = shape;
     } else if (!shape.equals(shape_)) {
-      shape_ = DimVector(infer_size(shape_, shape));
+      shape_ = DimVector(infer_size(shape_, shape, dim_apply));
     }
   }
 
