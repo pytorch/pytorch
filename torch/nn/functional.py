@@ -17,7 +17,7 @@ from .._jit_internal import boolean_dispatch, List, _overload
 def _compute_padding_same(input_size, dim, weight, stride, dilation):
     # type: (List[int], int, Tensor, List[int], List[int]) -> int
     # When calculating convolutions, we can examine each dimension independently
-    input_size = input_size[dim + 2] #  Ignoring batch size + channel dims
+    input_size = input_size[dim + 2]  # Ignoring batch size + channel dims
     filter_size = weight.size(dim + 2)
     # Here we calculate the equivalent filter size factoring in dilation
     effective_filter_size = (filter_size - 1) * dilation[dim] + 1
@@ -39,17 +39,17 @@ def _split_padding(padding):
         res.append((i + 1) // 2)
     return res
 
-@_overload # noqa: F811
-def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], BroadcastingList1[int], BroadcastingList1[int], int, str) -> Tensor
+@_overload  # noqa: F811
+def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):  # noqa: F811
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], BroadcastingList1[int], BroadcastingList1[int], int, str) -> Tensor  # noqa
     pass
 
-@_overload # noqa: F811
-def conv1d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], str, BroadcastingList1[int], int, str) -> Tensor
+@_overload  # noqa: F811
+def conv1d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1, padding_mode='zeros'):  # noqa: F811
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList1[int], str, BroadcastingList1[int], int, str) -> Tensor  # noqa
     pass
 
-def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
+def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):  # noqa: F811
     r"""
     conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
 
@@ -94,18 +94,19 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         final_padding = _single(0)
     return torch.conv1d(input, weight, bias, stride, final_padding, dilation, groups)
 
-@_overload # noqa: F811
+@_overload  # noqa: F811
 def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], int, str) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], int, str) -> Tensor  # noqa
     pass
 
-@_overload # noqa: F811
+@_overload  # noqa: F811
 def conv2d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], str, BroadcastingList2[int], int, str) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList2[int], str, BroadcastingList2[int], int, str) -> Tensor  # noqa
     pass
 
 
-def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
+def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):  # noqa: F811
+
     r"""
     conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
@@ -151,18 +152,18 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         final_padding = _pair(0)
     return torch.conv2d(input, weight, bias, stride, final_padding, dilation, groups)
 
-@_overload # noqa: F811
-def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int], BroadcastingList3[int], BroadcastingList3[int], int, str) -> Tensor
+@_overload  # noqa: F811
+def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):  # noqa: F811
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int], BroadcastingList3[int], BroadcastingList3[int], int, str) -> Tensor  # noqa
     pass
 
-@_overload # noqa: F811
-def conv3d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1, padding_mode='zeros'):
-    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int], str, BroadcastingList3[int], int, str) -> Tensor
+@_overload  # noqa: F811
+def conv3d(input, weight, bias=None, stride=1, padding="same", dilation=1, groups=1, padding_mode='zeros'):  # noqa: F811
+    # type: (Tensor, Tensor, Optional[Tensor], BroadcastingList3[int], str, BroadcastingList3[int], int, str) -> Tensor  # noqa
     pass
 
 
-def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):
+def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros'):  # noqa: F811
     r"""
     conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
