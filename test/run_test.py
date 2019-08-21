@@ -25,6 +25,7 @@ TESTS = [
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
+    'dist_autograd',
     'distributed',
     'distributions',
     'docs_coverage',
@@ -58,6 +59,7 @@ TESTS = [
     'jit_fuser',
     'tensorboard',
     'namedtensor',
+    'jit_disabled',
 ]
 
 WINDOWS_BLACKLIST = [
@@ -303,7 +305,7 @@ def get_executable_command(options):
     else:
         executable = [sys.executable]
     if options.pytest:
-        executable += ['-m', 'pytest', '--durations=10']
+        executable += ['-m', 'pytest']
     return executable
 
 

@@ -26,7 +26,7 @@ class TestDistAutograd(unittest.TestCase):
                 context_ids.append(context_id)
 
         for context_id in context_ids:
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, 'Could not find autograd context with id: {}'.format(context_id)):
                 dist_autograd._retrieve_context(context_id)
 
 if __name__ == '__main__':

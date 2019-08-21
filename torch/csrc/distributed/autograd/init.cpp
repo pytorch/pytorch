@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/autograd/context/DistAutogradContainer.h>
+#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
