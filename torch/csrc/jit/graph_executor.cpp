@@ -20,9 +20,11 @@
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/inplace_check.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
@@ -547,7 +549,14 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
+
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
+
+    // Phase 0. Inline functions, then clean up any artifacts that the inliner
+    //          left in that may inhibit optimization
+    Inline(*opt_graph);
+    LowerSimpleTuples(opt_graph);
+    ConstantPooling(opt_graph);
 
     // Phase 1. Specialize to input definedness (this is very important for
     //          gradient graphs), and run required passes to bring the graph
@@ -694,6 +703,11 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
   DecomposeOps(graph);
+
+  // TupleConstruct / TupleUnpack pairs can still be present at this point
+  // and must be removed for fusion.
+  LowerSimpleTuples(graph);
+
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
 

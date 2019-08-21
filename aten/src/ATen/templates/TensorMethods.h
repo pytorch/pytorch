@@ -11,6 +11,12 @@
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
+#ifdef USE_STATIC_DISPATCH
+#include <ATen/TypeDefault.h>
+#include <ATen/CPUType.h>
+#include <ATen/QuantizedCPUType.h>
+#include <ATen/SparseCPUType.h>
+#endif
 
 namespace at {
 
@@ -99,7 +105,7 @@ inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
 }
 
 inline bool Tensor::has_names() const {
-  return impl::internal_has_names(unsafeGetTensorImpl());
+  return impl::has_names(unsafeGetTensorImpl());
 }
 #endif
 
@@ -143,23 +149,23 @@ inline bool is_quantized(Tensor self) {
   return self.is_quantized();
 }
 
-#define DEFINE_CAST(T, name, _)                  \
+#define DEFINE_CAST(T, name)                     \
   template <>                                    \
-  inline T* Tensor::data() const {               \
-    TORCH_CHECK(                                    \
+  inline T* Tensor::data_ptr() const {           \
+    TORCH_CHECK(                                 \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \
         " but found ",                           \
         c10::toString(scalar_type()));           \
-    return static_cast<T*>(this->data_ptr());    \
+    return static_cast<T*>(this->unsafeGetTensorImpl()->data());    \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
 AT_FORALL_QINT_TYPES(DEFINE_CAST)
 #undef DEFINE_CAST
 
-#define DEFINE_ITEM(T, name, _)   \
+#define DEFINE_ITEM(T, name)      \
   template <>                     \
   inline T Tensor::item() const { \
     return item().to##name();     \

@@ -6,6 +6,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/module.h>
@@ -93,18 +94,7 @@ inline MatchTypeReturn tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
     auto tensor = py::cast<at::Tensor>(input);
-    if (tensor.is_sparse()) {
-      return MatchTypeReturn("Sparse tensors not supported");
-    }
-    if (tensor.is_mkldnn()) {
-      // mkldnn tensor as opaque tensor doesn't have strides, so we can
-      // not create a CompleteTensorType
-      return MatchTypeReturn(DimensionedTensorType::create(tensor));
-    }
-
-    // TODO: maybe unshape this type if this is used for script instead of
-    // tracing
-    return MatchTypeReturn(CompleteTensorType::create(tensor));
+    return MatchTypeReturn(TensorType::create(tensor));
   }
 
   if (input.is(py::none())) {
@@ -125,6 +115,8 @@ inline MatchTypeReturn tryToInferType(py::handle input) {
   } else if (THPDevice_Check(input.ptr())) {
     return MatchTypeReturn(DeviceObjType::get());
   } else if (THPDtype_Check(input.ptr())) {
+    return MatchTypeReturn(IntType::get());
+  } else if (THPQScheme_Check(input.ptr())) {
     return MatchTypeReturn(IntType::get());
   }
 
@@ -321,14 +313,14 @@ inline IValue toIValue(
     const TypePtr& type,
     c10::optional<int32_t> N) {
   switch (type->kind()) {
-    case TypeKind::TensorType:
-    case TypeKind::AutogradZeroTensorType:
-    case TypeKind::DimensionedTensorType:
-    case TypeKind::ProfiledTensorType:
-    case TypeKind::CompleteTensorType: {
+    case TypeKind::TensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
-        AT_ERROR("sparse tensors not supported");
+        AT_WARN(
+            "Using sparse tensors in TorchScript is experimental. Many optimization "
+            "pathways have not been thoroughly tested with sparse tensors. Please "
+            "include the fact that the network is running sparse tensors in any bug "
+            "reports submitted.");
       }
       return var;
     }
@@ -338,6 +330,10 @@ inline IValue toIValue(
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
         return static_cast<int64_t>(dtype->scalar_type);
+      }
+      if (THPQScheme_Check(obj.ptr())) {
+        auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+        return static_cast<uint8_t>(qscheme->qscheme);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
@@ -401,8 +397,6 @@ inline IValue toIValue(
             }
             return repeated;
           }
-        case TypeKind::DimensionedTensorType:
-        case TypeKind::ProfiledTensorType:
         case TypeKind::TensorType:
           return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:
@@ -445,6 +439,10 @@ inline IValue toIValue(
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
         return static_cast<int64_t>(dtype->scalar_type);
+      }
+      if (THPQScheme_Check(obj.ptr())) {
+        auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+        return static_cast<uint8_t>(qscheme->qscheme);
       }
       if (py::isinstance<py::int_>(obj)) {
         return py::cast<int64_t>(obj);
@@ -539,7 +537,11 @@ inline py::object toPyObject(IValue&& ivalue) {
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.is_sparse()) {
-      AT_ERROR("sparse tensors not supported");
+      AT_WARN(
+          "Using sparse tensors in TorchScript is experimental. Many optimization "
+          "pathways have not been thoroughly tested with sparse tensors. Please "
+          "include the fact that the network is running sparse tensors in any bug "
+          "reports submitted.");
     }
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
@@ -574,10 +576,10 @@ inline py::object toPyObject(IValue&& ivalue) {
     }
     if (tuple->type && tuple->type->schema() &&
         tuple->type->schema()->name() != "") {
-      auto unqualName = tuple->type->basename();
-      auto fieldNames = fmap(tuple->type->schema()->arguments(), [](const Argument& arg) {
-        return arg.name();
-      });
+      auto unqualName = tuple->type->name()->name();
+      auto fieldNames = fmap(
+          tuple->type->schema()->arguments(),
+          [](const Argument& arg) { return arg.name(); });
       return py::module::import("torch.jit")
           .attr("_create_named_tuple")(
               t, unqualName, fieldNames);
