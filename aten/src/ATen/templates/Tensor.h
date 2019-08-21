@@ -174,7 +174,7 @@ class CAFFE2_API Tensor {
   }
 #ifdef BUILD_NAMEDTENSOR
   optional<DimnameList> names() const {
-    return impl::internal_get_names(unsafeGetTensorImpl());
+    return impl::get_names(unsafeGetTensorImpl());
   }
 #endif
   int64_t ndimension() const {
@@ -182,6 +182,13 @@ class CAFFE2_API Tensor {
   }
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     return impl_->is_contiguous(memory_format);
+  }
+
+  at::MemoryFormat suggest_memory_format() const {
+    if (impl_->is_strides_like_channels_last()) {
+      return at::MemoryFormat::ChannelsLast;
+    }
+    return at::MemoryFormat::Contiguous;
   }
 
   // Total bytes consumed by the "view" of elements of the array.  Does not
@@ -262,7 +269,7 @@ class CAFFE2_API Tensor {
 
 #ifdef BUILD_NAMEDTENSOR
   /// Returns if a `Tensor` has any dimension names
-  bool is_named() const;
+  bool has_names() const;
 
   /// Returns a `Tensor`'s dimension names data structure
   const NamedTensorMeta* get_named_tensor_meta() const;
@@ -277,8 +284,13 @@ class CAFFE2_API Tensor {
     return this->unsafeGetTensorImpl()->data();
   }
 
+  template <typename T>
+  T * data_ptr() const;
+
   template<typename T>
-  T * data() const;
+  T * data() const {
+    return data_ptr<T>();
+  }
 
   template <typename T>
   T item() const;

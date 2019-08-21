@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/ir.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
@@ -54,7 +55,7 @@ at::Tensor castTensorTo(
     const IValue& device) {
   at::ScalarType scalar_type =
       dtype.isNone() ? self.scalar_type() : dtype.toScalarType();
-  c10::Device dev =                                                  
+  c10::Device dev =
       device.isNone() ? self.device() : device.toDevice();
   if (scalar_type != self.scalar_type() || dev != self.device()) {
     self = self.to(dev, scalar_type);

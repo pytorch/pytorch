@@ -10,6 +10,12 @@ cmake_policy(SET CMP0025 NEW)
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
+if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+  set(LINUX TRUE)
+else()
+  set(LINUX FALSE)
+endif()
+
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
 set(CMAKE_CXX_STANDARD 11)
@@ -121,7 +127,9 @@ cmake_dependent_option(
     "USE_NCCL" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
-option(USE_NUMA "Use NUMA (only available on Linux)" ON)
+cmake_dependent_option(
+    USE_NUMA "Use NUMA. Only available on Linux." ON
+    "LINUX" OFF)
 cmake_dependent_option(
     USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on." OFF
     "USE_CUDA" OFF)
@@ -180,6 +188,8 @@ if (MSVC)
   string(APPEND CMAKE_CXX_FLAGS " /EHa")
   if(MSVC_Z7_OVERRIDE)
     foreach(flag_var
+        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+        CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
         CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
         CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
       if(${flag_var} MATCHES "/Z[iI]")
@@ -221,6 +231,7 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(BUILD_CAFFE2_OPS OFF)
   set(USE_DISTRIBUTED OFF)
   set(FEATURE_TORCH_MOBILE ON)
+  set(NO_API ON)
 endif()
 
 if (BUILD_ATEN_ONLY)

@@ -1,5 +1,12 @@
 TorchScript
-============
+===========
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Builtin Functions
+   :hidden:
+
+   torch.jit.supported_ops <jit_builtin_functions>
 
 .. contents:: :local:
 
@@ -16,20 +23,26 @@ This makes it possible to train models in PyTorch using familiar tools in Python
 the model via TorchScript to a production environment where Python programs may be disadvantageous.
 for performance and multi-threading reasons.
 
+For a gentle introduction to TorchScript, see the `Introduction to TorchScript <https://pytorch.org/tutorials/beginner/Intro_to_TorchScript_tutorial.html>`_ tutorial.
+
+For an end-to-end example of converting a PyTorch model to TorchScript and running it in C++, see the
+`Loading a PyTorch Model in C++ <https://pytorch.org/tutorials/advanced/cpp_export.html>`_ tutorial.
+
 Creating TorchScript Code
 --------------------------
 
-.. autofunction:: script
-
-.. autofunction:: trace
-
-.. autoclass:: ScriptModule
+.. autoclass:: ScriptModule()
     :members:
+
+.. autofunction:: script(obj)
+
+.. autofunction:: trace(func, example_inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
+
+.. autofunction:: trace_module(mod, inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
 
 .. autofunction:: save
 
 .. autofunction:: load
-
 
 
 Mixing Tracing and Scripting
@@ -44,12 +57,13 @@ to use control-flow around a simple feed-forward model. For instance the beam se
 of a sequence to sequence model will typically be written in script but can call an
 encoder module generated using tracing.
 
-Example::
+Example (calling a traced function in script)::
 
     import torch
 
     def foo(x, y):
         return 2 * x + y
+
     traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
 
     @torch.jit.script
@@ -59,9 +73,9 @@ Example::
 Traced functions can call script functions. This is useful when a small part of
 a model requires some control-flow even though most of the model is just a feed-forward
 network. Control-flow inside of a script function called by a traced function is
-preserved correctly:
+preserved correctly.
 
-Example::
+Example (calling a script function in a traced function)::
 
     import torch
 
@@ -80,9 +94,9 @@ Example::
     traced_bar = torch.jit.trace(bar, (torch.rand(3), torch.rand(3), torch.rand(3)))
 
 This composition also works for ``nn.Module``\s as well, where it can be used to generate
-a submodule using tracing that can be called from the methods of a script module:
+a submodule using tracing that can be called from the methods of a script module.
 
-Example::
+Example (using a traced module)::
 
     import torch
     import torchvision
@@ -100,12 +114,188 @@ Example::
 
     my_script_module = torch.jit.script(MyScriptModule())
 
+Migrating to PyTorch 1.2 Recursive Scripting API
+------------------------------------------------
+This section details the changes to TorchScript in PyTorch 1.2. If you are new to TorchScript you can
+skip this section. There are two main changes to the TorchScript API with PyTorch 1.2.
+
+1. ``torch.jit.script`` will now attempt to recursively compile functions,
+methods, and classes that it encounters. Once you call ``torch.jit.script``,
+compilation is "opt-out", rather than "opt-in".
+
+2. ``torch.jit.script(nn_module_instance)`` is now the preferred way to create
+``ScriptModule``\s, instead of inheriting from ``torch.jit.ScriptModule``.
+These changes combine to provide a simpler, easier-to-use API for converting
+your ``nn.Module``\s into ``ScriptModule``\s, ready to be optimized and executed in a
+non-Python environment.
+
+The new usage looks like this::
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super(Model, self).__init__()
+            self.conv1 = nn.Conv2d(1, 20, 5)
+            self.conv2 = nn.Conv2d(20, 20, 5)
+
+        def forward(self, x):
+        x = F.relu(self.conv1(x))
+        return F.relu(self.conv2(x))
+
+    my_model = Model()
+    my_scripted_model = torch.jit.script(my_model)
+
+
+* The module's ``forward`` is compiled by default. Methods called from ``forward`` are lazily compiled in the order they are used in ``forward``.
+* To compile a method other than ``forward`` that is not called from ``forward``, add ``@torch.jit.export``.
+* To stop the compiler from compiling a method and leave it as a call to Python, add ``@torch.jit.ignore``.
+* Most attribute types can be inferred, so ``torch.jit.Attribute`` is not necessary. For empty container types, annotate their types using `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
+* Constants can be marked with a ``Final`` class annotation instead of adding the name of the member to ``__constants__``.
+* Python 3 type hints can be used in place of ``torch.jit.annotate``
+
+As a result of these changes, the following items are considered deprecated and should not appear in new code:
+  * The ``@torch.jit.script_method`` decorator
+  * Classes that inherit from ``torch.jit.ScriptModule``
+  * The ``torch.jit.Attribute`` wrapper class
+  * The ``__constants__`` array
+  * The ``torch.jit.annotate`` function
+
+Modules
+~~~~~~~
+When passed to the ``torch.jit.script`` function, a ``torch.nn.Module``\'s data is copied to a ``ScriptModule`` and the TorchScript compiler compiles the module. The module's ``forward`` is compiled by default. Methods called from ``forward`` are lazily compiled in the order they are used in ``forward``, as we as any ``@torch.jit.export`` methods.
+
+``@torch.jit.export``
+
+The export decorator marks a method as an entry point into a module. The TorchScript compile will compile the decorated method and recursively compile anything it calls. ``forward`` is implicitly marked with this decorator. Use ``@export`` if you need to directly call methods other than ``forward`` from your TorchScript model.
+
+``@torch.jit.ignore``
+
+The ignore decorator makes a method opaque to the TorchScript compiler. The function will not be compiled and will be left as an upcall to Python which cannot be exported. If the ``drop_on_export`` is set to ``True``, then the function will be replaced with an error-ing statement when the model is saved. For example, if you have Python-only training code that will not be run once your model is saved, you can ``@ignore`` it and use Python features that  TorchScript does not support.
+
+.. caution::
+    Before PyTorch 1.2 the ``@ignore`` decorator was used to make a function or method callable from code that is exported. To get this functionality back, use ``@torch.jit.ignore(drop_on_export=True)``. ``@torch.jit.ignore`` is equivalent to ``@torch.jit.ignore(drop_on_export=False)``.
+
+Functions
+~~~~~~~~~
+Functions don't change much, they can be decorated with ``@torch.jit.ignore`` if needed.
+
+::
+
+    # Same behavior as pre-PyTorch 1.2
+    @torch.jit.script
+    def some_fn():
+        return 2
+
+    # Marks a function as ignored, if nothing
+    # ever calls it then this has no effect
+    @torch.jit.ignore
+    def some_fn2():
+        return 2
+
+    # Doesn't do anything, this function is already
+    # the main entry point
+    @torch.jit.export
+    def some_fn3():
+        return 2
+
+
+TorchScript Classes
+~~~~~~~~~~~~~~~~~~~
+Everything in a user defined `TorchScript Class`_ is exported by default, functions can be decorated with ``@torch.jit.ignore`` if needed.
+
+Attributes
+~~~~~~~~~~
+The TorchScript compiler needs to know the types of `module attributes`_. Most types can be inferred from the value of the member. Empty lists and dicts cannot have their types inferred and must have their types annotated with `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
+
+Old API::
+
+    class MyModule(torch.jit.ScriptModule):
+        def __init__(self):
+            self.my_dict = torch.jit.Attribute({}, Dict[str, int])
+            self.my_int = torch.jit.Attribute(20, int)
+
+    m = MyModule()
+
+New API::
+
+    class MyModule(torch.nn.Module):
+        my_dict: Dict[str, int]
+
+        def __init__(self):
+            # This type cannot be inferred and must be specified
+            self.my_dict = {}
+
+            # The attribute type here is inferred to be `int`
+            self.my_int = 20
+
+    m = torch.jit.script(MyModule())
+
+Python 2
+^^^^^^^^
+If you are stuck on Python 2 and cannot use the class annotation syntax, you can use the ``__annotations__`` class member to directly apply type annotations.
+
+::
+
+    class MyModule(torch.jit.ScriptModule):
+        __annotations__ = {'my_dict': Dict[str, int]}
+
+        def __init__(self):
+            self.my_dict = {}
+            self.my_int = 20
+
+Constants
+~~~~~~~~~
+The ``Final`` type constructor can be used to mark members as `constant`_. If members are not marked constant, they will be copied to the resulting ``ScriptModule`` as an attribute. Using ``Final`` opens opportunities for optimization if the value is known to be fixed and gives additional type safety.
+
+Old API::
+
+    class MyModule(torch.jit.ScriptModule):
+        __constants__ = ['my_constant']
+
+        def __init__(self):
+            self.my_constant = 2
+
+    m = MyModule()
+
+New API::
+
+    class MyModule(torch.nn.Module):
+        my_constant: Final[int]
+
+        def __init__(self):
+            self.my_constant = 2
+
+    m = torch.jit.script(MyModule())
+
+.. _Python 3 type hints:
+
+Variables
+~~~~~~~~~
+Containers are assumed to have type ``Tensor`` and be non-optional (see
+`Default Types`_ for more information). Previously, ``torch.jit.annotate`` was used to
+tell the TorchScript compiler what the type should be. Python 3 style type hints are
+now supported.
+
+::
+
+    import torch
+    from typing import Dict, Optional
+
+    @torch.jit.script
+    def make_dict(flag: bool):
+        x: Dict[str, int] = {}
+        x['hi'] = 2
+        b: Optional[int] = None
+        if flag:
+            b = 2;
+        return x, b
+
+
 
 TorchScript Language Reference
 -------------------------------
 
 TorchScript is a statically typed subset of Python that can either be written directly (using
-the ``@torch.jit.script`` decorator) or generated automatically from Python code via
+the :func:`@torch.jit.script <torch.jit.script>` decorator) or generated automatically from Python code via
 tracing. When using tracing, code is automatically converted into this subset of
 Python by recording only the actual operators on tensors and simply executing and
 discarding the other surrounding Python code.
@@ -114,21 +304,15 @@ When writing TorchScript directly using ``@torch.jit.script`` decorator, the pro
 only use the subset of Python supported in TorchScript. This section documents
 what is supported in TorchScript as if it were a language reference for a stand
 alone language. Any features of Python not mentioned in this reference are not
-part of TorchScript.
+part of TorchScript. See `Builtin Functions`_ for a complete reference of available
+Pytorch tensor methods, modules, and functions.
 
-As a subset of Python any valid TorchScript function is also a valid Python
-function. This makes it possible to remove the ``@torch.jit.script`` decorator and debug the
+As a subset of Python, any valid TorchScript function is also a valid Python
+function. This makes it possible to `disable TorchScript`_ and debug the
 function using standard Python tools like ``pdb``. The reverse is not true: there
-are many valid python programs that are not valid TorchScript programs.
+are many valid Python programs that are not valid TorchScript programs.
 Instead, TorchScript focuses specifically on the features of Python that are
-needed to represent neural network models in Torch.
-
-.. envvar:: PYTORCH_JIT=1
-
-    Setting the environment variable ``PYTORCH_JIT=0`` will disable all script
-    and tracing annotations. If there is hard-to-debug error in one of your
-    ScriptModules, you can use this flag to force everything to run using native
-    Python. This allows the use of tools like ``pdb`` to debug code.
+needed to represent neural network models in PyTorch.
 
 
 Types
@@ -146,9 +330,12 @@ net models. In particular, TorchScript supports:
    "``bool``", "A boolean value"
    "``int``", "A scalar integer"
    "``float``", "A scalar floating point number"
+   "``str``", "A string"
    "``List[T]``", "A list of which all members are type ``T``"
    "``Optional[T]``", "A value which is either None or type ``T``"
    "``Dict[K, V]``", "A dict with key type ``K`` and value type ``V``. Only ``str``, ``int``, and ``float`` are allowed as key types."
+   "``T``", "A `TorchScript Class`_"
+   "``NamedTuple[T0, T1, ...]``", "A :func:`collections.namedtuple <collections.namedtuple>` tuple type"
 
 
 Unlike Python, each variable in TorchScript function must have a single static type.
@@ -184,15 +371,30 @@ Example::
     print(foo(3, (torch.rand(3), torch.rand(3))))
 
 .. note::
-  It is also possible to annotate types with Python 3 type annotations.
-  In our examples, we use comment-based annotations to ensure Python 2
+  It is also possible to annotate types with Python 3 type hints from the
+  ``typing`` module.
+
+  ::
+
+    import torch
+    from typing import Tuple
+
+    @torch.jit.script
+    def foo(x: int, tup: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
+        t0, t1 = tup
+        return t0 + t1 + x
+
+    print(foo(3, (torch.rand(3), torch.rand(3))))
+
+  In our examples, we use comment-based type hints to ensure Python 2
   compatibility as well.
+
 
 An empty list is assumed to be ``List[Tensor]`` and empty dicts
 ``Dict[str, Tensor]``. To instantiate an empty list or dict of other types,
-use ``torch.jit.annotate``.
+use `Python 3 type hints`_. If you are on Python 2, you can use ``torch.jit.annotate``.
 
-Example::
+Example (``torch.jit.annotate`` for Python 2)::
 
     import torch
     from torch.jit import Tensor
@@ -219,34 +421,56 @@ Optional Type Refinement
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
 TorchScript will refine the type of a variable of type ``Optional[T]`` when
-a comparison to ``None`` is made inside the conditional of an if-statement.
+a comparison to ``None`` is made inside the conditional of an if-statement or checked in an ``assert``.
 The compiler can reason about multiple ``None`` checks that are combined with
 ``and``, ``or``, and ``not``. Refinement will also occur for else blocks of if-statements
 that are not explicitly written.
 
-The expression must be emitted within the conditional; assigning
-a ``None`` check to a variable and using it in the conditional will not refine types.
-An attribute like `self.x` will not be refined, but assigning `self.x` to a local
-variable first will work.
+The ``None`` check must be within the if-statement's condition; assigning
+a ``None`` check to a variable and using it in the if-statement's condition will
+not refine the types of variables in the check.
+Only local variables will be refined, an attribute like ``self.x`` will not (see example).
 
 
 Example::
 
-  @torch.jit.script_method
-  def optional_unwrap(self, x, y):
-    # type: (Optional[int], Optional[int]) -> int
-    if x is None:
-      x = 1
-    x = x + 1
+    import torch
+    import torch.nn as nn
+    from typing import Optional
 
-    z = self.z
-    if y is not None and z is not None:
-      x = y + z
-    return x
+    class M(nn.Module):
+        z: Optional[int]
 
+        def __init__(self, z):
+            super(M, self).__init__()
+            # If `z` is None, its type cannot be inferred, so it must
+            # be specified (above)
+            self.z = z
 
-User Defined Types
-^^^^^^^^^^^^^^^^^^^^^^^^
+        def forward(self, x, y, z):
+            # type: (Optional[int], Optional[int], Optional[int]) -> int
+            if x is None:
+                x = 1
+                x = x + 1
+
+            # Refinement for an attribute by assigning it to a local
+            z = self.z
+            if y is not None and z is not None:
+                x = y + z
+
+            # Refinement via an `assert`
+            assert z is not None
+            x += z
+            return x
+
+    module = torch.jit.script(M(2))
+    module = torch.jit.script(M(None))
+
+.. _TorchScript Class:
+.. _TorchScript Classes:
+
+TorchScript Classes
+^^^^^^^^^^^^^^^^^^^
 Python classes can be used in TorchScript if they are annotated with ``@torch.jit.script``,
 similar to how you would declare a TorchScript function: ::
 
@@ -261,12 +485,12 @@ similar to how you would declare a TorchScript function: ::
 
 This subset is restricted:
 
-* All functions must be valid TorchScript functions (including ``__init__()``)
-* Classes must be new-style classes, as we use ``__new__()`` to construct them with pybind11
-* TorchScript classes are statically typed. Members are declared by assigning to
-  self in the ``__init__()`` method
+* All functions must be valid TorchScript functions (including ``__init__()``).
+* Classes must be new-style classes, as we use ``__new__()`` to construct them with pybind11.
+* TorchScript classes are statically typed. Members can only be declared by assigning to
+  self in the ``__init__()`` method.
 
-    For example, assigning outside of the ``__init__()`` method: ::
+    For example, assigning to ``self`` outside of the ``__init__()`` method: ::
 
         @torch.jit.script
         class Foo:
@@ -281,15 +505,16 @@ This subset is restricted:
           self.x = torch.rand(2, 3)
           ~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
 
-* No expressions except method definitions are allowed in the body of the class
+* No expressions except method definitions are allowed in the body of the class.
 * No support for inheritance or any other polymorphism strategy, except for inheriting
-  from object to specify a new-style class
+  from ``object`` to specify a new-style class.
 
 After a class is defined, it can be used in both TorchScript and Python interchangeably
 like any other TorchScript type:
 
 ::
 
+    # Declare a TorchScript class
     @torch.jit.script
     class Pair:
       def __init__(self, first, second):
@@ -305,6 +530,27 @@ like any other TorchScript type:
     print(sum_pair(p))
 
 
+Named Tuples
+^^^^^^^^^^^^
+Types produced by :func:`collections.namedtuple <collections.namedtuple>` can be used in TorchScript.
+
+::
+
+    import torch
+    import collections
+
+    Point = collections.namedtuple('Point', ['x', 'y'])
+
+    @torch.jit.script
+    def total(point):
+        # type: (Point) -> Tensor
+        return point.x + point.y
+
+    p = Point(x=torch.rand(3), y=torch.rand(3))
+    print(total(p))
+
+
+
 Expressions
 ~~~~~~~~~~~
 
@@ -312,101 +558,102 @@ The following Python Expressions are supported
 
 Literals
 ^^^^^^^^
-    ``True``, ``False``, ``None``, ``'string literals'``, ``"string literals"``,
-    number literals ``3`` (interpreted as int) ``3.4`` (interpreted as a float)
+::
+
+    True
+    False
+    None
+    'string literals'
+    "string literals"
+    3  # interpreted as int
+    3.4  # interpreted as a float
 
 List Construction
 """""""""""""""""
-    ``[3, 4]``, ``[]``, ``[torch.rand(3), torch.rand(4)]``
+    ::
 
-    .. note::
-        An empty list is assumed have type ``List[Tensor]``.
-        The types of other list literals are derived from the type of the members.
-        To denote an empty list of another type, use ``torch.jit.annotate``.
+        [3, 4]
+        []
+        [torch.rand(3), torch.rand(4)]
+
+    An empty list is assumed have type ``List[Tensor]``.
+    The types of other list literals are derived from the type of the members.
+    See `Default Types`_ for more details.
 
 Tuple Construction
 """"""""""""""""""
-    ``(3, 4)``, ``(3,)``
+    ::
+
+        (3, 4)
+        (3,)
 
 
 Dict Construction
 """""""""""""""""
-    ``{'hello': 3}``, ``{}``, ``{'a': torch.rand(3), 'b': torch.rand(4)}``
+    ::
 
-    .. note::
-        An empty dict is assumed have type ``Dict[str, Tensor]``.
-        The types of other dict literals are derived from the type of the members.
-        To denote an empty dict of another type, use ``torch.jit.annotate``.
+        {'hello': 3}
+        {}
+        {'a': torch.rand(3), 'b': torch.rand(4)}
+
+    An empty dict is assumed have type ``Dict[str, Tensor]``.
+    The types of other dict literals are derived from the type of the members.
+    See `Default Types`_ for more details.
 
 Variables
 ^^^^^^^^^
-  ``my_variable_name``
+    See `Variable Resolution`_ for how variables are resolved.
 
-  .. note::
-      See `Variable Resolution`_ for how variables are resolved.
+    ::
 
+        my_variable_name
 
 Arithmetic Operators
 ^^^^^^^^^^^^^^^^^^^^
-  ``a + b``
+    ::
 
-  ``a - b``
-
-  ``a * b``
-
-  ``a / b``
-
-  ``a ^ b``
-
-  ``a @ b``
+        a + b
+        a - b
+        a * b
+        a / b
+        a ^ b
+        a @ b
 
 Comparison Operators
 ^^^^^^^^^^^^^^^^^^^^
-  ``a == b``
+    ::
 
-  ``a != b``
-
-  ``a < b``
-
-  ``a > b``
-
-  ``a <= b``
-
-  ``a >= b``
+        a == b
+        a != b
+        a < b
+        a > b
+        a <= b
+        a >= b
 
 Logical Operators
 ^^^^^^^^^^^^^^^^^
-  ``a and b``
+    ::
 
-  ``a or b``
+        a and b
+        a or b
+        not b
 
-  ``not b``
+Subscripts and Slicing
+^^^^^^^^^^^^^^^^^^^^^^
+    ::
 
-Subscripts
-^^^^^^^^^^
-  ``t[0]``
-
-  ``t[-1]``
-
-  ``t[0:2]``
-
-  ``t[1:]``
-
-  ``t[:1]``
-
-  ``t[:]``
-
-  ``t[0, 1]``
-
-  ``t[0, 1:2]``
-
-  ``t[0, :1]``
-
-  ``t[-1, 1:, 0]``
-
-  ``t[1:, -1, 0]``
-
-  ``t[i:j, i]``
+        t[0]
+        t[-1]
+        t[0:2]
+        t[1:]
+        t[:1]
+        t[:]
+        t[0, 1]
+        t[0, 1:2]
+        t[0, :1]
+        t[-1, 1:, 0]
+        t[1:, -1, 0]
+        t[i:j, i]
 
 Function Calls
 ^^^^^^^^^^^^^^
@@ -430,10 +677,12 @@ Method Calls
 ^^^^^^^^^^^^
     Calls to methods of builtin types like tensor: ``x.mm(y)``
 
-
-    When defining a Script method inside of a ScriptModule, the ``@script_method``
-    annotation is used. Inside of these methods it is possible to call other methods
-    of this class or access methods on the submodules.
+    On modules, methods must be compiled before they can be called. The TorchScript
+    compiler recursively compiles methods it sees when compiling other methods. By default,
+    compilation starts on the ``forward`` method. Any methods called by ``forward`` will
+    be compiled, and any methods called by those methods, and so on. To start compilation at
+    a method other than ``forward``, use the ``@torch.jit.export`` decorator
+    (``forward`` implicitly is marked ``@torch.jit.export``).
 
     Calling a submodule directly (e.g. ``self.resnet(input)``) is equivalent to
     calling its ``forward`` method (e.g. ``self.resnet.forward(input)``)
@@ -441,34 +690,50 @@ Method Calls
     ::
 
         import torch
+        import torch.nn as nn
 
-        class MyScriptModule(torch.jit.ScriptModule):
+        class MyModule(nn.Module):
             def __init__(self):
-                super(MyScriptModule, self).__init__()
-                self.means = torch.nn.Parameter(torch.tensor([103.939, 116.779, 123.68])
-                                                .resize_(1, 3, 1, 1))
-                self.resnet = torch.jit.trace(torchvision.models.resnet18(),
-                                              torch.rand(1, 3, 224, 224))
+                super(MyModule, self).__init__()
+                means = torch.tensor([103.939, 116.779, 123.68])
+                self.means = torch.nn.Parameter(means.resize_(1, 3, 1, 1))
+                resnet = torchvision.models.resnet18()
+                self.resnet = torch.jit.trace(resnet, torch.rand(1, 3, 224, 224))
 
-            @torch.jit.script_method
             def helper(self, input):
-              return self.resnet(input - self.means)
+                return self.resnet(input - self.means)
 
-            @torch.jit.script_method
             def forward(self, input):
                 return self.helper(input)
 
+            # Since nothing in the model calls `top_level_method`, the compiler
+            # must be explicitly told to compile this method
+            @torch.jit.export
+            def top_level_method(self, input):
+                return self.other_helper(input)
+
+            def other_helper(self, input):
+                return input + 10
+
+        # `my_script_module` will have the compiled methods `forward`, `helper`,
+        # `top_level_method`, and `other_helper`
+        my_script_module = torch.jit.script(MyModule())
+
+
 Ternary Expressions
 ^^^^^^^^^^^^^^^^^^^
-    ``x if x > y else y``
+    ::
+
+        x if x > y else y
 
 Casts
 ^^^^^
-    ``float(ten)``
+    ::
 
-    ``int(3.5)``
-
-    ``bool(ten)``
+        float(ten)
+        int(3.5)
+        bool(ten)
+        str(2)``
 
 Accessing Module Parameters
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -497,7 +762,8 @@ Pattern Matching Assignments
 
 Print Statements
 
-  ``print("the result of an add:", a + b)``
+    ::
+        print("the result of an add:", a + b)
 
 If Statements
 
@@ -533,15 +799,15 @@ For loops with ``range``
 
 For loops over tuples:
 
+    These unroll the loop, generating a body for
+    each member of the tuple. The body must type-check correctly for each member.
+
     ::
 
         tup = (3, torch.rand(4))
         for x in tup:
             print(x)
 
-    .. note::
-      for loops over tuples will unroll the loop, generating a body for
-      each member of the tuple. The body must type-check correctly for each member.
 
 For loops over constant ``torch.nn.ModuleList``
 
@@ -587,13 +853,10 @@ Break and Continue
           print(i)
 
 Return
-    ``return a, b``
 
-    .. note::
-        TorchScript allows returns in the following circumstances:
-           1. At the end of a function
-           2. In an if-statement where <true> and <false> both return
-           3. In an if-statement where <true> returns and <false> is empty (an early return)
+    ::
+
+        return a, b
 
 Variable Resolution
 ~~~~~~~~~~~~~~~~~~~
@@ -689,6 +952,8 @@ Attribute Lookup On Python Modules
     are accessed this way. This allows TorchScript to call functions defined in
     other modules.
 
+.. _constant:
+
 Python-defined Constants
 ^^^^^^^^^^^^^^^^^^^^^^^^
     TorchScript also provides a way to use constants that are defined in Python.
@@ -726,6 +991,8 @@ Python-defined Constants
     * ``torch.nn.ModuleList`` which can be used in a TorchScript for loop
 
 
+.. _module attributes:
+
 Module Attributes
 ^^^^^^^^^^^^^^^^^
 
@@ -754,12 +1021,19 @@ Example::
 Debugging
 ~~~~~~~~~
 
+.. _`disable TorchScript`:
+
 Disable JIT for Debugging
 ^^^^^^^^^^^^^^^^^^^^^^^^^
-    If you want to disable all JIT modes (tracing and scripting) so you can
-    debug your program in raw Python, you can use the ``PYTORCH_JIT`` environment
-    variable. ``PYTORCH_JIT`` can be used to globally disable the
-    JIT by setting its value to ``0``. Given an example script::
+.. envvar:: PYTORCH_JIT
+
+    Setting the environment variable ``PYTORCH_JIT=0`` will disable all script
+    and tracing annotations. If there is hard-to-debug error in one of your
+    TorchScript model, you can use this flag to force everything to run using native
+    Python. Since TorchScript (scripting and tracing) are disabled with this flag,
+    you can use tools like ``pdb`` to debug the model code.
+
+    Given an example script::
 
         @torch.jit.script
         def scripted_fn(x : torch.Tensor):
@@ -777,9 +1051,9 @@ Disable JIT for Debugging
 
         traced_fn(torch.rand(3, 4))
 
-    Debugging this script with PDB works except for when we invoke the ``@torch.jit.script``
+    Debugging this script with ``pdb`` works except for when we invoke the ``@torch.jit.script``
     function. We can globally disable JIT, so that we can call the ``@torch.jit.script``
-    function as a normal python function and not compile it. If the above script
+    function as a normal Python function and not compile it. If the above script
     is called ``disable_jit_example.py``, we can invoke it like so::
 
         $ PYTORCH_JIT=0 python disable_jit_example.py
@@ -1052,6 +1326,24 @@ Tracer Warnings
         traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
         print(traced.graph)
 
+Builtin Functions
+~~~~~~~~~~~~~~~~~
+
+TorchScript supports a subset of the builtin tensor and neural network
+functions that PyTorch provides. Most methods on Tensor as well as functions in
+the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
+modules from ``torch.nn`` are supported in TorchScript, excluding those in the
+table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
+
+Unsupported ``torch.nn`` Modules  ::
+
+    torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss
+    torch.nn.modules.normalization.CrossMapLRN2d
+    torch.nn.modules.rnn.RNN
+
+
+See :ref:`builtin-functions` for a full reference of supported functions
+
 
 Frequently Asked Questions
 --------------------------
@@ -1147,23 +1439,3 @@ Q: I would like to trace module's method but I keep getting this error:
         module = torch.jit.trace_module(n, inputs)
 
 
-Builtin Functions
-~~~~~~~~~~~~~~~~~
-
-TorchScript supports a subset of the builtin tensor and neural network
-functions that PyTorch provides. Most methods on Tensor as well as functions in
-the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
-modules from ``torch.nn`` are supported in TorchScript, excluding those in the
-table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
-
-Unsupported ``torch.nn`` Modules  ::
-
-    torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss
-    torch.nn.modules.normalization.CrossMapLRN2d
-    torch.nn.modules.fold.Fold
-    torch.nn.modules.fold.Unfold
-    torch.nn.modules.rnn.GRU
-    torch.nn.modules.rnn.RNN
-
-
-.. automodule:: torch.jit.supported_ops

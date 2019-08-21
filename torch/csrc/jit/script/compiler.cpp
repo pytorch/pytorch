@@ -471,14 +471,6 @@ static Value* materializeConstant(
   return new_constant;
 }
 
-static Value* ensureInt(const SourceRange& range, Value* v) {
-  if (!v->type()->isSubtypeOf(IntType::get())) {
-    throw ErrorReport(range)
-        << "expected a int but found a " << v->type()->python_str();
-  }
-  return v;
-}
-
 inline bool isSupportedListElementType(const TypePtr& type) {
   return type->isSubtypeOf(TensorType::get()) ||
       type->isSubtypeOf(NumberType::get());
@@ -549,7 +541,8 @@ struct to_ir {
 
   // If the graph might not return, add an implicit None return at the end
   void handleMaybeNoReturn(const Def& def, Block* block) {
-    if (exit_blocks.count(graph->block()) == 0) {
+    auto decl_ret = def_stack_.back().declared_return_type_;
+    if (exit_blocks.count(block) == 0) {
       auto decl_ret = def_stack_.back().declared_return_type_;
       if (decl_ret && decl_ret != NoneType::get()) {
         throw ErrorReport(def.range())
@@ -559,6 +552,14 @@ struct to_ir {
       WithInsertPoint b(*block->nodes().end());
       emitReturn(Return::create(
           def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
+    } else {
+      // if we haven't seen any return statements, but the graph block exits
+      // (the funciton always throws) then we accept the declared return type if
+      // it exists or set it to none
+      if (def_stack_.back().merged_return_type_ == nullptr) {
+        def_stack_.back().merged_return_type_ =
+            decl_ret != nullptr ? decl_ret : NoneType::get();
+      }
     }
   }
 
@@ -614,9 +615,8 @@ struct to_ir {
     Stack stack;
     // XXX: We need to turn optimization off here because otherwise we try to
     // recursively initialize stuff in DecomposeOps.
-    setGraphExecutorOptimize(false);
+    GraphOptimizerEnabledGuard guard(false);
     cu.get_function(def.name().name()).run(stack);
-    setGraphExecutorOptimize(true);
     return stack.at(0).toTuple()->elements();
   }
 
@@ -709,6 +709,43 @@ struct to_ir {
         name, "", std::move(args), std::move(returns), false, false);
   }
 
+  // see [setstate type]
+  static TypePtr getTypeForSetStateArg(const Self* self) {
+    TORCH_CHECK(self, "Expected __setstate__ to have a `self` argument");
+    self->getClassType()->getMethod("__getstate__")->ensure_defined();
+    return self->getClassType()
+        ->getMethod("__getstate__")
+        ->getSchema()
+        .returns()
+        .at(0)
+        .type();
+  }
+
+  // see [setstate type]
+  static bool shouldDeriveSetStateType(
+      const Def& def,
+      const FunctionSchema& schema) {
+    const bool noTypeAnnotations = std::all_of(
+        schema.arguments().begin(),
+        schema.arguments().end(),
+        [](const Argument& arg) { return arg.is_inferred_type(); });
+
+    bool shouldInfer = def.name().name() == "__setstate__" && noTypeAnnotations;
+    if (!shouldInfer) {
+      return false;
+    }
+
+    // Do some additional basic validation that the __setstate__ func is
+    // well-formed
+    TORCH_INTERNAL_ASSERT(def.name().name() == "__setstate__");
+    const auto numDeclParams = def.decl().params().size();
+    TORCH_CHECK(
+        numDeclParams,
+        "Expected 2 arguments for __setstate__, got: ",
+        numDeclParams);
+    return true;
+  }
+
   std::vector<Argument> emitFormalArguments(
       const Def& def,
       const Self* self,
@@ -739,6 +776,12 @@ struct to_ir {
       arguments.emplace_back(name, new_input->type());
       ++it;
     }
+
+    // [setstate type]
+    // __setstate__ is special, because if the user leaves it un-annotated we
+    // will derive the type for `state` from the output type of __getstate__.
+    // This is necessary so that we can allow submodules to appear in `state`.
+    bool shouldDeriveType = shouldDeriveSetStateType(def, schema);
     size_t arg_annotation_idx = 0;
     for (; it != end; ++it) {
       auto& name = (*it).ident().name();
@@ -748,7 +791,14 @@ struct to_ir {
         new_input->setDebugName(name);
       }
       // Record the type for the schema and set the Type on the Value*
-      arguments.push_back(schema.arguments().at(arg_annotation_idx++));
+      auto arg = schema.arguments().at(arg_annotation_idx++);
+      if (shouldDeriveType) {
+        TORCH_INTERNAL_ASSERT(schema.arguments().size() == 1);
+        const auto& inferredStateType = getTypeForSetStateArg(self);
+        arg = arg.cloneWithType(inferredStateType);
+      }
+
+      arguments.push_back(arg);
       new_input->setType(arguments.back().type());
 
       // NB: set type of new_input before setVar call so the Store is
@@ -762,9 +812,9 @@ struct to_ir {
       const SourceRange& range,
       const FunctionSchema& schema,
       Block* block) {
-    // rewrites ensure there is always a return statement in program
+    // handleMaybeNoReturn ensures that merged_return_type_ is always set
     auto ret_type = def_stack_.back().merged_return_type_;
-    AT_ASSERT(ret_type);
+    TORCH_INTERNAL_ASSERT(ret_type);
 
     // in the ConvertToSSA pass, prim::ReturnStmts are lowered so that the
     // correct return value is set. Until then, we have a correctly-typed
@@ -965,6 +1015,27 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
+  // emit a single expr from the loop comprehension so that we can correctly
+  // type the list we create, then remove the nodes we emitted
+  TypePtr getListCompType(
+      const ListComp& lc,
+      const ListTypePtr& input_list_type) {
+    auto b = graph->insertNode(graph->create(prim::Loop))->addBlock();
+    pushFrame(b);
+    WithInsertPoint guard(b);
+    auto li_elem = graph->insertNode(
+        graph->createUninitialized(input_list_type->getElementType()));
+    emitExprsAssign(
+        List<Expr>::create(lc.range(), {lc.target()}),
+        {std::make_shared<SimpleValue>(li_elem->output())},
+        lc.range(),
+        /*n_binders*/ 1);
+    auto ret_type = emitExpr(lc.elt())->type();
+    popFrame();
+    b->owningNode()->destroy();
+    return ret_type;
+  }
+
   Value* emitListComprehension(const ListComp& lc) {
     // this avoids a race condition where we would re-use the same temp name
     static std::atomic<size_t> tmp_count{0};
@@ -977,19 +1048,14 @@ struct to_ir {
       throw ErrorReport(lc.range())
           << "iterator expression is expected to be a list";
     }
-    auto elem_types = list_value->type()->containedTypes();
-    // TODO: users can easily change the type to (x,1) or float(x)
-    // as in `float(x) for x in my_list_of_ints`
-    // eventually, we would probably want to temporarily inject x
-    // so we can evaluate the generator expression (e.g. `float(x)`) depending
-    // on x
 
     // given `[x*2 for x in my_list]` this generates the following AST:
     // __list_acc = []
     // for x in my_list:
     //  __list_acc.append(x*2)
-    const auto n = graph->insertNode(
-        graph->createList(elem_types.at(0), at::ArrayRef<Value*>{}));
+    const auto n = graph->insertNode(graph->createList(
+        getListCompType(lc, list_value->type()->expect<ListType>()),
+        at::ArrayRef<Value*>{}));
     environment_stack->setVar(lc.range(), tmp_name, n->output());
     const auto tmp_list_ident = Ident::create(lc.range(), tmp_name);
     const auto tmp_list_var = Var::create(lc.range(), tmp_list_ident);
@@ -1280,18 +1346,44 @@ struct to_ir {
     }
   }
 
+  bool isIsInstanceCall(const Expr& expr) {
+    if (expr.kind() != TK_APPLY) {
+      return false;
+    }
+    auto callee = Apply(expr).callee();
+    return callee.kind() == TK_VAR && Var(callee).name().name() == "isinstance";
+  }
+
+  bool isPotentialNoneCheck(const Expr& expr) {
+    return expr.kind() == TK_IS || expr.kind() == TK_ISNOT;
+  }
+
   void emitIf(const If& stmt) {
-    // NOTE: emitIf checks on If stmt condition to see if the cond AST kind ==
-    // is/is not, for such cases we do meta programming and disable emitting the
+    // NOTE: emitIf checks on If stmt condition to see if the cond AST is
+    // a potential none check with is/is not, or an isinstance check.
+    // for such cases we do meta programming and disable emitting the
     // corresponding branches
     Expr cond = stmt.cond();
+    bool isinstance_call = isIsInstanceCall(cond);
+    bool potential_none_check = !isinstance_call && isPotentialNoneCheck(cond);
 
-    if (cond.kind() != TK_IS && cond.kind() != TK_ISNOT) {
-      // emit normal IF stmt for cases except TK_IS and TK_ISNOT
+    if (!isinstance_call && !potential_none_check) {
+      // emit normal IF stmt for cases except isinstance & none checks
       Value* cond_value = emitCond(cond);
-      emitIfElseBlocks(cond_value, stmt);
-      return;
+      return emitIfElseBlocks(cond_value, stmt);
     }
+
+    if (isinstance_call) {
+      auto is_instance_result = emitSugaredExpr(cond, 1);
+      auto ivalue = toIValue(is_instance_result->asValue(cond.range(), method));
+      TORCH_INTERNAL_ASSERT(ivalue); // no support for runtime checks
+      if (ivalue->toBool()) {
+        return emitStatements(stmt.trueBranch());
+      } else {
+        return emitStatements(stmt.falseBranch());
+      }
+    }
+
     // meta programming on AST for is/is not cases and emit branches base on the
     // possible output of cond
     auto cond_op = BinOp(cond);
@@ -1481,32 +1573,23 @@ struct to_ir {
   // raise a
   //
   // We ignore the expression following raise
-  //
-  // NYI: add exception logic to control-flow nodes
-  // if True:
-  //   a = 1
-  // else
-  //   raise Exception("Hi")
-  // print(a)
   void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
     auto string_input = insertConstant(*graph, exception, nullptr, loc);
     graph->insert(prim::RaiseException, {string_input}, {}, loc);
+    exit_blocks.insert(environment_stack->block());
   }
 
+  // emit assserions as an if branch so that assertions will reuse the
+  // emitIfElseBlocks refining of types
   void emitAssert(const Assert& stmt) {
     Value* cond_value = emitCond(stmt.test());
-    Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
-
-    n->addInput(cond_value);
-    /* true_block =*/n->addBlock();
-    auto* false_block = n->addBlock();
-
-    // if assert test is false throw exception
-    pushFrame(false_block);
-    WithInsertPoint guard(false_block);
-    emitRaise(stmt.range());
-    popFrame();
+    List<Stmt> true_branch = List<Stmt>::create(stmt.range(), {});
+    List<Stmt> false_branch =
+        List<Stmt>::create(stmt.range(), {Raise::create(stmt.range())});
+    auto if_stmt =
+        If::create(stmt.range(), stmt.test(), true_branch, false_branch);
+    emitIfElseBlocks(cond_value, if_stmt);
   }
 
   // Validate that the `lhs` Expr's in an assignment statement are valid. That
@@ -1666,6 +1749,49 @@ struct to_ir {
     }
   }
 
+  void emitAugAssignmentGeneric(
+      const AugAssign& stmt,
+      const Subscript& lhs,
+      Value* sliceable) {
+    // Get the idx to augment
+    const auto subscriptExprs = lhs.subscript_exprs();
+    const TypePtr type = sliceable->type();
+    if (subscriptExprs.size() != 1) {
+      throw ErrorReport(subscriptExprs)
+          << "Sliced expression not yet supported for " << type->python_str()
+          << " augmented assignment. "
+          << "File a bug if you want this";
+    }
+
+    TypePtr elemType = nullptr;
+    if (const ListTypePtr listType = type->cast<ListType>()) {
+      elemType = listType->getElementType();
+    } else if (const DictTypePtr dictType = type->cast<DictType>()) {
+      elemType = dictType->getKeyType();
+    }
+
+    if (elemType == nullptr) {
+      throw ErrorReport(lhs)
+          << type->python_str() << " does not support augmented assignment.";
+    }
+    const auto idxValue = emitExpr(subscriptExprs[0]);
+    const auto containerArg =
+        NamedValue(lhs.value().range(), type->str(), sliceable);
+    const auto idxArg = NamedValue(subscriptExprs.range(), "idx", idxValue);
+    const auto valueArg =
+        NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
+
+    const auto getItem = graph->insert(
+        aten::__getitem__, {containerArg, idxArg}, {}, stmt.range());
+    const auto augmentedItem = graph->insert(
+        getAugOp(stmt, elemType), {getItem, valueArg}, {}, stmt.range());
+    graph->insert(
+        aten::_set_item,
+        {containerArg, idxArg, augmentedItem},
+        {},
+        stmt.range());
+  }
+
   void emitAugAssignmentToSubscript(const AugAssign& stmt) {
     // Process the base list value
     const auto lhs = Subscript(stmt.lhs());
@@ -1716,35 +1842,7 @@ struct to_ir {
             stmt.range());
       }
     } else {
-      // Otherwise, it should be a list.  Lower this expression into:
-      //     list.set_item(get_item(idx).add_(value))
-      // similar to how Python handles things.
-      const auto listType = sliceable->type()->cast<ListType>();
-      AT_ASSERT(listType != nullptr);
-
-      auto elementType = listType->getElementType();
-
-      // Get the idx to augment
-      const auto subscriptExprs = lhs.subscript_exprs();
-      if (subscriptExprs.size() != 1) {
-        throw ErrorReport(subscriptExprs)
-            << "Sliced expression not yet supported for"
-            << " subscripted list augmented assignment. "
-            << "File a bug if you want this";
-      }
-      const auto idxValue = emitExpr(subscriptExprs[0]);
-
-      const auto listArg = NamedValue(lhs.value().range(), "list", sliceable);
-      const auto idxArg = NamedValue(subscriptExprs.range(), "idx", idxValue);
-      const auto valueArg =
-          NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
-
-      const auto getItem =
-          graph->insert(aten::__getitem__, {listArg, idxArg}, {}, stmt.range());
-      const auto augmentedItem = graph->insert(
-          getAugOp(stmt, elementType), {getItem, valueArg}, {}, stmt.range());
-      graph->insert(
-          aten::_set_item, {listArg, idxArg, augmentedItem}, {}, stmt.range());
+      emitAugAssignmentGeneric(stmt, lhs, sliceable);
     }
   }
 
@@ -3113,15 +3211,9 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     // Store the function name so that it can be referenced if there is an error
     // while compiling this function
-    if (self) {
-      // Include the fully qualified name if this is a method
-      ErrorReport::CallStack::push_function(method.qualname().qualifiedName());
-    } else {
-      ErrorReport::CallStack::push_function(method.qualname().name());
-    }
+    ErrorReport::CallStack call(
+        self ? method.qualname().qualifiedName() : method.qualname().name());
     to_ir(def, _resolver, self, method);
-    // Compilation was successful, so remove the function def info
-    ErrorReport::CallStack::pop_function();
   };
   auto name = prefix ? QualifiedName(*prefix, def.name().name())
                      : QualifiedName(def.name().name());
@@ -3148,40 +3240,10 @@ std::vector<Function*> CompilationUnit::define(
     const Self* self,
     bool shouldMangle) {
   TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
-  // We need to compile `__init__` first, since it can determine what attributes
-  // are available to other methods. So reorder the definitions accordingly.
-  c10::optional<size_t> init_idx;
-  for (size_t i = 0; i < definitions.size(); i++) {
-    const auto& def = definitions[i];
-    if (def.name().name() == "__init__") {
-      init_idx = i;
-      break;
-    }
-  }
-
   std::vector<Function*> functions;
   std::unordered_map<std::string, Function*> function_table;
-  if (init_idx.has_value()) {
-    // if we have an init, do it first.
-    auto fn = define(
-        prefix,
-        definitions[*init_idx],
-        resolvers[*init_idx],
-        self,
-        function_table,
-        shouldMangle);
-    const auto& name = fn->name();
-    function_table[name] = fn.get();
-    functions.push_back(fn.get());
-    register_function(std::move(fn));
-  }
 
   for (size_t i = 0; i < definitions.size(); i++) {
-    if (init_idx.has_value() && i == *init_idx) {
-      // skip this def since it's already been compiled
-      continue;
-    }
-
     auto fn = define(
         prefix,
         definitions[i],
@@ -3193,6 +3255,15 @@ std::vector<Function*> CompilationUnit::define(
     function_table[name] = fn.get();
     functions.push_back(fn.get());
     register_function(std::move(fn));
+  }
+
+  // We need to compile `__init__` first, since it can determine what attributes
+  // are available to other methods. So reorder the definitions accordingly.
+  for (size_t i = 0; i < definitions.size(); i++) {
+    const auto& def = definitions[i];
+    if (def.name().name() == "__init__") {
+      functions[i]->ensure_defined();
+    }
   }
 
   for (Function* function : functions) {

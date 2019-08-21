@@ -67,20 +67,20 @@ static inline const Storage& checked_storage(
 
 // TODO: Change Backend into TensorTypeId
 // TODO: Stop unwrapping (this is blocked on getting rid of TH ;)
-static inline TensorImpl* checked_tensor_unwrap(const Tensor& expr, const char * name, int pos, bool allowNull, Backend backend, ScalarType scalar_type) {
+static inline TensorImpl* checked_tensor_unwrap(const Tensor& expr, const char * name, int pos, const char * api, bool allowNull, Backend backend, ScalarType scalar_type) {
   if(allowNull && !expr.defined()) {
     return nullptr;
   }
   if (tensorTypeIdToBackend(expr.type_id()) != backend) {
     AT_ERROR("Expected object of backend ", backend, " but got backend ", tensorTypeIdToBackend(expr.type_id()),
-             " for argument #", pos, " '", name, "'");
+             " for argument #", pos, " '", name, "' in call to ", api);
   }
   if (expr.scalar_type() != scalar_type) {
     AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
-             " for argument #", pos, " '", name, "'");
+             " for argument #", pos, " '", name, "' in call to ", api);
   }
   if (expr.is_variable()) {  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
-    AT_ERROR("Expected Tensor (not Variable) for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected Tensor (not Variable) for argument #", pos, " '", name, "' in call to ", api);
   }
   return expr.unsafeGetTensorImpl();
 }
