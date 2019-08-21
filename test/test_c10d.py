@@ -2201,22 +2201,27 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             loss = criterion(output, target)
             loss.backward()
 
-        if not self.delay_allreduce:
-            # First test that finding unused params under these conditions is to
-            # trigger an error when `backward` is called (because fc3 is an unused
-            # parameter and will therefore be marked ready twice).
-            #
-            # However, this should work if `delay_allreduce` is set to true,
-            # because all variables are just marked ready once when the backward
-            # pass is complete.
-            try:
-                test_find_unused_parameters(True)
-            except Exception as ex:
+        # First test that finding unused params under these conditions is to
+        # trigger an error when `backward` is called (because fc3 is an unused
+        # parameter and will therefore be marked ready twice).
+        #
+        # However, this should work if `delay_allreduce` is set to true,
+        # because all variables are just marked ready once when the backward
+        # pass is complete.
+        try:
+            test_find_unused_parameters(True)
+        except Exception as ex:
+            if self.delay_allreduce:
+                self.fail(
+                    "Unexpected exception with delay_allreduce=True: %s" % ex
+                )
+            else:
                 self.assertTrue(
                     str(ex).startswith(
                         "Expected to mark a variable ready only once.")
                 )
-            else:
+        else:
+            if not self.delay_allreduce:
                 self.fail("Expected exception")
 
         # Then test that the default behavior can be overridden by setting
@@ -2646,24 +2651,23 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
     @requires_nccl()
     @skip_if_not_multigpu
     def test_checkpoint(self):
-        # This test is copied from #24005
+        # This test is inspired by the repo in #24005
         store = c10d.FileStore(self.file.name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        class GradientStep(nn.Module):
+        class CheckpointStep(nn.Module):
 
-            def __init__(self, energy):
-                super(GradientStep, self).__init__()
-                self._energy = energy
-                self.step_size = 0.1
+            def __init__(self, reused_net):
+                super(CheckpointStep, self).__init__()
+                self._reused_net = reused_net
 
             def forward(self, x):
                 with torch.enable_grad():
                     x.requires_grad_()
-                    omega = self._energy(x).sum()
-                    grad_out = torch.ones_like(omega).to(x.device)
+                    local_loss = self._reused_net(x).sum()
+                    grad_out = torch.ones_like(local_loss).to(x.device)
                     dx = torch.autograd.grad(
-                        outputs=omega,
+                        outputs=local_loss,
                         inputs=x,
                         grad_outputs=grad_out,
                         create_graph=True,
@@ -2671,35 +2675,29 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
                         allow_unused=True
                     )[0]
                     dx.requires_grad_()
-                    x = (x - self.step_size ** 2 * dx)
                 return x
 
-        class FFN(nn.Module):
+        class TestModel(nn.Module):
 
             def __init__(self):
-                super(FFN, self).__init__()
-                self.n_hidden = 1024
-                self._energy = nn.Sequential(
-                    nn.Linear(28**2, self.n_hidden),
-                    nn.LeakyReLU(),
-                    nn.Linear(self.n_hidden, self.n_hidden),
-                    nn.LeakyReLU(),
-                    nn.Linear(self.n_hidden, self.n_hidden),
-                    nn.LeakyReLU(),
-                    nn.Linear(self.n_hidden, 1))
+                super(TestModel, self).__init__()
+                self._reused_net = nn.Sequential(
+                    nn.Linear(10, 20),
+                    nn.ReLU(),
+                    nn.Linear(20, 1))
                 self.L = 10
 
             def forward(self, x):
                 y = x.clone().to(x.device)
                 y.requires_grad_()
                 fwd = nn.Sequential(
-                    *[GradientStep(self._energy) for _ in range(self.L)]
+                    *[CheckpointStep(self._reused_net) for _ in range(self.L)]
                 )
                 y = checkpoint_sequential(fwd, self.L, y)
                 return y
 
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
-        net = FFN().float().to(device_id)
+        net = TestModel().float().to(device_id)
         ddp = DistributedDataParallel(
             copy.deepcopy(net),
             device_ids=[device_id],
@@ -2710,8 +2708,8 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
 
         batch_size = self.world_size
         loss_fn = nn.MSELoss()
-        input = torch.rand([batch_size, 28**2], dtype=torch.float).to(device_id)
-        target = torch.rand([batch_size, 28**2], dtype=torch.float).to(device_id)
+        input = torch.rand([batch_size, 10], dtype=torch.float).to(device_id)
+        target = torch.rand([batch_size, 10], dtype=torch.float).to(device_id)
 
         def step(model, input, target):
             output = model(input)

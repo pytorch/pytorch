@@ -133,7 +133,7 @@ Reducer::Reducer(
 
         // Hook to execute after the gradient accumulator has executed.
         hooks_.emplace_back(
-            // For delayed_allreduce, the actually hook only needs to be run at
+            // For delayed_allreduce, the actual hook only needs to be run at
             // the end of the autograd computation. However, final_callbacks_
             // inserted by ``queue_callback`` will be cleared at the beginning
             // of every backward execution. Hence, we have to first insert
@@ -304,8 +304,6 @@ void Reducer::delayed_autograd_hook() {
           mark_variable_ready(index);
         }
       }
-
-      //finalize_backward();
     });
     // mark false as the final hook only needs to be inserted once
     require_final_hook_ = false;
@@ -586,7 +584,7 @@ void Reducer::prepare_for_backward(
   unused_parameters_.clear();
 
   // Reset delayed allreduce final hook
-  require_final_hook_ = delay_allreduce_;
+  require_final_hook_ = true;
 
   // If no outputs are specified, we assume that autograd hooks for ALL
   // variables will be called, and we don't have to search the autograd graph
