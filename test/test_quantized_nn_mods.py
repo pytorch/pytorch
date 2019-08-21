@@ -12,7 +12,7 @@ from torch.nn.quantized.modules import Conv2d
 from torch.nn._intrinsic.quantized import ConvReLU2d
 import torch.quantization
 from common_utils import run_tests, tempfile
-from common_quantization import QuantizationTestCase, no_deadline
+from common_quantization import QuantizationTestCase, no_deadline, prepare_dynamic
 from common_quantized import _calculate_dynamic_qparams
 from hypothesis import given
 from hypothesis import strategies as st
@@ -49,8 +49,9 @@ class DynamicModuleAPITest(QuantizationTestCase):
         in_features=st.integers(16, 32),
         out_features=st.integers(4, 8),
         use_bias=st.booleans(),
+        use_default_observer=st.booleans(),
     )
-    def test_linear_api(self, batch_size, in_features, out_features, use_bias):
+    def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_default_observer):
         """test API functionality for nn.quantized.dynamic.Linear"""
         W = torch.rand(out_features, in_features).float()
         W_scale, W_zp = _calculate_dynamic_qparams(W, torch.qint8)
@@ -119,8 +120,9 @@ class DynamicModuleAPITest(QuantizationTestCase):
 
         # Test from_float
         float_linear = torch.nn.Linear(in_features, out_features).float()
-        float_linear.qconfig = torch.quantization.default_qconfig
-        torch.quantization.prepare(float_linear)
+        if use_default_observer:
+            float_linear.qconfig = torch.quantization.default_dynamic_qconfig
+        prepare_dynamic(float_linear)
         float_linear(X.float())
         quantized_float_linear = nnqd.Linear.from_float(float_linear)
 

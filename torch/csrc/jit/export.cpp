@@ -221,7 +221,7 @@ void EncoderBase::EncodeValueInfo(
     const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   std::string name = n->debugName();
   v->set_name(name);
-  if (ProfiledTensorTypePtr node_type = n->type()->cast<ProfiledTensorType>()) {
+  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
     if (!node_type->isComplete()) {
       return;
     }
@@ -624,7 +624,23 @@ class ScriptModuleSerializer2 {
       : writer_(filename.c_str()) {}
 
   ScriptModuleSerializer2(std::ostream* ofs) : ofs_(), writer_(ofs) {}
+  void serialize(
+      const script::Module& module,
+      const script::ExtraFilesMap& extra_files) {
+    C10_LOG_API_USAGE_ONCE("torch.script.save");
+    writeExtraFiles(module, extra_files);
+    // Serialize all code info.
+    writeCode(module.type());
+    // The tensor constants from the code are written to a separate archive
+    // so loading the code does not depend on loading the data
+    std::vector<IValue> ivalue_constants(
+        constant_table_.begin(), constant_table_.end());
+    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
+    // finally we serialize the model
+    writeArchive("data", module.module_object());
+  }
 
+ private:
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
     Pickler data_pickle(
@@ -645,27 +661,6 @@ class ScriptModuleSerializer2 {
     fname << archive_name << ".pkl";
     writer_.writeRecord(fname.str(), data.data(), data.size());
   }
-
-  void serialize(
-      const script::Module& module,
-      const script::ExtraFilesMap& extra_files) {
-    C10_LOG_API_USAGE_ONCE("torch.script.save");
-    writeExtraFiles(module, extra_files);
-    // Serialize all code info.
-    writeCode(module.type());
-    // The tensor constants from the code are written to a separate archive
-    // so loading the code does not depend on loading the data
-    std::vector<IValue> ivalue_constants(
-        constant_table_.begin(), constant_table_.end());
-    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
-    // finally we serialize the model
-    writeArchive("data", module.module_object());
-  }
-
- private:
-  std::ofstream ofs_;
-  caffe2::serialize::PyTorchStreamWriter writer_;
-  std::vector<at::Tensor> constant_table_;
 
   void writeExtraFiles(
       const script::Module& module,
@@ -779,6 +774,10 @@ class ScriptModuleSerializer2 {
     TypeInfo info{source_stream.str(), std::move(source_ranges)};
     converted_types_.insert(class_type, std::move(info));
   }
+
+  std::ofstream ofs_;
+  caffe2::serialize::PyTorchStreamWriter writer_;
+  std::vector<at::Tensor> constant_table_;
 
   // all deps used by this module hierarchy
   struct TypeInfo {

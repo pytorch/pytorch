@@ -13,8 +13,6 @@
 namespace torch {
 namespace jit {
 
-using ::c10::ProfiledTensorTypePtr;
-
 // Replaces prim::Guard nodes with prim::BailOut nodes and
 // computes sets of inputs needed to resume execution at
 // bailout points
