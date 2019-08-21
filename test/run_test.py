@@ -58,6 +58,7 @@ TESTS = [
     'jit_fuser',
     'tensorboard',
     'namedtensor',
+    'jit_disabled',
 ]
 
 WINDOWS_BLACKLIST = [
