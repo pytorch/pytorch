@@ -12,7 +12,7 @@ import common_utils as common
 import common_nn
 from common_cuda import TEST_CUDA
 import torch.utils.cpp_extension
-from cpp_api_parity import sample_module, torch_nn_modules, TorchNNTestParams
+from cpp_api_parity import sample_module, torch_nn_modules, TorchNNTestParams, CppArg
 
 
 torch_nn_has_parity = set([
@@ -148,16 +148,17 @@ TORCH_NN_MODULE_IGNORED_ATTRS = {
 class TestCppApiParity(common.TestCase):
     def _python_arg_to_cpp_arg(self, python_arg):
         if type(python_arg) == int:
-            return 'int64_t', str(python_arg)
+            return CppArg(type='int64_t', value=str(python_arg))
         elif type(python_arg) == float:
-            return 'double', str(python_arg)
+            return CppArg(type='double', value=str(python_arg))
         elif type(python_arg) == bool:
-            return 'bool', str(python_arg).lower()
+            return CppArg(type='bool', value=str(python_arg).lower())
         elif type(python_arg) == str:
-            return 'std::string', '"{}"'.format(python_arg)
+            return CppArg(type='std::string', value='"{}"'.format(python_arg))
         elif type(python_arg) == torch.Tensor:
-            return ('torch::Tensor',
-                    'torch::empty({})'.format(str(list(python_arg.shape)).replace('[', '{').replace(']', '}')))
+            return CppArg(
+                type='torch::Tensor',
+                value='torch::empty({})'.format(str(list(python_arg.shape)).replace('[', '{').replace(']', '}')))
         else:
             raise RuntimeError(
                 "{} is not a supported arg type for C++ module methods".format(type(python_default_value)))
@@ -188,7 +189,7 @@ class TestCppApiParity(common.TestCase):
         init_kwargs = init_arg_spec.args[len(python_default_constructor_args) + 1:]
         init_kwargs_defaults = init_arg_spec.defaults
         for arg_name, python_default_value in zip(init_kwargs, init_kwargs_defaults):
-            cpp_module_option += '.{}({})'.format(arg_name, self._python_arg_to_cpp_arg(python_default_value)[1])
+            cpp_module_option += '.{}({})'.format(arg_name, self._python_arg_to_cpp_arg(python_default_value).value)
 
         cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + module_metadata.get('cpp_sources', '')
         cpp_sources += TORCH_NN_MODULE_TEST_CTOR_ARGS.substitute(
@@ -206,7 +207,7 @@ class TestCppApiParity(common.TestCase):
 
         def generate_test_cpp_sources(test_params, template, extra_stmts):
             example_inputs = test_params.example_inputs
-            input_arg_types = [self._python_arg_to_cpp_arg(arg)[0] for arg in example_inputs]
+            input_arg_types = [self._python_arg_to_cpp_arg(arg).type for arg in example_inputs]
             input_arg_declarations = ',\n'.join(
                 [input_arg_types[i] + ' ' + 'arg' + str(i) for i in range(len(input_arg_types))])
             input_args = ',\n'.join(['arg' + str(i) for i in range(len(input_arg_types))])

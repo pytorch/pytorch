@@ -14,3 +14,5 @@ TorchNNTestParams = namedtuple(
         'device',
     ]
 )
+
+CppArg = namedtuple('CppArg', ['type', 'value'])
