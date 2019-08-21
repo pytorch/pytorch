@@ -592,12 +592,30 @@ struct PythonPrintPass {
   }
 
   void printAssignment(at::ArrayRef<Value*> lhs, at::ArrayRef<Value*> rhs) {
-    if (lhs.size() > 0) {
+    if (lhs.size() == 0) {
+      return;
+    }
+    indent();
+    printValueList(body_, lhs);
+    body_ << " = ";
+    printValueList(body_, rhs);
+    body_ << "\n";
+  }
+
+  bool requiresAnnotation(Value* lhs, Value* rhs) {
+    return *lhs->type() != *rhs->type();
+  }
+
+  void printAnnotatedAssignment(
+      at::ArrayRef<Value*> lhs,
+      at::ArrayRef<Value*> rhs) {
+    for (size_t i = 0; i < lhs.size(); ++i) {
       indent();
-      printValueList(body_, lhs);
-      body_ << " = ";
-      printValueList(body_, rhs);
-      body_ << "\n";
+      body_ << useOf(lhs[i]);
+      if (requiresAnnotation(lhs[i], rhs[i])) {
+        body_ << ": " << lhs[i]->type()->python_str();
+      }
+      body_ << " = " << useOf(rhs[i]) << "\n";
     }
   }
 
@@ -643,7 +661,7 @@ struct PythonPrintPass {
         });
 
     // Print initial assignments of loop node outputs = loop node inputs
-    printAssignment(stmt.carriedOutputs(), stmt.carriedInputs());
+    printAnnotatedAssignment(stmt.carriedOutputs(), stmt.carriedInputs());
 
     assignValuesToTheirUniqueNames(stmt.currentTripCount());
     // Loop header
