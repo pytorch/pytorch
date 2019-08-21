@@ -38,11 +38,7 @@ struct SourceRangeFactory {
       int line,
       int start_col,
       int end_col) {
-    // Python has a weird convention where col_offset points to the column
-    // *before* the token starts.
-    start_col++;
-    end_col++;
-    // Also, lines are counted from 1.
+    // lines are counted from 1.
     line--;
     auto line_start = source_->offset_for_line(line);
     return std::make_tuple<size_t, size_t>(
@@ -150,7 +146,8 @@ void initTreeViewBindings(PyObject* module) {
             const auto& r = name.range();
             return Def::create(r, name, decl, wrap_list(r, std::move(body)));
           }))
-      .def("decl", [](const Def& def) { return def.decl(); });
+      .def("decl", [](const Def& def) { return def.decl(); })
+      .def("name", [](const Def& def) { return def.name(); });
   py::class_<ClassDef, TreeView>(m, "ClassDef")
       .def(py::init([](const Ident& name, std::vector<Stmt> body) {
         const auto& r = name.range();

@@ -19,10 +19,11 @@ list(APPEND Caffe2_CPU_SRCS
 # ---[ threadpool/pthreadpool* is a local modification of the NNPACK
 # pthreadpool with a very similar interface. Neither NNPACK, nor this
 # thread pool supports Windows.
-if (NOT MSVC AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
+if (NOT MSVC)
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
           utils/threadpool/pthreadpool.cc
           utils/threadpool/pthreadpool_impl.cc
+          utils/threadpool/ThreadPoolMobile.cc
           )
 endif()
 

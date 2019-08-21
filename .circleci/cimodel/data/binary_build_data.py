@@ -59,20 +59,21 @@ CONFIG_TREE_DATA = OrderedDict(
     )),
 )
 
-
-# Why is this an option?
-# All the nightlies used to be devtoolset3 and built with the old gcc ABI. We
-# added a devtoolset7 option so that we could build nightlies with the new gcc
-# ABI. That didn't work since devtoolset7 can't build with the new gcc ABI. But
-# then we set devtoolset7 to be the default anyways, since devtoolset7
-# understands avx512, which is needed for good fbgemm performance.
-# This should be removed. The base dockers should just be upgraded to
-# devtoolset7 so we don't have to reinstall this in every build job.
-# The same machinery that this uses, though, should be retooled for a different
-# compiler toolchain that can build with the new gcc ABI.
-DEVTOOLSET_VERSIONS = [
-    7,
-]
+# GCC config variants:
+#
+# All the nightlies (except libtorch with new gcc ABI) are built with devtoolset7,
+# which can only build with old gcc ABI. It is better than devtoolset3
+# because it understands avx512, which is needed for good fbgemm performance.
+#
+# Libtorch with new gcc ABI is built with gcc 5.4 on Ubuntu 16.04.
+LINUX_GCC_CONFIG_VARIANTS = OrderedDict(
+    manywheel=['devtoolset7'],
+    conda=['devtoolset7'],
+    libtorch=[
+        "devtoolset7",
+        "gcc5.4_cxx11-abi",
+    ],
+)
 
 
 class TopLevelNode(ConfigNode):
@@ -95,13 +96,7 @@ class OSConfigNode(ConfigNode):
         self.props["cuda_versions"] = cuda_versions
 
     def get_children(self):
-        packaging_variants = [PackageFormatConfigNode(self, k, v) for k, v in self.py_tree.items()]
-
-        if self.find_prop("smoke"):
-            filtered_packaging_variants = list(filter(lambda x: x.get_label() != "libtorch", packaging_variants))
-            return filtered_packaging_variants
-        else:
-            return packaging_variants
+        return [PackageFormatConfigNode(self, k, v) for k, v in self.py_tree.items()]
 
 
 class PackageFormatConfigNode(ConfigNode):
@@ -113,23 +108,23 @@ class PackageFormatConfigNode(ConfigNode):
 
     def get_children(self):
         if self.find_prop("os_name") == "linux":
-            return [LinuxGccConfigNode(self, v) for v in DEVTOOLSET_VERSIONS]
+            return [LinuxGccConfigNode(self, v) for v in LINUX_GCC_CONFIG_VARIANTS[self.find_prop("package_format")]]
         else:
             return [ArchConfigNode(self, v) for v in self.find_prop("cuda_versions")]
 
 
 class LinuxGccConfigNode(ConfigNode):
-    def __init__(self, parent, devtoolset_version):
-        super(LinuxGccConfigNode, self).__init__(parent, "DEVTOOLSET=" + str(devtoolset_version))
+    def __init__(self, parent, gcc_config_variant):
+        super(LinuxGccConfigNode, self).__init__(parent, "GCC_CONFIG_VARIANT=" + str(gcc_config_variant))
 
-        self.props["devtoolset_version"] = devtoolset_version
+        self.props["gcc_config_variant"] = gcc_config_variant
 
     def get_children(self):
         cuda_versions = self.find_prop("cuda_versions")
 
         # XXX devtoolset7 on CUDA 9.0 is temporarily disabled
         # see https://github.com/pytorch/pytorch/issues/20066
-        if self.find_prop("devtoolset_version") == 7:
+        if self.find_prop("gcc_config_variant") == 'devtoolset7':
             cuda_versions = filter(lambda x: x != "90", cuda_versions)
 
         return [ArchConfigNode(self, v) for v in cuda_versions]
