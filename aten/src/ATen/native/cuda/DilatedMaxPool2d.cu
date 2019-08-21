@@ -23,6 +23,14 @@ __device__ inline int min(int a, int b) {
 
 #define BLOCK_STRIDE 2 // increasing block_stride to lower # of blocks launched
 
+static __device__ inline int p_start(int size, int pad, int kernel, int dilation, int stride) {
+  return (size + pad < ((kernel - 1) * dilation + 1)) ? 0 : (size + pad - ((kernel - 1) * dilation + 1)) / stride + 1;
+}
+
+static __device__ inline int p_end(int size, int pad, int pooled_size, int stride) {
+  return min((size + pad) / stride + 1, pooled_size);
+}
+
 // kernels borrowed from Caffe
 template <typename scalar_t, typename accscalar_t>
 __global__ void MaxPoolForwardNCHW(const int nthreads, const scalar_t* bottom_data,
@@ -64,27 +72,27 @@ __global__ void MaxPoolForwardNCHW(const int nthreads, const scalar_t* bottom_da
 
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-__global__ void MaxPoolForwardNHWC(const int nthreads, const scalar_t* bottom_data,
-                                   const int num, const int channels, const int height,
+__global__ void MaxPoolForwardNHWC(const scalar_t* bottom_data,
+                                   const int channels, const int height,
                                    const int width, const int pooled_height, const int pooled_width,
                                    const int kernel_h, const int kernel_w, const int stride_h,
                                    const int stride_w, const int pad_h, const int pad_w,
                                    const int dilation_h, const int dilation_w,
                                    const int in_stride_c, const int in_stride_h, const int in_stride_w,
                                    scalar_t* top_data, int64_t* top_mask) {
-
   extern __shared__ int smem[];
-  scalar_t *out_cached = reinterpret_cast<scalar_t*>(smem);
+  int *out_mask_cached = smem;
+  scalar_t *out_cached = reinterpret_cast<scalar_t*>(&out_mask_cached[channels*blockDim.y*blockDim.z]);
 
   // flattening cta for pre-computation & smem initialization;
-  int thread_id = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z); //globalId
-  int block_size = blockDim.x * blockDim.y * blockDim.z; //block size
+  int thread_id = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
+  int block_size = blockDim.x * blockDim.y * blockDim.z;
 
   // use shared memory to store temporary output value. This is simply to
   // reduce register usage.
   for (int i = thread_id; i < channels*blockDim.y*blockDim.z; i+= block_size) {
     out_cached[i] = scalar_t(0.0);
-    out_cached[2 * i + 1] = scalar_t(0.0);
+    out_mask_cached[i] = 0;
   }
 
   __syncthreads();
@@ -93,7 +101,8 @@ __global__ void MaxPoolForwardNHWC(const int nthreads, const scalar_t* bottom_da
   top_mask = top_mask + blockIdx.x * pooled_height * pooled_width * channels;
   bottom_data = bottom_data + blockIdx.x * channels * height * width;
 
-  out_cached = &out_cached[2 * (threadIdx.z * blockDim.y + threadIdx.y) * channels];
+  out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * channels];
+  out_mask_cached = &out_mask_cached[(threadIdx.z * blockDim.y + threadIdx.y) * channels];
 
   int oH = (pooled_height + gridDim.z-1) / gridDim.z;
   int oW = (pooled_width + gridDim.y-1) / gridDim.y;
@@ -117,10 +126,9 @@ __global__ void MaxPoolForwardNHWC(const int nthreads, const scalar_t* bottom_da
           const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
           for(int c = threadIdx.x; c < channels; c+= blockDim.x) {
             scalar_t val = ptr_input[c];
-            scalar_t maxval = out_cached[2 * c];
-            if ((ScalarConvert<scalar_t, accscalar_t>::to(val) > maxval) || THCNumerics<scalar_t>::isnan(val)) {
-              out_cached[2 * c] = ScalarConvert<scalar_t, accscalar_t>::to(val);
-              out_cached[2 * c + 1] = ih * width + iw;
+            if ((scalar_cast<accscalar_t>(val) > out_cached[c]) || THCNumerics<scalar_t>::isnan(val)) {
+              out_cached[c] = scalar_cast<accscalar_t>(val);
+              out_mask_cached[c] = ih * width + iw;
             }
           }
         }
@@ -128,10 +136,10 @@ __global__ void MaxPoolForwardNHWC(const int nthreads, const scalar_t* bottom_da
       scalar_t *ptr_output_data = top_data + (oh * pooled_width + ow) * channels;
       int64_t *ptr_output_mask = top_mask + (oh * pooled_width + ow) * channels;
       for(int c = threadIdx.x; c < channels; c+= blockDim.x) {
-        ptr_output_data[c] = out_cached[2 * c];
-        ptr_output_mask[c] = out_cached[2 * c + 1];
-        out_cached[2 * c] = scalar_t(0.0);
-        out_cached[2 * c + 1] = scalar_t(0.0);
+        ptr_output_data[c] = out_cached[c];
+        ptr_output_mask[c] = out_mask_cached[c];
+        out_cached[c] = scalar_t(0.0);
+        out_mask_cached[c] = 0;
       }
     }
   }
@@ -157,33 +165,10 @@ __global__ void MaxPoolBackwardNCHW(const int nthreads, const scalar_t* top_diff
     int h = index/width;
     int w = index - h * width;
 //get some templating performance benefits without actually templating
-    int phstart, phend, pwstart, pwend;
-    if (stride_h == 1) {
-       phstart =
-        (h + pad_h < ((kernel_h - 1) * dilation_h + 1)) ? 0 : (h + pad_h - ((kernel_h - 1) * dilation_h + 1))  + 1;
-       phend = min((h + pad_h)  + 1, pooled_height);
-    } else if (stride_h == 2) {
-       phstart =
-        (h + pad_h < ((kernel_h - 1) * dilation_h + 1)) ? 0 : (h + pad_h - ((kernel_h - 1) * dilation_h + 1)) / 2  + 1;
-       phend = min((h + pad_h) / 2  + 1, pooled_height);
-    } else {
-       phstart =
-        (h + pad_h < ((kernel_h - 1) * dilation_h + 1)) ? 0 : (h + pad_h - ((kernel_h - 1) * dilation_h + 1)) / stride_h  + 1;
-       phend = min((h + pad_h) / stride_h  + 1, pooled_height);
-    }
-    if (stride_w == 1) {
-        pwstart =
-        (w + pad_w < ((kernel_w - 1) * dilation_w + 1)) ? 0 : (w + pad_w - ((kernel_w - 1) * dilation_w + 1)) + 1;
-        pwend = min((w + pad_w) + 1, pooled_width);
-    } else if (stride_w == 2) {
-        pwstart =
-        (w + pad_w < ((kernel_w - 1) * dilation_w + 1)) ? 0 : (w + pad_w - ((kernel_w - 1) * dilation_w + 1)) / 2 + 1;
-        pwend = min((w + pad_w) / 2 + 1, pooled_width);
-    } else {
-        pwstart =
-        (w + pad_w < ((kernel_w - 1) * dilation_w + 1)) ? 0 : (w + pad_w - ((kernel_w - 1) * dilation_w + 1)) / stride_w + 1;
-        pwend = min((w + pad_w) / stride_w + 1, pooled_width);
-    }
+    int phstart = p_start(h, pad_h, kernel_h, dilation_h, stride_h);
+    int phend = p_end(h, pad_h, pooled_height, stride_h);
+    int pwstart = p_start(w, pad_w, kernel_w, dilation_w, stride_w);
+    int pwend = p_end(w, pad_w, pooled_width, stride_w);
     for (int n = blockIdx.y; n < num; n += gridDim.y)
        for (int c = blockIdx.z; c < channels; c+= gridDim.z) {
 
@@ -246,59 +231,34 @@ __global__ void MaxPoolBackwardNHWC(const int nthreads, const scalar_t* top_diff
 
   for (int ih = istartH; ih < iendH; ih+=blockDim.z) {
     for (int iw = istartW; iw < iendW; iw+=blockDim.y) {
-      int phstart, phend, pwstart, pwend;
-      if (stride_h == 1) {
-        phstart =
-            (ih + pad_h < ((kernel_h - 1) * dilation_h + 1)) ? 0 : (ih + pad_h - ((kernel_h - 1) * dilation_h + 1))  + 1;
-        phend = min((ih + pad_h)  + 1, pooled_height);
-      } else if (stride_h == 2) {
-        phstart =
-            (ih + pad_h < ((kernel_h - 1) * dilation_h + 1)) ? 0 : (ih + pad_h - ((kernel_h - 1) * dilation_h + 1)) / 2  + 1;
-        phend = min((ih + pad_h) / 2  + 1, pooled_height);
-      } else {
-        phstart =
-            (ih + pad_h < ((kernel_h - 1) * dilation_h + 1)) ? 0 : (ih + pad_h - ((kernel_h - 1) * dilation_h + 1)) / stride_h  + 1;
-        phend = min((ih + pad_h) / stride_h  + 1, pooled_height);
-      }
-      if (stride_w == 1) {
-        pwstart =
-            (iw + pad_w < ((kernel_w - 1) * dilation_w + 1)) ? 0 : (iw + pad_w - ((kernel_w - 1) * dilation_w + 1)) + 1;
-        pwend = min((iw + pad_w) + 1, pooled_width);
-      } else if (stride_w == 2) {
-        pwstart =
-            (iw + pad_w < ((kernel_w - 1) * dilation_w + 1)) ? 0 : (iw + pad_w - ((kernel_w - 1) * dilation_w + 1)) / 2 + 1;
-        pwend = min((iw + pad_w) / 2 + 1, pooled_width);
-      } else {
-        pwstart =
-            (iw + pad_w < ((kernel_w - 1) * dilation_w + 1)) ? 0 : (iw + pad_w - ((kernel_w - 1) * dilation_w + 1)) / stride_w + 1;
-        pwend = min((iw + pad_w) / stride_w + 1, pooled_width);
-      }
-
+      int phstart = p_start(ih, pad_h, kernel_h, dilation_h, stride_h);
+      int phend = p_end(ih, pad_h, pooled_height, stride_h);
+      int pwstart = p_start(iw, pad_w, kernel_w, dilation_w, stride_w);
+      int pwend = p_end(iw, pad_w, pooled_width, stride_w);
       if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
         for(int oh = phstart; oh < phend; ++oh) {
           for(int ow = pwstart; ow < pwend; ++ow) {
             const int64_t* ptr_top_mask = top_mask + oh * out_stride_h + ow * out_stride_w;
             for (int c = threadIdx.x; c < channels; c += blockDim.x) {
               if (ptr_top_mask[c] == ih * width + iw) {
-                out_cached[c] += ScalarConvert<accscalar_t, scalar_t>::to(top_diff[oh * out_stride_h + ow * out_stride_w + c]);
+                out_cached[c] += scalar_cast<scalar_t>(top_diff[oh * out_stride_h + ow * out_stride_w + c]);
               }
             }
           }
         }
+        scalar_t *ptr_bottom_diff = bottom_diff + (ih * width + iw) * channels;
+        for (int c = threadIdx.x; c < channels; c += blockDim.x) {
+          ptr_bottom_diff[c] = out_cached[c];
+          out_cached[c] = scalar_t(0.0);
+        }
       } else {
-        int idx = phstart * out_stride_h + pwstart * out_stride_w;
-        const int64_t* ptr_top_mask = top_mask + idx;
+        const int64_t* ptr_top_mask = top_mask + phstart * out_stride_h + pwstart * out_stride_w;
+        scalar_t *ptr_bottom_diff = bottom_diff + (ih * width + iw) * channels;
         for (int c = threadIdx.x; c < channels; c += blockDim.x) {
           if (ptr_top_mask[c] == ih * width + iw) {
-            out_cached[c] += ScalarConvert<accscalar_t, scalar_t>::to(top_diff[phstart * out_stride_h + pwstart * out_stride_w + c]);
+            ptr_bottom_diff[c] = scalar_cast<scalar_t>(top_diff[phstart * out_stride_h + pwstart * out_stride_w + c]);
           }
         }
-      }
-
-      scalar_t *ptr_bottom_diff = bottom_diff + (ih * width + iw) * channels;
-      for (int c = threadIdx.x; c < channels; c += blockDim.x) {
-        ptr_bottom_diff[c] = out_cached[c];
-        out_cached[c] = scalar_t(0.0);
       }
     }
   }
@@ -406,9 +366,9 @@ void max_pool2d_with_indices_out_cuda_template(
         const dim3 grid(grid_x, grid_y, grid_z);
 
         MaxPoolForwardNHWC<scalar_t, scalar_t>
-        <<<grid, block, 2 * nInputPlane * block_y * block_z * sizeof(scalar_t), at::cuda::getCurrentCUDAStream()>>>(
-            count, input_data,
-                nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+        <<<grid, block, nInputPlane * block_y * block_z * (sizeof(int) + sizeof(scalar_t)), at::cuda::getCurrentCUDAStream()>>>(
+            input_data,
+                nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
                 kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                 in_stride_c, in_stride_h, in_stride_w,
                 output_data, indices_data);
