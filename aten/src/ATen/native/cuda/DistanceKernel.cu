@@ -211,14 +211,44 @@ __global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   const scalar_t * a = start + threadIdx.x;
   const scalar_t * b = x2 + l * l2_size + j * m + threadIdx.x;
 
-  scalar_t agg = 0.0;
+  /*scalar_t agg = 0.0;
   for (; a < end; a += stride, b += stride) {
     F::inc(agg, std::abs(*a - *b), p);
   }
   agg = reduce_agg<scalar_t, F>(agg);
   if (threadIdx.x == 0) {
     result[blockIdx.x] = F::finish(agg, p);
+  }*/
+
+  scalar_t agg = 0.0;
+  F::inc(agg, std::abs(*a - *b), p);
+  scalar_t agg1 = reduce_agg<scalar_t, F>(agg);
+
+  if (blockIdx.x == 0 && threadIdx.x == 0) {
+    result[0] = agg;
   }
+  if (blockIdx.x == 0 && threadIdx.x == 1) {
+    result[1] = agg;
+  }
+  if (blockIdx.x == 2 && threadIdx.x == 0) {
+    result[2] = agg;
+  }
+  if (blockIdx.x == 2 && threadIdx.x == 1) {
+    result[3] = agg;
+  }
+
+  /*if (blockIdx.x == 0 && threadIdx.x == 0) {
+    result[0] = *b;
+  }
+  if (blockIdx.x == 0 && threadIdx.x == 1) {
+    result[1] = *b;
+  }
+  if (blockIdx.x == 1 && threadIdx.x == 0) {
+    result[2] = *b;
+  }
+  if (blockIdx.x == 1 && threadIdx.x == 1) {
+    result[3] = *b;
+  }*/
 }
 
 void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, double p) {
