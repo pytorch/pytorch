@@ -1924,6 +1924,24 @@ reciprocal_() -> Tensor
 In-place version of :meth:`~Tensor.reciprocal`
 """)
 
+add_docstr_all('record_stream',
+               r"""
+record_stream(stream)
+
+Ensures that the tensor memory is not reused for another tensor until all
+current work queued on :attr:`stream` are complete.
+
+.. note::
+
+    The caching allocator is aware of only the stream where a tensor was
+    allocated. Due to the awareness, it already correctly manages the life
+    cycle of tensors on only one stream. But if a tensor is used on a stream
+    different from the stream of origin, the allocator might reuse the memory
+    unexpectedly. Calling this method lets the allocator know which streams
+    have used the tensor.
+
+""")
+
 add_docstr_all('remainder',
                r"""
 remainder(divisor) -> Tensor
