@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/rpc/ScriptRet.h>
+#include <torch/csrc/distributed/rpc/script_ret.h>
 #include <torch/csrc/jit/pickle.h>
 
 namespace torch {
