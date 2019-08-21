@@ -146,10 +146,11 @@ Node* createIntReprNode(Value* v, Graph* g) {
   return intrepr;
 }
 
-// Create observer.forward Node and insert a call to observer forward function
+// Clone observer module and add it to the original module,
+// and insert a call to observer forward function
 Node* insertObserverForwardCall(Value* v, Graph* g,
                                 script::Module module,
-                                const script::Module observer_module) {
+                                const script::Module& observer_module) {
   std::string observer_name = "observer_for_" + v->debugName();
   script::Module observer = observer_module.clone();
   module.register_module(observer_name, observer);
@@ -628,7 +629,7 @@ TORCH_API script::Module InsertObservers(
   // prim::Param nodes do not belong to the graph. Hence the Insert
   // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
-  for (size_t idx = 0; idx < method.num_inputs(); ++idx) {
+  for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get())) {
       Node* observer_node = insertObserverForwardCall(v, v->owningGraph(), input_module, observer_module);
@@ -687,7 +688,6 @@ Node* insertQuantDeQuantCall(Value* v, IValue qparams, at::ScalarType t, bool af
   WithInsertPoint ins(insert_point);
 
   // Add quant-intrepr-dequant nodes and replace for all uses of Value
-  std::cout << "insertQuantDeQuantCall for " << v->debugName() << std::endl;
   // Create qparam constant nodes
   TORCH_INTERNAL_ASSERT(qparams.isTuple(), "qparams must be tuple");
   auto tp = qparams.toTuple();
@@ -723,28 +723,30 @@ Node* insertQuantDeQuantCall(Value* v, IValue qparams, at::ScalarType t, bool af
   return dequant;
 }
 
-c10::optional<script::Module> findObserverModule(const script::Module& module, Value* v) {
-      for (const Use& u: v->uses()) {
-        if (u.user->kind() == prim::CallMethod && u.user->s(attr::name) == "forward" &&
+std::tuple<std::string, c10::optional<script::Module>> findObserverModule(const script::Module& module, Value* v) {
+  for (const Use& u: v->uses()) {
+    // Note that here we just check for the name of observer, but the ideally
+    // we should be comparing the type of observer, this is a temporary
+    // work around until data only clone of module.clone is supported.
+    auto submodule_name = u.user->inputs().at(0)->debugName();
+    if (u.user->kind() == prim::CallMethod && u.user->s(attr::name) == "forward" &&
 //            u.user->inputs().at(0)->type()->kind() == c10::ClassType &&
-            u.user->inputs().at(0)->debugName().find("observer_for_") == 0) {
-          std::cout << "before toIValue";
-          c10::IValue observer = u.user->inputs().at(0);
-          std::cout << "after toIValue";
-          auto observer_module = script::Module(observer.toObject());
-          std::cout << "Got observer" << std::endl;
-          std::cout << "Got observer: " << observer_module.name().qualifiedName() << std::endl;
-          return observer_module;
-        }
-      }
-      std::cout << "No observer" << std::endl;
-      return c10::nullopt;
+        submodule_name.find("observer_for_") == 0) {
+      auto observer_module = module.find_module(submodule_name);
+      return std::make_tuple(submodule_name, observer_module);
+    }
+  }
+  return std::make_tuple("", c10::nullopt);
 }
 
 IValue getQParam(const script::Module& module, Value* v) {
     TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
-    auto observer_module = findObserverModule(module, v);
-    TORCH_INTERNAL_ASSERT(observer_module, "GetQParam expects the corresponding observer for ", v->debugName(), " exists.");
+    c10::optional<script::Module> observer_module;
+    std::tie(std::ignore, observer_module) = findObserverModule(module, v);
+    TORCH_INTERNAL_ASSERT(observer_module,
+                          "getQParam expects the corresponding observer for ",
+                          v->debugName(),
+                          " exists.");
     auto calculate_qparams = observer_module.value().get_method("calculate_qparams");
     IValue qparams = calculate_qparams(std::vector<IValue>());
     return qparams;
@@ -755,17 +757,21 @@ void quantizeBias(const script::Module& module, Value* v) {
   Node* aten_call_node = nullptr;
   std::vector<std::string> ops_with_bias = {"aten::conv2d", "aten::_convolution"};
   for (const auto& use: v->uses()) {
-    if (std::find(ops_with_bias.begin(), ops_with_bias.end(), use.user->kind().toQualString()) != ops_with_bias.end()) {
+    if (std::find(ops_with_bias.begin(), ops_with_bias.end(),
+                  use.user->kind().toQualString()) != ops_with_bias.end()) {
       Value* activation = use.user->inputs()[0];
       Value* weight = use.user->inputs()[1];
       // Get qparam from activation
       IValue act_qparam = getQParam(module, activation);
       // Get qparam from weight
       IValue weight_qparam = getQParam(module, weight);
-      std::cout << "scale:" << act_qparam.toTuple()->elements()[0] << std::endl;
-      IValue bias_scale =  at::scalar_tensor(c10::Scalar(act_qparam.toTuple()->elements()[0].toTensor().item().toDouble() * weight_qparam.toTuple()->elements()[0].toTensor().item().toDouble()), at::kDouble);
-      std::cout << "bias_scale:" << bias_scale << std::endl;
-      IValue bias_qparam = c10::ivalue::Tuple::create(std::vector<IValue>({bias_scale, at::scalar_tensor(c10::Scalar(0))}), act_qparam.toTuple()->type);
+      IValue bias_scale =  at::scalar_tensor(
+          c10::Scalar(act_qparam.toTuple()->elements()[0].toTensor().item().toDouble() *
+                      weight_qparam.toTuple()->elements()[0].toTensor().item().toDouble()),
+          at::kDouble);
+      IValue bias_qparam = c10::ivalue::Tuple::create(
+          std::vector<IValue>({bias_scale,
+                               at::scalar_tensor(c10::Scalar(0))}), act_qparam.toTuple()->type);
       Node* dequant = insertQuantDeQuantCall(v, bias_qparam, at::kQInt32);
       v->replaceAllUsesWith(dequant->output());
       Node* q = traverseToQuantNode(dequant);
@@ -776,37 +782,44 @@ void quantizeBias(const script::Module& module, Value* v) {
   }
 }
 
-void quantizeValue(const script::Module& module, Value* v, std::vector<std::string>& observer_modules_to_remove, std::vector<Node*>& nodes_to_destroy, bool after=true) {
-    auto observer_module = findObserverModule(module, v);
-    if (observer_module) {
-      auto observer_module_name = observer_module.value().name().qualifiedName();
-      // remove observer_module
-      observer_modules_to_remove.push_back(observer_module_name);
-      // remove observer forward call
-      for (const Use& u: v->uses()) {
-        Node* user = u.user;
-        if (user->kind() == prim::CallMethod && user->s(c10::attr::name) == "forward" && user->inputs()[0]->debugName() == observer_module_name) {
-          // Observer forward call node
-          nodes_to_destroy.push_back(user);
-          // GetAttr node for observer module
-          nodes_to_destroy.push_back(user->inputs()[0]->node());
-        }
+void quantizeValue(const script::Module& module,
+                   Value* v,
+                   std::vector<std::string>& observer_modules_to_remove,
+                   std::vector<Node*>& nodes_to_destroy,
+                   bool insert_after=true) {
+  std::string observer_module_name;
+  c10::optional<script::Module> observer_module;
+  std::tie(observer_module_name, observer_module) = findObserverModule(module, v);
+  if (observer_module) {
+    // remove observer_module
+    observer_modules_to_remove.push_back(observer_module_name);
+    // remove observer forward call
+    for (const Use& u: v->uses()) {
+      Node* user = u.user;
+      if (user->kind() == prim::CallMethod &&
+          user->s(c10::attr::name) == "forward" &&
+          user->inputs()[0]->debugName() == observer_module_name) {
+        // Observer forward call node
+        nodes_to_destroy.push_back(user);
+        // GetAttr node for observer module
+        nodes_to_destroy.push_back(user->inputs()[0]->node());
       }
-
-      // calculate qparams and insert quant/dequant calls
-      auto calculate_qparams = (*observer_module).get_method("calculate_qparams");
-      IValue qparams = calculate_qparams(std::vector<IValue>());
-      Node* dequant;
-      if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "weight") {
-        dequant = insertQuantDeQuantCall(v, qparams, at::kQInt8);
-      } else {
-        dequant = insertQuantDeQuantCall(v, qparams, at::kQUInt8, after);
-      }
-      v->replaceAllUsesWith(dequant->output());
-      Node* q = traverseToQuantNode(dequant);
-      TORCH_INTERNAL_ASSERT(q);
-      q->replaceInputWith(dequant->output(), v);
     }
+
+    // calculate qparams and insert quant/dequant calls
+    auto calculate_qparams = (*observer_module).get_method("calculate_qparams");
+    IValue qparams = calculate_qparams(std::vector<IValue>());
+    Node* dequant;
+    if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "weight") {
+      dequant = insertQuantDeQuantCall(v, qparams, at::kQInt8);
+    } else {
+      dequant = insertQuantDeQuantCall(v, qparams, at::kQUInt8, insert_after);
+    }
+    v->replaceAllUsesWith(dequant->output());
+    Node* q = traverseToQuantNode(dequant);
+    TORCH_INTERNAL_ASSERT(q);
+    q->replaceInputWith(dequant->output(), v);
+  }
 }
 
 script::Module InsertQuantDeQuant(
@@ -869,10 +882,9 @@ script::Module InsertQuantDeQuant(
   std::cout << "quantizing bias" << std::endl;
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      std::cout << "before get observer module" << std::endl;
-      c10::optional<script::Module> observer_module = findObserverModule(module, v);
-      std::cout << "after get observer module" << std::endl;
-      if (!observer_module.has_value()) {
+      c10::optional<script::Module> observer_module;
+      std::tie(std::ignore, observer_module) = findObserverModule(module, v);
+      if (!observer_module) {
         if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
           std::cout << "quantizing bias quantizeBias " << std::endl;
           quantizeBias(module, v);
@@ -888,7 +900,8 @@ script::Module InsertQuantDeQuant(
   std::cout << "quantizing values" << std::endl;
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      auto observer_module = findObserverModule(module, v);
+      c10::optional<script::Module> observer_module;
+      std::tie(std::ignore, observer_module) = findObserverModule(module, v);
       if (observer_module) {
         quantizeValue(module, v, observer_modules_to_remove, nodes_to_destroy);
       }
@@ -898,7 +911,8 @@ script::Module InsertQuantDeQuant(
   std::cout << "quantizing input values" << std::endl;
   for (Value* v : input_values) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      auto observer_module = findObserverModule(module, v);
+      c10::optional<script::Module> observer_module;
+      std::tie(std::ignore, observer_module) = findObserverModule(module, v);
       if (observer_module) {
         quantizeValue(module, v, observer_modules_to_remove, nodes_to_destroy, false);
       }
@@ -910,32 +924,9 @@ script::Module InsertQuantDeQuant(
     n->destroy();
   }
 
-  // NOTE: Remove observer does not work right now, we'll return
+  // NOTE: Remove observer module does not work right now, we'll return
   // the module with observer modules as a temporary workaround
-  // Remove observer module, moudle API doesn't support
-  // remove, we'll create a new module but skip registering
-  // modules in `observer_modules_to_remove`
-  // script::Module result(c10::QualifiedName(module.name().qualifiedName()), module.class_compilation_unit(), true);
-  // for (const auto& param: module.get_parameters()) {
-  //   result.register_parameter(param.name(), module.get_parameter(param.name()), false);
-  // }
-
-  // for (const auto& attr: module.get_attributes()) {
-  //   result.register_attribute(attr.name(), attr.type(), module.get_attribute(attr.name()));
-  // }
-
-  // for (const auto& mod: module.get_module_slots()) {
-  //   if (std::find(observer_modules_to_remove.begin(), observer_modules_to_remove.end(), mod.name()) == observer_modules_to_remove.end()) {
-  //     result.register_module(mod.name(), module.get_module(mod.name()));
-  //   }
-  // }
-
-  // Clone methods remapping the types to the cloned ones.
-  // Doesn't work
-  // for (auto& fn : module.get_methods()) {
-  //   result.clone_method(module, fn.name());;
-  // }
-  // TODO: copy submodules
+  // TODO: remove observer modules after we have a remove_module API
 
   return module;
 }
