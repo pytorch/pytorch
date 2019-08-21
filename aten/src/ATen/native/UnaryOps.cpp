@@ -152,8 +152,8 @@ Tensor& sign_(Tensor& self) {
 
 Tensor& sign_out(Tensor& result, const Tensor& self) {
     checkBackend("sign", result, self.type().backend());
-    assert_no_internal_overlap(result);
-    auto iter = TensorIterator::unary_op(result, self);
+    auto iter = TensorIterator::unary_op(result, self,
+      /*check_internal_overlap=*/true);
     sign_stub(iter.device_type(), iter);
 
 #ifdef BUILD_NAMEDTENSOR

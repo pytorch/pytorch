@@ -12716,11 +12716,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(e1, e2)
 
     def test_sign(self):
-
-        # Check sign on all supported backends
         for device in torch.testing.get_all_device_types():
-
-            # Check sign for all maths dtype
             for dtype in torch.testing.get_all_math_dtypes(device):
 
                 # Include NaN for floating point numbers
@@ -12733,7 +12729,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
                 else:
                     dt_info = torch.iinfo(dtype)
-
+                    
                     # If unsigned type, everything should be >= 0
                     if dt_info.min == 0:
                         a = torch.tensor([12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
@@ -12742,16 +12738,13 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                         a = torch.tensor([-12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
                         a_target = torch.tensor([-1, 0, 1, -1, 1], device=device, dtype=dtype)
 
-                # sign
                 self.assertEqual(a.sign(), a_target, 'sign device={} dtype={}'.format(device, dtype))
                 self.assertEqual(torch.sign(a), a_target, 'sign device={} dtype={}'.format(device, dtype))
 
-                # sign_out
                 out = torch.empty_like(a)
                 torch.sign(a, out=out)
                 self.assertEqual(out, a_target, 'sign_out device={} dtype={}'.format(device, dtype))
 
-                # sign_
                 a.sign_()
                 self.assertEqual(a, a_target, 'sign_ device={} dtype={}'.format(device, dtype))
 
@@ -12761,12 +12754,10 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(a_bool.sign(), a_bool_target, 'sign device={} dtype=bool'.format(device))
             self.assertEqual(torch.sign(a_bool), a_bool_target, 'sign device={} dtype=bool'.format(device))
 
-            # sign_out
             a_out = torch.empty_like(a_bool)
             torch.sign(a_bool, out=a_out)
             self.assertEqual(a_out, a_bool_target, 'sign_out device={} dtype=bool'.format(device))
 
-            # sign_
             a_bool.sign_()
             self.assertEqual(a_bool, a_bool_target, 'sign_ device={} dtype=bool'.format(device))
     
