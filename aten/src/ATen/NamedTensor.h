@@ -67,6 +67,7 @@ struct CAFFE2_API NoNamesGuard {
   bool prev_mode;
 };
 
+
 // Sets the names of `tensor` to be `names`.
 CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
 CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
