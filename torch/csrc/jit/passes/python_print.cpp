@@ -1010,13 +1010,24 @@ struct PythonPrintPass {
              << node->i(attr::end) << "]";
       } break;
       case prim::ListConstruct: {
-        // when the list is empty and is not a list of tensors,
-        // we need to annotate it, otherwise it won't be possible
-        // to infer the type on import
-        if (node->inputs().size() == 0 &&
-            !node->output()->type()->isSubtypeOf(TensorType::get())) {
-          stmt << "annotate(" << node->output()->type()->python_str()
-               << ", [])";
+        ListTypePtr list_type = node->output()->type()->expect<ListType>();
+        TypePtr elem_type = list_type->getElementType();
+        if (!elem_type->isSubtypeOf(TensorType::get())) {
+          // when the list is empty and is not a list of tensors,
+          // we need to annotate it, otherwise it won't be possible
+          // to infer the type on import
+          if (node->inputs().size() == 0) {
+            stmt << "annotate(" << node->output()->type()->python_str()
+                 << ", [])";
+          } else if (elem_type->cast<OptionalType>()) {
+            // if the element type is a optional type, we annotate the list so
+            // that we could correctly infer the type on import
+            stmt << "annotate(" << node->output()->type()->python_str() << ",";
+            printValueList(stmt, node->inputs(), "[", "]");
+            stmt << ")";
+          } else {
+            printValueList(stmt, node->inputs(), "[", "]");
+          }
         } else {
           printValueList(stmt, node->inputs(), "[", "]");
         }
