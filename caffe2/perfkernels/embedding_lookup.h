@@ -9,10 +9,10 @@ namespace caffe2 {
  *
  * `input` of size data_size * block_size
  * `indices` of size index_size
- * `lengths` of size output_size
+ * `lengths_offsets` of size output_size
  * `weights` nullptr or array of size index_size
  * `out` of size output_size * block_size
- * sum(lengths[i]) == index_size
+ * sum(lengths_offsets[i]) == index_size when use_lengths = true
  *
  * Behavior is roughly equivalent to pseudocode:
  *
@@ -20,14 +20,18 @@ namespace caffe2 {
  * for (i = 0..output_size-1)
  *   for (k = 0..block_size-1)
  *     out[i*block_size + k] = 0
- *   for (j = 0..lengths[i]-1)
+ *   length = use_lengths
+ *       ? lengths_offsets[i]
+ *       : (i == output_size-1 ? index_size : lengths_offsets[i+1]) -
+ *           lengths_offsets[i]
+ *   for (j = 0..length-1)
  *     for (k = 0..block_size-1)
  *       out[i*block_size + k] += input[indices[pos]*block_size + k] *
  *           (weights ? weights[IS_WEIGHT_POSITIONAL ? j : pos] : 1.0)
  *     pos += 1
- *   if (normalize_weights && lengths[i] > 0)
+ *   if (normalize_weights && length > 0)
  *     for (k = 0..block_size-1)
- *       out[i*block_size + k] /= lengths[i]
+ *       out[i*block_size + k] /= length
  *
  * TODO: make this API also take "offsets" rather than "lengths" to match the
  *       API for PyTorch's EmbeddingBag
@@ -44,10 +48,11 @@ void EmbeddingLookup(
     const std::int64_t data_size,
     const InType* input,
     const IndexType* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights, // optional, can be null for non-weighted sum
     const float* scale_bias, // optional scale & bias params for uint8 input
     bool normalize_by_lengths,
-    OutType* out);
+    OutType* out,
+    bool use_lengths = true);
 
 } // namespace caffe2

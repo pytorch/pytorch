@@ -17,11 +17,12 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
     const int64_t data_size,
     const float* input,
     const int* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   const int prefdist_T0 = 16;
   const int fused_block_size = block_size + 0;
   int dataInd = 0;
@@ -45,11 +46,15 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -109,7 +114,7 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
         vop120 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (120)), vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -127,7 +132,7 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -158,11 +163,15 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -202,7 +211,7 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -212,7 +221,7 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -231,11 +240,15 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -265,13 +278,13 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -284,11 +297,15 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -313,11 +330,11 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
       }
@@ -333,11 +350,15 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
       for (; j < block_size; j++) {
         op[j] = 0.0f;
       }
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -369,8 +390,8 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
           op[j] = std::fma(wgt, ip[j], op[j]);
         }
       }
-      if (normalize_by_lengths && lengths[rangeIndex]) {
-        float len_inv = 1.0f / lengths[rangeIndex];
+      if (normalize_by_lengths && length) {
+        float len_inv = 1.0f / length;
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
@@ -392,11 +413,12 @@ bool EmbeddingLookup_int32_t_float_float_false__avx2_fma(
     const int64_t data_size,
     const float* input,
     const int* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   return EmbeddingLookup_int32_t_float_float__avx2_fma<false>(
       block_size,
       output_size,
@@ -404,11 +426,12 @@ bool EmbeddingLookup_int32_t_float_float_false__avx2_fma(
       data_size,
       input,
       indices,
-      lengths,
+      lengths_offsets,
       weights,
       scale_bias,
       normalize_by_lengths,
-      out);
+      out,
+      use_lengths);
 }
 bool EmbeddingLookup_int32_t_float_float_true__avx2_fma(
     const int64_t block_size,
@@ -417,11 +440,12 @@ bool EmbeddingLookup_int32_t_float_float_true__avx2_fma(
     const int64_t data_size,
     const float* input,
     const int* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   return EmbeddingLookup_int32_t_float_float__avx2_fma<true>(
       block_size,
       output_size,
@@ -429,11 +453,12 @@ bool EmbeddingLookup_int32_t_float_float_true__avx2_fma(
       data_size,
       input,
       indices,
-      lengths,
+      lengths_offsets,
       weights,
       scale_bias,
       normalize_by_lengths,
-      out);
+      out,
+      use_lengths);
 }
 
 template <bool IS_WEIGHT_POSITIONAL>
@@ -444,11 +469,12 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
     const int64_t data_size,
     const float* input,
     const int64_t* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   const int64_t prefdist_T0 = 16;
   const int64_t fused_block_size = block_size + 0;
   int64_t dataInd = 0;
@@ -472,11 +498,15 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -536,7 +566,7 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
         vop120 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (120)), vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -554,7 +584,7 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -585,11 +615,15 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -629,7 +663,7 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -639,7 +673,7 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -658,11 +692,15 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -692,13 +730,13 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -711,11 +749,15 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -740,11 +782,11 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
       }
@@ -760,11 +802,15 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
       for (; j < block_size; j++) {
         op[j] = 0.0f;
       }
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -796,8 +842,8 @@ static bool EmbeddingLookup_int64_t_float_float__avx2_fma(
           op[j] = std::fma(wgt, ip[j], op[j]);
         }
       }
-      if (normalize_by_lengths && lengths[rangeIndex]) {
-        float len_inv = 1.0f / lengths[rangeIndex];
+      if (normalize_by_lengths && length) {
+        float len_inv = 1.0f / length;
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
@@ -819,11 +865,12 @@ bool EmbeddingLookup_int64_t_float_float_false__avx2_fma(
     const int64_t data_size,
     const float* input,
     const int64_t* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   return EmbeddingLookup_int64_t_float_float__avx2_fma<false>(
       block_size,
       output_size,
@@ -831,11 +878,12 @@ bool EmbeddingLookup_int64_t_float_float_false__avx2_fma(
       data_size,
       input,
       indices,
-      lengths,
+      lengths_offsets,
       weights,
       scale_bias,
       normalize_by_lengths,
-      out);
+      out,
+      use_lengths);
 }
 bool EmbeddingLookup_int64_t_float_float_true__avx2_fma(
     const int64_t block_size,
@@ -844,11 +892,12 @@ bool EmbeddingLookup_int64_t_float_float_true__avx2_fma(
     const int64_t data_size,
     const float* input,
     const int64_t* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   return EmbeddingLookup_int64_t_float_float__avx2_fma<true>(
       block_size,
       output_size,
@@ -856,11 +905,12 @@ bool EmbeddingLookup_int64_t_float_float_true__avx2_fma(
       data_size,
       input,
       indices,
-      lengths,
+      lengths_offsets,
       weights,
       scale_bias,
       normalize_by_lengths,
-      out);
+      out,
+      use_lengths);
 }
 
 template <bool IS_WEIGHT_POSITIONAL>
@@ -871,11 +921,12 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
     const int64_t data_size,
     const at::Half* input,
     const int* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   const int prefdist_T0 = 16;
   const int fused_block_size = block_size + 0;
   int dataInd = 0;
@@ -899,11 +950,15 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1023,7 +1078,7 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
             vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1041,7 +1096,7 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -1072,11 +1127,15 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1146,7 +1205,7 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
             vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1156,7 +1215,7 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -1175,11 +1234,15 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1224,13 +1287,13 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -1243,11 +1306,15 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1280,11 +1347,11 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
       }
@@ -1301,11 +1368,15 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
       for (; j < block_size; j++) {
         op[j] = 0.0f;
       }
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1343,8 +1414,8 @@ static bool EmbeddingLookup_int32_t_half_float__avx2_fma(
           op[j] = std::fma(wgt, ((float*)(&vtmp2))[0], op[j]);
         }
       }
-      if (normalize_by_lengths && lengths[rangeIndex]) {
-        float len_inv = 1.0f / lengths[rangeIndex];
+      if (normalize_by_lengths && length) {
+        float len_inv = 1.0f / length;
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
@@ -1366,11 +1437,12 @@ bool EmbeddingLookup_int32_t_half_float_false__avx2_fma(
     const int64_t data_size,
     const at::Half* input,
     const int* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   return EmbeddingLookup_int32_t_half_float__avx2_fma<false>(
       block_size,
       output_size,
@@ -1378,11 +1450,12 @@ bool EmbeddingLookup_int32_t_half_float_false__avx2_fma(
       data_size,
       input,
       indices,
-      lengths,
+      lengths_offsets,
       weights,
       scale_bias,
       normalize_by_lengths,
-      out);
+      out,
+      use_lengths);
 }
 bool EmbeddingLookup_int32_t_half_float_true__avx2_fma(
     const int64_t block_size,
@@ -1391,11 +1464,12 @@ bool EmbeddingLookup_int32_t_half_float_true__avx2_fma(
     const int64_t data_size,
     const at::Half* input,
     const int* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   return EmbeddingLookup_int32_t_half_float__avx2_fma<true>(
       block_size,
       output_size,
@@ -1403,11 +1477,12 @@ bool EmbeddingLookup_int32_t_half_float_true__avx2_fma(
       data_size,
       input,
       indices,
-      lengths,
+      lengths_offsets,
       weights,
       scale_bias,
       normalize_by_lengths,
-      out);
+      out,
+      use_lengths);
 }
 
 template <bool IS_WEIGHT_POSITIONAL>
@@ -1418,11 +1493,12 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
     const int64_t data_size,
     const at::Half* input,
     const int64_t* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   const int64_t prefdist_T0 = 16;
   const int64_t fused_block_size = block_size + 0;
   int64_t dataInd = 0;
@@ -1446,11 +1522,15 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1570,7 +1650,7 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
             vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1588,7 +1668,7 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -1619,11 +1699,15 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1693,7 +1777,7 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
             vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1703,7 +1787,7 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -1722,11 +1806,15 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1771,13 +1859,13 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -1790,11 +1878,15 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1827,11 +1919,11 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
       }
@@ -1848,11 +1940,15 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
       for (; j < block_size; j++) {
         op[j] = 0.0f;
       }
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -1890,8 +1986,8 @@ static bool EmbeddingLookup_int64_t_half_float__avx2_fma(
           op[j] = std::fma(wgt, ((float*)(&vtmp2))[0], op[j]);
         }
       }
-      if (normalize_by_lengths && lengths[rangeIndex]) {
-        float len_inv = 1.0f / lengths[rangeIndex];
+      if (normalize_by_lengths && length) {
+        float len_inv = 1.0f / length;
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
@@ -1913,11 +2009,12 @@ bool EmbeddingLookup_int64_t_half_float_false__avx2_fma(
     const int64_t data_size,
     const at::Half* input,
     const int64_t* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   return EmbeddingLookup_int64_t_half_float__avx2_fma<false>(
       block_size,
       output_size,
@@ -1925,11 +2022,12 @@ bool EmbeddingLookup_int64_t_half_float_false__avx2_fma(
       data_size,
       input,
       indices,
-      lengths,
+      lengths_offsets,
       weights,
       scale_bias,
       normalize_by_lengths,
-      out);
+      out,
+      use_lengths);
 }
 bool EmbeddingLookup_int64_t_half_float_true__avx2_fma(
     const int64_t block_size,
@@ -1938,11 +2036,12 @@ bool EmbeddingLookup_int64_t_half_float_true__avx2_fma(
     const int64_t data_size,
     const at::Half* input,
     const int64_t* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   return EmbeddingLookup_int64_t_half_float__avx2_fma<true>(
       block_size,
       output_size,
@@ -1950,11 +2049,12 @@ bool EmbeddingLookup_int64_t_half_float_true__avx2_fma(
       data_size,
       input,
       indices,
-      lengths,
+      lengths_offsets,
       weights,
       scale_bias,
       normalize_by_lengths,
-      out);
+      out,
+      use_lengths);
 }
 
 template <bool IS_WEIGHT_POSITIONAL>
@@ -1965,11 +2065,12 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
     const int64_t data_size,
     const uint8_t* input,
     const int* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   const int prefdist_T0 = 16;
   const int fused_block_size = block_size + 0;
   int dataInd = 0;
@@ -1993,11 +2094,15 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -2119,7 +2224,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop120, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2137,7 +2242,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -2168,11 +2273,15 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -2245,7 +2354,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop56, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2255,7 +2364,7 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -2274,11 +2383,15 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -2327,13 +2440,13 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -2346,11 +2459,15 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -2387,11 +2504,11 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
       }
@@ -2407,11 +2524,15 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
       for (; j < block_size; j++) {
         op[j] = 0.0f;
       }
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int start = dataInd; dataInd < start + length; ++dataInd) {
         const int idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -2450,8 +2571,8 @@ static bool EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
           op[j] = std::fma(wgt, (float)ip[j], bio + op[j]);
         }
       }
-      if (normalize_by_lengths && lengths[rangeIndex]) {
-        float len_inv = 1.0f / lengths[rangeIndex];
+      if (normalize_by_lengths && length) {
+        float len_inv = 1.0f / length;
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
@@ -2473,11 +2594,12 @@ bool EmbeddingLookup_int32_t_uint8_t_float_false__avx2_fma(
     const int64_t data_size,
     const uint8_t* input,
     const int* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   return EmbeddingLookup_int32_t_uint8_t_float__avx2_fma<false>(
       block_size,
       output_size,
@@ -2485,11 +2607,12 @@ bool EmbeddingLookup_int32_t_uint8_t_float_false__avx2_fma(
       data_size,
       input,
       indices,
-      lengths,
+      lengths_offsets,
       weights,
       scale_bias,
       normalize_by_lengths,
-      out);
+      out,
+      use_lengths);
 }
 bool EmbeddingLookup_int32_t_uint8_t_float_true__avx2_fma(
     const int64_t block_size,
@@ -2498,11 +2621,12 @@ bool EmbeddingLookup_int32_t_uint8_t_float_true__avx2_fma(
     const int64_t data_size,
     const uint8_t* input,
     const int* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   return EmbeddingLookup_int32_t_uint8_t_float__avx2_fma<true>(
       block_size,
       output_size,
@@ -2510,11 +2634,12 @@ bool EmbeddingLookup_int32_t_uint8_t_float_true__avx2_fma(
       data_size,
       input,
       indices,
-      lengths,
+      lengths_offsets,
       weights,
       scale_bias,
       normalize_by_lengths,
-      out);
+      out,
+      use_lengths);
 }
 
 template <bool IS_WEIGHT_POSITIONAL>
@@ -2525,11 +2650,12 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
     const int64_t data_size,
     const uint8_t* input,
     const int64_t* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   const int64_t prefdist_T0 = 16;
   const int64_t fused_block_size = block_size + 0;
   int64_t dataInd = 0;
@@ -2553,11 +2679,15 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -2679,7 +2809,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop120, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2697,7 +2827,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -2728,11 +2858,15 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -2805,7 +2939,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop56, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2815,7 +2949,7 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -2834,11 +2968,15 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -2887,13 +3025,13 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
         _mm256_storeu_ps(&op[16], _mm256_mul_ps(vop16, vlen_inv));
@@ -2906,11 +3044,15 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -2947,11 +3089,11 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
+      if (!normalize_by_lengths || length == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
       } else {
-        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
+        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
       }
@@ -2967,11 +3109,15 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
       for (; j < block_size; j++) {
         op[j] = 0.0f;
       }
-      if (dataInd + lengths[rangeIndex] > index_size) {
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];
+      if (dataInd + length > index_size) {
         return false;
       }
-      for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
-           ++dataInd) {
+      for (int64_t start = dataInd; dataInd < start + length; ++dataInd) {
         const int64_t idx = indices[dataInd];
         if (idx < 0 || idx >= data_size) {
           return false;
@@ -3010,8 +3156,8 @@ static bool EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
           op[j] = std::fma(wgt, (float)ip[j], bio + op[j]);
         }
       }
-      if (normalize_by_lengths && lengths[rangeIndex]) {
-        float len_inv = 1.0f / lengths[rangeIndex];
+      if (normalize_by_lengths && length) {
+        float len_inv = 1.0f / length;
         __m256 vlen_inv = _mm256_set1_ps(len_inv);
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
@@ -3033,11 +3179,12 @@ bool EmbeddingLookup_int64_t_uint8_t_float_false__avx2_fma(
     const int64_t data_size,
     const uint8_t* input,
     const int64_t* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   return EmbeddingLookup_int64_t_uint8_t_float__avx2_fma<false>(
       block_size,
       output_size,
@@ -3045,11 +3192,12 @@ bool EmbeddingLookup_int64_t_uint8_t_float_false__avx2_fma(
       data_size,
       input,
       indices,
-      lengths,
+      lengths_offsets,
       weights,
       scale_bias,
       normalize_by_lengths,
-      out);
+      out,
+      use_lengths);
 }
 bool EmbeddingLookup_int64_t_uint8_t_float_true__avx2_fma(
     const int64_t block_size,
@@ -3058,11 +3206,12 @@ bool EmbeddingLookup_int64_t_uint8_t_float_true__avx2_fma(
     const int64_t data_size,
     const uint8_t* input,
     const int64_t* indices,
-    const int* lengths,
+    const int* lengths_offsets,
     const float* weights,
     const float* scale_bias,
     bool normalize_by_lengths,
-    float* out) {
+    float* out,
+    bool use_lengths) {
   return EmbeddingLookup_int64_t_uint8_t_float__avx2_fma<true>(
       block_size,
       output_size,
@@ -3070,11 +3219,12 @@ bool EmbeddingLookup_int64_t_uint8_t_float_true__avx2_fma(
       data_size,
       input,
       indices,
-      lengths,
+      lengths_offsets,
       weights,
       scale_bias,
       normalize_by_lengths,
-      out);
+      out,
+      use_lengths);
 }
 
 } // namespace caffe2

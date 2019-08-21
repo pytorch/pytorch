@@ -61,15 +61,21 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
         code.append("      __m256 vop" + str(j) + " = _mm256_setzero_ps();")
 
     # inner loop
+    code.append("""\
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];""")
     code.append(
-        "      if (dataInd + lengths[rangeIndex] > index_size) {\n"
+        "      if (dataInd + length > index_size) {\n"
         + "        return false;\n"
         + "      }"
     )
     code.append(
         "      for ("
         + IndexType
-        + " start = dataInd; dataInd < start + lengths[rangeIndex];\n           ++dataInd) {"  # noqa
+        + " start = dataInd; dataInd < start + length; ++dataInd) {"  # noqa
     )
     code.append("        const " + IndexType + " idx = indices[dataInd];")
     code.append(
@@ -133,13 +139,13 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
         code.extend(compute(j, InType, use_weights, isa, prefetch))
     code.append("      }")
 
-    code.append("      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {")
+    code.append("      if (!normalize_by_lengths || length == 0) {")
     for i in range(0, uf):
         j = 8 * i
         code.append("        _mm256_storeu_ps(&op[" + str(j) + "], vop" + str(j) + ");")
     code.append("      } else {")
     # inv of length
-    code.append("        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);")
+    code.append("        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);")
     for i in range(0, uf):
         j = 8 * i
         code.append(
@@ -216,15 +222,21 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
     code.append("      }")
 
     # inner loop
+    code.append("""\
+      int length = use_lengths
+          ? lengths_offsets[rangeIndex]
+          : (rangeIndex == output_size - 1 ? index_size
+                                           : lengths_offsets[rangeIndex + 1]) -
+              lengths_offsets[rangeIndex];""")
     code.append(
-        "      if (dataInd + lengths[rangeIndex] > index_size) {\n"
+        "      if (dataInd + length > index_size) {\n"
         + "        return false;\n"
         + "      }"
     )
     code.append(
         "      for ("
         + IndexType
-        + " start = dataInd; dataInd < start + lengths[rangeIndex];\n           ++dataInd) {"  # noqa
+        + " start = dataInd; dataInd < start + length; ++dataInd) {"  # noqa
     )
     code.append("        const " + IndexType + " idx = indices[dataInd];")
     code.append(
@@ -304,8 +316,8 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
 
     code.append("      }")
 
-    code.append("      if (normalize_by_lengths && lengths[rangeIndex]) {")
-    code.append("        float len_inv = 1.0f / lengths[rangeIndex];")
+    code.append("      if (normalize_by_lengths && length) {")
+    code.append("        float len_inv = 1.0f / length;")
     code.append("        __m256 vlen_inv = _mm256_set1_ps(len_inv);")
     code.append("        j = 0;")
     code.append("        for (; j + 8 <= block_size; j += 8) {")
@@ -377,12 +389,13 @@ for o in options:
     args.append("    const int64_t data_size,")
     args.append("    const " + InType + "* input,")
     args.append("    const " + IndexType + "* indices,")
-    args.append("    const int* lengths,")
+    args.append("    const int* lengths_offsets,")
     args.append("    const float* weights,")
     if not opts.fused:
         args.append("    const float* scale_bias,")
     args.append("    bool normalize_by_lengths,")
-    args.append("    " + OutType + "* out) {")
+    args.append("    " + OutType + "* out,")
+    args.append("    " + "bool use_lengths) {")
     code += args
 
     code.append("  const " + IndexType + " prefdist_T0 = 16;")
@@ -422,12 +435,13 @@ for o in options:
         code.append("      data_size,")
         code.append("      input,")
         code.append("      indices,")
-        code.append("      lengths,")
+        code.append("      lengths_offsets,")
         code.append("      weights,")
         if not opts.fused:
             code.append("      scale_bias,")
         code.append("      normalize_by_lengths,")
-        code.append("      out);")
+        code.append("      out,")
+        code.append("      use_lengths);")
         code.append("}")
 
     code.append("")
