@@ -11,7 +11,7 @@ import sys
 default_set = [
     # PyTorch CPU
     # Selected oldest Python 2 version to ensure Python 2 coverage
-    'pytorch-linux-trusty-py2.7.9',
+    'pytorch-linux-xenial-py2.7.9',
     # PyTorch CUDA
     'pytorch-linux-xenial-cuda9-cudnn7-py3',
     # PyTorch ASAN
@@ -45,7 +45,7 @@ default_set = [
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c',
 
     # XLA
-    'pytorch-xla-linux-trusty-py3.6-gcc5.4',
+    'pytorch-xla-linux-xenial-py3.6-gcc5.4',
 
     # Other checks
     'pytorch-short-perf-test-gpu',
