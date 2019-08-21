@@ -1144,7 +1144,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
 #endif
 
 LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
@@ -1161,7 +1160,12 @@ LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_
 
 void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
   switch (n) {
-    case 0: THTensor_(digamma)(r_, t); break;
+    case 0: {
+      at::Tensor t__wrap = THTensor_wrap(t);
+      at::Tensor r__wrap = THTensor_wrap(r_);
+      at::native::_digamma_out_cpu(t__wrap, r__wrap);
+      break;
+    }
     case 1: THTensor_(trigamma)(r_, t); break;
     default: THError("polygamma(n,x) is not implemented for n>=2");
   }

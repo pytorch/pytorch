@@ -3435,7 +3435,7 @@
   named_guard: False
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_digamma_
+    CPU: _digamma__cpu
     CUDA: legacy::cuda::_th_digamma_
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
@@ -4046,14 +4046,14 @@
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_digamma_out
+    CPU: _digamma_out_cpu
     CUDA: legacy::cuda::_th_digamma_out
 
 - func: digamma(Tensor self) -> Tensor
   named_guard: False
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_digamma
+    CPU: digamma
     CUDA: legacy::cuda::_th_digamma
 
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
