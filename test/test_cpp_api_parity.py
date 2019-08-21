@@ -25,7 +25,10 @@ TORCH_NN_MODULE_COMMON_TEST_HARNESS = """\n
 const char * const parity_test_error_msg = "Parity test failed";
 
 bool check_tensor_equality(const torch::Tensor& tensor1, const torch::Tensor& tensor2) {
-  return tensor1.sizes().vec() == tensor2.sizes().vec() && tensor1.allclose(tensor2);
+  return tensor1.sizes().vec() == tensor2.sizes().vec() && \
+    tensor1.device() == tensor2.device() && \
+    tensor1.dtype() == tensor2.dtype() && \
+    tensor1.allclose(tensor2);
 }
 
 bool check_ivalue_equality(const c10::IValue& ivalue1, const c10::IValue& ivalue2) {
@@ -101,8 +104,7 @@ void ${module_variant_name}_test_forward(
   auto cpp_output = module(${input_args});
 
   TORCH_CHECK(
-    cpp_output.sizes().vec() == python_output.sizes().vec() &&
-    cpp_output.allclose(python_output),
+    check_tensor_equality(cpp_output, python_output),
     parity_test_error_msg, ": forward output doesn't match");
 
   ${extra_stmts}
@@ -130,7 +132,7 @@ void ${module_variant_name}_test_backward(
     auto named_param = module->named_parameters()[i];
     auto grad = grad_module->parameters()[i];
     TORCH_CHECK(
-      named_param->grad().allclose(grad),
+      check_tensor_equality(named_param->grad(), grad),
       parity_test_error_msg, ": ", "gradient value of `", named_param.key(), "` doesn't match");
   }
 
