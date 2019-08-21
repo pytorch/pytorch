@@ -12,7 +12,7 @@ import common_utils as common
 import common_nn
 from common_cuda import TEST_CUDA
 import torch.utils.cpp_extension
-from cpp_api_parity import sample_module, torch_nn_modules, TorchNNTestParams, set_has_parity
+from cpp_api_parity import sample_module, torch_nn_modules, TorchNNTestParams
 
 
 torch_nn_has_parity = set([
@@ -174,6 +174,7 @@ class TestCppApiParity(common.TestCase):
     def _test_torch_nn_module_ctor_args(self, module_name):
         python_module_class = getattr(torch.nn, module_name)
         module_metadata = torch_nn_modules.module_metadata_map[module_name]
+        # yf225 TODO: do we actually need this list? can we get rid of it and just use some count?
         python_default_constructor_args = module_metadata['python_default_constructor_args']
         cpp_default_constructor_args = module_metadata['cpp_default_constructor_args']
 
@@ -248,11 +249,9 @@ class TestCppApiParity(common.TestCase):
             python_module_class = test_params.python_module_class
             python_constructor_args = test_params.python_constructor_args
             example_inputs = test_params.example_inputs
-            has_parity = test_params.has_parity
 
-            with set_has_parity(has_parity):
-                torch.manual_seed(2)
-                module = python_module_class(*python_constructor_args).to(device)
+            torch.manual_seed(2)
+            module = python_module_class(*python_constructor_args).to(device)
 
             extra_stmt_list = []
             generate_attr_equality_checks(module, extra_stmt_list)
@@ -266,12 +265,10 @@ class TestCppApiParity(common.TestCase):
             python_module_class = test_params.python_module_class
             python_constructor_args = test_params.python_constructor_args
             example_inputs = test_params.example_inputs
-            has_parity = test_params.has_parity
 
-            with set_has_parity(has_parity):
-                torch.manual_seed(2)
-                module = python_module_class(*python_constructor_args).to(device)
-                python_output = module(*example_inputs)
+            torch.manual_seed(2)
+            module = python_module_class(*python_constructor_args).to(device)
+            python_output = module(*example_inputs)
 
             return (([module], device, python_output, example_inputs),
                     generate_test_cpp_sources(
@@ -282,22 +279,20 @@ class TestCppApiParity(common.TestCase):
             python_module_class = test_params.python_module_class
             python_constructor_args = test_params.python_constructor_args
             example_inputs = test_params.example_inputs
-            has_parity = test_params.has_parity
 
-            with set_has_parity(has_parity):
-                torch.manual_seed(2)
-                module = python_module_class(*python_constructor_args).to(device)
-                python_output = module(*example_inputs)
-                python_output.sum().backward()
-                # JIT tracing does not save a module's parameters' gradients into ScriptModule.
-                # Instead, we create another module `grad_module` with the same structure as `module`,
-                # and use `grad_module`'s parameters to save `module`'s corresponding parameters'
-                # gradients. Then, we trace both `module` and `grad_module`, serialize them and
-                # pass them into C++ for parity testing.
-                grad_module = copy.deepcopy(module)
-                for param, grad_param in zip(module.parameters(), grad_module.parameters()):
-                    if param.grad is not None:
-                        grad_param.data = param.grad
+            torch.manual_seed(2)
+            module = python_module_class(*python_constructor_args).to(device)
+            python_output = module(*example_inputs)
+            python_output.sum().backward()
+            # JIT tracing does not save a module's parameters' gradients into ScriptModule.
+            # Instead, we create another module `grad_module` with the same structure as `module`,
+            # and use `grad_module`'s parameters to save `module`'s corresponding parameters'
+            # gradients. Then, we trace both `module` and `grad_module`, serialize them and
+            # pass them into C++ for parity testing.
+            grad_module = copy.deepcopy(module)
+            for param, grad_param in zip(module.parameters(), grad_module.parameters()):
+                if param.grad is not None:
+                    grad_param.data = param.grad
 
             return (([module, grad_module], device, example_inputs),
                     generate_test_cpp_sources(
@@ -332,7 +327,6 @@ class TestCppApiParity(common.TestCase):
             python_module_class = test_params.python_module_class
             python_constructor_args = test_params.python_constructor_args
             module_variant_name = test_params.module_variant_name
-            has_parity = test_params.has_parity
             example_inputs = test_params.example_inputs
 
             args_map = {}

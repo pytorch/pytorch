@@ -1,5 +1,4 @@
 import torch
-from cpp_api_parity import has_parity
 
 '''
 `SampleModule` is used by `test_cpp_api_parity.py` to test that Python / C++ API
@@ -13,13 +12,14 @@ When `SampleModule.has_parity` is false, behavior of `reset_parameters` / `forwa
 '''
 
 class SampleModule(torch.nn.Module):
-    def __init__(self, has_submodule, int_option=0, double_option=0.1,
+    def __init__(self, has_parity, has_submodule, int_option=0, double_option=0.1,
                  bool_option=False, string_option='0', tensor_option=torch.empty(1)):
         super(SampleModule, self).__init__()
+        self.has_parity = has_parity
         self.register_parameter('param', torch.nn.Parameter(torch.empty(3, 4)))
         self.register_buffer('buffer', torch.empty(4, 5))
         if has_submodule:
-            self.submodule = SampleModule(False)
+            self.submodule = SampleModule(self.has_parity, False)
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -27,14 +27,14 @@ class SampleModule(torch.nn.Module):
             self.param.fill_(1)
             self.buffer.fill_(1)
             self.attr = 10
-            if not has_parity():
+            if not self.has_parity:
                 self.param.add_(10)
                 self.buffer.add_(10)
                 self.attr += 90
 
     def forward(self, x):
         submodule_forward_result = self.submodule(x) if hasattr(self, 'submodule') else 0
-        if not has_parity():
+        if not self.has_parity:
             return x + self.param * 4 + submodule_forward_result + 3
         else:
             return x + self.param * 2 + submodule_forward_result
@@ -82,7 +82,7 @@ TORCH_MODULE(SampleModule);
 module_tests = [
     dict(
         module_name='SampleModule',
-        constructor_args=(True, ),
+        constructor_args=(True, True),
         cpp_constructor_args='(true)',
         input_size=(3, 4),
         desc='has_parity',
@@ -90,7 +90,7 @@ module_tests = [
     ),
     dict(
         module_name='SampleModule',
-        constructor_args=(True, ),
+        constructor_args=(False, True),
         cpp_constructor_args='(true)',
         input_size=(3, 4),
         desc='no_parity',
@@ -99,7 +99,7 @@ module_tests = [
 ]
 
 module_metadata = dict(
-    python_default_constructor_args=(True, ),
+    python_default_constructor_args=(True, True),
     cpp_default_constructor_args='(true)',
     cpp_sources=SAMPLE_MODULE_CPP_SOURCE,
 )
