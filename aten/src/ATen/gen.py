@@ -370,11 +370,14 @@ def cmpfiles_with_eol_normalization(a, b, names):
             else:
                 results[1].append(x)
                 import difflib
+                import sys
                 d = difflib.Differ()
-                diff = list(d.compare(ax, bx))
-                print('-' * 80)
-                print('a={}, b={}\n{}'.format(a, b, ''.join(diff)))
-                print('-' * 80)
+                sys.stdout.write('-' * 80 + '\n')
+                sys.stdout.write('a={}, b={}\n'.format(a, b))
+                for line in d.compare(ax, bx):
+                    if line[:2] != '  ':
+                        sys.stdout.write(line)
+                sys.stdout.write('-' * 80 + '\n')
         except OSError:
             results[2].append(x)
     return results
