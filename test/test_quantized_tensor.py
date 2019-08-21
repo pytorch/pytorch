@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import numpy as np
 
 import torch
-import pickle
+import io
 
 from common_utils import TestCase, run_tests
 import tempfile
@@ -256,12 +256,15 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(b, c.reshape(1, 3, 2, 4))
 
     def test_qscheme_pickle(self):
+
         f = Foo()
-        s = pickle.dumps(f)
-        loaded = pickle.loads(s)
+        buf = io.BytesIO()
+        torch.save(f, buf)
 
-        self.assertTrue(loaded.qscheme == torch.per_tensor_symmetric)
+        buf.seek(0)
+        f2 = torch.load(buf)
 
+        self.assertTrue(f2.qscheme == torch.per_tensor_symmetric)
 
 if __name__ == "__main__":
     run_tests()
