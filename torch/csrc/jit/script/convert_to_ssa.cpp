@@ -126,14 +126,14 @@ struct ControlFlowLoadStores {
         continue;
       }
       auto block_type = loop_vars->findInThisFrame(name);
-      parent_type = unifyTypes(parent_type, block_type).value();
+      auto unified_type = unifyTypes(parent_type, block_type).value();
 
       // Insert a store at the beginning of the loop block, so that all
       // loads of the variable will use the loop carried value
       addNodeInput(n, parent_type, name);
-      addBlockInput(body_block, parent_type, name);
+      addBlockInput(body_block, unified_type, name);
       addBlockOutput(body_block, block_type, name);
-      addNodeOutput(n, parent_type, name);
+      addNodeOutput(n, unified_type, name);
     }
   }
 
