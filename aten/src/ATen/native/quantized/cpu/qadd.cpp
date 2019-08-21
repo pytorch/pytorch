@@ -11,15 +11,16 @@ namespace native {
 namespace {
 
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
-  TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
-              qa.qscheme() == kPerTensorSymmetric,
-              "Only per tensor quantization is suuported in Add.");
-  TORCH_CHECK(qa.qscheme() == qb.qscheme(),
-              "Both inputs to Add must have the same quantization shceme.");
-  TORCH_CHECK(qa.numel() == qb.numel(),
-              "Add operands must be the same size!");
-  TORCH_CHECK(qa.scalar_type() == qb.scalar_type(),
-              "Add operands should have same data type.");
+  TORCH_CHECK(
+      qa.qscheme() == kPerTensorAffine || qa.qscheme() == kPerTensorSymmetric,
+      "Only per tensor quantization is suuported in Add.");
+  TORCH_CHECK(
+      qa.qscheme() == qb.qscheme(),
+      "Both inputs to Add must have the same quantization shceme.");
+  TORCH_CHECK(qa.numel() == qb.numel(), "Add operands must be the same size!");
+  TORCH_CHECK(
+      qa.scalar_type() == qb.scalar_type(),
+      "Add operands should have same data type.");
 }
 
 // Note: out is assumed to be the same size as self and other.
@@ -51,11 +52,13 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
 template <bool ReLUFused = false>
 class QAdd final : public c10::OperatorKernel {
  public:
-  Tensor operator()(Tensor qa, Tensor qb,
-                    double scale, int64_t zero_point) {
+  Tensor operator()(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     check_inputs(qa, qb);
-    auto qc = at::_empty_affine_quantized(qa.sizes(),
-      at::device(kCPU).dtype(qa.scalar_type()), scale, zero_point);
+    auto qc = at::_empty_affine_quantized(
+        qa.sizes(),
+        at::device(kCPU).dtype(qa.scalar_type()),
+        scale,
+        zero_point);
     return _add_out<ReLUFused>(qc, qa, qb);
   }
 };
@@ -69,23 +72,24 @@ class QAddOut final : public c10::OperatorKernel {
   }
 };
 
-static auto registry = c10::RegisterOperators()
-.op("quantized::add(Tensor qa, Tensor qb, float scale, int zero_point)"
-     "-> Tensor qc",
-    c10::RegisterOperators::options()
-      .kernel<QAdd</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
-.op("quantized::add_relu(Tensor qa, Tensor qb, float scale, int zero_point)"
-     "-> Tensor qc",
-    c10::RegisterOperators::options()
-      .kernel<QAdd</*ReLUFused=*/true>>(QuantizedCPUTensorId()))
-.op("quantized::add_out(Tensor qa, Tensor qb, Tensor out)"
-     "-> Tensor out",
-    c10::RegisterOperators::options()
-      .kernel<QAddOut</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
-.op("quantized::add_relu_out(Tensor qa, Tensor qb, Tensor out)"
-     "-> Tensor out",
-    c10::RegisterOperators::options()
-      .kernel<QAddOut</*ReLUFused=*/true>>(QuantizedCPUTensorId()));
-}  // namespace
-}}  // namespace at::native
-
+static auto registry =
+    c10::RegisterOperators()
+        .op("quantized::add(Tensor qa, Tensor qb, float scale, int zero_point)"
+            "-> Tensor qc",
+            c10::RegisterOperators::options().kernel<QAdd</*ReLUFused=*/false>>(
+                QuantizedCPUTensorId()))
+        .op("quantized::add_relu(Tensor qa, Tensor qb, float scale, int zero_point)"
+            "-> Tensor qc",
+            c10::RegisterOperators::options().kernel<QAdd</*ReLUFused=*/true>>(
+                QuantizedCPUTensorId()))
+        .op("quantized::add_out(Tensor qa, Tensor qb, Tensor out)"
+            "-> Tensor out",
+            c10::RegisterOperators::options()
+                .kernel<QAddOut</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
+        .op("quantized::add_relu_out(Tensor qa, Tensor qb, Tensor out)"
+            "-> Tensor out",
+            c10::RegisterOperators::options()
+                .kernel<QAddOut</*ReLUFused=*/true>>(QuantizedCPUTensorId()));
+} // namespace
+} // namespace native
+} // namespace at
