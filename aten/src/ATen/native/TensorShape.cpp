@@ -700,6 +700,10 @@ Tensor & t_(Tensor & self) {
 Tensor unfold(const Tensor &self, int64_t dim, int64_t size, int64_t step) {
   auto ndims = self.dim();
   dim = maybe_wrap_dim(dim, ndims);
+
+  if (ndims == 0) {
+    return self;
+  }
   
   std::vector<int64_t> new_sizes;
   std::vector<int64_t> new_strides;
@@ -707,8 +711,8 @@ Tensor unfold(const Tensor &self, int64_t dim, int64_t size, int64_t step) {
   auto sizes = self.sizes().vec();
   auto strides = self.strides().vec();
 
-  TORCH_CHECK((dim >= 0) && (dim < ndims), "out of range");
-  TORCH_CHECK(size <= sizes[dim], "out of range");
+  TORCH_CHECK((dim >= 0) && (dim < ndims), "dimension out of range");
+  TORCH_CHECK(size <= sizes[dim], "size out of range");
   TORCH_CHECK(step > 0, "invalid step");
 
   for(int64_t d = 0; d < ndims; d++) {
