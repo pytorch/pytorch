@@ -697,33 +697,42 @@ smoke_mac_test: &smoke_mac_test
 ##############################################################################
 version: 2
 jobs:
-  pytorch_linux_xenial_py2_build:
+  pytorch_linux_xenial_py2_7_9_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py2-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2:327"
-      PYTHON_VERSION: "2.7"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py2.7.9-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7.9:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_py2_test:
+  pytorch_linux_xenial_py2_7_9_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2:327"
-      PYTHON_VERSION: "2.7"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py2.7.9-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7.9:327"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_py3_build:
+  pytorch_linux_xenial_py2_7_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3:327"
-      PYTHON_VERSION: "3.5"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py2.7-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_py3_test:
+  pytorch_linux_xenial_py2_7_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3:327"
-      PYTHON_VERSION: "3.5"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py2.7-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7:327"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
+
+  pytorch_linux_xenial_py3_5_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.5-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.5:327"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_linux_xenial_py3_5_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.5-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.5:327"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
@@ -731,259 +740,186 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-pynightly-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-pynightly:327"
-      PYTHON_VERSION: "nightly"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_pynightly_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-pynightly-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-pynightly:327"
-      PYTHON_VERSION: "nightly"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_py3_gcc4_8_build:
+  pytorch_linux_xenial_py3_6_gcc4_8_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-gcc4.8-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-gcc4.8:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-gcc4.8-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc4.8:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_py3_gcc4_8_test:
+  pytorch_linux_xenial_py3_6_gcc4_8_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-gcc4.8-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-gcc4.8:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-gcc4.8-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc4.8:327"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_py3_gcc5_4_build:
+  pytorch_linux_xenial_py3_6_gcc5_4_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-gcc5.4-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-gcc5.4:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-gcc5.4-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_py3_gcc5_4_test:
+  pytorch_linux_xenial_py3_6_gcc5_4_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-gcc5.4-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-gcc5.4:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-gcc5.4-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:327"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_xla_linux_xenial_py3_gcc5_4_build:
+  pytorch_xla_linux_xenial_py3_6_gcc5_4_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-xla-linux-xenial-py3-gcc5.4-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-gcc5.4:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-xla-linux-xenial-py3.6-gcc5.4-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_xla_linux_xenial_py3_gcc5_4_test:
+  pytorch_xla_linux_xenial_py3_6_gcc5_4_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-xla-linux-xenial-py3-gcc5.4-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-gcc5.4:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-xla-linux-xenial-py3.6-gcc5.4-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:327"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_namedtensor_linux_xenial_py3_gcc5_4_build:
+  pytorch_namedtensor_linux_xenial_py3_6_gcc5_4_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-py3-gcc5.4-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-gcc5.4:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-py3.6-gcc5.4-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_namedtensor_linux_xenial_py3_gcc5_4_test:
+  pytorch_namedtensor_linux_xenial_py3_6_gcc5_4_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-py3-gcc5.4-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-gcc5.4:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-py3.6-gcc5.4-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:327"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_py3_gcc7_build:
+  pytorch_linux_xenial_py3_6_gcc7_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-gcc7-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-gcc7:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-gcc7-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_py3_gcc7_test:
+  pytorch_linux_xenial_py3_6_gcc7_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-gcc7-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-gcc7:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-gcc7-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:327"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_py3_clang5_asan_build:
+  pytorch_linux_xenial_py3_6_clang5_asan_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-asan-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-clang5-asan-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-clang5-asan:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_py3_clang5_asan_test:
+  pytorch_linux_xenial_py3_6_clang5_asan_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-asan-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-clang5-asan-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-clang5-asan:327"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_namedtensor_linux_xenial_py3_clang5_asan_build:
+  pytorch_namedtensor_linux_xenial_py3_6_clang5_asan_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-py3-clang5-asan-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-py3.6-clang5-asan-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-clang5-asan:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_namedtensor_linux_xenial_py3_clang5_asan_test:
+  pytorch_namedtensor_linux_xenial_py3_6_clang5_asan_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-py3-clang5-asan-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-py3.6-clang5-asan-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-clang5-asan:327"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_cuda9_cudnn7_py2_build:
+  pytorch_linux_xenial_cuda9_cudnn7_py2_7_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:327"
-      PYTHON_VERSION: "2.7"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2.7-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2.7:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_cuda9_cudnn7_py2_test:
+  pytorch_linux_xenial_cuda9_cudnn7_py2_7_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:327"
-      PYTHON_VERSION: "2.7"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2.7-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2.7:327"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_cuda9_cudnn7_py3_build:
+  pytorch_linux_xenial_cuda9_cudnn7_py3_6_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3.6-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3.6:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_cuda9_cudnn7_py3_test:
+  pytorch_linux_xenial_cuda9_cudnn7_py3_6_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3.6-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3.6:327"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_cuda9_cudnn7_py3_multigpu_test:
+  pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_7_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3-multigpu-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:327"
-      PYTHON_VERSION: "3.6"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-      MULTI_GPU: "1"
-    resource_class: gpu.large
-    <<: *pytorch_linux_test_defaults
-
-  pytorch_linux_xenial_cuda9_cudnn7_py3_NO_AVX2_test:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3-NO_AVX2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:327"
-      PYTHON_VERSION: "3.6"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *pytorch_linux_test_defaults
-
-  pytorch_linux_xenial_cuda9_cudnn7_py3_NO_AVX_NO_AVX2_test:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3-NO_AVX-NO_AVX2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:327"
-      PYTHON_VERSION: "3.6"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *pytorch_linux_test_defaults
-
-  pytorch_linux_xenial_cuda9_cudnn7_py3_slow_test:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3-slow-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:327"
-      PYTHON_VERSION: "3.6"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *pytorch_linux_test_defaults
-
-  pytorch_linux_xenial_cuda9_cudnn7_py3_nogpu_test:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3-nogpu-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:327"
-      PYTHON_VERSION: "3.6"
-    resource_class: large
-    <<: *pytorch_linux_test_defaults
-
-  pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_build:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:327"
-      PYTHON_VERSION: "2.7"
+      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2.7-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2.7:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_test:
+  pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_7_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:327"
-      PYTHON_VERSION: "2.7"
+      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2.7-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2.7:327"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
+  pytorch_linux_xenial_cuda9_2_cudnn7_py3_6_gcc7_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9.2-cudnn7-py3.6-gcc7-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3.6-gcc7:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
+  pytorch_linux_xenial_cuda9_2_cudnn7_py3_6_gcc7_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9.2-cudnn7-py3.6-gcc7-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3.6-gcc7:327"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build:
+  pytorch_linux_xenial_cuda10_cudnn7_py3_6_gcc7_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10-cudnn7-py3.6-gcc7-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10-cudnn7-py3.6-gcc7:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build:
+  pytorch_linux_xenial_cuda10_1_cudnn7_py3_6_gcc7_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10.1-cudnn7-py3.6-gcc7-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3.6-gcc7:327"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_test:
+  pytorch_linux_xenial_cuda10_1_cudnn7_py3_6_gcc7_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10.1-cudnn7-py3.6-gcc7-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3.6-gcc7:327"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
+  pytorch_linux_xenial_py3_6_clang5_android_ndk_r19c_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:327"
-      PYTHON_VERSION: "3.6"
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-clang5-android-ndk-r19c-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-clang5-android-ndk-r19c:327"
     <<: *pytorch_linux_build_defaults
 
   
@@ -2606,31 +2542,14 @@ workflows:
   build:
     jobs:
       - setup
-      - pytorch_linux_xenial_py2_build:
+      - pytorch_linux_xenial_py2_7_9_build:
           requires:
             - setup
-      - pytorch_linux_xenial_py2_test:
+      - pytorch_linux_xenial_py2_7_9_test:
           requires:
             - setup
-            - pytorch_linux_xenial_py2_build
-      - pytorch_linux_xenial_py2_build:
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-      - pytorch_linux_xenial_py2_test:
-          requires:
-            - setup
-            - pytorch_linux_xenial_py2_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-      - pytorch_linux_xenial_py3_build:
+            - pytorch_linux_xenial_py2_7_9_build
+      - pytorch_linux_xenial_py2_7_build:
           requires:
             - setup
           filters:
@@ -2638,10 +2557,27 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
-      - pytorch_linux_xenial_py3_test:
+      - pytorch_linux_xenial_py2_7_test:
           requires:
             - setup
-            - pytorch_linux_xenial_py3_build
+            - pytorch_linux_xenial_py2_7_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+      - pytorch_linux_xenial_py3_5_build:
+          requires:
+            - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+      - pytorch_linux_xenial_py3_5_test:
+          requires:
+            - setup
+            - pytorch_linux_xenial_py3_5_build
           filters:
             branches:
               only:
@@ -2664,7 +2600,7 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
-      - pytorch_linux_xenial_py3_gcc4_8_build:
+      - pytorch_linux_xenial_py3_6_gcc4_8_build:
           requires:
             - setup
           filters:
@@ -2672,68 +2608,37 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
-      - pytorch_linux_xenial_py3_gcc4_8_test:
+      - pytorch_linux_xenial_py3_6_gcc4_8_test:
           requires:
             - setup
-            - pytorch_linux_xenial_py3_gcc4_8_build
+            - pytorch_linux_xenial_py3_6_gcc4_8_build
           filters:
             branches:
               only:
                 - master
                 - /ci-all\/.*/
-      - pytorch_linux_xenial_py3_gcc5_4_build:
+      - pytorch_linux_xenial_py3_6_gcc5_4_build:
           requires:
             - setup
-      - pytorch_linux_xenial_py3_gcc5_4_test:
+      - pytorch_linux_xenial_py3_6_gcc5_4_test:
           requires:
             - setup
-            - pytorch_linux_xenial_py3_gcc5_4_build
-      - pytorch_xla_linux_xenial_py3_gcc5_4_build:
+            - pytorch_linux_xenial_py3_6_gcc5_4_build
+      - pytorch_xla_linux_xenial_py3_6_gcc5_4_build:
           requires:
             - setup
-      - pytorch_xla_linux_xenial_py3_gcc5_4_test:
+      - pytorch_xla_linux_xenial_py3_6_gcc5_4_test:
           requires:
             - setup
-            - pytorch_xla_linux_xenial_py3_gcc5_4_build
-      - pytorch_namedtensor_linux_xenial_py3_gcc5_4_build:
+            - pytorch_xla_linux_xenial_py3_6_gcc5_4_build
+      - pytorch_namedtensor_linux_xenial_py3_6_gcc5_4_build:
           requires:
             - setup
-      - pytorch_namedtensor_linux_xenial_py3_gcc5_4_test:
+      - pytorch_namedtensor_linux_xenial_py3_6_gcc5_4_test:
           requires:
             - setup
-            - pytorch_namedtensor_linux_xenial_py3_gcc5_4_build
-      - pytorch_linux_xenial_py3_gcc7_build:
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-      - pytorch_linux_xenial_py3_gcc7_test:
-          requires:
-            - setup
-            - pytorch_linux_xenial_py3_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-      - pytorch_linux_xenial_py3_clang5_asan_build:
-          requires:
-            - setup
-      - pytorch_linux_xenial_py3_clang5_asan_test:
-          requires:
-            - setup
-            - pytorch_linux_xenial_py3_clang5_asan_build
-      - pytorch_namedtensor_linux_xenial_py3_clang5_asan_build:
-          requires:
-            - setup
-      - pytorch_namedtensor_linux_xenial_py3_clang5_asan_test:
-          requires:
-            - setup
-            - pytorch_namedtensor_linux_xenial_py3_clang5_asan_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py2_build:
+            - pytorch_namedtensor_linux_xenial_py3_6_gcc5_4_build
+      - pytorch_linux_xenial_py3_6_gcc7_build:
           requires:
             - setup
           filters:
@@ -2741,59 +2646,30 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
-      - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
+      - pytorch_linux_xenial_py3_6_gcc7_test:
           requires:
             - setup
-            - pytorch_linux_xenial_cuda9_cudnn7_py2_build
+            - pytorch_linux_xenial_py3_6_gcc7_build
           filters:
             branches:
               only:
                 - master
                 - /ci-all\/.*/
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_build:
+      - pytorch_linux_xenial_py3_6_clang5_asan_build:
           requires:
             - setup
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_test:
+      - pytorch_linux_xenial_py3_6_clang5_asan_test:
           requires:
             - setup
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_multigpu_test:
+            - pytorch_linux_xenial_py3_6_clang5_asan_build
+      - pytorch_namedtensor_linux_xenial_py3_6_clang5_asan_build:
           requires:
             - setup
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_NO_AVX2_test:
+      - pytorch_namedtensor_linux_xenial_py3_6_clang5_asan_test:
           requires:
             - setup
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_NO_AVX_NO_AVX2_test:
-          requires:
-            - setup
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_slow_test:
-          requires:
-            - setup
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_nogpu_test:
-          requires:
-            - setup
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_short_perf_test_gpu:
-          requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_python_doc_push:
-          requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_cpp_doc_push:
-          requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_build:
-          requires:
-            - setup
-      - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_test:
-          requires:
-            - setup
-            - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_build
-      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
+            - pytorch_namedtensor_linux_xenial_py3_6_clang5_asan_build
+      - pytorch_linux_xenial_cuda9_cudnn7_py2_7_build:
           requires:
             - setup
           filters:
@@ -2801,16 +2677,30 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
-      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
+      - pytorch_linux_xenial_cuda9_cudnn7_py2_7_test:
           requires:
             - setup
-            - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+            - pytorch_linux_xenial_cuda9_cudnn7_py2_7_build
           filters:
             branches:
               only:
                 - master
                 - /ci-all\/.*/
-      - pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build:
+      - pytorch_linux_xenial_cuda9_cudnn7_py3_6_build:
+          requires:
+            - setup
+      - pytorch_linux_xenial_cuda9_cudnn7_py3_6_test:
+          requires:
+            - setup
+            - pytorch_linux_xenial_cuda9_cudnn7_py3_6_build
+      - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_7_build:
+          requires:
+            - setup
+      - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_7_test:
+          requires:
+            - setup
+            - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_7_build
+      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_6_gcc7_build:
           requires:
             - setup
           filters:
@@ -2818,7 +2708,16 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
-      - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build:
+      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_6_gcc7_test:
+          requires:
+            - setup
+            - pytorch_linux_xenial_cuda9_2_cudnn7_py3_6_gcc7_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+      - pytorch_linux_xenial_cuda10_cudnn7_py3_6_gcc7_build:
           requires:
             - setup
           filters:
@@ -2826,16 +2725,24 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
-      - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_test:
+      - pytorch_linux_xenial_cuda10_1_cudnn7_py3_6_gcc7_build:
           requires:
             - setup
-            - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build
           filters:
             branches:
               only:
                 - master
                 - /ci-all\/.*/
-      - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
+      - pytorch_linux_xenial_cuda10_1_cudnn7_py3_6_gcc7_test:
+          requires:
+            - setup
+            - pytorch_linux_xenial_cuda10_1_cudnn7_py3_6_gcc7_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+      - pytorch_linux_xenial_py3_6_clang5_android_ndk_r19c_build:
           requires:
             - setup
       # Warning: indentation here matters!
