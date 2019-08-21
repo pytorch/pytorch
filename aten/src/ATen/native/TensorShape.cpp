@@ -703,6 +703,11 @@ Tensor unfold(const Tensor &self, int64_t dim, int64_t size, int64_t step) {
 
   auto sizes = self.sizes().vec();
   auto strides = self.strides().vec();
+
+  TORCH_CHECK((dim >= 0) && (dim < self.dim()), "out of range");
+  TORCH_CHECK(size <= sizes[dim], "out of range");
+  TORCH_CHECK(step > 0, "invalid step");
+
   for(int64_t d = 0; d < self.dim(); d++) {
     if (d == dim) {
       new_sizes.push_back((sizes[d] - size) / step + 1);

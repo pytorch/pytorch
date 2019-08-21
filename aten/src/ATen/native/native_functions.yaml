@@ -4256,9 +4256,6 @@
 
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   variants: method
-  dispatch:
-    CPU: unfold
-    CUDA: legacy::cuda::_th_unfold
 
 - func: equal(Tensor self, Tensor other) -> bool
   variants: method, function
