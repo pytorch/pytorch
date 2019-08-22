@@ -416,8 +416,6 @@ def add_test(test_name, test_fn):
         raise RuntimeError("Found two tests with the same name: " + test_name)
     setattr(TestCppApiParity, test_name, test_fn)
 
-torch_nn_modules.module_metadata_map['SampleModule'] = sample_module.module_metadata
-
 torch_nn_test_params_map = {}
 
 torch_nn_module_names = set()

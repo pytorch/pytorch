@@ -1,5 +1,7 @@
 import torch
 
+from cpp_api_parity import torch_nn_modules
+
 '''
 `SampleModule` is used by `test_cpp_api_parity.py` to test that Python / C++ API
 parity test harness works for `torch.nn.Module` subclasses.
@@ -98,7 +100,7 @@ module_tests = [
     ),
 ]
 
-module_metadata = dict(
+torch_nn_modules.module_metadata_map['SampleModule'] = dict(
     cpp_default_constructor_args='(true)',
     cpp_sources=SAMPLE_MODULE_CPP_SOURCE,
 )
