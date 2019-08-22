@@ -236,6 +236,7 @@ public:
     return map([](T x) -> T { return -x; });
   }
   Vec256<T> round() const {
+    // We do not use std::round because we would like to round midway numbers to the nearest even integer.
     return map(std::nearbyint);
   }
   Vec256<T> sin() const {
