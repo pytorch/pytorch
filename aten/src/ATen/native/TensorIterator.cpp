@@ -327,7 +327,6 @@ int64_t TensorIterator::numel() const {
   int64_t numel = 1;
   for (int64_t size : shape_) {
     numel *= size;
-    std::cout << "size = " << size << std::endl;
   }
   return dim_apply_ ? -numel: numel;
 }
@@ -444,7 +443,6 @@ void TensorIterator::for_each(const loop2d_t& loop) const {
 
 void TensorIterator::for_each(const loop_dim_apply_t& loop) const {
   int64_t numel = this->numel();
-  std::cout << "numel = " << numel << std::endl;
   if (numel == 0) {
     return;
   } else if (true || numel < internal::GRAIN_SIZE || at::get_num_threads() == 1) {
@@ -495,7 +493,6 @@ void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
 }
 
 void TensorIterator::serial_for_each(const loop_dim_apply_t& loop, Range range) const {
-  std::cout << "Entering serial_for_each" << std::endl;
   if (range.size() == 0) {
     return;
   }
@@ -510,13 +507,11 @@ void TensorIterator::serial_for_each(const loop_dim_apply_t& loop, Range range) 
   } else {
     auto counter = DimCounter(shape_, range);
     while (!counter.is_done()) {
-      std::cout << counter.values << std::endl;
       auto ptrs = get_data_ptrs(base_ptrs, counter.values);
       loop(ptrs.data(), strides.data());
       counter.increment();
     }
   }
-  std::cout << "Exiting serial_for_each" << std::endl;
 }
 
 bool TensorIterator::is_trivial_1d() const {
@@ -823,35 +818,25 @@ int TensorIterator::get_dim_to_split() const {
 void TensorIterator::build() {
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
-  std::cout << "done mark_outputs" << std::endl;
   // Check that the outputs have no internal overlap
   // and do not share memory with inputs.
   check_mem_overlaps();
-  std::cout << "done check_mem_overlaps" << std::endl;
   // compute the broadcasted shape
   compute_shape();
-  std::cout << "done compute_shape" << std::endl;
-  std::cout << "new shape: " << shape_ << std::endl;
   // compute each tensor's stride after broadcasting
   compute_strides();
-  std::cout << "done compute_strides" << std::endl;
   // re-order dimensions to improve coalescing
   reorder_dimensions();
-  std::cout << "done reorder_dimensions" << std::endl;
   // compute the result dtype and device
   compute_types();
-  std::cout << "done compute_types" << std::endl;
   // allocate the output tensor if it's not provided
   allocate_outputs();
-  std::cout << "done allocate_outputs" << std::endl;
 #ifdef BUILD_NAMEDTENSOR
   // perform name inference
   propagate_names_to_outputs();
 #endif
   // coalesce adjacent dimensions when possible
   coalesce_dimensions();
-  std::cout << "done coalesce_dimensions" << std::endl;
-  std::cout << "new shape: " << shape_ << std::endl;
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor.defined());
