@@ -42,7 +42,7 @@ TEST(TensorIteratorTest, MixedDevices) {
   ASSERT_ANY_THROW(TensorIterator::binary_op(out, x, y));
 }
 
-namespace at{ native {  // required to use cpu_apply_dim_kernel
+namespace at{ namespace native {  // required to use cpu_apply_dim_kernel
 
 Tensor gather_with_broadcast_cpu(IntArrayRef outsizes, const Tensor &src, int64_t dim, const Tensor &index) {
   Tensor result = at::empty(outsizes, src.options());
