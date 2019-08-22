@@ -218,12 +218,10 @@ class GradientHelper {
       if (input_size && output_size) {
         IValue ival{};
         if (input_size != output_size) {
-          size = node->owningGraph()->insertConstant(
-              IValue(input_size), OptionalType::create(ListType::ofInts()));
+          size = node->owningGraph()->insertConstant(IValue(input_size),
+                                                     ListType::ofInts());
         } else {
-          size = node->owningGraph()->insertConstant(
-              IValue(),
-              OptionalType::create(ListType::ofInts()) /*NoneType::get()*/);
+          size = node->owningGraph()->insertConstant(IValue(), NoneType::get());
         }
       } else {
         size = SymbolicVariable(node->namedInput(input_name))
@@ -586,12 +584,10 @@ static void constantsizeSizes(Gradient &grad_desc, ReverseDetails &rev_info) {
         IValue ival{};
         Value *size;
         if (input_size != output_size) {
-          size = node->owningGraph()->insertConstant(
-              IValue(input_size), OptionalType::create(ListType::ofInts()));
+          size = node->owningGraph()->insertConstant(IValue(input_size),
+                                                     ListType::ofInts());
         } else {
-          size = node->owningGraph()->insertConstant(
-              IValue(),
-              OptionalType::create(ListType::ofInts()) /*NoneType::get()*/);
+          size = node->owningGraph()->insertConstant(IValue(), NoneType::get());
         }
         node->replaceInputWith(input, size);
       }

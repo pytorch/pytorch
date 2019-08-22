@@ -217,7 +217,9 @@ bool Operator::matches(const Node* node) const {
       return false;
     }
     TypePtr formal = *matched_type.type;
-    if (!actuals[i]->type()->isSubtypeOf(formal)) {
+    if (!actuals[i]->type()->isSubtypeOf(formal) &&
+        !(formal->cast<OptionalType>() &&
+          actuals[i]->type()->cast<NoneType>())) {
       return false;
     }
   }

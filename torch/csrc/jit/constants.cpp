@@ -192,20 +192,6 @@ RegisterOperators reg({
               push(stack, IValue());
               return 0;
             };
-          } else if (type->isSubtypeOf(
-                         OptionalType::create(ListType::ofInts()))) {
-            if (node->hasAttribute(attr::value)) {
-              const auto &is = node->is(attr::value);
-              return [is](Stack &stack) {
-                push(stack, is);
-                return 0;
-              };
-            } else {
-              return [](Stack &stack) {
-                push(stack, IValue());
-                return 0;
-              };
-            }
           } else {
             std::stringstream ss;
             throw std::runtime_error(ss.str());
