@@ -138,20 +138,6 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_propagate_qinfo",
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
-          "_jit_pass_insert_observers",
-          [](const script::Module& moduleObj,
-             const std::string& methodName,
-             py::function pyObserverFunction) {
-            // Create a new node that would be used in the insert observer pass:
-            // all observer nodes will be cloned from this one.
-            Graph g;
-            Node* new_node = g.createPythonOp(
-                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(moduleObj, methodName, new_node);
-            // We don't need this node anymore, don't forget to remove it.
-            new_node->destroy();
-          })
-      .def(
           // TODO: rename to insert_observers after we remove old code
           "_jit_pass_prepare_quant",
           [](const script::Module& module,
@@ -170,20 +156,6 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
-      .def(
-          "_jit_pass_insert_observers",
-          [](const StrongFunctionPtr& function_var,
-             py::function pyObserverFunction) {
-            // Overloaded jit pass for pure functions instead of modules.
-            // Create a new node that would be used in the insert observer pass:
-            // all observer nodes will be cloned from this one.
-            Graph g;
-            Node* new_node = g.createPythonOp(
-                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(function_var.function_, new_node);
-            // We don't need this node anymore, don't forget to remove it.
-            new_node->destroy();
-          })
       .def(
           "_jit_pass_insert_quantdequant",
           [](const script::Module& moduleObj,
