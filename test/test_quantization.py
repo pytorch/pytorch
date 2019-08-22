@@ -485,8 +485,9 @@ class ScriptabilityTest(QuantizationTestCase):
 
         self.qmodel_under_test = ModelForWrapping().float()
         self.qmodel_under_test = quantize(
-            QuantWrapper(self.qmodel_under_test.float()), default_eval_fn,
-                         self.calib_data)
+            QuantWrapper(self.qmodel_under_test.float()),
+            default_eval_fn,
+            self.calib_data)
         self.x = torch.rand(10).float()
 
     def test_quantized(self):
