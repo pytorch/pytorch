@@ -63,10 +63,10 @@ static bool IsComparisonOp(const NodeKind& nkind) {
   return comparisonOps.find(nkind) != comparisonOps.end();
 }
 
-static ProfiledTensorTypePtr CreateProfiledTensorTypeWithScalarType(
-    const ProfiledTensorTypePtr& typePtr,
+static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
+    const TensorTypePtr& typePtr,
     const c10::ScalarType& scalar_type) {
-  return ProfiledTensorType::create(
+  return TensorType::create(
       scalar_type,
       typePtr->device(),
       typePtr->sizes(),
@@ -99,13 +99,13 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
       typesFromScalars.emplace_back(c10::kLong);
     } else if (nkind == onnx::Constant) {
       typesFromScalars.emplace_back(input->node()->t(attr::value).scalar_type());
-    } else if (auto scalar_type = ProfiledTensorType::create(input->type())->scalarType()) {
+    } else if (auto scalar_type = input->type()->cast<TensorType>()->scalarType()) {
       typesFromTensors.emplace_back(*scalar_type);
     }
   });
 
   c10::optional<c10::ScalarType> st = c10::nullopt;
-  const c10::optional<c10::ScalarType> output_st = ProfiledTensorType::create(n->output()->type())->scalarType();
+  const c10::optional<c10::ScalarType> output_st = n->output()->type()->cast<TensorType>()->scalarType();
 
   if (typesFromScalars.size() == n->inputs().size()) {
     // If all inputs are scalars, infer scalar_type by calling c10::promoteTypes.
@@ -146,7 +146,7 @@ static void UpdateScalarTypeForInputs(Node* n, const c10::ScalarType& scalar_typ
   }
 
   for (auto input : n->inputs()) {
-    auto input_tensor_type = ProfiledTensorType::create(input->type());
+    auto input_tensor_type = input->type()->cast<TensorType>();
     auto input_scalar_type = input_tensor_type->scalarType();
 
     if ((input->node()->kind() == onnx::Constant) ||
@@ -160,7 +160,7 @@ static void UpdateScalarTypeForInputs(Node* n, const c10::ScalarType& scalar_typ
         Node* const_node = n->owningGraph()->create(onnx::Constant);
         const_node->t_(attr::value, new_val);
         const_node->insertBefore(n);
-        const_node->output()->setType(ProfiledTensorType::create(new_val));
+        const_node->output()->setType(TensorType::create(new_val));
         n->replaceInputWith(input, const_node->output());
       } else {
         Node* cast_node = n->owningGraph()->create(onnx::Cast);
@@ -176,7 +176,7 @@ static void UpdateScalarTypeForInputs(Node* n, const c10::ScalarType& scalar_typ
 }
 
 static void UpdateScalarTypeForOutput(Node* n, const c10::ScalarType& scalar_type) {
-  auto output_tensor_type = ProfiledTensorType::create(n->output()->type());
+  auto output_tensor_type = n->output()->type()->cast<TensorType>();
   n->output()->setType(
       CreateProfiledTensorTypeWithScalarType(output_tensor_type, scalar_type));
 }
