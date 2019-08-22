@@ -847,7 +847,7 @@ RegisterOperators reg(
              pop(stack, input, shape);
              shape = shape.contiguous();
              AT_ASSERT(shape.ndimension() == 1);
-             at::IntArrayRef shape_list(shape.data<int64_t>(), shape.size(0));
+             at::IntArrayRef shape_list(shape.data_ptr<int64_t>(), shape.size(0));
              push(stack, input.reshape(shape_list));
              return 0;
            };
@@ -2750,7 +2750,7 @@ RegisterOperators reg2({
           c10::List<int64_t> elems;
           elems.reserve(t.size(0));
           for (int i = 0; i < t.size(0); i++) {
-            elems.push_back(*t[i].data<int32_t>());
+            elems.push_back(*t[i].data_ptr<int32_t>());
           }
           push(stack, std::move(elems));
           return 0;

@@ -362,7 +362,7 @@ void max_pool3d_with_indices_out_cuda_template(
     input.scalar_type(),
     "max_pool3d_with_indices_out_frame",
     [&]{
-      scalar_t *input_data = work_input.data<scalar_t>();
+      scalar_t *input_data = work_input.data_ptr<scalar_t>();
       int64_t totalZ = otime * nslices * nbatch;
 
       max_pool3d_with_indices_out_frame(
@@ -472,7 +472,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
     "max_pool3d_with_indices_backward_out_frame",
     [&] {
       const int64_t totalZ = otime * nslices * nbatch;
-      scalar_t *grad_input_data = work_grad_input.data<scalar_t>();
+      scalar_t *grad_input_data = work_grad_input.data_ptr<scalar_t>();
 
       max_pool3d_with_indices_backward_out_frame(
         grad_input_data, work_grad_output, work_indices,
