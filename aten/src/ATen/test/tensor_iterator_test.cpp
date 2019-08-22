@@ -64,7 +64,7 @@ Tensor test_gather(const Tensor &src, int64_t dim, const Tensor &index) {
 // Test TensorIterator's dim_apply CPU implementation by manually implementing gather
 TEST(TensorIteratorTest, DimApply) {
   Tensor src = at::randn({20, 1, 20, 10});
-  Tensor index = at::randint(100, {100, 10, 20, 1}, ScalarType::Long);
+  Tensor index = at::randint(20, {100, 10, 20, 1}, ScalarType::Long);
   Tensor result1 = src.expand({20, 10, 20, 10}).gather(0, index.expand({100, 10, 20, 10}));
   Tensor result2 = at::native::test_gather(src, 0, index);
   EXPECT_TRUE(at::allclose(result1, result2));
