@@ -106,4 +106,8 @@ class Adam(Optimizer):
 
                 p.data.addcdiv_(-step_size, exp_avg, denom)
 
+            if p.grad is not None:
+                group['effective_lr'] = group['lr']
+            else:
+                group['effective_lr'] = step_size
         return loss
