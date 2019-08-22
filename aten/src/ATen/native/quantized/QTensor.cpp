@@ -28,8 +28,8 @@ Tensor quantize_linear_per_channel_cpu(
       scales.numel() == zero_points.numel(),
       "number of elements in scales and zero_points must match");
   TORCH_CHECK(axis.size() == 1, "only axis of size 1 is supported right now");
-  double* scales_data = scales.data<double>();
-  int64_t* zero_points_data = zero_points.data<int64_t>();
+  double* scales_data = scales.data_ptr<double>();
+  int64_t* zero_points_data = zero_points.data_ptr<int64_t>();
   std::vector<double> scale_vals(scales_data, scales_data + scales.numel());
   std::vector<int64_t> zero_point_vals(
       zero_points_data, zero_points_data + zero_points.numel());
@@ -57,8 +57,8 @@ Tensor dequantize_linear_cpu(
   Tensor f = at::empty(self.sizes(), self.options().dtype(at::kFloat));
   AT_DISPATCH_QINT_TYPES(
       toQIntType(self.scalar_type()), "dequantize_linear_cpu", [&]() {
-        underlying_t* qdata = self.data<underlying_t>();
-        auto* fdata = f.data<float>();
+        underlying_t* qdata = self.data_ptr<underlying_t>();
+        auto* fdata = f.data_ptr<float>();
         for (int i = 0; i < self.numel(); ++i) {
           fdata[i] = (static_cast<float>(qdata[i]) - zero_point) * scale;
         }
@@ -89,8 +89,8 @@ Tensor int_repr_quant(const Tensor& self) {
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr", [&]() {
     dst = at::empty(self.sizes(), self.options().dtype(UNDERLYING_TYPE));
     underlying_t* self_data =
-        reinterpret_cast<underlying_t*>(self_c.data<scalar_t>());
-    underlying_t* dst_data = dst.data<underlying_t>();
+        reinterpret_cast<underlying_t*>(self_c.data_ptr<scalar_t>());
+    underlying_t* dst_data = dst.data_ptr<underlying_t>();
     if (self.numel() > 0) {
       memcpy(dst_data, self_data, self.nbytes());
     }
@@ -109,9 +109,9 @@ Tensor per_tensor_affine_qtensor_cpu(
       zero_point);
   Tensor self_contig = self.contiguous();
   AT_DISPATCH_QINT_TYPES(dst.scalar_type(), "per_tensor_affine_qtensor", [&]() {
-    underlying_t* self_data = self_contig.data<underlying_t>();
+    underlying_t* self_data = self_contig.data_ptr<underlying_t>();
     underlying_t* dst_data =
-        reinterpret_cast<underlying_t*>(dst.data<scalar_t>());
+        reinterpret_cast<underlying_t*>(dst.data_ptr<scalar_t>());
     if (self.numel() > 0) {
       memcpy(dst_data, self_data, self.nbytes());
     }

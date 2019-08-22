@@ -207,10 +207,10 @@ void fractional_max_pool3d_out_cpu_template(
     "fractional_max_pool3d_out_frame",
     [&] {
       fractional_max_pool3d_out_frame<scalar_t>(
-        input.data<scalar_t>(),
-        output.data<scalar_t>(),
-        indices.data<int64_t>(),
-        randomSamples.data<scalar_t>(),
+        input.data_ptr<scalar_t>(),
+        output.data_ptr<scalar_t>(),
+        indices.data_ptr<int64_t>(),
+        randomSamples.data_ptr<scalar_t>(),
         numBatch, numPlanes,
         inputT, inputH, inputW,
         outputT, outputH, outputW,
@@ -338,9 +338,9 @@ void fractional_max_pool3d_backward_out_cpu_template(
     "fractional_max_pool3d_backward_out_frame",
     [&]{
       fractional_max_pool3d_backward_out_frame<scalar_t>(
-        gradInput.data<scalar_t>(),
-        gradOutput.data<scalar_t>(),
-        indices.data<int64_t>(),
+        gradInput.data_ptr<scalar_t>(),
+        gradOutput.data_ptr<scalar_t>(),
+        indices.data_ptr<int64_t>(),
         numBatch, numPlanes,
         inputT, inputH, inputW,
         outputT, outputH, outputW
