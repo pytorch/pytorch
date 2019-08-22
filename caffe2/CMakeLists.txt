@@ -734,6 +734,9 @@ ENDIF()
     add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
   endif()
 
+  if (BUILD_TEST AND NOT NO_API)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/mobile ${CMAKE_BINARY_DIR}/test_export)
+  endif()
 
   # XXX This ABI check cannot be run with arm-linux-androideabi-g++
   if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")

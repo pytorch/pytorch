@@ -445,12 +445,13 @@ struct CodeImpl {
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
     n_inputs = graph_->inputs().size();
-    // std::cout << *graph_ << "\n";
+//    std::cout << *graph_ << "\n";
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
     // we deferred the emission of bailout blocks so they appear at the end
     // emit them now and patch up the jumps
     insertBailoutBlocks();
+    dump(std::cout);
   }
 
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {

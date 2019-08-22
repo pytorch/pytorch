@@ -10,7 +10,7 @@ namespace at {
 /// is on.
 #if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 
-thread_local bool GradMode_enabled = true;
+thread_local bool GradMode_enabled = false;
 
 bool GradMode::is_enabled() {
   return GradMode_enabled;
