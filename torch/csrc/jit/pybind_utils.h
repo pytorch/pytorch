@@ -41,7 +41,7 @@ namespace jit {
 // locations in libtorch code rather than user code.
 
 
-std::shared_ptr<script::CompilationUnit> get_python_cu();
+TORCH_API std::shared_ptr<script::CompilationUnit> get_python_cu();
 
 struct TypedIValue : public std::pair<IValue, TypePtr> {
   using pair::pair;
