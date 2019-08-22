@@ -32,6 +32,28 @@
 namespace torch {
 namespace jit {
 
+void writeArchive(const std::string& archive_name, const IValue& value,
+                  caffe2::serialize::PyTorchStreamWriter& writer) {
+  std::vector<char> data;
+  Pickler data_pickle(
+      [&](const char* buf, size_t size) {
+        data.insert(data.end(), buf, buf + size);
+      },
+      nullptr);
+  data_pickle.protocol();
+  data_pickle.pushIValue(value);
+  data_pickle.stop();
+  size_t i = 0;
+  for (const auto& td : data_pickle.tensorData()) {
+    std::stringstream fname;
+    fname << archive_name << "/" << i++;
+    writer.writeRecord(fname.str(), td.data(), td.sizeInBytes());
+  }
+  std::stringstream fname;
+  fname << archive_name << ".pkl";
+  writer.writeRecord(fname.str(), data.data(), data.size());
+}
+
 // write the content of the tensor to the file/stream, and save the
 // offset in the storageMap_
 void convertAndWriteTensor(
@@ -666,33 +688,12 @@ class ScriptModuleSerializer2 {
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
-    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
+    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants), writer_);
     // finally we serialize the model
-    writeArchive("data", module.module_object());
+    writeArchive("data", module.module_object(), writer_);
   }
 
  private:
-  void writeArchive(const std::string& archive_name, const IValue& value) {
-    std::vector<char> data;
-    Pickler data_pickle(
-        [&](const char* buf, size_t size) {
-          data.insert(data.end(), buf, buf + size);
-        },
-        nullptr);
-    data_pickle.protocol();
-    data_pickle.pushIValue(value);
-    data_pickle.stop();
-    size_t i = 0;
-    for (const auto& td : data_pickle.tensorData()) {
-      std::stringstream fname;
-      fname << archive_name << "/" << i++;
-      writer_.writeRecord(fname.str(), td.data(), td.sizeInBytes());
-    }
-    std::stringstream fname;
-    fname << archive_name << ".pkl";
-    writer_.writeRecord(fname.str(), data.data(), data.size());
-  }
-
   void writeExtraFiles(
       const script::Module& module,
       const script::ExtraFilesMap& extra_files) {

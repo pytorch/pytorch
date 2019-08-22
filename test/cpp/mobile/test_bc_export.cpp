@@ -14,6 +14,11 @@ int main(int argc, const char* argv[]) {
 
   // Deserialize the ScriptModule from a file using torch::jit::load().
   torch::jit::script::Module module = torch::jit::load(argv[1]);
+//  //Save in new format with code and pkl files.
+//  std::string nfile(argv[1]);
+//  nfile += "1.pt";
+//  module.save(nfile);
+//  module.save("/Users/myuan/data/lenet/lenet_traced1.pt");
   torch::jit::mobile::SaveBytecode(module, argv[2]);
 
 //  std::vector<torch::jit::IValue> inputs;
