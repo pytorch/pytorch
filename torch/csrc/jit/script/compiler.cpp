@@ -229,10 +229,17 @@ struct Environment {
     return std::make_shared<SimpleValue>(load->output());
   }
 
-  void insertStore(const std::string& name, const SourceRange& loc, Value* v) {
+  // note: type is not always the same as v->type(), e.g.
+  // type: Optional[Tensor]
+  // v->type(): Tensor
+  void insertStore(
+      const std::string& name,
+      const SourceRange& loc,
+      Value* v,
+      TypePtr type) {
     auto g = b->owningGraph();
-    auto store = g->insertNode(g->createStore(name, v))->setSourceRange(loc);
-    type_table[name] = store->input()->type();
+    g->insertNode(g->createStore(name, v))->setSourceRange(loc);
+    type_table[name] = type;
   }
 
   SugaredValuePtr findInThisFrame(const std::string& name) {
@@ -269,13 +276,18 @@ struct Environment {
   }
 
   void setVar(const SourceRange& loc, const std::string& name, Value* value) {
-    setSugaredVar(loc, name, std::make_shared<SimpleValue>(value));
+    setSugaredVar(
+        loc,
+        name,
+        std::make_shared<SimpleValue>(value),
+        /*annotated_type=*/nullptr);
   }
 
   void setSugaredVar(
       const SourceRange& loc,
       const std::string& name,
-      SugaredValuePtr value) {
+      SugaredValuePtr value,
+      TypePtr annotated_type) {
     Value* as_simple_value = asSimple(value);
     if (as_simple_value && !as_simple_value->hasDebugName() &&
         meaningfulName(name) &&
@@ -293,6 +305,11 @@ struct Environment {
     // requires 'a' to be first-class in the graph since its value depends on
     // control flow
     if (auto parent = findInParentFrame(name)) {
+      if (annotated_type) {
+        throw ErrorReport(loc)
+            << "Attempting to declare and annotate the type of variable '"
+            << name << "' but it is already defined in an outer block";
+      }
       if (!as_simple_value) {
         throw ErrorReport(loc)
             << "Cannot re-assign '" << name << "' to a value of type "
@@ -306,8 +323,15 @@ struct Environment {
             << value->kind() << " and " << name
             << " is not a first-class value.  Only reassignments to first-class values are allowed";
       }
-      if (!as_simple_value->type()->isSubtypeOf(
-              unshapedType(simple_parent->type()))) {
+
+      auto parent_type = unshapedType(simple_parent->type());
+      as_simple_value = tryConvertToType(
+          loc,
+          *b->owningGraph(),
+          parent_type,
+          as_simple_value,
+          /*allow_conversions=*/true);
+      if (!as_simple_value->type()->isSubtypeOf(parent_type)) {
         auto error = ErrorReport(loc);
         error << "Variable '" << name << "' previously has type "
               << simple_parent->type()->python_str()
@@ -326,7 +350,17 @@ struct Environment {
       }
     }
     if (as_simple_value) {
-      insertStore(name, loc, std::move(as_simple_value));
+      if (!annotated_type) {
+        annotated_type = as_simple_value->type();
+      }
+      if (!as_simple_value->type()->isSubtypeOf(annotated_type)) {
+        throw ErrorReport(loc)
+            << "Variable '" << name << "' is annotated with type "
+            << annotated_type->python_str()
+            << " but is being assigned to a value of type "
+            << as_simple_value->type()->python_str();
+      }
+      insertStore(name, loc, std::move(as_simple_value), annotated_type);
     } else {
       value_table[name] = std::move(value);
     }
@@ -772,7 +806,10 @@ struct to_ir {
       const auto& name = (*it).ident().name();
       Value* new_input = block->addInput()->setDebugName(name);
       environment_stack->setSugaredVar(
-          (*it).ident().range(), name, self->makeSugared(new_input));
+          (*it).ident().range(),
+          name,
+          self->makeSugared(new_input),
+          /*annotated_type=*/nullptr);
       arguments.emplace_back(name, new_input->type());
       ++it;
     }
@@ -867,7 +904,10 @@ struct to_ir {
     };
     auto closure_value = emitClosure(emit_body);
     environment_stack->setSugaredVar(
-        def.name().range(), def.name().name(), closure_value);
+        def.name().range(),
+        def.name().name(),
+        closure_value,
+        /*annotated_type=*/nullptr);
   }
 
   void emitBreak(const Break& stmt) {
@@ -946,13 +986,6 @@ struct to_ir {
           break;
         case TK_AUG_ASSIGN:
           emitAugAssignment(AugAssign(stmt));
-          break;
-        case TK_GLOBAL:
-          for (auto ident : Global(stmt).names()) {
-            const auto& name = Ident(ident).name();
-            environment_stack->setVar(
-                ident.range(), name, graph->addInput(name));
-          }
           break;
         case TK_EXPR_STMT: {
           auto expr = ExprStmt(stmt).expr();
@@ -1960,7 +1993,10 @@ struct to_ir {
           break;
         case TK_VAR:
           environment_stack->setSugaredVar(
-              assignee.range(), Var(assignee).name().name(), outputs.at(i));
+              assignee.range(),
+              Var(assignee).name().name(),
+              outputs.at(i),
+              /*annotated_type=*/nullptr);
           i++;
           break;
         case TK_STARRED: {
@@ -2015,7 +2051,10 @@ struct to_ir {
     const auto tmp_name =
         std::string("$tmp_assign_") + std::to_string(tmp_count++);
     environment_stack->setSugaredVar(
-        stmt.rhs().range(), tmp_name, emitSugaredExpr(stmt.rhs().get(), 1));
+        stmt.rhs().range(),
+        tmp_name,
+        emitSugaredExpr(stmt.rhs().get(), 1),
+        /*annotated_type=*/nullptr);
     auto ident = Var::create(
         stmt.rhs().range(), Ident::create(stmt.rhs().range(), tmp_name));
     for (auto expr : stmt.lhs_list()) {
@@ -2041,7 +2080,10 @@ struct to_ir {
           type = typeParser_.parseTypeFromExpr(stmt.type().get());
         }
         environment_stack->setSugaredVar(
-            v.range(), v.name().name(), emitSugaredExpr(rhs, 1, type));
+            v.range(),
+            v.name().name(),
+            emitSugaredExpr(rhs, 1, type),
+            /*annotated_type=*/type);
       } break;
       case TK_TUPLE_LITERAL:
         emitTupleAssign(TupleLiteral(stmt.lhs()), rhs);
