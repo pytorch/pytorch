@@ -33,3 +33,5 @@ static inline float TH_fracf(float x) {
 static inline float TH_rsqrtf(float x) {
   return 1.0f / sqrtf(x);
 }
+
+#endif // _THMATH_H

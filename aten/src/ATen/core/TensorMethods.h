@@ -2099,16 +2099,6 @@ inline Tensor Tensor::transpose(int64_t dim0, int64_t dim1) const {
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim0, dim1);
 #endif
 }
-#ifdef BUILD_NAMEDTENSOR
-inline Tensor Tensor::transpose(Dimname dim0, Dimname dim1) const {
-#ifdef USE_STATIC_DISPATCH
-    return TypeDefault::transpose(const_cast<Tensor&>(*this), dim0, dim1);
-#else
-    static auto table = globalATenDispatch().getOpTable("aten::transpose(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)");
-    return table->getOp<Tensor (const Tensor &, Dimname, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim0, dim1);
-#endif
-}
-#endif
 inline Tensor & Tensor::transpose_(int64_t dim0, int64_t dim1) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::transpose_(const_cast<Tensor&>(*this), dim0, dim1);
@@ -3616,20 +3606,6 @@ inline Tensor & Tensor::polygamma_(int64_t n) const {
     return table->getOp<Tensor & (Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), n);
 #endif
 }
-inline Tensor & Tensor::erfinv_() const {
-#ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::erfinv_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("erfinv_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
-#else
-    static auto table = globalATenDispatch().getOpTable("aten::erfinv_(Tensor(a!) self) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
-#endif
-}
 inline Tensor & Tensor::renorm_(Scalar p, int64_t dim, Scalar maxnorm) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(type_id())) {
@@ -4470,6 +4446,20 @@ inline Tensor Tensor::erfinv() const {
 #else
     static auto table = globalATenDispatch().getOpTable("aten::erfinv(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
+#endif
+}
+inline Tensor & Tensor::erfinv_() const {
+#ifdef USE_STATIC_DISPATCH
+    switch(tensorTypeIdToBackend(type_id())) {
+        case Backend::CPU:
+            return CPUType::erfinv_(const_cast<Tensor&>(*this));
+            break;
+        default:
+            AT_ERROR("erfinv_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
+    }
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::erfinv_(Tensor(a!) self) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::dist(const Tensor & other, Scalar p) const {
