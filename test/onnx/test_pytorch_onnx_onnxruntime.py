@@ -36,8 +36,8 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
 
         # export the model to ONNX
         f = io.BytesIO()
-        torch.onnx.export(model, input, '/home/neraoof/test/results/uni.onnx',
-                          opset_version=11,
+        torch.onnx.export(model, input, f, torch.onnx.export(model, input, '/home/neraoof/test/results/uni.onnx',
+                          opset_version=self.opset_version,
                           example_outputs=output,
                           do_constant_folding=do_constant_folding,
                           keep_initializers_as_inputs=self.keep_initializers_as_inputs)
@@ -59,11 +59,11 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
         ort_outs = ort_sess.run(None, ort_inputs)
-        #
-        # # compare onnxruntime and PyTorch results
+
+        # compare onnxruntime and PyTorch results
         assert len(outputs) == len(ort_outs), "number of outputs differ"
-        #
-        # # compare onnxruntime and PyTorch results
+
+        # compare onnxruntime and PyTorch results
         [np.testing.assert_allclose(out, ort_out, rtol=rtol, atol=atol) for out, ort_out in zip(outputs, ort_outs)]
 
 
