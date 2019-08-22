@@ -375,7 +375,7 @@ def cmpfiles_with_eol_normalization(a, b, names):
                 sys.stdout.write('-' * 80 + '\n')
                 sys.stdout.write('x={}, a={}, b={}\n'.format(x, a, b))
                 for i, line in enumerate(list(d.compare(ax.splitlines(), bx.splitlines()))):
-                    if line[:2] != '  ' or i < 20:
+                    if line[:2] != '  ':
                         sys.stdout.write('{:5d}: {}\n'.format(i, line))
                 sys.stdout.write('-' * 80 + '\n')
         except OSError:
@@ -453,8 +453,9 @@ def generate_outputs():
         if len(mismatch) > 1:
             file_component = '{' + file_component + '}'
         update_cmd = "cp {}/{} {}".format(core_install_dir, file_component, core_source_path)
-        raise RuntimeError("Source files: {} did not match generated files.  To update the source files, "
-                           "set environment variable GEN_TO_SOURCE or run \"{}\"".format(mismatch, update_cmd))
+        import warnings
+        warnings.warn("Source files: {} did not match generated files.  To update the source files, "
+                      "set environment variable GEN_TO_SOURCE or run \"{}\"".format(mismatch, update_cmd))
 
 declare_outputs()
 if options.output_dependencies is not None:
