@@ -45,6 +45,13 @@ default_set = [
     # PyTorch Android
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c',
 
+    # PyTorch Android gradle
+    'wip_shared_x86_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build',
+    'wip_shared_x86_64_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build',
+    'wip_shared_arm-v7_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build',
+    'wip_shared_arm-v8_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build',
+    'wip_pytorch_android',
+
     # XLA
     'pytorch-xla-linux-trusty-py3.6-gcc5.4',
 
