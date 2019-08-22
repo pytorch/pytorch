@@ -633,19 +633,20 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Constant(ctx, expr):
-        val = expr.value
-        if val is None or isinstance(val, bool):
+        value = expr.value
+        if value is None or isinstance(value, bool):
             # NB: this check has to happen before the int check because bool is
             # a subclass of int
             return ExprBuilder.build_NameConstant(ctx, expr)
-        if isinstance(val, (int, float)):
+        if isinstance(value, (int, float)):
             return ExprBuilder.build_Num(ctx, expr)
-        elif isinstance(val, str):
+        elif isinstance(value, str):
             return ExprBuilder.build_Str(ctx, expr)
-        elif isinstance(val, type(Ellipsis)):
+        elif isinstance(value, type(Ellipsis)):
             return ExprBuilder.build_Ellipsis(ctx, expr)
         else:
-            raise RuntimeError("Unknown Constant expr type for value: ", expr.value)
+            error_range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(str(value)))
+            raise FrontendError(error_range, "Unknown Constant expression type")
 
     @staticmethod
     def build_Str(ctx, expr):
