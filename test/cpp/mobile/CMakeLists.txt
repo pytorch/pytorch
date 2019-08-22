@@ -1,8 +1,17 @@
 add_executable(test_bc_export
   test_bc_export.cpp)
 
-caffe2_interface_library(torch torch_whole)
-target_link_libraries(test_bc_export PRIVATE torch_whole gtest)
+#caffe2_interface_library(torch torch_whole)
+#target_link_libraries(test_bc_export PRIVATE torch_whole gtest)
+if(APPLE)
+  target_link_libraries(test_bc_export PRIVATE -Wl,-force_load torch)
+elseif(MSVC)
+  target_link_libraries(test_bc_export PRIVATE -WHOLEARCHIVE:torch)
+else()
+  target_link_libraries(test_bc_export PRIVATE -Wl,--whole-archive,torch -Wl,--no-whole-archive)
+endif()
+
+target_link_libraries(test_bc_export PRIVATE gtest)
 target_include_directories(test_bc_export PRIVATE ${ATen_CPU_INCLUDE})
 #target_compile_definitions(test_bc_export PRIVATE USE_GTEST)
 

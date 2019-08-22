@@ -1,27 +1,13 @@
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
 
-#include <torch/csrc/autograd/symbolic.h>
-#include <torch/csrc/jit/export.h>
-#include <torch/csrc/onnx/onnx.h>
+#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/liteinterpreter/frameoutput.h>
 
-#include <ATen/core/functional.h>
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/import_export_helpers.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pickle.h>
-#include <torch/csrc/jit/source_range_serialization.h>
 
-#include <caffe2/core/types.h>
-#include <caffe2/proto/caffe2_pb.h>
-#include <caffe2/proto/torch_pb.h>
 #include <caffe2/proto/bytecode_pb.h>
 #include <caffe2/serialize/inline_container.h>
-#include <onnx/onnx_pb.h>
-
-#include <ATen/ATen.h>
-#include <c10/util/Optional.h>
 
 #include <fstream>
 #include <memory>
@@ -81,12 +67,11 @@ void ByteCodeSerializer::addConstant(const IValue& val, bytecode::FrameProto& fr
     attribute->set_kind(bytecode::ConstantProto::f);
     attribute->set_float_value(val.toDouble());
   }
-//  else if (val.isTensor()) {
-//    attribute->set_kind(bytecode::ConstantProto::t);
-//    attribute->set_tensor_id(tensor_id);
-//    auto tensor_proto = frame_proto.add_tensors();
-//    convertAndWriteTensor(tensor_id++, val.toTensor(), tensor_proto, storageMap, writer_);
-//  }
+  else if (val.isTensor()) {
+    tensor_table_.push_back(val.toTensor());
+    attribute->set_kind(bytecode::ConstantProto::t);
+    attribute->set_tensor_id(tensor_table_.size() - 1);
+  }
   else if (val.isIntList()) {
     attribute->set_kind(bytecode::ConstantProto::is);
     auto list = val.toIntList();
@@ -125,83 +110,71 @@ void ByteCodeSerializer::serialize(const script::Module& module) {
   auto data = pickle(module.module_object(), &tensor_table_);
   writer_.writeRecord("data.pkl", data.data(), data.size());
 
-//  auto compUnit = module.class_compilation_unit();
-//  auto funcList = compUnit->get_functions();
-//  for (auto func : funcList) {
-//    auto funcName = func->name();
-//    torch::jit::Code code(func->graph());
-//  }
+  auto compUnit = module.class_compilation_unit();
+  auto funcList = compUnit->get_functions();
+  for (auto func : funcList) {
+    torch::jit::Code code(func->graph());
+    auto frame = code.getFrame();
+    if (frame == nullptr) continue;
+    frame->name = func->name();
+    bytecode::FrameProto frame_proto;
+    frame_proto.set_name(frame->name);
+    frame_proto.set_pc(frame->pc);
 
-//  auto method = module.get_method("forward");
+    // constants (non-tensor)
+    for (const auto& val : frame->constants) {
+      addConstant(val, frame_proto);
+    }
 
-//  auto frame = method.function().get_executor().getFrame();
+    // instructions
+    for (const auto& ins : frame->instructions) {
+      auto ins_proto = frame_proto.add_instructions();
+      std::stringstream ss;
+      ss << ins.op;
+      ins_proto->set_opcode(ss.str());
+      ins_proto->set_n(ins.N);
+      ins_proto->set_x(ins.X);
+    }
 
-//  if (frame == nullptr) return;
+    // operators
+    for (size_t i = 0; i < frame->operators.size(); ++i) {
+      auto op_proto = frame_proto.add_operators();
+      auto name = frame->opnames[i].name;
+      op_proto->set_name(name);
+      op_proto->set_overload_name(frame->opnames[i].overload_name);
+    }
 
-//  bytecode::FrameProto frame_proto;
-//  frame_proto.set_name(frame->name);
-//  frame_proto.set_pc(frame->pc);
+    // tensors
+    std::unordered_map<const void*, std::string> storageMap;
+    size_t tensor_id = 0;
+    for (const at::Tensor& t : tensor_table_) {
+      auto* tensor_proto = frame_proto.add_tensors();
+      convertAndWriteTensor(tensor_id++, t, tensor_proto, storageMap, writer_);
+    }
 
-//  // constants
-//  std::unordered_map<const void*, std::string> storageMap;
-//  size_t tensor_id = 0;
-//  for (const auto& val : frame->constants) {
-//    addConstant(val, frame_proto, tensor_id, storageMap);
-//  }
+    std::string output;
+    // NB: cannot use MessageToJsonString, since fbcode's protobuf is too old
+    // be consistent with MessageToJsonString
+    std::string url_prefix = "type.googleapis.com";
+    std::unique_ptr<::google::protobuf::util::TypeResolver> resolver(
+        ::google::protobuf::util::NewTypeResolverForDescriptorPool(
+            url_prefix, frame_proto.GetDescriptor()->file()->pool()));
+    ::google::protobuf::util::Status convert_result =
+        ::google::protobuf::util::BinaryToJsonString(
+            resolver.get(),
+            url_prefix + "/" + frame_proto.GetDescriptor()->full_name(),
+            frame_proto.SerializeAsString(),
+            &output);
+    if (!convert_result.ok()) {
+      std::stringstream ss;
+        ss << convert_result;
+        AT_ERROR(ss.str());
+    }
+    std::cout << output << std::endl;
+    std::string recordName = frame->name + "/bytecode.json";
+    writer_.writeRecord(recordName, output.data(), output.size());
+  }
 
-//  // instructions. special treatment on attributes
-//  for (const auto& ins : frame->instructions) {
-//    auto ins_proto = frame_proto.add_instructions();
-//    std::stringstream ss;
-//    ss << ins.op;
-//    ins_proto->set_opcode(ss.str());
-//    ins_proto->set_n(ins.N);
-//    ins_proto->set_x(ins.X);
-//  }
-
-//  // operators and parameters
-//  Stack outstack;
-//  for (size_t i = 0; i < frame->operators.size(); ++i) {
-//    auto op_proto = frame_proto.add_operators();
-//    auto name = frame->opnames[i].name;
-//  //    if (name == "prim::GetAttr") {
-//  //      if (outstack.empty()) {
-//  //        outstack.emplace_back(module.module_object());
-//  //      }
-//  //      frame->operators[i](outstack);
-//  //      auto val = outstack.back();
-//    //      if (val.isObject()) {
-//    //        std::cout << val << std::endl;
-//    //      }
-//    //      else {
-//    //        // Change it to LOADC
-//    //        op_proto->set_name();
-//    //      }
-//    //    }
-//    op_proto->set_name(name);
-//    op_proto->set_overload_name(frame->opnames[i].overload_name);
-//  }
-
-//  std::string output;
-//  // NB: cannot use MessageToJsonString, since fbcode's protobuf is too old
-//  // be consistent with MessageToJsonString
-//  std::string url_prefix = "type.googleapis.com";
-//  std::unique_ptr<::google::protobuf::util::TypeResolver> resolver(
-//      ::google::protobuf::util::NewTypeResolverForDescriptorPool(
-//          url_prefix, frame_proto.GetDescriptor()->file()->pool()));
-//  ::google::protobuf::util::Status convert_result =
-//      ::google::protobuf::util::BinaryToJsonString(
-//          resolver.get(),
-//          url_prefix + "/" + frame_proto.GetDescriptor()->full_name(),
-//          frame_proto.SerializeAsString(),
-//          &output);
-//  if (!convert_result.ok()) {
-//    std::stringstream ss;
-//    ss << convert_result;
-//    AT_ERROR(ss.str());
-//  }
-//  std::cout << output << std::endl;
-//  writer_.writeRecord("bytecode.json", output.data(), output.size());
   writer_.writeEndOfFile();
 }
 } //namespace

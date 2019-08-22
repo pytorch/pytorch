@@ -25,6 +25,7 @@ struct CodeImpl;
 struct InterpreterStateImpl;
 struct Graph;
 struct Node;
+struct FrameOutput;
 using Stack = std::vector<c10::IValue>;
 using c10::ivalue::Future;
 
@@ -40,6 +41,7 @@ struct TORCH_API Code {
   }
   size_t num_inputs() const;
   size_t num_outputs() const;
+  std::unique_ptr<FrameOutput> getFrame() const;
 
  private:
   std::shared_ptr<CodeImpl> pImpl;
