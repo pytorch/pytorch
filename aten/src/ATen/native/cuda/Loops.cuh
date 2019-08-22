@@ -213,10 +213,10 @@ void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
 }
 
 template <typename func_t>
-using OffsetCalculatorForFunc = OffsetCalculator<function_traits<func_t>::arity / 2>, int64_t>;
+using OffsetCalculatorForFunc = OffsetCalculator<function_traits<func_t>::arity / 2, int64_t>;
 
 template <typename func_t, typename T>
-using ArrayForFunc = at::detail::Array<int64_t, function_traits<func_t>::arity / 2>>;
+using ArrayForFunc = at::detail::Array<int64_t, function_traits<func_t>::arity / 2>;
 
 template <int64_t n, typename func_t, typename... Args>
 struct gpu_dim_apply_helper {
@@ -243,6 +243,7 @@ __global__ void gpu_dim_apply(
   int64_t numel, OffsetCalculatorForFunc<func_t> calc, ArrayForFunc<func_t, char *> data,
   ArrayForFunc<func_t, int64_t> strides, const func_t& op)
 {
+  using traits = function_traits<func_t>;
   constexpr int64_t ntensors = traits::arity / 2;
   int64_t tid = blockIdx.x * blockDim.x + threadIdx.x;
   int64_t gridsize = gridDim.x * blockDim.x;
@@ -269,11 +270,11 @@ void gpu_apply_dim_kernel(TensorIterator& iter, const func_t& op) {
   int64_t numel = iter.numel();
   ArrayForFunc<func_t, char *> data;
   for (int64_t i = 0; i < ntensors; i++) {
-    data[i] = (char*)data_ptr(i);
+    data[i] = (char*)iter.data_ptr(i);
   }
   ArrayForFunc<func_t, int64_t> strides;
   for (int64_t i = 0; i < ntensors; i++) {
-    strides[i] = operands_[i].stride_bytes[0] / element_size(i);
+    strides[i] = iter.strides(i)[0] / iter.element_size(i);
   }
 
   dim3 block(launch_size_1d);
