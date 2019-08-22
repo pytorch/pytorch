@@ -9,10 +9,9 @@ namespace caffe2 {
  *
  * `input` of size data_size * block_size
  * `indices` of size index_size
- * `lengths` of size output_size
+ * `offsets` of size output_size
  * `weights` nullptr or array of size index_size
  * `out` of size output_size * block_size
- * sum(lengths[i]) == index_size
  *
  * Behavior is roughly equivalent to pseudocode:
  *
@@ -20,14 +19,17 @@ namespace caffe2 {
  * for (i = 0..output_size-1)
  *   for (k = 0..block_size-1)
  *     out[i*block_size + k] = 0
- *   for (j = 0..lengths[i]-1)
+ *   start_offset = offsets[i]
+ *   end_offset = i == output_size-1 ? index_size : offsets[i+1] - 1
+ *   length = end_offset - start_offset
+ *   for (j = start_offset..end_offset)
  *     for (k = 0..block_size-1)
  *       out[i*block_size + k] += input[indices[pos]*block_size + k] *
- *           (weights ? weights[IS_WEIGHT_POSITIONAL ? j : pos] : 1.0)
+ *           (weights ? weights[IS_WEIGHT_POSITIONAL ? j - start_offset : pos] : 1.0)
  *     pos += 1
- *   if (normalize_weights && lengths[i] > 0)
+ *   if (normalize_weights && length > 0)
  *     for (k = 0..block_size-1)
- *       out[i*block_size + k] /= lengths[i]
+ *       out[i*block_size + k] /= length
  *
  * TODO: make this API also take "offsets" rather than "lengths" to match the
  *       API for PyTorch's EmbeddingBag
@@ -37,14 +39,14 @@ template <
     typename InType,
     typename OutType,
     bool IS_WEIGHT_POSITIONAL = false>
-void EmbeddingLookup(
+void EmbeddingLookupIdx(
     const std::int64_t block_size,
     const std::int64_t output_size,
     const std::int64_t index_size,
     const std::int64_t data_size,
     const InType* input,
     const IndexType* indices,
-    const int* lengths,
+    const int64_t* offsets,
     const float* weights, // optional, can be null for non-weighted sum
     const float* scale_bias, // optional scale & bias params for uint8 input
     bool normalize_by_lengths,

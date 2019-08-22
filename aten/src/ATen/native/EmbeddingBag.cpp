@@ -5,7 +5,7 @@
 
 #include <TH/THBlasUtils.h>
 
-#include <caffe2/perfkernels/embedding_lookup.h>
+#include <caffe2/perfkernels/embedding_lookup_idx.h>
 
 #include <cstring>
 #include <iostream>
@@ -81,7 +81,7 @@ void index_select_add<float>(const Tensor &select_indices,
   auto output_data = output.data<float>();
 
   if (isFastPathIndexSelect(src, output)) {
-    caffe2::EmbeddingLookup(
+    caffe2::EmbeddingLookupIdx(
       /*block_size=*/ddim,
       /*output_size=*/offsets.numel(),
       /*index_size=*/select_indices.numel(),
@@ -92,8 +92,7 @@ void index_select_add<float>(const Tensor &select_indices,
       /*weights=*/nullptr,
       /*scale_bias=*/nullptr,
       /*normalize_by_lengths=*/false,
-      /*out=*/output_data,
-      /*use_lengths*/false
+      /*out=*/output_data
     );
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
@@ -161,7 +160,7 @@ void index_select_scale_add<float>(const Tensor &select_indices,
   auto output_data = output.data<float>();
 
   if (isFastPathIndexSelectScale(src, scale, output)) {
-    caffe2::EmbeddingLookup(
+    caffe2::EmbeddingLookupIdx(
       /*block_size=*/ddim,
       /*output_size=*/offsets.numel(),
       /*index_size=*/select_indices.numel(),
@@ -172,8 +171,7 @@ void index_select_scale_add<float>(const Tensor &select_indices,
       /*weights=*/scale_data,
       /*scale_bias=*/nullptr,
       /*normalize_by_lengths=*/false,
-      /*out=*/output_data,
-      /*use_lengths*/false
+      /*out=*/output_data
     );
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
