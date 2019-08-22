@@ -98,7 +98,7 @@ class TestNumbaIntegration(common.TestCase):
             # typestr from numpy, cuda-native little-endian
             self.assertEqual(ar_dict["typestr"], numpy.dtype(npt).newbyteorder("<").str)
             self.assertEqual(ar_dict["data"], (cudat.data_ptr(), False))
-            self.assertEqual(ar_dict["version"], 0)
+            self.assertEqual(ar_dict["version"], 1)
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
