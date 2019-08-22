@@ -16,6 +16,7 @@
 #include <ATen/native/UnaryOps.h>
 
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/Math.h>
 
 
 #if AT_MKL_ENABLED()
@@ -129,6 +130,14 @@ static void cosh_kernel(TensorIterator& iter) {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::cosh(a); });
+  });
+}
+
+static void erfinv_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "erfinv_cpu", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return calc_erfinv(a); });
   });
 }
 
@@ -248,6 +257,7 @@ REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
+REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel);
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)
