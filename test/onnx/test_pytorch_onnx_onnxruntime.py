@@ -36,7 +36,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
 
         # export the model to ONNX
         f = io.BytesIO()
-        torch.onnx.export(model, input, f, torch.onnx.export(model, input, '/home/neraoof/test/results/uni.onnx',
+        torch.onnx.export(model, input, f,
                           opset_version=self.opset_version,
                           example_outputs=output,
                           do_constant_folding=do_constant_folding,
