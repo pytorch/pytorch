@@ -1,6 +1,6 @@
 #pragma once
 
-// This file provides two functions to help write GPU elementwise kernels:
+// This file provides three functions to help write GPU elementwise kernels:
 //
 //   gpu_kernel(TensorIterator iter, <lambda>)
 //   gpu_kernel_with_scalars(TensorIterator iter, <lambda>)
@@ -79,14 +79,14 @@ __global__ void elementwise_kernel(int N, func_t f) {
   }
 }
 
-template<int N>
-static OffsetCalculator<N> make_offset_calculator(const TensorIterator& iter) {
+template<int N, typename index_t = uint32_t>
+static OffsetCalculator<N, index_t> make_offset_calculator(const TensorIterator& iter) {
   AT_ASSERT(N == iter.ntensors());
   std::array<const int64_t*, N> strides;
   for (int i = 0; i < N; i++) {
     strides[i] = iter.strides(i).data();
   }
-  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
+  return OffsetCalculator<N, index_t>(iter.ndim(), iter.shape().data(), strides.data());
 }
 
 template<int nt, int vt, typename func_t>
@@ -210,6 +210,78 @@ void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
   } else {
     gpu_kernel(iter, f);
   }
+}
+
+template <typename func_t>
+using OffsetCalculatorForFunc = OffsetCalculator<function_traits<func_t>::arity / 2>, int64_t>;
+
+template <typename func_t, typename T>
+using ArrayForFunc = at::detail::Array<int64_t, function_traits<func_t>::arity / 2>>;
+
+template <int64_t n, typename func_t, typename... Args>
+struct gpu_dim_apply_helper {
+  C10_HOST_DEVICE static inline void
+  apply(const ArrayForFunc<func_t, char*> &data, const ArrayForFunc<func_t, int64_t> &strides, func_t op, Args... args) {
+    using traits = function_traits<func_t>;
+    using ptr_t = typename traits::template arg<2 * (n - 1)>::type;
+    using stride_t = typename traits::template arg<2 * (n - 1) + 1>::type;
+    static_assert(std::is_same<stride_t, int64_t>::value, "type for strides must be int64_t");
+    gpu_dim_apply_helper<n - 1, func_t, ptr_t, int64_t, Args...>::apply(data, strides, op, (ptr_t)(data[n - 1]), strides[n - 1], args...);
+  }
+};
+
+template <typename func_t, typename... Args>
+struct gpu_dim_apply_helper<0, func_t, Args...> {
+  C10_HOST_DEVICE static inline void
+  apply(char* data[], const int64_t* strides, func_t op, Args... args) {
+    op(args...);
+  }
+};
+
+template <typename func_t>
+__global__ void gpu_dim_apply(
+  int64_t numel, OffsetCalculatorForFunc<func_t> calc, ArrayForFunc<func_t, char *> data,
+  ArrayForFunc<func_t, int64_t> strides, const func_t& op)
+{
+  constexpr int64_t ntensors = traits::arity / 2;
+  int64_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t gridsize = gridDim.x * blockDim.x;
+  for (int64_t linear_id = tid; linear_id < numel; linear_id += gridsize) {
+    auto offsets = calc.get(linear_id);
+    #pragma unroll
+    for (int64_t i = 0; i < ntensors; i++) {
+      data[i] += offsets[i];
+    }
+    // use template metaprogramming to do:
+    // op((scalar0_t *)data[0], strides[0], (scalar1_t *)data[1], strides[1], ...);
+    gpu_dim_apply_helper<ntensors, func_t>::apply(data, strides, op);
+  }
+}
+
+template <typename func_t>
+void gpu_apply_dim_kernel(TensorIterator& iter, const func_t& op) {
+  ASSERT_HOST_DEVICE_LAMBDA(func_t);
+  using traits = function_traits<func_t>;
+  constexpr int64_t ntensors = traits::arity / 2;
+  TORCH_INTERNAL_ASSERT(iter.ntensors() >= ntensors);
+  auto offset_calc = make_offset_calculator<ntensors, int64_t>(iter);
+
+  int64_t numel = iter.numel();
+  ArrayForFunc<func_t, char *> data;
+  for (int64_t i = 0; i < ntensors; i++) {
+    data[i] = (char*)data_ptr(i);
+  }
+  ArrayForFunc<func_t, int64_t> strides;
+  for (int64_t i = 0; i < ntensors; i++) {
+    strides[i] = operands_[i].stride_bytes[0] / element_size(i);
+  }
+
+  dim3 block(launch_size_1d);
+  dim3 grid((numel + launch_size_1d - 1) / launch_size_1d);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  gpu_dim_apply<func_t><<<grid, block, 0, stream>>>(numel, offset_calc, data, strides, op);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 }} // namespace at::native

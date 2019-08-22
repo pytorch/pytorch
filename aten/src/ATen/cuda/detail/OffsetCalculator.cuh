@@ -43,6 +43,9 @@ struct OffsetCalculator {
 
     #pragma unroll
     for (int dim = 0; dim < MAX_DIMS; ++dim) {
+      if (sizes_[dim].divisor < 0) {
+        continue;
+      }
       if (dim == dims) {
         break;
       }
