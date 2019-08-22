@@ -154,7 +154,7 @@ struct strided_tensor_iter_fixed {
   void operator=(strided_tensor_iter_fixed const& x) = delete;
   strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) = default;
   strided_tensor_iter_fixed(Tensor& tensor, bool sort_strides = false)
-      : data_(tensor.data<T>()) {
+      : data_(tensor.data_ptr<T>()) {
     std::memset(counter_, 0, sizeof(int64_t) * N);
     if (tensor.dim() > 0) {
       std::memcpy(
@@ -183,7 +183,7 @@ struct strided_tensor_iter {
   void operator=(strided_tensor_iter const& x) = delete;
   strided_tensor_iter(strided_tensor_iter&&) = default;
   strided_tensor_iter(Tensor& tensor)
-      : data_(tensor.data<T>()),
+      : data_(tensor.data_ptr<T>()),
         dim_(tensor.ndimension()),
         counter_(dim_, 0),
         sizes_(tensor.sizes().vec()),

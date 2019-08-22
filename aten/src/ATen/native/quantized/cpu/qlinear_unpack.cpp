@@ -27,7 +27,7 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
         pack_ptr.w_scale,
         weight_zero_point_int32);
     int8_t* weight_ptr_int8 =
-        reinterpret_cast<int8_t*>(weight_origin.data<c10::qint8>());
+        reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
 
     // packB->printPackedMatrix("packedB inside fbgemm_unpack
     // (QLinearUnpackWeightInt8): ");
