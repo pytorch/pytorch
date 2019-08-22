@@ -13,17 +13,27 @@ namespace torch {
 namespace jit {
 namespace script {
 
+c10::optional<std::string> maybeConvertToString(const py::object& obj) {
+  if (obj.is_none()) {
+    return c10::nullopt;
+  }
+  std::stringstream ss;
+  ss << py::str(obj);
+  return ss.str();
+}
+
 struct SourceRangeFactory {
   SourceRangeFactory(
       std::string text,
-      std::string filename,
+      py::object filename,
       size_t file_lineno,
       size_t leading_whitespace_chars)
       : source_(std::make_shared<Source>(
             std::move(text),
-            std::move(filename),
+            maybeConvertToString(filename),
             file_lineno)),
         leading_whitespace_chars_(leading_whitespace_chars) {}
+
   SourceRange create(int line, int start_col, int end_col) {
     size_t start_byte_offset, end_byte_offset;
     std::tie(start_byte_offset, end_byte_offset) =
@@ -78,7 +88,7 @@ void initTreeViewBindings(PyObject* module) {
       .def_property_readonly("start", &SourceRange::start)
       .def_property_readonly("end", &SourceRange::end);
   py::class_<SourceRangeFactory>(m, "SourceRangeFactory")
-      .def(py::init<std::string&&, std::string&&, size_t, size_t>())
+      .def(py::init<std::string&&, py::object, size_t, size_t>())
       .def("make_range", &SourceRangeFactory::create)
       .def(
           "make_raw_range",
@@ -146,7 +156,8 @@ void initTreeViewBindings(PyObject* module) {
             const auto& r = name.range();
             return Def::create(r, name, decl, wrap_list(r, std::move(body)));
           }))
-      .def("decl", [](const Def& def) { return def.decl(); });
+      .def("decl", [](const Def& def) { return def.decl(); })
+      .def("name", [](const Def& def) { return def.name(); });
   py::class_<ClassDef, TreeView>(m, "ClassDef")
       .def(py::init([](const Ident& name, std::vector<Stmt> body) {
         const auto& r = name.range();
