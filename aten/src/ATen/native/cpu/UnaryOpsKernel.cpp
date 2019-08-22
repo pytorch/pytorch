@@ -158,8 +158,8 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
       tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
     }
 
-    scalar_t *self_ptr = self.data<scalar_t>();
-    int *sample_int_ptr = tmp_int_tensor.data<int>();
+    scalar_t *self_ptr = self.data_ptr<scalar_t>();
+    int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
 
     auto sample = [&](int64_t begin, int64_t end) {
       int64_t len = end - begin;

@@ -102,17 +102,17 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
   AT_DISPATCH_ALL_TYPES(
     result.scalar_type(), "randperm_out_cuda", [&] {
       auto keys = at::empty(result.sizes(), result.options()).random_(generator);
-      auto keys_data = thrust::device_ptr<scalar_t>(keys.data<scalar_t>());
+      auto keys_data = thrust::device_ptr<scalar_t>(keys.data_ptr<scalar_t>());
 
       // shuffled_data points to the underlying data of the output tensor if the tensor is contiguous; otherwise it
       // points to a new tensor.
       Tensor shuffled;
       thrust::device_ptr<scalar_t> shuffled_data;
       if (result.is_contiguous()) {
-        shuffled_data = thrust::device_ptr<scalar_t>(result.data<scalar_t>());
+        shuffled_data = thrust::device_ptr<scalar_t>(result.data_ptr<scalar_t>());
       } else {
         shuffled = at::empty(n, result.options());
-        shuffled_data = thrust::device_ptr<scalar_t>(shuffled.data<scalar_t>());
+        shuffled_data = thrust::device_ptr<scalar_t>(shuffled.data_ptr<scalar_t>());
       }
 
       auto state = globalContext().getTHCState();
@@ -349,7 +349,7 @@ Tensor tril_indices_cuda(
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
       tril_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data<scalar_t>(),
+        tensor.data_ptr<scalar_t>(),
         trapezoid_row_offset,
         m_first_row,
         col,
@@ -425,7 +425,7 @@ Tensor triu_indices_cuda(
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
       triu_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data<scalar_t>(),
+        tensor.data_ptr<scalar_t>(),
         std::max<int64_t>(0, offset),
         m_first_row,
         col,
