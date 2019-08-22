@@ -2771,7 +2771,7 @@ def affine_grid(theta, size, align_corners=None):
 
 
 def pad(input, pad, mode='constant', value=0):
-    # type: (Tensor, List[int], str, float) -> Tensor
+    # type: (Tensor, Tuple[int], str, float) -> Tensor
     r"""Pads tensor.
 
     Padding size:
