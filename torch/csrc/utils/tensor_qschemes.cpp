@@ -15,8 +15,7 @@ namespace utils {
 static PyObject* thp_qscheme_array[at::COMPILE_TIME_NUM_QSCHEMES];
 #define _ADD_QSCHEME(qscheme, name)                                      \
   {                                                                      \
-    std::string module_name = "torch.";                                  \
-    PyObject* qscheme_obj = THPQScheme_New(qscheme, module_name + name); \
+    PyObject* qscheme_obj = THPQScheme_New(qscheme, name);               \
     thp_qscheme_array[static_cast<int>(qscheme)] = qscheme_obj;          \
     Py_INCREF(qscheme_obj);                                              \
     if (PyModule_AddObject(torch_module, name, qscheme_obj) != 0) {      \
