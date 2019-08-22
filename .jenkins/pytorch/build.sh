@@ -66,6 +66,27 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
   build_args=()
   build_args+=("-DBUILD_CAFFE2_MOBILE=OFF")
+
+  if [[ "${BUILD_ENVIRONMENT}" == *-shared-arm-v7a* ]]; then
+    build_args+=("-DBUILD_SHARED_LIBS=ON")
+    build_args+=("-DANDROID_ABI=armeabi-v7a")
+  fi
+
+  if [[ "${BUILD_ENVIRONMENT}" == *-shared-arm-v8a* ]]; then
+    build_args+=("-DBUILD_SHARED_LIBS=ON")
+    build_args+=("-DANDROID_ABI=arm64-v8a")
+  fi
+
+  if [[ "${BUILD_ENVIRONMENT}" == *-shared-x86* ]]; then
+    build_args+=("-DBUILD_SHARED_LIBS=ON")
+    build_args+=("-DANDROID_ABI=x86")
+  fi
+
+  if [[ "${BUILD_ENVIRONMENT}" == *-shared-x86_64* ]]; then
+    build_args+=("-DBUILD_SHARED_LIBS=ON")
+    build_args+=("-DANDROID_ABI=x86_64")
+  fi
+
   build_args+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
   build_args+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"

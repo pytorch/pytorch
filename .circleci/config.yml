@@ -995,16 +995,149 @@ jobs:
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
-  
+  wip_shared_arm-v7_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build-shared-arm-v7a-gradle
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:327"
+      PYTHON_VERSION: "3.6"
+    <<: *pytorch_linux_build_defaults
+
+  wip_shared_arm-v8_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build-shared-arm-v8a-gradle
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:327"
+      PYTHON_VERSION: "3.6"
+    <<: *pytorch_linux_build_defaults
+
+  wip_shared_x86_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build-shared-x86-gradle
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:327"
+      PYTHON_VERSION: "3.6"
+    <<: *pytorch_linux_build_defaults
+
+  wip_shared_x86_64_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build-shared-x86_64-gradle
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:327"
+      PYTHON_VERSION: "3.6"
+    <<: *pytorch_linux_build_defaults
+
+  wip_pytorch_android:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build-shared-x86-gradle
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:327"
+      PYTHON_VERSION: "3.6"
+    resource_class: large
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    - attach_workspace:
+        at: ~/workspace
+    - run:
+        <<: *should_run_job
+    - run:
+        <<: *setup_linux_system_environment
+    - run:
+        <<: *setup_ci_environment
+    - run:
+        name: PytorchAndroidGradleBuild
+        no_output_timeout: "1h"
+        command: |
+          set -e
+          # use separate docker image with jdk, android sdk, gradle
+          docker_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+
+          docker_image_libtorch_android_x86=$docker_image-android-shared-x86
+          docker_image_libtorch_android_x86_64=$docker_image-android-shared-x86_64
+          docker_image_libtorch_android_arm_v7a=$docker_image-android-shared-arm-v7a
+          docker_image_libtorch_android_arm_v8a=$docker_image-android-shared-arm-v8a
+
+          echo "docker_image: "${docker_image}
+          echo "docker_image_libtorch_android_x86: "${docker_image_libtorch_android_x86}
+          echo "docker_image_libtorch_android_x86_64: "${docker_image_libtorch_android_x86_64}
+          echo "docker_image_libtorch_android_arm_v7a: "${docker_image_libtorch_android_arm_v7a}
+          echo "docker_image_libtorch_android_arm_v8a: "${docker_image_libtorch_android_arm_v8a}
+
+          # x86
+          docker pull ${docker_image_libtorch_android_x86} >/dev/null
+          export id_x86=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86})
+          mkdir ~/workspace/build_android_install_x86
+          docker cp $id_x86:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_x86
+          zip -r ~/workspace/build_libtorch_android_x86.zip ~/workspace/build_android_install_x86
+          ls -lah ~/workspace/build_libtorch_android_x86.zip
+
+          # arm-v7a
+          docker pull ${docker_image_libtorch_android_arm_v7a} >/dev/null
+          export id_arm_v7a=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v7a})
+          mkdir ~/workspace/build_android_install_arm_v7a
+          docker cp $id_arm_v7a:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_arm_v7a
+          zip -r ~/workspace/build_libtorch_android_arm_v7a.zip ~/workspace/build_android_install_arm_v7a
+          ls -lah ~/workspace/build_libtorch_android_arm_v7a.zip
+
+          # x86_64
+          docker pull ${docker_image_libtorch_android_x86_64} >/dev/null
+          export id_x86_64=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_64})
+          mkdir ~/workspace/build_android_install_x86_64
+          docker cp $id_x86_64:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_x86_64
+          zip -r ~/workspace/build_libtorch_android_x86_64.zip ~/workspace/build_android_install_x86_64
+          ls -lah ~/workspace/build_libtorch_android_x86_64.zip
+
+          # arm-v8a
+          docker pull ${docker_image_libtorch_android_arm_v8a} >/dev/null
+          export id_arm_v8a=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v8a})
+          mkdir ~/workspace/build_android_install_arm_v8a
+          docker cp $id_arm_v8a:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_arm_v8a
+          zip -r ~/workspace/build_libtorch_android_arm_v8a.zip ~/workspace/build_android_install_arm_v8a
+          ls -lah ~/workspace/build_libtorch_android_arm_v8a.zip
+
+          docker pull ${docker_image} >/dev/null
+          export id=$(docker run -t -d -w /var/lib/jenkins ${docker_image})
+
+          docker cp ~/workspace/build_android_install_x86 $id:/var/lib/jenkins/workspace/build_android_install_x86
+          docker cp ~/workspace/build_android_install_arm_v7a $id:/var/lib/jenkins/workspace/build_android_install_arm_v7a
+          docker cp ~/workspace/build_android_install_x86_64 $id:/var/lib/jenkins/workspace/build_android_install_x86_64
+          docker cp ~/workspace/build_android_install_arm_v8a $id:/var/lib/jenkins/workspace/build_android_install_arm_v8a
+
+          # run gradle buildRelease
+          export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./scripts/build_android_gradle.sh || true") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          mkdir -p ~/workspace/build_android_aar
+          docker cp $id:/var/lib/jenkins/workspace/android/pytorch_android/build/outputs/aar/pytorch_android.aar ~/workspace/build_android_aar/
+
+          docker commit "$id" ${docker_image}
+          docker push ${docker_image}
+
+    - store_artifacts:
+        path: ~/workspace/build_android_aar/pytorch_android.aar
+        destination: pytorch_android.aar
+
+    - store_artifacts:
+        path: ~/workspace/build_libtorch_android_x86.zip
+        destination: build_libtorch_android_x86.zip
+
+    - store_artifacts:
+        path: ~/workspace/build_libtorch_android_x86_64.zip
+        destination: build_libtorch_android_x86_64.zip
+
+    - store_artifacts:
+        path: ~/workspace/build_libtorch_android_arm_v7a.zip
+        destination: build_libtorch_android_arm_v7a.zip
+
+    - store_artifacts:
+        path: ~/workspace/build_libtorch_android_arm_v8a.zip
+        destination: build_libtorch_android_arm_v8a.zip
+
   setup:
     docker:
       - image: circleci/python:3.7.3
     steps:
       - checkout
-      - run:
-          name: Ensure config is up to date
-          command: ./ensure-consistency.py
-          working_directory: .circleci
+      #- run:
+      #    name: Ensure config is up to date
+      #    command: ./ensure-consistency.py
+      #    working_directory: .circleci
       - run:
           name: Save commit message
           command: git log --format='%B' -n 1 HEAD > .circleci/scripts/COMMIT_MSG
@@ -3420,6 +3553,29 @@ workflows:
       - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
           requires:
             - setup
+
+      - wip_shared_arm-v7_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
+          requires:
+            - setup
+
+      - wip_shared_arm-v8_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
+          requires:
+            - setup
+
+      - wip_shared_x86_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
+          requires:
+            - setup
+
+      - wip_shared_x86_64_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
+          requires:
+            - setup
+
+      - wip_pytorch_android:
+          requires:
+            - wip_shared_arm-v7_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build
+            - wip_shared_arm-v8_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build
+            - wip_shared_x86_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build
+            - wip_shared_x86_64_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build
       # Warning: indentation here matters!
 
       # Pytorch MacOS builds
