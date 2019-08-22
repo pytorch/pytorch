@@ -41,7 +41,6 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         if [[ ${BUILD_ENVIRONMENT} == *"android"* ]]; then
           NAMED_FLAG="export USE_STATIC_DISPATCH=1"
         fi
-
         export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -56,6 +55,14 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
             export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
           elif [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
+          elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_64"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-android-x86_64
+          elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v7a"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-android-arm-v7a
+          elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v8a"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-android-arm-v8a
+          elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_32"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-android-x86_32
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
