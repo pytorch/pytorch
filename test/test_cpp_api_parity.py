@@ -204,15 +204,14 @@ class TestCppApiParity(common.TestCase):
         def generate_test_cpp_sources(test_params, template, extra_stmts):
             example_inputs = test_params.example_inputs
             input_arg_types = [self._python_arg_to_cpp_arg(arg).type for arg in example_inputs]
-            input_arg_declarations = ',\n'.join(
-                ['{} arg{}'.format(input_arg_types[i], str(i)) for i in range(len(input_arg_types))])
-            input_args = ',\n'.join(['arg{}'.format(str(i)) for i in range(len(input_arg_types))])
+            input_args = ['arg{}'.format(str(i)) for i in range(len(input_arg_types))]
+            input_arg_declarations = ['{} {}'.format(arg_type, arg_name) for arg_type, arg_name in zip(input_arg_types, input_args)]
             test_cpp_sources = template.substitute(
                 module_variant_name=test_params.module_variant_name,
                 module_qualified_name='torch::nn::{}'.format(test_params.module_name),
                 cpp_constructor_args=test_params.cpp_constructor_args,
-                input_arg_declarations=input_arg_declarations,
-                input_args=input_args,
+                input_arg_declarations=',\n'.join(input_arg_declarations),
+                input_args=',\n'.join(input_args),
                 extra_stmts=extra_stmts)
             return test_cpp_sources
 
@@ -344,9 +343,9 @@ class TestCppApiParity(common.TestCase):
             cpp_module = self._compile_cpp_code_inline(
                 name=test_params.module_variant_name,
                 cpp_sources=cpp_sources,
-                functions=['{}_test_{}'.format(test_params.module_variant_name, method) for method in torch_nn_test_methods])
+                functions=['{}_test_{}'.format(test_params.module_variant_name, method_name) for method_name, _ in torch_nn_test_methods])
 
-            for method_name in torch_nn_test_methods:
+            for method_name, _ in torch_nn_test_methods:
                 args = args_map[method_name]
                 modules = args[0]
                 script_modules = [trace_module(module, example_inputs) for module in modules]
