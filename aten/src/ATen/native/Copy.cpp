@@ -6,6 +6,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/MemoryOverlap.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
@@ -34,9 +35,9 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
   AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
-    scalar_t* sp = src.data<scalar_t>();
-    scalar_t* rp = self.data<scalar_t>();
-    scalar_t* bp = buf.data<scalar_t>();
+    scalar_t* sp = src.data_ptr<scalar_t>();
+    scalar_t* rp = self.data_ptr<scalar_t>();
+    scalar_t* bp = buf.data_ptr<scalar_t>();
 
     int64_t NR = src.size(0);
     int64_t NC = src.size(1);
@@ -75,9 +76,9 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
 #ifdef BUILD_NAMEDTENSOR
   auto outnames = unify_from_right(self.names(), src.names());
   if (outnames.has_value()) {
-    at::internal_set_names_inplace(self, *outnames);
+    namedinference::propagate_names(self, *outnames);
   } else {
-    at::internal_set_names_inplace(self, nullopt);
+    namedinference::propagate_names(self, nullopt);
   }
 #endif
 }
@@ -131,6 +132,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
 
   auto iter = TensorIterator();
+  iter.set_check_mem_overlap(true);
   iter.add_output(self);
   iter.add_input(src);
   iter.dont_resize_outputs();

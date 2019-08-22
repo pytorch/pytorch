@@ -29,7 +29,7 @@ class SimpleContainer : public nn::Cloneable<SimpleContainer> {
 };
 
 inline bool pointer_equal(at::Tensor first, at::Tensor second) {
-  return first.data<float>() == second.data<float>();
+  return first.data_ptr<float>() == second.data_ptr<float>();
 }
 
 struct SeedingFixture : public ::testing::Test {

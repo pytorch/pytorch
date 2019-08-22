@@ -35,7 +35,7 @@ void TensorIterator::reorder_dimensions() {
       }
       int64_t stride0 = operands_[arg].stride_bytes[dim0];
       int64_t stride1 = operands_[arg].stride_bytes[dim1];
-      if (operands_[arg].is_output) {
+      if (is_reduction_ && operands_[arg].is_output) {
         // move reduced dimensions to the front
         if ((stride0 == 0) != (stride1 == 0)) {
           return stride1 == 0 ? 1 : -1;
@@ -233,16 +233,17 @@ void TensorIterator::propagate_names_to_outputs() {
       names = NameVector(unify_from_right(names, tensor_names).value());
     }
   }
-  if (names.empty()) {
-    return;
-  }
 
   // propagate names
   for (int i = 0; i < num_outputs_; i++) {
     auto& op = operands_[i];
     // must call propagate_names_to_outputs after outputs have been allocated.
     TORCH_INTERNAL_ASSERT(op.tensor.defined());
-    at::internal_set_names_inplace(op.tensor, names);
+    if (names.empty()) {
+      namedinference::propagate_names(op.tensor, nullopt);
+    } else {
+      namedinference::propagate_names(op.tensor, names);
+    }
   }
 }
 #endif
@@ -535,13 +536,10 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 }
 
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
-    const Tensor& b, bool check_internal_overlap) {
+    const Tensor& b, bool check_mem_overlap) {
   auto iter = TensorIterator();
-  if (check_internal_overlap) {
-    iter.check_and_add_output(out);
-  } else {
-    iter.add_output(out);
-  }
+  iter.set_check_mem_overlap(check_mem_overlap);
+  iter.add_output(out);
   iter.add_input(a);
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;
@@ -550,13 +548,10 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
 }
 
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
-    bool check_internal_overlap) {
+    bool check_mem_overlap) {
   auto iter = TensorIterator();
-  if (check_internal_overlap) {
-    iter.check_and_add_output(out);
-  } else {
-    iter.add_output(out);
-  }
+  iter.set_check_mem_overlap(check_mem_overlap);
+  iter.add_output(out);
   iter.add_input(a);
   iter.num_outputs_ = 1;
   iter.build();
@@ -610,15 +605,30 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
 void TensorIterator::mark_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
     operands_[i].is_output = true;
-    const auto &output = operands_[i].tensor;
+    const auto& output = operands_[i].tensor;
     if (!output.defined()) continue;
 
     // check if output is also an input
     for (int arg = num_outputs_; arg < ntensors(); arg++) {
-      const auto &input = operands_[arg].tensor;
+      const auto& input = operands_[arg].tensor;
       if (output.is_same(input)) {
         operands_[i].is_read_write = true;
       }
+    }
+  }
+}
+
+void TensorIterator::check_mem_overlaps() {
+  if (!check_mem_overlap_) {
+    return;
+  }
+  for (int i = 0; i < num_outputs_; i++) {
+    const auto& output = operands_[i].tensor;
+    if (!output.defined()) continue;
+    assert_no_internal_overlap(output);
+    for (int j = num_outputs_; j < ntensors(); j++) {
+      const auto& input = operands_[j].tensor;
+      assert_no_partial_overlap(output, input);
     }
   }
 }
@@ -734,6 +744,9 @@ int TensorIterator::get_dim_to_split() const {
 void TensorIterator::build() {
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
+  // Check that the outputs have no internal overlap
+  // and do not share memory with inputs.
+  check_mem_overlaps();
   // compute the broadcasted shape
   compute_shape();
   // compute each tensor's stride after broadcasting

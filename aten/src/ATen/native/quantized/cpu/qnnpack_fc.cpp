@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/quantized/Quantizer.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
 #include "init_qnnpack.h"
 #include "qnnpack_utils.h"
@@ -67,8 +68,8 @@ class QNNPACKLinear final : public torch::OperatorKernel {
         input_contig.q_scale() /* input scale */,
         weight.q_zero_point() /* kernel zero_point */,
         weight.q_scale() /* kernel scale */,
-        (uint8_t*)weight.data<c10::quint8>() /* kernel data */,
-        (int32_t*)bias.data<c10::qint32>() /* bias data */,
+        (uint8_t*)weight.data_ptr<c10::quint8>() /* kernel data */,
+        (int32_t*)bias.data_ptr<c10::qint32>() /* bias data */,
         output.q_zero_point() /* output zero_point */,
         output.q_scale() /* output scale */,
         std::numeric_limits<uint8_t>::min() /* output_min */,
@@ -87,16 +88,18 @@ class QNNPACKLinear final : public torch::OperatorKernel {
     const qnnp_status setupStatus = qnnp_setup_fully_connected_nc_q8(
         qnnpack_operator /* fully_connected */,
         rows_x /* batch_size */,
-        (uint8_t*)input_contig.data<c10::quint8>() /* input */,
+        (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input */,
         cols_x /* input stride */,
-        (uint8_t*)output.data<c10::quint8>() /* output */,
+        (uint8_t*)output.data_ptr<c10::quint8>() /* output */,
         rows_y /* output stride */);
 
     TORCH_INTERNAL_ASSERT(
         setupStatus == qnnp_status_success,
         "failed to setup QNNPACK Linear operator");
+    pthreadpool_t threadpool = caffe2::mobile_threadpool();
+
     const qnnp_status runStatus =
-        qnnp_run_operator(qnnpack_operator, nullptr /* thread pool */);
+        qnnp_run_operator(qnnpack_operator, threadpool);
 
     TORCH_INTERNAL_ASSERT(
         runStatus == qnnp_status_success, "failed to run QNNPACK operator");

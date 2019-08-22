@@ -13,7 +13,7 @@ from hypothesis import strategies as st
 import hypothesis_utils as hu
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
-from common_quantized import _quantize, _dequantize
+from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams
 
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
@@ -81,10 +81,13 @@ class TestQuantizedOps(TestCase):
         return output_size
 
     """Tests the correctness of the quantized::relu op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams()))
-    def test_qrelu(self, X):
-        X, (scale, zero_point, torch_type) = X
+    @given(qparams=hu.qparams())
+    def test_qrelu(self, qparams):
+        X = np.array([[-3, -2, 1, 2],
+                      [0, 0, 0, 0],
+                      [-5, -4, -3, -2],
+                      [1, 2, 3, 4]], dtype=np.float32)
+        scale, zero_point, torch_type = qparams
 
         Y = X.copy()
         Y[Y < 0] = 0
@@ -95,9 +98,42 @@ class TestQuantizedOps(TestCase):
                                    dtype=torch_type)
 
         ops_under_test = {
-            'ops.quantized': torch.ops.quantized.relu,
             'native': torch.relu,
-            'nn.functional': torch.nn.functional.relu
+            'nn.functional': torch.nn.functional.relu,
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX)
+            self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
+
+        ops_under_test_inplace = {
+            'inplace native': torch.relu_,
+            'inplace nn.functional': torch.nn.functional.relu_,
+        }
+
+        for name, op_ in ops_under_test_inplace.items():
+            qY_hat = qX.clone()
+            op_(qY_hat)
+            self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
+
+    """Tests the correctness of the quantized::relu op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qrelu6(self, X):
+        X, (scale, zero_point, torch_type) = X
+
+        Y = X.copy()
+        Y[Y < 0] = 0
+        Y[Y > 6.0] = 6.0
+        qY = torch.quantize_linear(torch.from_numpy(Y), scale=scale,
+                                   zero_point=zero_point, dtype=torch_type)
+        X = torch.from_numpy(X)
+        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
+                                   dtype=torch_type)
+
+        ops_under_test = {
+            'ops.quantized': torch.ops.quantized.relu6,
+            'module': torch.nn.quantized.ReLU6(),
         }
 
         for name, op in ops_under_test.items():
@@ -108,6 +144,8 @@ class TestQuantizedOps(TestCase):
     def test_qadd_relu_same_qparams(self):
         add_relu = torch.ops.quantized.add_relu
         add = torch.ops.quantized.add
+        add_out = torch.ops.quantized.add_out
+        add_relu_out = torch.ops.quantized.add_relu_out
 
         A = torch.arange(-25, 25, dtype=torch.float)
         B = torch.arange(-25, 25, dtype=torch.float)
@@ -124,6 +162,12 @@ class TestQuantizedOps(TestCase):
         qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
         np.testing.assert_equal(qC, qC_hat.int_repr(),
                                 "Quantized addition failed.")
+        qC_out_hat = torch._empty_affine_quantized(qC.shape,
+                                                   scale=scale,
+                                                   zero_point=zero_point,
+                                                   dtype=torch.quint8)
+        add_out(qA, qB, out=qC_out_hat)
+        self.assertEqual(qC_hat, qC_out_hat, message="Add.out failed")
 
         # Add + ReLU ground truth
         Crelu = C.copy()
@@ -132,11 +176,20 @@ class TestQuantizedOps(TestCase):
         qCrelu_hat = add_relu(qA, qB, scale=scale, zero_point=zero_point)
         np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
                                 "Quantized addition with ReLU failed.")
+        qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+                                                       scale=scale,
+                                                       zero_point=zero_point,
+                                                       dtype=torch.quint8)
+        add_relu_out(qA, qB, out=qCrelu_out_hat)
+        self.assertEqual(qCrelu_hat, qCrelu_out_hat,
+                         message="AddReLU.out failed")
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_different_qparams(self):
         add_relu = torch.ops.quantized.add_relu
         add = torch.ops.quantized.add
+        add_out = torch.ops.quantized.add_out
+        add_relu_out = torch.ops.quantized.add_relu_out
 
         A = torch.arange(-25, 25, dtype=torch.float)
         B = torch.arange(-25, 25, dtype=torch.float)
@@ -159,6 +212,12 @@ class TestQuantizedOps(TestCase):
         qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point_C)
         np.testing.assert_equal(qC, qC_hat.int_repr(),
                                 "Quantized addition failed.")
+        qC_out_hat = torch._empty_affine_quantized(qC.shape,
+                                                   scale=scale_C,
+                                                   zero_point=zero_point_C,
+                                                   dtype=torch.quint8)
+        add_out(qA, qB, out=qC_out_hat)
+        self.assertEqual(qC_hat, qC_out_hat, message="Add.out failed")
 
         # Add + ReLU ground truth
         Crelu = C.copy()
@@ -167,6 +226,13 @@ class TestQuantizedOps(TestCase):
         qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
         np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
                                 "Quantized addition with ReLU failed.")
+        qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+                                                       scale=scale_C,
+                                                       zero_point=zero_point_C,
+                                                       dtype=torch.quint8)
+        add_relu_out(qA, qB, out=qCrelu_out_hat)
+        self.assertEqual(qCrelu_hat, qCrelu_out_hat,
+                         message="AddReLU.out failed")
 
     """Tests max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
@@ -249,33 +315,36 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qX_hat = op(qX, output_size=output_size)
-            qX_repr = qX_hat.int_repr()
-            self.assertEqual(X_ref, qX_repr,
-                             message=error_message.format(name, X_ref, qX_repr))
-
+            self.assertEqual(X_ref, qX_hat.int_repr(), prec=1.0,
+                             message=error_message.format(name, X_ref, qX_hat))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                                                          qX_hat.q_zero_point()))
 
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams()),
            num=st.integers(1, 4),
-           axis=st.integers(1, 4),
+           dim=st.integers(1, 4),
            relu=st.booleans())
-    def test_cat(self, X, num, axis, relu):
+    def test_cat(self, X, num, dim, relu):
         tensors_q = []
         tensors_ref = []
         X, (scale, zero_point, torch_type) = X
-        assume(axis < X.ndim)
+        assume(dim < X.ndim)
         X = torch.from_numpy(X)
         new_shape = np.array(X.shape)
-        new_shape[axis] = 0
+        new_shape[dim] = 0
         for idx in range(num):
             tensors_q.append(torch.quantize_linear(X, scale, zero_point,
                                                    torch_type))
             tensors_ref.append(X)
-            new_shape[axis] += tensors_ref[-1].shape[axis]
+            new_shape[dim] += tensors_ref[-1].shape[dim]
 
-        cat_ref = torch.cat(tensors_ref, axis=axis)
+        cat_ref = torch.cat(tensors_ref, dim=dim)
         cat_ref = torch.quantize_linear(cat_ref, scale, zero_point, torch_type)
         cat_ref = cat_ref.dequantize()
 
@@ -287,7 +356,7 @@ class TestQuantizedOps(TestCase):
             q_cat_op = torch.ops.quantized.cat
             q_cat_out_op = torch.ops.quantized.cat_out
 
-        cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
+        cat_q = q_cat_op(tensors_q, dim=dim, scale=scale,
                          zero_point=zero_point)
         cat_q = cat_q.dequantize()
         np.testing.assert_equal(cat_ref.numpy(), cat_q.numpy())
@@ -295,7 +364,7 @@ class TestQuantizedOps(TestCase):
         cat_q_out = torch._empty_affine_quantized(
             list(new_shape), scale=scale,
             zero_point=zero_point, dtype=torch_type)
-        q_cat_out_op(tensors_q, axis=axis, out=cat_q_out)
+        q_cat_out_op(tensors_q, dim=dim, out=cat_q_out)
         cat_q_out = cat_q_out.dequantize()
         np.testing.assert_equal(cat_ref.numpy(), cat_q_out.numpy())
 
@@ -308,8 +377,65 @@ class TestQuantizedOps(TestCase):
         tensors_q[0] = torch.quantize_linear_per_channel(
             X, scales, zero_points, axis=[ch_axis], dtype=torch_type)
         with self.assertRaisesRegex(RuntimeError, "supported.*cat"):
-            cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
+            cat_q = q_cat_op(tensors_q, dim=ch_axis, scale=scale,
                              zero_point=zero_point)
+
+    """Tests the correctness of the quantized equal op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()),
+           X2=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                        qparams=hu.qparams()),
+           X_per_channel=st.booleans(),
+           X2_per_channel=st.booleans())
+    def test_equal(self, X, X2, X_per_channel, X2_per_channel):
+        X, X_params = X
+        (scale, zero_point, torch_type) = X_params
+        X2, X2_params = X2
+        (scale2, zero_point2, torch_type2) = X2_params
+
+        X = torch.from_numpy(X)
+        if X_per_channel:
+            X_scheme = 'per_channel'
+            channels = X.shape[-1]
+            qX = torch.quantize_linear_per_channel(
+                X,
+                scales=torch.tensor([scale] * channels),
+                zero_points=torch.tensor([zero_point] * channels),
+                dtype=torch_type,
+                axis=[X.ndim - 1])
+        else:
+            X_scheme = 'per_tensor'
+            qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        X2 = torch.from_numpy(X2)
+        if X2_per_channel:
+            X2_scheme = 'per_channel'
+            channels = X2.shape[-1]
+            qX2 = torch.quantize_linear_per_channel(
+                X2,
+                scales=torch.tensor([scale2] * channels),
+                zero_points=torch.tensor([zero_point2] * channels),
+                dtype=torch_type2,
+                axis=[X2.ndim - 1])
+        else:
+            X2_scheme = 'per_tensor'
+            qX2 = torch.quantize_linear(X2, scale=scale2, zero_point=zero_point2,
+                                        dtype=torch_type2)
+
+        def equal_ref(X, params, X_scheme, X2, params2, X2_scheme):
+            if X_scheme != X2_scheme:
+                return False
+            if params != params2:
+                return False
+            if X.shape != X2.shape:
+                return False
+            if (X != X2).any():
+                return False
+            return True
+
+        self.assertEqual(qX.equal(qX), equal_ref(X, X_params, X_scheme, X, X_params, X_scheme))
+        self.assertEqual(qX.equal(qX2), equal_ref(X, X_params, X_scheme, X2, X2_params, X2_scheme))
+
 
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
@@ -317,19 +443,124 @@ class TestQuantizedOps(TestCase):
     " well with UBSAN at the moment, so we skip the test if"
     " we are in a UBSAN environment.",
 )
+class TestDynamicQuantizedLinear(TestCase):
+    """Tests the correctness of the dynamic quantized linear and linear_relu op."""
+    @given(
+        batch_size=st.integers(1, 4),
+        input_channels=st.integers(16, 32),
+        output_channels=st.integers(4, 8),
+        use_bias=st.booleans(),
+        use_relu=st.booleans(),
+        use_multi_dim_input=st.booleans())
+    def test_qlinear(self, batch_size, input_channels, output_channels,
+                     use_bias, use_relu, use_multi_dim_input):
+        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        if use_relu:
+            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_relu_dynamic
+        else:
+            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_dynamic
+
+        if use_multi_dim_input:
+            batch_size *= 3  # Test the multi-dim input tensor
+
+        X_scale = 1.0
+        X_zp = 0
+        X_value_min = 0
+        X_value_max = 255
+        X_q0 = np.round(np.random.rand(batch_size, input_channels) * (
+            X_value_max - X_value_min) + X_value_min
+        ).astype(np.uint8)
+        X_q0[0, 0] = X_value_min
+        X_q0[0, 1] = X_value_max
+
+        W_scale = 1.0
+        W_zp = 0
+        W_value_min = -128
+        W_value_max = 127
+        W_q0 = np.round(
+            np.random.rand(output_channels, input_channels)
+            * (W_value_max - W_value_min)
+            + W_value_min
+        ).astype(np.int8)
+        W_q0[0, 0] = W_value_min
+        W_q0[1, 0] = W_value_max
+
+        b_value_min = -10
+        b_value_max = 10
+        b_q0 = np.round(
+            np.random.rand(output_channels) * (b_value_max - b_value_min) +
+            b_value_min
+        ).astype(np.int32) if use_bias else None
+
+        avoid_vpmaddubsw_overflow_linear(
+            batch_size,
+            input_channels,
+            output_channels,
+            X_q0,
+            X_value_min,
+            X_value_max,
+            W_q0,
+            W_value_min,
+            W_value_max,
+        )
+
+        X_fp32 = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
+        W_fp32 = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
+        b_fp32 = torch.from_numpy(
+            _dequantize(b_q0, X_scale * W_scale, 0)
+        ).to(dtype=torch.float) if use_bias else None
+
+        if use_multi_dim_input:
+            X_fp32 = X_fp32.view(3, int(batch_size / 3), input_channels)
+
+        W_scale, W_zp = _calculate_dynamic_qparams(W_fp32, torch.qint8)
+        W_q = torch.quantize_linear(W_fp32, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
+
+        # Observe X_fp32 and determine X_scale and X_zero_point, this should match
+        # internals of dynamic linear.
+        X_scale, X_zp = _calculate_dynamic_qparams(X_fp32, torch.quint8)
+        X_q = torch.quantize_linear(X_fp32, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
+
+        # Weight prepacking operator for dynamic quantized Linear
+        W_prepack = qlinear_prepack(W_q)
+        # Dynamic quantized Linear operator with prepacked weight
+        Y_fp32 = qlinear_dynamic(X_q.dequantize(), W_prepack, b_fp32)
+        # Y_fp32 = qlinear_dynamic(X_fp32, W_prepack, b_fp32)
+
+        Y_fp32_ref = F.linear(X_q.dequantize(), W_q.dequantize(), b_fp32)
+        # Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
+        # if use_multi_dim_input:
+        #     Y_fp32_ref = Y_fp32_ref.view(3, int(batch_size / 3), output_channels)
+
+        if use_relu:
+            Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
+
+        self.assertEqual(Y_fp32, Y_fp32_ref,
+                         message="torch.ops.quantized.fbgemm_linear_dynamic results are off")
+
+@unittest.skipIf(
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
+)
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
     @given(batch_size=st.integers(1, 4),
            input_channels=st.integers(16, 32),
            output_channels=st.integers(4, 8),
            use_bias=st.booleans(),
-           use_relu=st.booleans())
-    def test_qlinear(self, batch_size, input_channels, output_channels, use_bias, use_relu):
+           use_relu=st.booleans(),
+           use_multi_dim_input=st.booleans())
+    def test_qlinear(self, batch_size, input_channels, output_channels, use_bias,
+                     use_relu, use_multi_dim_input):
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
         if use_relu:
             qlinear = torch.ops.quantized.fbgemm_linear_relu
         else:
             qlinear = torch.ops.quantized.fbgemm_linear
+
+        if use_multi_dim_input:
+            batch_size *= 3  # Test the multi-dim input tensor
 
         X_scale = 1.5
         X_zp = 5
@@ -385,9 +616,15 @@ class TestQuantizedLinear(unittest.TestCase):
         Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
         if use_relu:
             Y_q_ref[Y_q_ref < Y_zp] = Y_zp
+        if use_multi_dim_input:
+            Y_q_ref = np.reshape(Y_q_ref, (3, int(batch_size / 3), output_channels))
 
         # Weight prepacking operator for quantized Linear
         W_prepack = qlinear_prepack(W_q)
+
+        if use_multi_dim_input:
+            X_q = X_q.view(3, int(batch_size / 3), input_channels)
+
         # Quantized Linear operator with prepacked weight
         Y_q = qlinear(X_q, W_prepack, b_q, Y_scale, Y_zp)
 
@@ -432,10 +669,9 @@ class TestQuantizedLinear(unittest.TestCase):
         np.testing.assert_equal(W_q.q_zero_point(), W_q_origin.q_zero_point())
 
 @unittest.skipIf(
-    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-    " Quantized convolution requires FBGEMM. FBGEMM does not play"
-    " well with UBSAN at the moment, so we skip the test if"
-    " we are in a UBSAN environment.",
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
 )
 class TestQuantizedConv(unittest.TestCase):
     """Tests the correctness of quantized convolution op."""
@@ -640,6 +876,7 @@ class TestQuantizedConv(unittest.TestCase):
         np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())
         np.testing.assert_equal(W_q.q_scale(), W_unpacked.q_scale())
         np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
+
 
 @unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
 @unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")

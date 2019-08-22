@@ -30,7 +30,7 @@ CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/b
 # This projects sets CMAKE_C_COMPILER to /usr/bin/gcc and
 # CMAKE_CXX_COMPILER to /usr/bin/g++. In order to use ccache (if it is available) we
 # must override these variables via CMake arguments.
-CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$CAFFE2_ROOT/third_party/ios-cmake/toolchain/iOS.cmake")
+CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$CAFFE2_ROOT/cmake/iOS.cmake")
 CCACHE_WRAPPER_PATH=/usr/local/opt/ccache/libexec
 if [ -d "$CCACHE_WRAPPER_PATH" ]; then
   CMAKE_ARGS+=("-DCMAKE_C_COMPILER=$CCACHE_WRAPPER_PATH/gcc")
@@ -43,14 +43,6 @@ if [ -n "${IOS_PLATFORM:-}" ]; then
 else
   # IOS_PLATFORM is not set, default to OS, which builds iOS.
   CMAKE_ARGS+=("-DIOS_PLATFORM=OS")
-fi
-
-# IOS_ARCH controls type of iOS architecture (see ios-cmake)
-if [ -n "${IOS_ARCH:-}" ]; then
-  CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
-else
-  # IOS_ARCH is not set, default to arm64
-  CMAKE_ARGS+=("-DIOS_ARCH=arm64")
 fi
 
 # Don't build binaries or tests (only the library)
