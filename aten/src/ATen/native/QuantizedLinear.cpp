@@ -46,7 +46,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
 
   auto input_contig = input.contiguous();
-  auto* input_ptr = input_contig.data<float>();
+  auto* input_ptr = input_contig.data_ptr<float>();
 
   TORCH_CHECK(input.dim() >= 2);
   int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
@@ -127,8 +127,8 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
       /*Aq_zero_point=*/q_params.zero_point,
       /*Bq_zero_point=*/&weight_zero_point_int32,
       /*row_offsets=*/packA.getRowOffsetBuffer(),
-      /*col_offsets=*/col_offsets.data<int32_t>(),
-      /*bias=*/bias_contig.data<float>(),
+      /*col_offsets=*/col_offsets.data_ptr<int32_t>(),
+      /*bias=*/bias_contig.data_ptr<float>(),
       /*nCol=*/N);
 
   // Allocate output Tensor and a buffer for fbgemmPacked to use
@@ -143,8 +143,8 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   fbgemm::fbgemmPacked(
       /*packA=*/packA,
       /*packB=*/packB,
-      /*C=*/output.data<float>(),
-      /*C_buffer=*/buffer.data<int32_t>(),
+      /*C=*/output.data_ptr<float>(),
+      /*C_buffer=*/buffer.data_ptr<int32_t>(),
       /*ldc=*/N,
       /*outProcess=*/outputProcObj,
       /*thread_id=*/0,
@@ -212,7 +212,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   // Calculate weight statistics
   float w_min, w_max;
   fbgemm::FindMinMax(
-      /*m=*/weight_contig.data<float>(),
+      /*m=*/weight_contig.data_ptr<float>(),
       /*min=*/&w_min,
       /*max=*/&w_max,
       /*len=*/weight_contig.numel());
@@ -232,8 +232,8 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
 
   auto quantized = at::zeros_like(weight_contig).to(at::kChar).contiguous();
   fbgemm::Quantize<int8_t>(
-      /*src=*/weight_contig.data<float>(),
-      /*dst=*/quantized.data<int8_t>(),
+      /*src=*/weight_contig.data_ptr<float>(),
+      /*dst=*/quantized.data_ptr<int8_t>(),
       /*len=*/weight_contig.numel(),
       /*qparams=*/q_params);
 
@@ -244,9 +244,9 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   calc_col_offsets_transpose(
       /*K=*/quantized.size(1),
       /*N=*/quantized.size(0),
-      /*Bint8=*/quantized.data<int8_t>(),
+      /*Bint8=*/quantized.data_ptr<int8_t>(),
       /*B_zero_point=*/q_params.zero_point,
-      /*col_offsets=*/col_offsets.data<int32_t>());
+      /*col_offsets=*/col_offsets.data_ptr<int32_t>());
 
   return std::make_tuple(
       quantized, col_offsets, q_params.scale, q_params.zero_point);
@@ -264,7 +264,7 @@ Tensor fbgemm_pack_quantized_matrix(const Tensor& weight) {
   int64_t K = weight.size(1);
   int64_t N = weight.size(0);
   auto weight_contig = weight.contiguous();
-  auto contiguous_ptr = weight_contig.data<int8_t>();
+  auto contiguous_ptr = weight_contig.data_ptr<int8_t>();
   auto ptr = guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
       /*trans=*/fbgemm::matrix_op_t::Transpose,
       /*nRow=*/K,
@@ -342,7 +342,7 @@ Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
   int64_t K = weight.size(1);
   int64_t N = weight.size(0);
   Tensor weight_contig = weight.contiguous();
-  auto weight_contig_ptr = weight_contig.data<float>();
+  auto weight_contig_ptr = weight_contig.data_ptr<float>();
 
   handle_weights_saturation(weight_contig_ptr, K * N);
 
@@ -368,7 +368,7 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
 
   auto input_contig = input.contiguous();
-  auto* input_ptr = input_contig.data<float>();
+  auto* input_ptr = input_contig.data_ptr<float>();
 
   // Pull out the PackedGemmMatrixFP16 instance from the owning tensor
   const fbgemm::PackedGemmMatrixFP16& packed_weight_fp16 =
@@ -390,7 +390,7 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
       input_ptr,
       packed_weight_fp16,
       0.0f,
-      output.data<float>());
+      output.data_ptr<float>());
 
   // Add bias term
   output.add_(bias);

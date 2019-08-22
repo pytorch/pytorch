@@ -219,7 +219,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
 
   int64_t max_target_length = 0;
   auto tg_batch_offsets = at::empty({batch_size}, at::device(at::kCPU).dtype(at::kLong));
-  auto tg_batch_offsets_data = tg_batch_offsets.data<int64_t>();
+  auto tg_batch_offsets_data = tg_batch_offsets.data_ptr<int64_t>();
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
     for (int64_t i = 0; i < batch_size; i++) {
@@ -271,13 +271,13 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   ctc_loss_log_alpha_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>(
-                      log_alpha.data<scalar_t>(),
-                      log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
-                      targets.data<target_t>(), target_lengths_t.data<int64_t>(), max_target_length,
-                      neg_log_likelihood.data<scalar_t>(),
+                      log_alpha.data_ptr<scalar_t>(),
+                      log_probs.data_ptr<scalar_t>(), input_lengths_t.data_ptr<int64_t>(), log_probs.size(0),
+                      targets.data_ptr<target_t>(), target_lengths_t.data_ptr<int64_t>(), max_target_length,
+                      neg_log_likelihood.data_ptr<scalar_t>(),
                       log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
                       log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
-                      tg_batch_offsets.data<int64_t>(), tg_target_stride,
+                      tg_batch_offsets.data_ptr<int64_t>(), tg_target_stride,
                       batch_size, BLANK);
   THCudaCheck(cudaGetLastError()); // catch launch errors
   return std::make_tuple(neg_log_likelihood, log_alpha);
@@ -580,7 +580,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
 
   int64_t max_target_length;
   auto tg_batch_offsets = at::empty({batch_size}, TensorOptions(at::CPU(kLong)));
-  auto tg_batch_offsets_data = tg_batch_offsets.data<int64_t>();
+  auto tg_batch_offsets_data = tg_batch_offsets.data_ptr<int64_t>();
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
     max_target_length = 0;
@@ -624,12 +624,12 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
     dim3 block(threads_target, threads_batch);
     dim3 grid((2*max_target_length+1 + threads_target-1)/threads_target, (batch_size+threads_batch-1)/threads_batch);
     ctc_loss_backward_log_beta_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>
-      (log_beta.data<scalar_t>(),
-       log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
-       targets.data<target_t>(), target_lengths_t.data<int64_t>(), max_target_length,
+      (log_beta.data_ptr<scalar_t>(),
+       log_probs.data_ptr<scalar_t>(), input_lengths_t.data_ptr<int64_t>(), log_probs.size(0),
+       targets.data_ptr<target_t>(), target_lengths_t.data_ptr<int64_t>(), max_target_length,
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
-       tg_batch_offsets.data<int64_t>(), tg_target_stride,
+       tg_batch_offsets.data_ptr<int64_t>(), tg_target_stride,
        batch_size, BLANK);
     THCudaCheck(cudaGetLastError()); // catch launch errors
   }
@@ -676,17 +676,17 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
         (batch_size + threads_batch - 1) / threads_batch,
         1);
     ctc_loss_backward_collect_nonblank_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>
-      (grad.data<scalar_t>(),
-       grad_out.data<scalar_t>(), grad_out.stride(0),
-       log_alpha.data<scalar_t>(), log_beta.data<scalar_t>(),
-       log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
-       targets.data<target_t>(), target_lengths_t.data<int64_t>(), max_target_length,
-       neg_log_likelihood.data<scalar_t>(),
+      (grad.data_ptr<scalar_t>(),
+       grad_out.data_ptr<scalar_t>(), grad_out.stride(0),
+       log_alpha.data_ptr<scalar_t>(), log_beta.data_ptr<scalar_t>(),
+       log_probs.data_ptr<scalar_t>(), input_lengths_t.data_ptr<int64_t>(), log_probs.size(0),
+       targets.data_ptr<target_t>(), target_lengths_t.data_ptr<int64_t>(), max_target_length,
+       neg_log_likelihood.data_ptr<scalar_t>(),
        grad.stride(0), grad.stride(1), grad.stride(2),
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
        log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
-       tg_batch_offsets.data<int64_t>(), tg_target_stride,
+       tg_batch_offsets.data_ptr<int64_t>(), tg_target_stride,
        batch_size, num_labels, BLANK, zero_infinity);
     THCudaCheck(cudaGetLastError()); // catch launch errors
   } else { // small problem, use naive algorithm
@@ -699,17 +699,17 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
     dim3 block(threads_input, threads_batch);
     dim3 grid((log_probs.size(0) + threads_input-1)/threads_input, (batch_size+threads_batch-1)/threads_batch);
     ctc_loss_backward_collect_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>
-      (grad.data<scalar_t>(),
-       grad_out.data<scalar_t>(), grad_out.stride(0),
-       log_alpha.data<scalar_t>(), log_beta.data<scalar_t>(),
-       log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
-       targets.data<target_t>(), target_lengths_t.data<int64_t>(), max_target_length,
-       neg_log_likelihood.data<scalar_t>(),
+      (grad.data_ptr<scalar_t>(),
+       grad_out.data_ptr<scalar_t>(), grad_out.stride(0),
+       log_alpha.data_ptr<scalar_t>(), log_beta.data_ptr<scalar_t>(),
+       log_probs.data_ptr<scalar_t>(), input_lengths_t.data_ptr<int64_t>(), log_probs.size(0),
+       targets.data_ptr<target_t>(), target_lengths_t.data_ptr<int64_t>(), max_target_length,
+       neg_log_likelihood.data_ptr<scalar_t>(),
        grad.stride(0), grad.stride(1), grad.stride(2),
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
        log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
-       tg_batch_offsets.data<int64_t>(), tg_target_stride,
+       tg_batch_offsets.data_ptr<int64_t>(), tg_target_stride,
        batch_size, num_labels, BLANK, zero_infinity);
     THCudaCheck(cudaGetLastError()); // catch launch errors
   }
@@ -726,8 +726,8 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
       (log_probs.size(0) + threads_input-1)/threads_input,
       (batch_size+threads_batch-1)/threads_batch);
     ctc_loss_zero_padded_gradients<scalar_t><<<grid, block, 0, stream>>>(
-      grad.data<scalar_t>(),
-      input_lengths_t.data<int64_t>(),
+      grad.data_ptr<scalar_t>(),
+      input_lengths_t.data_ptr<int64_t>(),
       grad.stride(0),
       grad.stride(1),
       grad.stride(2),
