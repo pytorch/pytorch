@@ -254,15 +254,19 @@ inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
 // print out Argument, which is compatible with FunctionSchema parser
 // full format: Type(alias)? name=default_value
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
-  bool optional_type = arg.type()->isSubclass(TypeKind::OptionalType);
+  bool optional_type = arg.type()->kind() == OptionalType::Kind;
   // for adjusting the ? position.
   // in schema, we have Tensor?(a!) input, and t(a!)?.
   // however, t?(a!) doesn't work with schema parser.
   // so we always use Type(alias)? format
   std::stringstream oss;
-  if (arg.type()->isSubclass(TypeKind::ListType) && arg.N()) {
-    oss << arg.type()->cast<ListType>()->getElementType()->str();
-    oss << "[" << arg.N().value() << "]";
+  if (auto list = arg.type()->cast<c10::ListType>()) {
+    oss << list->getElementType()->str();
+    oss << "[";
+    if (arg.N()) {
+      oss << *arg.N();
+    }
+    oss << "]";
   } else {
     oss << arg.type()->str();
   }

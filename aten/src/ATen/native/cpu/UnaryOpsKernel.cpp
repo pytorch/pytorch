@@ -70,7 +70,7 @@ static void bitwise_not_kernel(TensorIterator& iter) {
             return !a;
           });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_cpu", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_not_cpu", [&]() {
       cpu_kernel(
           iter,
           [](scalar_t a) -> scalar_t {
@@ -86,6 +86,15 @@ static void frac_kernel(TensorIterator& iter) {
         iter,
         [=](scalar_t a) -> scalar_t { return a - std::trunc(a); },
         [=](Vec256<scalar_t> a) { return a.frac(); });
+  });
+}
+
+static void logical_not_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_not_cpu", [&]() {
+    using self_t = scalar_t;
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_not_cpu", [&]() {
+      cpu_kernel(iter, [](self_t a) -> scalar_t { return static_cast<scalar_t>(!a); });
+    });
   });
 }
 
@@ -149,8 +158,8 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
       tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
     }
 
-    scalar_t *self_ptr = self.data<scalar_t>();
-    int *sample_int_ptr = tmp_int_tensor.data<int>();
+    scalar_t *self_ptr = self.data_ptr<scalar_t>();
+    int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
 
     auto sample = [&](int64_t begin, int64_t end) {
       int64_t len = end - begin;
@@ -233,6 +242,7 @@ REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel)
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
+REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);

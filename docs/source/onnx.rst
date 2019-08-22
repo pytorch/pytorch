@@ -418,7 +418,7 @@ The following operators are supported:
 * sin
 * size
 * slice
-* softmax (only dim=-1 supported)
+* softmax
 * softplus
 * split
 * sqrt

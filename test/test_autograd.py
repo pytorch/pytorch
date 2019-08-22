@@ -21,7 +21,7 @@ from torch.autograd.profiler import (profile, format_time, EventList,
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm, slowTest,
-                          load_tests, random_symmetric_pd_matrix, IS_WINDOWS)
+                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -2499,6 +2499,26 @@ class TestAutograd(TestCase):
 
         for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
+            run_test(upper, dims)
+
+    @skipIfNoLapack
+    def test_symeig(self):
+        def func(root, upper):
+            x = 0.5 * (root + root.transpose(-2, -1))
+            return torch.symeig(x, eigenvectors=True, upper=upper)
+
+        def run_test(upper, dims):
+            root = torch.rand(*dims, requires_grad=True)
+
+            gradcheck(func, [root, upper])
+            gradgradcheck(func, [root, upper])
+
+            root = random_symmetric_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            w, v = root.symeig(eigenvectors=True)
+            (w.sum() + v.sum()).backward()
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2))  # Check the gradient is symmetric
+
+        for upper, dims in product([True, False], [(3, 3), (5, 3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
 
     @skipIfNoLapack

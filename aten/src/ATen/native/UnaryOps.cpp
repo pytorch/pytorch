@@ -48,11 +48,31 @@ Tensor& bitwise_not_(Tensor& self) {
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
   checkBackend("bitwise_not", result, self.type().backend());
   auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
+    /*check_mem_overlap=*/true);
   bitwise_not_stub(iter.device_type(), iter);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
 #endif
+  return result;
+}
+
+Tensor logical_not(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
+  return at::logical_not_out(result, self);
+}
+
+Tensor& logical_not_(Tensor& self) {
+  return at::logical_not_out(self, self);
+}
+
+Tensor& logical_not_out(Tensor& result, const Tensor& self) {
+  TensorIterator iter;
+  iter.dont_compute_common_dtype();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(result);
+  iter.add_input(self);
+  iter.build();
+  logical_not_stub(iter.device_type(), iter);
   return result;
 }
 
@@ -68,7 +88,7 @@ Tensor& neg_(Tensor& self) {
 Tensor& neg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `bitwise_not()` operator instead.");
+              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
   auto iter = TensorIterator::unary_op(result, self,
     /*check_internal_overlap=*/true);
   neg_stub(iter.device_type(), iter);
@@ -184,7 +204,7 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     checkBackend(#op, result, Backend::CPU);                    \
     auto iter = TensorIterator::unary_op(result, self,          \
-      /*check_internal_overlap=*/true);                         \
+      /*check_mem_overlap=*/true);                              \
     op##_stub(iter.device_type(), iter);                        \
     return result;                                              \
   }
@@ -235,6 +255,7 @@ DEFINE_DISPATCH(log_stub);
 DEFINE_DISPATCH(log10_stub);
 DEFINE_DISPATCH(log1p_stub);
 DEFINE_DISPATCH(log2_stub);
+DEFINE_DISPATCH(logical_not_stub);
 DEFINE_DISPATCH(neg_stub);
 DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);

@@ -316,6 +316,10 @@ view of a storage and defines numeric operations on it.
    .. automethod:: log2_
    .. automethod:: log_normal_
    .. automethod:: logsumexp
+   .. automethod:: logical_not
+   .. automethod:: logical_not_
+   .. automethod:: logical_xor
+   .. automethod:: logical_xor_
    .. automethod:: long
    .. automethod:: lstsq
    .. automethod:: lt
@@ -371,6 +375,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: random_
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
+   .. automethod:: record_stream
    .. automethod:: register_hook
    .. automethod:: remainder
    .. automethod:: remainder_

@@ -28,7 +28,8 @@ class SobolEngine(object):
                                    sequences. Default: ``False``.
         seed (Int, optional): This is the seed for the scrambling. The seed
                               of the random number generator is set to this,
-                              if specified. Default: ``None``
+                              if specified. Otherwise, it uses a random seed.
+                              Default: ``None``
 
     Examples::
 
@@ -57,6 +58,8 @@ class SobolEngine(object):
             g = torch.Generator()
             if self.seed is not None:
                 g.manual_seed(self.seed)
+            else:
+                g.seed()
 
             self.shift = torch.mv(torch.randint(2, (self.dimension, self.MAXBIT), generator=g),
                                   torch.pow(2, torch.arange(0, self.MAXBIT)))
