@@ -44,12 +44,7 @@ parser.add_argument(
     action='store_true',
     help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
 options = parser.parse_args()
-gen_to_source = os.environ.get('GEN_TO_SOURCE')  # update source directly as part of gen
-if not gen_to_source:
-    core_install_dir = os.path.join(options.install_dir, 'core_tmp') if options.install_dir is not None else None
-else:
-    core_install_dir = os.path.join(options.source_path, 'core')
-
+core_install_dir = os.path.join(options.install_dir, 'core') if options.install_dir is not None else None
 if options.install_dir is not None and not os.path.exists(options.install_dir):
     os.makedirs(options.install_dir)
 if core_install_dir is not None and not os.path.exists(core_install_dir):
@@ -355,25 +350,6 @@ def filter_by_extension(files, *extensions):
     return filtered_files
 
 
-# because EOL may not be LF(\n) on some environment (e.g. Windows),
-# normalize EOL from CRLF/CR to LF and compare both files.
-def cmpfiles_with_eol_normalization(a, b, names):
-    results = ([], [], [])    # match, mismatch, error
-    for x in names:
-        try:
-            with open(os.path.join(a, x)) as f:
-                ax = f.read().replace('\r\n', '\n').replace('\r', '\n')
-            with open(os.path.join(b, x)) as f:
-                bx = f.read().replace('\r\n', '\n').replace('\r', '\n')
-            if ax == bx:
-                results[0].append(x)
-            else:
-                results[1].append(x)
-        except OSError:
-            results[2].append(x)
-    return results
-
-
 def is_namedtensor_only_decl(decl):
     if 'Dimname' in decl['schema_string']:
         return True
@@ -431,21 +407,6 @@ def generate_outputs():
 
     file_manager.check_all_files_written()
     cuda_file_manager.check_all_files_written()
-
-    # check that generated files match source files
-    core_source_path = os.path.join(options.source_path, 'core')
-    match, mismatch, errors = cmpfiles_with_eol_normalization(core_install_dir, core_source_path, core_files.keys())
-    if errors:
-        raise RuntimeError("Error while trying to compare source and generated files for {}. "
-                           "Source directory: {}.  Generated directory: {}."
-                           .format(errors, core_source_path, core_install_dir))
-    if mismatch:
-        file_component = '{}'.format(','.join(mismatch))
-        if len(mismatch) > 1:
-            file_component = '{' + file_component + '}'
-        update_cmd = "cp {}/{} {}".format(core_install_dir, file_component, core_source_path)
-        raise RuntimeError("Source files: {} did not match generated files.  To update the source files, "
-                           "set environment variable GEN_TO_SOURCE or run \"{}\"".format(mismatch, update_cmd))
 
 declare_outputs()
 if options.output_dependencies is not None:
