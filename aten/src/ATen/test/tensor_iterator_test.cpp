@@ -44,7 +44,7 @@ TEST(TensorIteratorTest, MixedDevices) {
 
 namespace at::native {  // required to use cpu_apply_dim_kernel
 
-Tensor test_gather(IntArrayRef outsizes, const Tensor &src, int64_t dim, const Tensor &index) {
+Tensor gather_with_broadcast_cpu(IntArrayRef outsizes, const Tensor &src, int64_t dim, const Tensor &index) {
   Tensor result = at::empty(outsizes, src.options());
   auto iter = TensorIterator::dim_apply_op(result, index, src, dim);
   int64_t size = index.size(dim);
@@ -65,6 +65,6 @@ TEST(TensorIteratorTest, DimApply) {
   Tensor src = at::randn({20, 1, 20, 10});
   Tensor index = at::randint(20, {100, 10, 20, 1}, ScalarType::Long);
   Tensor result1 = src.expand({20, 10, 20, 10}).gather(0, index.expand({100, 10, 20, 10}));
-  Tensor result2 = at::native::test_gather(result1.sizes(), src, 0, index);
+  Tensor result2 = at::native::gather_with_broadcast_cpu(result1.sizes(), src, 0, index);
   EXPECT_TRUE(at::allclose(result1, result2));
 }
