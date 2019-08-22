@@ -145,6 +145,35 @@ Node* createIntReprNode(Value* v, Graph* g) {
   return intrepr;
 }
 
+// Clone observer module and add it to the original module,
+// and insert a call to observer forward function
+Node* insertObserverForwardCall(Value* v, Graph* g,
+                                script::Module module,
+                                const script::Module& observer_module) {
+  std::string observer_name = "observer_for_" + v->debugName();
+  script::Module observer = observer_module.clone();
+  module.register_module(observer_name, observer);
+  // Get handle of observer module
+  Node* observer_instance = g->create(c10::prim::GetAttr);
+  // self.observer_for_v
+  observer_instance->addInput(g->inputs()[0]);
+  observer_instance->s_(c10::attr::name, observer_name);
+  observer_instance->output()->setDebugName(observer_name);
+  observer_instance->output()->setType(observer.type());
+  observer_instance->insertAfter(v->node());
+
+  // Create forward method call
+  Node* call = g->create(c10::prim::CallMethod);
+  TORCH_INTERNAL_ASSERT(call != nullptr, "Failed to create forward call node");
+  call->s_(c10::attr::name, "forward");
+  call->addInput(observer_instance->output());
+  call->addInput(v);
+  call->output()->setType(v->type());
+  call->output()->setDebugName(v->debugName() + ".observed");
+  call->insertAfter(observer_instance);
+  return call;
+}
+
 // Insert Quant-Dequant node pattern for quantizable node outputs
 Node* addQuantDeQuantNodesFor(
     Value* v,
@@ -571,6 +600,81 @@ template TORCH_API void InsertQuantDequantNodesForParam(
     const std::function<std::tuple<std::string, float, int>(float, float)>&
         getQParamFunc,
     at::ScalarType t);
+
+
+TORCH_API script::Module InsertObservers(
+    const script::Module& module,
+    const std::string& method_name,
+    const script::Module& observer_module,
+    const script::Module& weight_observer_module) {
+  script::Module input_module = module.clone();
+  script::Method method = input_module.get_method(method_name);
+  auto graph = method.graph();
+  TORCH_CHECK(graph != nullptr);
+  // For storing all values that need to be instrumented with an observer call.
+  std::vector<Value*> values_to_observe;
+
+  // For traversing all blocks in the graph including subblocks.
+  std::stack<Block*> blocks_to_visit;
+
+  // Mark observer nodes for inputs so we dont add observers
+  // for observers while traversing graph
+  std::unordered_set<Node*> observer_for_input;
+
+  // Add observer for external input nodes excluding parameters
+  // These are treated as activation as they vary across batches
+  // and need to be observed.
+
+  // prim::Param nodes do not belong to the graph. Hence the Insert
+  // point is the beginning of graph node. This also safe guards against
+  // observing a potentially mutated value due to some in-place operation
+  for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
+    auto& v = graph->inputs()[idx];
+    if (v->type()->isSubtypeOf(TensorType::get())) {
+      Node* observer_node = insertObserverForwardCall(v, v->owningGraph(), input_module, observer_module);
+      observer_for_input.emplace(observer_node);
+    }
+  }
+
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      // Skip nodes that we don't need to observe, e.g. 'prim::Constant' or
+      // observer nodes
+      if (!outputsNeedToBeObserved(n) || observer_for_input.count(n) != 0) {
+        continue;
+      }
+
+      // Record all outputs in the values_to_observe - we'll later add observers
+      // for all values from it.
+      for (Value* v : n->outputs()) {
+        values_to_observe.push_back(v);
+      }
+
+      // Schedule subblocks (if any) for visiting.
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+
+  // Actually add observer nodes.
+  for (Value* v : values_to_observe) {
+    if (v->type()->isSubtypeOf(TensorType::get())) {
+      // Skip inserting observer for bias
+      if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
+        continue;
+      } else if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "weight") {
+        insertObserverForwardCall(v, v->owningGraph(), input_module, weight_observer_module);
+      } else {
+        insertObserverForwardCall(v, v->owningGraph(), input_module, observer_module);
+      }
+    }
+  }
+  return input_module;
+}
 
 } // namespace jit
 } // namespace torch
