@@ -40,7 +40,7 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
     size_t size = t->sizes()[i];
     if (size == 0) {
     } else if (size > 1) {
-      size_t stride = t->sizes()[i];
+      size_t stride = t->strides()[i];
       if (stride < 1) {
         return MemOverlap::YES;
       }
