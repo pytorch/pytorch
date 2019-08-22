@@ -759,6 +759,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_gelu(self):
         class GeluModel(torch.nn.Module):
             def forward(self, x):
