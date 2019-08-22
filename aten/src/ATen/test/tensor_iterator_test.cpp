@@ -46,7 +46,7 @@ namespace at::native {  // required to use cpu_apply_dim_kernel
 
 Tensor test_gather(IntArrayRef outsizes, const Tensor &src, int64_t dim, const Tensor &index) {
   Tensor result = at::empty(outsizes, src.options());
-  auto iter = TensorIterator::dim_apply_op(result, index, src, 0);
+  auto iter = TensorIterator::dim_apply_op(result, index, src, dim);
   int64_t size = index.size(dim);
   cpu_apply_dim_kernel(iter,
     [=](float *result_data, int64_t result_stride, int64_t *index_data, int64_t index_stride, float *src_data, int64_t src_stride) {
