@@ -1123,6 +1123,8 @@
 [[
   name: _th_topk
   cname: topk
+  backends:
+    - CUDA
   variants:
     - function
   return: argument 0,1
@@ -1498,7 +1500,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   cname: erfinv
   variants: function
@@ -1513,7 +1514,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - function

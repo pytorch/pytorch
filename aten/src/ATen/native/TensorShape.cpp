@@ -627,26 +627,6 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
   return self;
 }
 
-#ifdef BUILD_NAMEDTENSOR
-static Tensor& propagate_transposed_names(
-    Tensor& result,
-    const Tensor& other,
-    int64_t dim0,
-    int64_t dim1) {
-  if (other.names()) {
-    auto names = other.names()->vec();
-    std::swap(names[dim0], names[dim1]);
-    namedinference::propagate_names(result, names);
-  }
-  return result;
-}
-
-Tensor transpose(const Tensor& self, Dimname dim0, Dimname dim1) {
-  return at::transpose(
-      self, dimname_to_position(self, dim0), dimname_to_position(self, dim1));
-}
-#endif
-
 Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   auto ndims = self.dim();
   dim0 = maybe_wrap_dim(dim0, ndims);
@@ -691,11 +671,7 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   auto sizes = self.sizes().vec();
   std::swap(strides[dim0], strides[dim1]);
   std::swap(sizes[dim0], sizes[dim1]);
-  auto result = self.as_strided(sizes, strides);
-#ifdef BUILD_NAMEDTENSOR
-  propagate_transposed_names(result, self, dim0, dim1);
-#endif
-  return result;
+  return self.as_strided(sizes, strides);
 }
 
 static void check_t(const Tensor& self, const char *fn) {

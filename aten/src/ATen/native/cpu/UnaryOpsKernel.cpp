@@ -136,6 +136,14 @@ static void cosh_kernel(TensorIterator& iter) {
   });
 }
 
+static void erfinv_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "erfinv_cpu", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return calc_erfinv(a); });
+  });
+}
+
 static void digamma_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "digamma", [&]() {
     cpu_kernel(
@@ -189,8 +197,8 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
       tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
     }
 
-    scalar_t *self_ptr = self.data<scalar_t>();
-    int *sample_int_ptr = tmp_int_tensor.data<int>();
+    scalar_t *self_ptr = self.data_ptr<scalar_t>();
+    int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
 
     auto sample = [&](int64_t begin, int64_t end) {
       int64_t len = end - begin;
@@ -279,6 +287,7 @@ REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
+REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel);
 REGISTER_DISPATCH(digamma_stub, &digamma_kernel);
 REGISTER_DISPATCH(trigamma_stub, &trigamma_kernel);
 REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
