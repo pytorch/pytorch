@@ -28,12 +28,12 @@ void TensorIterator::reorder_dimensions() {
   // returns 1 if the dim0 should come after dim1, -1 if dim0 should come
   // before dim1, and 0 if the comparison is ambiguous.
   auto should_swap = [&](size_t dim0, size_t dim1) {
-    if(dim_apply) {
+    if(dim_apply_) {
       // move dim to apply to the front
-      if(dim0 == dim_apply.value()) {
+      if(dim0 == dim_apply_.value()) {
         return -1;
       }
-      if(dim1 == dim_apply.value()) {
+      if(dim1 == dim_apply_.value()) {
         return 1;
       }
     }
@@ -79,8 +79,8 @@ void TensorIterator::reorder_dimensions() {
   permute_dimensions(perm_);
 
   // dim to be applied moved to 0:
-  if(dim_apply) {
-    dim_apply = 0;
+  if(dim_apply_) {
+    dim_apply_ = 0;
   }
 }
 
@@ -128,6 +128,9 @@ std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
 }
 
 void TensorIterator::compute_types() {
+  if (!check_dtypes_) {
+    return;
+  }
   bool missing_dtypes = false;
   for (auto& op : operands_) {
     if (!op.tensor.defined() && !op.is_type_defined()) {
@@ -270,7 +273,7 @@ void TensorIterator::coalesce_dimensions() {
   // We can coalesce two adjacent dimensions if either dim has size 1 or if:
   // shape[n] * stride[n] == shape[n + 1].
   auto can_coalesce = [&](int dim0, int dim1) {
-    if (dim_apply && dim0 == 0) {
+    if (dim_apply_ && dim0 == 0) {
       // Don't coalesce the dim to apply. When coalesce_dimensions is called,
       // the dim to apply must have been moved to 0
       return false;
@@ -325,7 +328,7 @@ int64_t TensorIterator::numel() const {
   for (int64_t size : shape_) {
     numel *= size;
   }
-  return dim_apply ? -numel: numel;
+  return dim_apply_ ? -numel: numel;
 }
 
 DimVector TensorIterator::get_dim_strides(int dim) const {
@@ -451,7 +454,6 @@ void TensorIterator::for_each(const loop_dim_apply_t& loop) const {
   }
 }
 
-
 DimVector TensorIterator::get_strides() const {
   DimVector strides;
   for (int dim = 0; dim < ndim(); dim++) {
@@ -496,7 +498,7 @@ void TensorIterator::serial_for_each(const loop_dim_apply_t& loop, Range range) 
   }
   std::vector<int64_t> strides(ntensors());
   for (int64_t i = 0; i < ntensors(); i++) {
-    strides[i] = operands_[i].stride_bytes[0];
+    strides[i] = operands_[i].stride_bytes[0] / element_size(i);
   }
   auto base_ptrs = get_base_ptrs();
   if (ndim() <= 1) {
@@ -657,15 +659,16 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
   return iter;
 }
 
-
 TensorIterator TensorIterator::dim_apply_op(Tensor& out, const Tensor& a, const Tensor& b, int64_t dim) {
   TORCH_INTERNAL_ASSERT(out.defined());
   auto iter = TensorIterator();
   iter.add_output(out);
   iter.add_input(a);
   iter.add_input(b);
-  iter.dim_apply = dim;
+  iter.dim_apply_ = dim;
   iter.resize_outputs_ = false;
+  iter.check_dtypes_ = false;
+  iter.build();
   return iter;
 }
 
@@ -713,7 +716,7 @@ void TensorIterator::compute_shape() {
     if (shape_.empty()) {
       shape_ = shape;
     } else if (!shape.equals(shape_)) {
-      shape_ = DimVector(infer_size(shape_, shape, dim_apply));
+      shape_ = DimVector(infer_size(shape_, shape, dim_apply_));
     }
   }
 
@@ -811,25 +814,33 @@ int TensorIterator::get_dim_to_split() const {
 void TensorIterator::build() {
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
+  std::cout << "done mark_outputs" << std::endl;
   // Check that the outputs have no internal overlap
   // and do not share memory with inputs.
   check_mem_overlaps();
+  std::cout << "done check_mem_overlaps" << std::endl;
   // compute the broadcasted shape
   compute_shape();
+  std::cout << "done compute_shape" << std::endl;
   // compute each tensor's stride after broadcasting
   compute_strides();
+  std::cout << "done compute_strides" << std::endl;
   // re-order dimensions to improve coalescing
   reorder_dimensions();
+  std::cout << "done reorder_dimensions" << std::endl;
   // compute the result dtype and device
   compute_types();
+  std::cout << "done compute_types" << std::endl;
   // allocate the output tensor if it's not provided
   allocate_outputs();
+  std::cout << "done allocate_outputs" << std::endl;
 #ifdef BUILD_NAMEDTENSOR
   // perform name inference
   propagate_names_to_outputs();
 #endif
   // coalesce adjacent dimensions when possible
   coalesce_dimensions();
+  std::cout << "done coalesce_dimensions" << std::endl;
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor.defined());

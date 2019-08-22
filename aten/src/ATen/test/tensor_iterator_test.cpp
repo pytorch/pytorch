@@ -46,8 +46,10 @@ TEST(TensorIteratorTest, MixedDevices) {
 namespace at::native {  // required to use cpu_apply_dim_kernel
 
 Tensor test_gather(const Tensor &src, int64_t dim, const Tensor &index) {
+  std::cout << "Entering test_gather" << std::endl;
   Tensor result = at::empty_like(index, src.options());
   auto iter = TensorIterator::dim_apply_op(result, index, result, 0);
+  std::cout << "Building TensorIterator success" << std::endl;
   int64_t size = index.size(dim);
   cpu_apply_dim_kernel(iter,
     [=](float *result_data, int64_t result_stride, int64_t *index_data, int64_t index_stride, float *src_data, int64_t src_stride) {
@@ -56,6 +58,7 @@ Tensor test_gather(const Tensor &src, int64_t dim, const Tensor &index) {
         *(result_data + i * result_stride) = *(src_data + index * src_stride);
       }
     });
+  std::cout << "Exiting test_gather" << std::endl;
   return result;
 }
 
@@ -63,9 +66,12 @@ Tensor test_gather(const Tensor &src, int64_t dim, const Tensor &index) {
 
 // Test TensorIterator's dim_apply CPU implementation by manually implementing gather
 TEST(TensorIteratorTest, DimApply) {
+  std::cout << "Entering DimApply" << std::endl;
   Tensor src = at::randn({20, 1, 20, 10});
   Tensor index = at::randint(20, {100, 10, 20, 1}, ScalarType::Long);
   Tensor result1 = src.expand({20, 10, 20, 10}).gather(0, index.expand({100, 10, 20, 10}));
+  std::cout << "Done computing result1" << std::endl;
   Tensor result2 = at::native::test_gather(src, 0, index);
   EXPECT_TRUE(at::allclose(result1, result2));
+  std::cout << "Exiting DimApply" << std::endl;
 }
