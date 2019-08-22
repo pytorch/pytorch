@@ -122,8 +122,8 @@ void adaptive_avg_pool2d_out_template(
   if (input.dim() == 3 || input.size(0) == 1) {
     AT_DISPATCH_QINT_TYPES(
         input.scalar_type(), "quantized_adaptive_avg_pool2d", [&] {
-          auto input_data = input.data<scalar_t>();
-          auto output_data = output.data<scalar_t>();
+          auto input_data = input.data_ptr<scalar_t>();
+          auto output_data = output.data_ptr<scalar_t>();
           adaptive_avg_pool2d_single_out_frame<scalar_t, underlying_t>(
               input_data,
               output_data,
@@ -141,8 +141,8 @@ void adaptive_avg_pool2d_out_template(
 
     AT_DISPATCH_QINT_TYPES(
         input.scalar_type(), "quantized_adaptive_avg_pool2d", [&] {
-          auto input_data = input.data<scalar_t>();
-          auto output_data = output.data<scalar_t>();
+          auto input_data = input.data_ptr<scalar_t>();
+          auto output_data = output.data_ptr<scalar_t>();
           adaptive_avg_pool2d_out_frame<scalar_t, underlying_t>(
               input_data,
               output_data,

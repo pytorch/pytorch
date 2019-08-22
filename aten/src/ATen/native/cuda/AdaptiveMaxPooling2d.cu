@@ -234,9 +234,9 @@ void adaptive_max_pool2d_out_cuda_template(
         output.resize_({sizeD, osizeH, osizeW});
         indices.resize_({sizeD, osizeH, osizeW});
 
-        scalar_t *input_data = input.data<scalar_t>();
-        scalar_t *output_data = output.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *input_data = input.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         // cuda blocks & threads:
         int blocksH = (int)(16L / sizeD);
@@ -271,9 +271,9 @@ void adaptive_max_pool2d_out_cuda_template(
         output.resize_({sizeB, sizeD, osizeH, osizeW});
         indices.resize_({sizeB, sizeD, osizeH, osizeW});
 
-        scalar_t *input_data = input_.data<scalar_t>();
-        scalar_t *output_data = output.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *input_data = input_.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         // cuda blocks & threads:
         int blocksH = (int)(16L / sizeD);
@@ -328,9 +328,9 @@ void adaptive_max_pool2d_backward_out_cuda_template(
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
       "adaptive_max_pool2d_backward_cuda",
       [&] {
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         // cuda blocks & threads:
         int blocksH = (int)(16L / sizeD);
@@ -374,9 +374,9 @@ void adaptive_max_pool2d_backward_out_cuda_template(
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
       "adaptive_max_pool2d_backward_cuda",
       [&] {
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         // cuda blocks & threads:
         int blocksH = (int)(16L / sizeD);
