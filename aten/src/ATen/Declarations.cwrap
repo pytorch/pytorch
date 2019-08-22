@@ -1502,7 +1502,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   cname: erfinv
   variants: function
@@ -1517,7 +1516,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - function
