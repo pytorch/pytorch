@@ -463,6 +463,7 @@ class TestCase(expecttest.TestCase):
     maxDiff = None
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
+    _cuda_failure_reported = False
 
     def __init__(self, method_name='runTest'):
         super(TestCase, self).__init__(method_name)
@@ -517,19 +518,24 @@ class TestCase(expecttest.TestCase):
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
                 raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
 
-        if (torch.cuda.is_available()):
+        if torch.cuda.is_available():
             try:
                 torch.cuda.synchronize()
             except RuntimeError:
-                self.fail("Unusable CUDA state. Please check previous tests for errors.")
+                if TestCase._cuda_failure_reported:
+                    raise unittest.SkipTest("Unusable CUDA state. Please check previous tests for errors.")
+                else:
+                    TestCase._cuda_failure_reported = True
+                    self.fail("Unusable CUDA state. Please check previous tests for errors.")
 
         set_rng_seed(SEED)
 
     def tearDown(self):
-        if (torch.cuda.is_available()):
+        if torch.cuda.is_available():
             try:
                 torch.cuda.synchronize()
             except RuntimeError:
+                TestCase._cuda_failure_reported = True
                 self.fail("Unrecoverable CUDA failure. Follow-up tests will randomly fail.")
 
     def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
