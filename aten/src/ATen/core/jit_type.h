@@ -542,12 +542,12 @@ struct CAFFE2_API TensorType : public Type {
         requires_grad_(tensor.requires_grad()) {
           if (!tensor.is_mkldnn()) {
             sizes_ = tensor.sizes().vec();
-            if (!tensor.is_sparse())
-            {
+            if (!tensor.is_sparse()) {
               strides_ = tensor.strides().vec();
             }
-            // 
-            // strides_(tensor.is_sparse() ? VaryingShape(c10::nullopt) : tensor.strides().size()),
+            //
+            // strides_(tensor.is_sparse() ? VaryingShape(c10::nullopt) :
+            // tensor.strides().size()),
           }
         }
   TensorType(

@@ -92,11 +92,10 @@ struct TORCH_API Function {
         "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
   }
 
-  GraphExecutor& get_executor(bool multiple_output = false) {
+  GraphExecutor &get_executor(bool multiple_output = false) {
     ensure_defined(multiple_output);
     std::call_once(executor_init_, [&, multiple_output] {
-      if (!multiple_output)
-      {
+      if (!multiple_output) {
         check_single_output();
       }
       executor_ = GraphExecutor(graph());

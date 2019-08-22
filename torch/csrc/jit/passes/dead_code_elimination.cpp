@@ -19,8 +19,7 @@ class DeadCodeEliminator {
   explicit DeadCodeEliminator(std::shared_ptr<Graph> graph, DCESideEffectPolicy sideEffectPolicy)
       : sideEffectPolicy_(sideEffectPolicy), aliasDb_(torch::make_unique<AliasDb>(std::move(graph))) {}
   DeadCodeEliminator(DCESideEffectPolicy sideEffectPolicy)
-  : sideEffectPolicy_(sideEffectPolicy) {
-  }
+      : sideEffectPolicy_(sideEffectPolicy) {}
 
   // The algorithm is an inverse mark-and-sweep. Starting from the return node,
   // we mark "live" nodes that are necessary for the output. Nodes that have

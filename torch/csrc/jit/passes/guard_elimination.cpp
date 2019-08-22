@@ -1,11 +1,11 @@
-#include <torch/csrc/jit/passes/guard_elimination.h>
+#include <memory>
+#include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
-#include <memory>
-#include <unordered_set>
-#include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
@@ -96,15 +96,19 @@ struct GuardElimination {
     auto output = guard->input()->node();
     auto it = guard;
 
-    //This is needed because peephole which we in turn need to eliminate aten::size also eliminates aten::_grad_sum_to_size
-    //thus moving the guard away from its definition and when we try to walk back to definition we hit aten::add
-    //Another way to fix this is to not run peephole but have a smaller pass here which transforms aten::size to a constant
-    std::unordered_set<Symbol> allowed_symbols = {aten::add, aten::neg, aten::div, aten::mul, aten::_grad_sum_to_size};
+    // This is needed because peephole which we in turn need to eliminate
+    // aten::size also eliminates aten::_grad_sum_to_size
+    // thus moving the guard away from its definition and when we try to walk
+    // back to definition we hit aten::add
+    // Another way to fix this is to not run peephole but have a smaller pass
+    // here which transforms aten::size to a constant
+    std::unordered_set<Symbol> allowed_symbols = {
+        aten::add, aten::neg, aten::div, aten::mul, aten::_grad_sum_to_size};
     while (it != output) {
       if (it->kind() != prim::Guard && it->kind() != prim::Constant &&
-          allowed_symbols.count(it->kind()) == 0
-      ) {
-        GRAPH_DEBUG("found an unexpected node ", *it, " while trying to eliminate ", *guard);
+          allowed_symbols.count(it->kind()) == 0) {
+        GRAPH_DEBUG("found an unexpected node ", *it,
+                    " while trying to eliminate ", *guard);
         return false;
       }
       it = it->prev();
@@ -137,15 +141,12 @@ struct GuardElimination {
     }
   }
 
-
-  bool checkInputs(Node* n, const std::unordered_set<size_t>& except)
-  {
+  bool checkInputs(Node *n, const std::unordered_set<size_t> &except) {
     bool all_inputs_guarded = true;
     size_t i = 0;
     for (auto input : n->inputs()) {
       if (input->node()->kind() == prim::Guard ||
-          input->node()->kind() == prim::Constant ||
-          except.count(i) != 0) {
+          input->node()->kind() == prim::Constant || except.count(i) != 0) {
         AT_ASSERT(
             input->node()->kind() != prim::Guard ||
             input->type()->expect<TensorType>());
@@ -159,51 +160,51 @@ struct GuardElimination {
     return all_inputs_guarded;
   }
 
- private:
-  bool removableGuard(Node* n) {
+private:
+  bool removableGuard(Node *n) {
 
     const static auto no_exceptions = std::unordered_set<size_t>{};
-    switch (n->kind()){
-      case aten::add:
-      case aten::sub:
-      case aten::mul:
-      case aten::div:
-      case aten::t:
-      case aten::sigmoid:
-      case aten::tanh:
-      case aten::mm:
-      case aten::min:
-      case aten::max:
-      case aten::type_as:
-      case aten::ge:
-      case aten::gt:
-      case aten::lt:
-      case aten::le:
-      case aten::eq:
-      case aten::ne:
-      case aten::neg:
-      case aten::_grad_sum_to_size:
-      case prim::ConstantChunk:
-      case aten::size:
-        return checkInputs(n, no_exceptions);
-      case aten::cat:
-        //check that the dimension argument is constant
-        return n->input(1)->node()->kind() == prim::Constant &&
-          n->input(0)->node()->kind() == prim::ListConstruct &&
-          // no extra nodes in between aten::cat and prim::ListConstruct
-          n->prev() == n->input(0)->node() &&
-          // check the inputs to prim::ListConstruct (not aten::cat)
-          checkInputs(n->input(0)->node(), no_exceptions);
-      case aten::clamp:
-        //the second and third args do not affect shapes
-        return checkInputs(n, std::unordered_set<size_t>{1, 2});
-      // after some optimizations we might end up with two Guards back-to-back
-      // which case we can remove the one whose input is also prim::Guard
-      case prim::Guard:
-        return true;
-      default:
-        GRAPH_DEBUG("cannot remove ", n->kind().toQualString());
-        return false;
+    switch (n->kind()) {
+    case aten::add:
+    case aten::sub:
+    case aten::mul:
+    case aten::div:
+    case aten::t:
+    case aten::sigmoid:
+    case aten::tanh:
+    case aten::mm:
+    case aten::min:
+    case aten::max:
+    case aten::type_as:
+    case aten::ge:
+    case aten::gt:
+    case aten::lt:
+    case aten::le:
+    case aten::eq:
+    case aten::ne:
+    case aten::neg:
+    case aten::_grad_sum_to_size:
+    case prim::ConstantChunk:
+    case aten::size:
+      return checkInputs(n, no_exceptions);
+    case aten::cat:
+      // check that the dimension argument is constant
+      return n->input(1)->node()->kind() == prim::Constant &&
+             n->input(0)->node()->kind() == prim::ListConstruct &&
+             // no extra nodes in between aten::cat and prim::ListConstruct
+             n->prev() == n->input(0)->node() &&
+             // check the inputs to prim::ListConstruct (not aten::cat)
+             checkInputs(n->input(0)->node(), no_exceptions);
+    case aten::clamp:
+      // the second and third args do not affect shapes
+      return checkInputs(n, std::unordered_set<size_t>{1, 2});
+    // after some optimizations we might end up with two Guards back-to-back
+    // which case we can remove the one whose input is also prim::Guard
+    case prim::Guard:
+      return true;
+    default:
+      GRAPH_DEBUG("cannot remove ", n->kind().toQualString());
+      return false;
     }
   }
 
@@ -220,5 +221,3 @@ void EliminateRedundantGuards(std::shared_ptr<Graph> graph) {
 
 } // namespace jit
 } // namespace torch
-
-

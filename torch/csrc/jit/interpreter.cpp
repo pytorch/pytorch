@@ -229,8 +229,8 @@ struct CanEmitInline {
   }
   bool canInline(Value* v) {
     return v->node()->kind() != prim::Param &&
-        v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
-        v->node()->outputs().size() == 1;
+           v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
+           v->node()->outputs().size() == 1;
   }
 
   Node* previousNonConstant(Node* n) {
@@ -653,8 +653,8 @@ struct CodeImpl {
     TORCH_INTERNAL_ASSERT(bailout_index >= 0);
 
     auto build_bailout_graph = [bailout_index,
-                                unoptimized_graph](Function& func) {
-      
+                                unoptimized_graph](Function &func) {
+
       std::cout << "BailOut built!\n";
       BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
     };
@@ -1005,17 +1005,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case GUARD: {
             auto t = stack.back().toTensor();
-            if (t.defined())
-            {
+            if (t.defined()) {
               auto actual = TensorType::create(stack.back().toTensor());
-              const TypePtr& expected = af.types[inst.X];
+              const TypePtr &expected = af.types[inst.X];
               std::cout << "running guard:\n";
               std::cout << "actual = " << *actual << std::endl;
               std::cout << "expected = " << *expected << std::endl;
               push(stack, *expected == *actual);
-            }
-            else
-            {
+            } else {
               // TODO: comparison should work like a mask and a c-tor
               // should handle undefined tensors
               push(stack, false);
@@ -1026,7 +1023,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             std::cout << "BailOut triggered!\n";
             // multiple outputs should be okay
             af.functions[inst.X]->ensure_defined(/*multiple_output=*/true);
-            const Code& code =
+            const Code &code =
                 af.functions[inst.X]->get_executor(true).getPlanFor(stack).code;
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;

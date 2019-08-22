@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/passes/alias_analysis.h>
 
+#include <sstream>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/utils/memory.h>
-#include <sstream>
 
 namespace torch {
 namespace jit {
@@ -131,9 +131,8 @@ bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
   if (jit_log_level() == JitLoggingLevels::GRAPH_DEBUG &&
       aten::add_ == n->kind()) {
     std::stringstream ss;
-    for (const auto& v : vs)
-    {
-          ss << v->debugName() << ", ";
+    for (const auto &v : vs) {
+      ss << v->debugName() << ", ";
     }
     GRAPH_DEBUG("Live values at a write to ", *n, " : ", ss.str(), "\n");
   }
@@ -245,8 +244,7 @@ std::string AliasDb::toString() const {
     ss << "  ";
     for (const auto value : values) {
 
-      if (indexToElementMap.count(value) == 0)
-      {
+      if (indexToElementMap.count(value) == 0) {
         ss << "undef " << value << ", ";
         continue;
       }
@@ -369,14 +367,13 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::SetAttr:
       return analyzeSetAttr(node);
     case prim::profile:
-      if (node->inputs().size() > 0)
-      {
+      if (node->inputs().size() > 0) {
         makePointerTo(node->output(), node->inputs().at(0));
       }
       return;
     case prim::BailOut:
-      TORCH_INTERNAL_ASSERT(
-          node->inputs().at(0)->node()->kind() == prim::BailoutTemplate);
+      TORCH_INTERNAL_ASSERT(node->inputs().at(0)->node()->kind() ==
+                            prim::BailoutTemplate);
       makePointerTo(node->output(), node->inputs().at(1));
       return;
     case prim::Guard:
@@ -1293,11 +1290,10 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::AutogradAdd,
   };
 
-
-  if (symbol == prim::AutogradAnyNonZero)
-  {
+  if (symbol == prim::AutogradAnyNonZero) {
     std::cout << "in handled" << handled.count(symbol) << std::endl;
-    std::cout << "in purposefully_not_handled" << purposefully_not_handled.count(symbol) << std::endl;
+    std::cout << "in purposefully_not_handled"
+              << purposefully_not_handled.count(symbol) << std::endl;
   }
 
   return handled.count(symbol) || purposefully_not_handled.count(symbol);
@@ -1353,9 +1349,10 @@ void AliasDb::setWildcard(const Value* v) {
     // wildcardIndex_, we should be fine with a linear search
     // each time we hit a wildcard leaf
     eltDebugName = "WILDCARD";
-    for (const auto& ent : wildcardIndex_) {
+    for (const auto &ent : wildcardIndex_) {
       if (ent.second == e) {
-        eltDebugName = std::string("WILDCARD for type ") + typeKindToString(ent.first);
+        eltDebugName =
+            std::string("WILDCARD for type ") + typeKindToString(ent.first);
       }
     }
   } else {

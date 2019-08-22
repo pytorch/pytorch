@@ -1,19 +1,18 @@
-#include <torch/csrc/jit/profiling_graph_executor_impl.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
+#include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/insert_guards.h>
+#include <torch/csrc/jit/passes/lower_grad_of.h>
+#include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/lower_grad_of.h>
-#include <torch/csrc/jit/passes/remove_expands.h>
-#include <torch/csrc/jit/passes/canonicalize_ops.h>
-
+#include <torch/csrc/jit/profiling_graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
@@ -35,7 +34,8 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     : GraphExecutorImplBase(graph), arg_spec_creator_(*this->graph) {}
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
-  std::cout << "in ProfilingGraphExecutorImpl::getPlanFor " << this << std::endl;
+  std::cout << "in ProfilingGraphExecutorImpl::getPlanFor " << this
+            << std::endl;
   if (optimized_plan_) {
     std::cout << "returning optimized_plan for " << this << std::endl;
     return *optimized_plan_;
@@ -47,7 +47,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
     // to lower GradOf
     copy->dump();
     std::cout << "getProfilingMode() = " << getProfilingMode() << std::endl;
-    //runRequiredPasses(copy);
+    // runRequiredPasses(copy);
     LowerGradOf(*copy);
     std::cout << "after LowerGradOf\n";
     copy->dump();
@@ -79,19 +79,21 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   if (needsGradient(copy)) {
     GRAPH_DEBUG("needs grad");
     auto diff_nodes = CreateAutodiffSubgraphs(
-        copy, getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
-    for (Node* dnode : diff_nodes) {
+        copy,
+        getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
+    for (Node *dnode : diff_nodes) {
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
       std::cout << "gradient.f = \n";
       gradient.f->dump();
       runOptimization(gradient.f);
-       // run non diff optimization on the forward graph
+      // run non diff optimization on the forward graph
       runNondiffOptimization(gradient.f);
       packGradient(gradient, dnode);
     }
-    InlineAutodiffSubgraphs(
-        copy, getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
+    InlineAutodiffSubgraphs(copy, getAutodiffSubgraphInlining()
+                                      ? autodiffSubgraphInlineThreshold
+                                      : 1);
   }
   GRAPH_DUMP("InlineAutodiffSubgraphs: ", copy);
   ConstantPropagation(copy);
@@ -112,8 +114,7 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
 
   std::cout << "graph in debugstate\n";
   graph->dump();
-  if (this->pr_)
-  {
+  if (this->pr_) {
     std::cout << "pr_ set\n";
   }
   std::cout << "getDebugState: optimized_plan for " << this << std::endl;

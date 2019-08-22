@@ -10,15 +10,13 @@
 namespace torch {
 namespace jit {
 
-static std::unordered_set<Value*> collectLoopCounts(Node* n) {
+static std::unordered_set<Value *> collectLoopCounts(Node *n) {
 
-std::unordered_set<Value*> loopCounts;
-  Block* it = n->owningBlock();
-  while (it->owningNode())
-  {
+  std::unordered_set<Value *> loopCounts;
+  Block *it = n->owningBlock();
+  while (it->owningNode()) {
     auto outerNode = it->owningNode();
-    if (outerNode->kind() == prim::Loop)
-    {
+    if (outerNode->kind() == prim::Loop) {
       LoopView lv(outerNode);
       std::cout << "adding a loop count " << lv.currentTripCount() << std::endl;
       loopCounts.insert(lv.currentTripCount());
@@ -67,8 +65,7 @@ struct BailOutGraphBuilderForNode {
     }
   }
 
-  Value* getInputForValue(Value* v)
-  {
+  Value *getInputForValue(Value *v) {
     TORCH_INTERNAL_ASSERT(this->old_to_new_.count(v));
     return this->old_to_new_[v];
   }
@@ -142,21 +139,20 @@ struct BailOutGraphBuilderForNode {
     buildBailOutBlockFrom(outer_node->next());
   }
 
-  void mapLoopCounts(Node* n) {
+  void mapLoopCounts(Node *n) {
 
     auto loopCounts = collectLoopCounts(n);
-    for (auto lc : loopCounts)
-    {
-      std::cout << "adding new input for a loop cout " << lc->debugName() << std::endl;
+    for (auto lc : loopCounts) {
+      std::cout << "adding new input for a loop cout " << lc->debugName()
+                << std::endl;
       getOrAddInputForValue(lc);
     }
   }
 
   std::shared_ptr<Graph> buildBailOutGraphFrom(Node* n) {
 
-
-    // add graph inputs for guard's input 
-    // and loop counts this node is in 
+    // add graph inputs for guard's input
+    // and loop counts this node is in
     // to make sure we can line them up properly
     // with arguments to this BailOut node.
 
@@ -242,9 +238,6 @@ struct BailOutInserter {
     }
   }
 
-
-
-
   // Inserts prim::BailOut nodes for every prim::Guard
   // Each BailOut point takes the set of inputs live
   // at that particular execution point.
@@ -265,11 +258,10 @@ struct BailOutInserter {
         // pass loop counts in the same order
         // a bailout graph expects them
         auto loopCounts = collectLoopCounts(*it);
-        for (auto lc : loopCounts)
-        {
+        for (auto lc : loopCounts) {
           bailout_node->addInput(lc);
         }
-        
+
         for (auto li : live_inputs) {
           // Guarded inputs have already been added
           // BailOutGraphBuilder materializes constants into a bailout
@@ -277,7 +269,8 @@ struct BailOutInserter {
           // so there's no need to add them to inputs
           // Also, skip loop counts as they are added in advance right after
           // the guarded input
-          if (li->node()->kind() == prim::Constant || li == it->input() || loopCounts.count(li) != 0) {
+          if (li->node()->kind() == prim::Constant || li == it->input() ||
+              loopCounts.count(li) != 0) {
             continue;
           }
 

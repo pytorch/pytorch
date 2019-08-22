@@ -1,14 +1,14 @@
-#include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/graph_executor_impl.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/pass_manager.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
@@ -326,14 +326,11 @@ struct DifferentiableGraphBackward : public autograd::Node {
 // to the output Variables if present.
 struct DifferentiableGraphOp {
   DifferentiableGraphOp(Gradient grad)
-      : f(grad.f),
-        grad(std::move(grad)),
-        grad_executor(this->grad.df),
+      : f(grad.f), grad(std::move(grad)), grad_executor(this->grad.df),
         num_inputs(this->grad.f->inputs().size()),
-        num_outputs(this->grad.f->outputs().size()) 
-        {
-          std::cout << "created grad_executor " << &this->grad_executor << std::endl;
-        }
+        num_outputs(this->grad.f->outputs().size()) {
+    std::cout << "created grad_executor " << &this->grad_executor << std::endl;
+  }
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
   int operator()(Stack& stack) const {
@@ -695,36 +692,25 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
   if (mayIntroduceGradient(graph->block()))
     return true;
 
-
-  if (getProfilingMode())
-  {
+  if (getProfilingMode()) {
     std::cout << "in profiling mode\n";
-    for (const Value* input : graph->inputs())
-    {
-      for (const auto& use: input->uses())
-      {
-        if (use.user->kind() == prim::BailOut)
-        {
+    for (const Value *input : graph->inputs()) {
+      for (const auto &use : input->uses()) {
+        if (use.user->kind() == prim::BailOut) {
           auto ptt = use.user->output()->type()->expect<TensorType>();
-          if (ptt->requiresGrad() && *ptt->requiresGrad())
-          {
+          if (ptt->requiresGrad() && *ptt->requiresGrad()) {
             std::cout << "requires grad true \n";
             return true;
           }
         }
       }
     }
-  }
-  else
-  {
-    for (const Value* input : graph->inputs()) {
-    if (input->type()->requires_grad())
-      return true;
+  } else {
+    for (const Value *input : graph->inputs()) {
+      if (input->type()->requires_grad())
+        return true;
     }
   }
-
-
-
 
   return false;
 }
