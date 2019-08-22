@@ -96,9 +96,10 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   }
 
   // Event-related functions
+  // Note: hipEventCreateWithFlags should be called on the same device as
+  //  the recording stream's device.
   void createEvent(
     hipEvent_t* hip_event,
-    const DeviceIndex device_index,
     const EventFlag flag) const {
     // Maps PyTorch's Event::Flag to HIP flag
     auto hip_flag = hipEventDefault;
@@ -153,7 +154,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     setDevice(stream.device());
 
     // Creates the event (lazily)
-    if (!hip_event) createEvent(&hip_event, stream.device_index(), flag);
+    if (!hip_event) createEvent(&hip_event, flag);
     C10_HIP_CHECK(hipEventRecord(hip_event, hip_stream));
     // Makes the void* point to the (possibly just allocated) HIP event
     *event = hip_event;

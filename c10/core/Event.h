@@ -8,6 +8,15 @@ namespace c10 {
 /**
  * A backend-generic movable, not copyable, not thread-safe event.
  *
+ * The design of this event follows that of CUDA and HIP events. These events
+ * are recorded and waited on by streams and can be rerecorded to,
+ * each rerecording essentially creating a new version of the event.
+ * For example, if (in CPU time), stream X is asked to record E,
+ * stream Y waits on E, and stream X is asked to record E again, then Y will
+ * wait for X to finish the first call to record and not the second, because
+ * it's waiting on the first version of event E, not the second.
+ * Querying an event only returns the status of its most recent version.
+ *
  * Backend-generic events are implemented by this class and
  * impl::InlineEvent. In addition to these events there are also
  * some backend-specific events, like ATen's CUDAEvent. Each of these
@@ -66,12 +75,11 @@ struct Event final {
   }
 
 /**
- * Marks the event as not recorded and enqueues the event in the
- * stream's work queue. When the stream processes the event either:
- *  (1) the event is marked as recorded
- *  (2) if the event was enqueued again, nothing happens
- * Put another way, events reflect only the most recent call to record.
- */
+ * Increments the event's version and enqueues a job with this version
+ * in the stream's work queue. When the stream process that job
+ * it nofifies all streams waiting on / blocked by that version of the
+ * event to continue and marks that version as recorded.
+ * */
   void record(const Stream& stream) {
     impl_.record(stream);
   }
@@ -79,9 +87,10 @@ struct Event final {
 /**
  * Does nothing if the event has not been scheduled to be recorded.
  * If the event was previously enqueued to be recorded, a command
- * to wait for the event is inserted in the stream's work queue.
+ * to wait for the version of the event that exists at the time of this call
+ * is inserted in the stream's work queue.
  * When the stream reaches this command it will stop processing
- * additional commands until the event is marked as recorded.
+ * additional commands until that version of the event is marked as recorded.
  */
   void block(const Stream& stream) const {
     impl_.block(stream);
@@ -90,7 +99,7 @@ struct Event final {
 /**
  * Returns true if (and only if)
  *  (1) the event has never been scheduled to be recorded
- *  (2) is marked as recorded.
+ *  (2) the current version is marked as recorded.
  * Returns false otherwise.
  */
   bool query() const {

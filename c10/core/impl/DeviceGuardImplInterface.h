@@ -117,12 +117,11 @@ struct C10_API DeviceGuardImplInterface {
     const DeviceIndex device_index) const noexcept { }
 
 /**
- * Marks the event as not recorded and enqueues the event in the
- * stream's work queue. When the stream processes the event either:
- *  (1) the event is marked as recorded
- *  (2) if the event was enqueued again, nothing happens
- * Put another way, events reflect only the most recent call to record.
- */
+ * Increments the event's version and enqueues a job with this version
+ * in the stream's work queue. When the stream process that job
+ * it nofifies all streams waiting on / blocked by that version of the
+ * event to continue and marks that version as recorded.
+ * */
   virtual void record(
     void** event,
     const Stream& stream,
@@ -134,9 +133,10 @@ struct C10_API DeviceGuardImplInterface {
 /**
  * Does nothing if the event has not been scheduled to be recorded.
  * If the event was previously enqueued to be recorded, a command
- * to wait for the event is inserted in the stream's work queue.
+ * to wait for the version of the event that exists at the time of this call
+ * is inserted in the stream's work queue.
  * When the stream reaches this command it will stop processing
- * additional commands until the event is marked as recorded.
+ * additional commands until that version of the event is marked as recorded.
  */
   virtual void block(
     void* event,
@@ -147,7 +147,7 @@ struct C10_API DeviceGuardImplInterface {
 /**
  * Returns true if (and only if)
  *  (1) the event has never been scheduled to be recorded
- *  (2) is marked as recorded.
+ *  (2) the current version is marked as recorded.
  * Returns false otherwise.
  */
   virtual bool queryEvent(void* event) const {

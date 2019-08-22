@@ -64,7 +64,6 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   // Event-related functions
   void createEvent(
     cudaEvent_t* cuda_event,
-    const DeviceIndex device_index,
     const EventFlag flag) const {
     // Maps PyTorch's Event::Flag to CUDA flag
     auto cuda_flag = cudaEventDefault;
@@ -116,7 +115,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     setDevice(stream.device());
 
     // Creates the event (lazily)
-    if (!cuda_event) createEvent(&cuda_event, stream.device_index(), flag);
+    if (!cuda_event) createEvent(&cuda_event, flag);
     C10_CUDA_CHECK(cudaEventRecord(cuda_event, cuda_stream));
     // Makes the void* point to the (possibly just allocated) CUDA event
     *event = cuda_event;
