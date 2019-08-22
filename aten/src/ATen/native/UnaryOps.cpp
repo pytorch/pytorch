@@ -63,6 +63,10 @@ Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor ceil(const Tensor& self) { return unary_op_impl(self, ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, ceil_out); }
 
+Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, round_stub); }
+Tensor round(const Tensor& self) { return unary_op_impl(self, round_out); }
+Tensor& round_(Tensor& self) { return unary_op_impl_(self, round_out); }
+
 Tensor& neg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
