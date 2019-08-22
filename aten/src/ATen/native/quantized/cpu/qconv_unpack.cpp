@@ -62,7 +62,7 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
         device(kCPU).dtype(kQInt8));
    }
     int8_t* unpacked_weights_p =
-        reinterpret_cast<int8_t*>(unpacked_weights.data<c10::qint8>());
+        reinterpret_cast<int8_t*>(unpacked_weights.data_ptr<c10::qint8>());
 
     packed_weights_p->unpack(unpacked_weights_p);
 
