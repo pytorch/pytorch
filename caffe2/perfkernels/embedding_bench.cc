@@ -11,6 +11,7 @@
 #include <immintrin.h>
 
 #include "embedding_lookup.h"
+#include "embedding_lookup_idx.h"
 
 using namespace std;
 
@@ -83,9 +84,9 @@ int main(int argc, const char* argv[]) {
   cout << endl;
 
   // Calculate offsets
-  vector<int> offsets(batch_size);
-  int cumsum = 0;
-  for (int i = 0; i < batch_size; ++i) {
+  vector<int64_t> offsets(batch_size);
+  int64_t cumsum = 0;
+  for (int64_t i = 0; i < batch_size; ++i) {
     offsets[i] = cumsum;
     cumsum += lengths[i];
   }
@@ -175,8 +176,7 @@ int main(int argc, const char* argv[]) {
             has_weight ? weights.data() : nullptr,
             nullptr,
             false,
-            output.data(), /* output_size */
-            true); /* use_lengths */
+            output.data()); /* output_size */
 
         t_end = chrono::system_clock::now();
         if (i >= NUM_WARMUP) {
@@ -215,7 +215,9 @@ int main(int argc, const char* argv[]) {
 
         t_begin = chrono::system_clock::now();
 
-        caffe2::EmbeddingLookup(
+        // Calculating the Offsets!
+
+        caffe2::EmbeddingLookupIdx(
             embedding_dim /* block_size */,
             batch_size /* output_size */,
             lengths_sum /* index_size */,
@@ -226,8 +228,7 @@ int main(int argc, const char* argv[]) {
             has_weight ? weights.data() : nullptr,
             nullptr,
             false,
-            output.data(), /* output_size */
-            false); /* use_lengths */
+            output.data()); /* output_size */
 
         t_end = chrono::system_clock::now();
         if (i >= NUM_WARMUP) {
