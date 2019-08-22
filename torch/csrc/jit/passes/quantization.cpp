@@ -288,11 +288,11 @@ void quantizeBias(const script::Module& module, Value* v) {
   }
 }
 
-void quantizeValue(const script::Module& module,
-                   Value* v,
-                   std::vector<std::string>& observer_modules_to_remove,
-                   std::vector<Node*>& nodes_to_destroy,
-                   bool insert_after=true) {
+void quantizeTensor(const script::Module& module,
+                    Value* v,
+                    std::vector<std::string>& observer_modules_to_remove,
+                    std::vector<Node*>& nodes_to_destroy,
+                    bool insert_after=true) {
   std::string observer_module_name;
   c10::optional<script::Module> observer_module;
   std::tie(observer_module_name, observer_module) = findObserverModule(module, v);
@@ -384,24 +384,19 @@ script::Module InsertQuantDeQuant(
     }
   }
 
-  // quantize bias first
-  for (Value* v : values_to_observe) {
-    if (v->type()->isSubtypeOf(TensorType::get())) {
-      if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
-        quantizeBias(module, v);
-      }
-    }
-  }
-
   std::vector<std::string> observer_modules_to_remove;
   std::vector<Node*> nodes_to_destroy;
 
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      c10::optional<script::Module> observer_module;
-      std::tie(std::ignore, observer_module) = findObserverModule(module, v);
-      if (observer_module) {
-        quantizeValue(module, v, observer_modules_to_remove, nodes_to_destroy);
+      if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
+        quantizeBias(module, v);
+      } else {
+        c10::optional<script::Module> observer_module;
+        std::tie(std::ignore, observer_module) = findObserverModule(module, v);
+        if (observer_module) {
+          quantizeTensor(module, v, observer_modules_to_remove, nodes_to_destroy);
+        }
       }
     }
   }
@@ -411,7 +406,7 @@ script::Module InsertQuantDeQuant(
       c10::optional<script::Module> observer_module;
       std::tie(std::ignore, observer_module) = findObserverModule(module, v);
       if (observer_module) {
-        quantizeValue(module, v, observer_modules_to_remove, nodes_to_destroy, false);
+        quantizeTensor(module, v, observer_modules_to_remove, nodes_to_destroy, false);
       }
     }
   }
