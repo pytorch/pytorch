@@ -229,6 +229,9 @@ struct Environment {
     return std::make_shared<SimpleValue>(load->output());
   }
 
+  // note: type is not always the same as v->type(), e.g.
+  // type: Optional[Tensor]
+  // v->type(): Tensor
   void insertStore(
       const std::string& name,
       const SourceRange& loc,

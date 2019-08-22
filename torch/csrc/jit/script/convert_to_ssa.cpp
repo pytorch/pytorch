@@ -119,7 +119,7 @@ struct ControlFlowLoadStores {
 
     for (const auto& name : loop_vars->definedVariables()) {
       // if the variable local to the loop body, then
-      // we do not need a loop carried variabl for it
+      // we do not need a loop carried variable for it
       auto parent_type = environment_stack->findInAnyFrame(name);
       if (!parent_type) {
         continue;
