@@ -464,7 +464,13 @@ struct CodeImpl {
 
   void emitOperator(Node* node) {
     emitLoadInputs(node->inputs());
-    insertInstruction(OP, operator_table_.size());
+    uint64_t Nn = 0;
+    if (node->kind() == prim::GetAttr) {
+      const auto type = node->input()->type()->expect<ClassType>();
+      const auto& field = node->s(attr::name);
+      Nn = type->getAttributeSlot(field);
+    }
+    insertInstruction(OP, operator_table_.size(), Nn);
     operator_table_.emplace_back(getOperation(node));
     // Looks like all overload_names are empty? If the name is not unique,
     // use inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
