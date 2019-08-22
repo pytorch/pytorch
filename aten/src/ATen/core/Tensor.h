@@ -365,6 +365,15 @@ class CAFFE2_API Tensor {
   //Tensor * add(Tensor & b);
   void backward(const Tensor & gradient={}, bool keep_graph=false, bool create_graph=false) const;
   void set_data(const Tensor & new_data) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor & names_(c10::optional<DimnameList> names) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor view_names(c10::optional<DimnameList> names) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor align_to(DimnameList names) const;
+  #endif
   Tensor abs() const;
   Tensor & abs_() const;
   Tensor acos() const;
@@ -476,6 +485,9 @@ class CAFFE2_API Tensor {
   Tensor & log2_() const;
   Tensor logdet() const;
   Tensor log_softmax(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor log_softmax(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor logsumexp(IntArrayRef dim, bool keepdim=false) const;
   Tensor matmul(const Tensor & other) const;
   Tensor matrix_power(int64_t n) const;
@@ -521,6 +533,9 @@ class CAFFE2_API Tensor {
   Tensor hardshrink_backward(const Tensor & grad_out, Scalar lambd) const;
   Tensor rsqrt() const;
   Tensor & rsqrt_() const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor select(Dimname dim, int64_t index) const;
+  #endif
   Tensor select(int64_t dim, int64_t index) const;
   Tensor sigmoid() const;
   Tensor & sigmoid_() const;
@@ -531,10 +546,16 @@ class CAFFE2_API Tensor {
   Tensor detach() const;
   Tensor & detach_() const;
   int64_t size(int64_t dim) const;
+  #ifdef BUILD_NAMEDTENSOR
+  int64_t size(Dimname dim) const;
+  #endif
   Tensor slice(int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) const;
   std::tuple<Tensor,Tensor> slogdet() const;
   Tensor smm(const Tensor & mat2) const;
   Tensor softmax(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor softmax(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   std::vector<Tensor> split(int64_t split_size, int64_t dim=0) const;
   std::vector<Tensor> split_with_sizes(IntArrayRef split_sizes, int64_t dim=0) const;
   Tensor squeeze() const;
@@ -544,8 +565,14 @@ class CAFFE2_API Tensor {
   Tensor sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
   Tensor stft(int64_t n_fft, c10::optional<int64_t> hop_length=c10::nullopt, c10::optional<int64_t> win_length=c10::nullopt, const Tensor & window={}, bool normalized=false, bool onesided=true) const;
   int64_t stride(int64_t dim) const;
+  #ifdef BUILD_NAMEDTENSOR
+  int64_t stride(Dimname dim) const;
+  #endif
   Tensor sum(c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor sum(IntArrayRef dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor sum(DimnameList dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor sum_to_size(IntArrayRef size) const;
   Tensor sqrt() const;
   Tensor & sqrt_() const;
@@ -553,6 +580,9 @@ class CAFFE2_API Tensor {
   Tensor std(IntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
   Tensor prod(c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor prod(int64_t dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor prod(Dimname dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor t() const;
   Tensor & t_() const;
   Tensor tan() const;
@@ -560,6 +590,9 @@ class CAFFE2_API Tensor {
   Tensor tanh() const;
   Tensor & tanh_() const;
   Tensor transpose(int64_t dim0, int64_t dim1) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor transpose(Dimname dim0, Dimname dim1) const;
+  #endif
   Tensor & transpose_(int64_t dim0, int64_t dim1) const;
   Tensor flip(IntArrayRef dims) const;
   Tensor roll(IntArrayRef shifts, IntArrayRef dims={}) const;
@@ -682,7 +715,6 @@ class CAFFE2_API Tensor {
   Tensor & triu_(int64_t diagonal=0) const;
   Tensor & digamma_() const;
   Tensor & polygamma_(int64_t n) const;
-  Tensor & erfinv_() const;
   Tensor & renorm_(Scalar p, int64_t dim, Scalar maxnorm) const;
   Tensor & pow_(Scalar exponent) const;
   Tensor & pow_(const Tensor & exponent) const;
@@ -750,6 +782,7 @@ class CAFFE2_API Tensor {
   Tensor digamma() const;
   Tensor polygamma(int64_t n) const;
   Tensor erfinv() const;
+  Tensor & erfinv_() const;
   Tensor dist(const Tensor & other, Scalar p=2) const;
   Tensor atan2(const Tensor & other) const;
   Tensor lerp(const Tensor & end, Scalar weight) const;
