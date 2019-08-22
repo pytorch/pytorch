@@ -18,6 +18,6 @@ class _BaseQuantizedModule(object):
             type(mod) + " doesn't have an observer"
         scale, zero_point = mod.observer.calculate_qparams()[:2]
         new_mod = cls()
-        new_mod.scale = scale
-        new_mod.zero_point = zero_point
+        new_mod.scale = float(scale)
+        new_mod.zero_point = int(zero_point)
         return new_mod

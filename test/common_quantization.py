@@ -440,41 +440,16 @@ class ModelForFusion(nn.Module):
         return x
 
 
-class DummyObserver(torch.nn.Module):
-    def calculate_qparams(self):
-        return 1.0, 0
-
-    def forward(self, x):
-        return x
-
-
-class ModForWrapping(torch.nn.Module):
+class ModelForWrapping(torch.nn.Module):
     def __init__(self, quantized=False):
-        super(ModForWrapping, self).__init__()
+        super(ModelForWrapping, self).__init__()
         self.qconfig = default_qconfig
-        if quantized:
-            self.mycat = nnq.QFunctional()
-            self.myadd = nnq.QFunctional()
-            self.my_intrinsic_add = nni.quantized.modules.AddReLU()
-        else:
-            self.mycat = nnq.FloatFunctional()
-            self.myadd = nnq.FloatFunctional()
-            self.my_intrinsic_add = nni.AddReLU()
-
-            self.mycat.observer = DummyObserver()
-            self.myadd.observer = DummyObserver()
-            self.my_intrinsic_add.observer = DummyObserver()
+        self.mycat = nnq.FloatFunctional()
+        self.myadd = nnq.FloatFunctional()
+        self.my_intrinsic_add = nni.AddReLU()
 
     def forward(self, x):
         y = self.mycat.cat([x, x, x])
         z = self.myadd.add(y, y)
         z = self.my_intrinsic_add(z, z)
         return z
-
-    @classmethod
-    def from_float(cls, mod):
-        new_mod = cls(quantized=True)
-        new_mod.mycat = new_mod.mycat.from_float(mod.mycat)
-        new_mod.myadd = new_mod.myadd.from_float(mod.myadd)
-        new_mod.my_intrinsic_add = new_mod.my_intrinsic_add.from_float(mod.my_intrinsic_add)
-        return new_mod
