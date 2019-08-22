@@ -3,26 +3,36 @@ producer_name: "pytorch"
 producer_version: "1.2"
 graph {
   node {
-    input: "0"
     input: "1"
     output: "2"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 1
+      type: INT
+    }
+  }
+  node {
+    input: "0"
+    input: "2"
+    output: "3"
     op_type: "Div"
   }
   node {
-    input: "2"
-    output: "3"
+    input: "3"
+    output: "4"
     op_type: "Floor"
   }
   node {
-    input: "3"
-    input: "1"
-    output: "4"
+    input: "4"
+    input: "2"
+    output: "5"
     op_type: "Mul"
   }
   node {
     input: "0"
-    input: "4"
-    output: "5"
+    input: "5"
+    output: "6"
     op_type: "Sub"
   }
   name: "torch-jit-export"
@@ -65,7 +75,7 @@ graph {
     }
   }
   output {
-    name: "5"
+    name: "6"
     type {
       tensor_type {
         elem_type: 1
