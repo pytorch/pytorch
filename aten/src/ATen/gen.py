@@ -375,8 +375,8 @@ def cmpfiles_with_eol_normalization(a, b, names):
                 sys.stdout.write('-' * 80 + '\n')
                 sys.stdout.write('x={}, a={}, b={}\n'.format(x, a, b))
                 for i, line in enumerate(list(d.compare(ax.splitlines(keepends=True), bx.splitlines(keepends=True)))):
-                    if line[:2] != '  ':
-                        sys.stdout.write('{:3d}: {}\n'.format(i, line))
+                    if line[:2] != '  ' or i < 20:
+                        sys.stdout.write('{:5d}: {}\n'.format(i, line))
                 sys.stdout.write('-' * 80 + '\n')
         except OSError:
             results[2].append(x)
