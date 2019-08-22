@@ -94,10 +94,7 @@ __device__ static inline scalar_t reduce_agg(scalar_t agg) {
 
   for(int s = 1; s < blockDim.x; s *= 2) {
     if (tid % (2 * s) == 0) {
-      if (shared[tid + s] > shared[tid]) {
-        shared[tid] = shared[tid + s];
-      }
-      //F::agg(shared[tid], shared[tid + s]);
+      F::agg(shared[tid], shared[tid + s]);
     }
     __syncthreads();
   }
@@ -135,7 +132,7 @@ template <typename scalar_t, typename F>
 __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const scalar_t * grad, const scalar_t * x1, const scalar_t * x2, const scalar_t * dist, int64_t gs,
                                                        const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m, const int64_t count, const int64_t r_size, const int64_t l1_size, const int64_t l2_size) {
   const int y = blockIdx.y * blockDim.y + threadIdx.y;
-  if (y >= (count / m)) {
+  if (y >= count) {
     return;
   }
   const int l = y / r_size;
@@ -314,8 +311,8 @@ void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
 }
 
 void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& dist) {
+  result.fill_(0);
   if (p == 0.0 || grad.numel() == 0 || x1.numel() == 0 || x2.numel() == 0) {
-    result.fill_(0);
     return;
   }
 
@@ -334,12 +331,12 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const dim3 grid(grid_x, grid_y);
   const dim3 block(block_x, block_y);
 
-  const int64_t count = dist.numel();
+  const int64_t count = r1 * r2 * d;
   const int64_t r_size = r1 * r2;
   const int64_t l1_size = r1 * m;
   const int64_t l2_size = r2 * m;
 
-  Tensor buffer = (d > 1) ? at::empty({d, r2, r1, m}, result.options()) : at::empty({r2, r1, m}, result.options());
+  Tensor buffer = (x1.dim() > 2) ? at::empty({d, r2, r1, m}, result.options()) : at::empty({r2, r1, m}, result.options());
   AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_cuda_backward", [&] {
     if (p == 1.0) {
       cdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(-1), p, r1, r2, m, count, r_size, l1_size, l2_size);
@@ -355,7 +352,7 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   });
   AT_CUDA_CHECK(cudaGetLastError());
 
-  if (d > 1) {
+  if (x1.dim() > 2) {
     at::sum_out(result, buffer, 1);
   } else {
     at::sum_out(result, buffer, 0);
