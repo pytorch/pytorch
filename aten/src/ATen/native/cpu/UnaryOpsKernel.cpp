@@ -16,6 +16,7 @@
 #include <ATen/native/UnaryOps.h>
 
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/Math.h>
 
 
 #if AT_MKL_ENABLED()
@@ -116,13 +117,6 @@ static void neg_kernel(TensorIterator& iter) {
   });
 }
 
-static void erfinv_kernel(TensorIterator& iter) {
-  // This method must not be called by dispatcher,
-  // because CPU-device mapped to another method in native-functions.yaml
-  // It's a placeholder for CPU kernel that should be moved from TH to ATen
-  AT_ERROR("erfinv_kernel is not implemented");
-}
-
 static void sinh_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel(
@@ -136,6 +130,14 @@ static void cosh_kernel(TensorIterator& iter) {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::cosh(a); });
+  });
+}
+
+static void erfinv_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "erfinv_cpu", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return calc_erfinv(a); });
   });
 }
 
@@ -165,8 +167,8 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
       tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
     }
 
-    scalar_t *self_ptr = self.data<scalar_t>();
-    int *sample_int_ptr = tmp_int_tensor.data<int>();
+    scalar_t *self_ptr = self.data_ptr<scalar_t>();
+    int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
 
     auto sample = [&](int64_t begin, int64_t end) {
       int64_t len = end - begin;

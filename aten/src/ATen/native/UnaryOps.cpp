@@ -209,23 +209,6 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
     return result;                                              \
   }
 
-#define IMPLEMENT_UNARY_OP_VEC_CUDA(op)                          \
-  Tensor op(const Tensor& self) {                                \
-    Tensor result = at::empty({0}, self.options());              \
-    at::op##_out(result, self);                                  \
-    return result;                                               \
-  }                                                              \
-  Tensor& _##op##__cuda(Tensor& self) {                          \
-    return at::op##_out(self, self);                             \
-  }                                                              \
-  Tensor& _##op##_out_cuda(Tensor& result, const Tensor& self) { \
-    checkBackend(#op, result, Backend::CUDA);                    \
-    auto iter = TensorIterator::unary_op(result, self,           \
-      /*check_mem_overlap=*/true);                               \
-    op##_stub(iter.device_type(), iter);                         \
-    return result;                                               \
-  }
-
 IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
@@ -235,6 +218,7 @@ IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
+IMPLEMENT_UNARY_OP_VEC(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(expm1)
 IMPLEMENT_UNARY_OP_VEC(floor)
@@ -253,8 +237,6 @@ IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
-
-IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);

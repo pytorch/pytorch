@@ -1123,6 +1123,8 @@
 [[
   name: _th_topk
   cname: topk
+  backends:
+    - CUDA
   variants:
     - function
   return: argument 0,1
@@ -1497,33 +1499,6 @@
       output: True
     - THTensor* self
 ]]
-[[
-  name: _th_erfinv_
-  types:
-    - floating_point
-  backends:
-    - CPU
-  cname: erfinv
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: _th_erfinv
-  cname: erfinv
-  types:
-    - floating_point
-  backends:
-    - CPU
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
 ]]
 [[
   name: _th_sqrt

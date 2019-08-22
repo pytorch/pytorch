@@ -3,9 +3,16 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import numpy as np
 
 import torch
+import io
 
 from common_utils import TestCase, run_tests
 import tempfile
+
+class Foo(torch.nn.Module):
+    def __init__(self):
+        super(Foo, self).__init__()
+        self.qscheme = torch.per_tensor_symmetric
+
 
 class TestQuantizedTensor(TestCase):
     def test_qtensor(self):
@@ -247,6 +254,17 @@ class TestQuantizedTensor(TestCase):
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         c = b.reshape(1, 4, 2, 3)
         self.assertEqual(b, c.reshape(1, 3, 2, 4))
+
+    def test_qscheme_pickle(self):
+
+        f = Foo()
+        buf = io.BytesIO()
+        torch.save(f, buf)
+
+        buf.seek(0)
+        f2 = torch.load(buf)
+
+        self.assertTrue(f2.qscheme == torch.per_tensor_symmetric)
 
 if __name__ == "__main__":
     run_tests()
