@@ -13277,7 +13277,7 @@ a")
     def test_padding_same_overload(self):
         class W(torch.nn.Module):
             def __init__(self):
-                super().__init__()
+                super(W, self).__init__()
                 self.pool = nn.MaxPool1d(2, stride=2, return_indices=True)
                 self.unpool = nn.MaxUnpool1d(2, stride=2)
                 self.layer = nn.Conv1d(10, 3, 3, padding="same")
