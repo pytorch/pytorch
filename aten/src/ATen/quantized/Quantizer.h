@@ -141,13 +141,13 @@ struct CAFFE2_API PerTensorSymmetricQuantizer : public SymmetricQuantizer {
   double scale_{1.0};
 
   bool equalTo(QuantizerPtr other) override {
-    if (auto* other_per_tensor_sym =
-            dynamic_cast<PerTensorSymmetricQuantizer*>(other.get())) {
-      return qscheme() == other_per_tensor_sym->qscheme() &&
-          scalar_type() == other_per_tensor_sym->scalar_type() &&
-          scale_ == other_per_tensor_sym->scale_;
+    if (!other.get() || other->qscheme() != kPerTensorSymmetric) {
+      return false;
     }
-    return false;
+    auto* other_per_tensor_sym =
+        static_cast<PerTensorSymmetricQuantizer*>(other.get());
+    return scalar_type() == other_per_tensor_sym->scalar_type() &&
+        scale_ == other_per_tensor_sym->scale_;
   }
 };
 
@@ -181,14 +181,14 @@ struct CAFFE2_API PerChannelSymmetricQuantizer : public SymmetricQuantizer {
   }
 
   bool equalTo(QuantizerPtr other) override {
-    if (auto* other_per_channel_sym =
-            dynamic_cast<PerChannelSymmetricQuantizer*>(other.get())) {
-      return qscheme() == other_per_channel_sym->qscheme() &&
-          scalar_type() == other_per_channel_sym->scalar_type() &&
-          scales() == other_per_channel_sym->scales() &&
-          axis() == other_per_channel_sym->axis();
+    if (!other.get() || other->qscheme() != kPerChannelSymmetric) {
+      return false;
     }
-    return false;
+    auto* other_per_channel_sym =
+        static_cast<PerChannelSymmetricQuantizer*>(other.get());
+    return scalar_type() == other_per_channel_sym->scalar_type() &&
+        scales() == other_per_channel_sym->scales() &&
+        axis() == other_per_channel_sym->axis();
   }
 
  private:
@@ -218,14 +218,14 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
   }
 
   bool equalTo(QuantizerPtr other) override {
-    if (auto* other_per_tensor_affine =
-            dynamic_cast<PerTensorAffineQuantizer*>(other.get())) {
-      return qscheme() == other_per_tensor_affine->qscheme() &&
-          scalar_type() == other_per_tensor_affine->scalar_type() &&
-          scale() == other_per_tensor_affine->scale() &&
-          zero_point() == other_per_tensor_affine->zero_point();
+    if (!other.get() || other->qscheme() != kPerTensorAffine) {
+      return false;
     }
-    return false;
+    auto* other_per_tensor_affine =
+        static_cast<PerTensorAffineQuantizer*>(other.get());
+    return scalar_type() == other_per_tensor_affine->scalar_type() &&
+        scale() == other_per_tensor_affine->scale() &&
+        zero_point() == other_per_tensor_affine->zero_point();
   }
 
  private:
@@ -270,15 +270,15 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
   Tensor dequantize(Tensor tensor) override;
 
   bool equalTo(QuantizerPtr other) override {
-    if (auto* other_per_channel_affine =
-            dynamic_cast<PerChannelAffineQuantizer*>(other.get())) {
-      return qscheme() == other_per_channel_affine->qscheme() &&
-          scalar_type() == other_per_channel_affine->scalar_type() &&
-          scales() == other_per_channel_affine->scales() &&
-          zero_points() == other_per_channel_affine->zero_points() &&
-          axis() == other_per_channel_affine->axis();
+    if (!other.get() || other->qscheme() != kPerChannelAffine) {
+      return false;
     }
-    return false;
+    auto* other_per_channel_affine =
+        static_cast<PerChannelAffineQuantizer*>(other.get());
+    return scalar_type() == other_per_channel_affine->scalar_type() &&
+        scales() == other_per_channel_affine->scales() &&
+        zero_points() == other_per_channel_affine->zero_points() &&
+        axis() == other_per_channel_affine->axis();
   }
 
  private:
