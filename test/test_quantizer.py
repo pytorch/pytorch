@@ -4,7 +4,6 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch.jit
-from torch.jit import ScriptModule
 from torch._jit_internal import Optional
 import torch.nn as nn
 import torch.nn.functional as F
@@ -293,23 +292,24 @@ class QuantizerTestCase(TestCase):
 
         ScriptedObserver = torch.jit.script(Observer())
         ScriptedWeightObserver = torch.jit.script(WeightObserver())
-        print('--------- 1. Prepare Quant -------------')
+        print('--------- 1. Prepare Quant --------')
         script_module._c = torch._C._jit_pass_prepare_quant(script_module._c,
                                                             "forward",
                                                             ScriptedObserver._c, ScriptedWeightObserver._c)
 
         # Run ScriptM Model and Collect statistics
-        print('--------- 2. Calibration -------------')
+        print('--------- 2. Calibration ----------')
         get_forward(script_module)(data[0][0])
 
         # Insert quantize and dequantize calls
-        print('--------- 3. Convert -------------')
+        print('--------- 3. Convert --------------')
         script_module._c = torch._C._jit_pass_insert_quant_dequant(script_module._c, "forward")
         # Note that observer modules are not removed right now
-        print(script_module._c._get_modules())
+        # print(script_module._c._get_modules())
         # torch._C._jit_pass_custom_pattern_based_rewrite_graph()
-        print('--------- 4. Fusion -------------')
+        print('--------- 4. Fusion ---------------')
         torch._C._jit_pass_quant_fusion(script_module._c._get_method('forward').graph)
+        get_forward(script_module)(data[0][0])
         print(get_forward(script_module).code)
         eager_result = quantized_eager_module(data[0][0])
         script_result = get_forward(script_module)(data[0][0])

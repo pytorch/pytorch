@@ -677,12 +677,12 @@ TORCH_API script::Module InsertObservers(
   return input_module;
 }
 
-Node* insertQuantDeQuantCall(Value* v, IValue qparams, at::ScalarType t, bool after=true) {
+Node* insertQuantDeQuantCall(Value* v, const IValue& qparams, at::ScalarType t, bool insert_after=true) {
   Graph* g = v->node()->owningGraph();
   Node* quant = createQuantNode(v, g);
   Node* intrepr = createIntReprNode(v, g);
   Node* dequant = createDeQuantNode(v, g);
-  Node* insert_point = after ? v->node() : *g->nodes().begin();
+  Node* insert_point = insert_after ? v->node() : *g->nodes().begin();
   WithCurrentScope scope_guard(
       *insert_point->owningGraph(), insert_point->scope());
   WithInsertPoint ins(insert_point);
@@ -697,7 +697,7 @@ Node* insertQuantDeQuantCall(Value* v, IValue qparams, at::ScalarType t, bool af
   Value* zero_point_val = g->insertConstant(zero_point);
 
   // Insert quant/int_repr/dequant nodes
-  if (after) {
+  if (insert_after) {
     quant->insertAfter(insert_point);
   } else {
     quant->insertBefore(insert_point);
@@ -723,7 +723,8 @@ Node* insertQuantDeQuantCall(Value* v, IValue qparams, at::ScalarType t, bool af
   return dequant;
 }
 
-std::tuple<std::string, c10::optional<script::Module>> findObserverModule(const script::Module& module, Value* v) {
+std::tuple<std::string, c10::optional<script::Module>> findObserverModule(
+    const script::Module& module, Value* v) {
   for (const Use& u: v->uses()) {
     // Note that here we just check for the name of observer, but the ideally
     // we should be comparing the type of observer, this is a temporary
@@ -759,6 +760,11 @@ void quantizeBias(const script::Module& module, Value* v) {
   for (const auto& use: v->uses()) {
     if (std::find(ops_with_bias.begin(), ops_with_bias.end(),
                   use.user->kind().toQualString()) != ops_with_bias.end()) {
+      // Make sure there is no observer module for bias
+      c10::optional<script::Module> observer_module;
+      std::tie(std::ignore, observer_module) = findObserverModule(module, v);
+      TORCH_INTERNAL_ASSERT(!observer_module,
+                            "bias should not be observed!");
       Value* activation = use.user->inputs()[0];
       Value* weight = use.user->inputs()[1];
       // Get qparam from activation
@@ -879,25 +885,17 @@ script::Module InsertQuantDeQuant(
   }
 
   // quantize bias first
-  std::cout << "quantizing bias" << std::endl;
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      c10::optional<script::Module> observer_module;
-      std::tie(std::ignore, observer_module) = findObserverModule(module, v);
-      if (!observer_module) {
-        if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
-          std::cout << "quantizing bias quantizeBias " << std::endl;
-          quantizeBias(module, v);
-        }
+      if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
+        quantizeBias(module, v);
       }
-      std::cout << "after if" << std::endl;
     }
   }
 
   std::vector<std::string> observer_modules_to_remove;
   std::vector<Node*> nodes_to_destroy;
 
-  std::cout << "quantizing values" << std::endl;
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
       c10::optional<script::Module> observer_module;
@@ -908,7 +906,6 @@ script::Module InsertQuantDeQuant(
     }
   }
 
-  std::cout << "quantizing input values" << std::endl;
   for (Value* v : input_values) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
       c10::optional<script::Module> observer_module;

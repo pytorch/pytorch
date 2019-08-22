@@ -1797,6 +1797,7 @@ _builtin_ops = [
     (math.degrees, "aten::degrees"),
     (math.radians, "aten::radians"),
     (math.ldexp, "aten::ldexp"),
+    (torch.autograd.grad, "aten::grad"),
     (torch._C._infer_size, "aten::_infer_size"),
     (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
     (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
