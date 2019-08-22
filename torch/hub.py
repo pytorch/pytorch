@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 import shutil
+import ssl
 import sys
 import tempfile
 import torch
@@ -93,7 +94,19 @@ def _git_archive_link(repo_owner, repo_name, branch):
 
 def _download_archive_zip(url, filename):
     sys.stderr.write('Downloading: \"{}\" to {}\n'.format(url, filename))
-    response = urlopen(url)
+    # TODO: This is to get around CA issues on Python2, where urllib can't
+    # verify the cert from the github server. Another solution is to do:
+    #
+    # import certifi
+    # ...
+    # urlopen(url, cafile=certifi.where())
+    #
+    # But it requires adding a dependency on the certifi package
+    if sys.version_info[0] == 2:
+        context = ssl._create_unverified_context()
+    else:
+        context = None
+    response = urlopen(url, context=context)
     with open(filename, 'wb') as f:
         while True:
             data = response.read(READ_DATA_CHUNK)
