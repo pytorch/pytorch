@@ -203,29 +203,30 @@ void cpu_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
 template <int64_t n, typename func_t, typename... Args>
 struct dim_apply_helper {
   static inline void
-  apply(char* C10_RESTRICT data[], const int64_t* strides, func_t op, Args... args) {
+  apply(char* data[], const int64_t* strides, func_t op, Args... args) {
     using traits = function_traits<func_t>;
-    dim_apply_helper<n - 1, func_t>::apply(data, strides, op, static_cast<typename traits::template arg<n - 1>::type>(data[n - 1]), strides[n - 1], args...);
+    using ptr_t = typename traits::template arg<2 * (n - 1)>::type;
+    dim_apply_helper<n - 1, func_t, ptr_t, int64_t, Args...>::apply(data, strides, op, (ptr_t)(data[n - 1]), strides[n - 1], args...);
   }
 };
 
 template <typename func_t, typename... Args>
 struct dim_apply_helper<0, func_t, Args...> {
   static inline void
-  apply(char* C10_RESTRICT data[], const int64_t* strides, func_t op, Args... args) {
+  apply(char* data[], const int64_t* strides, func_t op, Args... args) {
     op(args...);
   }
 };
 
 template <typename func_t>
 static inline void
-dim_apply(char* C10_RESTRICT data[], const int64_t* strides, func_t op) {
+dim_apply(char* data[], const int64_t* strides, func_t op) {
   using traits = function_traits<func_t>;
   static_assert(std::is_same<typename traits::result_type, void>::value, "return type must be void");
   constexpr int ntensors = traits::arity / 2;
   // use template metaprogramming to do:
   // op((scalar0_t *)data[0], strides[0], (scalar1_t *)data[1], strides[1], ...);
-  dim_apply_helper<ntensors - 1, func_t>::apply(data, strides, op);
+  dim_apply_helper<ntensors, func_t>::apply(data, strides, op);
 }
 
 template <typename func_t>

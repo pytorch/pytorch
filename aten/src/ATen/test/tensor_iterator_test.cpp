@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 
 using namespace at;
 
@@ -41,3 +42,30 @@ TEST(TensorIteratorTest, MixedDevices) {
   ASSERT_ANY_THROW(TensorIterator::binary_op(out, x, y));
 }
 
+
+namespace at::native {  // required to use cpu_apply_dim_kernel
+
+Tensor test_gather(const Tensor &src, int64_t dim, const Tensor &index) {
+  Tensor result = at::empty_like(index, src.options());
+  auto iter = TensorIterator::dim_apply_op(result, index, result, 0);
+  int64_t size = index.size(dim);
+  cpu_apply_dim_kernel(iter,
+    [=](float *result_data, int64_t result_stride, int64_t *index_data, int64_t index_stride, float *src_data, int64_t src_stride) {
+      for (int64_t i = 0; i < size; i++) {
+        int64_t index = *(index_data + i * index_stride);
+        *(result_data + i * result_stride) = *(src_data + index * src_stride);
+      }
+    });
+  return result;
+}
+
+}  // namespace at::native
+
+// Test TensorIterator's dim_apply CPU implementation by manually implementing gather
+TEST(TensorIteratorTest, DimApply) {
+  Tensor src = at::randn({20, 1, 20, 10});
+  Tensor index = at::randint(100, {100, 10, 20, 1}, ScalarType::Long);
+  Tensor result1 = src.expand({20, 10, 20, 10}).gather(0, index.expand({100, 10, 20, 10}));
+  Tensor result2 = at::native::test_gather(src, 0, index);
+  EXPECT_TRUE(at::allclose(result1, result2));
+}
