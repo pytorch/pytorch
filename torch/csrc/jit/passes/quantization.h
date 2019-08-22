@@ -19,24 +19,6 @@ namespace jit {
  */
 TORCH_API void PropagateQuantInfo(std::shared_ptr<Graph>& graph);
 
-/** \brief Inserts quant-dequant nodes.
- *
- * This actually changes the numerical semantics of the original model and thus
- * we only run it when user explicitly wants that. This pass essentially
- * performs quantization of the model by inserting quant-dequant node pairs for
- * quantizatable tensors - later passes only cleanup the IR and
- * make sure the model runs faster/consumes less memory.
- * \moduleObj is the module object whose containing methods are modified.
- * \param method_name whose graph is instrumented for quant-dequant nodes.
- * \param qparam_dict dictionary of tensor unique names to qparams.
- *
- */
-TORCH_API void InsertQuantDequantNodes(
-    const script::Module& moduleObj,
-    const std::string& methodName,
-    const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
-        qparam_dict);
-
 /** \brief Check that all expected optimizations after quant-dequant nodes
  * insertion actually happened.
  *
@@ -55,26 +37,6 @@ TORCH_API void QuantLinting(std::shared_ptr<Graph>& graph);
  * quantizing these tensors. It's done to reduce model's memory footprint.
  */
 TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
-
-/** \brief Inserts quant-dequant nodes for attributes.
- *
- * This is similar to Quant-Dequant pass but it inserts quant-dequant nodes
- * for module parameters. It changes the numerical semantics of the original
- * model and thus we only run it when user explicitly wants that. Later passes
- * only cleanup the IR and make sure the model runs faster/consumes less memory
- * \moduleObj is the module object whose containing methods are modified.
- * \param method_name whose graph is instrumented for quant-dequant nodes.
- * \param param_name parameter for which the nodes are inserted.
- * \param getQParamFunc function to compute qparams.
- * \at::ScalarType t Datatype for param
- */
-template <typename Fn>
-TORCH_API void InsertQuantDequantNodesForParam(
-    const script::Module& moduleObj,
-    const std::string& method_name,
-    const std::string& param_name,
-    const Fn& getQParamFunc,
-    at::ScalarType t);
 
 /** \brief Insert observer module and observer function call for
  *  the Tensors that needs to be observed.
