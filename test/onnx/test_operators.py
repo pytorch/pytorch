@@ -603,6 +603,14 @@ class TestOperators(TestCase):
         self.assertONNX(torch.nn.Linear(4, 5, bias=True), x,
                         keep_initializers_as_inputs=True)
 
+    def test_empty_like(self):
+        x = torch.randn(5, 8, requires_grad=True)
+        self.assertONNX(lambda x: torch.empty_like(x), x)
+
+    def test_empty_like_opset7(self):
+        x = torch.randn(5, 8, requires_grad=True)
+        self.assertONNX(lambda x: torch.empty_like(x), x, opset_version=7)
+
     def test_zeros_like(self):
         x = torch.randn(5, 8, requires_grad=True)
         self.assertONNX(lambda x: torch.zeros_like(x), x)
@@ -655,6 +663,10 @@ class TestOperators(TestCase):
         y = torch.randn(2, 3, 4).float()
         self.assertONNX(lambda x: torch.std(x, dim=(0, 1), unbiased=True, keepdim=True), x)
 
+    def test_cumsum(self):
+        x = torch.randn(2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.cumsum(x, dim=1), x, opset_version=11)
+
     def test_retain_param_name_disabled(self):
         class MyModule(Module):
             def __init__(self):
@@ -702,6 +714,10 @@ class TestOperators(TestCase):
         x = torch.randn(20, 5, 10, 10)
         self.assertONNX(model, x,
                         operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+
+    def test_pixel_shuffle(self):
+        x = torch.randn(2, 8, 3, 4).float()
+        self.assertONNX(lambda x: torch.pixel_shuffle(x, upscale_factor=2), x, opset_version=11)
 
     def test_frobenius_norm(self):
         x = torch.randn(2, 3, 4).float()

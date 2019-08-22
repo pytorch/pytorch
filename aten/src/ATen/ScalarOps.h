@@ -2,6 +2,7 @@
 
 #include <c10/core/Scalar.h>
 #include <ATen/Tensor.h>
+#include <ATen/Functions.h>
 
 // This is in the c10 namespace because we use ADL to find the functions in it.
 namespace c10 {

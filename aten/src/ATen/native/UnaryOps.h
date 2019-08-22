@@ -16,6 +16,7 @@ DECLARE_DISPATCH(unary_fn, acos_stub);
 DECLARE_DISPATCH(unary_fn, asin_stub);
 DECLARE_DISPATCH(unary_fn, atan_stub);
 DECLARE_DISPATCH(unary_fn, bitwise_not_stub);
+DECLARE_DISPATCH(unary_fn, logical_not_stub);
 DECLARE_DISPATCH(unary_fn, ceil_stub);
 DECLARE_DISPATCH(unary_fn, cos_stub);
 DECLARE_DISPATCH(unary_fn, cosh_stub);
