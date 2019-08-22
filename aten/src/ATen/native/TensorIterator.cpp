@@ -327,6 +327,7 @@ int64_t TensorIterator::numel() const {
   int64_t numel = 1;
   for (int64_t size : shape_) {
     numel *= size;
+    std::cout << "size = " << size << std::endl;
   }
   return dim_apply_ ? -numel: numel;
 }
@@ -443,9 +444,10 @@ void TensorIterator::for_each(const loop2d_t& loop) const {
 
 void TensorIterator::for_each(const loop_dim_apply_t& loop) const {
   int64_t numel = this->numel();
+  std::cout << "numel = " << numel << std::endl;
   if (numel == 0) {
     return;
-  } else if (numel < internal::GRAIN_SIZE || at::get_num_threads() == 1) {
+  } else if (true || numel < internal::GRAIN_SIZE || at::get_num_threads() == 1) {
     return serial_for_each(loop, {0, numel});
   } else {
     at::parallel_for(0, numel, internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
@@ -493,6 +495,7 @@ void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
 }
 
 void TensorIterator::serial_for_each(const loop_dim_apply_t& loop, Range range) const {
+  std::cout << "Entering serial_for_each" << std::endl;
   if (range.size() == 0) {
     return;
   }
@@ -507,11 +510,13 @@ void TensorIterator::serial_for_each(const loop_dim_apply_t& loop, Range range) 
   } else {
     auto counter = DimCounter(shape_, range);
     while (!counter.is_done()) {
+      std::cout << counter.values << std::endl;
       auto ptrs = get_data_ptrs(base_ptrs, counter.values);
       loop(ptrs.data(), strides.data());
       counter.increment();
     }
   }
+  std::cout << "Exiting serial_for_each" << std::endl;
 }
 
 bool TensorIterator::is_trivial_1d() const {
@@ -720,6 +725,10 @@ void TensorIterator::compute_shape() {
     }
   }
 
+  if (dim_apply_) {
+    shape_[dim_apply_.value()] = -1;
+  }
+
   // Outputs cannot be broadcasted. Check that the shape of the outputs matches
   // the inferred shape. There's an exception for write-only tensors to support
   // our legacy behavior that functions with `out=` arguments resize their
@@ -733,7 +742,7 @@ void TensorIterator::compute_shape() {
         tensor.resize_(shape_);
         continue;
       }
-      if (!is_reduction_) {
+      if (!is_reduction_ && !dim_apply_) {
         AT_ERROR("output with shape ", tensor.sizes(), " doesn't match the broadcast shape ",
                  shape_);
       }
@@ -822,6 +831,7 @@ void TensorIterator::build() {
   // compute the broadcasted shape
   compute_shape();
   std::cout << "done compute_shape" << std::endl;
+  std::cout << "new shape: " << shape_ << std::endl;
   // compute each tensor's stride after broadcasting
   compute_strides();
   std::cout << "done compute_strides" << std::endl;
@@ -841,6 +851,7 @@ void TensorIterator::build() {
   // coalesce adjacent dimensions when possible
   coalesce_dimensions();
   std::cout << "done coalesce_dimensions" << std::endl;
+  std::cout << "new shape: " << shape_ << std::endl;
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor.defined());

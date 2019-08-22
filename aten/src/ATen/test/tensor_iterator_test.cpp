@@ -42,13 +42,12 @@ TEST(TensorIteratorTest, MixedDevices) {
   ASSERT_ANY_THROW(TensorIterator::binary_op(out, x, y));
 }
 
-
 namespace at::native {  // required to use cpu_apply_dim_kernel
 
-Tensor test_gather(const Tensor &src, int64_t dim, const Tensor &index) {
+Tensor test_gather(IntArrayRef outsizes, const Tensor &src, int64_t dim, const Tensor &index) {
   std::cout << "Entering test_gather" << std::endl;
-  Tensor result = at::empty_like(index, src.options());
-  auto iter = TensorIterator::dim_apply_op(result, index, result, 0);
+  Tensor result = at::empty(outsizes, src.options());
+  auto iter = TensorIterator::dim_apply_op(result, index, src, 0);
   std::cout << "Building TensorIterator success" << std::endl;
   int64_t size = index.size(dim);
   cpu_apply_dim_kernel(iter,
@@ -71,7 +70,8 @@ TEST(TensorIteratorTest, DimApply) {
   Tensor index = at::randint(20, {100, 10, 20, 1}, ScalarType::Long);
   Tensor result1 = src.expand({20, 10, 20, 10}).gather(0, index.expand({100, 10, 20, 10}));
   std::cout << "Done computing result1" << std::endl;
-  Tensor result2 = at::native::test_gather(src, 0, index);
+  Tensor result2 = at::native::test_gather(result1.sizes(), src, 0, index);
+  std::cout << "Done computing result2" << std::endl;
   EXPECT_TRUE(at::allclose(result1, result2));
   std::cout << "Exiting DimApply" << std::endl;
 }
