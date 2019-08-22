@@ -27,7 +27,7 @@ Tensor empty_affine_quantized_cpu(
       optional_memory_format.value_or(MemoryFormat::Contiguous));
 }
 
-Tensor empty_perchannel_affine_quantized_cpu(
+Tensor empty_per_channel_affine_quantized_cpu(
     const Tensor& scales,
     const Tensor& zero_points,
     IntArrayRef size,

@@ -54,7 +54,7 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
         device(kCPU).dtype(kInt));
 
     // The output channel axis is 0
-    unpacked_weights = _empty_perchannel_affine_quantized_like(
+    unpacked_weights = _empty_per_channel_affine_quantized_like(
         scales.toType(kDouble),
         zero_points.toType(kLong),
         {output_channels, kernel_h, kernel_w, C_per_G},

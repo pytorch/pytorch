@@ -798,9 +798,9 @@
   dispatch:
     QuantizedCPU: empty_affine_quantized_cpu
 
-- func: _empty_perchannel_affine_quantized_like(Tensor self, Tensor zero_points, int[] size, int[] axis, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor
+- func: _empty_per_channel_affine_quantized_like(Tensor self, Tensor zero_points, int[] size, int[] axis, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor
   dispatch:
-    QuantizedCPU: empty_perchannel_affine_quantized_cpu
+    QuantizedCPU: empty_per_channel_affine_quantized_cpu
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   variants: method
