@@ -517,7 +517,20 @@ class TestCase(expecttest.TestCase):
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
                 raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
 
+        if (torch.cuda.is_available()):
+            try:
+                torch.cuda.synchronize()
+            except RuntimeError:
+                self.fail("Unusable CUDA state. Please check previous tests for errors.")
+
         set_rng_seed(SEED)
+
+    def tearDown(self):
+        if (torch.cuda.is_available()):
+            try:
+                torch.cuda.synchronize()
+            except RuntimeError:
+                self.fail("Unrecoverable CUDA failure. Follow-up tests will randomly fail.")
 
     def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
         max_err = 0
