@@ -17,6 +17,9 @@
 
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/Math.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 
 #if AT_MKL_ENABLED()
@@ -141,6 +144,25 @@ static void digamma_kernel(TensorIterator& iter) {
   });
 }
 
+static void trigamma_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "trigamma", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return trigamma(a); });
+  });
+}
+
+static void polygamma_kernel(TensorIterator& iter, int64_t n) {
+  switch (n) {
+    case 0: digamma_kernel(iter); break;
+    case 1: trigamma_kernel(iter); break;
+    default: AT_ERROR("polygamma(n,x) is not implemented for n>=2");
+  }
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(r_, t);
+#endif
+}
+
 #if !AT_MKL_ENABLED()
 void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
   // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
@@ -258,6 +280,8 @@ REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(digamma_stub, &digamma_kernel);
+REGISTER_DISPATCH(trigamma_stub, &trigamma_kernel);
+REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)

@@ -1144,7 +1144,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
 #endif
 
 LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
@@ -1157,24 +1156,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,TH_MATH_NAME(sqrt),HYPER_TH_OMP_OVERHEAD_THRES
 LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
 LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-
-void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
-  switch (n) {
-    case 0: {
-      THTensor_(resizeAs)(r_, t);
-      at::Tensor r__wrap = THTensor_wrap(r_);
-      at::Tensor t__wrap = THTensor_wrap(t);
-      at::Tensor result = at::native::digamma(t__wrap);
-      at::native::copy_(r__wrap, result, false);
-      break;
-    }
-    case 1: THTensor_(trigamma)(r_, t); break;
-    default: THError("polygamma(n,x) is not implemented for n>=2");
-  }
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(r_, t);
-#endif
-}
 
 void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
 {

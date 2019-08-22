@@ -3442,7 +3442,7 @@
   named_guard: False
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_polygamma_
+    CPU: polygamma_
     CUDA: legacy::cuda::_th_polygamma_
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
@@ -4059,14 +4059,14 @@
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_polygamma_out
+    CPU: polygamma_out
     CUDA: legacy::cuda::_th_polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
   named_guard: False
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_polygamma
+    CPU: polygamma
     CUDA: legacy::cuda::_th_polygamma
 
 - func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)

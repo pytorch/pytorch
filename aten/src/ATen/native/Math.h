@@ -35,7 +35,7 @@ static inline double trigamma(double x) {
   return sign * result;
 }
 
-static inline float trigammaf(float x) {
+static inline float trigamma(float x) {
   float sign = +1;
   float result = 0;
   if (x < 0.5f) {

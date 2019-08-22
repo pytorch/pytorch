@@ -117,6 +117,30 @@ Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   return _clamp_out_cpu(self, self, min, max);
 }
 
+Tensor& trigamma_out(Tensor& result, const Tensor& self) {
+  checkBackend("trigamma", result, Backend::CPU);
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_mem_overlap=*/true);
+  trigamma_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor polygamma(int64_t n, const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  at::polygamma_out(result, n, self);
+  return result;
+}
+Tensor& polygamma_(Tensor& self, int64_t n) {
+  return at::polygamma_out(self, n, self);
+}
+Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
+  checkBackend("polygamma", result, Backend::CPU);
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_mem_overlap=*/true);
+  polygamma_stub(iter.device_type(), iter, n);
+  return result;
+}
+
 Tensor& _clamp_out_cpu(
     Tensor& result,
     const Tensor& self,
@@ -259,6 +283,7 @@ DEFINE_DISPATCH(log1p_stub);
 DEFINE_DISPATCH(log2_stub);
 DEFINE_DISPATCH(logical_not_stub);
 DEFINE_DISPATCH(neg_stub);
+DEFINE_DISPATCH(polygamma_stub);
 DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
 DEFINE_DISPATCH(rsqrt_stub);
@@ -268,6 +293,7 @@ DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
+DEFINE_DISPATCH(trigamma_stub);
 DEFINE_DISPATCH(trunc_stub);
 }
 } // namespace at
