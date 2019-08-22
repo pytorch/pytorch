@@ -427,17 +427,25 @@ CONFIGURE_FILE(ATenConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/AT
 INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
   DESTINATION "${AT_INSTALL_SHARE_DIR}/cmake/ATen")
 
+if(INTERN_BUILD_MOBILE)
+  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
+else()
+  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
+endif()
+
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
-FOREACH(HEADER ${base_h} ${ATen_CORE_HEADERS} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
+FOREACH(HEADER  ${INSTALL_HEADERS})
   string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
   GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
 ENDFOREACH()
+
 # TODO: Install hip_generated_h when we have it
 FOREACH(HEADER ${generated_h} ${cuda_generated_h})
   # NB: Assumed to be flat
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
 ENDFOREACH()
+
 INSTALL(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen)
 

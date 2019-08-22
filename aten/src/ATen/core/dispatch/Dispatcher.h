@@ -11,58 +11,6 @@ namespace c10 {
 class CAFFE2_API OperatorHandle;
 
 /**
- * This class represents an operator kernel, i.e. an operator *after* it was
- * dispatched to a certain device. You can use it to call the kernel.
- *
- * You can keep this OpKernel instance around to avoid future dispatch
- * when you know it'd dispatch to the same kernel anyhow.
- *
- * Also, keeping around the OpKernel instance will keep around a local cache
- * that is used by some kernels to get better performance when they're called
- * multiple times (mostly Caffe2 kernels do that).
- *
- * OpKernel is only threadsafe if the kernel is threadsafe. There are no mutexes
- * protecting the kernel cache, so if the kernel uses the cache and doesn't have
- * mutexes for it, it will likely not be threadsafe.
- */
-class CAFFE2_API OpKernel final {
-public:
-  OpKernel(OpKernel&&) noexcept = default;
-  OpKernel& operator=(OpKernel&&) noexcept = default;
-  OpKernel(const OpKernel&) = delete;
-  OpKernel& operator=(const OpKernel&) = delete;
-
-  /**
-   * Call the operator kernel with the given arguments.
-   */
-  void call(Stack* stack) const {
-    // TODO Make boxed kernels mandatory and remove this check
-    TORCH_CHECK(nullptr != kernel_, "Tried to call OpKernel::call() for a kernel that doesn't have an boxed version.");
-
-    return (*kernel_)(stack, cache_.get());
-  }
-
-  template<class Result, class... Args>
-  Result callUnboxed(Args... args) const {
-    // TODO Should we box and call the boxed kernel instead of failing?
-    TORCH_CHECK(nullptr != unboxed_kernel_, "Tried to call OpKernel::callUnboxed() for a kernel that doesn't have an unboxed version.");
-
-    using OpSignature = Result (c10::KernelCache*, Args...);
-    OpSignature* kernel = reinterpret_cast<OpSignature*>(unboxed_kernel_);
-    return (*kernel)(cache_.get(), std::forward<Args>(args)...);
-  }
-
-private:
-  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator, void* unboxed_kernel)
-  : kernel_(kernel), cache_(cache_creator()), unboxed_kernel_(unboxed_kernel) {}
-  friend class Dispatcher;
-
-  KernelFunction* kernel_; // can be nullptr, not all kernels have this
-  std::unique_ptr<c10::KernelCache> cache_;
-  void* unboxed_kernel_; // can be nullptr, not all kernels have this
-};
-
-/**
  * Implement this interface and register your instance with the dispatcher
  * to get notified when operators are registered or deregistered with
  * the dispatcher.
@@ -227,14 +175,12 @@ private:
 
 inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(stack);
-  return OpKernel(kernel.kernel_func, kernel.cache_creator_func, kernel.unboxed_kernel_func);
+  return op.operatorIterator_->op.lookupKernel(stack);
 }
 
 inline OpKernel Dispatcher::lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(dispatchKey);
-  return OpKernel(kernel.kernel_func, kernel.cache_creator_func, kernel.unboxed_kernel_func);
+  return op.operatorIterator_->op.lookupKernel(dispatchKey);
 }
 
 template<class Result, class... Args>
