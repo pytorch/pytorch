@@ -391,7 +391,7 @@ void max_pool2d_with_indices_out_cuda_template(
                   output_data, indices_data);
           break;
         }
-        default: AT_ERROR("Unsupported memory format. Supports only ChannelsLast, Contiguous");
+        default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
       }
     }
   );
