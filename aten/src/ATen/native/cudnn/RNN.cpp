@@ -1193,7 +1193,7 @@ Tensor try_get_weight_buf(
   auto param_storage = any_param.storage();
   auto param_offset = any_param.storage_offset();
   std::initializer_list<int64_t> buffer_size = {
-    static_cast<int64_t>(param_storage.size()) - param_offset, 1};
+    static_cast<int64_t>(param_storage.size()) - param_offset};
   auto weight_buf = at::empty({0}, any_param.options()).set_(param_storage, param_offset, buffer_size, {});
   if (weight_buf.size(0) < num_params) {
     return {};
