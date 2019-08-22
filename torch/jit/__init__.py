@@ -31,7 +31,7 @@ import warnings
 from collections import OrderedDict, namedtuple
 
 # These are imported so users can access them from the `torch.jit` module
-from torch._jit_internal import Final, _overload  # noqa: F401
+from torch._jit_internal import Final, _overload, _overload_method  # noqa: F401
 from torch._jit_internal import ignore, export  # noqa: F401
 
 if sys.version_info[0] > 2:
@@ -841,8 +841,6 @@ def trace(func,
                              "Please use trace_module")
 
     name = _qualified_name(func)
-    if name == '<lambda>':
-        name = '_lambda'  # make name a valid identifier
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                   var_lookup_fn,
                                                   _force_outplace)
@@ -1137,8 +1135,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
                 @torch.jit.ignore
                 def python_only_fn(self, input):
-                    # This function won't be compiled, so any Python APIs can be
-                    # used
+                    # This function won't be compiled, so any
+                    # Python APIs can be used
                     import pdb
                     pdb.set_trace()
 
@@ -1799,6 +1797,7 @@ _builtin_ops = [
     (math.degrees, "aten::degrees"),
     (math.radians, "aten::radians"),
     (math.ldexp, "aten::ldexp"),
+    (torch.autograd.grad, "aten::grad"),
     (torch._C._infer_size, "aten::_infer_size"),
     (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
     (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
@@ -1878,10 +1877,14 @@ def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
 
-def _get_overload_decl_and_defaults(func):
+def _check_no_signature(func):
     signature = torch.jit.annotations.get_signature(func)
     if signature is None:
-        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {obj}").format(func)
+        qual_name = _qualified_name(func)
+        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
+
+def _get_overload_decl_and_defaults(func):
+    _check_no_signature(func)
     return (torch.jit.get_jit_def(func).decl(), get_default_args(func))
 
 def _get_overloads(obj):
@@ -1955,7 +1958,11 @@ def annotate(the_type, the_value):
     return the_value
 
 
-Attribute = collections.namedtuple('Attribute', ['value', 'type'])
+if _enabled:
+    Attribute = collections.namedtuple('Attribute', ['value', 'type'])
+else:
+    def Attribute(value, type):
+        return value
 
 last_executed_optimized_graph = torch._C._last_executed_optimized_graph
 

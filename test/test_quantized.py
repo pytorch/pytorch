@@ -81,10 +81,13 @@ class TestQuantizedOps(TestCase):
         return output_size
 
     """Tests the correctness of the quantized::relu op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams()))
-    def test_qrelu(self, X):
-        X, (scale, zero_point, torch_type) = X
+    @given(qparams=hu.qparams())
+    def test_qrelu(self, qparams):
+        X = np.array([[-3, -2, 1, 2],
+                      [0, 0, 0, 0],
+                      [-5, -4, -3, -2],
+                      [1, 2, 3, 4]], dtype=np.float32)
+        scale, zero_point, torch_type = qparams
 
         Y = X.copy()
         Y[Y < 0] = 0
@@ -95,9 +98,42 @@ class TestQuantizedOps(TestCase):
                                    dtype=torch_type)
 
         ops_under_test = {
-            'ops.quantized': torch.ops.quantized.relu,
             'native': torch.relu,
-            'nn.functional': torch.nn.functional.relu
+            'nn.functional': torch.nn.functional.relu,
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX)
+            self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
+
+        ops_under_test_inplace = {
+            'inplace native': torch.relu_,
+            'inplace nn.functional': torch.nn.functional.relu_,
+        }
+
+        for name, op_ in ops_under_test_inplace.items():
+            qY_hat = qX.clone()
+            op_(qY_hat)
+            self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
+
+    """Tests the correctness of the quantized::relu op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qrelu6(self, X):
+        X, (scale, zero_point, torch_type) = X
+
+        Y = X.copy()
+        Y[Y < 0] = 0
+        Y[Y > 6.0] = 6.0
+        qY = torch.quantize_linear(torch.from_numpy(Y), scale=scale,
+                                   zero_point=zero_point, dtype=torch_type)
+        X = torch.from_numpy(X)
+        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
+                                   dtype=torch_type)
+
+        ops_under_test = {
+            'ops.quantized': torch.ops.quantized.relu6,
+            'module': torch.nn.quantized.ReLU6(),
         }
 
         for name, op in ops_under_test.items():
@@ -279,10 +315,13 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qX_hat = op(qX, output_size=output_size)
-            qX_repr = qX_hat.int_repr()
-            self.assertEqual(X_ref, qX_repr,
-                             message=error_message.format(name, X_ref, qX_repr))
-
+            self.assertEqual(X_ref, qX_hat.int_repr(), prec=1.0,
+                             message=error_message.format(name, X_ref, qX_hat))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                                                          qX_hat.q_zero_point()))
 
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,

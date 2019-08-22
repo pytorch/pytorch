@@ -26,7 +26,11 @@ constexpr int MODE_SUM = 0;
 constexpr int MODE_MEAN = 1;
 constexpr int MODE_MAX = 2;
 
+#ifdef __HIP_PLATFORM_HCC__
+constexpr int WARP_SIZE = 64;
+#else
 constexpr int WARP_SIZE = 32;
+#endif
 
 
 // This kernel assumes that all input tensors except `weight` and
@@ -227,7 +231,11 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
+#ifdef __HIP_PLATFORM_HCC__
+  dim3 block = dim3(64, 4);
+#else
   dim3 block = dim3(32, 8);
+#endif
   int grid = 1024;
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -279,7 +287,11 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
     max_indices = at::zeros({0}, indices.options());
   }
 
+#ifdef __HIP_PLATFORM_HCC__
+  dim3 block = dim3(64, 4);
+#else
   dim3 block = dim3(32, 8);
+#endif
   int grid = 1024;
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(weight.scalar_type(), "embedding_bag_cuda", [&] {
     EmbeddingBag_updateOutputKernel<scalar_t><<<grid, block, 0, stream>>>(

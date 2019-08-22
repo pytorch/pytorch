@@ -32,18 +32,8 @@ from functools import wraps
 #
 # In general, we should avoid depending on the type of Tensor Values contained
 # within the trace graph. However, this is sometimes unavoidable (due to ONNX
-# spec requirements, etc). If you are implementing a symbolic and need Tensor
-# type information, note that there are several levels of Tensor types, defined
-# in aten/src/ATen/core/jit_type.h:
-#
-# TensorType - This is a Tensor, but we don't know anything about its
-#               properties (e.g. scalar type, # dims, shapes).
-#               Appears as `Tensor` in graph print-outs.
-# ProfiledTensorType <: TensorType - Denotes a Tensor for which we know the
-#                                       concrete sizes in addition to the information
-#                                       contained in TensorTyper. This adds a sizes()
-#                                       method which can be used to retrieve the
-#                                       concrete sizes.
+# spec requirements, etc). The TensorType object has accessors for these properties
+# that return the property if it is statically known and return nullopt otherwise. 
 #
 # In general, we should prefer to rely on the least specific information possible.
 # For example, not relying on tensor properties at all is better than relying
@@ -194,6 +184,7 @@ def _try_get_scalar_type(*args):
             pass
     return None
 
+
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if _export_onnx_opset_version <= 9:
         from torch.onnx.symbolic_opset9 import _slice
@@ -201,6 +192,11 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
     else:
         from torch.onnx.symbolic_opset10 import _slice
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
+
+
+def _is_fp(value):
+    type = value.type().scalarType()
+    return (type == 'Float') or (type == 'Double') or (type == 'Half')
 
 # ---------------------------------------------------------------------
 # ONNX operator version

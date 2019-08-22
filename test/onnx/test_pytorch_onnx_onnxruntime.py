@@ -770,12 +770,22 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_remainder_scalar(self):
         class RemainderModel(torch.nn.Module):
-            def forward(self, input, other):
-                return torch.remainder(input, other)
+            def forward(self, input):
+                return torch.remainder(input, 2.55)
 
-        x = torch.randint(10, (2, 3)).to(dtype=torch.int)
-        y = torch.tensor(1).to(dtype=torch.int)
-        self.run_test(RemainderModel(), (x, y))
+        x = torch.randint(10, (2, 3))
+        self.run_test(RemainderModel(), x)
+
+    # TODO: enable opset 11 test once ORT support for cumsum is in
+    @skipIfUnsupportedOpsetVersion([11])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_cumsum(self):
+        class CumSum(torch.nn.Module):
+            def forward(self, input):
+                return torch.cumsum(input, dim=0)
+        x = torch.randn(2, 3, 4)
+        model = CumSum()
+        self.run_test(model, x)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':

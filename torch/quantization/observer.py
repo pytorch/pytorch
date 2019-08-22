@@ -65,6 +65,9 @@ class Observer(nn.Module):
 
         return torch.tensor([scale]), torch.tensor([zero_point])
 
+    def extra_repr(self):
+        return 'min_val={}, max_val={}'.format(self.min_val, self.max_val)
+
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
 

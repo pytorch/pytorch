@@ -304,3 +304,10 @@ TEST(TensorTest, Item_CUDA) {
     ASSERT_EQ(scalar.to<int>(), 123);
   }
 }
+
+TEST(TensorTest, DataPtr) {
+  auto tensor = at::empty({3, 4}, at::kFloat);
+  auto tensor_not_copy = tensor.to(tensor.options());
+  ASSERT_EQ(tensor_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
+  ASSERT_EQ(tensor_not_copy.data_ptr(), tensor.data_ptr());
+}

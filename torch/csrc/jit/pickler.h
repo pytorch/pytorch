@@ -234,12 +234,10 @@ class Unpickler {
 
  public:
   Unpickler(
-      std::function<void(char*, size_t)> reader,
-      std::function<bool()> bounds_checker,
+      std::function<bool(char*, size_t)> reader,
       const std::vector<at::Tensor>* tensor_table,
       ClassResolver class_resolver)
       : reader_(reader),
-        bounds_checker_(bounds_checker),
         tensor_table_(tensor_table),
         class_resolver_(std::move(class_resolver)) {}
 
@@ -252,7 +250,9 @@ class Unpickler {
   template <typename T>
   T read() {
     T item;
-    reader_(reinterpret_cast<char*>(&item), sizeof(item));
+    if (!reader_(reinterpret_cast<char*>(&item), sizeof(item))) {
+      AT_ERROR("Unexpected end of pickler archive.");
+    }
     return item;
   }
 
@@ -268,10 +268,7 @@ class Unpickler {
 
   // Returns a pointer to the number of bytes requested. This should state-fully
   // remember how many bytes have been read
-  std::function<void(char*, size_t)>  reader_;
-
-  // Check if the stream has gone past its size
-  std::function<bool()> bounds_checker_;
+  std::function<bool(char*, size_t)> reader_;
 
   std::vector<IValue> stack_;
 

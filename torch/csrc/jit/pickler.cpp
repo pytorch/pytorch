@@ -560,14 +560,12 @@ void Unpickler::run() {
       "Only Pickle protocol 2 is supported, found protocol = ",
       protocol);
 
-  while (bounds_checker_()) {
+  while (true) {
     OpCode opcode = readInstruction();
     if (opcode == OpCode::STOP) {
       return;
     }
   }
-
-  AT_ERROR("Overran buffer while unpickling data, didn't find STOP opcode");
 }
 void Unpickler::setInput(size_t memo_id) {
   AT_ASSERT(!stack_.empty());
@@ -813,7 +811,9 @@ OpCode Unpickler::readInstruction() {
 std::string Unpickler::readBytes(size_t length) {
   std::string data(length, 0);
   // This is fine since C++11 has contiguous strings
-  reader_(&data[0], length);
+  if (!reader_(&data[0], length)) {
+    AT_ERROR("Unexpected end of pickler archive.");
+  }
   return data;
 }
 
