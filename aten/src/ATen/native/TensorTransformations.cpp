@@ -22,8 +22,8 @@ void inline flip_cpu_kernel(
   Tensor& out_tensor
 ){
   const int64_t numel = in_tensor.numel();
-  const scalar_t* in_tensor_d = in_tensor.data<scalar_t>();
-  scalar_t* out_tensor_d = out_tensor.data<scalar_t>();
+  const scalar_t* in_tensor_d = in_tensor.data_ptr<scalar_t>();
+  scalar_t* out_tensor_d = out_tensor.data_ptr<scalar_t>();
   auto sizes_v = in_tensor.sizes().vec();
   auto strides_v = in_tensor.strides().vec();
 
