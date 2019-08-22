@@ -16,7 +16,6 @@ import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
-from torch._six import PY2
 
 TESTS = [
     'autograd',
@@ -61,8 +60,6 @@ TESTS = [
     'namedtensor',
     'jit_disabled',
 ]
-if not PY2:
-    TESTS.append('jit_py3')
 
 WINDOWS_BLACKLIST = [
     'distributed',
