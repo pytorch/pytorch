@@ -206,6 +206,8 @@ struct dim_apply_helper {
   apply(char* data[], const int64_t* strides, func_t op, Args... args) {
     using traits = function_traits<func_t>;
     using ptr_t = typename traits::template arg<2 * (n - 1)>::type;
+    using stride_t = typename traits::template arg<2 * (n - 1) + 1>::type;
+    static_assert(std::is_same<stride_t, int64_t>::value, "type for strides must be int64_t");
     dim_apply_helper<n - 1, func_t, ptr_t, int64_t, Args...>::apply(data, strides, op, (ptr_t)(data[n - 1]), strides[n - 1], args...);
   }
 };
