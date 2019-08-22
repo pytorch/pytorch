@@ -56,6 +56,14 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
             export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
           elif [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
+          elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_64"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-android-x86_64
+          elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v7a"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-android-arm-v7a
+          elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v8a"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-android-arm-v8a
+          elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_32"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-android-x86_32
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
