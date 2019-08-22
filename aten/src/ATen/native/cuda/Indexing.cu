@@ -212,7 +212,7 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
     
       // Fill sortedOrigIndices with sequential indices
       const auto count_iter = thrust::counting_iterator<int64_t>(0);
-      auto orig_data = device_ptr(orig_indices.data<int64_t>());
+      auto orig_data = device_ptr(orig_indices.data_ptr<int64_t>());
       thrust::copy(policy, count_iter, count_iter + num_indices, orig_data);
     
       // Sort the inputs into sorted with the corresponding indices; we
@@ -220,7 +220,7 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       // directly
       // Sort; a stable sort is not required
       // NB - not passing comparator causes thrust to use radix sort, and it hurts perf A LOT, at least for medium (few K) sized indices
-      auto sorted_data = device_ptr(sorted_indices.data<int64_t>());
+      auto sorted_data = device_ptr(sorted_indices.data_ptr<int64_t>());
       thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, ThrustLTOp<int64_t>());
       }
       TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
@@ -235,10 +235,10 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
   
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(value_.scalar_type(), "embedding_backward", [&] {
       indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
-        sorted_indices.data<int64_t>(),
-        orig_indices.data<int64_t>(),
-        value_.data<scalar_t>(),
-        src_.data<scalar_t>(),
+        sorted_indices.data_ptr<int64_t>(),
+        orig_indices.data_ptr<int64_t>(),
+        value_.data_ptr<scalar_t>(),
+        src_.data_ptr<scalar_t>(),
         num_indices,
         sliceSize,
         strideBefore,
