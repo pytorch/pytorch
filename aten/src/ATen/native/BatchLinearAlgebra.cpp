@@ -226,8 +226,8 @@ static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("solve: LAPACK library not found in compilation");
 #else
-  auto A_data = A.data<scalar_t>();
-  auto b_data = b.data<scalar_t>();
+  auto A_data = A.data_ptr<scalar_t>();
+  auto b_data = b.data_ptr<scalar_t>();
   auto A_mat_stride = matrixStride(A);
   auto b_mat_stride = matrixStride(b);
   auto batch_size = batchCount(A);
@@ -235,7 +235,7 @@ static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
   auto nrhs = b.size(-1);
 
   auto ipiv = at::empty({n}, b.options().dtype(kInt));
-  auto ipiv_data = ipiv.data<int>();
+  auto ipiv_data = ipiv.data_ptr<int>();
 
   int info;
   for (int64_t i = 0; i < batch_size; i++) {
@@ -291,13 +291,13 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("inverse: LAPACK library not found in compilation");
 #else
-  auto self_data = self.data<scalar_t>();
+  auto self_data = self.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
   auto batch_size = batchCount(self);
   auto n = self.size(-2);
 
   auto ipiv = at::empty({n}, self.options().dtype(kInt));
-  auto ipiv_data = ipiv.data<int>();
+  auto ipiv_data = ipiv.data_ptr<int>();
 
   int info;
   // Run once, first to get the optimum work size
@@ -309,7 +309,7 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
   lapackGetri<scalar_t>(n, self_data, n, ipiv_data, &wkopt, lwork, &info);
   lwork = static_cast<int>(wkopt);
   Tensor work = at::empty({lwork}, self.options());
-  auto work_data = work.data<scalar_t>();
+  auto work_data = work.data_ptr<scalar_t>();
 
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
@@ -368,8 +368,8 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<i
 #else
   char uplo = upper ? 'U' : 'L';
 
-  auto A_data = A.data<scalar_t>();
-  auto b_data = b.data<scalar_t>();
+  auto A_data = A.data_ptr<scalar_t>();
+  auto b_data = b.data_ptr<scalar_t>();
   auto A_mat_stride = matrixStride(A);
   auto b_mat_stride = matrixStride(b);
   auto batch_size = batchCount(A);
@@ -431,7 +431,7 @@ static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos
 #else
   char uplo = upper ? 'U' : 'L';
 
-  auto self_data = self.data<scalar_t>();
+  auto self_data = self.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
   auto batch_size = batchCount(self);
   auto n = self.size(-2);
@@ -491,9 +491,9 @@ static void apply_lu(Tensor& self, Tensor& pivots, Tensor& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("lu: LAPACK library not found in compilation");
 #else
-  auto self_data = self.data<scalar_t>();
-  auto pivots_data = pivots.data<int>();
-  auto infos_data = infos.data<int>();
+  auto self_data = self.data_ptr<scalar_t>();
+  auto pivots_data = pivots.data_ptr<int>();
+  auto infos_data = infos.data_ptr<int>();
   auto self_matrix_stride = matrixStride(self);
   auto pivots_matrix_stride = pivots.size(-1);
   auto batch_size = batchCount(self);
@@ -583,13 +583,13 @@ template <typename scalar_t, bool upper>
 void apply_triu_tril(Tensor& result, const Tensor& self, bool inplace, int64_t k) {
   auto n = self.size(-2);
   auto m = self.size(-1);
-  auto self_data = self.data<scalar_t>();
+  auto self_data = self.data_ptr<scalar_t>();
   auto self_stride = (self.dim() > 2 && self.stride(-3) > 0) ? self.stride(-3) : 1;
   auto batchsize = batchCountTrilTriu(result);
   auto self_row_stride = self.stride(-2);
   auto self_column_stride = self.stride(-1);
 
-  auto result_data = result.data<scalar_t>();
+  auto result_data = result.data_ptr<scalar_t>();
   int64_t result_stride, result_row_stride, result_column_stride;
   if (result_data != self_data) {
     result_stride = (result.dim() > 2 && result.stride(-3) > 0) ? result.stride(-3) : 1;
@@ -695,8 +695,8 @@ static void apply_triangular_solve(Tensor& b, Tensor& A, bool upper, bool transp
   char trans = transpose ? 'T' : 'N';
   char diag = unitriangular ? 'U' : 'N';
 
-  auto A_data = A.data<scalar_t>();
-  auto b_data = b.data<scalar_t>();
+  auto A_data = A.data_ptr<scalar_t>();
+  auto b_data = b.data_ptr<scalar_t>();
   auto A_mat_stride = matrixStride(A);
   auto b_mat_stride = matrixStride(b);
   auto batch_size = batchCount(A);
@@ -751,8 +751,8 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
 #ifndef USE_LAPACK
   AT_ERROR("qr: LAPACK library not found in compilation");
 #else
-  auto self_data = self.data<scalar_t>();
-  auto tau_data = tau.data<scalar_t>();
+  auto self_data = self.data_ptr<scalar_t>();
+  auto tau_data = tau.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
   auto tau_stride = tau.size(-1);
   auto batch_size = batchCount(self);
@@ -773,7 +773,7 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
 
     // now compute the actual R and TAU
-    lapackGeqrf<scalar_t>(m, n, self_working_ptr, m, tau_working_ptr, work.data<scalar_t>(), lwork, &info);
+    lapackGeqrf<scalar_t>(m, n, self_working_ptr, m, tau_working_ptr, work.data_ptr<scalar_t>(), lwork, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -788,8 +788,8 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
 #ifndef USE_LAPACK
   AT_ERROR("qr: LAPACK library not found in compilation");
 #else
-  auto self_data = self.data<scalar_t>();
-  auto tau_data = tau.data<scalar_t>();
+  auto self_data = self.data_ptr<scalar_t>();
+  auto tau_data = tau.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
   auto tau_stride = tau.size(-1);
   auto batch_size = batchCount(self);
@@ -810,7 +810,7 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
 
     // now compute the actual Q
-    lapackOrgqr<scalar_t>(m, n_columns, k, self_working_ptr, m, tau_working_ptr, work.data<scalar_t>(), lwork, &info);
+    lapackOrgqr<scalar_t>(m, n_columns, k, self_working_ptr, m, tau_working_ptr, work.data_ptr<scalar_t>(), lwork, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -903,8 +903,8 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
 #ifndef USE_LAPACK
   AT_ERROR("symeig: LAPACK library not found in compilation");
 #else
-  auto self_data = self.data<scalar_t>();
-  auto eigvals_data = eigvals.data<scalar_t>();
+  auto self_data = self.data_ptr<scalar_t>();
+  auto eigvals_data = eigvals.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
   auto eigvals_stride = eigvals.size(-1);
   auto batch_size = batchCount(self);
@@ -929,7 +929,7 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
     scalar_t* eigvals_working_ptr = &eigvals_data[i * eigvals_stride];
 
     // now compute the eigenvalues and the eigenvectors (optionally)
-    lapackSymeig<scalar_t>(jobz, uplo, n, self_working_ptr, n, eigvals_working_ptr, work.data<scalar_t>(), lwork, &info);
+    lapackSymeig<scalar_t>(jobz, uplo, n, self_working_ptr, n, eigvals_working_ptr, work.data_ptr<scalar_t>(), lwork, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -987,10 +987,10 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
 #ifndef USE_LAPACK
   AT_ERROR("svd: LAPACK library not found in compilation");
 #else
-  auto self_data = self.data<scalar_t>();
-  auto U_data = U.data<scalar_t>();
-  auto S_data = S.data<scalar_t>();
-  auto VT_data = VT.data<scalar_t>();
+  auto self_data = self.data_ptr<scalar_t>();
+  auto U_data = U.data_ptr<scalar_t>();
+  auto S_data = S.data_ptr<scalar_t>();
+  auto VT_data = VT.data_ptr<scalar_t>();
   auto self_stride = matrixStride(self);
   auto U_stride = matrixStride(U);
   auto S_stride = S.size(-1);
@@ -1002,7 +1002,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   auto n = self.size(-1);
   auto k = std::min(m, n);
   Tensor iwork = at::empty({8 * k}, at::kInt);
-  auto iwork_data = iwork.data<int>();
+  auto iwork_data = iwork.data_ptr<int>();
 
   // Run once, first to get the optimum work size.
   // Since we deal with batches of matrices with the same dimensions, doing this outside
@@ -1013,7 +1013,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   lapackSvd<scalar_t>(jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n, &wkopt, lwork, iwork_data, &info);
   lwork = static_cast<int>(wkopt);
   Tensor work = at::empty({lwork}, self.options());
-  auto work_data = work.data<scalar_t>();
+  auto work_data = work.data_ptr<scalar_t>();
 
   for (int64_t i = 0; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_stride];
@@ -1095,9 +1095,9 @@ static void apply_lu_solve(Tensor& b, const Tensor& lu, const Tensor& pivots, st
 #ifndef USE_LAPACK
   AT_ERROR("lu_solve: LAPACK library not found in compilation");
 #else
-  auto b_data = b.data<scalar_t>();
-  auto lu_data = lu.data<scalar_t>();
-  auto pivots_data = pivots.data<int>();
+  auto b_data = b.data_ptr<scalar_t>();
+  auto lu_data = lu.data_ptr<scalar_t>();
+  auto pivots_data = pivots.data_ptr<int>();
   auto b_stride = matrixStride(b);
   auto lu_stride = matrixStride(lu);
   auto pivots_stride = pivots.size(-1);

@@ -152,6 +152,15 @@ void initJITBindings(PyObject* module) {
             new_node->destroy();
           })
       .def(
+          // TODO: rename to insert_observers after we remove old code
+          "_jit_pass_prepare_quant",
+          [](const script::Module& module,
+             const std::string& method_name,
+             const script::Module& observer_module,
+             const script::Module& weight_observer_module) {
+            return InsertObservers(module, method_name, observer_module, weight_observer_module);
+          })
+      .def(
           "_jit_pass_insert_observers",
           [](const StrongFunctionPtr& function_var,
              py::function pyObserverFunction) {
