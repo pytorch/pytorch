@@ -1,7 +1,6 @@
-#pragma once
-
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 namespace at { namespace native {
 
@@ -26,14 +25,14 @@ using detail::GridSamplerPadding;
 //     +1 --> (size - 1) + 0.5 == size - 0.5
 //     scale_factor = size / 2
 template <typename scalar_t>
-static inline scalar_t grid_sampler_unnormalize(scalar_t coord, int64_t size,
-                                                bool align_corners) {
+static __forceinline__ __device__
+scalar_t grid_sampler_unnormalize(scalar_t coord, int size, bool align_corners) {
   if (align_corners) {
     // unnormalize coord from [-1, 1] to [0, size - 1]
-    return ((coord + 1) / 2) * (size - 1);
+    return ((coord + 1.f) / 2) * (size - 1);
   } else {
     // unnormalize coord from [-1, 1] to [-0.5, size - 0.5]
-    return ((coord + 1) * size - 1) / 2;
+    return ((coord + 1.f) * size - 1) / 2;
   }
 }
 
@@ -42,31 +41,33 @@ static inline scalar_t grid_sampler_unnormalize(scalar_t coord, int64_t size,
 // `grad_in`.
 // This is useful in the backward pass of grid_sampler.
 template <typename scalar_t>
-static inline scalar_t grid_sampler_unnormalize_set_grad(scalar_t coord, int64_t size,
-                                                         bool align_corners, scalar_t *grad_in) {
+static __forceinline__ __device__
+scalar_t grid_sampler_unnormalize_set_grad(scalar_t coord, int size,
+                                           bool align_corners, scalar_t *grad_in) {
   if (align_corners) {
     // unnormalize coord from [-1, 1] to [0, size - 1]
     *grad_in = static_cast<scalar_t>(size - 1) / 2;
-    return ((coord + 1) / 2) * (size - 1);
+    return ((coord + 1.f) / 2) * (size - 1);
   } else {
     // unnormalize coord from [-1, 1] to [-0.5, size - 0.5]
     *grad_in = static_cast<scalar_t>(size) / 2;
-    return ((coord + 1) * size - 1) / 2;
+    return ((coord + 1.f) * size - 1) / 2;
   }
 }
 
 // Clips coordinates to between 0 and clip_limit - 1
-template<typename scalar_t>
-static inline scalar_t clip_coordinates(scalar_t in, int64_t clip_limit) {
-  return std::min(static_cast<scalar_t>(clip_limit - 1), std::max(in, static_cast<scalar_t>(0)));
+template <typename scalar_t>
+static __forceinline__ __device__
+scalar_t clip_coordinates(scalar_t in, int clip_limit) {
+  return ::min(static_cast<scalar_t>(clip_limit - 1), ::max(in, static_cast<scalar_t>(0)));
 }
 
 // clip_coordinates_set_grad works similarly to clip_coordinates except that
 // it also returns the `d output / d input` via pointer argument `grad_in`.
 // This is useful in the backward pass of grid_sampler.
-template<typename scalar_t>
-static inline scalar_t clip_coordinates_set_grad(scalar_t in, int64_t clip_limit,
-                                                 scalar_t *grad_in) {
+template <typename scalar_t>
+static __forceinline__ __device__
+scalar_t clip_coordinates_set_grad(scalar_t in, int clip_limit, scalar_t *grad_in) {
   if (in < static_cast<scalar_t>(0)) {
     *grad_in = static_cast<scalar_t>(0);
     return static_cast<scalar_t>(0);
@@ -85,18 +86,18 @@ static inline scalar_t clip_coordinates_set_grad(scalar_t in, int64_t clip_limit
 // Reflects coordinates until they fall between low and high (inclusive).
 // The bounds are passed as twice their value so that half-integer values
 // can be represented as ints.
-template<typename scalar_t>
-static inline scalar_t reflect_coordinates(scalar_t in, int64_t twice_low,
-                                           int64_t twice_high) {
+template <typename scalar_t>
+static __forceinline__ __device__
+scalar_t reflect_coordinates(scalar_t in, int twice_low, int twice_high) {
   if (twice_low == twice_high) {
     return static_cast<scalar_t>(0);
   }
   scalar_t min = static_cast<scalar_t>(twice_low) / 2;
   scalar_t span = static_cast<scalar_t>(twice_high - twice_low) / 2;
-  in = std::fabs(in - min);
+  in = ::fabs(in - min);
   // `fmod` returns same sign as `in`, which is positive after the `fabs` above.
-  scalar_t extra = std::fmod(in, span);
-  int flips = static_cast<int>(std::floor(in / span));
+  scalar_t extra = ::fmod(in, span);
+  int flips = static_cast<int>(::floor(in / span));
   if (flips % 2 == 0) {
     return extra + min;
   } else {
@@ -108,9 +109,10 @@ static inline scalar_t reflect_coordinates(scalar_t in, int64_t twice_low,
 // that it also returns the `d output / d input` via pointer argument
 // `grad_in`.
 // This is useful in the backward pass of grid_sampler.
-template<typename scalar_t>
-static inline scalar_t reflect_coordinates_set_grad(scalar_t in, int64_t twice_low,
-                                                    int64_t twice_high, scalar_t *grad_in) {
+template <typename scalar_t>
+static __forceinline__ __device__
+scalar_t reflect_coordinates_set_grad(scalar_t in, int twice_low, int twice_high,
+                                      scalar_t *grad_in) {
   if (twice_low == twice_high) {
     *grad_in = static_cast<scalar_t>(0);
     return static_cast<scalar_t>(0);
@@ -126,8 +128,8 @@ static inline scalar_t reflect_coordinates_set_grad(scalar_t in, int64_t twice_l
     grad_in_mult_ = 1;
   }
   // `fmod` returns same sign as `in`, which is positive after the `if` above.
-  scalar_t extra = std::fmod(in, span);
-  int flips = static_cast<int>(std::floor(in / span));
+  scalar_t extra = ::fmod(in, span);
+  int flips = static_cast<int>(::floor(in / span));
   if (flips % 2 == 0) {
     *grad_in = static_cast<scalar_t>(grad_in_mult_);
     return extra + min;
@@ -139,9 +141,10 @@ static inline scalar_t reflect_coordinates_set_grad(scalar_t in, int64_t twice_l
 
 // Computes the pixel source index value for a grid coordinate
 template <typename scalar_t>
-static inline scalar_t grid_sampler_compute_source_index(
+static __forceinline__ __device__
+scalar_t grid_sampler_compute_source_index(
     scalar_t coord,
-    int64_t size,
+    int size,
     GridSamplerPadding padding_mode,
     bool align_corners) {
   coord = grid_sampler_unnormalize(coord, size, align_corners);
@@ -166,9 +169,10 @@ static inline scalar_t grid_sampler_compute_source_index(
 // `d output / d input` via pointer argument `grad_in`.
 // This is useful in the backward pass of grid_sampler.
 template <typename scalar_t>
-static inline scalar_t grid_sampler_compute_source_index_set_grad(
+static __forceinline__ __device__
+scalar_t grid_sampler_compute_source_index_set_grad(
     scalar_t coord,
-    int64_t size,
+    int size,
     GridSamplerPadding padding_mode,
     bool align_corners,
     scalar_t *grad_in) {
@@ -193,30 +197,33 @@ static inline scalar_t grid_sampler_compute_source_index_set_grad(
   return coord;
 }
 
-static inline bool within_bounds_2d(int64_t h, int64_t w, int64_t H, int64_t W) {
+static __forceinline__ __device__
+bool within_bounds_2d(int h, int w, int H, int W) {
   return h >= 0 && h < H && w >= 0 && w < W;
 }
 
-static inline bool within_bounds_3d(int64_t d, int64_t h, int64_t w, int64_t D, int64_t H, int64_t W) {
+static __forceinline__ __device__
+bool within_bounds_3d(int d, int h, int w, int D, int H, int W) {
   return d >= 0 && d < D && h >= 0 && h < H && w >= 0 && w < W;
 }
 
 template<typename scalar_t>
-static inline void safe_add_2d(scalar_t *data, int64_t h, int64_t w,
-                               int64_t sH, int64_t sW, int64_t H, int64_t W,
-                               scalar_t delta) {
+static __forceinline__ __device__
+void safe_add_2d(scalar_t *data, int h, int w,
+                 int sH, int sW, int H, int W,
+                 scalar_t delta) {
   if (within_bounds_2d(h, w, H, W)) {
-    data[h * sH + w * sW] += delta;
+    atomicAdd(data + h * sH + w * sW, delta);
   }
 }
 
 template<typename scalar_t>
-static inline void safe_add_3d(scalar_t *data, int64_t d, int64_t h, int64_t w,
-                               int64_t sD, int64_t sH, int64_t sW,
-                               int64_t D, int64_t H, int64_t W,
-                               scalar_t delta) {
+static __forceinline__ __device__
+void safe_add_3d(scalar_t *data, int d, int h, int w,
+                 int sD, int sH, int sW, int D, int H, int W,
+                 scalar_t delta) {
   if (within_bounds_3d(d, h, w, D, H, W)) {
-    data[d * sD + h * sH + w * sW] += delta;
+    atomicAdd(data + d * sD + h * sH + w * sW, delta);
   }
 }
 
