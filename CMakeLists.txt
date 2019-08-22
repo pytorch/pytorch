@@ -90,6 +90,7 @@ option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" ON)
 option(BUILD_NAMEDTENSOR "Experimental: compile with namedtensor support" OFF)
+option(USE_STATIC_DISPATCH "Use static dispatch for ATen operators" OFF)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
     "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
@@ -108,9 +109,6 @@ option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
-cmake_dependent_option(
-    USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
-    "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
@@ -320,6 +318,10 @@ if(USE_QNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_QNNPACK")
 endif()
 
+if(USE_STATIC_DISPATCH)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_STATIC_DISPATCH")
+endif()
+
 # ---[ Whitelist file if whitelist is specified
 include(cmake/Whitelist.cmake)
 
@@ -465,6 +467,7 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR})
 include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
+include_directories(BEFORE ${PROJECT_BINARY_DIR}/aten/src/)
 
 # ---[ Main build
 add_subdirectory(c10)

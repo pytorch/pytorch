@@ -889,10 +889,10 @@ class TestQuantizedConv(unittest.TestCase):
         # Assert equal
         np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())
         if channelwise:
-            np.testing.assert_array_almost_equal(np.float32(W_q.q_scales().numpy()),
-                                                 np.float32(W_unpacked.q_scales().numpy()),
+            np.testing.assert_array_almost_equal(np.float32(W_q.q_per_channel_scales().numpy()),
+                                                 np.float32(W_unpacked.q_per_channel_scales().numpy()),
                                                  decimal=4)
-            np.testing.assert_equal(W_q.q_zero_points().numpy(), W_unpacked.q_zero_points().numpy())
+            np.testing.assert_equal(W_q.q_per_channel_zero_points().numpy(), W_unpacked.q_per_channel_zero_points().numpy())
         else:
             np.testing.assert_equal(np.float32(W_q.q_scale()), np.float32(W_unpacked.q_scale()))
             np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())

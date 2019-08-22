@@ -66,7 +66,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     } else if (qtype == kPerChannelAffine) {
       zero_points.resize(output_channels, 0);
       for (int i = 0; i < output_channels; ++i) {
-        zero_points[i] = weight.q_zero_points()[i].item<int32_t>();
+        zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
       }
     }
 
@@ -101,7 +101,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     } else if (qtype == kPerChannelAffine) {
       scales.resize(output_channels, 0.0);
       for (int i = 0; i < output_channels; ++i) {
-        scales[i] = weight.q_scales()[i].item<float>();
+        scales[i] = weight.q_per_channel_scales()[i].item<float>();
       }
     }
 
