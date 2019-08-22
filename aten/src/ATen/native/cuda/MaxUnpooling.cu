@@ -161,14 +161,14 @@ Tensor& max_unpooling2d_forward_out_cuda(
             0,
             at::cuda::getCurrentCUDAStream()>>>(
             self.numel(),
-            self.data<scalar_t>(),
-            indices.data<int64_t>(),
+            self.data_ptr<scalar_t>(),
+            indices.data_ptr<int64_t>(),
             numChannels,
             inputHeight,
             inputWidth,
             oheight,
             owidth,
-            output.data<scalar_t>());
+            output.data_ptr<scalar_t>());
       }));
   TORCH_CHECK(
       cudaGetLastError() == cudaSuccess,
@@ -341,7 +341,7 @@ Tensor& max_unpooling3d_forward_out_cuda(
               at::cuda::getCurrentCUDAStream()>>>(
               self.packed_accessor<scalar_t, 4>(),
               indices.packed_accessor<int64_t, 4>(),
-              output.data<scalar_t>(),
+              output.data_ptr<scalar_t>(),
               oT,
               oH,
               oW,
@@ -446,14 +446,14 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
             0,
             at::cuda::getCurrentCUDAStream()>>>(
             count,
-            grad_output.data<scalar_t>(),
-            indices.data<int64_t>(),
+            grad_output.data_ptr<scalar_t>(),
+            indices.data_ptr<int64_t>(),
             nInputPlane,
             nInputRows,
             nInputCols,
             oheight,
             owidth,
-            grad_input.data<scalar_t>());
+            grad_input.data_ptr<scalar_t>());
       }));
   TORCH_CHECK(
       cudaGetLastError() == cudaSuccess,
@@ -554,7 +554,7 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
               block,
               0,
               at::cuda::getCurrentCUDAStream()>>>(
-              grad_output.data<scalar_t>(),
+              grad_output.data_ptr<scalar_t>(),
               oT,
               oH,
               oW,
