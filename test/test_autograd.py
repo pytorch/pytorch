@@ -2451,6 +2451,10 @@ class TestAutograd(TestCase):
                               lambda y, x: torch.trapz(y, x),
                               True, f_args_variable, f_args_tensor)
 
+    # skip this test if running on rocm, because in cdist
+    # we use __shfl_down_sync on CUDA for fast reduction
+    # and it gives incorrect results on rocm platform
+    @skipIfRocm
     def test_cdist(self):
         def _test_cdist_for_size(sizes):
             devices = torch.testing.get_all_device_types()
