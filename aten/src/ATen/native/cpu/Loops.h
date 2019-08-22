@@ -1,16 +1,17 @@
 #pragma once
 
-// This file provides two functions to help write elementwise kernels:
+// This file provides three functions to help write elementwise kernels:
 //
 //   cpu_kernel(TensorIterator iter, <lambda>)
 //   cpu_kernel_vec(TensorIterator iter, <lambda>, <vec_lambda>)
+//   cpu_apply_dim_kernel(TensorIterator iter, <lambda>)
 //
-// Both functions may generate vectorized code. The cpu_kernel implementation
-// relies on the compiler's auto-vectorization. The cpu_kernel_vec
-// implementation uses x86 SIMD intrinsics when available. These functions
-// are only intended to be used in the ATen/native/cpu subdirectory, since files
-// in other directories are not compiled with AVX/AVX2 enabled. See README.md
-// for more details.
+// Both cpu_kernel and cpu_kernel_vec are designed for elementwise operations
+// and they may generate vectorized code. The cpu_kernel implementation relies
+// on the compiler's auto-vectorization. The cpu_kernel_vec implementation uses
+// x86 SIMD intrinsics when available. These functions are only intended to be
+// used in the ATen/native/cpu subdirectory, since files in other directories
+// sare not compiled with AVX/AVX2 enabled.
 //
 // For example, to write a multiplication kernel for float:
 //
@@ -24,7 +25,18 @@
 //
 // See BinaryOpsKernel.cpp for the complete implementation
 //
+// See README.md for more details.
 //
+// cpu_apply_dim_kernel is designed for dimension apply. For example, if you want
+// to implement gather_out(result, dim, index, src), you may write:
+//
+//     cpu_apply_dim_kernel(iter,
+//       [=](float *result_data, int64_t result_stride, int64_t *index_data, int64_t index_stride, float *src_data, int64_t src_stride) {
+//         for (int64_t i = 0; i < size; i++) {
+//           int64_t index = *(index_data + i * index_stride);
+//           *(result_data + i * result_stride) = *(src_data + index * src_stride);
+//         }
+//       });
 
 #include <stdint.h>
 #include <c10/util/C++17.h>
