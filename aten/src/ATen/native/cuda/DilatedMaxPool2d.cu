@@ -347,40 +347,46 @@ void max_pool2d_with_indices_out_cuda_template(
       scalar_t *input_data = input.data<scalar_t>();
       int64_t *indices_data = indices.data<int64_t>();
 
-      if (memory_format == MemoryFormat::ChannelsLast) {
-        const int max_threads = std::min<int>(
-            at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
-        int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
-        int block_x = std::min<int>(
-            maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), at::cuda::warp_size()));
-        int block_y = std::min<int>(
-            maxThreadsDim[1], std::min<int>(lastPow2(outputWidth), max_threads / block_x));
-        int block_z = std::min<int>(
-            maxThreadsDim[2], std::min<int>(lastPow2(outputHeight), max_threads / block_x / block_y));
-        block_x = std::min<int>(
-            maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
-        const dim3 block(block_x, block_y, block_z);
-        int grid_x = nbatch;
-        int grid_y = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE);
-        int grid_z = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE);
-        const dim3 grid(grid_x, grid_y, grid_z);
+      switch (memory_format) {
+        case MemoryFormat::ChannelsLast: {
+          const int max_threads = std::min<int>(
+              at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
+          int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+          int block_x = std::min<int>(
+              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), at::cuda::warp_size()));
+          int block_y = std::min<int>(
+              maxThreadsDim[1], std::min<int>(lastPow2(outputWidth), max_threads / block_x));
+          int block_z = std::min<int>(
+              maxThreadsDim[2], std::min<int>(lastPow2(outputHeight), max_threads / block_x / block_y));
+          block_x = std::min<int>(
+              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
+          const dim3 block(block_x, block_y, block_z);
+          int grid_x = nbatch;
+          int grid_y = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE);
+          int grid_z = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE);
+          const dim3 grid(grid_x, grid_y, grid_z);
 
-        MaxPoolForwardNHWC<scalar_t, scalar_t>
-        <<<grid, block, nInputPlane * block_y * block_z * (sizeof(int) + sizeof(scalar_t)), at::cuda::getCurrentCUDAStream()>>>(
-            input_data,
-                nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
-                kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-                in_stride_c, in_stride_h, in_stride_w,
-                output_data, indices_data);
-      } else {
-        const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
-                                         BLOCK_THREADS);
-        MaxPoolForwardNCHW<scalar_t, scalar_t>
-            <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-            count, input_data,
-                nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
-                kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-                output_data, indices_data);
+          MaxPoolForwardNHWC<scalar_t, scalar_t>
+          <<<grid, block, nInputPlane * block_y * block_z * (sizeof(int) + sizeof(scalar_t)), at::cuda::getCurrentCUDAStream()>>>(
+              input_data,
+                  nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+                  kH, kW, dH, dW, padH, padW, dilationH, dilationW,
+                  in_stride_c, in_stride_h, in_stride_w,
+                  output_data, indices_data);
+          break;
+        }
+        case MemoryFormat::Contiguous: {
+          const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
+                                           BLOCK_THREADS);
+          MaxPoolForwardNCHW<scalar_t, scalar_t>
+              <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+              count, input_data,
+                  nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+                  kH, kW, dH, dW, padH, padW, dilationH, dilationW,
+                  output_data, indices_data);
+          break;
+        }
+        default: AT_ERROR("Unsupported memory format. Supports only ChannelsLast, Contiguous");
       }
     }
   );
@@ -485,55 +491,61 @@ void max_pool2d_with_indices_backward_out_cuda_template(
       scalar_t *gradInput_data = gradInput.data<scalar_t>();
       int64_t *indices_data = indices.data<int64_t>();
 
-      if (memory_format == MemoryFormat::ChannelsLast) {
-        const int max_threads = std::min<int>(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
-        int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
-        int block_x = std::min<int>(
-            maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), at::cuda::warp_size()));
-        int block_y = std::min<int>(
-            maxThreadsDim[1], std::min<int>(lastPow2(inputWidth), max_threads / block_x));
-        int block_z = std::min<int>(
-            maxThreadsDim[2], std::min<int>(lastPow2(inputHeight), max_threads / block_x / block_y));
-        block_x = std::min<int>(
-            maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
-        const dim3 block(block_x, block_y, block_z);
-        int grid_x = nbatch;
-        int grid_y = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE);
-        int grid_z = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE);
-        const dim3 grid(grid_x, grid_y, grid_z);
+      switch (memory_format) {
+        case MemoryFormat::ChannelsLast: {
+          const int max_threads = std::min<int>(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
+          int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+          int block_x = std::min<int>(
+              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), at::cuda::warp_size()));
+          int block_y = std::min<int>(
+              maxThreadsDim[1], std::min<int>(lastPow2(inputWidth), max_threads / block_x));
+          int block_z = std::min<int>(
+              maxThreadsDim[2], std::min<int>(lastPow2(inputHeight), max_threads / block_x / block_y));
+          block_x = std::min<int>(
+              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
+          const dim3 block(block_x, block_y, block_z);
+          int grid_x = nbatch;
+          int grid_y = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE);
+          int grid_z = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE);
+          const dim3 grid(grid_x, grid_y, grid_z);
 
-        MaxPoolBackwardNHWC<scalar_t, accscalar_t>
-        <<<grid, block, nInputPlane * block_y * block_z * sizeof(scalar_t), at::cuda::getCurrentCUDAStream()>>>(
-            count,
-                gradOutput_data,
-                indices_data,
-                nbatch,
-                nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
-                kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-                out_stride_c, out_stride_h, out_stride_w,
-                in_stride_c, in_stride_h, in_stride_w,
-                gradInput_data);
-      } else {
-        int imgcount = inputWidth * inputHeight;
-        dim3 grid;
-        const int blocks = (imgcount + BLOCK_THREADS - 1) / BLOCK_THREADS;
-        grid.x = blocks;
-        grid.y = nbatch;
-        uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
-        if (maxGridY < grid.y) grid.y = maxGridY;
-        grid.z = nInputPlane;
-        uint64_t maxGridZ = at::cuda::getCurrentDeviceProperties()->maxGridSize[2];
-        if (maxGridZ < grid.z) grid.z = maxGridZ;
+          MaxPoolBackwardNHWC<scalar_t, accscalar_t>
+          <<<grid, block, nInputPlane * block_y * block_z * sizeof(scalar_t), at::cuda::getCurrentCUDAStream()>>>(
+              count,
+                  gradOutput_data,
+                  indices_data,
+                  nbatch,
+                  nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+                  kH, kW, dH, dW, padH, padW, dilationH, dilationW,
+                  out_stride_c, out_stride_h, out_stride_w,
+                  in_stride_c, in_stride_h, in_stride_w,
+                  gradInput_data);
+          break;
+        }
+        case MemoryFormat::Contiguous: {
+          int imgcount = inputWidth * inputHeight;
+          dim3 grid;
+          const int blocks = (imgcount + BLOCK_THREADS - 1) / BLOCK_THREADS;
+          grid.x = blocks;
+          grid.y = nbatch;
+          uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
+          if (maxGridY < grid.y) grid.y = maxGridY;
+          grid.z = nInputPlane;
+          uint64_t maxGridZ = at::cuda::getCurrentDeviceProperties()->maxGridSize[2];
+          if (maxGridZ < grid.z) grid.z = maxGridZ;
 
-        MaxPoolBackwardNCHW<scalar_t, accscalar_t>
-        <<<grid, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-          count,
-          gradOutput_data,
-          indices_data,
-          nbatch,
-          nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
-          kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-          gradInput_data);
+          MaxPoolBackwardNCHW<scalar_t, accscalar_t>
+          <<<grid, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+              count,
+                  gradOutput_data,
+                  indices_data,
+                  nbatch,
+                  nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+                  kH, kW, dH, dW, padH, padW, dilationH, dilationW,
+                  gradInput_data);
+          break;
+        }
+        default: AT_ERROR("Unsupported memory format. Supports only ChannelsLast, Contiguous");
       }
     }
   );
