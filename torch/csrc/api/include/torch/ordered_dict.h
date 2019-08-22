@@ -225,14 +225,14 @@ class OrderedDict<Key, Value>::Item {
   }
 
   /// Returns a `(key, value)` pair.
-  const std::pair<const Key, Value>& pair() const noexcept {
+  std::pair<const Key, Value> pair() const noexcept {
     return pair_;
   }
 
  private:
   /// This is stored as an std::pair because it will make Python binding a lot,
-  /// lot easier.
-  ::std::pair<const Key, Value> pair_;
+  /// lot easier. Key shouldn't be const here so that erase function can work.
+  ::std::pair<Key, Value> pair_;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ OrderedDict ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

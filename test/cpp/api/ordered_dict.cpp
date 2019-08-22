@@ -140,11 +140,14 @@ TEST(OrderedDictTest, CanIterateItems) {
 TEST(OrderedDictTest, EraseWorks) {
   OrderedDict<int> dict = {{"a", 1}, {"b", 2}, {"c", 3}};
   dict.erase("b");
-  ASSERT_EQ(dict[0], 1);
-  ASSERT_EQ(dict[1], 3);
+  ASSERT_FALSE(dict.contains("b"));
+  ASSERT_EQ(dict["a"], 1);
+  ASSERT_EQ(dict["c"], 3);
   dict.erase("a");
-  ASSERT_EQ(dict[0], 3);
+  ASSERT_FALSE(dict.contains("a"));
+  ASSERT_EQ(dict["c"], 3);
   dict.erase("c");
+  ASSERT_FALSE(dict.contains("c"));
   ASSERT_TRUE(dict.is_empty());
 }
 

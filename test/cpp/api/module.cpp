@@ -120,7 +120,7 @@ TEST_F(ModuleTest, UnregisterModuleThrowsForUnknownModuleName) {
   TestModel model;
   ASSERT_THROWS_WITH(
       model.unregister_module("linear"),
-      "No Module with name `linear' is registered");
+      "No Module with name `linear` is registered");
   model.register_module("linear", torch::nn::Linear(3, 4));
   model.unregister_module("linear");
   ASSERT_TRUE(model.children().empty());
