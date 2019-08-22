@@ -152,6 +152,7 @@ struct CAFFE2_API TensorIterator {
   static TensorIterator nullary_op(Tensor& out);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
+  static TensorIterator dim_apply_op(Tensor& out, const Tensor& a, const Tensor& b, int64_t dim);
 
   int ndim() const { return shape_.size(); }
   IntArrayRef shape() const { return shape_; }

@@ -657,6 +657,18 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
   return iter;
 }
 
+
+TensorIterator TensorIterator::dim_apply_op(Tensor& out, const Tensor& a, const Tensor& b, int64_t dim) {
+  TORCH_INTERNAL_ASSERT(out.defined());
+  auto iter = TensorIterator();
+  iter.add_output(out);
+  iter.add_input(a);
+  iter.add_input(b);
+  iter.dim_apply = dim;
+  iter.resize_outputs_ = false;
+  return iter;
+}
+
 void TensorIterator::mark_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
     operands_[i].is_output = true;
