@@ -1123,6 +1123,8 @@
 [[
   name: _th_topk
   cname: topk
+  backends:
+    - CUDA
   variants:
     - function
   return: argument 0,1
