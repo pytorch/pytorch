@@ -122,6 +122,17 @@ TORCH_API script::Module InsertObservers(
     const script::Module& observer_module,
     const script::Module& weight_observer_module);
 
+/** \brief Insert quantize - int_repr - dequantize calls to the Tensors
+ *  that are observed in insert_observers pass
+ *
+ * For each Tensor that is observed, get the observer module and call
+ * calculate_qparam on the observer module to get quantization parameters
+ * and add quantize - int_repr - dequantize function calls using these parameters
+ * we also have special handling for quantizing "bias" right now.
+ *
+ * \param module the input module
+ * \param method_name the method we want to insert quantization calls for
+ */
 TORCH_API script::Module InsertQuantDeQuant(
     const script::Module& module,
     const std::string& method_name);
