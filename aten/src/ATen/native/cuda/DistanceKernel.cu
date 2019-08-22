@@ -133,7 +133,7 @@ __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
                                                        const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m, const int64_t count, const int64_t r_size, const int64_t l1_size, const int64_t l2_size) {
   const int y = blockIdx.y * blockDim.y + threadIdx.y;
   const int init = blockIdx.x * blockDim.x + threadIdx.x;
-  if (y >= count || init >= m) {
+  if (y >= count || init >= m) {   //CHANGED
     return;
   }
   const int l = y / r_size;
@@ -311,8 +311,8 @@ void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
 }
 
 void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& dist) {
-  result.fill_(0);
   if (p == 0.0 || grad.numel() == 0 || x1.numel() == 0 || x2.numel() == 0) {
+    result.fill_(0);
     return;
   }
 
@@ -352,7 +352,7 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   });
   AT_CUDA_CHECK(cudaGetLastError());
 
-  if (x1.dim() > 2) {
+  if (x1.dim() > 2) {  //CHANGED
     at::sum_out(result, buffer, 1);
   } else {
     at::sum_out(result, buffer, 0);
