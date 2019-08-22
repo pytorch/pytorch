@@ -1270,7 +1270,7 @@ if (NOT INTERN_BUILD_MOBILE)
     MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
     set(AT_CUDNN_ENABLED 0)
   ELSE()
-    include_directories(SYSTEM ${CUDNN_INCLUDE_PATH})
+    include_directories(SYSTEM ${CUDNN_INCLUDE_DIRS})
     set(AT_CUDNN_ENABLED 1)
   ENDIF()
 
