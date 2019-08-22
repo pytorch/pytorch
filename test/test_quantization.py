@@ -11,7 +11,7 @@ from torch.quantization import \
     QConfig_dynamic, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
     quantize_dynamic, default_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, Observer
+    default_dynamic_qconfig, Observer, QuantWrapper
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
@@ -19,7 +19,8 @@ from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     ModelForFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
     ModForWrapping, \
     test_only_eval_fn, test_only_train_fn, \
-    prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, TwoLayerLinearModel, NestedModel
+    prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, \
+    TwoLayerLinearModel, NestedModel, ResNetBase
 
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
@@ -255,6 +256,29 @@ class PostTrainingQuantTest(QuantizationTestCase):
         model = quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
+    def test_resnet_base(self):
+        r"""Test quantization for bottleneck topology used in resnet/resnext
+        and add coverage for conversion of average pool operator
+        """
+        model = ResNetBase().float().eval()
+        model = QuantWrapper(model)
+        model.qconfig = default_qconfig
+        print(model)
+        fuse_list = [['module.conv1', 'module.bn1', 'module.relu1']]
+        print(model.module)
+        print(model.module.conv1)
+        fuse_modules(model, fuse_list)
+        prepare(model)
+        self.checkObservers(model)
+        test_only_eval_fn(model, self.img_data)
+        convert(model)
+
+        def checkQuantized(model):
+            self.assertEqual(type(model.module.conv1), nn._intrinsic.quantized.ConvReLU2d)
+            self.assertEqual(type(model.module.myop), nn.quantized.QFunctional)
+            test_only_eval_fn(model, self.img_data)
+
+        checkQuantized(model)
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
@@ -427,6 +451,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         self.checkObservers(model)
         test_only_train_fn(model, self.train_data)
         convert(model)
+
 
         def checkQuantized(model):
             self.assertEqual(type(model.fc1), nnq.Linear)
