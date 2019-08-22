@@ -339,7 +339,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::TupleIndex:
     case prim::TupleSlice:
     case prim::ListUnpack:
-    case prim::PythonOp:
     case prim::GetAttr:
       return analyzeExtractor(node);
     case prim::ConstantChunk:
@@ -358,6 +357,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return;
     case prim::CallFunction:
     case prim::CallMethod:
+    case prim::PythonOp:
       // TODO: this can be improved with summarizes of what the function does
       // for now we assume the worst
       return analyzeConservative(node);
