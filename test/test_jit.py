@@ -18864,8 +18864,6 @@ class TestDocs(unittest.TestCase):
             out = result.stdout.decode('utf-8')
             err = result.stderr.decode('utf-8')
             raise RuntimeError("{}\n{}\nDocs build failed (run `cd docs && make doctest`)".format(err, out))
-        generated_file_dir = [os.path.dirname(__file__), '..', 'docs', 'm.pt']
-        os.remove(os.path.join(*generated_file_dir))
 
 
 for test in autograd_method_tests():
