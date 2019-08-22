@@ -458,7 +458,7 @@ struct ParserImpl {
         }
         if (type.present()) {
           throw ErrorReport(type.range())
-              << "Annotated multiple assignment is not well-defined in python";
+              << "Annotated multiple assignment is not supported in python";
         }
         L.expect(TK_NEWLINE);
         return Assign::create(

@@ -10302,11 +10302,14 @@ a")
             ten = torch.tensor(1)
             ten1 = ten2 = ten.add_(1)
 
-            return a, b, c, d, f, ten, ten1, ten2
+            # ordering
+            x = 1
+            y = 3
+            x, y = y, x + y
+
+            return a, b, c, d, f, ten, ten1, ten2, x, y
 
         self.checkScript(test, ())
-        # check frontend
-        self.assertEqual(torch.jit.script(test)(), test())
 
     def test_multi_reduction(self):
         with self.assertRaisesRegex(
