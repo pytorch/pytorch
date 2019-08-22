@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <math.h>
+
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
 Output was modified to be inf or -inf when input is 1 or -1. */
