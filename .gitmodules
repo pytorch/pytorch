@@ -61,9 +61,6 @@
 [submodule "third_party/sleef"]
 	path = third_party/sleef
 	url = https://github.com/zdevito/sleef
-[submodule "third_party/ideep"]
-	path = third_party/ideep
-	url = https://github.com/intel/ideep
 [submodule "third_party/nccl/nccl"]
 	path = third_party/nccl/nccl
 	url = https://github.com/NVIDIA/nccl
@@ -82,3 +79,6 @@
 [submodule "third_party/foxi"]
 	path = third_party/foxi
 	url = https://github.com/houseroad/foxi.git
+[submodule "third_party/ideep"]
+	path = third_party/ideep
+	url = ssh://git-ccr-1.devtools.intel.com:29418/dl_framework-ideep_pytorch

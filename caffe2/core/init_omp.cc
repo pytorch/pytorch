@@ -49,8 +49,8 @@ REGISTER_CAFFE2_INIT_FUNCTION(Caffe2SetOpenMPThreads,
 
 #ifdef CAFFE2_USE_MKL
 bool Caffe2SetMKLThreads(int*, char***) {
-  if (!getenv("MKL_NUM_THREADS")) {
-    VLOG(1) << "MKL_NUM_THREADS not passed, defaulting to 1 thread";
+  if (!getenv("MKL_NUM_THREADS") && !getenv("OMP_NUM_THREADS")) {
+    VLOG(1) << "MKL_NUM_THREADS and OMP_NUM_THREADS not passed, defaulting to 1 thread";
     mkl_set_num_threads(1);
   }
 

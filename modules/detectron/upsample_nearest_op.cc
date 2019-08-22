@@ -15,17 +15,32 @@
  */
 
 #include "upsample_nearest_op.h"
-#ifdef CAFFE2_USE_MKLDNN
-#include "caffe2/ideep/operators/operator_fallback_ideep.h"
-#include "caffe2/ideep/utils/ideep_operator.h"
-#endif
 
 namespace caffe2 {
 #ifdef CAFFE2_USE_MKLDNN
-REGISTER_IDEEP_OPERATOR(
-    UpsampleNearest,
-    IDEEPFallbackOp<UpsampleNearestOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(UpsampleNearest, IDEEPUpsampleNearestOp);
+REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8UpsampleNearest, DNNLOWP, IDEEPUpsampleNearestOp);
 #endif
+  
+OPERATOR_SCHEMA(Int8UpsampleNearest)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Nearest neighbor upsampling operation with int8 data type.
+)DOC")
+    .Arg(
+        "scale",
+        "(int) default 2; integer upsampling factor.")
+    .Input(
+        0,
+        "X",
+        "4D feature map input of shape (N, C, H, W) or (N, H, W, C).")
+    .Output(
+        0,
+        "Y",
+        "4D feature map of shape (N, C, scale * H, scale * W) "
+        "or (N, scale * H, scale * W, C); Values are "
+        "neareast neighbor samples from X.");
 
 REGISTER_CPU_OPERATOR(UpsampleNearest, UpsampleNearestOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(

@@ -1,4 +1,6 @@
 #include <caffe2/ideep/ideep_utils.h>
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include "caffe2/operators/reshape_op.h"
 
 namespace caffe2 {
 
@@ -7,13 +9,23 @@ class IDEEPReshapeOp final : public IDEEPOperator {
  public:
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_OPERATOR_FUNCTIONS();
+  using FALLBACK_OP = IDEEPFallbackOp<ReshapeOp<float, CPUContext>>;
 
   IDEEPReshapeOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
-        new_shape_(OperatorBase::GetRepeatedArgument<int>("shape")) {}
+        new_shape_(OperatorBase::GetRepeatedArgument<int>("shape")),
+        fallback_(operator_def, ws) {}
 
   bool RunOnDevice() override {
     ideep::tensor::dims actual_new_shape = new_shape_;
+
+    if (!(OperatorBase::InputBlob(0).template IsType<itensor>())) {
+      CAFFE_ENFORCE(
+          BlobIsTensorType(OperatorBase::InputBlob(0), CPU),
+          "Expect cpu tensor if not itensor");
+      return fallback_.Run(0);
+    }
+
     if (InputSize() == 2) {
       CAFFE_ENFORCE(
           !OperatorBase::HasArgument("shape"),
@@ -123,6 +135,7 @@ class IDEEPReshapeOp final : public IDEEPOperator {
 
  private:
   ideep::tensor::dims new_shape_;
+  FALLBACK_OP fallback_;
 };
 
 REGISTER_IDEEP_OPERATOR(Reshape, IDEEPReshapeOp);

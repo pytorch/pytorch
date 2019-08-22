@@ -5,6 +5,7 @@
 #include <caffe2/operators/accuracy_op.h>
 #include <caffe2/operators/affine_channel_op.h>
 #include <caffe2/operators/atan_op.h>
+#include <caffe2/operators/batch_gather_ops.h>
 #include <caffe2/operators/batch_matmul_op.h>
 #include <caffe2/operators/cast_op.h>
 #include <caffe2/operators/clip_op.h>
@@ -20,6 +21,7 @@
 #include <caffe2/operators/elementwise_ops.h>
 #include <caffe2/operators/elementwise_sub_op.h>
 #include <caffe2/operators/expand_op.h>
+#include <caffe2/operators/exp_op.h>
 #include <caffe2/operators/filler_op.h>
 #include <caffe2/operators/flatten_op.h>
 #include <caffe2/operators/gather_op.h>
@@ -28,7 +30,6 @@
 #include <caffe2/operators/load_save_op.h>
 #include <caffe2/operators/loss_op.h>
 #include <caffe2/operators/normalize_op.h>
-#include <caffe2/operators/order_switch_ops.h>
 #include <caffe2/operators/pad_op.h>
 #include <caffe2/operators/prelu_op.h>
 #include <caffe2/operators/reduce_ops.h>
@@ -44,13 +45,16 @@
 #include <caffe2/operators/stop_gradient.h>
 #include <caffe2/operators/tanh_op.h>
 #include <caffe2/operators/tensor_protos_db_input.h>
-#include <caffe2/operators/transpose_op.h>
 #include <caffe2/operators/utility_ops.h>
 #include <caffe2/queue/queue_ops.h>
 #include <caffe2/sgd/iter_op.h>
 #include <caffe2/sgd/learning_rate_op.h>
+#include <caffe2/contrib/aten/aten_op.h>
 #include "caffe2/operators/bbox_transform_op.h"
 #include "caffe2/operators/box_with_nms_limit_op.h"
+#include <caffe2/operators/numpy_tile_op.h>
+#include <caffe2/operators/log_op.h>
+#include <caffe2/operators/top_k.h>
 
 #ifdef CAFFE2_USE_GLOO
 #include <caffe2/contrib/gloo/common_world_ops.h>
@@ -81,7 +85,6 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<AveragedLoss<float, CPUContext>, SkipIndices<0>>);
 REGISTER_IDEEP_OPERATOR(Flatten, IDEEPFallbackOp<FlattenOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(ResizeLike, IDEEPFallbackOp<ResizeLikeOp<CPUContext>>);
-REGISTER_IDEEP_OPERATOR(Transpose, IDEEPFallbackOp<TransposeOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Slice, IDEEPFallbackOp<SliceOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Clip, IDEEPFallbackOp<ClipOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
@@ -164,6 +167,12 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     PRelu,
     IDEEPFallbackOp<PReluOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    Exp,
+    IDEEPFallbackOp<UnaryElementwiseOp<TensorTypes<float>, CPUContext, ExpFunctor<CPUContext>>>);
+REGISTER_IDEEP_OPERATOR(
+    BatchGather,
+    IDEEPFallbackOp<BatchGatherOp<CPUContext>>);
 
 // ctc decoder operators
 REGISTER_IDEEP_OPERATOR(
@@ -201,6 +210,10 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<UnaryElementwiseOp<
       TensorTypes<float>, CPUContext, SqrtFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
+    Log,
+    IDEEPFallbackOp<UnaryElementwiseOp<
+      TensorTypes<float>, CPUContext, LogFunctor<CPUContext>>>);
+REGISTER_IDEEP_OPERATOR(
     Div,
     IDEEPFallbackOp<BinaryElementwiseOp<
       NumericTypes, CPUContext, DivFunctor<CPUContext>>>);
@@ -218,6 +231,15 @@ REGISTER_IDEEP_OPERATOR(
         TensorTypes<float>,
         CPUContext,
         TanhFunctor<CPUContext>>>);
+REGISTER_IDEEP_OPERATOR(
+    ATen,
+    IDEEPFallbackOp<ATenOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    NumpyTile,
+    IDEEPFallbackOp<NumpyTileOp<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    TopK,
+    IDEEPFallbackOp<TopKOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     L1Distance,
     IDEEPFallbackOp<L1DistanceOp<float, CPUContext>>);
@@ -252,12 +274,6 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     SoftmaxWithLossGradient,
     IDEEPFallbackOp<SoftmaxWithLossGradientOp<float, CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    NHWC2NCHW,
-    IDEEPFallbackOp<NHWC2NCHWOp<float, CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    NCHW2NHWC,
-    IDEEPFallbackOp<NCHW2NHWCOp<float, CPUContext>>);
 
 REGISTER_IDEEP_OPERATOR(
     Expand,

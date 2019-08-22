@@ -4,6 +4,9 @@
 
 #include "caffe2/utils/math.h"
 
+#ifdef CAFFE2_USE_MKLDNN
+#include "caffe2/ideep/operators/operator_fallback_ideep.h"
+#endif
 namespace caffe2 {
 
 namespace {
@@ -62,7 +65,11 @@ bool ArgMinReducer<CPUContext>::operator()(
 
 REGISTER_CPU_OPERATOR(ArgMax, ArgOp<CPUContext, ArgMaxReducer<CPUContext>>);
 REGISTER_CPU_OPERATOR(ArgMin, ArgOp<CPUContext, ArgMinReducer<CPUContext>>);
-
+#ifdef CAFFE2_USE_MKLDNN
+REGISTER_IDEEP_OPERATOR(
+    ArgMax,
+    IDEEPFallbackOp<ArgOp<CPUContext, ArgMaxReducer<CPUContext>>, SkipIndices<0>>);
+#endif
 namespace {
 
 std::vector<TensorShape> InferTensor(

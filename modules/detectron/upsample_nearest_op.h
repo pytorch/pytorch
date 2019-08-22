@@ -21,6 +21,9 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#ifdef CAFFE2_USE_MKLDNN
+#include <caffe2/ideep/ideep_utils.h>
+#endif
 
 namespace caffe2 {
 
@@ -61,11 +64,7 @@ class UpsampleNearestOp final : public Operator<Context> {
     int scaled_d3 = d3 / scale_;
 
 #ifdef _OPENMP
-#if (_OPENMP >= 201307)
-#pragma omp parallel for simd
-#else
 #pragma omp parallel for
-#endif
 #endif
     for (int i = 0; i < d1; ++i) {
       for (int j = 0; j < d2; ++j) {
@@ -105,6 +104,102 @@ class UpsampleNearestGradientOp final : public Operator<Context> {
   int scale_;
 };
 
+#ifdef CAFFE2_USE_MKLDNN
+USE_IDEEP_DEF_ALIASES();
+
+template <typename T>
+void getData(T Ydata, const T Xdata, 
+  int d0, int d1, int d2, int d3, int upsample_scale) {
+  int scaled_d1 = d1 / upsample_scale;
+  int scaled_d2 = d2 / upsample_scale;
+  
+  for (int j = 0; j < d0; ++j) {    
+#ifdef _OPENMP
+#pragma omp parallel for collapse(3)
+#endif
+    for (int u = 0; u < d1; ++u) {
+      for (int v = 0; v < d2; ++v) {
+        for (int k = 0; k < d3; ++k) {
+          int scaled_u = u / upsample_scale;
+          int scaled_v = v / upsample_scale;
+          int ii = ((j * d1 + u) * d2 + v) * d3 + k;
+          int ipidx = ((j * scaled_d1 + scaled_u) * scaled_d2 + scaled_v) * d3 + k;
+          Ydata[ii] = Xdata[ipidx];
+        }
+      }
+    }
+  }
+}
+
+class IDEEPUpsampleNearestOp final : public IDEEPOperator {
+public:
+  USE_IDEEP_DEF_ALIASES();
+  USE_IDEEP_OPERATOR_FUNCTIONS();
+
+  IDEEPUpsampleNearestOp(const OperatorDef& operator_def, Workspace* ws)
+      : IDEEPOperator(operator_def, ws),
+        upsample_scale_(this->template GetSingleArgument<int>("scale", 2)) {
+  }
+  virtual ~IDEEPUpsampleNearestOp() {}
+
+  bool RunOnDevice() override {
+    const auto& X = Input(INPUT);
+    auto X_ = X;
+    bool nhwc_format = X_.is_nhwc_format();
+    if (!X_.is_nchw_channel_blocking() && !X_.is_nhwc_format()) {
+      X_.init({X.get_dims(), X.get_data_type(), iformat::nchw});
+      X_.feed_from(X);
+    }
+
+    auto Y_dims = X_.get_dims();
+    int d0, d1, d2, d3;
+    if (X_.ndims() == 3) {
+      d0 = 1;
+      d1 = Y_dims[0];
+      d2 = Y_dims[1] * upsample_scale_;
+      d3 = Y_dims[2] * upsample_scale_;
+      Y_dims = {d1, d2, d3};
+    } else {
+      d0 = Y_dims[0];
+      d1 = Y_dims[1];
+      d2 = Y_dims[2] * upsample_scale_;
+      d3 = Y_dims[3] * upsample_scale_;
+      Y_dims = {d0, d1, d2, d3};
+    }
+
+    int c_blocking = X_.is_nhwc_format() ? Y_dims[1] : X_.get_block_dims()[1];
+    int nc_num = d0 * ceil(float(d1) / c_blocking);
+   
+    auto* Y = Output(OUTPUT);
+    Y->init({Y_dims, X_.get_data_type(), X_.get_internal_format()});
+ 
+    if (X_.get_data_type() == idtype::s8 || 
+      X_.get_data_type() == idtype::u8) {
+      Y->set_scale(X.get_scale());
+      if (X_.get_data_type() == idtype::s8) {
+        auto Xdata = static_cast<int8_t*>(X_.get_data_handle());
+        auto Ydata = static_cast<int8_t*>(Y->get_data_handle());
+        getData<int8_t*>(Ydata, Xdata, nc_num, d2, d3, c_blocking, upsample_scale_);
+      } else {
+        auto Xdata = static_cast<uint8_t*>(X_.get_data_handle());
+        auto Ydata = static_cast<uint8_t*>(Y->get_data_handle());
+        getData<uint8_t*>(Ydata, Xdata, nc_num, d2, d3, c_blocking, upsample_scale_);
+      }
+    } else {
+      auto Xdata = static_cast<float*>(X_.get_data_handle());
+      auto Ydata = static_cast<float*>(Y->get_data_handle());
+      getData<float*>(Ydata, Xdata, nc_num, d2, d3, c_blocking, upsample_scale_);
+    } 
+    return true;
+  }
+
+ protected:
+  int upsample_scale_;
+
+  INPUT_TAGS(INPUT);
+  OUTPUT_TAGS(OUTPUT);
+};
+#endif // CAFFE2_USE_MKLDNN
 } // namespace caffe2
 
 #endif // UPSAMPLE_NEAREST_OP_H_
