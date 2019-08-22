@@ -1,10 +1,7 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import copy
 import math
 import os
 import random
-import signal
 import sys
 import tempfile
 import threading
@@ -25,7 +22,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, \
-    skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues, get_timeout
+    skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues
 from common_utils import TestCase, load_tests, run_tests
 from common_utils import retry_on_address_already_in_use_error
 
@@ -2795,26 +2792,12 @@ class ComputeBucketAssignmentTest(TestCase):
 
 
 class CommTest(MultiProcessTestCase):
-
-    def setUp(self):
-        super(CommTest, self).setUp()
-        # Need to skip return code checking for these tests since the child
-        # processes don't exit cleanly.
-        self.skip_return_code_checks = [
-            self.test_nccl_errors_blocking_abort,
-            self.test_nccl_errors_blocking_sigkill,
-            self.test_nccl_errors_blocking_sigstop,
-            self.test_nccl_errors_blocking_sigterm,
-        ]
-        self.op_timeout_sec = 1
-
     def tearDown(self):
         super(CommTest, self).tearDown()
         try:
             os.remove(self.file.name)
         except OSError:
             pass
-        os.environ["NCCL_BLOCKING_WAIT"] = "0"
 
     @property
     def world_size(self):
@@ -2847,85 +2830,6 @@ class CommTest(MultiProcessTestCase):
             buffer_size=256)
 
         self.assertEqual(tensors, target)
-
-    def _run_all_reduce(self, pg):
-        pg.allreduce(torch.rand(10).cuda(self.rank))
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_nonblocking(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        process_group.allreduce(torch.rand(10).cuda(self.rank))
-        if self.rank == 0:
-            # This allreduce does not block Python thread as allreduce enqueues
-            # the cuda operation, and then wait only blocks the current cuda
-            # stream.
-            work = process_group.allreduce(torch.rand(10).cuda(self.rank))
-            work.wait()
-
-            # Now the work scheduled next should hang forever since the previous
-            # allreduce will never complete.
-            t = threading.Thread(target=self._run_all_reduce, args=(process_group,))
-            t.start()
-            t.join(int(get_timeout(self.id()) / 2))
-            self.assertTrue(t.is_alive())
-
-    def _test_nccl_errors_blocking(self, func):
-        os.environ["NCCL_BLOCKING_WAIT"] = "1"
-        store = c10d.FileStore(self.file.name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, "", timeout=timedelta(seconds=self.op_timeout_sec))
-        process_group.allreduce(torch.rand(10).cuda(self.rank))
-        if self.rank == 0:
-            work = process_group.allreduce(torch.rand(10).cuda(self.rank))
-            with self.assertRaises(RuntimeError):
-                # Operation would time out in blocking mode.
-                work.wait()
-        else:
-            func()
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_blocking_clean_exit(self):
-        self._test_nccl_errors_blocking(lambda : sys.exit(0))
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_blocking_abort(self):
-        self._test_nccl_errors_blocking(lambda : os.abort())
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_blocking_sigkill(self):
-        self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGKILL))
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_blocking_sigstop(self):
-        self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGSTOP))
-        if self.rank == 0:
-            time.sleep(2 * self.op_timeout_sec)
-            for i in range(1, len(self.processes)):
-                os.kill(self.processes[i].pid, signal.SIGCONT)
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_blocking_sigterm(self):
-        self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGTERM))
-
-    def _run_invalid_nccl_blocking_wait_env(self, val):
-        os.environ["NCCL_BLOCKING_WAIT"] = val
-        store = c10d.FileStore(self.file.name, self.world_size)
-        with self.assertRaises(RuntimeError):
-            process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_invalid_nccl_blocking_wait_env(self):
-        self._run_invalid_nccl_blocking_wait_env('abc')
-        self._run_invalid_nccl_blocking_wait_env('-1')
-        self._run_invalid_nccl_blocking_wait_env('2147483647')
-        self._run_invalid_nccl_blocking_wait_env('4294967295')
 
     @requires_nccl()
     @skip_if_not_multigpu
