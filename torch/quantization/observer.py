@@ -102,6 +102,7 @@ class MinMaxObserver(ObserverBase):
         else:
             self.min_val = torch.min(torch.min(x), self.min_val)
             self.max_val = torch.max(torch.max(x), self.max_val)
+        return x
 
     def calculate_qparams(self, **kwargs):
         if self.max_val is None or self.min_val is None:
@@ -365,10 +366,8 @@ class HistogramObserver(ObserverBase):
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
 
-
 def default_observer(**kwargs):
     return observer(MinMaxObserver, **kwargs)
-
 
 def default_weight_observer(**kwargs):
     kwargs.setdefault("dtype", torch.qint8)
