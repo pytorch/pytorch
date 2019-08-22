@@ -142,7 +142,6 @@ __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
   }
   const int l = y / r_size;
   const int k = y % r_size;
-  const int init = blockIdx.x * blockDim.x + threadIdx.x;
   const int stride = blockDim.x * gridDim.x;
   const int l_size = r_size * m;
 
