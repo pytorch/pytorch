@@ -78,7 +78,7 @@ int64_t q_zero_point_quant(const Tensor& self) {
   return static_cast<PerTensorAffineQuantizer*>(quantizer.get())->zero_point();
 }
 
-Tensor q_scales_quant(const Tensor& self) {
+Tensor q_per_channel_scales_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
   return at::tensor(
@@ -86,7 +86,7 @@ Tensor q_scales_quant(const Tensor& self) {
       self.options().dtype(at::kDouble));
 }
 
-Tensor q_zero_points_quant(const Tensor& self) {
+Tensor q_per_channel_zero_points_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
   return at::tensor(
