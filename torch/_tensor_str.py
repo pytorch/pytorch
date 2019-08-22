@@ -278,8 +278,8 @@ def _str(self):
             suffixes.append('scale=' + str(self.q_scale()))
             suffixes.append('zero_point=' + str(self.q_zero_point()))
         elif self.qscheme() == torch.per_channel_affine or self.qscheme() == torch.per_channel_symmetric:
-            suffixes.append('scale=' + str(self.q_scales()))
-            suffixes.append('zero_point=' + str(self.q_zero_points()))
+            suffixes.append('scale=' + str(self.q_per_channel_scales()))
+            suffixes.append('zero_point=' + str(self.q_per_channel_zero_points()))
         tensor_str = _tensor_str(self.dequantize(), indent)
     else:
         if self.numel() == 0 and not self.is_sparse:
