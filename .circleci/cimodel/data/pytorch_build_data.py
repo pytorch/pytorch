@@ -4,7 +4,7 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
 
 CONFIG_TREE_DATA = [
-    ("trusty", [
+    ("xenial", [
         (None, [
             XImportant("2.7.9"),
             X("2.7"),
@@ -16,19 +16,21 @@ CONFIG_TREE_DATA = [
             ("5.4", [
                 XImportant("3.6"),
                 ("3.6", [
-                    ("xla", [XImportant(True)]),
                     ("namedtensor", [XImportant(True)]),
                 ]),
             ]),
             ("7", [X("3.6")]),
         ]),
-    ]),
-    ("xenial", [
         ("clang", [
             ("5", [
                 XImportant("3.6"),  # This is actually the ASAN build
                 ("3.6", [
                     ("namedtensor", [XImportant(True)]),  # ASAN
+                ]),
+            ]),
+            ("7", [
+                ("3.6", [
+                    ("xla", [XImportant(True)]),
                 ]),
             ]),
         ]),
@@ -96,32 +98,9 @@ class DistroConfigNode(TreeConfigNode):
         distro = self.find_prop("distro_name")
 
         next_nodes = {
-            "trusty": TrustyCompilerConfigNode,
             "xenial": XenialCompilerConfigNode,
         }
         return next_nodes[distro]
-
-
-class TrustyCompilerConfigNode(TreeConfigNode):
-
-    def modify_label(self, label):
-        return label or "<unspecified>"
-
-    def init2(self, node_name):
-        self.props["compiler_name"] = node_name
-
-    def child_constructor(self):
-        return TrustyCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
-
-
-class TrustyCompilerVersionConfigNode(TreeConfigNode):
-
-    def init2(self, node_name):
-        self.props["compiler_version"] = node_name
-
-    # noinspection PyMethodMayBeStatic
-    def child_constructor(self):
-        return PyVerConfigNode
 
 
 class PyVerConfigNode(TreeConfigNode):
@@ -184,12 +163,16 @@ class ImportantConfigNode(TreeConfigNode):
 
 class XenialCompilerConfigNode(TreeConfigNode):
 
+    def modify_label(self, label):
+        return label or "<unspecified>"
+
     def init2(self, node_name):
         self.props["compiler_name"] = node_name
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
-        return XenialCompilerVersionConfigNode
+
+        return XenialCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
 
 
 class XenialCompilerVersionConfigNode(TreeConfigNode):

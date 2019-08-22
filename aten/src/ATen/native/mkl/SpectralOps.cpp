@@ -49,7 +49,7 @@ template <typename scalar_t>
 static inline void _fft_fill_with_conjugate_symmetry_slice(Tensor& output,
                        int64_t signal_ndim, int64_t size_last_dim,
                        int64_t start_last_dim_idx, int64_t i, int64_t num) {
-  scalar_t *data = output.data<scalar_t>();
+  scalar_t *data = output.data_ptr<scalar_t>();
 
   // A slice means a slice of last dimension (of size size_last_dim)
 

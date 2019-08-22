@@ -198,7 +198,7 @@ void runAsyncAllreduceTest(
     auto tensors = tests[i].getTensors();
     for (size_t j = 0; j < tensors.size(); j++) {
       auto& tensor = tensors[j];
-      auto data = tensor.data<float>();
+      auto data = tensor.data_ptr<float>();
       for (auto k = 0; k < tensor.numel(); k++) {
         if (data[k] != expected) {
           throw std::runtime_error("BOOM!");
@@ -233,7 +233,7 @@ void runAsyncBroadcastTest(
         auto tensors = tests[i].getTensors();
         for (size_t j = 0; j < tensors.size(); j++) {
           auto& tensor = tensors[j];
-          auto data = tensor.data<float>();
+          auto data = tensor.data_ptr<float>();
           for (auto k = 0; k < tensor.numel(); k++) {
             if (data[k] != expected) {
               throw std::runtime_error("BOOM!");

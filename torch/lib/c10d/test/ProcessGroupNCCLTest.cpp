@@ -290,7 +290,7 @@ void testAllreduce(const std::string& path, int rank, int size) {
   auto tensors = test.getTensors();
   for (size_t j = 0; j < tensors.size(); j++) {
     auto& tensor = tensors[j];
-    auto data = tensor.data<float>();
+    auto data = tensor.data_ptr<float>();
     for (auto k = 0; k < tensor.numel(); k++) {
       if (data[k] != expected) {
         throw std::runtime_error("BOOM!");
@@ -318,7 +318,7 @@ void testBroadcast(const std::string& path, int rank, int size) {
       auto tensors = test.getTensors();
       for (size_t j = 0; j < tensors.size(); j++) {
         auto& tensor = tensors[j];
-        auto data = tensor.data<float>();
+        auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
           if (data[k] != expected) {
             throw std::runtime_error("BOOM!");
@@ -349,7 +349,7 @@ void testReduce(const std::string& path, int rank, int size) {
       auto tensors = test.getTensors();
       if (rank == rootRank) {
         auto& tensor = tensors[rootTensor];
-        auto data = tensor.data<float>();
+        auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
           if (data[k] != expected) {
             throw std::runtime_error("BOOM!");
@@ -376,7 +376,7 @@ void testAllgather(const std::string& path, int rank, int size) {
     for (size_t j = 0; j < tensors[i].size(); ++j) {
       const auto expected = j;
       auto& tensor = tensors[i][j];
-      auto data = tensor.data<float>();
+      auto data = tensor.data_ptr<float>();
       for (auto k = 0; k < tensor.numel(); k++) {
         if (data[k] != expected) {
           throw std::runtime_error("BOOM!");
@@ -404,7 +404,7 @@ void testReduceScatter(const std::string& path, int rank, int size) {
     const auto modifier = participants * (rank * participants + i);
     const auto expected = base + modifier;
     auto& tensor = tensors[i];
-    auto data = tensor.data<float>();
+    auto data = tensor.data_ptr<float>();
     for (auto j = 0; j < tensor.numel(); j++) {
       if (data[j] != expected) {
         throw std::runtime_error("BOOM!");

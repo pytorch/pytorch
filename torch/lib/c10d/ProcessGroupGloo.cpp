@@ -611,7 +611,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Construct from an existing metadata tensor to facilitate structured
     // access to metadata from peers, after gathering it.
     explicit SparseTensorMetadata(at::Tensor metadata)
-        : metadata_(metadata), data_(metadata_.data<long>()) {
+        : metadata_(metadata), data_(metadata_.data_ptr<long>()) {
       AT_ASSERT(metadata.scalar_type() == at::kLong);
       AT_ASSERT(metadata.dim() == 1);
       AT_ASSERT(metadata.size(0) == dim);
@@ -745,7 +745,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Allgather metadata
     gloo::AllgatherOptions opts(context);
-    opts.setOutput(buffer.data<long>(), buffer.numel());
+    opts.setOutput(buffer.data_ptr<long>(), buffer.numel());
     opts.setTag(tag);
     gloo::allgather(opts);
 
@@ -769,7 +769,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Allgather indices.
     gloo::AllgatherOptions opts(context);
-    opts.setOutput(buffer.data<long>(), buffer.numel());
+    opts.setOutput(buffer.data_ptr<long>(), buffer.numel());
     opts.setTag(tag);
     gloo::allgather(opts);
 
