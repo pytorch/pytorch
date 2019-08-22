@@ -360,12 +360,6 @@ struct GraphFuser {
           // so we generally don't allow fusing tensor-scalar operations unless
           // the scalar is constant. In those cases we inline the constants
           // directly in the body of the fused group.
-          if (input->node()->kind() != prim::Constant) {
-            std::cout << "before assert :"
-                      << input->node()->kind().toQualString() << std::endl;
-            std::cout << "n = " << *n << std::endl;
-            std::cout << "input" << *input->node() << std::endl;
-          }
           AT_ASSERT(input->node()->kind() == prim::Constant);
           Node* in_const =
               subgraph.createClone(input->node(), [](Value*) -> Value* {

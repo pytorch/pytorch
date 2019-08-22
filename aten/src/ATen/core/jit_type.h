@@ -545,9 +545,6 @@ struct CAFFE2_API TensorType : public Type {
             if (!tensor.is_sparse()) {
               strides_ = tensor.strides().vec();
             }
-            //
-            // strides_(tensor.is_sparse() ? VaryingShape(c10::nullopt) :
-            // tensor.strides().size()),
           }
         }
   TensorType(

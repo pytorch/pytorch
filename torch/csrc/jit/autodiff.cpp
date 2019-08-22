@@ -207,13 +207,6 @@ class GradientHelper {
       // We insert after the current node because we want to use
       // its output.
       WithInsertPoint insert_guard{node->next()};
-      std::cout << "gradSumToSizeOf222:\n";
-      std::cout << "fw_output = " << fw_output.value()->debugName()
-                << " type = " << *fw_output.value()->type() << std::endl;
-      std::cout << "input = " << node->namedInput(input_name)->debugName()
-                << " type = " << *node->namedInput(input_name)->type()
-                << std::endl;
-
       auto ptt_input = node->namedInput(input_name)->type()->cast<TensorType>();
       auto ptt_output = fw_output.value()->type()->cast<TensorType>();
       auto dynamic_size = c10::optional<std::vector<int64_t>>{};
@@ -232,20 +225,7 @@ class GradientHelper {
               IValue(),
               OptionalType::create(ListType::ofInts()) /*NoneType::get()*/);
         }
-
-        std::cout << "int[] is a subtype of int[]? = "
-                  << (ListType::ofInts()->isSubtypeOf(
-                         OptionalType::create(ListType::ofInts())))
-                  << std::endl;
-        std::cout << "int[]? is subtype of int[] = "
-                  << (OptionalType::create(ListType::ofInts())
-                          ->isSubtypeOf(ListType::ofInts()))
-                  << std::endl;
-        std::cout << "inserted node = " << *size->node() << std::endl;
       } else {
-        std::cout << "333444\n";
-        std::cout
-            << "no profiling information to constant fold gradSumToSizeOf\n";
         size = SymbolicVariable(node->namedInput(input_name))
                    .size_if_not_equal(fw_output);
       }
@@ -416,8 +396,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
   const auto set_grad = [&](Value* x, Value* dx) {
     if (Value* prev_grad = grad_map[x]) {
       GRAPH_DEBUG("grad_map[", x->debugName(), "] = ", *grad_map[x]->node());
-      std::cout << "grad_map for  " << x->debugName() << " is already set to "
-                << prev_grad->debugName() << std::endl;
       grad_map[x] = createAutogradAdd(prev_grad, dx);
     } else {
       GRAPH_DEBUG("grad_map[", x->debugName(), "] = ", dx->debugName());
@@ -425,8 +403,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     }
   };
 
-  std::cout << "autodiffing graph = \n";
-  graph.dump();
   auto outputs = graph.outputs();
   for (size_t i = 0, num_outputs = outputs.size(); i < num_outputs; ++i) {
     Value* output = outputs[i];
@@ -438,8 +414,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
         output_grad->debugName(),
         " for ",
         output->debugName());
-    std::cout << "autodiff setting " << output->debugName() << " to "
-              << output_grad->debugName() << std::endl;
     set_grad(output, output_grad);
     grad_desc.df_input_vjps.push_back(i);
   }
@@ -468,8 +442,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
       // aten::type_as case.
       if (!grad_inputs[i])
         continue;
-      std::cout << "autodiff setting " << inputs[i]->debugName() << " to "
-                << grad_inputs[i]->debugName() << std::endl;
       set_grad(inputs[i], grad_inputs[i]);
     }
   }
@@ -572,12 +544,6 @@ static void constantsizeSizes(Gradient &grad_desc, ReverseDetails &rev_info) {
     throw std::runtime_error("unexpected input");
   };
   auto &graph = *grad_desc.f;
-
-  std::cout << "forward:\n";
-  graph.dump();
-  std::cout << "reverse_block:\n";
-  std::cout << *rev_info.reverse_block->owningNode();
-
   Block *reverse_block = rev_info.reverse_block;
 
   for (Node *top_node : reverse_block->nodes()) {
@@ -594,7 +560,6 @@ static void constantsizeSizes(Gradient &grad_desc, ReverseDetails &rev_info) {
           continue;
         }
 
-        std::cout << "hit_size_if_not_equal\n";
         auto ptt_input = input->node()
                              ->input(0)
                              ->node()
@@ -608,17 +573,12 @@ static void constantsizeSizes(Gradient &grad_desc, ReverseDetails &rev_info) {
                               ->type()
                               ->cast<TensorType>();
         if (!ptt_input || !ptt_output) {
-          std::cout << "no profiling info on "
-                    << input->node()->input(0)->debugName() << std::endl;
-          std::cout << "no profiling info on "
-                    << input->node()->input(1)->debugName() << std::endl;
           continue;
         }
         auto input_size = ptt_input->sizes().concrete_sizes();
         auto output_size = ptt_output->sizes().concrete_sizes();
 
         if (!input_size || !output_size) {
-          std::cout << "no size information\n";
           continue;
         }
         // insert in front of _grad_sum_to_size
@@ -633,8 +593,6 @@ static void constantsizeSizes(Gradient &grad_desc, ReverseDetails &rev_info) {
               IValue(),
               OptionalType::create(ListType::ofInts()) /*NoneType::get()*/);
         }
-        std::cout << "Replacing _size_if_not_equal " << input->debugName()
-                  << " with " << size->debugName() << std::endl;
         node->replaceInputWith(input, size);
       }
     }
@@ -815,11 +773,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
       continue;
 
     Value* tmp_vjp_in = reverse_block->addInput()->setType(tmp->type());
-    std::cout << "autodiff: temp " << tmp->debugName() << " receives gradient "
-              << tmp_vjp_in->debugName() << std::endl;
     Value* tmp_vjp_prev = rev_info.grad_map.at(tmp);
-    std::cout << "autodiff: temp " << tmp->debugName() << " was set to "
-              << tmp_vjp_prev->debugName() << " before\n";
     // This is quite weird because we can't first make a sum and then replace
     // all uses of tmp_vjp_prev (that would replace its use in the sum too!), so
     // we create an incorrect sum that doesn't use prev vjp, replace uses, and

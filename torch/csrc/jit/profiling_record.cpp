@@ -101,16 +101,9 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   auto new_g = graph->copy();
   auto pr = std::unique_ptr<ProfilingRecord>(new ProfilingRecord(new_g));
   auto raw_pr = pr.get();
-
-  std::cout << "before unprofiling\n";
-  new_g->dump();
   unprofileGraphInputs(new_g);
   unprofileBlock(new_g->block());
-  std::cout << "after unprofiling\n";
-  new_g->dump();
   pr->instrumentBlock(new_g->block());
-
-  std::cout << "return node = " << *new_g->return_node() << std::endl;
 
   for (auto i : new_g->return_node()->inputs()) {
     if (i->type()->isSubtypeOf(TensorType::get())) {

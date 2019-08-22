@@ -391,9 +391,6 @@ class JitTestCase(TestCase):
                     # optimized run
                     opt_script_outputs = scripted_fn(*recording_inputs)
                     python_outputs = python_fn(*inputs)
-                    # print("python_outputs = ", python_outputs)
-                    # print("script_outputs = ", script_outputs)
-                    # print("opt_script_outputs = ", opt_script_outputs)
             self.assertEqual(python_outputs, script_outputs)
             self.assertEqual(script_outputs, opt_script_outputs)
             return scripted_fn

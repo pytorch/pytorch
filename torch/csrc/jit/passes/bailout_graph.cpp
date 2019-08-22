@@ -18,7 +18,6 @@ static std::unordered_set<Value *> collectLoopCounts(Node *n) {
     auto outerNode = it->owningNode();
     if (outerNode->kind() == prim::Loop) {
       LoopView lv(outerNode);
-      std::cout << "adding a loop count " << lv.currentTripCount() << std::endl;
       loopCounts.insert(lv.currentTripCount());
     }
     it = outerNode->owningBlock();
@@ -143,8 +142,6 @@ struct BailOutGraphBuilderForNode {
 
     auto loopCounts = collectLoopCounts(n);
     for (auto lc : loopCounts) {
-      std::cout << "adding new input for a loop cout " << lc->debugName()
-                << std::endl;
       getOrAddInputForValue(lc);
     }
   }
@@ -152,16 +149,11 @@ struct BailOutGraphBuilderForNode {
   std::shared_ptr<Graph> buildBailOutGraphFrom(Node* n) {
 
     // add graph inputs for guard's input
-    // and loop counts this node is in
-    // to make sure we can line them up properly
+    // and loop counts for loops `n` is contained in
+    // to make sure we can line bailout grap's inputs up properly
     // with arguments to this BailOut node.
-
-    std::cout << "n = " << *n << std::endl;
-    std::cout << "adding a new value " << n->input(0)->debugName() << std::endl;
     getOrAddInputForValue(n->input(0));
     mapLoopCounts(n);
-    std::cout << "buildBailOutGraphFrom:\n";
-    copy_graph_->dump();
     buildBailOutBlockFrom(n);
     // add graph outputs
     for (auto ov : graph_->outputs()) {
@@ -356,8 +348,6 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
   auto bailout_graph = bg.buildBailOutGraphFrom(orig_bailout_node);
   removeBailouts(bailout_graph->block());
   ConstantPooling(bailout_graph);
-  std::cout << "bailout graph:\n";
-  bailout_graph->dump();
   return bailout_graph;
 }
 

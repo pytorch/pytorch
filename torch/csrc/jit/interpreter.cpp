@@ -655,7 +655,6 @@ struct CodeImpl {
     auto build_bailout_graph = [bailout_index,
                                 unoptimized_graph](Function &func) {
 
-      std::cout << "BailOut built!\n";
       BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
     };
 
@@ -869,8 +868,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-        std::cout << "RUNNING ";
-        frames.back().function->dump(std::cout, af.pc);
+        // std::cout << "RUNNING ";
+        // frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
@@ -1008,9 +1007,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             if (t.defined()) {
               auto actual = TensorType::create(stack.back().toTensor());
               const TypePtr &expected = af.types[inst.X];
-              std::cout << "running guard:\n";
-              std::cout << "actual = " << *actual << std::endl;
-              std::cout << "expected = " << *expected << std::endl;
               push(stack, *expected == *actual);
             } else {
               // TODO: comparison should work like a mask and a c-tor
@@ -1020,8 +1016,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case TAIL_CALL: {
-            std::cout << "BailOut triggered!\n";
-            // multiple outputs should be okay
+            // multiple outputs should be okay, especially for backward graphs
             af.functions[inst.X]->ensure_defined(/*multiple_output=*/true);
             const Code &code =
                 af.functions[inst.X]->get_executor(true).getPlanFor(stack).code;

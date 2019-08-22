@@ -210,14 +210,11 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       }
     } else if (getProfilingMode() &&
                node->matches("aten::size(Tensor self) -> int[]")) {
-      std::cout << "in aten::size\n";
       if (auto ptt = node->input()->type()->cast<TensorType>()) {
         if (auto sizes = ptt->sizes().concrete_sizes()) {
           WithInsertPoint guard(node);
           IValue ival(sizes);
           auto const_sizes_val = node->owningGraph()->insertConstant(ival);
-          std::cout << "replacing " << node->output()->debugName() << " with "
-                    << const_sizes_val->debugName() << std::endl;
           node->output()->replaceAllUsesWith(const_sizes_val);
         }
       }
@@ -357,7 +354,6 @@ void PeepholeOptimize(Block* block, bool addmm_fusion_enabled) {
 void PeepholeOptimize(
     const std::shared_ptr<Graph>& graph,
     bool addmm_fusion_enabled) {
-  std::cout << "running PeepholeOptimize\n";
   PeepholeOptimize(graph->block(), addmm_fusion_enabled);
 }
 } // namespace jit

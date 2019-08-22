@@ -25,17 +25,9 @@ void Function::ensure_defined(bool multiple_output) {
         << "Recursive calls are not supported";
   }
 
-  std::cout << "check_single_output222 = \n";
-  if (this->graph()->outputs().size() != 1) {
-    std::cout << "check_single_output = \n";
-    this->graph()->dump();
-  }
-
-  std::cout << "multiple_output begin = " << multiple_output << std::endl;
   if (!multiple_output) {
     check_single_output();
   }
-  std::cout << "multiple_output false = " << multiple_output << std::endl;
 }
 
 } // namespace jit

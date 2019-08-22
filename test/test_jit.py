@@ -196,11 +196,7 @@ def get_execution_plan(graph_executor_state):
 def get_grad_executor(plan_state, diff_graph_idx=None):
     if diff_graph_idx is None:
         nodes = list(plan_state.graph.nodes())
-        for n in nodes:
-            print ("kind = ", n.kind())
         nodes = list(filter(lambda n : n.kind() != "prim::BailOut" and n.kind() != "prim::BailoutTemplate", nodes))
-        print(plan_state.graph)
-        print("nodes length = "+str(len(nodes)))
         if len(nodes) == 1 or (len(nodes) == 2 and nodes[1].kind() == "prim::TupleConstruct"):
             pass
         else:
@@ -213,9 +209,7 @@ def all_backward_graphs(script_module, diff_graph_idx=None):
     # Note: for Python 2 the order seems to be unstable
     ge_state = script_module.get_debug_state()
     fwd_plan = get_execution_plan(ge_state)
-    print ("before get_grad_executor")
     grad_executor_state = get_grad_executor(fwd_plan, diff_graph_idx=diff_graph_idx)
-    print ("after get_grad_executor")
     bwd_plans = list(grad_executor_state.execution_plans.values())
     return [p.graph.copy() for p in bwd_plans]
 
@@ -4495,25 +4489,6 @@ a")
             self.assertEqual(def_in_one_branch(a, False), 6.0)
             # this triggers 2 bailouts
             self.assertEqual(def_in_one_branch(a, True), 3.0)
-
-
-    # def test_bram(self):
-
-    #     with enable_profiling_mode(True):
-
-    #         @torch.jit.script
-    #         def func2(a, b, c):
-
-    #             d = a * 2
-    #             e = b + 3
-    #             f = a - b
-    #             return torch.clamp(f + e, min=0, max=2)
-
-    #         a = torch.rand(2,2)
-    #         b = torch.rand(2,2)
-    #         func2(a,a,a)
-    #         func2(a,a,a)
-
 
     def test_resize_input_ops(self):
         # resize_ and resize_as resize the input tensor. because our shape analysis
@@ -17909,9 +17884,7 @@ class TestDict(JitTestCase):
     def test_aug_assign(self):
         def aug_assign_dict_tensor(a):
             # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
-            print('a = ', a['a'])
             a['a'] += 1
-            print('after a = ', a['a'])
             a['b'] -= 12
             a['c'] *= 122
             a['c'] /= 2

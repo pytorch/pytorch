@@ -128,22 +128,12 @@ bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
     return false;
   }
 
-  if (jit_log_level() == JitLoggingLevels::GRAPH_DEBUG &&
-      aten::add_ == n->kind()) {
-    std::stringstream ss;
-    for (const auto &v : vs) {
-      ss << v->debugName() << ", ";
-    }
-    GRAPH_DEBUG("Live values at a write to ", *n, " : ", ss.str(), "\n");
-  }
-
   MemoryLocations locs;
   for (const auto v : vs) {
     auto it = elementMap_.find(v);
     if (it != elementMap_.end()) {
       const auto& vlocs = it->second->getMemoryLocations();
       if (writtenTo.intersects(vlocs)) {
-        GRAPH_DEBUG("node ", *n, " writes to ", v->debugName());
         return true;
       }
     }
@@ -305,8 +295,6 @@ void AliasDb::analyzeImpl(Node* node) {
           node->kind().toDisplayString(),
           " is registered with AliasAnalysisKind::INTERNAL_SPECIAL_CASE but doesn't have a special case.");
     } else if (C10_UNLIKELY(!registeredAsSpecialCase && hasSpecialCase)) {
-
-      std::cout << "hitting this assert!\n";
       TORCH_INTERNAL_ASSERT(
           false,
           "Op ",
@@ -797,8 +785,6 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
 
   auto fromEl = getOrCreateElement(from);
   auto toEl = getOrCreateElement(to);
-
-  GRAPH_DEBUG("makePointerTo: ", from->debugName(), " -> ", to->debugName());
   memoryDAG_->makePointerTo(fromEl, toEl);
 }
 
@@ -1289,12 +1275,6 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       at::onnx::Shape,
       prim::AutogradAdd,
   };
-
-  if (symbol == prim::AutogradAnyNonZero) {
-    std::cout << "in handled" << handled.count(symbol) << std::endl;
-    std::cout << "in purposefully_not_handled"
-              << purposefully_not_handled.count(symbol) << std::endl;
-  }
 
   return handled.count(symbol) || purposefully_not_handled.count(symbol);
 }
