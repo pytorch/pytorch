@@ -101,7 +101,7 @@ def _download_archive_zip(url, filename):
     # ...
     # urlopen(url, cafile=certifi.where())
     #
-    # But it requires adding a dependency on the certifi package
+    # But it requires adding a dependency on the `certifi` package
     if sys.version_info[0] == 2:
         context = ssl._create_unverified_context()
     else:
