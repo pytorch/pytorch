@@ -36,7 +36,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
 
         # export the model to ONNX
         f = io.BytesIO()
-        torch.onnx.export(model, input, f,
+        torch.onnx.export(model, input, '/home/neraoof/test/results/uni.onnx',
                           opset_version=11,
                           example_outputs=output,
                           do_constant_folding=do_constant_folding,
@@ -59,11 +59,11 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
         ort_outs = ort_sess.run(None, ort_inputs)
-
-        # compare onnxruntime and PyTorch results
+        #
+        # # compare onnxruntime and PyTorch results
         assert len(outputs) == len(ort_outs), "number of outputs differ"
-
-        # compare onnxruntime and PyTorch results
+        #
+        # # compare onnxruntime and PyTorch results
         [np.testing.assert_allclose(out, ort_out, rtol=rtol, atol=atol) for out, ort_out in zip(outputs, ort_outs)]
 
 
@@ -759,11 +759,24 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    # TODO: enable opset 11 test once ORT support for unique is in
+    @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_unique(self):
         class UniqueModel(torch.nn.Module):
             def forward(self, x):
-                return torch.unique(x, sorted=True, return_inverse=True)
+                return torch.unique(x, sorted=True, return_inverse=False, return_counts=True)
+
+        x = torch.tensor([1, 3, 2, 3], dtype=torch.long)
+        self.run_test(UniqueModel(), x)
+
+    # TODO: enable opset 11 test once ORT support for unique is in
+    @skipIfUnsupportedOpsetVersion([11])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_unique_along_dim(self):
+        class UniqueModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.unique(x, dim=0, sorted=True, return_inverse=True, return_counts=False)
 
         x = torch.tensor([1, 3, 2, 3], dtype=torch.long)
         self.run_test(UniqueModel(), x)
