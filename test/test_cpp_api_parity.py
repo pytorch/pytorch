@@ -201,8 +201,6 @@ class TestCppApiParity(common.TestCase):
         getattr(cpp_module, cpp_test_name)()
 
     def _test_torch_nn_module_variant(self, test_params):
-        torch_nn_test_methods = ['init', 'forward', 'backward']
-
         def generate_test_cpp_sources(test_params, template, extra_stmts):
             example_inputs = test_params.example_inputs
             input_arg_types = [self._python_arg_to_cpp_arg(arg).type for arg in example_inputs]
@@ -334,15 +332,13 @@ class TestCppApiParity(common.TestCase):
 
             cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + test_params.cpp_sources
 
-            for method_name in torch_nn_test_methods:
-                if method_name == 'init':
-                    args_map[method_name], test_cpp_sources = setup_init_test(test_params)
-                elif method_name == 'forward':
-                    args_map[method_name], test_cpp_sources = setup_forward_test(test_params)
-                elif method_name == 'backward':
-                    args_map[method_name], test_cpp_sources = setup_backward_test(test_params)
-                else:
-                    raise RuntimeError("{} is not a supported method to test".format(method_name))
+            torch_nn_test_methods = [
+                ('init', setup_init_test),
+                ('forward', setup_forward_test),
+                ('backward', setup_backward_test),
+            ]
+            for method_name, setup_test in torch_nn_test_methods:
+                args_map[method_name], test_cpp_sources = setup_test(test_params)
                 cpp_sources += test_cpp_sources
 
             cpp_module = self._compile_cpp_code_inline(
