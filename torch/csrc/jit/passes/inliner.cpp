@@ -12,7 +12,7 @@ using namespace ::c10::prim;
 void inlineCalls(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
-    Node* cur = *it++;
+    Node* cur = *it;
     switch (cur->kind()) {
       case prim::CallFunction: {
         AT_ASSERT(cur->input(0)->node()->kind() == prim::Constant);
@@ -20,6 +20,9 @@ void inlineCalls(Block* block) {
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
         cur->removeInput(0);
+        // We need to decrerement `it` because inlineCallTo will destroy `cur`
+        // and potentially replace it with new nodes.
+        it--;
         inlineCallTo(cur, *fun_type->function()->graph());
         if (!function_constant->hasUses()) {
           function_constant->destroy();
@@ -29,6 +32,9 @@ void inlineCalls(Block* block) {
         const std::string& name = cur->s(attr::name);
         auto function =
             cur->input(0)->type()->expect<ClassType>()->getMethod(name);
+        // We need to decrerement `it` because inlineCallTo will destroy `cur`
+        // and potentially replace it with new nodes.
+        it--;
         inlineCallTo(cur, *function->graph());
       } break;
       default: {
@@ -37,6 +43,7 @@ void inlineCalls(Block* block) {
         }
       } break;
     }
+    it++;
   }
 }
 
