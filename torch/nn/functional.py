@@ -3297,7 +3297,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
         attn_output_weights, dim=-1)
 
     attn_nan = torch.isnan(attn_output_weights)
-    if attn_nan.sum().item() > 0:
+    if True in attn_nan:
         attn_output_weights = attn_output_weights.masked_fill(attn_nan, 0)
 
     attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
