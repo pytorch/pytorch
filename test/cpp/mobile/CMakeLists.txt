@@ -1,7 +1,8 @@
 add_executable(test_bc_export
   test_bc_export.cpp)
 
-target_link_libraries(test_bc_export PRIVATE torch gtest)
+caffe2_interface_library(torch torch_whole)
+target_link_libraries(test_bc_export PRIVATE torch_whole gtest)
 target_include_directories(test_bc_export PRIVATE ${ATen_CPU_INCLUDE})
 #target_compile_definitions(test_bc_export PRIVATE USE_GTEST)
 

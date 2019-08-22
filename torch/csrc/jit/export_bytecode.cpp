@@ -30,6 +30,7 @@
 #include <string>
 #include <vector>
 
+
 namespace torch {
 namespace jit {
 void convertAndWriteTensor(
@@ -41,6 +42,7 @@ void convertAndWriteTensor(
 
 namespace mobile {
 
+namespace {
 // this is a serializer class which saves bytecode of a frame to a zip file. the
 // content of the file is written using PyTorchStreamWriter, for details please
 // check caffe2/serialize/inline_container.h. all the records except the last
@@ -55,10 +57,10 @@ class ByteCodeSerializer final {
   void serialize(const script::Module& module);
 
  private:
-  void addConstant(const IValue& val, bytecode::FrameProto& frame_proto,
-                   size_t tensor_id, std::unordered_map<const void*, std::string>& storageMap);
+  void addConstant(const IValue& val, bytecode::FrameProto& frame_proto);
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
+  std::vector<at::Tensor> tensor_table_;
 };
 
 ByteCodeSerializer::ByteCodeSerializer(const std::string& filename)
@@ -69,8 +71,7 @@ ByteCodeSerializer::ByteCodeSerializer(const std::string& filename)
 ByteCodeSerializer::ByteCodeSerializer(std::ostream* ofs)
     : ofs_(), writer_(ofs) {}
 
-void ByteCodeSerializer::addConstant(const IValue& val, bytecode::FrameProto& frame_proto,
-                                     size_t tensor_id, std::unordered_map<const void*, std::string>& storageMap) {
+void ByteCodeSerializer::addConstant(const IValue& val, bytecode::FrameProto& frame_proto) {
   auto attribute = frame_proto.add_constants();
   if (val.isInt()) {
     attribute->set_kind(bytecode::ConstantProto::i);
@@ -80,12 +81,12 @@ void ByteCodeSerializer::addConstant(const IValue& val, bytecode::FrameProto& fr
     attribute->set_kind(bytecode::ConstantProto::f);
     attribute->set_float_value(val.toDouble());
   }
-  else if (val.isTensor()) {
-    attribute->set_kind(bytecode::ConstantProto::t);
-    attribute->set_tensor_id(tensor_id);
-    auto tensor_proto = frame_proto.add_tensors();
-    convertAndWriteTensor(tensor_id++, val.toTensor(), tensor_proto, storageMap, writer_);
-  }
+//  else if (val.isTensor()) {
+//    attribute->set_kind(bytecode::ConstantProto::t);
+//    attribute->set_tensor_id(tensor_id);
+//    auto tensor_proto = frame_proto.add_tensors();
+//    convertAndWriteTensor(tensor_id++, val.toTensor(), tensor_proto, storageMap, writer_);
+//  }
   else if (val.isIntList()) {
     attribute->set_kind(bytecode::ConstantProto::is);
     auto list = val.toIntList();
@@ -120,12 +121,16 @@ void ByteCodeSerializer::addConstant(const IValue& val, bytecode::FrameProto& fr
 }
 
 void ByteCodeSerializer::serialize(const script::Module& module) {
-  auto compUnit = module.class_compilation_unit();
-  auto funcList = compUnit->get_functions();
-  for (auto func : funcList) {
-    auto funcName = func->name();
-    torch::jit::Code code(func->graph());
-  }
+
+  auto data = pickle(module.module_object(), &tensor_table_);
+  writer_.writeRecord("data.pkl", data.data(), data.size());
+
+//  auto compUnit = module.class_compilation_unit();
+//  auto funcList = compUnit->get_functions();
+//  for (auto func : funcList) {
+//    auto funcName = func->name();
+//    torch::jit::Code code(func->graph());
+//  }
 
 //  auto method = module.get_method("forward");
 
@@ -197,20 +202,22 @@ void ByteCodeSerializer::serialize(const script::Module& module) {
 //  }
 //  std::cout << output << std::endl;
 //  writer_.writeRecord("bytecode.json", output.data(), output.size());
-//  writer_.writeEndOfFile();
+  writer_.writeEndOfFile();
 }
+} //namespace
 
 void SaveBytecode(
     const script::Module& module,
     const std::string& filename) {
-//#ifdef FBCODE_CAFFE2
-//  ScriptModuleSerializer serializer(&out);
-//#else
-//  ScriptModuleSerializer2 serializer(&out);
-//#endif
-
-//  serializer.serialize(module, extra_files);
+  ByteCodeSerializer serializer(filename);
+  serializer.serialize(module);
 }
+
+bool TestFunc() {
+  std::cout << "test";
+  return true;
+}
+
 }
 }
 }
