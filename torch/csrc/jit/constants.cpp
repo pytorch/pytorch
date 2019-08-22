@@ -194,6 +194,7 @@ RegisterOperators reg({
             };
           } else {
             std::stringstream ss;
+            ss << "constant literal not supported for: " << type->str();
             throw std::runtime_error(ss.str());
           }
         },
