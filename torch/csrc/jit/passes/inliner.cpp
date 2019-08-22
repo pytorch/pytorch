@@ -24,9 +24,6 @@ void inlineCalls(Block* block) {
         // and potentially replace it with new nodes.
         it--;
         inlineCallTo(cur, *fun_type->function()->graph());
-        if (!function_constant->hasUses()) {
-          function_constant->destroy();
-        }
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
