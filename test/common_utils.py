@@ -526,7 +526,8 @@ class TestCase(expecttest.TestCase):
                     raise unittest.SkipTest("Unusable CUDA state. Please check previous tests for errors.")
                 else:
                     TestCase._cuda_failure_reported = True
-                    self.fail("Unusable CUDA state. Please check previous tests for errors.")
+                    self.fail("Unusable CUDA state. Please check previous tests for errors."
+                              " Run tests with CUDA_LAUNCH_BLOCKING=1 to debug issue.")
 
         set_rng_seed(SEED)
 
@@ -536,7 +537,8 @@ class TestCase(expecttest.TestCase):
                 torch.cuda.synchronize()
             except RuntimeError:
                 TestCase._cuda_failure_reported = True
-                self.fail("Unrecoverable CUDA failure. Follow-up tests will randomly fail.")
+                self.fail("Unrecoverable CUDA failure. Follow-up tests will randomly fail."
+                          " Run tests with CUDA_LAUNCH_BLOCKING=1 to debug issue.")
 
     def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
         max_err = 0
