@@ -231,24 +231,6 @@ def _sum_of_list(tensorlist):
     return s
 
 
-# helper function to generate test qparam
-def _helper_generate_qparam(script_module, input_data):
-    class TestGenQParam:
-        def __init__(self, qscheme):
-            self.qscheme = qscheme
-            self.qparam_dict = {}
-
-        def observer(self, x, name):
-            if name not in self.qparam_dict:
-                self.qparam_dict[name] = []
-            self.qparam_dict.update({name : (self.qscheme, 1.0, 0)})
-            return x
-    activationObj = TestGenQParam(qscheme='per_tensor_quant')
-    torch._C._jit_pass_insert_observers(script_module._c, "forward", activationObj.observer)
-    script_module.forward(input_data)
-    return activationObj.qparam_dict
-
-
 # has to be at top level or Pickle complains
 class FooToPickle(torch.nn.Module):  # noqa T484
     def __init__(self):
@@ -10211,6 +10193,22 @@ a")
         with self.assertRaisesRegex(RuntimeError, 'does not support augmented assign'):
             scripted_aug_assign = torch.jit.script(subscript_tuple_augmented_assign)
 
+    def test_multiple_assign(self):
+        def test():
+            a = b, c = d, f = (1, 1)
+
+            # side effect
+            ten = torch.tensor(1)
+            ten1 = ten2 = ten.add_(1)
+
+            # ordering
+            x = 1
+            y = 3
+            x, y = y, x + y
+
+            return a, b, c, d, f, ten, ten1, ten2, x, y
+
+        self.checkScript(test, ())
 
     def test_multi_reduction(self):
         with self.assertRaisesRegex(
