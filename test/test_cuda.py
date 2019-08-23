@@ -2554,8 +2554,8 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_lu_solve_batched_dims(self):
-        _TestTorchMixin._test_lu_solve_batched_dims(self, lambda t: t.cuda())
+    def test_lu_solve_batched_broadcasting(self):
+        _TestTorchMixin._test_lu_solve_batched_broadcasting(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu_unpack(self):

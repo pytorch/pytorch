@@ -1034,24 +1034,15 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     return A
 
 
-def random_fullrank_matrix_distinct_singular_value(l, *batches, **kwargs):
+def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims, **kwargs):
     silent = kwargs.get("silent", False)
     if silent and not torch._C.has_lapack:
-        return torch.ones(l, l)
+        return torch.ones(matrix_size, matrix_size)
 
-    if len(batches) == 0:
-        A = torch.randn(l, l)
-        u, _, v = A.svd()
-        s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-        return u.mm(torch.diag(s)).mm(v.t())
-    else:
-        all_matrices = []
-        for _ in range(0, torch.prod(torch.as_tensor(batches)).item()):
-            A = torch.randn(l, l)
-            u, _, v = A.svd()
-            s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-            all_matrices.append(u.mm(torch.diag(s)).mm(v.t()))
-        return torch.stack(all_matrices).reshape(*(batches + (l, l)))
+    A = torch.randn(batch_dims + (matrix_size, matrix_size))
+    u, _, v = A.svd()
+    s = torch.arange(1., matrix_size + 1).mul_(1.0 / (matrix_size + 1)).diag()
+    return u.matmul(torch.diag(s.expand(batch_dims + (matrix_size, matrix_size))).matmul(v.transpose(-2, -1))
 
 
 def random_linalg_solve_processed_inputs(A_dims, b_dims, gen_fn, transform_fn, cast_fn):

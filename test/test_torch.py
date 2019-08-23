@@ -2268,12 +2268,14 @@ class _TestTorchMixin(torchtest):
         self._test_lu_solve_batched_many_batches(self, lambda t: t)
 
     @staticmethod
-    def _test_lu_solve_batched_dims(self, cast, pivot=True):
+    def _test_lu_solve_batched_broadcasting(self, cast, pivot=True):
         from numpy.linalg import solve
         from common_utils import random_fullrank_matrix_distinct_singular_value
 
         def run_test(A_dims, b_dims, cast, pivot):
-            A = random_fullrank_matrix_distinct_singular_value(*A_dims)
+            A_matrix_size = A_dims[-1]
+            A_batch_dims = A_dims[:-2]
+            A = random_fullrank_matrix_distinct_singular_value(A_matrix_size, *A_batch_dims)
             b = torch.randn(*b_dims)
             x_exp = torch.as_tensor(solve(A.numpy(), b.numpy()))
             A, b = cast(A), cast(b)
@@ -2282,15 +2284,15 @@ class _TestTorchMixin(torchtest):
             self.assertEqual(x, cast(x_exp))
 
         # test against numpy.linalg.solve
-        run_test((4, 2, 1, 3), (2, 1, 3, 4, 6), cast, pivot)  # no broadcasting
-        run_test((4, 2, 1, 3), (4, 6), cast, pivot)  # broadcasting b
-        run_test((4,), (2, 1, 3, 4, 2), cast, pivot)  # broadcasting A
-        run_test((4, 1, 3, 1), (2, 1, 3, 4, 5), cast, pivot)  # broadcasting A & b
+        run_test((2, 1, 3, 4, 4), (2, 1, 3, 4, 6), cast, pivot)  # no broadcasting
+        run_test((2, 1, 3, 4, 4), (4, 6), cast, pivot)  # broadcasting b
+        run_test((4, 4), (2, 1, 3, 4, 2), cast, pivot)  # broadcasting A
+        run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5), cast, pivot)  # broadcasting A & b
 
     @skipIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_lu_solve_batched_dims(self):
-        self._test_lu_solve_batched_dims(self, lambda t: t)
+    def test_lu_solve_batched_broadcasting(self):
+        self._test_lu_solve_batched_broadcasting(self, lambda t: t)
 
     @staticmethod
     def _test_lu_unpack(self, cast, pivot=True):
