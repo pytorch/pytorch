@@ -2540,25 +2540,25 @@ class _TestTorchMixin(torchtest):
                 # pow CUDA implementation is fixed.
                 pow = int(pow)
 
-            # cpu CUDA implementation is already fixed and
+            # pow CPU implementation is already fixed and
             # does not cast exponent to tensor dtype,
             # that why it is compatible with numpy.
-            expected = np.power(nparr, pow).astype(np.int64)
+            expected = torch.from_numpy(np.power(nparr, pow).astype(np.int64))
 
             actual = tensor.pow(pow)
-            self.assertEqual(expected, actual.cpu().numpy())
+            self.assertEqual(actual, expected)
 
             actual = tensor.clone()
             actual2 = actual.pow_(pow)
-            self.assertEqual(expected, actual.cpu().numpy())
-            self.assertEqual(expected, actual2.cpu().numpy())
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual2, expected)
 
             actual = torch.pow(tensor, pow)
-            self.assertEqual(expected, actual.cpu().numpy())
+            self.assertEqual(actual, expected)
 
             actual2 = torch.pow(tensor, pow, out=actual)
-            self.assertEqual(expected, actual.cpu().numpy())
-            self.assertEqual(expected, actual2.cpu().numpy())
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual2, expected)
 
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
