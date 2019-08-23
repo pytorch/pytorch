@@ -1,3 +1,5 @@
+#include <ATen/native/Sorting.h>
+
 #include <ATen/ATen.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
@@ -28,52 +30,14 @@ namespace {
    Julien, November 12th 2013
 */
 
-constexpr int64_t MAX_LEVELS = 300;
-constexpr int64_t M_SMALL = 10; // Limit for small subfiles
-
-template <typename Fn>
-void dim_apply(TensorList tensors, int64_t dim, Fn f) {
-  AT_ASSERT(tensors.size() > 0);
-  auto t = tensors[0];
-  auto sizes = t.sizes();
-  int64_t ndim = t.dim();
-  int64_t itersize = 1;
-  for (int64_t i = 0; i < ndim; i++) {
-    if (i != dim) {
-      itersize *= t.size(i);
-    }
-  }
-  parallel_for(0, itersize, 1, [&](int64_t i_begin, int64_t i_end) {
-    std::vector<Tensor> narrowed_tensors;
-    narrowed_tensors.reserve(tensors.size());
-    for (int64_t it = i_begin; it < i_end; it++) {
-      narrowed_tensors.clear();
-      for (auto ti : tensors) {
-        int64_t i = it;
-        Tensor nt = ti;
-        for (size_t d = 0; d < ndim; d++) {
-          if (d != dim) {
-            // this could be avoided for slower-changing dimensions if done
-            // better
-            nt = nt.select((d > dim ? 1 : 0), i % sizes[d]);
-            i = i / sizes[d];
-          }
-        }
-        narrowed_tensors.emplace_back(nt);
-      }
-      f(it, narrowed_tensors);
-    }
-  });
-}
-
 template <typename scalar_t, typename Comp, typename Fn>
 void quick_select_template(
     TensorAccessor<scalar_t, 1> arr,
     int64_t k,
     Comp gt_or_nan,
     Fn swap_fn) {
-  int64_t P, L, R, i, j, swap;
-  scalar_t rswap, piv;
+  int64_t P, L, R, i, j;
+  scalar_t piv;
   L = 0;
   R = arr.size(0) - 1;
 
@@ -162,8 +126,8 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
         [&](int64_t i, TensorList tl) {
           auto tmp_values = tl[0].accessor<scalar_t, 1>();
           auto tmp_indices = tl[1].accessor<int64_t, 1>();
-          scalar_t* mode_value = tl[2].data<scalar_t>();
-          int64_t* mode_index = tl[3].data<int64_t>();
+          scalar_t* mode_value = tl[2].data_ptr<scalar_t>();
+          int64_t* mode_index = tl[3].data_ptr<int64_t>();
           for (int64_t j = 0; j < tmp_indices.size(0); j++) {
             tmp_indices[j] = j;
           }
@@ -198,6 +162,43 @@ std::tuple<Tensor, Tensor> kthvalue(
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   at::kthvalue_out(values, indices, self, k, dim, keepdim);
+  return std::make_tuple(values, indices);
+}
+
+std::tuple<Tensor&, Tensor&> topk_out_cpu(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t k,
+    int64_t dim_,
+    bool largest,
+    bool sorted) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
+  TORCH_CHECK(
+      k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
+      "selected index k out of range");
+
+  _allocate_or_resize_output_with_indices(values, indices, self, dim_, k);
+  if (self.dim() == 0 && self.numel() == 1) {
+    values.copy_(self);
+    indices.zero_();
+    return std::forward_as_tuple(values, indices);
+  }
+
+  topk_stub(kCPU, values, indices, self, k, dim, largest, sorted);
+
+  return std::forward_as_tuple(values, indices);
+}
+
+std::tuple<Tensor, Tensor> topk(
+    const Tensor& self,
+    int64_t k,
+    int64_t dim,
+    bool largest,
+    bool sorted) {
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  at::topk_out(values, indices, self, k, dim, largest, sorted);
   return std::make_tuple(values, indices);
 }
 
@@ -248,6 +249,8 @@ Tensor median_cpu(const Tensor& self) {
   });
   return result.view({});
 }
+
+DEFINE_DISPATCH(topk_stub);
 
 } // namespace native
 } // namespace at

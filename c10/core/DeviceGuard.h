@@ -108,7 +108,7 @@ private:
  *     setDevice(1);
  *     OptionalDeviceGuard g;
  *     setDevice(2);
- *     g.set_device(3);  // initializes!
+ *     g.reset_device(Device(DeviceType::CUDA, 3));  // initializes!
  *
  * On destruction, g will reset device to 2, rather than 1.
  *
@@ -118,7 +118,7 @@ private:
  */
 class OptionalDeviceGuard {
 public:
-  /// Create an uninitialized guard.  Set the guard later using set_device.
+  /// Create an uninitialized guard.  Set the guard later using reset_device.
   explicit OptionalDeviceGuard() : guard_() {}
 
   /// Initialize the guard, setting the current device to the passed Device.
@@ -159,7 +159,7 @@ public:
   }
 
   /// Returns the most recent device that was set using this device guard,
-  /// either from construction, or via set_device.
+  /// either from construction, or via reset_device.
   optional<Device> current_device() const {
     return guard_.current_device();
   }

@@ -14,12 +14,12 @@ class expand_dims_cpu final : public c10::OperatorKernel {
   void operator()(
       const at::Tensor& input_,
       const at::Tensor& output_,
-      std::vector<int64_t> dims) {
+      c10::List<int64_t> dims) {
     Tensor input(input_);
     Tensor output(output_);
 
     if (!initialized_) {
-      dims_ = std::move(dims);
+      dims_ = dims.copy();
       auto originalSize = dims_.size();
       CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
       std::sort(dims_.begin(), dims_.end());
@@ -27,7 +27,7 @@ class expand_dims_cpu final : public c10::OperatorKernel {
       if (dims_.size() < originalSize) {
         LOG(WARNING) << "Parameter `dims` has repeated dimensions.";
       }
-      CAFFE_ENFORCE(dims_.front() >= 0, "Dimension ids must be non-negative.");
+      CAFFE_ENFORCE(dims_[0] >= 0, "Dimension ids must be non-negative.");
       initialized_ = true;
     }
 
@@ -39,18 +39,18 @@ class expand_dims_cpu final : public c10::OperatorKernel {
     auto newDims = input.sizes().vec();
     CAFFE_ENFORCE_GE(
         input.sizes().size() + dims_.size(),
-        dims_.back() + 1,
+        dims_[dims_.size()-1] + 1,
         "Input needs at least ",
-        (1 + dims_.back() - dims_.size()),
+        (1 + dims_[dims_.size()-1] - dims_.size()),
         " dimensions given `dims`.");
-    for (const auto dim : dims_) {
+    for (const int64_t dim : dims_) {
       newDims.insert(newDims.begin() + dim, 1);
     }
     output.Reshape(newDims);
   }
 
  private:
-  std::vector<int64_t> dims_;
+  c10::List<int64_t> dims_;
   bool initialized_ = false;
 };
 

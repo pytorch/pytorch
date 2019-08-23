@@ -23,7 +23,7 @@ ShapeInfo getShapeInfoFromBlob(const Blob* blob) {
     auto function_ptr =
         ExternalTensorFunctionsBaseRegistry()->Create(blob->meta().id());
     if (function_ptr != nullptr) {
-      shape_info.is_quantized = true;
+      shape_info.is_quantized = function_ptr->isQuantized();
       function_ptr->LoadInfoOfBlob(
           blob,
           &shape_info.q_info.scale,

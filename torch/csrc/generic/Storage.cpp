@@ -25,7 +25,7 @@ static void THPStorage_(dealloc)(THPStorage* self)
 
 static THWStorage* THPStorage_(newWithAllocator)(int64_t size, at::Allocator* allocator)
 {
-#if defined(THC_GENERIC_FILE) || defined(THD_GENERIC_FILE)
+#if defined(THC_GENERIC_FILE)
   THPUtils_setError(THPStorageStr " does not support custom allocators");
   return nullptr;
 #else
@@ -94,9 +94,6 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
   // torch.Storage(sequence)
   if (num_args == 1 && PySequence_Check(first_arg)) {
-#ifdef THD_GENERIC_FILE
-    THPUtils_setError("distributed storages don't support construction from a sequence");
-#else
     Py_ssize_t length = PySequence_Length(first_arg);
     THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
         THPUtils_typename(first_arg));
@@ -122,7 +119,6 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
       return nullptr;
     }
     return (PyObject*)self.release();
-#endif
   }
 
   THPUtils_invalidArguments(args, kwargs, THPStorageStr " constructor", 6,
@@ -310,7 +306,6 @@ THPCopyList THWStorage_(copy_functions);
 
 void THPStorage_(initCopyMethods)()
 {
-#ifndef THD_GENERIC_FILE
   auto& h = THWStorage_(copy_functions);
   // copy from CPU types
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPByteStorageType, h, &THWStorage_(copyByte));
@@ -322,6 +317,7 @@ void THPStorage_(initCopyMethods)()
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPFloatStorageType, h, &THWStorage_(copyFloat));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPDoubleStorageType, h, &THWStorage_(copyDouble));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPBoolStorageType, h, &THWStorage_(copyBool));
+  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPBFloat16StorageType, h, &THWStorage_(copyBFloat16));
 #ifdef THC_GENERIC_FILE
   // copy from GPU types
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPByteStorageType, h, &THWStorage_(copyCudaByte));
@@ -333,6 +329,7 @@ void THPStorage_(initCopyMethods)()
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPDoubleStorageType, h, &THWStorage_(copyCudaDouble));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPHalfStorageType, h, &THWStorage_(copyCudaHalf));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBoolStorageType, h, &THWStorage_(copyCudaBool));
+  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBFloat16StorageType, h, &THWStorage_(copyCudaBFloat16));
   // add CPU <- GPU copies to base type
   /// #define THPCpuStorage TH_CONCAT_3(THP, Real, Storage)
   #define THCpuStorage_(name) TH_CONCAT_4(TH, Real, Storage_, name)
@@ -347,24 +344,20 @@ void THPStorage_(initCopyMethods)()
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPDoubleStorageType, b, &THCpuStorage_(copyCudaDouble));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPHalfStorageType, b, &THCpuStorage_(copyCudaHalf));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBoolStorageType, b, &THCpuStorage_(copyCudaBool));
+  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBFloat16StorageType, b, &THCpuStorage_(copyCudaBFloat16));
   #undef THCpuStorage
   #undef THCpuStorage_
 #endif
-#endif // !defined(THD_GENERIC_FILE)
 }
 
 #include <torch/csrc/generic/StorageMethods.cpp>
-#ifndef THD_GENERIC_FILE
 #include <torch/csrc/generic/StorageSharing.cpp>
-#endif
 
 bool THPStorage_(init)(PyObject *module)
 {
   static std::vector<PyMethodDef> methods;
   THPUtils_addPyMethodDefs(methods, THPStorage_(methods));
-#ifndef THD_GENERIC_FILE
   THPUtils_addPyMethodDefs(methods, THPStorage_(sharingMethods));
-#endif
 
   THPStorageType.tp_methods = methods.data();
   THPStorageType.tp_members = THPStorage_(members);

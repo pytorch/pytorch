@@ -1,5 +1,6 @@
 #include "observers/net_observer_reporter_print.h"
 
+#include <algorithm>
 #include <sstream>
 #include "caffe2/core/init.h"
 #include "observers/observer_config.h"
@@ -9,6 +10,7 @@ namespace caffe2 {
 const std::string NetObserverReporterPrint::IDENTIFIER = "Caffe2Observer ";
 static std::string get_op_args(PerformanceInformation p);
 static std::string get_tensor_shapes(PerformanceInformation p);
+static std::string sanatize(std::string json_s);
 
 void NetObserverReporterPrint::report(
     NetBase* net,
@@ -23,29 +25,49 @@ void NetObserverReporterPrint::report(
                              {"value", c10::to_string(p.second.latency * 1000)},
                              {"unit", "us"},
                              {"metric", "latency"}});
+      caffe2_perf.push_back({{"type", "NET_"},
+                             {
+                               "value",
+                               c10::to_string(
+                                   p.second.cpuMilliseconds /
+                                   p.second.latency *
+                                   100),
+                             },
+                             {"unit", "percent"},
+                             {"metric", "cpu_percent"}});
     } else if (p.first != "NET_DELAY") {
       // for operator perf
       std::string shape_str = get_tensor_shapes(p.second);
       std::string args_str = get_op_args(p.second);
-
-      caffe2_perf.push_back({{"type", p.first},
+      std::string type = p.first;
+      caffe2_perf.push_back({{"type", type},
                              {"value", c10::to_string(p.second.latency * 1000)},
                              {"unit", "us"},
                              {"metric", "latency"}});
+      caffe2_perf.push_back({{"type", type},
+                             {
+                               "value",
+                               c10::to_string(
+                                   p.second.cpuMilliseconds /
+                                   p.second.latency *
+                                   100),
+                             },
+                             {"unit", "percent"},
+                             {"metric", "cpu_percent"}});
       if (p.second.flops > 0) {
-        caffe2_perf.push_back({{"type", p.first},
+        caffe2_perf.push_back({{"type", type},
                                {"value", c10::to_string(p.second.flops)},
                                {"unit", "flop"},
                                {"metric", "flops"}});
       }
       if (shape_str != "") {
-        caffe2_perf.push_back({{"type", p.first},
+        caffe2_perf.push_back({{"type", type},
                                {"info_string", shape_str},
                                {"unit", ""},
                                {"metric", "tensor_shapes"}});
       }
       if (args_str != "") {
-        caffe2_perf.push_back({{"type", p.first},
+        caffe2_perf.push_back({{"type", type},
                                {"info_string", args_str},
                                {"unit", ""},
                                {"metric", "op_args"}});
@@ -57,13 +79,13 @@ void NetObserverReporterPrint::report(
     std::stringstream buffer;
     auto entry = *it;
     buffer << IDENTIFIER << "{";
-    buffer << "\"type\": \"" << entry["type"] << "\","
-           << "\"unit\": \"" << entry["unit"] << "\","
-           << "\"metric\": \"" << entry["metric"] << "\",";
+    buffer << "\"type\": \"" << sanatize(entry["type"]) << "\","
+           << "\"unit\": \"" << sanatize(entry["unit"]) << "\","
+           << "\"metric\": \"" << sanatize(entry["metric"]) << "\",";
     if (entry.find("value") != entry.end()) {
-      buffer << "\"value\": \"" << entry["value"] << "\"";
+      buffer << "\"value\": \"" << sanatize(entry["value"]) << "\"";
     } else if (entry.find("info_string") != entry.end()) {
-      buffer << "\"info_string\": \"" << entry["info_string"] << "\"";
+      buffer << "\"info_string\": \"" << sanatize(entry["info_string"]) << "\"";
     }
     buffer << "}";
     LOG(INFO) << buffer.str();
@@ -116,5 +138,13 @@ static std::string get_op_args(PerformanceInformation p) {
     args_str = "";
   }
   return args_str;
+}
+
+static std::string sanatize(std::string json_s) {
+  // Remove illegal characters from the name that would cause json string to
+  // become invalid
+  json_s.erase(std::remove(json_s.begin(), json_s.end(), '"'), json_s.end());
+  json_s.erase(std::remove(json_s.begin(), json_s.end(), '\\'), json_s.end());
+  return json_s;
 }
 }

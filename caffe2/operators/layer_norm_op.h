@@ -5,8 +5,8 @@
 #include <vector>
 
 #include "caffe2/core/context.h"
-#include "caffe2/core/operator.h"
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
 
@@ -196,8 +196,7 @@ class LayerNormGradientOp final : public Operator<Context> {
           rstd_data,
           g_scale_data,
           dgamma_data,
-          dbeta_data,
-          dX_data);
+          dbeta_data);
     }
     LayerNormBackward<T>(
         M,
@@ -259,8 +258,7 @@ class LayerNormGradientOp final : public Operator<Context> {
       const T* rstd,
       const T* g_scale,
       T* dgamma,
-      T* dbeta,
-      T* scratch);
+      T* dbeta);
 
   const int axis_;
   const bool elementwise_affine_;

@@ -61,8 +61,7 @@ void test_argument_checking_for_serialized_modules(
     const std::string& path_to_exported_script_module) {
   torch::jit::script::Module module =
       torch::jit::load(path_to_exported_script_module);
-  AT_ASSERT(module != nullptr);
-
+  
   try {
     module.forward({torch::jit::IValue(1), torch::jit::IValue(2)});
     AT_ASSERT(false);
@@ -96,7 +95,6 @@ void test_argument_checking_for_serialized_modules(
 void test_move_to_device(const std::string& path_to_exported_script_module) {
   torch::jit::script::Module module =
       torch::jit::load(path_to_exported_script_module);
-  AT_ASSERT(module != nullptr);
 
   helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
     return tensor.device().is_cpu();
@@ -118,7 +116,6 @@ void test_move_to_device(const std::string& path_to_exported_script_module) {
 void test_move_to_dtype(const std::string& path_to_exported_script_module) {
   torch::jit::script::Module module =
       torch::jit::load(path_to_exported_script_module);
-  AT_ASSERT(module != nullptr);
 
   module.to(torch::kInt);
 

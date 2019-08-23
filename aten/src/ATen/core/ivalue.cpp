@@ -18,7 +18,7 @@ CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
 namespace {
 
 template<class T>
-std::ostream& printList(std::ostream & out, const c10::ListPtr<T> &v,
+std::ostream& printList(std::ostream & out, const c10::List<T> &v,
   const std::string start, const std::string finish) {
   out << start;
   for(size_t i = 0; i < v.size(); ++i) {
@@ -102,6 +102,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printList(out, v.toTensorList(), "[", "]");
     case IValue::Tag::Blob:
       return out << *v.toBlob();
+    case IValue::Tag::Capsule:
+      return out << "Capsule";
     case IValue::Tag::GenericList:
       return printList(out, v.toGenericList(), "[", "]");
     case IValue::Tag::Future:
@@ -118,7 +120,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       // print this out the way python would do it
       return out << "<" << obj->name() << " object at " << obj.get() << ">";
   }
-  AT_ERROR("Tag not found\n");
+  AT_ERROR("Tag not found: ", v.tagKind());
 }
 
 #undef TORCH_FORALL_TAGS
@@ -129,16 +131,16 @@ void IValue::dump() const {
 
 
 std::string ivalue::Object::name() const {
-  return this->type_->qualname();
+  return this->type_.type_->name()->qualifiedName();
 }
 
 IValue ivalue::Object::getAttr(const std::string& name) const {
-  const size_t slot = type_->getAttributeSlot(name);
+  const size_t slot = type_.type_->getAttributeSlot(name);
   return getSlot(slot);
 }
 
 void ivalue::Object::setAttr(const std::string& name, IValue v) {
-  const size_t slot = type_->getAttributeSlot(name);
+  const size_t slot = type_.type_->getAttributeSlot(name);
   setSlot(slot, std::move(v));
 }
 
@@ -161,7 +163,7 @@ static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
   AT_ERROR("Illegal dict key");
 }
 
-std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::DictPtr<IValue, IValue>& dict) {
+std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict) {
   std::vector<std::pair<IValue, IValue>> ordered;
   for (auto& element : dict) {
     ordered.emplace_back(element.key(), element.value());
@@ -170,4 +172,15 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::DictPtr<IValue,
   return ordered;
 }
 
+std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap() {
+    static std::unordered_map<std::string, c10::StrongTypePtr> tmap;
+    return tmap;
+}
+
+std::unordered_map<std::string, std::function<PyObject*(void*)>>&
+getClassConverter() {
+  static std::unordered_map<std::string, std::function<PyObject*(void*)>>
+      classConverter;
+  return classConverter;
+}
 } // namespace c10

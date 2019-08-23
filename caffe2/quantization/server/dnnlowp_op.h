@@ -160,9 +160,9 @@ class DNNLowPOp : public Operator<CPUContext> {
         // dnnlowp op won't clip negative values. Do it here.
         actual_temp.resize(OutputTensorCPU_(0)->numel());
         for (int i = 0; i < Output(0)->numel(); ++i) {
-          actual = actual_temp.data();
-          actual_temp[i] = std::max(0.f, actual_temp[i]);
+          actual_temp[i] = std::max(0.f, actual[i]);
         }
+        actual = actual_temp.data();
       }
     } else {
       actual_temp.resize(OutputTensorCPU_(0)->numel());

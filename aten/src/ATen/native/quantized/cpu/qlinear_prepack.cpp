@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
@@ -49,13 +48,13 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     auto N = weight.size(0);
     auto K = weight.size(1);
 
-    int32_t weight_zero_point_int32 = weight.q_zero_point().toInt();
+    int32_t weight_zero_point_int32 = weight.q_zero_point();
 
     // TODO: contiguous is called for further JIT optimizations.
     auto weight_contig = weight.contiguous();
 
     int8_t* weight_ptr_int8 =
-        reinterpret_cast<int8_t*>(weight_contig.data<c10::qint8>());
+        reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
 
     std::vector<int32_t> col_offsets(N);
     calc_col_offsets_transpose(
@@ -75,7 +74,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
             /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
             /*groups=*/1),
         col_offsets,
-        weight.q_scale().toFloat(),
+        weight.q_scale(),
         weight_zero_point_int32});
 
     // TODO: we will need to replace this with torchscript classes at a later
@@ -96,8 +95,8 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_linear_prepack(Tensor W) -> Tensor W_prepack",
-    c10::RegisterOperators::options()
-      .kernel<QLinearPackWeightInt8>(QuantizedCPUTensorId()));
+    c10::RegisterOperators::options().kernel<QLinearPackWeightInt8>(
+        QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at

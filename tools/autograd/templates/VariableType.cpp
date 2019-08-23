@@ -1,5 +1,7 @@
 #include "torch/csrc/autograd/VariableTypeUtils.h"
 
+#include <ATen/TypeDefault.h>
+
 // ${generated_comment}
 
 // NOTE [Sharded File]: on this file's split-into-shards state
@@ -29,4 +31,6 @@ namespace torch { namespace autograd {
 
 ${type_derived_method_definitions}
 
+static auto& registerer = globalATenDispatch()
+  ${wrapper_registrations};
 }} // namespace torch::autograd

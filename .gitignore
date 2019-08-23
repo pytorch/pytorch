@@ -8,6 +8,8 @@
 
 ## PyTorch
 
+.coverage
+.hypothesis
 .mypy_cache
 */*.pyc
 */*.so*
@@ -27,6 +29,7 @@ dist/
 docs/src/**/*
 docs/cpp/build
 docs/cpp/source/api
+log
 test/.coverage
 test/.hypothesis/
 test/cpp/api/mnist
@@ -41,6 +44,8 @@ third_party/build/
 tools/shared/_utils_internal.py
 torch.egg-info/
 torch/__init__.pyi
+torch/nn/functional.pyi
+torch/nn/modules/*.pyi
 torch/csrc/autograd/generated/*
 torch/csrc/cudnn/cuDNN.cpp
 torch/csrc/generated

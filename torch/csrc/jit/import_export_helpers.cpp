@@ -7,17 +7,26 @@ namespace torch {
 namespace jit {
 namespace ImportExportHelpers {
 
-static const std::string kExportPrefix = "libs/";
+static const std::string exportPrefix = "code/";
+static const std::string LEGACY_exportPrefix = "libs/";
 static const std::string kExportSuffix = "py";
 
-std::string qualifierToPath(const std::string& qualifier) {
+std::string qualifierToPath(
+    const std::string& qualifier,
+    size_t proto_version) {
+  const auto kExportPrefix =
+      proto_version >= 6 ? exportPrefix : LEGACY_exportPrefix;
   std::string path = qualifier;
   std::replace_if(
       path.begin(), path.end(), [](char c) { return c == '.'; }, '/');
   return kExportPrefix + path + "." + kExportSuffix;
 }
 
-std::string pathToQualifier(const std::string& classPath) {
+std::string pathToQualifier(
+    const std::string& classPath,
+    size_t proto_version) {
+  const auto kExportPrefix =
+      proto_version >= 6 ? exportPrefix : LEGACY_exportPrefix;
   // strip input suffix
   const auto end = classPath.rfind(kExportSuffix);
   AT_ASSERT(end != std::string::npos);

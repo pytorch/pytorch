@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 
 namespace torch {
 namespace jit {
@@ -21,30 +22,33 @@ void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
     for (auto i : n->inputs()) {
-      if (!i->type()->isSubclass(TypeKind::TensorType) ||
+      if (!i->type()->isSubtypeOf(TensorType::get()) ||
           i->node()->kind() == prim::profile) {
         continue;
       }
 
       auto pn = createProfileNode(nullptr, {i});
       auto pno = pn->addOutput();
-      pno->setType(i->type());
-      std::function<void(Stack&)> shape_profiler = [this, pno](Stack& stack) {
-        IValue t;
-        pop(stack, t);
-        if (t.isTensor()) {
-          auto pttp = ProfiledTensorType::create(t.toTensor());
-          std::lock_guard<std::mutex> lock(this->mutex_);
-          if (pno->type()->isSubclass(TypeKind::ProfiledTensorType)) {
-            auto type = pno->type()->cast<ProfiledTensorType>();
-            pno->setType(type->merge(pttp));
-          } else {
-            pno->setType(pttp);
-          }
-        }
-        // passing t through
-        push(stack, t);
-      };
+      bool first = true;
+      pno->setType(TensorType::get());
+      std::function<void(Stack&)> shape_profiler =
+          [this, pno, first](Stack& stack) mutable {
+            IValue t;
+            pop(stack, t);
+            if (t.isTensor()) {
+              auto pttp = TensorType::create(t.toTensor());
+              std::lock_guard<std::mutex> lock(this->mutex_);
+              if (auto type = pno->type()->cast<TensorType>()) {
+                if (!first) {
+                  pttp = pttp->merge(type);
+                }
+                pno->setType(pttp);
+                first = false;
+              }
+            }
+            // passing t through
+            push(stack, t);
+          };
 
       pn->setCallback(shape_profiler);
       pn->insertBefore(n);
@@ -77,11 +81,10 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   return pr;
 }
 
-ProfiledTensorTypePtr ProfilingRecord::toProfiledTensorTypePtr(
-    const IValue& ival) {
+TensorTypePtr ProfilingRecord::toTensorTypePtr(const IValue& ival) {
   if (ival.isTensor()) {
     auto tensor = ival.toTensor();
-    return ProfiledTensorType::create(tensor);
+    return TensorType::create(tensor);
   }
 
   return {nullptr};

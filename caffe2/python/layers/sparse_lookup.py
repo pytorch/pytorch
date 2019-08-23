@@ -13,8 +13,11 @@ from caffe2.python.layers.layers import (
     get_key,
     IdList,
     IdScoreList,
+    IdListWithEvicted,
+    IdScoreListWithEvicted,
     LayerPsParam,
     ModelLayer,
+    almost_equal_schemas,
 )
 import collections
 import functools
@@ -52,13 +55,12 @@ def get_sparse_lookup_trainer_version(version):
         "Unexpected version of sparse_lookup layer {0}".format(version)
     return version
 
-
 def _is_id_list(input_record):
-    return schema.equal_schemas(input_record, IdList)
+    return almost_equal_schemas(input_record, IdList)
 
 
 def _is_id_score_list(input_record):
-    return schema.equal_schemas(input_record,
+    return almost_equal_schemas(input_record,
                                 IdScoreList,
                                 check_field_types=False)
 
@@ -99,18 +101,18 @@ class SparseLookup(ModelLayer):
                 "PositionWeighted only support IdScoreList, but got {} " +
                 "please use PositionWeighted layer to convert IdList " +
                 "to IdScoreList").format(repr(self.input_record))
-            self.external_weights = input_record.values()
+            self.external_weights = self.input_record.values()
 
         elif reducer == "RecencyWeighted":
             assert _is_id_score_list(self.input_record), (
                 "RecencyWeighted only supports IdScoreList.")
-            self.external_weights = input_record.values()
+            self.external_weights = self.input_record.values()
         self.reducer = reducer
 
-        input_dim = get_categorical_limit(input_record)
+        input_dim = get_categorical_limit(self.input_record)
         assert input_dim > 0, (
             "{} should have categorical limit > 0, but got {}".format(
-                get_key(input_record)(), input_dim))
+                get_key(self.input_record)(), input_dim))
 
         self.input_dim = input_dim
         self.shape = [input_dim] + inner_shape
@@ -122,6 +124,12 @@ class SparseLookup(ModelLayer):
         default_init_op = self._get_default_init_op()
 
         self.weight_init = weight_init or default_init_op
+
+        self.evicted_values = None
+        if schema.equal_schemas(self.input_record, IdListWithEvicted) or \
+            schema.equal_schemas(self.input_record, IdScoreListWithEvicted,
+                                 check_field_types=False):
+            self.evicted_values = self.input_record._evicted_values
 
         # If fp16 is used, make sure fp16 init op is used
         if self.trainer_version == "fp16":
@@ -167,6 +175,14 @@ class SparseLookup(ModelLayer):
                 average_length=avg_length),
             regularizer=regularizer
         )
+        if self.evicted_values:
+            self.reinit_vec = self.create_param(
+                param_name="reinit_vec",
+                shape=inner_shape,
+                initializer=self.weight_init,
+                optimizer=model.NoOptim,
+                regularizer=None,
+            )
 
         self.scale_bias_init = ('ConstantFill', {'value': 0.0})
 
@@ -405,6 +421,9 @@ class SparseLookup(ModelLayer):
                 "Trying to create with {}".format(self.reducer)
 
     def _add_ops(self, net, version='fp32'):
+        if self.evicted_values:
+            net.CopyRowsToTensor(
+                [self.w, self.evicted_values.get(), self.reinit_vec], [self.w])
         if _is_id_list(self.input_record):
             self._add_ops_id_list(net, version=version)
         elif _is_id_score_list(self.input_record):

@@ -79,7 +79,7 @@ def validate_cuda_device(location):
         raise RuntimeError('Attempting to deserialize object on a CUDA '
                            'device but torch.cuda.is_available() is False. '
                            'If you are running on a CPU-only machine, '
-                           'please use torch.load with map_location=\'cpu\' '
+                           'please use torch.load with map_location=torch.device(\'cpu\') '
                            'to map your storages to the CPU.')
     if device >= torch.cuda.device_count():
         raise RuntimeError('Attempting to deserialize object on CUDA device '

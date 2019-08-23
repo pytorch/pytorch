@@ -12,6 +12,8 @@
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
 
+#include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
+
 
 namespace at { namespace native {
 
@@ -231,14 +233,12 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
 
   auto num_indices = indices.numel();
   auto grad = grad_.contiguous().view({num_indices, grad_.size(-1)});
-  auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
-
-  int64_t stride = grad_weight.stride(0);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   if (num_indices <= 768 && !scale_grad_by_freq) {
     auto indices_contig = indices.contiguous();
-
+    auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
+    int64_t stride = grad_weight.stride(0);
     dim3 grid(THCCeilDiv(stride, (int64_t)WARP_SIZE));
     dim3 block(WARP_SIZE, BLOCKDIMY);
 
@@ -253,9 +253,9 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
               block,
               sizeof(accscalar_t)*WARP_SIZE*BLOCKDIMY + sizeof(int)*WARP_SIZE*BLOCKDIMY,
               stream>>>
-           (indices_contig.data<int64_t>(),
-            grad.data<scalar_t>(),
-            grad_weight.data<scalar_t>(),
+           (indices_contig.data_ptr<int64_t>(),
+            grad.data_ptr<scalar_t>(),
+            grad_weight.data_ptr<scalar_t>(),
             static_cast<int>(num_indices),
             static_cast<int64_t>(stride),
             static_cast<int>(padding_idx));
@@ -280,11 +280,11 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
 
     // Fill sortedOrigIndices with sequential indices
     auto count_iter = thrust::counting_iterator<int64_t>(0);
-    auto orig_data = device_ptr(orig_indices.data<int64_t>());
+    auto orig_data = device_ptr(orig_indices.data_ptr<int64_t>());
     thrust::copy(policy, count_iter, count_iter + num_indices, orig_data);
 
     // Sort; a stable sort is not required
-    auto sorted_data = device_ptr(sorted_indices.data<int64_t>());
+    auto sorted_data = device_ptr(sorted_indices.data_ptr<int64_t>());
     thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data,
                         ThrustLTOp<int64_t>());
   }
@@ -299,8 +299,8 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     // Compute an increasing sequence per unique item in sortedIndices:
     // sorted: 2 5 5 5 7 7 8 9 9
     //  count: 1 1 2 3 1 2 1 1 2
-    auto sorted_data = device_ptr(sorted_indices.data<int64_t>());
-    auto count_data = device_ptr(count.data<int64_t>());
+    auto sorted_data = device_ptr(sorted_indices.data_ptr<int64_t>());
+    auto count_data = device_ptr(count.data_ptr<int64_t>());
     thrust::inclusive_scan_by_key(
       policy,
       sorted_data,
@@ -323,23 +323,8 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     );
   }
 
-  dim3 grid(THCCeilDiv(num_indices, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
-  dim3 block(32, 4);
-
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.scalar_type(), "embedding_backward", [&] {
-    embedding_backward_kernel<<<grid, block, 0, stream>>>(
-      sorted_indices.data<int64_t>(),
-      orig_indices.data<int64_t>(),
-      grad.data<scalar_t>(),
-      grad_weight.data<scalar_t>(),
-      count.defined() ? count.data<int64_t>() : nullptr,
-      num_indices,
-      stride,
-      padding_idx);
-  });
-  THCudaCheck(cudaGetLastError());
-
-  return grad_weight;
+  return embedding_backward_cuda_kernel(grad, orig_indices,
+      sorted_indices, count, num_weights, padding_idx);
 }
 
 Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
@@ -357,13 +342,13 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
 
   auto num_indices = indices.numel();
   auto indices_contig = indices.contiguous();
-  auto indices_data = device_ptr(indices_contig.data<int64_t>());
+  auto indices_data = device_ptr(indices_contig.data_ptr<int64_t>());
 
   // FIXME: thrust::unique only removes consecutive elements that are equal.
   // We have race conditions when indices contain duplicates which are not
   // adjacent
   auto unique_indices = at::empty(indices.numel(), indices.options());
-  auto unique_data = device_ptr(unique_indices.data<int64_t>());
+  auto unique_data = device_ptr(unique_indices.data_ptr<int64_t>());
   auto end = thrust::unique_copy(policy, indices_data, indices_data + num_indices, unique_data);
   auto num_unique_indices = static_cast<int>(end - unique_data);
 
@@ -374,8 +359,8 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "embedding_backward", [&] {
     using accscalar_t = acc_type<scalar_t, true>;
     renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
-      self.data<scalar_t>(),
-      unique_indices.data<int64_t>(),
+      self.data_ptr<scalar_t>(),
+      unique_indices.data_ptr<int64_t>(),
       static_cast<accscalar_t>(max_norm),
       static_cast<accscalar_t>(norm_type),
       dim, self.stride(0), self.stride(1));

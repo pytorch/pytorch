@@ -4,6 +4,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/core/MemoryFormat.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/ir.h>
@@ -12,17 +13,19 @@
 #include <initializer_list>
 #include <utility>
 
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 using at::DimnameList;
 #endif
 
 namespace torch {
 
-#define TENSOR(T, S, _1)                                                   \
+#define TENSOR(T, S)                                                       \
   inline at::Tensor tensor(                                                \
       at::ArrayRef<T> values, const at::TensorOptions& options) {          \
-    at::Tensor result =                                                    \
-        at::tensor(values, at::TensorOptions(options).is_variable(false)); \
+    at::Tensor result = ([&]() {                                           \
+      at::AutoNonVariableTypeMode non_var_type_mode(true);                 \
+      return at::tensor(values, at::TensorOptions(options).is_variable(false)); \
+    })();                                                                  \
     return autograd::make_variable(result, options.requires_grad());       \
   }                                                                        \
   inline at::Tensor tensor(                                                \
@@ -41,11 +44,12 @@ namespace torch {
   inline at::Tensor tensor(T value) {                                      \
     return torch::tensor(at::ArrayRef<T>(value));                          \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, TENSOR)
 #undef TENSOR
 
 /// A generic deleter function.
 using Deleter = std::function<void(void*)>;
+using at::MemoryFormat;
 
 /// Exposes the given `data` as a `Tensor` without taking ownership of the
 /// original data. `sizes` should specify the shape of the tensor, `strides` the
@@ -60,8 +64,10 @@ inline at::Tensor from_blob(
     at::IntArrayRef strides,
     const Deleter& deleter,
     const at::TensorOptions& options = at::TensorOptions()) {
-  at::Tensor tensor =
-      at::from_blob(data, sizes, strides, deleter, options.is_variable(false));
+  at::Tensor tensor = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return at::from_blob(data, sizes, strides, deleter, options.is_variable(false));
+  })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
 
@@ -94,8 +100,10 @@ inline at::Tensor from_blob(
     at::IntArrayRef sizes,
     const Deleter& deleter,
     const at::TensorOptions& options = at::TensorOptions()) {
-  at::Tensor tensor =
-      at::from_blob(data, sizes, deleter, options.is_variable(false));
+  at::Tensor tensor = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return at::from_blob(data, sizes, deleter, options.is_variable(false));
+  })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
 

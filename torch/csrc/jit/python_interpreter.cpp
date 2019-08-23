@@ -72,7 +72,16 @@ Operation createPythonOperation(const Node* op_) {
   };
 }
 
-RegisterOperators reg({Operator(prim::PythonOp, createPythonOperation)});
+c10::OperatorOptions aliasAnalysisIsSpecialCase() {
+  c10::OperatorOptions options;
+  options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
+  return options;
+}
+
+RegisterOperators reg({Operator(
+    prim::PythonOp,
+    createPythonOperation,
+    aliasAnalysisIsSpecialCase())});
 
 } // namespace
 } // namespace jit

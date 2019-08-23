@@ -329,6 +329,8 @@ class RecurrentNetworkOp final : public Operator<Context> {
     // of parallelism over timesteps that the RNNExecutor provides. So with
     // RNN executor we use more workspaces to get better perf.
     int num_workspaces_on_fwd_only = rnnExecutor_ ? 4 : 2;
+    num_workspaces_on_fwd_only = this->template GetSingleArgument<int>(
+        "num_workspaces", num_workspaces_on_fwd_only);
 
     if (!has_backward_pass && stepWorkspaces.size() < num_workspaces_on_fwd_only) {
       // Use alternating stepWorkspaces when forward_only=True.

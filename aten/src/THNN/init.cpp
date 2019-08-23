@@ -118,31 +118,25 @@
 #include <THNN/generic/Tanh.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/TemporalRowConvolution.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/FeatureLPPooling.c>
 #include <TH/THGenerateFloatTypes.h>
+
+#include <THNN/generic/unfold.c>
+#include <TH/THGenerateLongType.h>
 
 #include <THNN/generic/unfold.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/SpatialConvolutionMM.c>
-#include <TH/THGenerateFloatTypes.h>
+#include <TH/THGenerateLongType.h>
 
-#include <THNN/generic/SpatialFullDilatedConvolution.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SpatialDilatedConvolution.c>
+#include <THNN/generic/SpatialConvolutionMM.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricConvolutionMM.c>
-#include <TH/THGenerateFloatTypes.h>
+#include <TH/THGenerateLongType.h>
 
-#include <THNN/generic/VolumetricFullDilatedConvolution.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricDilatedConvolution.c>
+#include <THNN/generic/VolumetricConvolutionMM.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/SpatialClassNLLCriterion.c>

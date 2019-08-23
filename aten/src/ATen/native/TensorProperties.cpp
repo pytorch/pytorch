@@ -2,6 +2,9 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <ATen/Config.h>
 namespace at {
@@ -22,6 +25,18 @@ int64_t stride(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim(), false);
   return self.strides()[dim];
 }
+
+#ifdef BUILD_NAMEDTENSOR
+int64_t size(const Tensor& self, Dimname dim) {
+  size_t pos_dim = dimname_to_position(self, dim);
+  return self.sizes()[pos_dim];
+}
+
+int64_t stride(const Tensor& self, Dimname dim) {
+  size_t pos_dim = dimname_to_position(self, dim);
+  return self.strides()[pos_dim];
+}
+#endif
 
 bool cudnn_is_acceptable(const Tensor& self) {
   if (!globalContext().userEnabledCuDNN()) return false;
@@ -60,30 +75,12 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
   if (self.is_contiguous(memory_format)) {
     return self;
   }
-  auto  result = at::empty_like(self);
-  switch (memory_format) {
-    case MemoryFormat::Any: // Back compatibility with old defaults
-    case MemoryFormat::Contiguous: {
-      break;
-    }
-    case MemoryFormat::ChannelsLast: {
-      TORCH_CHECK(
-          result.dim() == 4,
-          " required rank 4 tensor to use channels_last format");
-      std::vector<int64_t> newStrides(self.dim());
-      auto sizes = result.sizes();
-      newStrides[1] = 1;
-      newStrides[3] = sizes[1];
-      newStrides[2] = newStrides[3] * sizes[3];
-      newStrides[0] = newStrides[2] * sizes[2];
-      result = result.as_strided(sizes, newStrides);
-      break;
-    }
-    default: {
-      TORCH_CHECK(false, " unsupported memory format");
-    }
-  }
+  TORCH_CHECK(
+      memory_format != MemoryFormat::Preserve,
+      "preserve memory format is unsupported by the contiguous operator");
+
+  auto result = at::empty_like(self, self.options(), memory_format);
   return result.copy_(self);
 }
 } // namespace native
-}
+} // namespace at

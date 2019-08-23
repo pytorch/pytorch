@@ -61,7 +61,7 @@ def tensor_init_helper(N, M, dtype, is_contig):
 class TorchOrTensorBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, N, M, dtype, contig): 
         if dtype.is_floating_point:
-            raise op_bench.InputShapeError
+            raise op_bench.SkipInputShape
 
         self.input_one = tensor_init_helper(N, M, dtype, contig)
         self.input_two = tensor_init_helper(N, M, dtype, contig)
@@ -97,7 +97,7 @@ def forward(self, a, iterations):
 class TorchTanhBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, N, M, dtype, contig): 
         if not dtype.is_floating_point:
-            raise op_bench.InputShapeError
+            raise op_bench.SkipInputShape
         self.input_one = tensor_init_helper(N, M, dtype, contig)
         self.set_module_name("tanh_")
         self.tanh_jit = torch_unary('tanh_')
@@ -111,7 +111,7 @@ class TorchSigmoidBenchmark(TorchTanhBenchmark):
     def init(self, N, M, dtype, contig): 
         super(TorchSigmoidBenchmark, self).init(N, M, dtype, contig)
         if not dtype.is_floating_point:
-            raise op_bench.InputShapeError
+            raise op_bench.SkipInputShape
         self.set_module_name("sigmoid_")
         self.sigmoid_jit = torch_unary('sigmoid_')
 
@@ -133,7 +133,7 @@ def torch_sumall(a, iterations):
 class TorchSumBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, N, M, dtype, contig): 
         if not dtype.is_floating_point:
-            raise op_bench.InputShapeError
+            raise op_bench.SkipInputShape
         self.input_one = tensor_init_helper(N, M, dtype, contig)
         self.set_module_name("sum")
 

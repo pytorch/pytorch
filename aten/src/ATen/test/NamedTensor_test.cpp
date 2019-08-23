@@ -1,4 +1,4 @@
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/memory.h>
 
 using at::Dimname;
+using at::DimnameList;
 using at::NamedTensorMeta;
 using at::Symbol;
 using torch::make_unique;
@@ -25,12 +26,12 @@ static Dimname dimnameFromString(const std::string& str) {
 
 TEST(NamedTensorTest, isNamed) {
   auto tensor = at::zeros({3, 2, 5, 7});
-  ASSERT_FALSE(tensor.is_named());
+  ASSERT_FALSE(tensor.has_names());
 
   tensor = at::zeros({3, 2, 5, 7});
   tensor.unsafeGetTensorImpl()->set_named_tensor_meta(
       make_unique<NamedTensorMeta>(tensor.dim()));
-  ASSERT_FALSE(tensor.is_named());
+  ASSERT_FALSE(tensor.has_names());
 
   tensor = at::zeros({3, 2, 5, 7});
   auto N = dimnameFromString("N");
@@ -40,7 +41,7 @@ TEST(NamedTensorTest, isNamed) {
   std::vector<Dimname> names = { N, C, H, W };
   tensor.unsafeGetTensorImpl()->set_named_tensor_meta(
       make_unique<NamedTensorMeta>(names));
-  ASSERT_TRUE(tensor.is_named());
+  ASSERT_TRUE(tensor.has_names());
 }
 
 static bool dimnames_equal(at::DimnameList names, at::DimnameList other) {
@@ -73,7 +74,7 @@ TEST(NamedTensorTest, attachMetadata) {
 
   // Test dropping metadata
   tensor.unsafeGetTensorImpl()->set_named_tensor_meta(nullptr);
-  ASSERT_FALSE(tensor.is_named());
+  ASSERT_FALSE(tensor.has_names());
 }
 
 TEST(NamedTensorTest, internalSetNamesInplace) {
@@ -83,7 +84,7 @@ TEST(NamedTensorTest, internalSetNamesInplace) {
   auto H = dimnameFromString("H");
   auto W = dimnameFromString("W");
   std::vector<Dimname> names = { N, C, H, W };
-  ASSERT_FALSE(tensor.is_named());
+  ASSERT_FALSE(tensor.has_names());
 
   // Set names
   at::internal_set_names_inplace(tensor, names);
@@ -138,6 +139,52 @@ TEST(NamedTensorTest, dimnameToPosition) {
 
   tensor = at::empty({1, 1}, std::vector<Dimname>({ Cin, N }));
   ASSERT_EQ(dimname_to_position(tensor, C), 0);
+}
+
+static void check_unify(
+    DimnameList names,
+    DimnameList other_names,
+    DimnameList expected) {
+  const auto result = at::unify_from_right(names, other_names);
+  ASSERT_TRUE(dimnames_equal(result.value(), expected));
+}
+
+static void check_unify_error(DimnameList names, DimnameList other_names) {
+  ASSERT_THROW(at::unify_from_right(names, other_names), c10::Error);
+}
+
+TEST(NamedTensorTest, unifyFromRight) {
+  auto N = dimnameFromString("N");
+  auto C = dimnameFromString("C");
+  auto H = dimnameFromString("H");
+  auto W = dimnameFromString("W");
+  auto None = dimnameFromString("*");
+  
+  std::vector<Dimname> names = { N, C };
+  ASSERT_TRUE(dimnames_equal(*at::unify_from_right(at::nullopt, names), names));
+  ASSERT_TRUE(dimnames_equal(*at::unify_from_right(names, at::nullopt), names));
+  ASSERT_FALSE(at::unify_from_right(at::nullopt, at::nullopt).has_value());
+
+  check_unify({ N, C, H, W }, { N, C, H, W }, { N, C, H, W });
+  check_unify({ W }, { C, H, W }, { C, H, W });
+  check_unify({ None, W }, { C, H, W }, { C, H, W });
+  check_unify({ None, None, H, None }, { C, None, W }, { None, C, H, W });
+
+  check_unify_error({ W, H }, { W, C });
+  check_unify_error({ W, H }, { C, H });
+  check_unify_error({ None, H }, { H, None });
+  check_unify_error({ H, None, C }, { H });
+}
+
+TEST(NamedTensorTest, alias) {
+  // tensor.alias is not exposed in Python so we test its name propagation here
+  auto N = dimnameFromString("N");
+  auto C = dimnameFromString("C");
+  std::vector<Dimname> names = { N, C };
+
+  auto tensor = at::empty({2, 3}, std::vector<Dimname>{ N, C });
+  auto aliased = tensor.alias();
+  ASSERT_TRUE(dimnames_equal(tensor.names().value(), aliased.names().value()));
 }
 
 #endif

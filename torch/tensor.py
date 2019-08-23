@@ -1,6 +1,7 @@
 import sys
 import torch
 import torch._C as _C
+from torch.namedtensor import _update_names
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -43,8 +44,8 @@ class Tensor(torch._C._TensorBase):
                     self.storage_offset(),
                     tuple(self.size()),
                     self.stride(),
-                    self.q_scale().item(),
-                    self.q_zero_point().item(),
+                    self.q_scale(),
+                    self.q_zero_point(),
                     self.requires_grad,
                     OrderedDict())  # TODO: self.qscheme()
             return (torch._utils._rebuild_qtensor, args)
@@ -231,11 +232,6 @@ class Tensor(torch._C._TensorBase):
         self.register_hook(retain_grad_hook)
         self.retains_grad = True
 
-    def is_pinned(self):
-        r"""Returns true if this tensor resides in pinned memory"""
-        storage = self.storage()
-        return storage.is_pinned() if storage else False
-
     def is_shared(self):
         r"""Checks if tensor is in shared memory.
 
@@ -263,69 +259,6 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
-    def pstrf(self, upper=True):
-        r"""See :func:`torch.pstrf`"""
-        warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
-                      "in the next release.", stacklevel=2)
-        return super(Tensor, self).pstrf(upper=upper)
-
-    def potrf(self, upper=True):
-        r"""See :func:`torch.cholesky`"""
-        warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed "
-                      "in the next release. Please use torch.cholesky instead and note that the "
-                      ":attr:`upper` argument in torch.cholesky defaults to ``False``.", stacklevel=2)
-        return super(Tensor, self).cholesky(upper=upper)
-
-    def potri(self, upper=True):
-        r"""See :func:`torch.cholesky_inverse`"""
-        warnings.warn("torch.potri is deprecated in favour of torch.cholesky_inverse and will be "
-                      "removed in the next release. Please use torch.cholesky_inverse instead and "
-                      "note that the :attr:`upper` argument in torch.cholesky_inverse defaults to "
-                      "``False``.", stacklevel=2)
-        return super(Tensor, self).cholesky_inverse(upper=upper)
-
-    def potrs(self, u, upper=True):
-        r"""See :func:`torch.cholesky_solve`"""
-        warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and "
-                      "will be removed in the next release. Please use torch.cholesky_solve instead "
-                      "and note that the :attr:`upper` argument in torch.cholesky_solve defaults "
-                      "to ``False``.", stacklevel=2)
-        return super(Tensor, self).cholesky_solve(u, upper=upper)
-
-    def gesv(self, A):
-        r"""See :func:`torch.solve`"""
-        warnings.warn("torch.gesv is deprecated in favour of torch.solve and will be removed in the "
-                      "next release. Please use torch.solve instead.", stacklevel=2)
-        return super(Tensor, self).solve(A)
-
-    def trtrs(self, A, upper=True, transpose=False, unitriangular=False):
-        r"""See :func:`torch.triangular_solve`"""
-        warnings.warn("torch.trtrs is deprecated in favour of torch.triangular_solve and will be "
-                      "removed in the next release. Please use torch.triangular_solve instead.",
-                      stacklevel=2)
-        return super(Tensor, self).triangular_solve(A, upper=upper,
-                                                    transpose=transpose, unitriangular=unitriangular)
-
-    def btrifact(self, pivot=True):
-        r"""See :func:`torch.lu`"""
-        warnings.warn("torch.btrifact is deprecated in favour of torch.lu and will be removed in "
-                      "the next release. Please use torch.lu instead.", stacklevel=2)
-        return torch._lu_with_info(self, pivot=pivot, check_errors=True)
-
-    def btrifact_with_info(self, pivot=True):
-        r"""See :func:`torch.lu`"""
-        warnings.warn("torch.btrifact_with_info is deprecated in favour of torch.lu with the "
-                      "get_infos argument and will be removed in the next release. Please use "
-                      "torch.lu with the get_infos argument set to True instead.", stacklevel=2)
-        return torch._lu_with_info(self, pivot=pivot, check_errors=False)
-
-    def btrisolve(self, LU_data, LU_pivots):
-        r"""See :func:`torch.lu_solve`"""
-        warnings.warn("torch.btrisolve is deprecated in favour of torch.lu_solve and will be "
-                      "removed in the next release. Please use torch.lu_solve instead.",
-                      stacklevel=2)
-        return super(Tensor, self).lu_solve(LU_data=LU_data, LU_pivots=LU_pivots)
-
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
@@ -334,6 +267,12 @@ class Tensor(torch._C._TensorBase):
             return LU, pivots, infos
         else:
             return LU, pivots
+
+    def gels(self, A):
+        r"""See :func:`torch.lstsq`"""
+        warnings.warn("torch.gels is deprecated in favour of torch.lstsq and will be "
+                      "removed in the next release. Please use torch.lstsq instead.", stacklevel=2)
+        return super(Tensor, self).lstsq(A)
 
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
@@ -424,18 +363,6 @@ class Tensor(torch._C._TensorBase):
     __gt__ = _C._TensorBase.gt
     __ge__ = _C._TensorBase.ge
     __abs__ = _C._TensorBase.abs
-
-    def __std_mean__(self, dim=None, unbiased=True, keepdim=False):
-        if dim is None:
-            return _C._VariableFunctions.std_mean(self, unbiased)
-        else:
-            return _C._VariableFunctions.std_mean(self, dim, unbiased, keepdim)
-
-    def __var_mean__(self, dim=None, unbiased=True, keepdim=False):
-        if dim is None:
-            return _C._VariableFunctions.var_mean(self, unbiased)
-        else:
-            return _C._VariableFunctions.var_mean(self, dim, unbiased, keepdim)
 
     def __len__(self):
         if self.dim() == 0:
@@ -552,5 +479,24 @@ class Tensor(torch._C._TensorBase):
         data = (self.data_ptr(), False)  # read-only is false
 
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=0)
+
+    def names_(self, *names, **rename_map):
+        # Note [names_ / view_names API]
+        # The Python API for these is different from the C++ API. In Python:
+        # 1) tensor.view_names(*names) takes a vararglist of names
+        # 2) tensor.view_names(**rename_map) takes a map of names to rename.
+        # C++ is static, making it difficult to implement similar behavior.
+        return _update_names(self, names, rename_map, inplace=True)
+
+    def view_names(self, *names, **rename_map):
+        # See Note [names_ / view_names API]
+        return _update_names(self, names, rename_map, inplace=False)
+
+    def _update_names(self, names, inplace):
+        # See Note [names_ / view_names API]
+        if inplace:
+            return super(Tensor, self).names_(names)
+        else:
+            return super(Tensor, self).view_names(names)
 
     __module__ = 'torch'

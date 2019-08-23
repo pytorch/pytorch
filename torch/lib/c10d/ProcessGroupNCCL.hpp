@@ -186,12 +186,12 @@ class ProcessGroupNCCL : public ProcessGroup {
   //    ncclResult_t fn(at::Tensor& input, at::Tensor& output,
   //                    ncclComm_t, at::cuda::CUDAStream&);
   //    void {pre,post}(std::vector<at::cuda::CUDAStream&>);
-  template<typename Fn>
+  template <typename Fn>
   std::shared_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
       Fn fn);
-  template<typename Fn, typename PreProcess, typename PostProcess>
+  template <typename Fn, typename PreProcess, typename PostProcess>
   std::shared_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,

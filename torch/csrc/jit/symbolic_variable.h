@@ -20,8 +20,8 @@ struct SymbolicVariable {
   static SymbolicVariable asNewInput(Graph& g, TypePtr type) {
     return g.addInput()->setType(std::move(type));
   }
-  const std::vector<int64_t>& sizes() const {
-    return v->type()->expect<CompleteTensorType>()->sizes();
+  std::vector<int64_t> sizes() const {
+    return v->type()->expect<TensorType>()->sizes().concrete_sizes().value();
   }
   void addAsOutput() const {
     v->owningGraph()->registerOutput(v);
@@ -260,13 +260,20 @@ struct SymbolicVariable {
   SymbolicVariable sinh() const {
     return create(t("sinh"), {*this})[0];
   }
-  SymbolicVariable sum() const {
-    return create(t("sum"), {*this})[0];
+  SymbolicVariable sum(c10::optional<c10::ScalarType> dtype=c10::nullopt) const {
+    return create(t("sum"), {*this, insertNullable(dtype)})[0];
   }
-  SymbolicVariable sum(int dim, bool keepdim) const {
+  SymbolicVariable sum(
+    int dim,
+    bool keepdim,
+    c10::optional<c10::ScalarType> dtype = c10::nullopt) const
+  {
     return create(
         t("sum"),
-        {*this, insertConstant(at::IntArrayRef{dim}), insertConstant(keepdim)})[0];
+        {*this,
+          insertConstant(at::IntArrayRef{dim}),
+          insertConstant(keepdim),
+          insertNullable(dtype)})[0];
   }
   SymbolicVariable squeeze(Value* dim) const {
     return create(t("squeeze"), {*this, dim})[0];
@@ -284,13 +291,13 @@ struct SymbolicVariable {
     return create(aten::view, {*this, sizes})[0];
   }
   SymbolicVariable view(std::vector<std::int64_t> sizes) const {
-    return view(insertConstant(std::move(sizes)));
+    return view(insertConstant(c10::impl::toList(std::move(sizes))));
   }
   SymbolicVariable reshape(Value* sizes) const {
     return create(aten::reshape, {*this, sizes})[0];
   }
   SymbolicVariable reshape(std::vector<std::int64_t> sizes) const {
-    return reshape(insertConstant(std::move(sizes)));
+    return reshape(insertConstant(c10::impl::toList(std::move(sizes))));
   }
   SymbolicVariable addmm(SymbolicVariable mat1, SymbolicVariable mat2) const {
     return create(
@@ -306,19 +313,31 @@ struct SymbolicVariable {
     return v->owningGraph()->insertConstant(std::move(value));
   }
   SymbolicVariable typeLike(SymbolicVariable other) const {
-    if (auto other_type = other.v->type()->cast<CompleteTensorType>())
+    if (auto other_type = other.v->type()->cast<TensorType>())
       v->setType(other_type->contiguous());
     return *this;
   }
+
+  Value * insertNullable(c10::optional<c10::ScalarType> value) const {
+    if (value != c10::nullopt) {
+      return insertConstant(static_cast<int64_t>(*value));
+    } else {
+      return v->owningGraph()
+          ->insertNode(v->owningGraph()->createNone(IntType::get()))
+          ->output();
+    }
+  }
+
   SymbolicVariable toType(TypePtr type) const {
     v->setType(type);
     return *this;
   }
+
   SymbolicVariable typeLikeWithScalarType(
       SymbolicVariable other,
       at::ScalarType type) const {
-    if (auto other_type = other.v->type()->cast<CompleteTensorType>()) {
-      auto new_type = other_type->toScalarType(type)->contiguous();
+    if (auto other_type = other.v->type()->cast<TensorType>()) {
+      auto new_type = other_type->withScalarType(type)->contiguous();
       v->setType(new_type);
     }
     return *this;
@@ -326,11 +345,12 @@ struct SymbolicVariable {
   SymbolicVariable typeLikeWithRhsScalarType(
       SymbolicVariable other,
       SymbolicVariable rhs) const {
-    auto other_type = other.v->type()->cast<CompleteTensorType>();
-    auto rhs_type = rhs.v->type()->cast<CompleteTensorType>();
-    if (other_type && rhs_type) {
+    auto other_type = other.v->type()->cast<TensorType>();
+    auto rhs_type = rhs.v->type()->cast<TensorType>();
+    if (other_type && rhs_type && other_type->isComplete() &&
+        rhs_type->isComplete()) {
       auto new_type =
-          other_type->toScalarType(rhs_type->scalarType())->contiguous();
+          other_type->withScalarType(rhs_type->scalarType())->contiguous();
       v->setType(new_type);
     }
     return *this;

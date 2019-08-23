@@ -9,3 +9,6 @@
 
 #include <TH/generic/THTensorFill.cpp>
 #include <TH/THGenerateBoolType.h>
+
+#include <TH/generic/THTensorFill.cpp>
+#include <TH/THGenerateBFloat16Type.h>

@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/jit/pybind_utils.h>
@@ -28,10 +27,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     SourceRange loc,
     bool is_constant = false);
 
-std::shared_ptr<Function> as_function(const py::object& obj);
+c10::optional<StrongFunctionPtr> as_function(const py::object& obj);
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
-  PythonValue(py::object self) : self(std::move(self)) {}
+  PythonValue(py::object the_self) : self(std::move(the_self)) {}
 
   FunctionSchema getSchema(const size_t n_args, const size_t n_binders);
 
@@ -122,6 +121,25 @@ struct VISIBILITY_HIDDEN OverloadedMethodValue : public SugaredValue {
   std::vector<std::string> method_names_;
 };
 
+struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
+  OverloadedFunctionValue(std::vector<StrongFunctionPtr> compiled_overloads)
+      : compiled_overloads_(std::move(compiled_overloads)) {}
+
+  std::string kind() const override {
+    return "overloaded function";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+ private:
+  std::vector<StrongFunctionPtr> compiled_overloads_;
+};
+
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
 // in the future, we will add the ability to resolve `self.foo` to python
@@ -138,6 +156,8 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   std::string kind() const override {
     return "module";
   }
+
+  Value* asValue(const SourceRange& loc, Function& m) override;
 
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
@@ -191,8 +211,6 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
  private:
   py::dict dispatched_fn_;
 };
-
-TORCH_API bool& getRecursiveScriptMode();
 
 } // namespace script
 } // namespace jit

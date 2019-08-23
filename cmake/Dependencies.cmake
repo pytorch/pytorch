@@ -48,6 +48,8 @@ endif()
 if (MSVC)
   if(MSVC_Z7_OVERRIDE)
     foreach(flag_var
+        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+        CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
         CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
         CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
       if(${flag_var} MATCHES "/Z[iI]")
@@ -88,8 +90,6 @@ if (USE_TBB)
   set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
   add_subdirectory(${CMAKE_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
   set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
-
-  install(TARGETS tbb EXPORT Caffe2Targets DESTINATION lib)
 
   set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
 endif()
@@ -171,6 +171,9 @@ if (NOT INTERN_BUILD_MOBILE)
 
   if (MKL_FOUND)
     ADD_DEFINITIONS(-DTH_BLAS_MKL)
+    if ("${MKL_THREADING}" STREQUAL "SEQ")
+      ADD_DEFINITIONS(-DTH_BLAS_MKL_SEQ=1)
+    endif()
     if (MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
       ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
       set(AT_MKL_MT 1)
@@ -498,10 +501,7 @@ endif()
 
 # ---[ NUMA
 if(USE_NUMA)
-  if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
-    message(WARNING "NUMA is currently only supported under Linux.")
-    caffe2_update_option(USE_NUMA OFF)
-  else()
+  if(LINUX)
     find_package(Numa)
     if(NUMA_FOUND)
       include_directories(SYSTEM ${Numa_INCLUDE_DIR})
@@ -510,6 +510,9 @@ if(USE_NUMA)
       message(WARNING "Not compiling with NUMA. Suppress this warning with -DUSE_NUMA=OFF")
       caffe2_update_option(USE_NUMA OFF)
     endif()
+  else()
+    message(WARNING "NUMA is currently only supported under Linux.")
+    caffe2_update_option(USE_NUMA OFF)
   endif()
 endif()
 
@@ -892,14 +895,14 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${hipsparse_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
+      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
 
     # Note [rocblas & rocfft cmake bug]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
     list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
-      roc::rocblas roc::rocfft)
+      roc::rocblas roc::rocfft hip::hiprand roc::hipsparse)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
@@ -964,10 +967,10 @@ if(USE_GLOO)
     set(BUILD_TEST ${__BUILD_TEST})
     set(BUILD_BENCHMARK ${__BUILD_BENCHMARK})
 
-    # Add explicit dependency if NCCL is built from third_party.
+    # Add explicit dependency since NCCL is built from third_party.
     # Without dependency, make -jN with N>1 can fail if the NCCL build
     # hasn't finished when CUDA targets are linked.
-    if(NCCL_EXTERNAL)
+    if(USE_NCCL)
       add_dependencies(gloo_cuda nccl_external)
     endif()
     # Pick the right dependency depending on USE_CUDA
@@ -1052,16 +1055,16 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # Set the ONNX_ML flag for ONNX submodule
   if (DEFINED ENV{ONNX_ML})
     set(ONNX_ML $ENV{ONNX_ML})
-    if (ONNX_ML)
-      add_definitions(-DONNX_ML=1)
-    endif()
   else()
-    set(ONNX_ML OFF)
+    set(ONNX_ML ON)
+  endif()
+  if (ONNX_ML)
+    add_definitions(-DONNX_ML=1)
   endif()
   # Add op schemas in "ai.onnx.pytorch" domain
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi EXCLUDE_FROM_ALL)
 
   include_directories(${ONNX_INCLUDE_DIRS})
   include_directories(${FOXI_INCLUDE_DIRS})
@@ -1244,72 +1247,6 @@ if (NOT INTERN_BUILD_MOBILE)
   IF (C_AVX2_FOUND)
     MESSAGE(STATUS "AVX2 compiler support found")
     add_compile_options(-DUSE_AVX2)
-  ENDIF()
-
-  CHECK_C_SOURCE_RUNS("
-  #include <stdatomic.h>
-  // ATOMIC_INT_LOCK_FREE is flaky on some older gcc versions
-  // so if this define is not usable a preprocessor definition
-  // we fail this check and fall back to GCC atomics
-  #if ATOMIC_INT_LOCK_FREE == 2
-  #define TH_ATOMIC_IPC_REFCOUNT 1
-  #endif
-  int main()
-  {
-    int a;
-    int oa;
-    atomic_store(&a, 1);
-    atomic_fetch_add(&a, 1);
-    oa = atomic_load(&a);
-    if(!atomic_compare_exchange_strong(&a, &oa, 3))
-      return -1;
-    return 0;
-  }
-  " HAS_C11_ATOMICS)
-
-  IF (NOT HAS_C11_ATOMICS)
-    CHECK_C_SOURCE_RUNS("
-  #include <intrin.h>
-  int main()
-  {
-    long a;
-    _InterlockedExchange(&a, 1);
-    _InterlockedExchangeAdd(&a, 1);
-    if(_InterlockedCompareExchange(&a, 3, 2) != 2)
-      return -1;
-    return 0;
-  }
-  " HAS_MSC_ATOMICS)
-
-    CHECK_C_SOURCE_RUNS("
-  int main()
-  {
-    int a;
-    __sync_lock_test_and_set(&a, 1);
-    __sync_fetch_and_add(&a, 1);
-    if(!__sync_bool_compare_and_swap(&a, 2, 3))
-      return -1;
-    return 0;
-  }
-  " HAS_GCC_ATOMICS)
-  ENDIF()
-
-  IF (HAS_C11_ATOMICS)
-    ADD_DEFINITIONS(-DUSE_C11_ATOMICS=1)
-    MESSAGE(STATUS "Atomics: using C11 intrinsics")
-  ELSEIF (HAS_MSC_ATOMICS)
-    ADD_DEFINITIONS(-DUSE_MSC_ATOMICS=1)
-    MESSAGE(STATUS "Atomics: using MSVC intrinsics")
-  ELSEIF (HAS_GCC_ATOMICS)
-    ADD_DEFINITIONS(-DUSE_GCC_ATOMICS=1)
-      MESSAGE(STATUS "Atomics: using GCC intrinsics")
-  ELSE()
-    SET(CMAKE_THREAD_PREFER_PTHREAD TRUE)
-    FIND_PACKAGE(Threads)
-    IF(THREADS_FOUND)
-      ADD_DEFINITIONS(-DUSE_PTHREAD_ATOMICS=1)
-      MESSAGE(STATUS "Atomics: using pthread")
-    ENDIF()
   ENDIF()
 
   IF (WIN32 AND NOT CYGWIN)

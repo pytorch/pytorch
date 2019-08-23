@@ -7,24 +7,31 @@ class SyncBatchNorm(Function):
     @staticmethod
     def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, process_group, world_size):
         input = input.contiguous()
+        count = torch.Tensor([input.numel() // input.size(1)]).to(input.device)
 
-        # calcualte mean/invstd for input.
+        # calculate mean/invstd for input.
         mean, invstd = torch.batch_norm_stats(input, eps)
 
+        count_all = torch.empty(world_size, 1, dtype=count.dtype, device=count.device)
         mean_all = torch.empty(world_size, mean.size(0), dtype=mean.dtype, device=mean.device)
         invstd_all = torch.empty(world_size, invstd.size(0), dtype=invstd.dtype, device=invstd.device)
+
+        count_l = list(count_all.unbind(0))
         mean_l = list(mean_all.unbind(0))
         invstd_l = list(invstd_all.unbind(0))
-        # using all_gather instead of all reduce so we can calculate mean/var in one go
+
+        # using all_gather instead of all reduce so we can calculate count/mean/var in one go
+        count_all_reduce = torch.distributed.all_gather(count_l, count, process_group, async_op=True)
         mean_all_reduce = torch.distributed.all_gather(mean_l, mean, process_group, async_op=True)
         invstd_all_reduce = torch.distributed.all_gather(invstd_l, invstd, process_group, async_op=True)
 
         # wait on the async communication to finish
+        count_all_reduce.wait()
         mean_all_reduce.wait()
         invstd_all_reduce.wait()
 
         # calcualte global mean & invstd
-        mean, invstd = torch.batch_norm_gather_stats(
+        mean, invstd = torch.batch_norm_gather_stats_with_counts(
             input,
             mean_all,
             invstd_all,
@@ -32,7 +39,7 @@ class SyncBatchNorm(Function):
             running_var,
             momentum,
             eps,
-            int(input.numel() / input.size(1))
+            count_all.view(-1).long().tolist()
         )
 
         self.save_for_backward(input, weight, mean, invstd)

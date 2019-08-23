@@ -11,7 +11,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   source activate testenv >/dev/null
 elif [[ "$DESIRED_PYTHON" == 2.7mu ]]; then
   export PATH="/opt/python/cp27-cp27mu/bin:\$PATH"
-else
+elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
   export PATH="/opt/python/cp\$python_nodot-cp\${python_nodot}m/bin:\$PATH"
 fi
@@ -25,6 +25,9 @@ fi
 pkg="/final_pkgs/\$(ls /final_pkgs)"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   conda install -y "\$pkg" --offline
+  if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
+    conda install -y cpuonly -c pytorch
+  fi
   retry conda install -yq future numpy protobuf six
   if [[ "$DESIRED_CUDA" != 'cpu' ]]; then
     # DESIRED_CUDA is in format cu90 or cu100
@@ -35,9 +38,14 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     fi
     retry conda install -yq -c pytorch "cudatoolkit=\${cu_ver}"
   fi
-else
+elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg"
   retry pip install -q future numpy protobuf six
+fi
+if [[ "$PACKAGE_TYPE" == libtorch ]]; then
+  pkg="\$(ls /final_pkgs/*-latest.zip)"
+  unzip "\$pkg" -d /tmp
+  cd /tmp/libtorch
 fi
 
 # Test the package

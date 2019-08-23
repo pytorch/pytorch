@@ -137,7 +137,8 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
       nInputPlane, inputHeight, inputWidth,
       outputHeight, outputWidth,
       kH, kW, padH, padW, dH, dW,
-      1, 1, THCTensor_(data)(state, finput_n)
+      1, 1, 
+      finput_n->data<scalar_t>()
     );
 
     output3d = THCTensor_(newWithStorage3d)(state, THTensor_getStoragePtr(output_n), output_n->storage_offset(),
@@ -374,7 +375,8 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
       nInputPlane, inputHeight, inputWidth,
       outputHeight, outputWidth,
       kH, kW, padH, padW, dH, dW,
-      1, 1, THCTensor_(data)(state, finput_n)
+      1, 1, 
+      finput_n->data<scalar_t>()
     );
 
     // gradOutput3d:  oH*oW x nOutputPlane x 1

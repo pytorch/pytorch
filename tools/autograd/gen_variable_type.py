@@ -26,11 +26,11 @@ from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
-from .env import NAMEDTENSOR_ENABLED
+from .env import BUILD_NAMEDTENSOR
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_'
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward', 'set_data'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -79,6 +79,8 @@ DONT_REQUIRE_DERIVATIVE = {
     '_sobol_engine_initialize_state_',
     # This is an unsafe method that is meant to be out of reach of autograd.
     '_coalesced_',
+    # Quantize functions should not record gradients
+    'quantize_linear', 'quantize_linear_per_channel'
 }
 
 # NOTE [ Invariant: TensorImpl and Storage Pointer Equality ]
@@ -142,13 +144,17 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
+static ${return_type} ${api_name}(${type_method_formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${method_prefix_derived}${api_name}(${type_method_formals}) const {
+${return_type} VariableType::${api_name}(${type_method_formals}) {
   ${type_definition_body}
 }
+""")
+
+WRAPPER_REGISTRATION = CodeTemplate("""\
+.registerVariableOp<${return_type} (${formal_types})>("${schema_string}", &VariableType::${api_name})
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -168,17 +174,20 @@ if (compute_requires_grad( ${args_with_derivatives} )) {
 """)
 
 ASSIGN_GRAD_FN = CodeTemplate("""\
-grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteFunction);
+grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
-CALL_VIA_TYPE = CodeTemplate("""\
-TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
+CALL_DEFAULT = CodeTemplate("""\
+TypeDefault::${api_name}(${type_method_args})""")
 
-CALL_VIA_DERIVED = CodeTemplate("""\
-baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
+CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
+at::${api_name}(${unpacked_args})""")
 
-# If the `baseType` operation has return values, we use the `tmp` variable to hold the
+CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
+self_.${api_name}(${unpacked_method_args})""")
+
+# If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoNonVariableTypeMode` guard block.
 DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
@@ -209,7 +218,7 @@ if (${cond}) {
 """)
 
 RECORD_FUNCTION = CodeTemplate("""\
-RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Function::peek_at_next_sequence_nr());
+RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
 """)
 
 SELECT = CodeTemplate("""\
@@ -273,13 +282,13 @@ def find_factory_functions(declarations):
 
 
 def should_trace(declaration):
-    if NAMEDTENSOR_ENABLED:
+    if BUILD_NAMEDTENSOR:
         # Short-term plan: Don't support tracing Dimname.
         # Long-term plan: Add Dimname as a first-class type to the JIT.
         if any('Dimname' in arg['simple_type'] for arg in declaration['arguments']):
             return False
     # Operations involving Storage or Type are not traceable at the moment
-    if any(arg['simple_type'] in {'Storage', 'Type'} for arg in declaration['arguments']):
+    if any(arg['simple_type'] in {'Storage', 'Type', 'ConstQuantizerPtr'} for arg in declaration['arguments']):
         return False
     # We can't trace functions which don't have any Tensor or TensorList returns
     if 'Tensor' not in declaration['return_type']:
@@ -447,30 +456,27 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
     type_declarations = []
     type_definitions = []
+    wrapper_registrations = []
 
     for declaration in aten_declarations:
-        # Factory methods usually do not appear in `VariableType` at all, since they
-        # don't dispatch via `Type`; except in the case where the implementation is 'abstract'
-        # in which case they do!
-        if declaration['is_factory_method']:
-            continue
+        formal_types = [arg['type'] for arg in declaration['arguments']]
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
-            type_definitions.append(emit_method_definition(declaration))
+            body = emit_body(declaration)
+            type_definitions.append(METHOD_DEFINITION.substitute(
+                declaration, type_definition_body=body))
+        wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+            declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
+        'wrapper_registrations': wrapper_registrations,
     }
     if header:
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
     else:
         write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
-
-
-def emit_method_definition(declaration):
-    body = emit_body(declaration)
-    return METHOD_DEFINITION.substitute(declaration, type_definition_body=body)
 
 
 def emit_body(declaration):
@@ -584,7 +590,7 @@ def emit_body(declaration):
                 if arg['name'] == derivative_var_name:
                     break
             else:
-                assert False
+                raise AssertionError()
 
             return 'grad_fn->should_compute_output({})'.format(edge_off)
 
@@ -605,7 +611,7 @@ def emit_body(declaration):
         if is_out_fn:
             setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
             body = []
-            body.append(DECLARE_GRAD_FN.substitute(op='Function'))
+            body.append(DECLARE_GRAD_FN.substitute(op='Node'))
             body.append(SETUP_DERIVATIVE.substitute(
                 setup=setup,
                 args_with_derivatives=[arg['name'] for arg in differentiable_inputs]))
@@ -735,7 +741,7 @@ def emit_body(declaration):
                 extra_wrapping_stmts.append(stmt)
             return call, extra_wrapping_stmts
         else:
-            return 'as_variable({})'.format(call), []
+            return 'as_variable(std::move({}))'.format(call), []
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []
@@ -764,12 +770,17 @@ def emit_body(declaration):
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
-            # We only care about adding `at::AutoNonVariableTypeMode` guard for `baseType` dispatch
+            # We only care about adding `at::AutoNonVariableTypeMode` guard for non-variable dispatch
             # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
             # the baseType operations still dispatch to non-Variable type, even if the arguments passed
             # in are now Variables.
             # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
-            base_type_call = CALL_VIA_DERIVED.substitute(combined)
+            if 'namespace' in declaration['method_of']:
+                base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined)
+            else:
+                unpacked_method_args = combined['unpacked_args'][1:]
+                base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(
+                    combined, unpacked_method_args=unpacked_method_args)
             if not modifies_arguments and not returns_void:
                 rhs_value, extra_wrapping_stmts = wrap_output('tmp')
                 call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
@@ -780,7 +791,7 @@ def emit_body(declaration):
                 call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
         else:
-            call = CALL_VIA_TYPE.substitute(declaration)
+            call = CALL_DEFAULT.substitute(declaration)
             if not modifies_arguments and not returns_void:
                 call = '{} = {}'.format(tie_return_values(), call)
             call = call + ';'

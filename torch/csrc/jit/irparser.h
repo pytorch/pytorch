@@ -1,3 +1,5 @@
+#pragma once
+
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <string>
 #include <unordered_map>

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <THHalf.h>
+#include <c10/util/BFloat16.h>
 
 enum THPByteOrder {
   THP_LITTLE_ENDIAN = 0,
@@ -19,6 +20,7 @@ void THP_decodeHalfBuffer(THHalf* dst, const uint8_t* src, THPByteOrder order, s
 void THP_decodeFloatBuffer(float* dst, const uint8_t* src, THPByteOrder order, size_t len);
 void THP_decodeDoubleBuffer(double* dst, const uint8_t* src, THPByteOrder order, size_t len);
 void THP_decodeBoolBuffer(bool* dst, const uint8_t* src, THPByteOrder order, size_t len);
+void THP_decodeBFloat16Buffer(at::BFloat16* dst, const uint8_t* src, THPByteOrder order, size_t len);
 
 void THP_encodeInt16Buffer(uint8_t* dst, const int16_t* src, THPByteOrder order, size_t len);
 void THP_encodeInt32Buffer(uint8_t* dst, const int32_t* src, THPByteOrder order, size_t len);

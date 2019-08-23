@@ -5,20 +5,17 @@ import numbers
 
 from .module import Module
 from ..parameter import Parameter
-from ..utils.rnn import PackedSequence, get_packed_sequence
+from ..utils.rnn import PackedSequence
 from .. import init
 from .. import _VF
-from ..._jit_internal import weak_module, weak_script_method, weak_script, \
-    _parameter_list
+from ..._jit_internal import _parameter_list
 
 _rnn_impls = {
-    'GRU': _VF.gru,
     'RNN_TANH': _VF.rnn_tanh,
     'RNN_RELU': _VF.rnn_relu,
 }
 
 
-@weak_script
 def apply_permutation(tensor, permutation, dim=1):
     # type: (Tensor, Tensor, int) -> Tensor
     return tensor.index_select(dim, permutation)
@@ -139,7 +136,6 @@ class RNNBase(Module):
     def _get_flat_weights(self):
         return self._flat_weights
 
-    @weak_script_method
     def check_input(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> None
         expected_input_dim = 2 if batch_sizes is not None else 3
@@ -152,7 +148,6 @@ class RNNBase(Module):
                 'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
                     self.input_size, input.size(-1)))
 
-    @weak_script_method
     def get_expected_hidden_size(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> Tuple[int, int, int]
         if batch_sizes is not None:
@@ -165,19 +160,20 @@ class RNNBase(Module):
                                 mini_batch, self.hidden_size)
         return expected_hidden_size
 
-    @weak_script_method
     def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
         # type: (Tensor, Tuple[int, int, int], str) -> None
         if hx.size() != expected_hidden_size:
             raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
 
     def check_forward_args(self, input, hidden, batch_sizes):
+        # type: (Tensor, Tensor, Optional[Tensor]) -> None
         self.check_input(input, batch_sizes)
         expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
 
         self.check_hidden_size(hidden, expected_hidden_size)
 
     def permute_hidden(self, hx, permutation):
+        # type: (Tensor, Optional[Tensor]) -> Tensor
         if permutation is None:
             return hx
         return apply_permutation(hx, permutation)
@@ -374,7 +370,18 @@ class RNN(RNNBase):
         super(RNN, self).__init__(mode, *args, **kwargs)
 
 
-@weak_module
+# XXX: LSTM and GRU implementation is different from RNNBase, this is because:
+# 1. we want to support nn.LSTM and nn.GRU in TorchScript and TorchScript in
+#    its current state could not support the python Union Type or Any Type
+# 2. TorchScript static typing does not allow a Function or Callable type in
+#    Dict values, so we have to separately call _VF instead of using _rnn_impls
+# 3. This is temporary only and in the transition state that we want to make it
+#    on time for the release
+#
+# More discussion details in https://github.com/pytorch/pytorch/pull/23266
+#
+# TODO: remove the overriding implementations for LSTM and GRU when TorchScript
+# support expressing these two modules generally.
 class LSTM(RNNBase):
     r"""Applies a multi-layer long short-term memory (LSTM) RNN to an input
     sequence.
@@ -484,7 +491,6 @@ class LSTM(RNNBase):
     def __init__(self, *args, **kwargs):
         super(LSTM, self).__init__('LSTM', *args, **kwargs)
 
-    @weak_script_method
     def check_forward_args(self, input, hidden, batch_sizes):
         # type: (Tensor, Tuple[Tensor, Tensor], Optional[Tensor]) -> None
         self.check_input(input, batch_sizes)
@@ -495,14 +501,12 @@ class LSTM(RNNBase):
         self.check_hidden_size(hidden[1], expected_hidden_size,
                                'Expected hidden[1] size {}, got {}')
 
-    @weak_script_method
     def permute_hidden(self, hx, permutation):
         # type: (Tuple[Tensor, Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
         if permutation is None:
             return hx
         return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
 
-    @weak_script_method
     def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):
         # type: (Tensor, Optional[Tuple[Tensor, Tensor]], Optional[Tensor], int, Optional[Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]  # noqa
         if hx is None:
@@ -528,7 +532,7 @@ class LSTM(RNNBase):
 
         return output, hidden
 
-    @weak_script_method
+    @torch._jit_internal.export
     def forward_tensor(self, input, hx=None):
         # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
         batch_sizes = None
@@ -540,18 +544,19 @@ class LSTM(RNNBase):
 
         return output, self.permute_hidden(hidden, unsorted_indices)
 
-    @weak_script_method
+    @torch._jit_internal.export
     def forward_packed(self, input, hx=None):
-        # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
+        # type: (PackedSequence, Optional[Tuple[Tensor, Tensor]]) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]  # noqa
         input, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
         max_batch_size = int(max_batch_size)
 
         output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
 
-        output = get_packed_sequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
+    @torch._jit_internal.ignore
     def forward(self, input, hx=None):
         if isinstance(input, PackedSequence):
             return self.forward_packed(input, hx)
@@ -663,9 +668,65 @@ class GRU(RNNBase):
         >>> h0 = torch.randn(2, 3, 20)
         >>> output, hn = rnn(input, h0)
     """
+    __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
     def __init__(self, *args, **kwargs):
         super(GRU, self).__init__('GRU', *args, **kwargs)
+
+    def run_impl(self, input, hx, batch_sizes):
+        # type: (Tensor, Tensor, Optional[Tensor]) -> Tuple[Tensor, Tensor]
+        if batch_sizes is None:
+            result = _VF.gru(input, hx, self._get_flat_weights(), self.bias, self.num_layers,
+                             self.dropout, self.training, self.bidirectional, self.batch_first)
+        else:
+            result = _VF.gru(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
+                             self.num_layers, self.dropout, self.training, self.bidirectional)
+        return result
+
+    def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):
+        # type: (Tensor, Optional[Tensor], Optional[Tensor], int, Optional[Tensor]) -> Tuple[Tensor, Tensor]  # noqa
+        if hx is None:
+            num_directions = 2 if self.bidirectional else 1
+            hx = torch.zeros(self.num_layers * num_directions,
+                             max_batch_size, self.hidden_size,
+                             dtype=input.dtype, device=input.device)
+        else:
+            # Each batch of the hidden state should match the input sequence that
+            # the user believes he/she is passing in.
+            hx = self.permute_hidden(hx, sorted_indices)
+
+        self.check_forward_args(input, hx, batch_sizes)
+        result = self.run_impl(input, hx, batch_sizes)
+        output = result[0]
+        hidden = result[1]
+        return output, hidden
+
+    @torch._jit_internal.export
+    def forward_packed(self, input, hx=None):
+        # type: (PackedSequence, Optional[Tensor]) -> Tuple[PackedSequence, Tensor]
+        input, batch_sizes, sorted_indices, unsorted_indices = input
+        max_batch_size = batch_sizes[0]
+        max_batch_size = int(max_batch_size)
+        output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
+        output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        return output, self.permute_hidden(hidden, unsorted_indices)
+
+    @torch._jit_internal.export
+    def forward_tensor(self, input, hx=None):
+        # type: (Tensor, Optional[Tensor]) -> Tuple[Tensor, Tensor]
+        batch_sizes = None
+        max_batch_size = input.size(0) if self.batch_first else input.size(1)
+        sorted_indices = None
+        unsorted_indices = None
+        output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
+        return output, self.permute_hidden(hidden, unsorted_indices)
+
+    @torch._jit_internal.ignore
+    def forward(self, input, hx=None):
+        if isinstance(input, PackedSequence):
+            return self.forward_packed(input, hx)
+        else:
+            return self.forward_tensor(input, hx)
 
 
 class RNNCellBase(Module):
@@ -694,14 +755,12 @@ class RNNCellBase(Module):
             s += ', nonlinearity={nonlinearity}'
         return s.format(**self.__dict__)
 
-    @weak_script_method
     def check_forward_input(self, input):
         if input.size(1) != self.input_size:
             raise RuntimeError(
                 "input has inconsistent input_size: got {}, expected {}".format(
                     input.size(1), self.input_size))
 
-    @weak_script_method
     def check_forward_hidden(self, input, hx, hidden_label=''):
         # type: (Tensor, Tensor, str) -> None
         if input.size(0) != hx.size(0):
@@ -720,7 +779,6 @@ class RNNCellBase(Module):
             init.uniform_(weight, -stdv, stdv)
 
 
-@weak_module
 class RNNCell(RNNCellBase):
     r"""An Elman RNN cell with tanh or ReLU non-linearity.
 
@@ -784,7 +842,6 @@ class RNNCell(RNNCellBase):
         super(RNNCell, self).__init__(input_size, hidden_size, bias, num_chunks=1)
         self.nonlinearity = nonlinearity
 
-    @weak_script_method
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         self.check_forward_input(input)
@@ -810,7 +867,6 @@ class RNNCell(RNNCellBase):
         return ret
 
 
-@weak_module
 class LSTMCell(RNNCellBase):
     r"""A long short-term memory (LSTM) cell.
 
@@ -875,7 +931,6 @@ class LSTMCell(RNNCellBase):
     def __init__(self, input_size, hidden_size, bias=True):
         super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4)
 
-    @weak_script_method
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
         self.check_forward_input(input)
@@ -891,7 +946,6 @@ class LSTMCell(RNNCellBase):
         )
 
 
-@weak_module
 class GRUCell(RNNCellBase):
     r"""A gated recurrent unit (GRU) cell
 
@@ -957,7 +1011,6 @@ class GRUCell(RNNCellBase):
     def __init__(self, input_size, hidden_size, bias=True):
         super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3)
 
-    @weak_script_method
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         self.check_forward_input(input)

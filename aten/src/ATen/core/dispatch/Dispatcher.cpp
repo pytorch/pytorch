@@ -30,6 +30,7 @@ OpRegistrationListener::~OpRegistrationListener() {}
 
 Dispatcher::Dispatcher()
 : operators_()
+, operatorLookupTable_()
 , listeners_(guts::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
@@ -40,20 +41,18 @@ C10_EXPORT Dispatcher& Dispatcher::singleton() {
   return _singleton;
 }
 
-c10::optional<OperatorHandle> Dispatcher::findSchema(const char* operator_name, const char* overload_name) {
-  const auto found = std::find_if(operators_.begin(), operators_.end(), [&] (const OperatorDef& opDef) {
-    return opDef.op.schema().name() == operator_name && opDef.op.schema().overload_name() == overload_name;
+c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> c10::optional<OperatorHandle> {
+    auto found = operatorLookupTable.find(overload_name);
+    if (found == operatorLookupTable.end()) {
+      return c10::nullopt;
+    }
+    return found->second;
   });
-
-  if (found == operators_.end()) {
-    return c10::nullopt;
-  }
-
-  return OperatorHandle(found);
 }
 
 OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options) {
-  const auto found = findSchema(schema.name().c_str(), schema.overload_name().c_str());
+  const auto found = findSchema(schema.operator_name());
   if (found != c10::nullopt) {
     if (found->schema() != schema) {
       std::ostringstream str;
@@ -66,13 +65,21 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, Operat
     return *found;
   }
 
+  OperatorName op_name = schema.operator_name();
   operators_.emplace_back(std::move(schema), std::move(options));
-  return OperatorHandle(--operators_.end());
+  OperatorHandle handle(--operators_.end());
+  operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
+    operatorLookupTable.emplace(op_name, handle);
+  });
+
+  return handle;
 }
 
 SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema, OperatorOptions options) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
+
+  OperatorName op_name = schema.operator_name();
 
   auto op = findOrRegisterSchema_(std::move(schema), std::move(options));
 
@@ -82,14 +89,16 @@ SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema, O
     listeners_->callOnOperatorRegistered(op);
   }
 
-  return SchemaRegistrationHandleRAII {op, RegistrationHandleRAII([this, op] {
-    deregisterSchema_(op);
+  return SchemaRegistrationHandleRAII {op, RegistrationHandleRAII([this, op, op_name] {
+    deregisterSchema_(op, op_name);
   })};
 }
 
-void Dispatcher::deregisterSchema_(const OperatorHandle& op) {
+void Dispatcher::deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
+
+  TORCH_INTERNAL_ASSERT(op.schema().operator_name() == op_name);
 
   // reduce refcount and actually deregister if no references left
   TORCH_INTERNAL_ASSERT(op.operatorIterator_->refcount > 0);
@@ -101,17 +110,25 @@ void Dispatcher::deregisterSchema_(const OperatorHandle& op) {
     listeners_->callOnOperatorDeregistered(op);
 
     operators_.erase(op.operatorIterator_);
+    operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
+      operatorLookupTable.erase(op_name);
+    });
   }
 }
 
-RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func) {
+RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func, void* unboxed_kernel_func) {
   // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, std::move(cache_creator_func)});
+  return op.operatorIterator_->op.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, std::move(cache_creator_func), unboxed_kernel_func});
 }
 
-RegistrationHandleRAII Dispatcher::registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func) {
+RegistrationHandleRAII Dispatcher::registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func, void* unboxed_kernel_func) {
   // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.registerCatchallKernel(DispatchTableEntry{kernel_func, std::move(cache_creator_func)});
+  return op.operatorIterator_->op.registerCatchallKernel(DispatchTableEntry{kernel_func, std::move(cache_creator_func), unboxed_kernel_func});
+}
+
+RegistrationHandleRAII Dispatcher::registerUnboxedAutogradKernel(const OperatorHandle& op, void* unboxed_autograd_kernel) {
+  // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
+  return op.operatorIterator_->op.registerUnboxedAutogradKernel(unboxed_autograd_kernel);
 }
 
 void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {

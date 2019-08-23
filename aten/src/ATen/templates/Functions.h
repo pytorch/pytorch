@@ -3,8 +3,6 @@
 // ${generated_comment}
 
 #include <c10/core/Scalar.h>
-#include <ATen/Type.h>
-#include <ATen/TypeExtendedInterface.h>
 #include <ATen/Tensor.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/Generator.h>
@@ -15,6 +13,8 @@
 #include <ATen/core/Reduction.h>
 #include <c10/util/Optional.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/core/ATenDispatch.h>
+#include <ATen/Context.h>
 
 namespace at {
 
@@ -28,7 +28,7 @@ inline Tensor from_blob(
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  auto device = getType(options).getDeviceFromPtr(data);
+  auto device = globalContext().getDeviceFromPtr(data, options.device().type());
   if (options.device().has_index()) {
     TORCH_CHECK(
         options.device() == device,
@@ -67,19 +67,6 @@ inline Tensor from_blob(
     const TensorOptions& options = {}) {
   return from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, options);
 }
-
-namespace detail {
-
-static inline TypeExtendedInterface & infer_type(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return getType(t);
-}
-static inline TypeExtendedInterface & infer_type(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return getType(tl[0]);
-}
-
-} // namespace detail
 
 // function definitions are all static inline because
 // they are one-line statically dispatched functions that

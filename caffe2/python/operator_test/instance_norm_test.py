@@ -52,10 +52,10 @@ class TestInstanceNorm(serial.SerializedTestCase):
 
     @given(gc=hu.gcs['gc'],
            dc=hu.gcs['dc'],
-           N=st.integers(2, 3),
-           C=st.integers(2, 3),
-           H=st.integers(2, 3),
-           W=st.integers(2, 3),
+           N=st.integers(1, 4),
+           C=st.integers(1, 4),
+           H=st.integers(2, 4),
+           W=st.integers(2, 4),
            order=st.sampled_from(['NCHW', 'NHWC']),
            epsilon=st.floats(1e-6, 1e-4),
            store_mean=st.booleans(),
@@ -76,7 +76,16 @@ class TestInstanceNorm(serial.SerializedTestCase):
             store_inv_stdev=store_inv_stdev,
             epsilon=epsilon,
             order=order)
-        input_blobs = self._get_inputs(N, C, H, W, order)
+
+        input_data = np.arange(N * C * H * W).astype(np.float32)
+        np.random.shuffle(input_data)
+        if order == "NCHW":
+            input_data = input_data.reshape(N, C, H, W)
+        else:
+            input_data = input_data.reshape(N, H, W, C)
+        scale_data = np.random.randn(C).astype(np.float32)
+        bias_data = np.random.randn(C).astype(np.float32)
+        input_blobs = (input_data, scale_data, bias_data)
 
         output_indices = [0]
         # if store_inv_stdev is turned on, store_mean must also be forced on
@@ -88,8 +97,7 @@ class TestInstanceNorm(serial.SerializedTestCase):
         # The gradient only flows from output #0 since the other two only
         # store the temporary mean and inv_stdev buffers.
         # Check dl/dinput
-        self.assertGradientChecks(gc, op, input_blobs, 0, [0], stepsize=0.005,
-                                  threshold=0.01)
+        self.assertGradientChecks(gc, op, input_blobs, 0, [0])
         # Check dl/dscale
         self.assertGradientChecks(gc, op, input_blobs, 1, [0])
         # Check dl/dbias
