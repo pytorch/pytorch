@@ -455,8 +455,6 @@ void AliasDb::analyzeImpl(Node* node) {
 
     // Record writes
     if (formal->isWrite()) {
-      std::cerr << "registering a write " << actualValue->debugName() 
-        << " to " << *node << std::endl;
       registerWrite(actualValue, node);
     }
 

@@ -112,9 +112,9 @@ Element* MemoryDAG::makeFreshValue(const Value* v) {
 }
 
 const MemoryLocations& Element::getMemoryLocations() const {
-  // if (false && !cachedMemoryLocations_.empty()) {
-  //   return cachedMemoryLocations_;
-  // }
+  if (!cachedMemoryLocations_.empty()) {
+    return cachedMemoryLocations_;
+  }
 
   // Do a BFS in the `points-to` direction, collecting all memory locations
   MemoryLocations ret;
