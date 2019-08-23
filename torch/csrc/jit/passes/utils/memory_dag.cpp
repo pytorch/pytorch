@@ -16,6 +16,11 @@ const Element* MemoryDAG::fromIndex(unsigned x) const {
   return indexToElementMap[x].get();
 }
 
+Element* MemoryDAG::fromIndex(unsigned x) {
+    TORCH_INTERNAL_ASSERT(x < indexToElementMap.size());
+      return indexToElementMap[x].get();
+}
+
 bool MemoryDAG::mayAlias(Element* a, Element* b) const {
   return mayAliasImpl(a, b);
 }
@@ -107,9 +112,9 @@ Element* MemoryDAG::makeFreshValue(const Value* v) {
 }
 
 const MemoryLocations& Element::getMemoryLocations() const {
-  if (!cachedMemoryLocations_.empty()) {
-    return cachedMemoryLocations_;
-  }
+  // if (false && !cachedMemoryLocations_.empty()) {
+  //   return cachedMemoryLocations_;
+  // }
 
   // Do a BFS in the `points-to` direction, collecting all memory locations
   MemoryLocations ret;

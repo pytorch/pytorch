@@ -455,6 +455,8 @@ void AliasDb::analyzeImpl(Node* node) {
 
     // Record writes
     if (formal->isWrite()) {
+      std::cerr << "registering a write " << actualValue->debugName() 
+        << " to " << *node << std::endl;
       registerWrite(actualValue, node);
     }
 
@@ -1313,6 +1315,19 @@ void AliasDb::setWildcard(const Value* v) {
   auto e = getOrCreateWildcard(v->type());
   TORCH_INTERNAL_ASSERT(e != nullptr);
   memoryDAG_->makePointerTo(getOrCreateElement(v), e);
+
+  // point everything v aliases to the wildcard 
+  const auto& pointeeSet = getOrCreateElement(v)->getMemoryLocations();
+  for (const auto& pointee : pointeeSet)
+  {  
+      auto fe = memoryDAG_->fromIndex(pointee);
+      // avoid cycles where the wildcard points
+      // to itself
+      if (fe != e)
+      {
+        memoryDAG_->makePointerTo(fe, e);
+      }
+  }
 }
 
 void AliasDb::rebuildWriteCache() const {
