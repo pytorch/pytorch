@@ -78,10 +78,16 @@ class QuantizerTestCase(TestCase):
 
         ScriptedObserver = torch.jit.script(Observer())
         ScriptedWeightObserver = torch.jit.script(WeightObserver())
-        print('--------- 1. Prepare Quant --------')
-        script_module._c = torch._C._jit_pass_prepare_quant(script_module._c,
-                                                            "forward",
-                                                            ScriptedObserver._c, ScriptedWeightObserver._c)
+        qconfig_dict = {
+            '':
+            QConfig(
+                activation=ScriptedObserver._c,
+                weight=ScriptedWeightObserver._c)
+        }
+        print('--------- 1. Insert Observers --------')
+        script_module._c = torch._C._jit_pass_insert_observers(script_module._c,
+                                                               "forward",
+                                                               qconfig_dict)
 
         # Run ScriptM Model and Collect statistics
         print('--------- 2. Calibration ----------')

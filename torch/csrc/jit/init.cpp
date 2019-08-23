@@ -138,13 +138,12 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_propagate_qinfo",
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
-          // TODO: rename to insert_observers after we remove old code
-          "_jit_pass_prepare_quant",
+          "_jit_pass_insert_observers",
           [](const script::Module& module,
              const std::string& method_name,
-             const script::Module& observer_module,
-             const script::Module& weight_observer_module) {
-            return InsertObservers(module, method_name, observer_module, weight_observer_module);
+             const py::dict& qconfig_dict) {
+            auto dict = py::cast<std::unordered_map<std::string, std::tuple<script::Module, script::Module>>>(qconfig_dict);
+            return InsertObservers(module, method_name, dict);
           })
       .def(
           "_jit_pass_insert_quant_dequant",

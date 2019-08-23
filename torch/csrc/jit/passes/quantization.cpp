@@ -55,11 +55,82 @@ Node* createIntReprNode(Value* v, Graph* g) {
   return intrepr;
 }
 
+// c10::optional<QConfig> getQConfig(Value* v, script::Module module, const QConfigDict& qconfig_dict) {
+//   TORCH_INTERNAL_ASSERT(v->node()->kind() == prim::GetAttr,
+//                         "We can only get qconfig for output of GetAttr node");
+//   // module that owns value
+//   Value* vi = v->node()->inputs()[0];
+//   // name for the module
+//   std::string key = vi->node()->s(c10::attr::name);
+//   // move up the module hierarchy
+//   vi = vi->node()->inputs()[0];
+//   std::cout << "module: " << key << std::endl;
+//   while (vi->node()->kind() == prim::GetAttr) {
+//     key = vi->node()->s(c10::attr::name) + "." + key;
+//     std::cout << "module: " << key << std::endl;
+//     vi = vi->node()->inputs()[0];
+//   }
+//   // now we constructed the "absolute path" for the current scope
+//   // for example: sub1.sub2.conv
+
+//   // Find qconfig
+//   while(std::count(key.begin(), key.end(), '.') > 0) {
+//     if (qconfig_dict.find(key) != qconfig_dict.end()) {
+//       std::cout << "returning: " << key;
+//       return qconfig_dict.at(key);
+//     }
+//     // move up hierarchy by removing the last part after "."
+//     auto pos = key.rfind('.');
+//     key = key.substr(0, pos);
+//   }
+
+//   if (qconfig_dict.find(key) != qconfig_dict.end()) {
+//     std::cout << "returning: " << key;
+//     return qconfig_dict.at(key);
+//   } else {
+//     return c10::nullopt;
+//   }
+// }
+
+c10::optional<QConfig> getQConfig(std::string key, c10::optional<QConfig> parent_qconfig, const QConfigDict& qconfig_dict) {
+  if (qconfig_dict.find(key) != qconfig_dict.end()) {
+    return qconfig_dict.at(key);
+  }
+  return parent_qconfig;
+}
+
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
-Node* insertObserverForwardCall(Value* v, Graph* g,
-                                script::Module module,
-                                const script::Module& observer_module) {
+Node* insertObserver(Value* v, Graph* g,
+                     script::Module module,
+                     const QConfigDict& qconfig_dict,
+                     const std::string& key,
+                     c10::optional<QConfig> parent_qconfig) {
+  if (v->node()->kind() == prim::CallMethod && v->node()->s(attr::name) == "forward") {
+    auto child_instance = v->node()->inputs()[0];
+    TORCH_INTERNAL_ASSERT(child_instance->node()->kind() == prim::GetAttr, "Child instance should come from GetAttr.");
+    auto child_module_name = child_instance->node()->s(attr::name);
+    auto child_module = module.find_module(child_module_name);
+    TORCH_INTERNAL_ASSERT(child_module, "Child module " + child_module_name + " does not exist");
+    std::string child_key = key;
+    if (child_key == "") {
+      child_key = child_module_name;
+    } else {
+      child_key = key + "." + child_module_name;
+    }
+    auto m = InsertObservers(child_module.value(), "forward", qconfig_dict, child_key, parent_qconfig);
+  }
+  script::Module observer_module;
+  auto qconfig = getQConfig(key, parent_qconfig, qconfig_dict);
+  // Skip observer if no qconfig is found
+  if (!qconfig) {
+    return nullptr;
+  }
+  if (v->node()->kind() == prim::GetAttr && v->node()->s(attr::name) == "weight") {
+    std::tie(std::ignore, observer_module) = qconfig.value();
+  } else {
+    std::tie(observer_module, std::ignore) = qconfig.value();
+  }
   std::string observer_name = "observer_for_" + v->debugName();
   script::Module observer = observer_module.clone();
   module.register_module(observer_name, observer);
@@ -106,9 +177,10 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
 TORCH_API script::Module InsertObservers(
     const script::Module& module,
     const std::string& method_name,
-    const script::Module& observer_module,
-    const script::Module& weight_observer_module) {
-  script::Module input_module = module.clone();
+    const QConfigDict& qconfig_dict,
+    const std::string& key,
+    c10::optional<QConfig> parent_qconfig) {
+  script::Module input_module = module;
   script::Method method = input_module.get_method(method_name);
   auto graph = method.graph();
   TORCH_CHECK(graph != nullptr);
@@ -132,8 +204,10 @@ TORCH_API script::Module InsertObservers(
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      Node* observer_node = insertObserverForwardCall(v, v->owningGraph(), input_module, observer_module);
-      observer_for_input.emplace(observer_node);
+      auto observer_node = insertObserver(v, v->owningGraph(), input_module, qconfig_dict, key, parent_qconfig);
+      if (observer_node) {
+        observer_for_input.emplace(observer_node);
+      }
     }
   }
 
@@ -167,10 +241,8 @@ TORCH_API script::Module InsertObservers(
       // Skip inserting observer for bias
       if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
         continue;
-      } else if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "weight") {
-        insertObserverForwardCall(v, v->owningGraph(), input_module, weight_observer_module);
       } else {
-        insertObserverForwardCall(v, v->owningGraph(), input_module, observer_module);
+        insertObserver(v, v->owningGraph(), input_module, qconfig_dict, key, parent_qconfig);
       }
     }
   }
