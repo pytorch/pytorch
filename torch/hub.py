@@ -382,7 +382,19 @@ def load(github, model, *args, **kwargs):
 
 def _download_url_to_file(url, dst, hash_prefix, progress):
     file_size = None
-    u = urlopen(url)
+    # TODO: This is to get around CA issues on Python2, where urllib can't
+    # verify the cert from the github server. Another solution is to do:
+    #
+    # import certifi
+    # ...
+    # urlopen(url, cafile=certifi.where())
+    #
+    # But it requires adding a dependency on the `certifi` package
+    if sys.version_info[0] == 2:
+        context = ssl._create_unverified_context()
+    else:
+        context = None
+    u = urlopen(url, context=context)
     meta = u.info()
     if hasattr(meta, 'getheaders'):
         content_length = meta.getheaders("Content-Length")
