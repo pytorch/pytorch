@@ -137,5 +137,34 @@ TORCH_API void InsertQuantDeQuant(
     script::Module& module,
     const std::string& method_name);
 
+/** \brief Backend specific pass to fuse dequantize - op - quantize calls
+ * as quantized_op calls.
+ *
+ * Right now this is a fusion for fbgemm backend and only works for quantized
+ * conv op, we'll extend to more ops and more backends in the future.
+ *
+ * \param graph the graph we want to apply fusion
+ */
+TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
+
+class QuantizeHelper {
+ public:
+  QuantizeHelper(const script::Module& m) : module_(m) {}
+  IValue getQParam(Value* v);
+  void quantizeBias(Value* v);
+  void quantizeTensor(Value* v, bool insert_after=true);
+  void destroyNodes() {
+    // Destroy observer forward calls
+    for (auto& n: nodes_to_destroy_) {
+      n->destroy();
+    }
+  }
+
+ private:
+  const script::Module& module_;
+  std::vector<std::string> observer_modules_to_remove_;
+  std::vector<Node*> nodes_to_destroy_;
+};
+
 } // namespace jit
 } // namespace torch
