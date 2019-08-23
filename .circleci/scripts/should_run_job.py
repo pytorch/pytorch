@@ -8,7 +8,7 @@ import sys
 # WARNING: Actually, this is a lie; we're currently also controlling
 # the set of jobs to run via the Workflows filters in CircleCI config.
 
-default_set = [
+default_set = set([
     # PyTorch CPU
     # Selected oldest Python 2 version to ensure Python 2 coverage
     'pytorch-linux-xenial-py2.7.9',
@@ -52,7 +52,15 @@ default_set = [
     'pytorch-short-perf-test-gpu',
     'pytorch-python-doc-push',
     'pytorch-cpp-doc-push',
-]
+])
+
+# Collection of jobs that are *temporarily* excluded from running on PRs.
+# Use this if there is a long-running job breakage that we can't fix with a
+# single revert.
+skip_override = {
+    # example entry:
+    # 'pytorch-cpp-doc-push': "https://github.com/pytorch/pytorch/issues/<related issue>"
+}
 
 # Takes in commit message to analyze via stdin
 #
@@ -65,7 +73,8 @@ default_set = [
 # Semantics in the presence of multiple tags:
 #   - Let D be the set of default builds
 #   - Let S be the set of explicitly specified builds
-#   - Run S \/ D
+#   - Let O be the set of temporarily skipped builds
+#   - Run S \/ (D - O)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('build_environment')
@@ -88,10 +97,16 @@ for m in markers:
         print("Accepting {} due to commit marker {}".format(args.build_environment, m.group(0)))
         sys.exit(0)
 
-for spec in default_set:
+skip_override_set = set(skip_override.keys())
+should_run_set = default_set - skip_override_set
+for spec in should_run_set:
     if spec in args.build_environment:
         print("Accepting {} as part of default set".format(args.build_environment))
         sys.exit(0)
 
 print("Rejecting {}".format(args.build_environment))
+for spec, issue in skip_override:
+    if spec in args.build_environment:
+        print("This job is temporarily excluded from running on PRs. Reason: {}".format(issue))
+        break
 sys.exit(1)
