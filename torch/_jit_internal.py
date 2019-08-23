@@ -286,7 +286,7 @@ def ignore(drop_on_export=False):
         m.save("m.pt")
 
     .. testcleanup::
-        
+
         import os
         os.remove('m.pt')
     """
