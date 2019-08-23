@@ -518,7 +518,7 @@ class TestCase(expecttest.TestCase):
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
                 raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
 
-        if torch.cuda.is_available():
+        if torch.cuda._initialized and torch.cuda.is_available():
             try:
                 torch.cuda.synchronize()
             except RuntimeError:
@@ -532,7 +532,7 @@ class TestCase(expecttest.TestCase):
         set_rng_seed(SEED)
 
     def tearDown(self):
-        if torch.cuda.is_available():
+        if torch.cuda._initialized and torch.cuda.is_available():
             try:
                 torch.cuda.synchronize()
             except RuntimeError:
