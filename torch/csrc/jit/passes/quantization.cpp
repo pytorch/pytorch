@@ -738,7 +738,6 @@ c10::optional<std::string> findObserverName(Value* v) {
   return c10::nullopt;
 }
 
-// TODO: refactor to have a class
 IValue QuantizeHelper::getQParam(Value* v) {
     TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
     auto observer_name = findObserverName(v);
