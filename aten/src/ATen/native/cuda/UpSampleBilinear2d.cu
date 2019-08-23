@@ -275,8 +275,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
       grad_output.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = grad_input.data<scalar_t>();
-        auto odata = grad_output.data<scalar_t>();
+        auto idata = grad_input.data_ptr<scalar_t>();
+        auto odata = grad_output.data_ptr<scalar_t>();
 
         const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
             input_height, output_height, align_corners);

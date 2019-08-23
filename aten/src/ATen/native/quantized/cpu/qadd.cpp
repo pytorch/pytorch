@@ -88,7 +88,7 @@ class QAdd final : public c10::OperatorKernel {
 template <bool ReLUFused = false>
 class QAddOut final : public c10::OperatorKernel {
  public:
-  Tensor operator()(Tensor qa, Tensor qb, at::Tensor out) {
+  Tensor operator()(Tensor qa, Tensor qb, Tensor out) {
     check_inputs(qa, qb);
     check_inputs(qa, out);
     return _add_out<ReLUFused>(out, qa, qb);
