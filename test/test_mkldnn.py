@@ -146,7 +146,7 @@ class TestMkldnn(TestCase):
                     weight_g = subtensor(weight, 0, group, g)
                     bias_g = subtensor(bias, 0, group, g)
                     outputs.append(thnn_conv(input_g, weight_g, k, bias_g, s, p, d))
-                return torch.cat(outputs, 1);
+                return torch.cat(outputs, 1)
 
         def test_single_conv2d(g, bs, isize, ic_g, oc_g, has_bias, p, d, s, k):
             ic, oc = ic_g * g, oc_g * g
@@ -157,8 +157,8 @@ class TestMkldnn(TestCase):
                 thnn_conv_group(input, weight, k, bias, s, p, d, g),
                 torch.mkldnn_convolution(input, weight, bias, p, s, d, g),
                 message='input size:{}; group:{}; input channel:{}; output channel:{};'
-                    'bias:{}, padding:{}, dilation:{}; stride:{}; kernel:{}'.format(
-                    isize, g, ic, oc, has_bias, p, d, s, k))
+                        'bias:{}, padding:{}, dilation:{}; stride:{}; kernel:{}'.format(
+                        isize, g, ic, oc, has_bias, p, d, s, k))
 
         groups = [1, torch.randint(2, 17, (1,)).item()]
         batch_sizes = [1, torch.randint(2, 257, (1,)).item()]
@@ -171,9 +171,8 @@ class TestMkldnn(TestCase):
         output_sizes = [[3, 3], [torch.randint(1, 10, (1,)).item() for i in range(2)]]
 
         for group, bs, ic, oc, bias, p, d, s, k, osize in itertools.product(
-            groups, batch_sizes, input_channels, output_channels, [True, False],
-            paddings, dilations, strides, kernels, output_sizes):
-
+                groups, batch_sizes, input_channels, output_channels, [True, False],
+                paddings, dilations, strides, kernels, output_sizes):
             isize = []
             for i in range(len(osize)):
                 isize.append(s[i] * (osize[i] - 1) + 1 + d[i] * (k[i] - 1) - 2 * p[i])
