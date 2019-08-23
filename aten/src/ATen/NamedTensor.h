@@ -33,12 +33,12 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
   bool has_names() const;
   DimnameList names() const { return names_; }
 
-  void set_names_(DimnameList new_names) {
+  void set_names(DimnameList new_names) {
     TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
     std::copy(new_names.begin(), new_names.end(), names_.begin());
   }
 
-  void set_names_(std::vector<Dimname>&& new_names) {
+  void set_names(std::vector<Dimname>&& new_names) {
     TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
     names_ = std::move(new_names);
   }
@@ -72,9 +72,9 @@ struct CAFFE2_API NoNamesGuard {
 CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
 CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
 
-// Everywhere this is used, it is possible to not instantiate the vector by doing
-// some more clever bookkeeping. This is important for performance.
-std::vector<Dimname> FIXME_default_names(size_t len);
+constexpr size_t kMaxNamedTensorDim = 64;
+
+DimnameList default_names(size_t len);
 
 namespace impl {
 
