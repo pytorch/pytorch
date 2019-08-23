@@ -59,17 +59,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
          static_cast<int>(padding[1])});
 
     auto weight_contig = weight.contiguous();
-    const auto qtype = weight.qscheme();
-    std::vector<int32_t> zero_points(1, 0);
-    if (qtype == kPerTensorAffine) {
-      zero_points[0] = weight.q_zero_point();
-    } else if (qtype == kPerChannelAffine) {
-      zero_points.resize(output_channels, 0);
-      for (int i = 0; i < output_channels; ++i) {
-        zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
-      }
-    }
-
+    int32_t weight_zero_point_int32 = weight.q_zero_point();
     const int8_t* weight_ptr_int8 =
         reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
 
@@ -86,22 +76,8 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         for (int k = 0; k < KDim_per_group; ++k) {
           sum += weight_ptr_int8[(g * NDim + j) * KDim_per_group + k];
         }
-        if (qtype == kPerTensorAffine) {
-          col_offsets[g * NDim + j] = sum - zero_points[0] * KDim_per_group;
-        } else {
-          col_offsets[g * NDim + j] =
-              sum - zero_points[g * NDim + j] * KDim_per_group;
-        }
-      }
-    }
-
-    std::vector<float> scales(1, 0.0);
-    if (qtype == kPerTensorAffine) {
-      scales[0] = weight.q_scale();
-    } else if (qtype == kPerChannelAffine) {
-      scales.resize(output_channels, 0.0);
-      for (int i = 0; i < output_channels; ++i) {
-        scales[i] = weight.q_per_channel_scales()[i].item<float>();
+        col_offsets[g * NDim + j] =
+            sum - weight_zero_point_int32 * KDim_per_group;
       }
     }
 
@@ -110,9 +86,8 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
                              conv_p, weight_ptr_int8),
                          col_offsets,
                          {kernel_h, kernel_w},
-                         scales,
-                         zero_points,
-                         qtype});
+                         weight.q_scale(),
+                         weight_zero_point_int32});
     // TODO: we will need to replace this with torchscript classes at a later
     // point.
     return cpp_custom_type_hack::create(std::move(ret_ptr), weight.options());
