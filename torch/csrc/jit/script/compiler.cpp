@@ -524,7 +524,7 @@ struct to_ir {
   std::vector<DefContext> def_stack_;
   size_t temp_name_count_ = 0;
   std::string createTempName(const std::string& prefix) {
-    return prefix + std::to_string(temp_name_count_);
+    return prefix + std::to_string(temp_name_count_++);
   }
 
   void pushFrame(Block* b, bool starts_def = false) {
@@ -1041,7 +1041,7 @@ struct to_ir {
   }
 
   Value* emitListComprehension(const ListComp& lc) {
-    const auto tmp_name = createTempName("___list_acc");
+    const auto tmp_name = createTempName("$list_acc");
     const auto list_value = emitExpr(lc.iter());
     if (list_value->type()->kind() != TypeKind::ListType) {
       // TODO: constraining iterators to be simple lists for now
