@@ -460,8 +460,11 @@ at::Tensor conv1d(
 at::Tensor conv2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
-  return at::convolution(input, weight, bias, stride, padding, dilation,
+      std::cout << "conv2d in  " << input.suggest_memory_format() << "\n";
+  auto out =  at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0}}, groups);
+      std::cout << "conv2d out " << out.suggest_memory_format() << "\n";
+      return out;
 }
 
 at::Tensor conv3d(

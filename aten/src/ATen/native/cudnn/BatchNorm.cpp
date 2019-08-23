@@ -76,7 +76,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
   // TODO: is weight required to be contiguous?
   checkAllContiguous(c, {weight, bias, running_mean, running_var});
   // TODO: TensorArg check should start handle memory format
-  TORCH_CHECK(input->is_contiguous(input->suggest_memory_format()));
+  TORCH_CHECK(input->is_contiguous(input->suggest_memory_format()), input->strides());
 
   checkDimRange(c, input, 2, 6 /* exclusive */);
   auto num_features = input->size(1);
@@ -178,7 +178,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   // TODO: is weight required to be contiguous?
   checkAllContiguous(c, {save_mean, save_var});
   // TODO: TensorArg check should start handle memory format
-  TORCH_CHECK(input->is_contiguous(input->suggest_memory_format()));
+  TORCH_CHECK(input->is_contiguous(input->suggest_memory_format()), input->strides(), input->suggest_memory_format(), " ", input->sizes());
   TORCH_CHECK(grad_output->is_contiguous(grad_output->suggest_memory_format()));
   checkDimRange(c, input, 2, 6 /* exclusive */);
   checkSameSize(c, input, grad_output);
