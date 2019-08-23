@@ -113,6 +113,9 @@ class MinMaxObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
+        # We pull these out so that TorchScript optional type refinement works.
+        # We may be able to remove this in the future if TorchScript supports that
+        # feature on attributes
         min_val = self.min_val
         max_val = self.max_val
         if max_val is None or min_val is None:
