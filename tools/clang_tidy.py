@@ -106,7 +106,7 @@ class ClangTidyConverter:
             <failure message="{message}">
 {htmldata}
             </failure>
-        </testcase>""".format(id="{}:{}".format(error.file, error.line)
+        </testcase>""".format(id="{}:{}".format(error.file, error.line),
                               name="[{}/{}] {}".format(error.line, error.column, error.error_identifier),
                               message=escape(error.error),
                               htmldata=escape(error.description)))
