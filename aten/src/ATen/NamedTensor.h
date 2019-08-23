@@ -33,12 +33,12 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
   bool has_names() const;
   DimnameList names() const { return names_; }
 
-  void set_names_(DimnameList new_names) {
+  void set_names(DimnameList new_names) {
     TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
     std::copy(new_names.begin(), new_names.end(), names_.begin());
   }
 
-  void set_names_(std::vector<Dimname>&& new_names) {
+  void set_names(std::vector<Dimname>&& new_names) {
     TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
     names_ = std::move(new_names);
   }
@@ -72,9 +72,9 @@ struct CAFFE2_API NoNamesGuard {
 CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
 CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
 
-// Everywhere this is used, it is possible to not instantiate the vector by doing
-// some more clever bookkeeping. This is important for performance.
-std::vector<Dimname> FIXME_default_names(size_t len);
+constexpr size_t kMaxNamedTensorDim = 64;
+
+DimnameList default_names(size_t len);
 
 namespace impl {
 
@@ -82,8 +82,24 @@ namespace impl {
 // XXX: Ideally these would exist as methods on TensorImpl
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names);
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names);
-CAFFE2_API optional<DimnameList> get_names(TensorImpl* impl);
+
+// Returns true if the tensor's names exist and are not all 'None'.
+// Returns false if the tensor's names don't exist (were not allocated),
+// or if all names are 'None'.
+// We treat not-allocated-names the same as allocated names that are all 'None'.
 CAFFE2_API bool has_names(TensorImpl* impl);
+
+// Returns the names of the tensor's dimensions.
+// Unnamed tensors are treated as having 'None' in all dimension; this method
+// would return a DimnameList of all 'None's for an unnamed tensor.
+CAFFE2_API DimnameList get_names(TensorImpl* impl);
+
+// This is more of an implementation detail; one should use impl::get_names /
+// Tensor::names() whenever possible because it provides a cleaner API.
+// Returns the names of the tensor if they have been allocated; returns nullopt
+// instead if the haven't been. The names of a tensor are not allocated if a
+// tensor is constructed with names=None.
+CAFFE2_API optional<DimnameList> get_opt_names(TensorImpl* impl);
 
 
 } // namespace impl
