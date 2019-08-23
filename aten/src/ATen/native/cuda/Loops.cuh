@@ -232,7 +232,7 @@ using ArrayForFunc = at::detail::Array<T, function_traits<func_t>::arity / 2>;
 template <int64_t n, typename func_t, typename... Args>
 struct gpu_dim_apply_helper {
   C10_HOST_DEVICE static inline void
-  apply(const ArrayForFunc<func_t, char*> &data, const ArrayForFunc<func_t, int64_t> &strides, func_t op, Args... args) {
+  apply(char *data[], int64_t strides[], const func_t &op, Args... args) {
     using traits = function_traits<func_t>;
     using ptr_t = typename traits::template arg<2 * (n - 1)>::type;
     using stride_t = typename traits::template arg<2 * (n - 1) + 1>::type;
@@ -244,7 +244,7 @@ struct gpu_dim_apply_helper {
 template <typename func_t, typename... Args>
 struct gpu_dim_apply_helper<0, func_t, Args...> {
   C10_HOST_DEVICE static inline void
-  apply(const ArrayForFunc<func_t, char*> &data, const ArrayForFunc<func_t, int64_t> &strides, func_t op, Args... args) {
+  apply(char *data[], int64_t strides[], const func_t &op, Args... args) {
     op(args...);
   }
 };
@@ -252,7 +252,7 @@ struct gpu_dim_apply_helper<0, func_t, Args...> {
 template <typename func_t>
 __global__ void gpu_dim_apply(
   int64_t numel, OffsetCalculatorForFunc<func_t> calc, ArrayForFunc<func_t, char *> base_data,
-  ArrayForFunc<func_t, int64_t> strides, const func_t& op)
+  ArrayForFunc<func_t, int64_t> strides, func_t op)
 {
   using traits = function_traits<func_t>;
   constexpr int64_t ntensors = traits::arity / 2;
@@ -267,7 +267,7 @@ __global__ void gpu_dim_apply(
     }
     // use template metaprogramming to do:
     // op((scalar0_t *)data[0], strides[0], (scalar1_t *)data[1], strides[1], ...);
-    gpu_dim_apply_helper<ntensors, func_t>::apply(data, strides, op);
+    gpu_dim_apply_helper<ntensors, func_t>::apply(data.data, strides.data, op);
   }
 }
 
