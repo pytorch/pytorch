@@ -724,14 +724,14 @@ Node* insertQuantDeQuantCall(Value* v, const IValue& qparams, at::ScalarType t, 
 }
 
 // find the observer for Value `v` and return the name of the observer
-c10::optional<std::string> findObserverName(const script::Module& module, Value* v) {
+c10::optional<std::string> findObserverName(Value* v) {
   for (const Use& u: v->uses()) {
     // Note that here we just check for the name of observer, but the ideally
     // we should be comparing the type of observer, this is a temporary
     // work around until data only clone of module.clone is supported.
     if (u.user->kind() == prim::CallMethod && u.user->s(attr::name) == "forward") {
       auto module_instance = u.user->inputs().at(0);
-      if (module_instance->node()->kind() == prim::GetAttr) {
+      if (module_instance->node()->kind() == prim::GetAttr && module_instance->node()->s(attr::name).find("observer_for_") != std::string::npos) {
         return module_instance->node()->s(attr::name);
       }
     }
@@ -740,14 +740,14 @@ c10::optional<std::string> findObserverName(const script::Module& module, Value*
 }
 
 // TODO: refactor to have a class
-IValue getQParam(const script::Module& module, Value* v) {
+IValue QuantizeHelper::getQParam(Value* v) {
     TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
-    auto observer_name = findObserverName(module, v);
+    auto observer_name = findObserverName(v);
     TORCH_INTERNAL_ASSERT(observer_name,
                           "getQParam expects the corresponding observer for ",
                           v->debugName(),
                           " exists.");
-    auto observer_module = module.find_module(observer_name.value());
+    auto observer_module = module_.find_module(observer_name.value());
     TORCH_INTERNAL_ASSERT(observer_module,
                           "getQParam expects the corresponding observer for ",
                           v->debugName(),
@@ -757,7 +757,7 @@ IValue getQParam(const script::Module& module, Value* v) {
     return qparams;
 }
 
-void quantizeBias(const script::Module& module, Value* v) {
+void QuantizeHelper::quantizeBias(Value* v) {
   // Traverse to the place where this is used
   Node* aten_call_node = nullptr;
   std::vector<std::string> ops_with_bias = {"aten::conv2d", "aten::_convolution"};
@@ -766,15 +766,15 @@ void quantizeBias(const script::Module& module, Value* v) {
                   use.user->kind().toQualString()) != ops_with_bias.end()) {
       // Make sure there is no observer module for bias
       c10::optional<script::Module> observer_module;
-      auto observer_name = findObserverName(module, v);
+      auto observer_name = findObserverName(v);
       TORCH_INTERNAL_ASSERT(!observer_name,
                             "bias should not be observed!");
       Value* activation = use.user->inputs()[0];
       Value* weight = use.user->inputs()[1];
       // Get qparam from activation
-      IValue act_qparam = getQParam(module, activation);
+      IValue act_qparam = getQParam(activation);
       // Get qparam from weight
-      IValue weight_qparam = getQParam(module, weight);
+      IValue weight_qparam = getQParam(weight);
       IValue bias_scale =  at::scalar_tensor(
           c10::Scalar(act_qparam.toTuple()->elements()[0].toTensor().item().toDouble() *
                       weight_qparam.toTuple()->elements()[0].toTensor().item().toDouble()),
@@ -792,21 +792,18 @@ void quantizeBias(const script::Module& module, Value* v) {
   }
 }
 
-void quantizeTensor(const script::Module& module,
-                    Value* v,
-                    std::vector<std::string>& observer_modules_to_remove,
-                    std::vector<Node*>& nodes_to_destroy,
-                    bool insert_after=true) {
-  auto observer_name = findObserverName(module, v);
+void QuantizeHelper::quantizeTensor(Value* v,
+                                    bool insert_after) {
+  auto observer_name = findObserverName(v);
   if (!observer_name) {
     return;
   }
-  auto observer_module = module.find_module(observer_name.value());
+  auto observer_module = module_.find_module(observer_name.value());
   TORCH_INTERNAL_ASSERT(observer_module,
                         "Expect observer module " +                     \
                         observer_name.value() + " in quantizeTensor");
   // remove observer_module
-  observer_modules_to_remove.push_back(observer_name.value());
+  observer_modules_to_remove_.push_back(observer_name.value());
   // remove observer forward call
   for (const Use& u: v->uses()) {
     Node* user = u.user;
@@ -815,9 +812,9 @@ void quantizeTensor(const script::Module& module,
         user->inputs()[0]->node()->kind() == prim::GetAttr &&
         user->inputs()[0]->node()->s(attr::name) == observer_name) {
       // Observer forward call node
-      nodes_to_destroy.push_back(user);
+      nodes_to_destroy_.push_back(user);
       // GetAttr node for observer module
-      nodes_to_destroy.push_back(user->inputs()[0]->node());
+      nodes_to_destroy_.push_back(user->inputs()[0]->node());
     }
   }
 
@@ -890,18 +887,16 @@ void InsertQuantDeQuant(
       }
     }
   }
-
-  std::vector<std::string> observer_modules_to_remove;
-  std::vector<Node*> nodes_to_destroy;
+  QuantizeHelper qh(module);
 
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
       if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
-        quantizeBias(module, v);
+        qh.quantizeBias(v);
       } else {
-        auto observer_name = findObserverName(module, v);
+        auto observer_name = findObserverName(v);
         if (observer_name) {
-          quantizeTensor(module, v, observer_modules_to_remove, nodes_to_destroy);
+          qh.quantizeTensor(v);
         }
       }
     }
@@ -909,17 +904,14 @@ void InsertQuantDeQuant(
 
   for (Value* v : input_values) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      auto observer_name = findObserverName(module, v);
+      auto observer_name = findObserverName(v);
       if (observer_name) {
-        quantizeTensor(module, v, observer_modules_to_remove, nodes_to_destroy, false);
+        qh.quantizeTensor(v, false);
       }
     }
   }
 
-  // Destroy observer forward calls
-  for (auto& n: nodes_to_destroy) {
-    n->destroy();
-  }
+  qh.destroyNodes();
 
   // NOTE: Remove observer module does not work right now, we'll return
   // the module with observer modules as a temporary workaround
