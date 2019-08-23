@@ -50,24 +50,25 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
 }
 
 template <bool ReLUFused = false>
-Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
-  int64_t zero_point = out.q_zero_point();
-  double scale = out.q_scale();
-  int64_t self_zero_point = self.q_zero_point();
-  double self_scale = self.q_scale();
+Tensor _add_scalar_(Tensor& self, Scalar other) {
 
-  auto iter = TensorIterator::unary_op(out, self);
-  AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qadd", [&]() {
-    cpu_kernel(iter, [&](scalar_t a) -> scalar_t {
-      const auto da = at::dequantize_val(self_scale, self_zero_point, a);
-      float c = da + other.toFloat();
-      if (ReLUFused) {
-        c = std::max<float>(c, 0.0);
-      }
-      return at::quantize_val<scalar_t>(scale, zero_point, c);
+  if (self.qscheme() == kPerTensorAffine) {
+    AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qadd", [&]() {
+      int64_t qmin = std::numeric_limits<typename T::underlying>::min();
+      int64_t qmax = std::numeric_limits<typename T::underlying>::max();
+      double new_s = s * ((max(qmax - z, 0) - min(qmin - z, 0)) / (qmax - qmin));
+      int64_t new_z = qmin - min(xmin + other_int, 0) / new_s;
+      self.set_quantizer_(make_per_tensor_affine_quantizer(new_s, new_z,
+                                                           self.scalar_type()));
     });
-  });
-  return out;
+  } else {
+    TORCH_CHECK(false, "Only per tensor affine is supported for now!!");
+  }
+
+  if (ReLUFused) {
+    return at::relu_(self);
+  }
+  return self;
 }
 
 
@@ -88,7 +89,7 @@ class QAdd final : public c10::OperatorKernel {
 template <bool ReLUFused = false>
 class QAddOut final : public c10::OperatorKernel {
  public:
-  Tensor operator()(Tensor qa, Tensor qb, at::Tensor out) {
+  Tensor operator()(Tensor qa, Tensor qb, Tensor out) {
     check_inputs(qa, qb);
     check_inputs(qa, out);
     return _add_out<ReLUFused>(out, qa, qb);
