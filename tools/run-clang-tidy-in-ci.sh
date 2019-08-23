@@ -3,11 +3,10 @@
 set -ex
 
 BASE_BRANCH=master
-# From https://docs.travis-ci.com/user/environment-variables
-if [[ $AZURE_CI ]]; then
+if [[ $SYSTEM_PULLREQUEST_TARGETBRANCH ]]; then
   git remote add upstream https://github.com/pytorch/pytorch
-  git fetch upstream "$TARGET_BRANCH"
-  BASE_BRANCH="upstream/$TARGET_BRANCH"
+  git fetch upstream "$SYSTEM_PULLREQUEST_TARGETBRANCH"
+  BASE_BRANCH="upstream/$SYSTEM_PULLREQUEST_TARGETBRANCH"
 fi
 
 if [[ ! -d build ]]; then
