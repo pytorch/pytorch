@@ -4,7 +4,6 @@ import hashlib
 import os
 import re
 import shutil
-import ssl
 import sys
 import tempfile
 import torch
@@ -13,7 +12,7 @@ import zipfile
 
 if sys.version_info[0] == 2:
     from urlparse import urlparse
-    from urllib2 import urlopen  # noqa f811
+    import requests
 else:
     from urllib.request import urlopen
     from urllib.parse import urlparse  # noqa: F401
@@ -94,19 +93,12 @@ def _git_archive_link(repo_owner, repo_name, branch):
 
 def _download_archive_zip(url, filename):
     sys.stderr.write('Downloading: \"{}\" to {}\n'.format(url, filename))
-    # TODO: This is to get around CA issues on Python2, where urllib can't
-    # verify the cert from the github server. Another solution is to do:
-    #
-    # import certifi
-    # ...
-    # urlopen(url, cafile=certifi.where())
-    #
-    # But it requires adding a dependency on the `certifi` package
+    # We use a different API for python2 since urllib(2) doesn't recognize the CA
+    # certificates in older Python
     if sys.version_info[0] == 2:
-        context = ssl._create_unverified_context()
+        response = requests.get(url, stream=True).raw
     else:
-        context = None
-    response = urlopen(url, context=context)
+        response = urlopen(url)
     with open(filename, 'wb') as f:
         while True:
             data = response.read(READ_DATA_CHUNK)
@@ -382,26 +374,24 @@ def load(github, model, *args, **kwargs):
 
 def _download_url_to_file(url, dst, hash_prefix, progress):
     file_size = None
-    # TODO: This is to get around CA issues on Python2, where urllib can't
-    # verify the cert from the github server. Another solution is to do:
-    #
-    # import certifi
-    # ...
-    # urlopen(url, cafile=certifi.where())
-    #
-    # But it requires adding a dependency on the `certifi` package
+    # We use a different API for python2 since urllib(2) doesn't recognize the CA
+    # certificates in older Python
     if sys.version_info[0] == 2:
-        context = ssl._create_unverified_context()
+        response = requests.get(url, stream=True)
+
+        content_length = response.headers['Content-Length']
+        file_size = content_length
+        u = response.raw
     else:
-        context = None
-    u = urlopen(url, context=context)
-    meta = u.info()
-    if hasattr(meta, 'getheaders'):
-        content_length = meta.getheaders("Content-Length")
-    else:
-        content_length = meta.get_all("Content-Length")
-    if content_length is not None and len(content_length) > 0:
-        file_size = int(content_length[0])
+        u = urlopen(url)
+
+        meta = u.info()
+        if hasattr(meta, 'getheaders'):
+            content_length = meta.getheaders("Content-Length")
+        else:
+            content_length = meta.get_all("Content-Length")
+        if content_length is not None and len(content_length) > 0:
+            file_size = int(content_length[0])
 
     # We deliberately save it in a temp file and move it after
     # download is complete. This prevents a local working checkpoint
