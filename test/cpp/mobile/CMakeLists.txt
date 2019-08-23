@@ -1,8 +1,6 @@
 add_executable(test_bc_export
   test_bc_export.cpp)
 
-#caffe2_interface_library(torch torch_whole)
-#target_link_libraries(test_bc_export PRIVATE torch_whole gtest)
 if(APPLE)
   target_link_libraries(test_bc_export PRIVATE -Wl,-force_load torch)
 elseif(MSVC)

@@ -41,6 +41,7 @@ struct TORCH_API Code {
   }
   size_t num_inputs() const;
   size_t num_outputs() const;
+  // API to get necessary data for bytecode.
   std::unique_ptr<FrameOutput> getFrame() const;
 
  private:

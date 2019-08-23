@@ -40,7 +40,6 @@ class ByteCodeSerializer final {
  private:
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
-  std::vector<at::Tensor> tensor_table_;
 };
 
 ByteCodeSerializer::ByteCodeSerializer(const std::string& filename)
@@ -98,11 +97,6 @@ void SaveBytecode(
     const std::string& filename) {
   ByteCodeSerializer serializer(filename);
   serializer.serialize(module);
-}
-
-bool TestFunc() {
-  std::cout << "test";
-  return true;
 }
 
 }

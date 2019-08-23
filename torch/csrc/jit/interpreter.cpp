@@ -466,6 +466,8 @@ struct CodeImpl {
     emitLoadInputs(node->inputs());
     uint64_t Nn = 0;
     if (node->kind() == prim::GetAttr) {
+      // GetAttr uses node to get the slot number, but bytecode does not depend on node.
+      // Put the slot number in instruction.N.
       const auto type = node->input()->type()->expect<ClassType>();
       const auto& field = node->s(attr::name);
       Nn = type->getAttributeSlot(field);
@@ -677,6 +679,7 @@ struct CodeImpl {
   }
 
   std::unique_ptr<FrameOutput> getFrame() const {
+    // The simple function to get necessary data for bytecode.
     std::unique_ptr<FrameOutput> frameptr(new FrameOutput);
     frameptr->pc = 0;
     frameptr->instructions = instructions_;

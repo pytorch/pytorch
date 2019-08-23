@@ -13,17 +13,6 @@
 namespace torch {
 namespace jit {
 
-//struct Variable {
-//  size_t unique_id;
-//  bool free_flag;
-//};
-
-//struct OperatorOutput {
-//  // For C10 dispatcher and debugging
-//  std::string name;
-//  std::string overload_name;
-//};
-
 // A container of necessary structures to be serialized into bytecode.
 // It does not have Function, which depends on graph.
 // It does not have types at this time.
