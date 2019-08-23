@@ -26,6 +26,7 @@ from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedMod
 
 from hypothesis import given
 from hypothesis import strategies as st
+import io
 
 
 @unittest.skipIf(
@@ -58,7 +59,8 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        quantize(SingleLayerLinearModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(SingleLayerLinearModel(), test_only_eval_fn,
+                         self.calib_data)
         checkQuantized(model)
 
     def test_two_layers(self):
@@ -88,7 +90,8 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        quantize(AnnotatedTwoLayerLinearModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(AnnotatedTwoLayerLinearModel(), test_only_eval_fn,
+                         self.calib_data)
         checkQuantized(model)
 
     def test_nested1(self):
@@ -126,7 +129,8 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        quantize(AnnotatedNestedModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(AnnotatedNestedModel(), test_only_eval_fn,
+                         self.calib_data)
         checkQuantized(model)
 
 
@@ -164,7 +168,8 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        quantize(AnnotatedSubNestedModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(AnnotatedSubNestedModel(), test_only_eval_fn,
+                         self.calib_data)
         checkQuantized(model)
 
     def test_nested3(self):
@@ -202,7 +207,8 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        quantize(AnnotatedCustomConfigNestedModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(AnnotatedCustomConfigNestedModel(), test_only_eval_fn,
+                         self.calib_data)
         checkQuantized(model)
 
     def test_skip_quant(self):
@@ -227,7 +233,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        quantize(SkipQuantModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(SkipQuantModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
 
@@ -252,7 +258,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
 
@@ -280,7 +286,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        quantize_dynamic(SingleLayerLinearDynamicModel().eval(), qconfig_dict)
+        model = quantize_dynamic(SingleLayerLinearDynamicModel().eval(),
+                                 qconfig_dict)
         checkQuantized(model)
 
     def test_two_layers(self):
@@ -302,7 +309,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        quantize_dynamic(TwoLayerLinearModel().eval(), qconfig_dict)
+        model = quantize_dynamic(TwoLayerLinearModel().eval(), qconfig_dict)
         checkQuantized(model)
 
     def test_nested1(self):
@@ -327,7 +334,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
     def test_nested2(self):
@@ -353,7 +360,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
     def test_nested3(self):
@@ -383,7 +390,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        quantize_dynamic(NestedModel().eval(), qconfig_dynamic_dict)
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dynamic_dict)
         checkQuantized(model)
 
     def test_type_match_rule(self):
@@ -411,7 +418,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
 
@@ -436,7 +443,8 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        quantize_qat(ManualLinearQATModel(), test_only_train_fn, self.train_data)
+        model = quantize_qat(ManualLinearQATModel(), test_only_train_fn,
+                             self.train_data)
         checkQuantized(model)
 
     def test_eval_only_fake_quant(self):
@@ -471,7 +479,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         checkQuantized(model)
 
         model = ManualConvLinearQATModel()
-        quantize_qat(model, test_only_train_fn, self.img_data)
+        model = quantize_qat(model, test_only_train_fn, self.img_data)
         checkQuantized(model)
 
 
@@ -482,8 +490,7 @@ class ScriptabilityTest(QuantizationTestCase):
 
         super(ScriptabilityTest, self).setUp()
         self.model_under_test = ModelForWrapping().float()
-        self.qmodel_under_test = QuantWrapper(ModelForWrapping().float())
-        quantize(self.qmodel_under_test, default_eval_fn, self.calib_data)
+        self.qmodel_under_test = quantize(QuantWrapper(self.model_under_test), default_eval_fn, self.calib_data)
         self.x = torch.rand(10).float()
 
     def test_quantized(self):
@@ -557,7 +564,7 @@ class FusionTest(QuantizationTestCase):
         model = ModelForFusion(default_qat_qconfig).train()
         fuse_modules(model, [['conv1', 'bn1', 'relu1'],
                              ['sub1.conv', 'sub1.bn']])
-        quantize_qat(model, test_only_train_fn, self.img_data)
+        model = quantize_qat(model, test_only_train_fn, self.img_data)
         checkQuantized(model)
 
 
@@ -605,7 +612,7 @@ class FusionTest(QuantizationTestCase):
         model = ModelForFusion(default_qat_qconfig).eval()
         fuse_modules(model, [['conv1', 'bn1', 'relu1'],
                              ['sub1.conv', 'sub1.bn']])
-        quantize(model, test_only_eval_fn, self.img_data)
+        model = quantize(model, test_only_eval_fn, self.img_data)
         checkQuantized(model)
 
 class ObserverTest(QuantizationTestCase):
@@ -630,6 +637,21 @@ class ObserverTest(QuantizationTestCase):
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
 
+    def test_observer_scriptable(self):
+        obs = torch.quantization.default_observer()()
+        scripted = torch.jit.script(obs)
+
+        x = torch.rand(3, 4)
+        obs(x)
+        scripted(x)
+
+        self.assertEqual(obs.calculate_qparams(), scripted.calculate_qparams())
+
+        buf = io.BytesIO()
+        torch.jit.save(scripted, buf)
+        buf.seek(0)
+        loaded = torch.jit.load(buf)
+        self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
 
 if __name__ == '__main__':

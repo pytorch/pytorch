@@ -1,4 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+
+import copy
 import torch.nn as nn
 import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
@@ -240,21 +242,27 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
             function that simply runs the prepared model or a training loop
         run_args: positional arguments for `run_fn`
     """
+
+    model = copy.deepcopy(model)
     model.eval()
     prepare(model)
     run_fn(model, run_args)
     convert(model, mapping)
+    return model
 
 DEFAULT_QCONFIG_DICT = {
     nn.Linear : default_dynamic_qconfig
 }
 
 def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
-    r"""Converts a float model to dynamic quantized model. Do dynamic training and output a quantized model.
+    r"""Converts a float model to dynamic quantized model.
+    Do dynamic training and output a quantized model.
     """
+    model = copy.deepcopy(model)
     model.eval()
     propagate_qconfig(model, qconfig_dict)
     convert(model, mapping)
+    return model
 
 def prepare_qat(model):
     prepare(model)
@@ -263,10 +271,12 @@ def prepare_qat(model):
 def quantize_qat(model, run_fn, run_args):
     r"""Do quantization aware training and output a quantized model
     """
+    model = copy.deepcopy(model)
     model.train()
     prepare_qat(model)
     run_fn(model, run_args)
     convert(model)
+    return model
 
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts the float module with observers(where we can get quantization
@@ -285,8 +295,7 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING):
     for name, mod in module.named_children():
         if type(mod) not in SWAPPABLE_MODULES:
             convert(mod, mapping)
-        swapped_mod = swap_module(mod, mapping)
-        reassign[name] = swapped_mod
+        reassign[name] = swap_module(mod, mapping)
 
     for key, value in reassign.items():
         module._modules[key] = value

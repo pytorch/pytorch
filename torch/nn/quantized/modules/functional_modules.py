@@ -97,7 +97,8 @@ class QFunctional(torch.nn.Module, _BaseQuantizedModule):
 
     r"""Operation equivalent to ``torch.ops.quantized.mul``"""
     def mul(self, x, y):
-        raise NotImplementedError("Implementation of 'mul' is in progress...")
+        return ops.quantized.mul(x, y, scale=self.scale,
+                                 zero_point=self.zero_point)
 
     r"""Operation equivalent to ``torch.ops.quantized.cat``"""
     def cat(self, x, dim=0):
