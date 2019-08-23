@@ -332,14 +332,7 @@ PyObject *THPVariable_get_names(THPVariable *self)
   THPObjectPtr tuple(PyTuple_New(size));
   if (!tuple) throw python_error();
 
-  if (!self->cdata.has_names()) {
-    for (size_t i = 0; i < size; ++i) {
-      PyTuple_SET_ITEM(tuple.get(), i, Py_None);
-    }
-    return tuple.release();
-  }
-
-  const auto dimnames = self->cdata.opt_names().value();
+  const auto dimnames = self->cdata.names();
   for (size_t i = 0; i < size; ++i) {
     PyObject* str = Py_None;
     if (dimnames[i].type() != at::NameType::WILDCARD) {
