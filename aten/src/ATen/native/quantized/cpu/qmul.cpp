@@ -59,7 +59,6 @@ Tensor& _mul_scalar_(Tensor& self, Scalar other) {
   } else {
     TORCH_CHECK(false, "Only per tensor affine is supported for now!!");
   }
-
   if (ReLUFused) {
     self = at::relu_(self);
   }
@@ -81,7 +80,7 @@ class QMul final : public c10::OperatorKernel {
 template <bool ReLUFused = false>
 class QMulOut final : public c10::OperatorKernel {
  public:
-  Tensor operator()(at::Tensor qa, at::Tensor qb, Tensor out) {
+  Tensor operator()(Tensor qa, Tensor qb, Tensor out) {
     check_inputs(qa, qb);
     return _mul_out<ReLUFused>(out, qa, qb);
   }

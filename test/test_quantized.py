@@ -303,7 +303,7 @@ class TestQuantizedOps(TestCase):
 
         scale_A, zero_point_A = _calculate_dynamic_qparams(A, torch.uint8)
         scale_B, zero_point_B = _calculate_dynamic_qparams(B, torch.uint8)
-        scale_C, zero_point_C = _calculate_dynamic_qparams(A*B, torch.uint8)
+        scale_C, zero_point_C = _calculate_dynamic_qparams(A * B, torch.uint8)
 
         qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point_A,
                                    dtype=torch.quint8)
@@ -542,10 +542,9 @@ class TestQuantizedOps(TestCase):
 
 
 @unittest.skipIf(
-    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-    " Quantized Linear requires FBGEMM. FBGEMM does not play"
-    " well with UBSAN at the moment, so we skip the test if"
-    " we are in a UBSAN environment.",
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
 )
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
