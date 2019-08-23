@@ -522,6 +522,10 @@ struct to_ir {
   // `next` that points to the most immediate enclosing scope's value.
   std::shared_ptr<Environment> environment_stack;
   std::vector<DefContext> def_stack_;
+  size_t temp_name_count_ = 0;
+  std::string createTempName(const std::string& prefix) {
+    return prefix + std::to_string(temp_name_count_++);
+  }
 
   void pushFrame(Block* b, bool starts_def = false) {
     if (starts_def) {
@@ -1037,10 +1041,7 @@ struct to_ir {
   }
 
   Value* emitListComprehension(const ListComp& lc) {
-    // this avoids a race condition where we would re-use the same temp name
-    static std::atomic<size_t> tmp_count{0};
-    const auto tmp_name =
-        std::string("___list_acc") + std::to_string(tmp_count++);
+    const auto tmp_name = createTempName("$list_acc");
     const auto list_value = emitExpr(lc.iter());
     if (list_value->type()->kind() != TypeKind::ListType) {
       // TODO: constraining iterators to be simple lists for now
@@ -2003,6 +2004,29 @@ struct to_ir {
   }
 
   void emitAssignment(const Assign& stmt) {
+    if (stmt.lhs_list().size() == 1) {
+      return emitSingleAssignment(stmt);
+    }
+    // multiple assign & annotated type not supported in python
+    TORCH_INTERNAL_ASSERT(stmt.lhs_list().size() > 1 && !stmt.type().present());
+    // a = b = expr()
+    // the semantics of multiple assignment is that expr() is emitted once, then
+    // from left to right the assignments are made
+    const auto tmp_name = createTempName("$tmp_assign_");
+    environment_stack->setSugaredVar(
+        stmt.rhs().range(), tmp_name, emitSugaredExpr(stmt.rhs().get(), 1));
+    auto ident = Var::create(
+        stmt.rhs().range(), Ident::create(stmt.rhs().range(), tmp_name));
+    for (auto expr : stmt.lhs_list()) {
+      emitSingleAssignment(Assign::create(
+          stmt.range(),
+          List<Expr>::create(expr.range(), {expr}),
+          Maybe<Expr>::create(stmt.rhs().range(), ident),
+          Maybe<Expr>::create(stmt.range())));
+    }
+  }
+
+  void emitSingleAssignment(const Assign& stmt) {
     if (!stmt.rhs().present()) {
       throw ErrorReport(stmt.range())
           << "For an assignment, expected an expression on the right-hand side";
