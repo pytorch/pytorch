@@ -4194,13 +4194,7 @@ inline std::vector<Tensor> Tensor::nonzero_numpy() const {
 }
 inline Tensor Tensor::gather(int64_t dim, const Tensor & index, bool sparse_grad) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::gather(const_cast<Tensor&>(*this), dim, index, sparse_grad);
-            break;
-        default:
-            AT_ERROR("gather not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::gather(const_cast<Tensor&>(*this), dim, index, sparse_grad);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor");
     return table->getOp<Tensor (const Tensor &, int64_t, const Tensor &, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, index, sparse_grad);
