@@ -1838,7 +1838,11 @@ int listSort<at::Tensor>(Stack& stack) {
   std::sort(
       list.begin(),
       list.end(),
-      [reverse](const at::Tensor& a, const at::Tensor& b) {
+      [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
+        // "strict weak ordering" issue - see other sort
+        if (a.getIntrusivePtr() == b.getIntrusivePtr()) {
+          return false;
+        }
         return (a.lt(b).is_nonzero()) ^ reverse;
       });
   return 0;
