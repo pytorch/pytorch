@@ -487,11 +487,9 @@ class ResNetBase(torch.nn.Module):
 
 
     def forward(self, x):
-        print(x.size())
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu1(out)
-
         identity = self.downsample(x)
         out = self.myop.add(out, identity)
         out = self.relu2(out)
