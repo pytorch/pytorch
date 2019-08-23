@@ -1496,9 +1496,6 @@ struct CAFFE2_API InterfaceType : public NamedType {
  private:
   InterfaceType(QualifiedName name);
 
-  // Fully qualified name of type (note that this has to be globally unique).
-  // Looks like: "foo.bar.Baz".
-  QualifiedName name_;
   // shared_ptr so that this header does not have to depend on 
   // FunctionSchema.h
   std::shared_ptr<std::vector<FunctionSchema>> methods_;
