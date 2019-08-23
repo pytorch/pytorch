@@ -165,7 +165,7 @@ static std::string getPadding(size_t cursor, const std::string& filename, size_t
   return buf;
 }
 
-bool PyTorchStreamReader::hasFile(const std::string& name) {
+bool PyTorchStreamReader::hasRecord(const std::string& name) {
   std::stringstream ss;
   ss << archive_name_ << "/" << name;
   mz_zip_reader_locate_file(ar_.get(), ss.str().c_str(), nullptr, 0);
@@ -177,7 +177,7 @@ bool PyTorchStreamReader::hasFile(const std::string& name) {
   return result;
 }
 
-size_t PyTorchStreamReader::getFileID(const std::string& name) {
+size_t PyTorchStreamReader::getRecordID(const std::string& name) {
   std::stringstream ss;
   ss << archive_name_ << "/" << name;
   size_t result = mz_zip_reader_locate_file(ar_.get(), ss.str().c_str(), nullptr, 0);
@@ -190,7 +190,7 @@ size_t PyTorchStreamReader::getFileID(const std::string& name) {
 
 // return dataptr, size
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string& name) {
-  size_t key = getFileID(name);
+  size_t key = getRecordID(name);
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   valid("retrieving file meta-data");
@@ -208,7 +208,7 @@ static int64_t read_le_16(uint8_t* buf) {
 
 size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
   mz_zip_archive_file_stat stat;
-  mz_zip_reader_file_stat(ar_.get(), getFileID(name), &stat);
+  mz_zip_reader_file_stat(ar_.get(), getRecordID(name), &stat);
   valid("retriving file meta-data");
   uint8_t local_header[MZ_ZIP_LOCAL_DIR_HEADER_SIZE];
   in_->read(
