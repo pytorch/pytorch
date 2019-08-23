@@ -133,8 +133,8 @@ TORCH_API script::Module InsertObservers(
  * \param module the input module
  * \param method_name the method we want to insert quantization calls for
  */
-TORCH_API script::Module InsertQuantDeQuant(
-    const script::Module& module,
+TORCH_API void InsertQuantDeQuant(
+    script::Module& module,
     const std::string& method_name);
 
 /** \brief Backend specific pass to fuse dequantize - op - quantize calls
