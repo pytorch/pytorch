@@ -74,7 +74,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
       int64_t length = end_offset - offsets[rangeIndex];""")
         code.append(
             "      for ("
-            + "int64_t" 
+            + "int64_t"
             + " start = dataInd; dataInd < end_offset; ++dataInd) {"  # noqa
         )
     else:
