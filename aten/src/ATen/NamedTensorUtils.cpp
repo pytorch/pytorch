@@ -10,7 +10,7 @@ namespace at {
 static std::string toDimnameRepr(const Tensor& tensor) {
   std::ostringstream os;
   os << "Tensor";
-  if (tensor.names() == nullopt) {
+  if (tensor.opt_names() == nullopt) {
     os << "[";
     for (auto i = 0; i < tensor.dim(); i++) {
       if (i != 0) os << ", ";
@@ -18,7 +18,7 @@ static std::string toDimnameRepr(const Tensor& tensor) {
     }
     os << "]";
   } else {
-    os << *tensor.names();
+    os << *tensor.opt_names();
   }
   return os.str();
 }
@@ -26,9 +26,9 @@ static std::string toDimnameRepr(const Tensor& tensor) {
 int64_t dimname_to_position(const Tensor& tensor, Dimname dim) {
   TORCH_CHECK(dim.type() != NameType::WILDCARD,
       "Please look up dimensions by name, got: name = None.");
-  TORCH_CHECK(tensor.names().has_value(),
+  TORCH_CHECK(tensor.opt_names().has_value(),
       "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
-  const auto names = *tensor.names();
+  const auto names = *tensor.opt_names();
 
   const auto it = std::find_if(
       names.begin(), names.end(),
@@ -169,7 +169,7 @@ static void assert_names_equal(DimnameList a, DimnameList b) {
 }
 
 void propagate_names(TensorImpl* result, optional<DimnameList> names) {
-  if (!impl::get_names(result).has_value() && !names.has_value()) {
+  if (!impl::get_opt_names(result).has_value() && !names.has_value()) {
     return;
   }
   if (!impl::has_names(result)) {
@@ -177,7 +177,7 @@ void propagate_names(TensorImpl* result, optional<DimnameList> names) {
     return;
   }
   assert_names_equal(
-      *impl::get_names(result),
+      *impl::get_opt_names(result),
       names.value_or(default_names(result->dim())));
 }
 
@@ -186,7 +186,7 @@ void propagate_names(TensorImpl* result, std::vector<Dimname>&& names, bool vali
     impl::internal_set_names_inplace(result, std::move(names), validate_names);
     return;
   }
-  assert_names_equal(*impl::get_names(result), names);
+  assert_names_equal(*impl::get_opt_names(result), names);
 }
 
 void propagate_names(Tensor& result, optional<DimnameList> names) {
@@ -198,7 +198,7 @@ void propagate_names(Tensor& result, std::vector<Dimname>&& names, bool validate
 }
 
 void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs) {
-  auto src_names = src.names();
+  auto src_names = src.opt_names();
   if (!src_names.has_value()) {
     return;
   }
@@ -246,7 +246,7 @@ void propagate_names(TensorImpl* result, TensorImpl* src) {
   if (result == src) {
     return;
   }
-  propagate_names(result, impl::get_names(src));
+  propagate_names(result, impl::get_opt_names(src));
 }
 
 } // namespace namedinference

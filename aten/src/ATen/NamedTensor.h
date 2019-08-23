@@ -82,7 +82,7 @@ namespace impl {
 // XXX: Ideally these would exist as methods on TensorImpl
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names);
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names);
-CAFFE2_API optional<DimnameList> get_names(TensorImpl* impl);
+CAFFE2_API optional<DimnameList> get_opt_names(TensorImpl* impl);
 CAFFE2_API bool has_names(TensorImpl* impl);
 
 
