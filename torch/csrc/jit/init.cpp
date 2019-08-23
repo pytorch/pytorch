@@ -148,7 +148,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_quant_dequant",
-          [](const script::Module& module,
+          [](script::Module& module,
              const std::string& method_name) {
             return InsertQuantDeQuant(module, method_name);
           }
