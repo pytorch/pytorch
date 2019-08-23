@@ -50,13 +50,18 @@ Tensor _mul_out(Tensor& out, const Tensor& self, const Tensor& other) {
 
 template <bool ReLUFused = false>
 Tensor& _mul_scalar_(Tensor& self, Scalar other) {
-  auto other_float = other.toFloat();
+  float other_float;
+  other_float = other.toFloat();
   if (self.qscheme() == kPerTensorAffine) {
     double new_scale = self.q_scale() / other_float;
     self.set_quantizer_(make_per_tensor_affine_quantizer(
       new_scale, self.q_zero_point(), self.scalar_type()));
   } else {
     TORCH_CHECK(false, "Only per tensor affine is supported for now!!");
+  }
+
+  if (ReLUFused) {
+    self = at::relu_(self);
   }
   return self;
 }

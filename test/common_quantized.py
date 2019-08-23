@@ -40,11 +40,9 @@ def _requantize(x, multiplier, zero_point, qmin=0, qmax=255, qtype=np.uint8):
 def _calculate_dynamic_qparams(X, dtype):
     """Calculate the dynamic quantization parameters (scale, zero_point)
     according to the min and max element of the tensor"""
-    if dtype == torch.qint8:
-        qmin, qmax = -128, 127
-    else:  # dtype == torch.quint8
-        qmin, qmax = 0, 255
-    n_levels = 255.0
+    qmin = torch.iinfo(dtype).min
+    qmax = torch.iinfo(dtype).max
+    n_levels = 1.0 * (qmax - qmin)
     min_val = torch.min(X).item()
     max_val = torch.max(X).item()
     if min_val == max_val:
