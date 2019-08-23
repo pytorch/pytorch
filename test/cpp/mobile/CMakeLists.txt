@@ -11,7 +11,6 @@ endif()
 
 target_link_libraries(test_bc_export PRIVATE gtest)
 target_include_directories(test_bc_export PRIVATE ${ATen_CPU_INCLUDE})
-#target_compile_definitions(test_bc_export PRIVATE USE_GTEST)
 
 if (USE_CUDA)
   target_link_libraries(test_bc_export PRIVATE
