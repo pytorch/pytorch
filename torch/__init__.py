@@ -176,6 +176,13 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
+
+def set_memory_format_propagation(b):
+    _C._set_memory_format_propagation(b)
+
+def get_memory_format_propagation():
+    return _C._get_memory_format_propagation()
+
 # If you edit these imports, please update torch/__init__.py.in as well
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load

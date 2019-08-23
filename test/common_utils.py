@@ -198,6 +198,14 @@ if TEST_NUMPY:
     import numpy
 
 
+@contextmanager
+def memory_format_propagation():
+    saved = torch.get_memory_format_propagation()
+    torch.set_memory_format_propagation(True)
+    yield
+    torch.set_memory_format_propagation(saved)
+
+
 def skipIfRocm(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -206,7 +214,6 @@ def skipIfRocm(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
-
 
 
 def _test_function(fn, device):

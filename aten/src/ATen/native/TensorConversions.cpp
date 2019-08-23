@@ -20,7 +20,7 @@ static inline Device ensure_has_index(Device device) {
 }
 
 static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking) {
-  auto r = at::empty(self.sizes(), options);
+  auto r = at::empty(self.sizes(), options, self.suggest_memory_format());
   r.copy_(self, non_blocking);
   return r;
 }

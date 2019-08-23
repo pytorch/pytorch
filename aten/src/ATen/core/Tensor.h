@@ -185,7 +185,7 @@ class CAFFE2_API Tensor {
   }
 
   at::MemoryFormat suggest_memory_format() const {
-    if (impl_->is_strides_like_channels_last()) {
+    if (get_memory_format_propagation() && impl_->is_strides_like_channels_last()) {
       return at::MemoryFormat::ChannelsLast;
     }
     return at::MemoryFormat::Contiguous;

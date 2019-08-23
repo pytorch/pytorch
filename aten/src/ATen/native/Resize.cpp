@@ -11,7 +11,9 @@ Tensor& resize_cpu_(Tensor& self, IntArrayRef size) {
 }
 
 Tensor& resize_as_cpu_(Tensor& self, const Tensor& the_template) {
-  return resize_cpu_(self, the_template.sizes());
+  resize_cpu_(self, the_template.sizes());
+  self.unsafeGetTensorImpl()->empty_tensor_restride(the_template.suggest_memory_format());
+  return self;
 }
 
 }}

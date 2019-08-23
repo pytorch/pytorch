@@ -198,7 +198,7 @@ Tensor empty_like(
   }
 
   auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Contiguous);
+      optional_memory_format.value_or(self.suggest_memory_format());
   auto use_memory_format = memory_format;
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_contiguous(MemoryFormat::ChannelsLast)) {
@@ -837,7 +837,7 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clone ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor clone(const Tensor& src) {
-  auto self = at::empty_like(src);
+  auto self = at::empty_like(src, src.options(), src.suggest_memory_format());
   self.copy_(src);
   return self;
 }
