@@ -107,3 +107,10 @@ jobs:
     env:
       TARGET_BRANCH: $(System.PullRequest.TargetBranch)
       AZURE_CI: 1
+      JUNIT_OUTPUT: clang_tidy_junit_output.xml
+  - task: PublishTestResults@2
+    inputs:
+      testResultsFormat: JUnit
+      testResultsFiles: clang_tidy_junit_output.xml
+    displayName: Publish test results
+    condition: succeededOrFailed()

@@ -40,8 +40,8 @@ fi
 # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
 time python tools/clang_tidy.py             \
   --verbose                                 \
-  --paths torch/csrc/                       \
-  --diff "$BASE_BRANCH"                     \
+  --paths torch/csrc/jit/ir.cpp                       \
+  --junit "$JUNIT_OUPUT"  \
   -g"-torch/csrc/jit/export.cpp"            \
   -g"-torch/csrc/jit/import.cpp"            \
   -g"-torch/csrc/jit/netdef_converter.cpp"  \
