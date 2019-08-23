@@ -15,7 +15,6 @@ import hypothesis_utils as hu
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams
 
-
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
 # for the 8-bit int multiplication. This instruction vertically multiplies each
@@ -783,12 +782,13 @@ class TestQuantizedConv(unittest.TestCase):
            dilation=st.integers(1, 1),
            X_scale=st.floats(0.2, 1.6),
            X_zero_point=st.integers(0, 4),
-           W_scale=st.floats(0.2, 1.6),
-           W_zero_point=st.integers(-5, 5),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
            Y_scale=st.floats(0.2, 1.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
-           use_relu=st.booleans())
+           use_relu=st.booleans(),
+           use_channelwise=st.booleans())
     def test_qconv(
             self,
             batch_size,
@@ -811,7 +811,8 @@ class TestQuantizedConv(unittest.TestCase):
             Y_scale,
             Y_zero_point,
             use_bias,
-            use_relu
+            use_relu,
+            use_channelwise
     ):
 
         qconv = torch.ops.quantized.fbgemm_conv2d
@@ -825,6 +826,12 @@ class TestQuantizedConv(unittest.TestCase):
         output_channels = output_channels_per_group * groups
 
         dilation_h = dilation_w = dilation
+
+        W_scale = W_scale * output_channels
+        W_zero_point = W_zero_point * output_channels
+        # Resize W_scale and W_zero_points arrays equal to output_channels
+        W_scale = W_scale[:output_channels]
+        W_zero_point = W_zero_point[:output_channels]
 
         # For testing, we use small values for weights and for activations so that no overflow occurs
         # in vpmaddubsw instruction. If the overflow occurs in qconv implementation and if there is no overflow
@@ -856,9 +863,16 @@ class TestQuantizedConv(unittest.TestCase):
 
         X = X_scale * (X_init - X_zero_point).to(dtype=torch.float)
 
-        W = W_scale * (W_init - W_zero_point).to(dtype=torch.float)
+        if use_channelwise:
+            W_scales_tensor = torch.tensor(W_scale, dtype=torch.float)
+            W_zero_points_tensor = torch.tensor(W_zero_point, dtype=torch.float)
+            W = W_scales_tensor.reshape(-1, 1, 1, 1) * (W_init.to(dtype=torch.float) -
+                                                        W_zero_points_tensor.reshape(-1, 1, 1, 1)).to(dtype=torch.float)
+            b = X_scale * W_scales_tensor * (b_init - 0).to(dtype=torch.float)
+        else:
+            W = W_scale[0] * (W_init - W_zero_point[0]).to(dtype=torch.float)
+            b = X_scale * W_scale[0] * (b_init - 0).to(dtype=torch.float)
 
-        b = X_scale * W_scale * (b_init - 0).to(dtype=torch.float)
 
         # Existing floating point conv operator
         conv_op = torch.nn.Conv2d(input_channels,
@@ -888,8 +902,20 @@ class TestQuantizedConv(unittest.TestCase):
         W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
 
         X_q = torch.quantize_linear(X_NHWC, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
-        W_q = torch.quantize_linear(W_KRSC, scale=W_scale, zero_point=W_zero_point, dtype=torch.qint8)
-        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32) if use_bias else None
+        if use_channelwise:
+            W_q = torch.quantize_linear_per_channel(W_KRSC,
+                                                    W_scales_tensor.to(dtype=torch.double),
+                                                    W_zero_points_tensor.to(dtype=torch.long),
+                                                    [0],
+                                                    dtype=torch.qint8)
+            b_q = torch.quantize_linear_per_channel(b,
+                                                    X_scale * W_scales_tensor.to(dtype=torch.double),
+                                                    torch.zeros(output_channels, dtype=torch.long),
+                                                    [0],
+                                                    dtype=torch.qint32) if use_bias else None
+        else:
+            W_q = torch.quantize_linear(W_KRSC, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
+            b_q = torch.quantize_linear(b, scale=X_scale * W_scale[0], zero_point=0, dtype=torch.qint32) if use_bias else None
 
         W_prepack = qconv_prepack(W_q, stride, pad, dilation, groups)
 
@@ -907,7 +933,6 @@ class TestQuantizedConv(unittest.TestCase):
 
         # Back to NCHW format
         Y_q = Y_q.permute([0, 3, 1, 2]).contiguous()
-
 
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
@@ -941,12 +966,18 @@ class TestQuantizedConv(unittest.TestCase):
                                                   zero_point_min=0,
                                                   zero_point_max=0)]),
            strideH=st.integers(1, 3), strideW=st.integers(1, 3),
-           padH=st.integers(1, 2), padW=st.integers(1, 2))
-    def test_qconv_unpack(self, X, strideH, strideW, padH, padW):
+           padH=st.integers(1, 2), padW=st.integers(1, 2),
+           channelwise=st.booleans())
+    def test_qconv_unpack(self, X, strideH, strideW, padH, padW, channelwise):
         (inputs, filters, bias, groups) = X
         inputs, (inputs_scale, inputs_zero_point, inputs_qtype) = inputs
         filters, (filters_scale, filters_zero_point, filters_qtype) = filters
         bias, (bias_scale, bias_zero_point, bias_qtype) = bias
+
+        if channelwise:
+            output_channels = filters.shape[0]
+            filters_scale = torch.tensor([filters_scale] * output_channels).to(torch.double)
+            filters_zero_point = torch.tensor([filters_zero_point] * output_channels).to(torch.long)
 
         qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
         qconv_unpack = torch.ops.quantized.fbgemm_conv_unpack
@@ -955,7 +986,14 @@ class TestQuantizedConv(unittest.TestCase):
         W = torch.from_numpy(filters).to(torch.float)
         # K(C/G)RS -> KRS(C/G)
         W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
-        W_q = torch.quantize_linear(W_KRSC, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)
+        if channelwise:
+            W_q = torch.quantize_linear_per_channel(W_KRSC,
+                                                    scales=filters_scale,
+                                                    zero_points=filters_zero_point,
+                                                    axis=[0],
+                                                    dtype=filters_qtype)
+        else:
+            W_q = torch.quantize_linear(W_KRSC, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)
 
         # Pack weights using weight packing operator
         strides = [strideH, strideW]
@@ -967,9 +1005,14 @@ class TestQuantizedConv(unittest.TestCase):
 
         # Assert equal
         np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())
-        np.testing.assert_equal(W_q.q_scale(), W_unpacked.q_scale())
-        np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
-
+        if channelwise:
+            np.testing.assert_array_almost_equal(np.float32(W_q.q_per_channel_scales().numpy()),
+                                                 np.float32(W_unpacked.q_per_channel_scales().numpy()),
+                                                 decimal=4)
+            np.testing.assert_equal(W_q.q_per_channel_zero_points().numpy(), W_unpacked.q_per_channel_zero_points().numpy())
+        else:
+            np.testing.assert_equal(np.float32(W_q.q_scale()), np.float32(W_unpacked.q_scale()))
+            np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
 
 @unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
 @unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")
