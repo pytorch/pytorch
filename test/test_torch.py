@@ -10198,6 +10198,8 @@ class _TestTorchMixin(torchtest):
         self._test_bernoulli(self, torch.float32, torch.float64, 'cpu')
         # test that it works with integral tensors
         self._test_bernoulli(self, torch.uint8, torch.float64, 'cpu')
+        # test that it works with bool tensors
+        self._test_bernoulli(self, torch.bool, torch.float32, 'cpu')
 
     def test_normal(self):
         for device in torch.testing.get_all_device_types():
