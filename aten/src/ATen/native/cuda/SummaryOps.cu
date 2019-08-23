@@ -275,7 +275,7 @@ Tensor _bincount_cuda_template(
   }
   if (self.dim() != 1 ||
       (!std::is_same<input_t, uint8_t>::value &&
-       *self.min().cpu().data<input_t>() < 0)) {
+       *self.min().cpu().data_ptr<input_t>() < 0)) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
   }
 
@@ -284,7 +284,7 @@ Tensor _bincount_cuda_template(
     AT_ERROR("input and weights should have the same length");
   }
 
-  const int64_t nbins = std::max(*self.max().cpu().data<input_t>() + (int64_t)1, minlength);
+  const int64_t nbins = std::max(*self.max().cpu().data_ptr<input_t>() + (int64_t)1, minlength);
   const input_t minvalue = 0;
   const input_t maxvalue = nbins;
   // alloc output counter on GPU
@@ -315,8 +315,8 @@ Tensor _histc_cuda_template(
   input_t minvalue = min;
   input_t maxvalue = max;
   if (min == max) {
-    minvalue = *self.min().cpu().data<input_t>();
-    maxvalue = *self.max().cpu().data<input_t>();
+    minvalue = *self.min().cpu().data_ptr<input_t>();
+    maxvalue = *self.max().cpu().data_ptr<input_t>();
   }
   if (minvalue == maxvalue) {
     minvalue = minvalue - 1;
