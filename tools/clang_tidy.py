@@ -102,11 +102,13 @@ class ClangTidyConverter:
             for error in errors:
                 # Write each error as a test case.
                 output_file.write("""
-        <testcase id="{id}" name="{id}" time="0">
+        <testcase id="{id}" name="{name}" time="0">
             <failure message="{message}">
 {htmldata}
             </failure>
-        </testcase>""".format(id="[{}/{}] {}".format(error.line, error.column, error.error_identifier), message=escape(error.error),
+        </testcase>""".format(id="{}:{}".format(error.file, error.line)
+                              name="[{}/{}] {}".format(error.line, error.column, error.error_identifier),
+                              message=escape(error.error),
                               htmldata=escape(error.description)))
             output_file.write("\n    </testsuite>\n")
         output_file.write("</testsuites>\n")
@@ -379,6 +381,7 @@ def main():
         files = get_all_files(paths)
     file_patterns = get_file_patterns(options.glob, options.regex)
     files = list(filter_files(files, file_patterns))
+    print(files)
 
     # clang-tidy error's when it does not get input files.
     if not files:
@@ -393,8 +396,10 @@ def main():
     output = ClangTidyConverter("", raw_output)
     if len(output.errors) > 0:
         if options.junit:
-            output_file = open(options.junit, "w")
-            output.print_junit_file(output_file)
+            with open(options.junit, "w") as f:
+                output.print_junit_file(f)
+            with open(options.junit, "r") as f:
+                print(f.read())
 
         print(raw_output)
         exit(1)
