@@ -2679,74 +2679,95 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
 
 
 def padding1d_circular(input, pad):
-    r""" input:
-            [[[0., 1., 2.],
-              [3., 4., 5.]]]
-          pad: (1, 2)
-          output:
-            [[[2., 0., 1., 2., 0., 1.],
-              [5., 3., 4., 5., 3., 4.]]]
+    r"""input: torch.Tensor([[[0., 1., 2.],
+                              [3., 4., 5.]]])
+        pad: (1, 2)
+        output: tensor([[[2., 0., 1., 2., 0., 1.],
+                         [5., 3., 4., 5., 3., 4.]]])
     """
-    return torch.cat([input[:, :, -pad[0]:], input,
-                      input[:, :, 0:pad[1]]], dim=2)
+    input = torch.cat([input, input[:, :, 0:pad[-1]]], dim=2)
+    if pad[-1] == 0 and pad[-2] != 0:
+        return torch.cat([input[:, :, -(pad[-1] + pad[-2]):], input], dim=2)
+    else:
+        return torch.cat([input[:, :, -(pad[-1] + pad[-2]):-pad[-1]], input], dim=2)
 
 
 def padding2d_circular(input, pad):
-    r"""input:
-             [[[[0., 1., 2],
-                [3., 4., 5.]]]]
-            pad: (1, 2, 2, 1)
-    output:
-        [[[[2., 0., 1., 2., 0., 1.],
-           [5., 3., 4., 5., 3., 4.],
-           [2., 0., 1., 2., 0., 1.],
-           [5., 3., 4., 5., 3., 4.],
-           [2., 0., 1., 2., 0., 1.]]]]
+    r"""input: torch.Tensor([[[[0., 1., 2],
+                               [3., 4., 5.]]]])
+        pad: (1, 2, 2, 1)
+        output: tensor([[[[2., 0., 1., 2., 0., 1.],
+                          [5., 3., 4., 5., 3., 4.],
+                          [2., 0., 1., 2., 0., 1.],
+                          [5., 3., 4., 5., 3., 4.],
+                          [2., 0., 1., 2., 0., 1.]]]])
     """
-    input = torch.cat([input[:, :, -pad[2]:], input, input[:, :, 0:pad[3]]], dim=2)
-    return torch.cat([input[:, :, :, -pad[0]:], input, input[:, :, :, 0:pad[1]]], dim=3)
+    input = torch.cat([input, input[:, :, 0:pad[-1]]], dim=2)
+    if pad[-1] == 0 and pad[-2] != 0:
+        input = torch.cat([input[:, :, -(pad[-1] + pad[-2]):], input], dim=2)
+    else:
+        input = torch.cat([input[:, :, -(pad[-1] + pad[-2]):-pad[-1]], input], dim=2)
+
+    input = torch.cat([input, input[:, :, :, 0:pad[-3]]], dim=3)
+    if pad[-3] == 0 and pad[-4] != 0:
+        return torch.cat([input[:, :, :, -(pad[-3] + pad[-4]):], input], dim=3)
+    else:
+        return torch.cat([input[:, :, :, -(pad[-3] + pad[-4]):-pad[-3]], input], dim=3)
 
 
 def padding3d_circular(input, pad):
-    r"""input:
-            [[[[[ 0.,  1.,  2.],
-                [ 3.,  4.,  5.]],
-               [[ 6.,  7.,  8.],
-                [ 9., 10., 11.]]]]]
+    r"""input: torch.Tensor([[[[[ 0.,  1.,  2.],
+                                [ 3.,  4.,  5.]],
+                               [[ 6.,  7.,  8.],
+                                [ 9., 10., 11.]]]]])
         pad: (1, 2, 2, 1, 1, 2)
-        output: [[[[[ 8.,  6.,  7.,  8.,  6.,  7.],
-               [11.,  9., 10., 11.,  9., 10.],
-               [ 8.,  6.,  7.,  8.,  6.,  7.],
-               [11.,  9., 10., 11.,  9., 10.],
-               [ 8.,  6.,  7.,  8.,  6.,  7.]],
+        output: tensor([[[[[ 8.,  6.,  7.,  8.,  6.,  7.],
+                           [11.,  9., 10., 11.,  9., 10.],
+                           [ 8.,  6.,  7.,  8.,  6.,  7.],
+                           [11.,  9., 10., 11.,  9., 10.],
+                           [ 8.,  6.,  7.,  8.,  6.,  7.]],
 
-              [[ 2.,  0.,  1.,  2.,  0.,  1.],
-               [ 5.,  3.,  4.,  5.,  3.,  4.],
-               [ 2.,  0.,  1.,  2.,  0.,  1.],
-               [ 5.,  3.,  4.,  5.,  3.,  4.],
-               [ 2.,  0.,  1.,  2.,  0.,  1.]],
+                          [[ 2.,  0.,  1.,  2.,  0.,  1.],
+                           [ 5.,  3.,  4.,  5.,  3.,  4.],
+                           [ 2.,  0.,  1.,  2.,  0.,  1.],
+                           [ 5.,  3.,  4.,  5.,  3.,  4.],
+                           [ 2.,  0.,  1.,  2.,  0.,  1.]],
 
-              [[ 8.,  6.,  7.,  8.,  6.,  7.],
-               [11.,  9., 10., 11.,  9., 10.],
-               [ 8.,  6.,  7.,  8.,  6.,  7.],
-               [11.,  9., 10., 11.,  9., 10.],
-               [ 8.,  6.,  7.,  8.,  6.,  7.]],
+                          [[ 8.,  6.,  7.,  8.,  6.,  7.],
+                           [11.,  9., 10., 11.,  9., 10.],
+                           [ 8.,  6.,  7.,  8.,  6.,  7.],
+                           [11.,  9., 10., 11.,  9., 10.],
+                           [ 8.,  6.,  7.,  8.,  6.,  7.]],
 
-              [[ 2.,  0.,  1.,  2.,  0.,  1.],
-               [ 5.,  3.,  4.,  5.,  3.,  4.],
-               [ 2.,  0.,  1.,  2.,  0.,  1.],
-               [ 5.,  3.,  4.,  5.,  3.,  4.],
-               [ 2.,  0.,  1.,  2.,  0.,  1.]],
+                          [[ 2.,  0.,  1.,  2.,  0.,  1.],
+                           [ 5.,  3.,  4.,  5.,  3.,  4.],
+                           [ 2.,  0.,  1.,  2.,  0.,  1.],
+                           [ 5.,  3.,  4.,  5.,  3.,  4.],
+                           [ 2.,  0.,  1.,  2.,  0.,  1.]],
 
-              [[ 8.,  6.,  7.,  8.,  6.,  7.],
-               [11.,  9., 10., 11.,  9., 10.],
-               [ 8.,  6.,  7.,  8.,  6.,  7.],
-               [11.,  9., 10., 11.,  9., 10.],
-               [ 8.,  6.,  7.,  8.,  6.,  7.]]]]]
+                          [[ 8.,  6.,  7.,  8.,  6.,  7.],
+                           [11.,  9., 10., 11.,  9., 10.],
+                           [ 8.,  6.,  7.,  8.,  6.,  7.],
+                           [11.,  9., 10., 11.,  9., 10.],
+                           [ 8.,  6.,  7.,  8.,  6.,  7.]]]]])
     """
-    input = torch.cat([input[:, :, -pad[4]:], input, input[:, :, 0:pad[5]]], dim=2)
-    input = torch.cat([input[:, :, :, -pad[2]:], input, input[:, :, :, 0:pad[3]]], dim=3)
-    return torch.cat([input[:, :, :, :, -pad[0]:], input, input[:, :, :, :, 0:pad[1]]], dim=4)
+    input = torch.cat([input, input[:, :, 0:pad[-1]]], dim=2)
+    if pad[-1] == 0 and pad[-2] != 0:
+        input = torch.cat([input[:, :, -(pad[-1] + pad[-2]):], input], dim=2)
+    else:
+        input = torch.cat([input[:, :, -(pad[-1] + pad[-2]):-pad[-1]], input], dim=2)
+
+    input = torch.cat([input, input[:, :, :, 0:pad[-3]]], dim=3)
+    if pad[-3] == 0 and pad[-4] != 0:
+        input = torch.cat([input[:, :, :, -(pad[-3] + pad[-4]):], input], dim=3)
+    else:
+        input = torch.cat([input[:, :, :, -(pad[-3] + pad[-4]):-pad[-3]], input], dim=3)
+
+    input = torch.cat([input, input[:, :, :, :, 0:pad[-5]]], dim=4)
+    if pad[-5] == 0 and pad[-6] != 0:
+        return torch.cat([input[:, :, :, :, -(pad[-5] + pad[-6]):], input], dim=4)
+    else:
+        return torch.cat([input[:, :, :, :, -(pad[-5] + pad[-6]):-pad[-5]], input], dim=4)
 
 
 loss_reference_fns = {
