@@ -9,26 +9,16 @@ namespace at {
 // Returns "Tensor['N', 'C', 'H', 'W']" for a tensor with names ('N', 'C', 'H', 'W').
 static std::string toDimnameRepr(const Tensor& tensor) {
   std::ostringstream os;
-  os << "Tensor";
-  if (tensor.opt_names() == nullopt) {
-    os << "[";
-    for (auto i = 0; i < tensor.dim(); i++) {
-      if (i != 0) os << ", ";
-      os << "None";
-    }
-    os << "]";
-  } else {
-    os << *tensor.opt_names();
-  }
+  os << "Tensor" << tensor.names();
   return os.str();
 }
 
 int64_t dimname_to_position(const Tensor& tensor, Dimname dim) {
   TORCH_CHECK(dim.type() != NameType::WILDCARD,
       "Please look up dimensions by name, got: name = None.");
-  TORCH_CHECK(tensor.opt_names().has_value(),
+  TORCH_CHECK(tensor.has_names(),
       "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
-  const auto names = *tensor.opt_names();
+  const auto names = tensor.names();
 
   const auto it = std::find_if(
       names.begin(), names.end(),
@@ -169,7 +159,7 @@ static void assert_names_equal(DimnameList a, DimnameList b) {
 }
 
 void propagate_names(TensorImpl* result, optional<DimnameList> names) {
-  if (!impl::get_opt_names(result).has_value() && !names.has_value()) {
+  if (!impl::has_names(result) && !names.has_value()) {
     return;
   }
   if (!impl::has_names(result)) {
@@ -177,7 +167,7 @@ void propagate_names(TensorImpl* result, optional<DimnameList> names) {
     return;
   }
   assert_names_equal(
-      *impl::get_opt_names(result),
+      impl::get_names(result),
       names.value_or(default_names(result->dim())));
 }
 
@@ -186,7 +176,7 @@ void propagate_names(TensorImpl* result, std::vector<Dimname>&& names, bool vali
     impl::internal_set_names_inplace(result, std::move(names), validate_names);
     return;
   }
-  assert_names_equal(*impl::get_opt_names(result), names);
+  assert_names_equal(impl::get_names(result), names);
 }
 
 void propagate_names(Tensor& result, optional<DimnameList> names) {
@@ -198,18 +188,17 @@ void propagate_names(Tensor& result, std::vector<Dimname>&& names, bool validate
 }
 
 void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs) {
-  auto src_names = src.opt_names();
-  if (!src_names.has_value()) {
+  if (!result.has_names() && !src.has_names()) {
     return;
   }
-
+  auto src_names = src.names();
   auto result_dim = result.dim();
-  auto src_dim = src_names->size();
+  auto src_dim = src_names.size();
   TORCH_INTERNAL_ASSERT(src_dim - excluded_idxs.size() == result_dim);
 
   // fast path
   if (excluded_idxs.size() == 1) {
-    std::vector<Dimname> outnames = src_names->vec();
+    std::vector<Dimname> outnames = src_names.vec();
     outnames.erase(outnames.begin() + excluded_idxs[0]);
     propagate_names(result, std::move(outnames), /*validate_names=*/false);
     return;
@@ -220,7 +209,7 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
   auto included_idxs = compute_included_idxs(excluded_idxs);
   for (size_t dim = 0; dim < src_dim; ++dim) {
     if (included_idxs[dim]) {
-      outnames.push_back((*src_names)[dim]);
+      outnames.push_back(src_names[dim]);
     }
   }
   propagate_names(result, std::move(outnames), /*validate_names=*/false);
