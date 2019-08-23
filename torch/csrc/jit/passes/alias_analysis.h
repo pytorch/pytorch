@@ -149,7 +149,6 @@ class AliasDb {
   void analyzeBroadcastingChunk(Node* node);
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
-  void analyzeBackward(Node* node);
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
   void analyzeTupleConstruct(Node* node);
