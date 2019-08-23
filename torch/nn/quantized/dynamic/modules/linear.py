@@ -62,7 +62,15 @@ class Linear(nnq.Linear):
         """
         assert type(mod) == NNLinear, 'nn.quantized.dynamic.Linear.from_float only works for nn.Linear'
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-        weight_observer = mod.qconfig.weight()
+        if mod.qconfig is not None and mod.qconfig.weight() is not None:
+            weight_observer = mod.qconfig.weight()
+        else:
+            # We have the circular import issues if we import the qconfig in the beginning of this file:
+            # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
+            # import until we need it.
+            from torch.quantization.QConfig import default_dynamic_qconfig
+            weight_observer = default_dynamic_qconfig.weight()
+        assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
         weight_observer(mod.weight)
         wt_scale, wt_zp = weight_observer.calculate_qparams()
         qweight = torch.quantize_linear(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
