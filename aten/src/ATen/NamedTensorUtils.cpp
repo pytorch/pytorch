@@ -148,12 +148,13 @@ unify_from_right(optional<DimnameList> names, optional<DimnameList> other_names)
 
 namespace namedinference {
 
-static std::bitset<64> compute_included_idxs(IntArrayRef excluded_idxs) {
-  std::bitset<64> included_idxs;
+static std::bitset<kMaxNamedTensorDim>
+compute_included_idxs(IntArrayRef excluded_idxs) {
+  std::bitset<kMaxNamedTensorDim> included_idxs;
   for (auto i : excluded_idxs) {
     TORCH_INTERNAL_ASSERT(
-        i < 64,
-        "Named tensors must have dimension less than 64.");
+        i <= kMaxNamedTensorDim,
+        "Only tensors with up to ", kMaxNamedTensorDim, " are supported.");
     included_idxs.set(i);
   }
   included_idxs.flip();
@@ -177,7 +178,7 @@ void propagate_names(TensorImpl* result, optional<DimnameList> names) {
   }
   assert_names_equal(
       *impl::get_names(result),
-      names.value_or(FIXME_default_names(result->dim())));
+      names.value_or(default_names(result->dim())));
 }
 
 void propagate_names(TensorImpl* result, std::vector<Dimname>&& names, bool validate_names) {
