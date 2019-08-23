@@ -177,13 +177,43 @@ class FunctionModifiers(object):
 def export(fn):
     """
     This decorator indicates that a method is used as an entry point into a
-    ScriptModule. `forward` implicitly is used as an entry point, so it does
-    not need this decorator.
+    ``ScriptModule`` and should be compiled. ``forward`` implicitly is assumbed to be an
+    entry point, so it does not need this decorator. Functions and methods
+    called from ``forward`` are compiled as they are seen, so they do not need
+    this decorator either.
 
-    Methods are added to a ScriptModule as they are called in Python. If a
-    method is never called, it will not be included in the ScriptModule when
-    saving. This decorator explicitly marks that a method should be included
-    even if it is not called from Python.
+    Example (using ``@torch.jit.export`` on a method):
+
+    .. testcode::
+
+        import torch
+        import torch.nn as nn
+
+        class MyModule(nn.Module):
+            def implicitly_compiled_method(self, x):
+                return x + 99
+
+            # `forward` is implicitly decorated with `@torch.jit.export`,
+            # so adding it here would have no effect
+            def forward(self, x):
+                return x + 10
+
+            @torch.jit.export
+            def another_forward(self, x):
+                # When the compiler sees this call, it will compile
+                # `implicitly_compiled_method`
+                return self.implicitly_compiled_method(x)
+
+            def unused_method(self, x):
+                return x - 20
+
+        # `m` will contain compiled methods:
+        #     `forward`
+        #     `another_forward`
+        #     `implicitly_compiled_method`
+        # `unused_method` will not be compiled since it was not called from
+        # any compiled methods and wasn't decorated with `@torch.jit.export`
+        m = torch.jit.script(MyModule())
     """
     fn._torchscript_modifier = FunctionModifiers.EXPORT
     return fn
@@ -194,13 +224,66 @@ def ignore(drop_on_export=False):
     This decorator indicates to the compiler that a function or method should
     be ignored and left as a Python function.
 
-    With `drop_on_export=False` (the default), calls to this function will
-    prevent saving a TorchScript model.
+    Arguments:
 
-    With `drop_on_export=True`, any calls to this function from other
-    TorchScript code will be replaced with a `raise`. This allows you to leave
-    code in your TorchScript model that is only ever run when the Python
-    interpreter is present.
+        drop_on_export (bool):  When ``False``, calls to this function will
+                                that will be run with ``example_inputs``.
+                                arguments and returns to ``func`` must be tensors
+                                or (possibly nested) tuples that
+                                contain tensors. When ``True``, any calls to
+                                this function from other TorchScript code will be replaced
+                                with a `raise` when the model is saved.
+                                This allows you to leave code in your TorchScript model that is only ever
+                                run when the Python interpreter is present, but not run after you save
+                                and load your model.
+
+    Example (using ``@torch.jit.ignore`` on a method)::
+
+        import torch
+        import torch.nn as nn
+
+        class MyModule(nn.Module):
+            @torch.jit.ignore
+            def debugger(self, x):
+                import pdb
+                pdb.set_trace()
+
+            def forward(self, x):
+                x += 10
+                # The compiler would normally try to compile `debugger`,
+                # but since it is `@ignore`d, it will be left as a call
+                # to Python
+                self.debugger(x)
+                return x
+
+        m = torch.jit.script(MyModule())
+
+        # Error! The call `debugger` cannot be saved since it calls into Python
+        m.save("m.pt")
+
+    Example (using ``@torch.jit.ignore(drop_on_export=True)`` on a method):
+
+    .. testcode::
+
+        import torch
+        import torch.nn as nn
+
+        class MyModule(nn.Module):
+            @torch.jit.ignore(drop_on_export=True)
+            def training_method(self, x):
+                import pdb
+                pdb.set_trace()
+
+            def forward(self, x):
+                if self.training:
+                    self.training_method(x)
+                return x
+
+        m = torch.jit.script(MyModule())
+
+        # This is OK since `training_method` is not saved, the call is replaced
+        # with a `raise`.
+        m.save("m.pt")
     """
     if callable(drop_on_export):
         # used without any args, so drop_on_export is actually a function

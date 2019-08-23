@@ -224,6 +224,7 @@ if (USE_DISTRIBUTED)
     if (NOT MSVC AND NOT APPLE)
       list(APPEND TORCH_PYTHON_SRCS
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/comm.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
