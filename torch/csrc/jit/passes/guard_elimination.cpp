@@ -146,7 +146,8 @@ struct GuardElimination {
     size_t i = 0;
     for (auto input : n->inputs()) {
       if (input->node()->kind() == prim::Guard ||
-          input->node()->kind() == prim::Constant || except.count(i) != 0) {
+          input->node()->kind() == prim::Constant ||
+          input->type()->cast<NumberType>() || except.count(i) != 0) {
         AT_ASSERT(
             input->node()->kind() != prim::Guard ||
             input->type()->expect<TensorType>());
