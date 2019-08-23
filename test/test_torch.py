@@ -2475,7 +2475,7 @@ class _TestTorchMixin(torchtest):
             exp_np = exp if isinstance(exp, int) else exp.cpu().numpy()
             expected = torch.tensor(tensor_np ** exp_np, dtype=tensor.dtype)
             self.assertEqual(torch.pow(tensor, exp), expected)
-            self.assertEqual(tensor.pow(exp), torch.pow(tensor, exp))
+            self.assertEqual(tensor.pow(exp), expected)
 
         def _test_integral_pow(dt, range, dev):
             tensor = torch.tensor((3, 3), dtype=dt, device=dev).random_(*range)
@@ -2503,27 +2503,23 @@ class _TestTorchMixin(torchtest):
         nparr = np.array(ints, dtype=np.int32)
         out = torch.empty_like(tensor, device=device)
 
+        test_cases = [
+            lambda: tensor.pow(pow),
+            lambda: tensor.pow_(pow),
+            lambda: torch.pow(tensor, pow),
+            lambda: torch.pow(tensor, pow, out=out)
+        ]
+
         for pow in neg_ints:
             self.assertRaisesRegex(
                 ValueError,
                 "Integers to negative integer powers are not allowed.",
                 lambda: np.power(nparr, pow))
-            self.assertRaisesRegex(
-                RuntimeError,
-                "Integers to negative integer powers are not allowed.",
-                lambda: tensor.pow(pow))
-            self.assertRaisesRegex(
-                RuntimeError,
-                "Integers to negative integer powers are not allowed.",
-                lambda: tensor.pow_(pow))
-            self.assertRaisesRegex(
-                RuntimeError,
-                "Integers to negative integer powers are not allowed.",
-                lambda: torch.pow(tensor, pow))
-            self.assertRaisesRegex(
-                RuntimeError,
-                "Integers to negative integer powers are not allowed.",
-                lambda: torch.pow(tensor, pow, out=out))
+            for test_case in test_cases:
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "Integers to negative integer powers are not allowed.",
+                    test_case)
 
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
@@ -2534,48 +2530,35 @@ class _TestTorchMixin(torchtest):
         tensor = torch.tensor(ints, dtype=torch.int64, device=device)
         nparr = np.array(ints, dtype=np.int64)
 
-        if device == 'cuda' and not TEST_WITH_ROCM:
-            with self.assertRaises(AssertionError):
-                # This is a check that pow CUDA implementation is
-                # incompatible with Numpy:
+        for pow in floats:
+            if device == 'cuda' and not TEST_WITH_ROCM:
+                # Current pow CUDA implementation casts exponent
+                # to tensor dtype, but numpy does not, that's why:
                 # pow CUDA  4 ^ 0.5 = 1
                 # numpy pow 4 ^ 0.5 = 2
-                # This check must be deleted after pow CUDA is fixed
-                for pow in floats:
-                    expected = np.power(nparr, pow).astype(np.int64)
-
-                    actual = tensor.pow(pow)
-                    self.assertEqual(expected, actual.cpu().numpy())
-
-                    actual = tensor.clone()
-                    actual2 = actual.pow_(pow)
-                    self.assertEqual(expected, actual.cpu().numpy())
-                    self.assertEqual(expected, actual2.cpu().numpy())
-
-                    actual = torch.pow(tensor, pow)
-                    self.assertEqual(expected, actual.cpu().numpy())
-
-                    actual2 = torch.pow(tensor, pow, out=actual)
-                    self.assertEqual(expected, actual.cpu().numpy())
-                    self.assertEqual(expected, actual2.cpu().numpy())
-        else:
-            for pow in floats:
+                # This line must be deleted as soon as
+                # pow CUDA implementation is fixed.
+                expected = np.power(nparr, int(pow)).astype(np.int64)
+            else:
+                # cpu CUDA implementation is already fixed and
+                # does not cast exponent to tensor dtype,
+                # that why it is compatible with numpy.
                 expected = np.power(nparr, pow).astype(np.int64)
 
-                actual = tensor.pow(pow)
-                self.assertEqual(expected, actual.cpu().numpy())
+            actual = tensor.pow(pow)
+            self.assertEqual(expected, actual.cpu().numpy())
 
-                actual = tensor.clone()
-                actual2 = actual.pow_(pow)
-                self.assertEqual(expected, actual.cpu().numpy())
-                self.assertEqual(expected, actual2.cpu().numpy())
+            actual = tensor.clone()
+            actual2 = actual.pow_(pow)
+            self.assertEqual(expected, actual.cpu().numpy())
+            self.assertEqual(expected, actual2.cpu().numpy())
 
-                actual = torch.pow(tensor, pow)
-                self.assertEqual(expected, actual.cpu().numpy())
+            actual = torch.pow(tensor, pow)
+            self.assertEqual(expected, actual.cpu().numpy())
 
-                actual2 = torch.pow(tensor, pow, out=actual)
-                self.assertEqual(expected, actual.cpu().numpy())
-                self.assertEqual(expected, actual2.cpu().numpy())
+            actual2 = torch.pow(tensor, pow, out=actual)
+            self.assertEqual(expected, actual.cpu().numpy())
+            self.assertEqual(expected, actual2.cpu().numpy())
 
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
