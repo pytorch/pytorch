@@ -1,7 +1,6 @@
 #include "torch/csrc/autograd/VariableTypeUtils.h"
 
 #include <ATen/TypeDefault.h>
-#include <ATen/core/op_registration/op_registration.h>
 
 // ${generated_comment}
 
@@ -32,14 +31,6 @@ namespace torch { namespace autograd {
 
 ${type_derived_method_definitions}
 
-namespace {
-
 static auto& registerer = globalATenDispatch()
   ${wrapper_registrations};
-
-static auto c10_registerer = c10::RegisterOperators()
-  ${c10_wrapper_registrations};
-
-}
-
 }} // namespace torch::autograd

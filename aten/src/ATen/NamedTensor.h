@@ -47,14 +47,43 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
   std::vector<Dimname> names_;
 };
 
+// When NamesMode is disabled, then all operations ignore tensors' names fields.
+// Concretely speaking, all tensors are treated as having nullopt names.
+struct CAFFE2_API NamesMode {
+  static bool is_enabled();
+  static void set_enabled(bool enabled);
+};
+
+// A RAII, thread local (!) guard that enables or disables names upon
+// construction, and sets it back to the original value upon destruction.
+struct CAFFE2_API NoNamesGuard {
+  NoNamesGuard() : prev_mode(NamesMode::is_enabled()) {
+    NamesMode::set_enabled(false);
+  }
+  ~NoNamesGuard() {
+    NamesMode::set_enabled(prev_mode);
+  }
+ private:
+  bool prev_mode;
+};
+
+
+// Sets the names of `tensor` to be `names`.
+CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
+CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
+
+// Everywhere this is used, it is possible to not instantiate the vector by doing
+// some more clever bookkeeping. This is important for performance.
+std::vector<Dimname> FIXME_default_names(size_t len);
+
 namespace impl {
 
 // Some helper functions on TensorImpl. Useful for working with names in TH.
 // XXX: Ideally these would exist as methods on TensorImpl
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names);
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names);
-CAFFE2_API optional<DimnameList> internal_get_names(TensorImpl* impl);
-CAFFE2_API bool internal_has_names(TensorImpl* impl);
+CAFFE2_API optional<DimnameList> get_names(TensorImpl* impl);
+CAFFE2_API bool has_names(TensorImpl* impl);
 
 
 } // namespace impl

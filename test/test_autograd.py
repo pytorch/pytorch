@@ -21,7 +21,7 @@ from torch.autograd.profiler import (profile, format_time, EventList,
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm, slowTest,
-                          load_tests, random_symmetric_pd_matrix, IS_WINDOWS)
+                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -2451,17 +2451,38 @@ class TestAutograd(TestCase):
                               lambda y, x: torch.trapz(y, x),
                               True, f_args_variable, f_args_tensor)
 
+    # skip this test if running on rocm, because in cdist
+    # we use __shfl_down_sync on CUDA for fast reduction
+    # and it gives incorrect results on rocm platform
+    @skipIfRocm
     def test_cdist(self):
-        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
-            f_args_variable = (torch.randn(S, S, requires_grad=True),
-                               torch.randn(S, S, requires_grad=True))
+        def _test_cdist_for_size(sizes):
+            devices = torch.testing.get_all_device_types()
+            for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+                for device in devices:
+                    x = torch.randn(sizes, device=device, dtype=torch.double)
+                    y = torch.randn(sizes, device=device, dtype=torch.double)
 
-            def f(a, b):
-                return torch.cdist(a, b, p)
+                    eps = 1e-6
+                    # to avoid extremum
+                    x = x - (((x - y) < eps).double() * 2 * eps)
+                    x.requires_grad = True
+                    y.requires_grad = True
 
-            f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-            run_functional_checks(self, "test_cdist", "cdist", f,
-                                  True, f_args_variable, f_args_tensor)
+                    f_args_variable = (x, y)
+
+                    def f(a, b):
+                        return torch.cdist(a, b, p)
+
+                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+                    run_functional_checks(self, "test_cdist", "cdist", f,
+                                          True, f_args_variable, f_args_tensor)
+
+        _test_cdist_for_size((S, S))
+        _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_var_mean_differentiable(self):
         dim = [2, 4]
@@ -2499,6 +2520,26 @@ class TestAutograd(TestCase):
 
         for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
+            run_test(upper, dims)
+
+    @skipIfNoLapack
+    def test_symeig(self):
+        def func(root, upper):
+            x = 0.5 * (root + root.transpose(-2, -1))
+            return torch.symeig(x, eigenvectors=True, upper=upper)
+
+        def run_test(upper, dims):
+            root = torch.rand(*dims, requires_grad=True)
+
+            gradcheck(func, [root, upper])
+            gradgradcheck(func, [root, upper])
+
+            root = random_symmetric_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            w, v = root.symeig(eigenvectors=True)
+            (w.sum() + v.sum()).backward()
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2))  # Check the gradient is symmetric
+
+        for upper, dims in product([True, False], [(3, 3), (5, 3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
 
     @skipIfNoLapack
@@ -3590,7 +3631,6 @@ def gradgradcheck_method_precision_override(test_name):
             # errors accumulated across multiple dimensions
             override = {'atol': override['atol'] * S * S, 'rtol': override['atol'] * S * S}
     return override
-
 
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):

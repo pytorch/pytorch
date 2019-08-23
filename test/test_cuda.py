@@ -1099,14 +1099,14 @@ class TestCuda(TestCase):
     def test_bitwise_not(self):
         _TestTorchMixin._test_bitwise_not(self, 'cuda')
 
+    def test_logical_not(self):
+        _TestTorchMixin._test_logical_not(self, 'cuda')
+
+    def test_logical_xor(self):
+        _TestTorchMixin._test_logical_xor(self, 'cuda')
+
     def test_isinf(self):
         _TestTorchMixin._test_isinf(self, lambda t: t.cuda())
-
-    def test_inplace_unary_mem_overlap(self):
-        _TestTorchMixin._test_inplace_unary_mem_overlap(self, device='cuda')
-
-    def test_inplace_binary_mem_overlap(self):
-        _TestTorchMixin._test_inplace_binary_mem_overlap(self, device='cuda')
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_arithmetic_large_tensor(self):

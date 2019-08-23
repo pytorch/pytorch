@@ -95,7 +95,7 @@ def parse_type_line(type_line):
     arg_ann_str, ret_ann_str = split_type_line(type_line)
 
     try:
-        arg_ann = eval(arg_ann_str, _eval_env)
+        arg_ann = eval(arg_ann_str, _eval_env)  # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the argument list of a type annotation: {}".format(str(e)))
 
@@ -103,7 +103,7 @@ def parse_type_line(type_line):
         arg_ann = (arg_ann,)
 
     try:
-        ret_ann = eval(ret_ann_str, _eval_env)
+        ret_ann = eval(ret_ann_str, _eval_env)  # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e)))
 

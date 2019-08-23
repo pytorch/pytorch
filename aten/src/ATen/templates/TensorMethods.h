@@ -4,15 +4,21 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
-#include <ATen/core/TensorOptions.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/dispatch/Dispatcher.h>
 #endif
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
+#endif
+#ifdef USE_STATIC_DISPATCH
+#include <ATen/TypeDefault.h>
+#include <ATen/CPUType.h>
+#include <ATen/QuantizedCPUType.h>
+#include <ATen/SparseCPUType.h>
 #endif
 
 namespace at {
@@ -98,7 +104,7 @@ inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
 }
 
 inline bool Tensor::has_names() const {
-  return impl::internal_has_names(unsafeGetTensorImpl());
+  return impl::has_names(unsafeGetTensorImpl());
 }
 #endif
 
@@ -144,14 +150,14 @@ inline bool is_quantized(Tensor self) {
 
 #define DEFINE_CAST(T, name)                     \
   template <>                                    \
-  inline T* Tensor::data() const {               \
+  inline T* Tensor::data_ptr() const {           \
     TORCH_CHECK(                                 \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \
         " but found ",                           \
         c10::toString(scalar_type()));           \
-    return static_cast<T*>(this->data_ptr());    \
+    return static_cast<T*>(this->unsafeGetTensorImpl()->data());    \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)

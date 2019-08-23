@@ -50,7 +50,7 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
 }
 
 // Applies implict conversion from value trying to turn it into type
-// concrete_type. It succeeds if `return_value->isSubclassOf(concrete_type)`
+// concrete_type. It succeeds if `return_value->isSubtypeOf(concrete_type)`
 Value* tryConvertToType(
     const SourceRange& loc,
     Graph& graph,

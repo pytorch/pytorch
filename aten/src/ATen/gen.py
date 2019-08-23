@@ -120,7 +120,7 @@ TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
 REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegistrationDeclarations.h")
 
-TENSOR_BODY_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
+TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
@@ -157,7 +157,6 @@ top_env = {
     'cpu_type_headers': [],
     'cuda_type_headers': [],
     'function_registrations': [],
-    'c10_function_registrations': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'tensor_method_declarations': [],
@@ -274,12 +273,11 @@ def generate_storage_type_and_tensor(backend, density, declarations):
         env['Generator'] = 'CPUGenerator'
         env['allocator'] = 'getCPUAllocator()'
 
-    declarations, definitions, registrations, c10_registrations, th_declarations, th_definitions = function_wrapper.create_derived(
+    declarations, definitions, registrations, th_declarations, th_definitions = function_wrapper.create_derived(
         env, declarations)
     env['type_derived_method_declarations'] = declarations
     env['type_derived_method_definitions'] = definitions
     env['function_registrations'] = registrations
-    env['c10_function_registrations'] = c10_registrations
     env['legacy_th_declarations'] = th_declarations
     env['legacy_th_definitions'] = th_definitions
 
@@ -376,6 +374,14 @@ def cmpfiles_with_eol_normalization(a, b, names):
     return results
 
 
+def is_namedtensor_only_decl(decl):
+    if 'Dimname' in decl['schema_string']:
+        return True
+    if decl['name'] == 'align_tensors':
+        return True
+    return False
+
+
 def generate_outputs():
     cwrap_files = filter_by_extension(options.files, '.cwrap')
     nn_files = filter_by_extension(options.files, 'nn.yaml', '.h')
@@ -402,13 +408,13 @@ def generate_outputs():
     # need to be consistent whether or not BUILD_NAMEDTENSOR is on/off.
     if not BUILD_NAMEDTENSOR:
         declarations = [decl for decl in declarations
-                        if 'Dimname' not in decl['schema_string']]
+                        if not is_namedtensor_only_decl(decl)]
 
     for backend, density in iterate_types():
         generate_storage_type_and_tensor(backend, density, declarations)
 
     core_files = {
-        'TensorBody.h': TENSOR_BODY_H,
+        'TensorBody.h': TENSOR_H,
         'TensorMethods.h': TENSOR_METHODS_H
     }
 

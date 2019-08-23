@@ -114,8 +114,8 @@ static void upsample_nearest1d_out_cuda_template(
       input.scalar_type(), "upsample_nearest1d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.data<scalar_t>();
-        auto odata = output.data<scalar_t>();
+        auto idata = input.data_ptr<scalar_t>();
+        auto odata = output.data_ptr<scalar_t>();
 
         upsample_nearest1d_out_frame<scalar_t><<<gdim, bdim, 0, stream>>>(
             idata, nbatch, channels, input_width, output_width, odata);
@@ -167,8 +167,8 @@ static void upsample_nearest1d_backward_out_cuda_template(
       grad_output.scalar_type(), "upsample_nearest1d_backward_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = grad_input.data<scalar_t>();
-        auto odata = grad_output.data<scalar_t>();
+        auto idata = grad_input.data_ptr<scalar_t>();
+        auto odata = grad_output.data_ptr<scalar_t>();
 
         upsample_nearest1d_backward_out_frame<scalar_t, accscalar_t>
             <<<gdim, bdim, 0, stream>>>(

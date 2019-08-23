@@ -463,6 +463,21 @@ TEST(UtilsNMSTest, RotatedBBoxOverlaps) {
   }
 
   {
+    // Angle 0, very similar boxes that can produce 17 candidate 'intersections'
+    Eigen::ArrayXXf boxes(1, 5);
+    boxes << 299.500000, 417.370422, 600.000000, 364.259186, 0.000000;
+
+    Eigen::ArrayXXf query_boxes(1, 5);
+    query_boxes << 299.500000, 417.370422, 600.000000, 364.259155, 0.000000;
+
+    Eigen::ArrayXXf expected(1, 1);
+    expected << 0.99999991489;
+
+    auto actual = utils::bbox_overlaps_rotated(boxes, query_boxes);
+    EXPECT_TRUE(((expected - actual).abs() < 1e-6).all());
+  }
+
+  {
     // Simple case with angle 0 (upright boxes)
     Eigen::ArrayXXf boxes(2, 5);
     boxes << 10.5, 15.5, 21, 31, 0, 14.0, 17, 4, 10, 0;

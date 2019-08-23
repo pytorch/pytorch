@@ -45,6 +45,10 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
     ptr->addAttribute(attributeNames_[i], refined_slots[i]);
   }
+  // Copy methods over
+  for (const auto& method : methods()) {
+    ptr->addMethod(method);
+  }
   return ptr;
 }
 
