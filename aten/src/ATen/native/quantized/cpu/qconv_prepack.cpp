@@ -61,7 +61,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     auto weight_contig = weight.contiguous();
     int32_t weight_zero_point_int32 = weight.q_zero_point();
     const int8_t* weight_ptr_int8 =
-        reinterpret_cast<int8_t*>(weight_contig.data<c10::qint8>());
+        reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
 
     std::vector<int32_t> col_offsets(output_channels);
     // compute column offsets (Similar to
