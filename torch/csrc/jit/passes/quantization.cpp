@@ -311,7 +311,6 @@ c10::optional<std::string> findObserverName(Value* v) {
   return c10::nullopt;
 }
 
-// TODO: refactor to have a class
 IValue QuantizeHelper::getQParam(Value* v) {
     TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
     auto observer_name = findObserverName(v);
@@ -505,27 +504,19 @@ void InsertQuantDeQuant(
 void QuantFusion(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter rewriter;
   std::string pattern = R"(
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
-        %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
+graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_intrepr = aten::int_repr(%a_quant)
         %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
-        %w_quant = aten::quantize_linear(%w, %w_scale, %w_zero_point, %w_dtype)
         %w_intrepr = aten::int_repr(%w_quant)
         %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
-        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
         %b_intrepr = aten::int_repr(%b_quant)
         %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b_dequant, %c, %d, %e, %f)
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
-        %r_intrepr = aten::int_repr(%r_quant)
-        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_dequant))";
+        return (%r_quant))";
 
   std::string replacement = R"(
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
-        %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
-        %w_quant = aten::quantize_linear(%w, %w_scale, %w_zero_point, %w_dtype)
-        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
+graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %0 : int = prim::Constant[value=0]()
         %1 : int = prim::Constant[value=1]()
         %2 : int = prim::Constant[value=2]()
@@ -537,9 +528,7 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %r = quantized::fbgemm_conv2d(%a_perm, %w_packed, %b_quant, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
         %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
         %r_perm = aten::permute(%r, %out_param)
-        %r_intrepr = aten::int_repr(%r_perm)
-        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_dequant))";
+        return (%r_perm))";
   rewriter.RegisterRewritePattern(pattern, replacement);
   rewriter.runOnGraph(graph);
 }
