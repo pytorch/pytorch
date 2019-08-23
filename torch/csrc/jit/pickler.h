@@ -147,12 +147,16 @@ class Pickler {
   void startTuple();
   void endTuple();
 
+  const std::vector<WriteableTensorData>& tensorData() {
+    return tensor_data_;
+  }
+
  private:
   void pushIValueImpl(const IValue& ivalue);
   void pushDict(const IValue& ivalue);
-  void pushDouble(const IValue& ivalue);
+  void pushDouble(double value);
   void pushGenericList(const IValue& ivalue);
-  void pushInt(const IValue& ivalue);
+  void pushInt(int64_t value);
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
   void pushLiteralTensor(const IValue& ivalue);
@@ -233,18 +237,29 @@ class Unpickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
 
  public:
+  // tensors inside the pickle are references to the tensor_table
   Unpickler(
-      std::function<void(char*, size_t)> reader,
-      std::function<bool()> bounds_checker,
-      const std::vector<at::Tensor>* tensor_table,
-      ClassResolver class_resolver)
+      std::function<bool(char*, size_t)> reader,
+      ClassResolver class_resolver,
+      const std::vector<at::Tensor>* tensor_table)
       : reader_(reader),
-        bounds_checker_(bounds_checker),
         tensor_table_(tensor_table),
         class_resolver_(std::move(class_resolver)) {}
 
+  // tensors inside the pickle contain meta-data, the raw tensor
+  // dead is retrieved by calling `read_record`.
+  Unpickler(
+      std::function<bool(char*, size_t)> reader,
+      ClassResolver class_resolver,
+      std::function<at::DataPtr(const std::string&)> read_record,
+      c10::optional<at::Device> device)
+      : reader_(reader),
+        tensor_table_(nullptr),
+        class_resolver_(std::move(class_resolver)),
+        read_record_(std::move(read_record)),
+        device_(std::move(device)) {}
+
   IValue parse_ivalue();
-  IValue parseModule();
 
  private:
   // No arguments ensures that a template arugment must be specified
@@ -252,7 +267,9 @@ class Unpickler {
   template <typename T>
   T read() {
     T item;
-    reader_(reinterpret_cast<char*>(&item), sizeof(item));
+    if (!reader_(reinterpret_cast<char*>(&item), sizeof(item))) {
+      AT_ERROR("Unexpected end of pickler archive.");
+    }
     return item;
   }
 
@@ -268,10 +285,7 @@ class Unpickler {
 
   // Returns a pointer to the number of bytes requested. This should state-fully
   // remember how many bytes have been read
-  std::function<void(char*, size_t)>  reader_;
-
-  // Check if the stream has gone past its size
-  std::function<bool()> bounds_checker_;
+  std::function<bool(char*, size_t)> reader_;
 
   std::vector<IValue> stack_;
 
@@ -285,6 +299,9 @@ class Unpickler {
   // optionally nullptr, needs to be present for creating classes
   ClassResolver class_resolver_;
   IValue empty_tuple_;
+
+  std::function<at::DataPtr(const std::string&)> read_record_;
+  c10::optional<at::Device> device_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor

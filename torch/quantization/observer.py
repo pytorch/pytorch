@@ -4,6 +4,8 @@ import torch
 from functools import partial
 import warnings
 
+from torch._jit_internal import Optional
+
 class Observer(nn.Module):
     r"""Default Observer Module
     A default implementation of the observer module, only works for
@@ -17,6 +19,8 @@ class Observer(nn.Module):
     that computes the quantization parameters given the collected statistics.
     TODO: Maybe add an abstract Observer class that enforces these rules?
     """
+    __annotations__ = {'min_val' : Optional[torch.Tensor], 'max_val' : Optional[torch.Tensor]}
+
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine):
         super(Observer, self).__init__()
         self.dtype = dtype
@@ -28,16 +32,22 @@ class Observer(nn.Module):
             'Default Observer only works for qint8 and quint data type'
         self.min_val = None
         self.max_val = None
+        self.eps = torch.finfo(torch.float32).eps
 
     def forward(self, x):
-        if self.min_val is None or self.max_val is None:
-            self.min_val = torch.min(x)
-            self.max_val = torch.max(x)
+        min_val = self.min_val
+        max_val = self.max_val
+        if min_val is None or max_val is None:
+            min_val = torch.min(x)
+            max_val = torch.max(x)
         else:
-            self.min_val = torch.min(torch.min(x), self.min_val)
-            self.max_val = torch.max(torch.max(x), self.max_val)
+            min_val = torch.min(torch.min(x), min_val)
+            max_val = torch.max(torch.max(x), max_val)
+        self.min_val = min_val
+        self.max_val = max_val
         return x
 
+    @torch.jit.export
     def calculate_qparams(self):
         if self.dtype == torch.qint8:
             qmin, qmax = -128, 127
@@ -45,9 +55,13 @@ class Observer(nn.Module):
             qmin, qmax = 0, 255
         scale = 1.0
         zero_point = 0
-        if self.max_val is None or self.min_val is None:
+        # We pull these out so that TorchScript optional type refinement works.
+        # We may be able to remove this in the future if TorchScript supports that
+        # feature on attributes
+        min_val = self.min_val
+        max_val = self.max_val
+        if max_val is None or min_val is None:
             warnings.warn("must run observer before calling calculate_qparams")
-#            raise Exception('must run observer before calling calculate_qparams!')
         else:
             max_val, min_val = self.max_val.item(), self.min_val.item()
             min_val = min(0.0, self.min_val.item())
@@ -55,16 +69,20 @@ class Observer(nn.Module):
             if self.qscheme == torch.per_tensor_symmetric:
                 max_val = max(-min_val, max_val)
                 scale = max_val / ((qmax - qmin) / 2)
-                scale = max(scale, torch.finfo(torch.float32).eps)
+                scale = max(scale, self.eps)
                 zero_point = 0 if self.dtype == torch.qint8 else 128
             else:
-                scale = (max_val - min_val) / (qmax - qmin)
-                scale = max(scale, torch.finfo(torch.float32).eps)
+                scale = (max_val - min_val) / float(qmax - qmin)
+                scale = max(scale, self.eps)
                 zero_point = qmin - round(min_val / scale)
                 zero_point = max(qmin, zero_point)
                 zero_point = min(qmax, zero_point)
+                zero_point = int(zero_point)
 
         return torch.tensor([scale]), torch.tensor([zero_point])
+
+    def extra_repr(self):
+        return 'min_val={}, max_val={}'.format(self.min_val, self.max_val)
 
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)

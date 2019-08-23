@@ -200,6 +200,14 @@ def _constant_fill(g, sizes, dtype, const_value):
     else:
         return g.op("ConstantFill", sizes, dtype_i=sym_help.scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=const_value)
 
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
+    return zeros(g, sizes, dtype, layout, device, pin_memory)
+
+
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+    return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
