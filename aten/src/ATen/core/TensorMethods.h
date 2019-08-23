@@ -2099,6 +2099,16 @@ inline Tensor Tensor::transpose(int64_t dim0, int64_t dim1) const {
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim0, dim1);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::transpose(Dimname dim0, Dimname dim1) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::transpose(const_cast<Tensor&>(*this), dim0, dim1);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::transpose(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)");
+    return table->getOp<Tensor (const Tensor &, Dimname, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim0, dim1);
+#endif
+}
+#endif
 inline Tensor & Tensor::transpose_(int64_t dim0, int64_t dim1) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::transpose_(const_cast<Tensor&>(*this), dim0, dim1);
