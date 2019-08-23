@@ -12,6 +12,9 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <type_traits>
 #include <functional>
@@ -121,7 +124,11 @@ Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
   // result.resize_as_(self) requires self to have same dtype as result, so we
   // use resize_ instead.
   // TODO: Fix resize_as_. See pytorch/pytorch#11665.
-  return result.resize_(self.sizes()).bernoulli_(self, gen);
+  result.resize_(self.sizes()).bernoulli_(self, gen);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, self);
+#endif
+  return result;
 }
 
 Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {

@@ -70,8 +70,6 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
   return result;
 }
 
-static int aten_to_numpy_dtype(const ScalarType scalar_type);
-
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   if (tensor.is_cuda()) {
     throw TypeError(
@@ -178,7 +176,7 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   );
 }
 
-static int aten_to_numpy_dtype(const ScalarType scalar_type) {
+int aten_to_numpy_dtype(const ScalarType scalar_type) {
   switch (scalar_type) {
     case kDouble: return NPY_DOUBLE;
     case kFloat: return NPY_FLOAT;

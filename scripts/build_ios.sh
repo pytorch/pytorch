@@ -45,14 +45,6 @@ else
   CMAKE_ARGS+=("-DIOS_PLATFORM=OS")
 fi
 
-# IOS_ARCH controls type of iOS architecture (see ios-cmake)
-if [ -n "${IOS_ARCH:-}" ]; then
-  CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
-else
-  # IOS_ARCH is not set, default to arm64
-  CMAKE_ARGS+=("-DIOS_ARCH=arm64")
-fi
-
 # Don't build binaries or tests (only the library)
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")

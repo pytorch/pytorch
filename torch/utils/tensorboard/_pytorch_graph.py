@@ -52,7 +52,7 @@ class NodePy(NodeBase):
                 io_tensor_sizes = []
                 for n in list_of_node:
                     io_unique_names.append(n.debugName())
-                    if n.type().kind() == 'CompleteTensorType':
+                    if n.isCompleteTensor():
                         io_tensor_sizes.append(n.type().sizes())
                     else:
                         io_tensor_sizes.append(None)

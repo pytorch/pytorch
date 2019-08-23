@@ -1,6 +1,7 @@
 import sys
 import torch
 import torch._C as _C
+from torch.namedtensor import _update_names
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -478,5 +479,24 @@ class Tensor(torch._C._TensorBase):
         data = (self.data_ptr(), False)  # read-only is false
 
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=0)
+
+    def names_(self, *names, **rename_map):
+        # Note [names_ / view_names API]
+        # The Python API for these is different from the C++ API. In Python:
+        # 1) tensor.view_names(*names) takes a vararglist of names
+        # 2) tensor.view_names(**rename_map) takes a map of names to rename.
+        # C++ is static, making it difficult to implement similar behavior.
+        return _update_names(self, names, rename_map, inplace=True)
+
+    def view_names(self, *names, **rename_map):
+        # See Note [names_ / view_names API]
+        return _update_names(self, names, rename_map, inplace=False)
+
+    def _update_names(self, names, inplace):
+        # See Note [names_ / view_names API]
+        if inplace:
+            return super(Tensor, self).names_(names)
+        else:
+            return super(Tensor, self).view_names(names)
 
     __module__ = 'torch'

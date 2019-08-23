@@ -274,17 +274,17 @@ void slow_conv_transpose2d_out_cpu_template(
               m,
               k,
               1,
-              input_n.data<scalar_t>(),
+              input_n.data_ptr<scalar_t>(),
               n,
-              weight.data<scalar_t>(),
+              weight.data_ptr<scalar_t>(),
               m,
               0,
-              columns.data<scalar_t>(),
+              columns.data_ptr<scalar_t>(),
               n);
 
           // Unpack columns back into input:
           col2im<scalar_t>(
-              columns.data<scalar_t>(),
+              columns.data_ptr<scalar_t>(),
               n_output_plane,
               output_height,
               output_width,
@@ -298,7 +298,7 @@ void slow_conv_transpose2d_out_cpu_template(
               stride_width,
               dilation_height,
               dilation_width,
-              output_n.data<scalar_t>());
+              output_n.data_ptr<scalar_t>());
 
           // Do Bias after:
           // M,N,K are dims of matrix A and B
@@ -317,12 +317,12 @@ void slow_conv_transpose2d_out_cpu_template(
                 m_,
                 k_,
                 1,
-                ones.data<scalar_t>(),
+                ones.data_ptr<scalar_t>(),
                 k_,
-                bias.data<scalar_t>(),
+                bias.data_ptr<scalar_t>(),
                 k_,
                 1,
-                output_n.data<scalar_t>(),
+                output_n.data_ptr<scalar_t>(),
                 n_);
           }
         }
@@ -452,7 +452,7 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
 
           // Extract columns:
           im2col<scalar_t>(
-              grad_output_n.data<scalar_t>(),
+              grad_output_n.data_ptr<scalar_t>(),
               n_output_plane,
               output_height,
               output_width,
@@ -466,7 +466,7 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
               stride_width,
               dilation_height,
               dilation_width,
-              grad_columns.data<scalar_t>());
+              grad_columns.data_ptr<scalar_t>());
 
           // M,N,K are dims of matrix A and B
           // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
@@ -483,12 +483,12 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
               m,
               k,
               1,
-              grad_columns.data<scalar_t>(),
+              grad_columns.data_ptr<scalar_t>(),
               n,
-              weight.data<scalar_t>(),
+              weight.data_ptr<scalar_t>(),
               k,
               0,
-              grad_input_n.data<scalar_t>(),
+              grad_input_n.data_ptr<scalar_t>(),
               n);
         }
 
@@ -643,7 +643,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
 
             // Extract columns:
             im2col<scalar_t>(
-                grad_output_n.data<scalar_t>(),
+                grad_output_n.data_ptr<scalar_t>(),
                 n_output_plane,
                 output_height,
                 output_width,
@@ -657,7 +657,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
                 stride_width,
                 dilation_height,
                 dilation_width,
-                columns.data<scalar_t>());
+                columns.data_ptr<scalar_t>());
 
             // M,N,K are dims of matrix A and B
             // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
@@ -674,12 +674,12 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
                 m,
                 k,
                 scale,
-                columns.data<scalar_t>(),
+                columns.data_ptr<scalar_t>(),
                 k,
-                input_n.data<scalar_t>(),
+                input_n.data_ptr<scalar_t>(),
                 k,
                 1,
-                grad_weight.data<scalar_t>(),
+                grad_weight.data_ptr<scalar_t>(),
                 n);
           }
 
@@ -697,12 +697,12 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
                 k_,
                 m_,
                 scale,
-                grad_output_n.data<scalar_t>(),
+                grad_output_n.data_ptr<scalar_t>(),
                 k_,
-                ones.data<scalar_t>(),
+                ones.data_ptr<scalar_t>(),
                 1,
                 1,
-                grad_bias.data<scalar_t>(),
+                grad_bias.data_ptr<scalar_t>(),
                 1);
           }
         }
