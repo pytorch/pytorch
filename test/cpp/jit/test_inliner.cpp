@@ -46,7 +46,7 @@ void testInliner() {
         auto& fn = cu.get_function("foo3");
 
         auto g = fn.graph();
-        Inline(*g);
+        Inline(*g, /*recurse=*/true);
         FileCheck().check_count("prim::Print", 3)->run(*g);
     }
 }
