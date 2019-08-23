@@ -32,6 +32,67 @@
 namespace torch {
 namespace jit {
 
+void writeArchive(const std::string& archive_name, const IValue& value,
+                  caffe2::serialize::PyTorchStreamWriter& writer) {
+  std::vector<char> data;
+  Pickler data_pickle(
+      [&](const char* buf, size_t size) {
+        data.insert(data.end(), buf, buf + size);
+      },
+      nullptr);
+  data_pickle.protocol();
+  data_pickle.pushIValue(value);
+  data_pickle.stop();
+  size_t i = 0;
+  for (const auto& td : data_pickle.tensorData()) {
+    std::stringstream fname;
+    fname << archive_name << "/" << i++;
+    writer.writeRecord(fname.str(), td.data(), td.sizeInBytes());
+  }
+  std::stringstream fname;
+  fname << archive_name << ".pkl";
+  writer.writeRecord(fname.str(), data.data(), data.size());
+}
+
+// write the content of the tensor to the file/stream, and save the
+// offset in the storageMap_
+void convertAndWriteTensor(
+    size_t tensor_id,
+    const at::Tensor& tensor,
+    torch::TensorDef* tensor_proto,
+    std::unordered_map<const void*, std::string>& storageMap,
+    caffe2::serialize::PyTorchStreamWriter& writer) {
+  for (auto d : tensor.sizes()) {
+    tensor_proto->add_dims(d);
+  }
+  for (auto s : tensor.strides()) {
+    tensor_proto->add_strides(s);
+  }
+  tensor_proto->set_data_type(caffe2::TypeMetaToDataType(
+      at::scalarTypeToTypeMeta(tensor.scalar_type())));
+  tensor_proto->set_offset(tensor.storage_offset());
+  tensor_proto->set_requires_grad(tensor.requires_grad());
+  tensor_proto->set_is_quantized(tensor.is_quantized());
+  if (tensor.is_quantized()) {
+    tensor_proto->set_scale(tensor.q_scale());
+    tensor_proto->set_zero_point(tensor.q_zero_point());
+  }
+  auto* key = tensor.storage().unsafeGetStorageImpl();
+  auto storage_it = storageMap.find(key);
+  if (storage_it == storageMap.end()) {
+    WriteableTensorData data = getWriteableTensorData(tensor);
+    std::string name = "tensors/" + std::to_string(tensor_id);
+    writer.writeRecord(name, data.data(), data.sizeInBytes());
+    storage_it = storageMap.insert({key, name}).first;
+  }
+  auto* data = tensor_proto->mutable_data();
+  data->set_key(storage_it->second);
+  // handle device case, set the device_detail and load to CUDA device
+  std::stringstream ss;
+  ss << tensor.device();
+  tensor_proto->set_device(ss.str());
+}
+
 namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
@@ -527,45 +588,6 @@ void GraphEncoder::EncodeTensor(
   }
 }
 
-// write the content of the tensor to the file/stream, and save the
-// offset in the storageMap_
-void convertAndWriteTensor(
-    size_t tensor_id,
-    const at::Tensor& tensor,
-    torch::TensorDef* tensor_proto,
-    std::unordered_map<const void*, std::string>& storageMap,
-    caffe2::serialize::PyTorchStreamWriter& writer) {
-  for (auto d : tensor.sizes()) {
-    tensor_proto->add_dims(d);
-  }
-  for (auto s : tensor.strides()) {
-    tensor_proto->add_strides(s);
-  }
-  tensor_proto->set_data_type(caffe2::TypeMetaToDataType(
-      at::scalarTypeToTypeMeta(tensor.scalar_type())));
-  tensor_proto->set_offset(tensor.storage_offset());
-  tensor_proto->set_requires_grad(tensor.requires_grad());
-  tensor_proto->set_is_quantized(tensor.is_quantized());
-  if (tensor.is_quantized()) {
-    tensor_proto->set_scale(tensor.q_scale());
-    tensor_proto->set_zero_point(tensor.q_zero_point());
-  }
-  auto* key = tensor.storage().unsafeGetStorageImpl();
-  auto storage_it = storageMap.find(key);
-  if (storage_it == storageMap.end()) {
-    WriteableTensorData data = getWriteableTensorData(tensor);
-    std::string name = "tensors/" + std::to_string(tensor_id);
-    writer.writeRecord(name, data.data(), data.sizeInBytes());
-    storage_it = storageMap.insert({key, name}).first;
-  }
-  auto* data = tensor_proto->mutable_data();
-  data->set_key(storage_it->second);
-  // handle device case, set the device_detail and load to CUDA device
-  std::stringstream ss;
-  ss << tensor.device();
-  tensor_proto->set_device(ss.str());
-}
-
 // this is a serializer class which saves script modules to pt files. the
 // content of the file is written using PyTorchStreamWriter, for details please
 // check caffe2/serialize/inline_container.h. all the records except the last
@@ -666,33 +688,12 @@ class ScriptModuleSerializer2 {
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
-    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
+    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants), writer_);
     // finally we serialize the model
-    writeArchive("data", module.module_object());
+    writeArchive("data", module.module_object(), writer_);
   }
 
  private:
-  void writeArchive(const std::string& archive_name, const IValue& value) {
-    std::vector<char> data;
-    Pickler data_pickle(
-        [&](const char* buf, size_t size) {
-          data.insert(data.end(), buf, buf + size);
-        },
-        nullptr);
-    data_pickle.protocol();
-    data_pickle.pushIValue(value);
-    data_pickle.stop();
-    size_t i = 0;
-    for (const auto& td : data_pickle.tensorData()) {
-      std::stringstream fname;
-      fname << archive_name << "/" << i++;
-      writer_.writeRecord(fname.str(), td.data(), td.sizeInBytes());
-    }
-    std::stringstream fname;
-    fname << archive_name << ".pkl";
-    writer_.writeRecord(fname.str(), data.data(), data.size());
-  }
-
   void writeExtraFiles(
       const script::Module& module,
       const script::ExtraFilesMap& extra_files) {

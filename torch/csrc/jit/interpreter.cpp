@@ -11,8 +11,10 @@
 #include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/instruction.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
+#include <torch/csrc/liteinterpreter/frameoutput.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 
@@ -293,87 +295,6 @@ struct PreprocessGraph {
   std::unordered_map<Node*, bool> can_emit_inline;
 };
 
-// instructs look like:
-// op_code X, N
-// meaning of X, N depend on the op:
-// O - index into operator table
-// R - index into register table
-// I - literal integer
-// C - index into constant table
-// P - jump offset relative to beginning of current instruction
-// F - index into function table
-// T - index into the type table, used for guard instructions
-
-#define FORALL_OPCODES(_)                                                   \
-  _(OP, "O") /* invoke operator X */                                        \
-  _(LOAD, "R") /* push a value from a register X */                         \
-  _(MOVE, "R") /* push a value from register X, clearing the register */    \
-  _(STOREN, "RI") /* store N values to registers [X, X+N) */                \
-  _(STORE, "R") /* store 1 value to registers X */                          \
-  _(DROP, "") /* drop 1 value from the top of the stack */                  \
-  _(DROPR, "R") /* clear register X */                                      \
-  _(LOADC, "C") /* push the constant X */                                   \
-  _(JF, "P") /* pop the top of the stack, if false, branch to P */          \
-  _(JMP, "P") /* unconditional branch to X */                               \
-  _(LOOP, "PI") /* perform a loop, X is where to branch if cond is false */ \
-  _(RET, "") /* exit execution */                                           \
-  _(WAIT, "") /* wait for a future to be complete */                        \
-  _(CALL, "F") /* call function X */                                        \
-  _(GUARD, "T") /* check guard against type_table, true if passes */        \
-  _(TAIL_CALL, "F") /* replace current frame with function F */
-
-enum OpCode : uint8_t {
-#define DEFINE_OP(op, _) op,
-  FORALL_OPCODES(DEFINE_OP)
-#undef DEFINE_OP
-};
-
-std::ostream& operator<<(std::ostream& out, OpCode op) {
-  switch (op) {
-#define OP_STRING(x, _) \
-  case x:               \
-    return out << #x;
-    FORALL_OPCODES(OP_STRING)
-#undef OP_STRING
-  }
-  return out;
-}
-
-const char* OpInfo(OpCode op) {
-  switch (op) {
-#define OP_INFO(x, info) \
-  case x:                \
-    return info;
-    FORALL_OPCODES(OP_INFO)
-#undef OP_INFO
-  }
-  return nullptr;
-}
-
-struct Instruction {
-  OpCode op;
-  uint8_t padding; // currently unused
-  uint16_t N;
-  int32_t X;
-  // TODO: check for overflow
-  Instruction(OpCode op, int32_t X, uint16_t N)
-      : op(op), padding(0), N(N), X(X) {}
-};
-
-static_assert(sizeof(Instruction) == 8, "Instructions should be 8 bytes");
-std::ostream& operator<<(std::ostream& out, Instruction inst) {
-  // TODO: use op info to print out the op in a more user-friendly way
-  int nargs = strlen(OpInfo(inst.op));
-  out << inst.op;
-  if (nargs > 0) {
-    out << " " << inst.X;
-  }
-  if (nargs > 1) {
-    out << " " << inst.N;
-  }
-  return out;
-}
-
 // for keeping track of the current node
 struct WithCurrentNode {
   WithCurrentNode(Node** loc, Node* new_value) : loc_(loc), old_value_(*loc_) {
@@ -409,6 +330,10 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
+  // One way to have operator names for debugging/dumping purpose. Because it's only
+  // available from node, we add schema name to the list when operators are emitted.
+  // Any other solutions?
+  std::vector<c10::OperatorName> opname_table_;
   std::vector<Function*> function_table_;
   std::vector<TypePtr> type_table_;
   int register_size_ = 0;
@@ -454,7 +379,7 @@ struct CodeImpl {
     dump(std::cout);
   }
 
-  void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
+  void insertInstruction(OperatorCode op, int64_t X = 0, uint64_t N = 0) {
     instructions_.emplace_back(op, X, N);
     instructions_source_.emplace_back(current_node_);
 
@@ -517,7 +442,7 @@ struct CodeImpl {
       int reg = registerFor(input);
       bool moved = input->uses().size() == ++use_count_[input];
 
-      OpCode op;
+      OperatorCode op;
       if (input->node()->kind() == prim::Constant) {
         op = LOADC;
       } else if (drop) {
@@ -539,8 +464,18 @@ struct CodeImpl {
 
   void emitOperator(Node* node) {
     emitLoadInputs(node->inputs());
-    insertInstruction(OP, operator_table_.size());
+    uint64_t Nn = 0;
+    if (node->kind() == prim::GetAttr) {
+      const auto type = node->input()->type()->expect<ClassType>();
+      const auto& field = node->s(attr::name);
+      Nn = type->getAttributeSlot(field);
+    }
+    insertInstruction(OP, operator_table_.size(), Nn);
     operator_table_.emplace_back(getOperation(node));
+    // Looks like all overload_names are empty? If the name is not unique,
+    // use inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
+    // as a backup.
+    opname_table_.emplace_back(node->schema().operator_name());
   }
 
   void emitWait(Node* node) {
@@ -739,6 +674,16 @@ struct CodeImpl {
       }
     }
     return *grad_executors_;
+  }
+
+  std::unique_ptr<FrameOutput> getFrame() const {
+    std::unique_ptr<FrameOutput> frameptr(new FrameOutput);
+    frameptr->pc = 0;
+    frameptr->instructions = instructions_;
+    frameptr->constants = constant_table_;
+    frameptr->opnames = opname_table_;
+    frameptr->operators = operator_table_;
+    return frameptr;
   }
 
   void dump(std::ostream& out, size_t i) const {
@@ -1113,6 +1058,11 @@ size_t Code::num_inputs() const {
 size_t Code::num_outputs() const {
   return pImpl->n_outputs;
 }
+
+std::unique_ptr<FrameOutput> Code::getFrame() const {
+  return pImpl->getFrame();
+}
+
 
 InterpreterState::InterpreterState(const Code& code)
     : pImpl(c10::make_intrusive<InterpreterStateImpl>(code)) {}
