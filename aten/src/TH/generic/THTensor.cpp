@@ -768,7 +768,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
     // The product of dimensions to the right of the concatenation dimension.
     // We go on to multiply this by the size of the concat dimension for
     // each input tensor.
-    for (int i = dimension + 1; i < size.size(); ++i) {
+    for (int i = dimension + 1; i < int(size.size()); ++i) {
       inner *= size[i];
     }
 

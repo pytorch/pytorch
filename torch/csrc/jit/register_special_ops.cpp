@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/ir.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>

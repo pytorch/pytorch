@@ -9,7 +9,7 @@
 
 using c10::AliasInfo;
 using c10::BoolType;
-using c10::CompleteTensorType;
+using c10::CapsuleType;
 using c10::DeviceObjType;
 using c10::DictType;
 using c10::FloatType;
@@ -18,7 +18,6 @@ using c10::GeneratorType;
 using c10::IntType;
 using c10::ListType;
 using c10::NoneType;
-using c10::CapsuleType;
 using c10::NumberType;
 using c10::OptionalType;
 using c10::StringType;
@@ -148,7 +147,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       L.expect('*');
       num_dims++;
     });
-    ptr = at::ProfiledTensorType::create(
+    ptr = at::TensorType::create(
         dtype,
         at::DeviceType::CPU,
         c10::VaryingShape(num_dims),
@@ -167,8 +166,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       dims.push_back(dim);
     });
     at::IntArrayRef dims_ref(dims);
-    ptr =
-        CompleteTensorType::create(dtype, at::DeviceType::CPU, dims_ref, false);
+    ptr = at::TensorType::create(dtype, at::DeviceType::CPU, dims_ref, false);
   }
   return ptr;
 }
