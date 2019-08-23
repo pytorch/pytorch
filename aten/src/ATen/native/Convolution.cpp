@@ -640,7 +640,7 @@ at::Tensor _convolution(
     }
   } else {
     // Only reach here when input is backend with out-of-source implementation.
-    return at::convolution_overrideable(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
+    output = at::convolution_overrideable(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
   }
 
   if (k == 3) {
