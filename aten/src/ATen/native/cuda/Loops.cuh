@@ -4,6 +4,7 @@
 //
 //   gpu_kernel(TensorIterator iter, <lambda>)
 //   gpu_kernel_with_scalars(TensorIterator iter, <lambda>)
+//   gpu_apply_dim_kernel(TensorIterator iter, <lambda>)
 //
 // The gpu_kernel_with_scalars generates specializations that support a
 // single scalar CPU argument, such as from `cuda_tensor + 5`. The CPU scalar
@@ -27,6 +28,16 @@
 //
 // See BinaryOpsKernel.cu for the complete implementation
 //
+// The gpu_apply_dim_kernel helps for writing dimension apply. For example, if you want
+// to implement gather_out(result, dim, index, src), you may write:
+//
+//     cpu_apply_dim_kernel(iter,
+//       [=] GPU_LAMBDA (float *result_data, int64_t result_stride, int64_t *index_data, int64_t index_stride, float *src_data, int64_t src_stride) {
+//         for (int64_t i = 0; i < size; i++) {
+//           int64_t index = *(index_data + i * index_stride);
+//           *(result_data + i * result_stride) = *(src_data + index * src_stride);
+//         }
+//       });
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -216,7 +227,7 @@ template <typename func_t>
 using OffsetCalculatorForFunc = OffsetCalculator<function_traits<func_t>::arity / 2, int64_t>;
 
 template <typename func_t, typename T>
-using ArrayForFunc = at::detail::Array<int64_t, function_traits<func_t>::arity / 2>;
+using ArrayForFunc = at::detail::Array<T, function_traits<func_t>::arity / 2>;
 
 template <int64_t n, typename func_t, typename... Args>
 struct gpu_dim_apply_helper {
@@ -233,14 +244,14 @@ struct gpu_dim_apply_helper {
 template <typename func_t, typename... Args>
 struct gpu_dim_apply_helper<0, func_t, Args...> {
   C10_HOST_DEVICE static inline void
-  apply(char* data[], const int64_t* strides, func_t op, Args... args) {
+  apply(const ArrayForFunc<func_t, char*> &data, const ArrayForFunc<func_t, int64_t> &strides, func_t op, Args... args) {
     op(args...);
   }
 };
 
 template <typename func_t>
 __global__ void gpu_dim_apply(
-  int64_t numel, OffsetCalculatorForFunc<func_t> calc, ArrayForFunc<func_t, char *> data,
+  int64_t numel, OffsetCalculatorForFunc<func_t> calc, ArrayForFunc<func_t, char *> base_data,
   ArrayForFunc<func_t, int64_t> strides, const func_t& op)
 {
   using traits = function_traits<func_t>;
@@ -248,6 +259,7 @@ __global__ void gpu_dim_apply(
   int64_t tid = blockIdx.x * blockDim.x + threadIdx.x;
   int64_t gridsize = gridDim.x * blockDim.x;
   for (int64_t linear_id = tid; linear_id < numel; linear_id += gridsize) {
+    auto data = base_data;
     auto offsets = calc.get(linear_id);
     #pragma unroll
     for (int64_t i = 0; i < ntensors; i++) {
@@ -277,8 +289,8 @@ void gpu_apply_dim_kernel(TensorIterator& iter, const func_t& op) {
     strides[i] = iter.strides(i)[0] / iter.element_size(i);
   }
 
-  dim3 block(launch_size_1d);
-  dim3 grid((numel + launch_size_1d - 1) / launch_size_1d);
+  int64_t block = launch_size_1d;
+  int64_t grid = (numel + launch_size_1d - 1) / launch_size_1d;
   auto stream = at::cuda::getCurrentCUDAStream();
 
   gpu_dim_apply<func_t><<<grid, block, 0, stream>>>(numel, offset_calc, data, strides, op);

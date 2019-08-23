@@ -27,7 +27,7 @@
 //
 // See README.md for more details.
 //
-// cpu_apply_dim_kernel is designed for dimension apply. For example, if you want
+// The cpu_apply_dim_kernel is designed for dimension apply. For example, if you want
 // to implement gather_out(result, dim, index, src), you may write:
 //
 //     cpu_apply_dim_kernel(iter,

@@ -43,11 +43,11 @@ struct OffsetCalculator {
 
     #pragma unroll
     for (int dim = 0; dim < MAX_DIMS; ++dim) {
-      if (sizes_[dim].divisor < 0) {
-        continue;
-      }
       if (dim == dims) {
         break;
+      }
+      if (sizes_[dim].divisor < 0) {
+        continue;
       }
       auto divmod = sizes_[dim].divmod(linear_idx);
       linear_idx = divmod.div;
