@@ -472,7 +472,6 @@ void InsertQuantDeQuant(
         if (child_module_name.find("observer_for_") == std::string::npos) {
           auto child_module = module.find_module(child_module_name);
           TORCH_INTERNAL_ASSERT(child_module, "InsertQuantDeQuant - Child module " + child_module_name + " does not exist");
-          std::cout << "child: " << child_module_name << std::endl;
           InsertQuantDeQuant(child_module.value(), "forward");
         }
       }
