@@ -16,9 +16,9 @@ const Element* MemoryDAG::fromIndex(unsigned x) const {
   return indexToElementMap[x].get();
 }
 
-Element* MemoryDAG::fromIndex(unsigned x) {
-    TORCH_INTERNAL_ASSERT(x < indexToElementMap.size());
-      return indexToElementMap[x].get();
+Element *MemoryDAG::fromIndex(unsigned x) {
+  TORCH_INTERNAL_ASSERT(x < indexToElementMap.size());
+  return indexToElementMap[x].get();
 }
 
 bool MemoryDAG::mayAlias(Element* a, Element* b) const {

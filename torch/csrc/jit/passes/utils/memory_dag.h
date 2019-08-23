@@ -64,9 +64,9 @@ class TORCH_API MemoryDAG {
 
   // Converts from the compressed index representation
   const Element* fromIndex(unsigned x) const;
-  Element* fromIndex(unsigned x);
+  Element *fromIndex(unsigned x);
 
- private:
+private:
   bool mayAliasImpl(const Element* a, const Element* b) const;
   bool mayContainAliasImpl(const Element* contained, const Element* container)
       const;

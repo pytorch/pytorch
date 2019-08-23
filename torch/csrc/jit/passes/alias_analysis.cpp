@@ -1314,17 +1314,15 @@ void AliasDb::setWildcard(const Value* v) {
   TORCH_INTERNAL_ASSERT(e != nullptr);
   memoryDAG_->makePointerTo(getOrCreateElement(v), e);
 
-  // point everything v aliases to the wildcard 
-  const auto& pointeeSet = getOrCreateElement(v)->getMemoryLocations();
-  for (const auto& pointee : pointeeSet)
-  {  
-      auto fe = memoryDAG_->fromIndex(pointee);
-      // avoid cycles where the wildcard points
-      // to itself
-      if (fe != e)
-      {
-        memoryDAG_->makePointerTo(fe, e);
-      }
+  // point everything v aliases to the wildcard
+  const auto &pointeeSet = getOrCreateElement(v)->getMemoryLocations();
+  for (const auto &pointee : pointeeSet) {
+    auto fe = memoryDAG_->fromIndex(pointee);
+    // avoid cycles where the wildcard points
+    // to itself
+    if (fe != e) {
+      memoryDAG_->makePointerTo(fe, e);
+    }
   }
 }
 
