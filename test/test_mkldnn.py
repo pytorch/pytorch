@@ -124,52 +124,51 @@ class TestMkldnn(TestCase):
                 self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
 
     def test_conv2d_ext(self):
-
         def subtensor(tensor, dim, groups, g):
             if tensor is None:
                 return None
             group_size = int(tensor.size(dim) / group)
             return tensor.narrow(dim, group_size * g, group_size).contiguous()
 
-        def thnn_conv_group(input, weight, bias, stride, padding, dilation, group):
+        def thnn_conv(input, weight, k, bias, s, p, d):
+            if d[0] > 1 or d[1] > 1:
+                return torch._C._nn.slow_conv_dilated2d(input, weight, k, bias, s, p, d)
+            else:
+                return torch._C._nn.thnn_conv2d(input, weight, k, bias, s, p)
+
+        def thnn_conv_group(input, weight, k, bias, s, p, d, group):
             if group == 1:
-                return torch._convolution_nogroup(
-                    input, weight, bias, stride, padding, dilation, False, (0, 0))
+                return thnn_conv(input, weight, k, bias, s, p, d)
             else:
                 outputs = []
                 for g in range(group):
                     input_g = subtensor(input, 1, group, g)
                     weight_g = subtensor(weight, 0, group, g)
                     bias_g = subtensor(bias, 0, group, g)
-                    outputs.append(torch._convolution_nogroup(
-                        input_g, weight_g, bias_g, stride, padding, dilation, False, (0, 0)))
+                    outputs.append(thnn_conv(input_g, weight_g, k, bias_g, s, p, d))
                 return torch.cat(outputs, 1);
 
-        def test_single_conv2d(group, batch_size, input_size, input_channel_g,
-            output_channel_g, has_bias, padding, dilation, stride, kernel):
-
-            print(group, batch_size, input_size, input_channel_g, output_channel_g, has_bias, padding, dilation, stride, kernel)
-
-            input_channel = input_channel_g * group
-            output_channel = output_channel_g * group
-
-            input = torch.randn((batch_size, input_channel, input_size[0], input_size[1]), dtype=torch.float32)
-            weight = torch.randn((output_channel, input_channel_g, kernel[0], kernel[1]), dtype=torch.float32)
-            bias = None if has_bias else torch.randn((output_channel), dtype=torch.float32)
-
+        def test_single_conv2d(g, bs, isize, ic_g, oc_g, has_bias, p, d, s, k):
+            ic, oc = ic_g * g, oc_g * g
+            input = torch.randn((bs, ic, isize[0], isize[1]), dtype=torch.float32)
+            weight = torch.randn((oc, ic_g, k[0], k[1]), dtype=torch.float32) * 0.01
+            bias = None if has_bias else torch.randn((oc), dtype=torch.float32)
             self.assertEqual(
-                thnn_conv_group(input, weight, bias, stride, padding, dilation, group),
-                torch.mkldnn_convolution(input, weight, bias, padding, stride, dilation, group))
+                thnn_conv_group(input, weight, k, bias, s, p, d, g),
+                torch.mkldnn_convolution(input, weight, bias, p, s, d, g),
+                message='input size:{}; group:{}; input channel:{}; output channel:{};'
+                    'bias:{}, padding:{}, dilation:{}; stride:{}; kernel:{}'.format(
+                    isize, g, ic, oc, has_bias, p, d, s, k))
 
-        groups = (1, 2, 4) #, torch.randint(3, 10, (1,)).item())
-        batch_sizes = (1, 16)#, torch.randint(2, 257, (1,)).item())
-        input_channels = (1, 3) #, torch.randint(2, 257, (1,)).item())
-        output_channels = (1, 3) #, torch.randint(2, 257, (1,)).item())
-        paddings = ((0, 0), (1, 1))    # [torch.randint(1, 10, (1,)).item() for i in range(2)])
-        dilations = ((1, 1), (2, 2,)) #[torch.randint(1, 10, (1,)).item() for i in range(2)])
-        strides = ((1, 1), (2, 2)) #[torch.randint(1, 10, (1,)).item() for i in range(2)])
-        kernels = ((1, 1), (3, 3)) #, [torch.randint(1, 10, (1,)).item() for i in range(2)])
-        output_sizes = ((3, 3), (5, 5)) #[torch.randint(1, 10, (1,)).item() for i in range(2)])
+        groups = [1, torch.randint(2, 17, (1,)).item()]
+        batch_sizes = [1, torch.randint(2, 257, (1,)).item()]
+        input_channels = [3, torch.randint(1, 257, (1,)).item()]
+        output_channels = [3, torch.randint(1, 257, (1,)).item()]
+        paddings = [[0, 0], [torch.randint(1, 10, (1,)).item() for i in range(2)]]
+        dilations = [[1, 1], [torch.randint(1, 10, (1,)).item() for i in range(2)]]
+        strides = [[1, 1], [torch.randint(1, 10, (1,)).item() for i in range(2)]]
+        kernels = [[1, 1], [3, 3], [torch.randint(1, 10, (1,)).item() for i in range(2)]]
+        output_sizes = [[3, 3], [torch.randint(1, 10, (1,)).item() for i in range(2)]]
 
         for group, bs, ic, oc, bias, p, d, s, k, osize in itertools.product(
             groups, batch_sizes, input_channels, output_channels, [True, False],
@@ -180,9 +179,7 @@ class TestMkldnn(TestCase):
                 isize.append(s[i] * (osize[i] - 1) + 1 + d[i] * (k[i] - 1) - 2 * p[i])
 
             if isize[0] > 0 and isize[1] > 0:
-                print('osize: ', osize)
                 test_single_conv2d(group, bs, isize, ic, oc, bias, p, d, s, k)
-
 
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
