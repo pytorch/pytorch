@@ -102,7 +102,7 @@ class ClangTidyConverter:
             for error in errors:
                 # Write each error as a test case.
                 output_file.write("""
-        <testcase id="{id}" name="{name}" time="0">
+        <testcase id="{id}" name="{id}" time="0">
             <failure message="{message}">
 {htmldata}
             </failure>
