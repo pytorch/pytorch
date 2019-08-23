@@ -280,10 +280,8 @@ public:
       return std::move(*this);
     }
 
-    template<class FuncType>
-    Options&& impl_unboxedAutogradKernel(FuncType* kernel) && {
-      static_assert(guts::is_function_type<FuncType>::value, "Wrong argument type for impl_unboxedAutogradKernel");
-
+    template<class Result, class... Args>
+    Options&& impl_unboxedAutogradKernel(Result (*kernel)(Args...)) && {
       // TODO Infer and check schema
       TORCH_CHECK(kernel != nullptr, "Kernel function pointer cannot be nullptr");
       TORCH_CHECK(unboxedAutogradKernel_ == nullptr, "You can only call impl_unboxedAutogradKernel() once per operator registration.");

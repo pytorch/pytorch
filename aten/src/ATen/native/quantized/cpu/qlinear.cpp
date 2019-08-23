@@ -31,7 +31,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
     // TODO: contiguous is called for further jit optimizations.
     auto input_contig = input.contiguous();
     const auto* input_ptr =
-        reinterpret_cast<uint8_t*>(input_contig.data<c10::quint8>());
+        reinterpret_cast<uint8_t*>(input_contig.data_ptr<c10::quint8>());
 
     TORCH_CHECK(
         input.dim() >= 2,
@@ -102,7 +102,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
           "bias should have N elements: " + std::to_string(N));
       // TODO: contiguous is called for further jit optimizations.
       auto bias_contig = bias_vec.contiguous();
-      bias_ptr = reinterpret_cast<int32_t*>(bias_contig.data<c10::qint32>());
+      bias_ptr = reinterpret_cast<int32_t*>(bias_contig.data_ptr<c10::qint32>());
     }
 
     // After the uint8 * int8 matrix multiplication is performed, this operation
@@ -120,9 +120,15 @@ class QLinearInt8 final : public torch::OperatorKernel {
         /*bias=*/bias_ptr,
         /*nCol=*/N);
 
+    // The resulting matrix here is 2-D, let's view it with the original
+    // left hand dimensions of the input. Here are two examples:
+    // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
+    // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
+    std::vector<int64_t> out_sizes = input.sizes().vec();
+    out_sizes.back() = N;
     // Allocate output Tensor and a buffer for fbgemmPacked to use
     auto output = _empty_affine_quantized(
-        {M, N},
+        out_sizes,
         at::device(kCPU).dtype(kQUInt8),
         output_scale,
         output_zero_point);
@@ -133,8 +139,8 @@ class QLinearInt8 final : public torch::OperatorKernel {
     fbgemm::fbgemmPacked(
         /*packA=*/packA,
         /*packB=*/*packB,
-        /*C=*/reinterpret_cast<uint8_t*>(output.data<c10::quint8>()),
-        /*C_buffer=*/buffer.data<int32_t>(),
+        /*C=*/reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+        /*C_buffer=*/buffer.data_ptr<int32_t>(),
         /*ldc=*/N,
         /*outProcess=*/outputProcObj,
         /*thread_id=*/0,

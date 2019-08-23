@@ -63,6 +63,13 @@ TENSOR_IMPLEMENT_LOGICAL_BYTE(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(eq,==)
 TENSOR_IMPLEMENT_LOGICAL_BYTE(ne,!=)
 
+ptrdiff_t THTensor_(numel)(THTensor *t)
+{
+  return THTensor_(nElement)(t);
+}
+
+#if !defined(TH_REAL_IS_BFLOAT16)
+
 int THTensor_(equal)(THTensor *ta, THTensor* tb)
 {
   int equal = 1;
@@ -109,11 +116,6 @@ TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(r_, t);
 #endif
-}
-
-ptrdiff_t THTensor_(numel)(THTensor *t)
-{
-  return THTensor_(nElement)(t);
 }
 
 // Helper function to be used in a reduction operation.
@@ -953,74 +955,6 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
   }
 }
 
-void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, int dim, int dir, int sorted)
-{
-  int numDims = THTensor_(nDimensionLegacyNoScalars)(t);
-  THArgCheck(dim >= 0 && dim < numDims, 3, "dim not in range");
-
-  int64_t sliceSize = THTensor_sizeLegacyNoScalars(t, dim);
-  THArgCheck(k >= 0 && k <= sliceSize, 2, "k not in range for dimension");
-
-  THTensor *tmpResults = THTensor_(new)();
-  THTensor_(resize1d)(tmpResults, sliceSize);
-  scalar_t *tmp__data = tmpResults->data<scalar_t>();
-
-  THLongTensor *tmpIndices = THLongTensor_new();
-  THLongTensor_resize1d(tmpIndices, sliceSize);
-  int64_t *tmpi__data = THLongTensor_data(tmpIndices);
-
-  std::vector<int64_t> topKSize = t->sizes().vec();
-  if (topKSize.size() > 0) { // handle 0-dim vs 1-dim differences.
-    topKSize[dim] = k;
-  }
-  THTensor_(resize)(rt_, topKSize, {});
-  THLongTensor_resize(ri_, topKSize, {});
-
-  if (dir) {
-    /* k largest elements, descending order (optional: see sorted) */
-    int64_t K = sliceSize - k;
-    TH_TENSOR_DIM_APPLY3(scalar_t, t, scalar_t, rt_, int64_t, ri_, dim,
-                         TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
-                         int64_t i;
-                         for(i = 0; i < sliceSize; i++)
-                         {
-                           tmp__data[i] = t_data[i*t_stride];
-                           tmpi__data[i] = i;
-                         }
-                         if (K > 0)
-                           THTensor_(quickselect)(tmp__data, tmpi__data, K - 1, sliceSize, 1);
-                         if (sorted)
-                           THTensor_(quicksortdescend)(tmp__data + K, tmpi__data + K, k, 1);
-                         for(i = 0; i < k; i++)
-                         {
-                           rt__data[i*rt__stride] = tmp__data[i + K];
-                           ri__data[i*ri__stride] = tmpi__data[i + K];
-                         })
-  }
-  else {
-    /* k smallest elements, ascending order (optional: see sorted) */
-    TH_TENSOR_DIM_APPLY3(scalar_t, t, scalar_t, rt_, int64_t, ri_, dim,
-                         TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
-                         int64_t i;
-                         for(i = 0; i < sliceSize; i++)
-                         {
-                           tmp__data[i] = t_data[i*t_stride];
-                           tmpi__data[i] = i;
-                         }
-                         THTensor_(quickselect)(tmp__data, tmpi__data, k - 1, sliceSize, 1);
-                         if (sorted)
-                           THTensor_(quicksortascend)(tmp__data, tmpi__data, k - 1, 1);
-                         for(i = 0; i < k; i++)
-                         {
-                           rt__data[i*rt__stride] = tmp__data[i];
-                           ri__data[i*ri__stride] = tmpi__data[i];
-                         })
-  }
-
-  c10::raw::intrusive_ptr::decref(tmpResults);
-  THLongTensor_free(tmpIndices);
-}
-
 void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
 {
   int64_t t_size_0, t_size_1;
@@ -1144,7 +1078,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
 LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
@@ -1500,6 +1433,8 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t
                         }
   );
 }
+
+#endif
 
 #undef TH_MATH_NAME
 #endif /* floating point only part */

@@ -299,18 +299,6 @@ with other components of PyTorch in order to reduce overall complexity.
 If you find yourself having to set this field to False add @gchanan to your PR's
 set of reviewers.
 
-### `use_c10_dispatcher`
-
-```
-use_c10_dispatcher: True
-```
-
-This will indicate that the func signature only uses features supported by
-the c10 dispatcher. With this flag, the operator will be added to the
-c10 operator library and be available there. This should be the default choice
-and over time, as the c10 dispatcher gets more features, there will be more
-and more funcs that have this flag, until (hopefully) all of them are in c10.
-
 ## Writing an implementation in C++
 
 Implementations of native functions go in an appropriate C++ file in the

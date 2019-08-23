@@ -1,31 +1,12 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/tracer.h>
-#include <unordered_set>
 
 namespace torch {
 namespace jit {
-
-std::unordered_set<c10::OperatorName> ops_blacklisted_from_c10_to_jit_export_0();
-std::unordered_set<c10::OperatorName> ops_blacklisted_from_c10_to_jit_export_1();
-std::unordered_set<c10::OperatorName> ops_blacklisted_from_c10_to_jit_export_2();
-
 namespace {
-
-std::unordered_set<c10::OperatorName> ops_blacklisted_from_c10_to_jit_export() {
-  std::unordered_set<c10::OperatorName> result;
-  for (c10::OperatorName name : ops_blacklisted_from_c10_to_jit_export_0()) {
-    result.insert(std::move(name));
-  }
-  for (c10::OperatorName name : ops_blacklisted_from_c10_to_jit_export_1()) {
-    result.insert(std::move(name));
-  }
-  for (c10::OperatorName name : ops_blacklisted_from_c10_to_jit_export_2()) {
-    result.insert(std::move(name));
-  }
-  return result;
-}
 
 at::Tensor wrap_tensor(at::Tensor&& tensor) {
   if (tensor.is_variable()) {
@@ -101,7 +82,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
                   reinterpret_cast<OptionalType*>(type.get())->getElementType();
             }
           }
-          if (type->isSubclass(TypeKind::TensorType)) {
+          if (type->isSubtypeOf(TensorType::get())) {
             AT_ASSERT(iter->isTensor());
             tracer::addInputs(node, args[i].name().c_str(), iter->toTensor());
           } else if (type->kind() == TypeKind::FloatType) {
@@ -120,7 +101,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           } else if (type->kind() == TypeKind::ListType) {
             const auto& elem_type =
                 reinterpret_cast<ListType*>(type.get())->getElementType();
-            if (elem_type->isSubclass(TypeKind::TensorType)) {
+            if (elem_type->isSubtypeOf(TensorType::get())) {
               AT_ASSERT(iter->isTensorList());
               auto list = iter->toTensorListRef();
               tracer::addInputs(node, args[i].name().c_str(), list);
@@ -168,13 +149,13 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
         for (auto iter = stack.end() - output_size; iter != stack.end();
              ++iter, ++i) {
           const auto& type = op.schema().returns()[i].type();
-          if (type->isSubclass(TypeKind::TensorType)) {
+          if (type->isSubtypeOf(TensorType::get())) {
             AT_ASSERT(iter->isTensor());
             tracer::addOutput(node, iter->toTensor());
           } else if (type->kind() == TypeKind::ListType) {
             const auto& elem_type =
                 reinterpret_cast<ListType*>(type.get())->getElementType();
-            if (elem_type->isSubclass(TypeKind::TensorType)) {
+            if (elem_type->isSubtypeOf(TensorType::get())) {
               AT_ASSERT(iter->isTensorList());
               tracer::addOutput(node, iter->toTensorList());
             } else {
@@ -194,13 +175,6 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
 class RegistrationListener final : public c10::OpRegistrationListener {
 public:
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
-    static auto blacklist = ops_blacklisted_from_c10_to_jit_export();
-    if (0 != blacklist.count(op.schema().operator_name())) {
-      // Ignore ATen ops for now because they have their own code
-      // to expose them to JIT in register_aten_ops.cpp
-      // TODO Remove register_aten_ops.cpp and also use this registration here
-      return;
-    }
     torch::jit::registerOperator(createOperatorFromC10(op));
   }
 

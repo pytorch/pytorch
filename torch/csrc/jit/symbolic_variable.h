@@ -20,8 +20,8 @@ struct SymbolicVariable {
   static SymbolicVariable asNewInput(Graph& g, TypePtr type) {
     return g.addInput()->setType(std::move(type));
   }
-  const std::vector<int64_t>& sizes() const {
-    return v->type()->expect<CompleteTensorType>()->sizes();
+  std::vector<int64_t> sizes() const {
+    return v->type()->expect<TensorType>()->sizes().concrete_sizes().value();
   }
   void addAsOutput() const {
     v->owningGraph()->registerOutput(v);
@@ -313,7 +313,7 @@ struct SymbolicVariable {
     return v->owningGraph()->insertConstant(std::move(value));
   }
   SymbolicVariable typeLike(SymbolicVariable other) const {
-    if (auto other_type = other.v->type()->cast<CompleteTensorType>())
+    if (auto other_type = other.v->type()->cast<TensorType>())
       v->setType(other_type->contiguous());
     return *this;
   }
@@ -336,8 +336,8 @@ struct SymbolicVariable {
   SymbolicVariable typeLikeWithScalarType(
       SymbolicVariable other,
       at::ScalarType type) const {
-    if (auto other_type = other.v->type()->cast<CompleteTensorType>()) {
-      auto new_type = other_type->toScalarType(type)->contiguous();
+    if (auto other_type = other.v->type()->cast<TensorType>()) {
+      auto new_type = other_type->withScalarType(type)->contiguous();
       v->setType(new_type);
     }
     return *this;
@@ -345,11 +345,12 @@ struct SymbolicVariable {
   SymbolicVariable typeLikeWithRhsScalarType(
       SymbolicVariable other,
       SymbolicVariable rhs) const {
-    auto other_type = other.v->type()->cast<CompleteTensorType>();
-    auto rhs_type = rhs.v->type()->cast<CompleteTensorType>();
-    if (other_type && rhs_type) {
+    auto other_type = other.v->type()->cast<TensorType>();
+    auto rhs_type = rhs.v->type()->cast<TensorType>();
+    if (other_type && rhs_type && other_type->isComplete() &&
+        rhs_type->isComplete()) {
       auto new_type =
-          other_type->toScalarType(rhs_type->scalarType())->contiguous();
+          other_type->withScalarType(rhs_type->scalarType())->contiguous();
       v->setType(new_type);
     }
     return *this;

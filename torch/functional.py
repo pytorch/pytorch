@@ -5,6 +5,7 @@ from itertools import product
 import warnings
 
 __all__ = [
+    'align_tensors',  # BUILD_NAMEDTENSOR only
     'broadcast_tensors',
     'cartesian_prod',
     'chain_matmul',
@@ -825,3 +826,10 @@ def gels(input, A, out=None):
     warnings.warn("torch.gels is deprecated in favour of torch.lstsq and will be removed in "
                   "the next release. Please use torch.lstsq instead.", stacklevel=2)
     return torch.lstsq(input, A, out=out)
+
+
+def align_tensors(*tensors):
+    if not torch._C._BUILD_NAMEDTENSOR:
+        raise RuntimeError('NYI: torch.align_tensors is experimental and a part '
+                           'of our named tensors project.')
+    return torch._C._VariableFunctions.align_tensors(tensors)

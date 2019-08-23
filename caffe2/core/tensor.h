@@ -7,7 +7,7 @@
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include "ATen/core/Tensor.h"
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 
 #include <ATen/core/grad_mode.h>
 
