@@ -95,7 +95,7 @@ class QuantizerTestCase(TestCase):
 
         # Insert quantize and dequantize calls
         print('--------- 3. Convert --------------')
-        script_module._c = torch._C._jit_pass_insert_quant_dequant(script_module._c, "forward")
+        torch._C._jit_pass_insert_quant_dequant(script_module._c, "forward")
         # Note that observer modules are not removed right now
         # print(script_module._c._get_modules())
         # torch._C._jit_pass_custom_pattern_based_rewrite_graph()
