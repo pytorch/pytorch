@@ -1499,7 +1499,6 @@
       output: True
     - THTensor* self
 ]]
-]]
 [[
   name: _th_sqrt
   cname: sqrt
