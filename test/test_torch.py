@@ -2581,10 +2581,6 @@ class _TestTorchMixin(torchtest):
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_tensor_pow_tensor(self, dev):
-        def assertEqual(x, y):
-            z = (y - x) / y
-            self.assertEqual(np.nan_to_num(z), np.zeros_like(z), allow_inf=True)
-
         def rotate(l, n):
             return l[-n:] + l[:-n]
 
@@ -2596,14 +2592,14 @@ class _TestTorchMixin(torchtest):
                 pows = rotate(values, i)
                 pows_tensor = torch.tensor(pows, dtype=torch_type, device=dev)
                 pows_nparr = np.array(pows, dtype=numpy_type)
-                expected = np.power(vals_nparr, pows_nparr)
+                expected = torch.from_numpy(np.power(vals_nparr, pows_nparr))
 
                 actual = torch.pow(vals_tensor, pows_tensor)
-                assertEqual(expected, actual.cpu().numpy())
+                self.assertEqual(expected, actual, allow_inf=True)
 
                 actual2 = torch.pow(vals_tensor, pows_tensor, out=actual)
-                assertEqual(expected, actual.cpu().numpy())
-                assertEqual(expected, actual2.cpu().numpy())
+                self.assertEqual(expected, actual, allow_inf=True)
+                self.assertEqual(expected, actual2, allow_inf=True)
 
         ints = [0, 1, 2, 3]
         test_tensor_pow_tensor(ints, torch.int32, np.int32)
