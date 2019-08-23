@@ -2538,12 +2538,12 @@ class _TestTorchMixin(torchtest):
                 # numpy pow 4 ^ 0.5 = 2
                 # This line must be deleted as soon as
                 # pow CUDA implementation is fixed.
-                expected = np.power(nparr, int(pow)).astype(np.int64)
-            else:
-                # cpu CUDA implementation is already fixed and
-                # does not cast exponent to tensor dtype,
-                # that why it is compatible with numpy.
-                expected = np.power(nparr, pow).astype(np.int64)
+                pow = int(pow)
+
+            # cpu CUDA implementation is already fixed and
+            # does not cast exponent to tensor dtype,
+            # that why it is compatible with numpy.
+            expected = np.power(nparr, pow).astype(np.int64)
 
             actual = tensor.pow(pow)
             self.assertEqual(expected, actual.cpu().numpy())
