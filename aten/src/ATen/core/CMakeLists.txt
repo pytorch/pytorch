@@ -6,6 +6,8 @@ FILE(GLOB_RECURSE ATen_CORE_SRCS "*.cpp")
 FILE(GLOB_RECURSE ATen_CORE_TEST_SRCS "*_test.cpp")
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
+filter_list(core_generated_h core_generated_cpp "\\.h$")
+
 # Add files needed from jit folders
 LIST(APPEND ATen_CORE_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/source_range.h
@@ -16,6 +18,9 @@ LIST(APPEND ATen_CORE_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/schema_type_parser.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/error_report.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/tree.h
+)
+LIST(APPEND ATen_CORE_HEADERS
+    ${core_generated_h}
 )
 LIST(APPEND ATen_CORE_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/error_report.cpp
