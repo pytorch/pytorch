@@ -393,7 +393,7 @@ def main():
         line_filters = [get_changed_lines(options.diff, f) for f in files]
 
     raw_output = run_clang_tidy(options, line_filters, files)
-    output = ClangTidyConverter("", raw_output)
+    output = ClangTidyConverter("/home/vsts/work/1/s/", raw_output)
     if len(output.errors) > 0:
         if options.junit:
             with open(options.junit, "w") as f:
