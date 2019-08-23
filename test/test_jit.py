@@ -12569,8 +12569,8 @@ a")
             x.add_(torch.ones(2, 3))
             return x_view
 
-        self.checkScript(fn, (), profiling = False)
-        
+        self.checkScript(fn, (), profiling=False)
+
     def test_cpp_function_tensor_str(self):
         x = torch.randn(2, 2)
         scale = torch.randn(2, 2, requires_grad=True)

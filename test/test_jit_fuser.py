@@ -958,7 +958,7 @@ class TestFuser(JitTestCase):
         s1 = torch.randn(5, 1, requires_grad=True, device='cuda')
         s2 = torch.randn(5, 5, requires_grad=True, device='cuda')
 
-        module = self.checkScript(my_broadcasted_cell, (s1, s1, s1), profiling = False)
+        module = self.checkScript(my_broadcasted_cell, (s1, s1, s1), profiling=False)
         forward_graph = module.graph_for(s1, s1, s1)
         self.assertAllFused(forward_graph, except_for=("aten::size", "prim::BroadcastSizes",
                                                        "aten::_size_if_not_equal"))
