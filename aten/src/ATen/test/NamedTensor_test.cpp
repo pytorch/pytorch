@@ -187,4 +187,21 @@ TEST(NamedTensorTest, alias) {
   ASSERT_TRUE(dimnames_equal(tensor.names().value(), aliased.names().value()));
 }
 
+TEST(NamedTensorTest, NoNamesGuard) {
+  auto N = dimnameFromString("N");
+  auto C = dimnameFromString("C");
+  std::vector<Dimname> names = { N, C };
+
+  auto tensor = at::empty({2, 3}, names);
+  ASSERT_TRUE(at::NamesMode::is_enabled());
+  {
+    at::NoNamesGuard guard;
+    ASSERT_FALSE(at::NamesMode::is_enabled());
+    ASSERT_FALSE(tensor.names());
+    ASSERT_FALSE(at::impl::get_names(tensor.unsafeGetTensorImpl()));
+  }
+  ASSERT_TRUE(at::NamesMode::is_enabled());
+}
+
+
 #endif
