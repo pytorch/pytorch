@@ -185,7 +185,7 @@ from ._tensor_str import set_printoptions
 # Define Storage and Tensor classes
 ################################################################################
 
-from .tensor import Tensor
+from ._tensor import Tensor
 from .storage import _StorageBase
 
 

@@ -80,7 +80,7 @@ class Generator:
     def __init__(self, device: Union[_int, str]) -> None: ...
 
 # TODO: One downside of doing it this way, is direct use of
-# torch.tensor.Tensor doesn't get type annotations.  Nobody
+# torch._tensor.Tensor doesn't get type annotations.  Nobody
 # should really do that, so maybe this is not so bad.
 class Tensor:
     dtype: _dtype = ...
