@@ -104,3 +104,5 @@ jobs:
   - script: git branch master origin/master
   - script: pip install pyyaml
   - script: tools/run-clang-tidy-in-ci.sh
+    env: 
+      TRAVIS_BRANCH: $(System.PullRequest.TargetBranch)
