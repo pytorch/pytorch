@@ -23,6 +23,7 @@ class FloatFunctional(torch.nn.Module):
     Valid operation names:
         - add
         - cat
+        - mul
     """
     def __init__(self):
         super(FloatFunctional, self).__init__()
@@ -36,6 +37,14 @@ class FloatFunctional(torch.nn.Module):
     def add(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
         r = torch.add(x, y)
+        # TODO: Fix for QAT.
+        self.observer(r)
+        return r
+
+    r"""Operation equivalent to ``torch.mul``"""
+    def mul(self, x, y):
+        # type: (Tensor, Tensor) -> Tensor
+        r = torch.mul(x, y)
         # TODO: Fix for QAT.
         self.observer(r)
         return r
@@ -69,7 +78,7 @@ class QFunctional(torch.nn.Module):
     Valid operation names:
         - add
         - cat
-
+        - mul
     """
     def __init__(self):
         super(QFunctional, self).__init__()
@@ -99,6 +108,11 @@ class QFunctional(torch.nn.Module):
     r"""Operation equivalent to ``torch.ops.quantized.add``"""
     def add(self, x, y):
         return ops.quantized.add(x, y, scale=self.scale,
+                                 zero_point=self.zero_point)
+
+    r"""Operation equivalent to ``torch.ops.quantized.mul``"""
+    def mul(self, x, y):
+        return ops.quantized.mul(x, y, scale=self.scale,
                                  zero_point=self.zero_point)
 
     r"""Operation equivalent to ``torch.ops.quantized.cat``"""
