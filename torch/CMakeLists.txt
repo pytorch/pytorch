@@ -105,6 +105,8 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tuple_parser.cpp
+    ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
+    ${JIT_TEST_SRCS}
     )
 
 set(TORCH_PYTHON_INCLUDE_DIRECTORIES
@@ -226,11 +228,11 @@ if (USE_DISTRIBUTED)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp
 
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/RpcAgent.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/ProcessGroupAgent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/functions.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/PythonRpcHandler.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_rpc_handler.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
         )
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
@@ -291,6 +293,7 @@ set(ModulesStubIn
     ${TORCH_SRC_DIR}/nn/modules/distance.pyi.in
     ${TORCH_SRC_DIR}/nn/modules/dropout.pyi.in
     ${TORCH_SRC_DIR}/nn/modules/fold.pyi.in
+    ${TORCH_SRC_DIR}/nn/modules/flatten.pyi.in
     ${TORCH_SRC_DIR}/nn/modules/instancenorm.pyi.in
     ${TORCH_SRC_DIR}/nn/modules/linear.pyi.in
     ${TORCH_SRC_DIR}/nn/modules/loss.pyi.in

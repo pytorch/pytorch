@@ -32,7 +32,7 @@ TORCH_API void PythonPrint(
 TORCH_API void LEGACY_PythonPrint(
     std::ostream& out,
     SourceRangeRecords& source_ranges_out,
-    const c10::NamedTypePtr& classType,
+    const c10::NamedTypePtr& type,
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable = false);

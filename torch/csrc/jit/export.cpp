@@ -221,7 +221,7 @@ void EncoderBase::EncodeValueInfo(
     const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   std::string name = n->debugName();
   v->set_name(name);
-  if (ProfiledTensorTypePtr node_type = n->type()->cast<ProfiledTensorType>()) {
+  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
     if (!node_type->isComplete()) {
       return;
     }
@@ -618,34 +618,70 @@ class ScriptModuleSerializer {
 // 1. Several tests that depend on the serialization format details.
 // 2. The emit module hook (since combining the old export and new import code
 //    is going to cause jitter)
-class ScriptModuleSerializer2 : public ScriptModuleSerializer {
+class ScriptModuleSerializer2 {
  public:
   ScriptModuleSerializer2(const std::string& filename)
-      : ScriptModuleSerializer(filename) {}
+      : writer_(filename.c_str()) {}
 
-  ScriptModuleSerializer2(std::ostream* ofs) : ScriptModuleSerializer(ofs) {}
-
- private:
-  void convertModel(
+  ScriptModuleSerializer2(std::ostream* ofs) : ofs_(), writer_(ofs) {}
+  void serialize(
       const script::Module& module,
-      torch::ModelDef* model_def,
-      const script::ExtraFilesMap& extra_files) override {
-    model_def->set_producer_name("pytorch");
-    model_def->set_producer_version("1.0"); // TODO: set the producer version
-                                            // using appropriate function call
-    model_def->set_proto_version(torch::ProtoVersion::PROTO_VERSION_NEWEST);
-    // Serialize all code info.
-    convertNamedType(module.type());
-    // Then pickle the module
-    auto data = pickle(module.module_object(), &tensor_table_);
-    writer_.writeRecord("data.pkl", data.data(), data.size());
-
-    writeTensorTable(model_def);
-    writeLibs(model_def);
+      const script::ExtraFilesMap& extra_files) {
+    C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
+    // Serialize all code info.
+    writeCode(module.type());
+    // The tensor constants from the code are written to a separate archive
+    // so loading the code does not depend on loading the data
+    std::vector<IValue> ivalue_constants(
+        constant_table_.begin(), constant_table_.end());
+    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
+    // finally we serialize the model
+    writeArchive("data", module.module_object());
   }
 
-  void writeLibs(ModelDef* model_def) override {
+ private:
+  void writeArchive(const std::string& archive_name, const IValue& value) {
+    std::vector<char> data;
+    Pickler data_pickle(
+        [&](const char* buf, size_t size) {
+          data.insert(data.end(), buf, buf + size);
+        },
+        nullptr);
+    data_pickle.protocol();
+    data_pickle.pushIValue(value);
+    data_pickle.stop();
+    size_t i = 0;
+    for (const auto& td : data_pickle.tensorData()) {
+      std::stringstream fname;
+      fname << archive_name << "/" << i++;
+      writer_.writeRecord(fname.str(), td.data(), td.sizeInBytes());
+    }
+    std::stringstream fname;
+    fname << archive_name << ".pkl";
+    writer_.writeRecord(fname.str(), data.data(), data.size());
+  }
+
+  void writeExtraFiles(
+      const script::Module& module,
+      const script::ExtraFilesMap& extra_files) {
+    // Write out extra files.
+    for (const auto& kv : extra_files) {
+      const std::string key = "extra/" + kv.first;
+      writer_.writeRecord(key, kv.second.data(), kv.second.size());
+    }
+    auto hook = GetExtraFilesHook();
+    if (hook) {
+      script::ExtraFilesMap hook_files = hook(module);
+      for (const auto& kv : hook_files) {
+        const std::string key = "extra/" + kv.first;
+        writer_.writeRecord(key, kv.second.data(), kv.second.size());
+      }
+    }
+  }
+
+  void writeCode(const at::NamedTypePtr& root_type) {
+    convertNamedType(root_type);
     static const std::string opset_string =
         c10::str("op_version_set = ", CURRENT_OP_VERSION_SET, "\n");
 
@@ -661,7 +697,7 @@ class ScriptModuleSerializer2 : public ScriptModuleSerializer {
 
       // For the type, foo.bar.Baz
       const std::string filename = ImportExportHelpers::qualifierToPath(
-          converted_type->name()->prefix(), torch::PROTO_VERSION_NEWEST);
+          converted_type->name()->prefix(), "code/");
       // End state: filename is "foo/bar.py", in which we will define a class
       // named Baz
       auto& stream = fileToSrc[filename];
@@ -708,7 +744,7 @@ class ScriptModuleSerializer2 : public ScriptModuleSerializer {
           /*compress=*/true);
     }
   }
-  void convertNamedType(const c10::NamedTypePtr& class_type) override {
+  void convertNamedType(const c10::NamedTypePtr& class_type) {
     if (converted_types_.contains(class_type)) {
       return;
     }
@@ -720,7 +756,7 @@ class ScriptModuleSerializer2 : public ScriptModuleSerializer {
         source_stream,
         source_ranges,
         class_type,
-        tensor_table_,
+        constant_table_,
         class_deps,
         /*enforce_importable=*/true);
 
@@ -738,6 +774,10 @@ class ScriptModuleSerializer2 : public ScriptModuleSerializer {
     TypeInfo info{source_stream.str(), std::move(source_ranges)};
     converted_types_.insert(class_type, std::move(info));
   }
+
+  std::ofstream ofs_;
+  caffe2::serialize::PyTorchStreamWriter writer_;
+  std::vector<at::Tensor> constant_table_;
 
   // all deps used by this module hierarchy
   struct TypeInfo {
@@ -804,8 +844,8 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
     const auto& class_src = item.value();
 
     // For the type, foo.bar.Baz
-    const std::string filename =
-        ImportExportHelpers::qualifierToPath(class_type->name()->prefix(), 5);
+    const std::string filename = ImportExportHelpers::qualifierToPath(
+        class_type->name()->prefix(), "libs/");
     // End state: filename is "foo/bar.py", in which we will define a class
     // named Baz
     fileToSrc[filename] << class_src;
@@ -816,8 +856,8 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   std::unordered_set<std::string> written_files;
   for (const auto& item : converted_classes_) {
     const c10::NamedTypePtr& class_type = item.key();
-    const std::string filename =
-        ImportExportHelpers::qualifierToPath(class_type->name()->prefix(), 5);
+    const std::string filename = ImportExportHelpers::qualifierToPath(
+        class_type->name()->prefix(), "libs/");
     if (written_files.count(filename)) {
       continue;
     }
