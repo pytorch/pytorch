@@ -2706,6 +2706,34 @@ inline int64_t Tensor::q_zero_point() const {
     return table->getOp<int64_t (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
 #endif
 }
+inline Tensor Tensor::q_per_channel_scales() const {
+#ifdef USE_STATIC_DISPATCH
+    switch(tensorTypeIdToBackend(type_id())) {
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::q_per_channel_scales(const_cast<Tensor&>(*this));
+            break;
+        default:
+            AT_ERROR("q_per_channel_scales not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
+    }
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::q_per_channel_scales(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
+#endif
+}
+inline Tensor Tensor::q_per_channel_zero_points() const {
+#ifdef USE_STATIC_DISPATCH
+    switch(tensorTypeIdToBackend(type_id())) {
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::q_per_channel_zero_points(const_cast<Tensor&>(*this));
+            break;
+        default:
+            AT_ERROR("q_per_channel_zero_points not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
+    }
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::q_per_channel_zero_points(Tensor self) -> Tensor");
+    return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
+#endif
+}
 inline Tensor Tensor::int_repr() const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(type_id())) {
