@@ -2483,16 +2483,10 @@ Example::
 
 add_docstr_all('sub',
                r"""
-sub(value, other) -> Tensor
+sub(value) -> Tensor
+sub(value=1, other) -> Tensor
 
-Subtracts a scalar or tensor from :attr:`self` tensor. If both :attr:`value` and
-:attr:`other` are specified, each element of :attr:`other` is scaled by
-:attr:`value` before being used.
-
-When :attr:`other` is a tensor, the shape of :attr:`other` must be
-:ref:`broadcastable <broadcasting-semantics>` with the shape of the underlying
-tensor.
-
+See :func:`torch.sub`
 """)
 
 add_docstr_all('sub_',

@@ -210,6 +210,75 @@ Example::
             [ -8.9902,  -8.3667,  -7.3925,  -7.6147]])
 """.format(**common_args))
 
+add_docstr(torch.sub,
+           r"""
+.. function:: sub(input, other, out=None)
+
+Subtracts the scalar :attr:`other` to each element of the input :attr:`input`
+and returns a new resulting tensor.
+
+.. math::
+    \text{{out}} = \text{{input}} - \text{{other}}
+
+If :attr:`input` is of type FloatTensor or DoubleTensor, :attr:`other` must be
+a real number, otherwise it should be an integer.
+
+Args:
+    {input}
+    value (Number): the number to be added to each element of :attr:`input`
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([-0.4261, -0.6182, -0.6378,  0.1480])
+    >>> torch.sub(a, 20)
+    tensor([-20.4261, -20.6182, -20.6378, -19.8520])
+
+.. function:: sub(input, alpha=1, other, out=None)
+
+Each element of the tensor :attr:`other` is multiplied by the scalar
+:attr:`-alpha` and subtracted from each element of the tensor :attr:`input`.
+The resulting tensor is returned.
+
+The shapes of :attr:`input` and :attr:`other` must be
+:ref:`broadcastable <broadcasting-semantics>`.
+
+.. math::
+    \text{{out}} = \text{{input}} - \text{{alpha}} \times \text{{other}}
+
+If :attr:`other` is of type FloatTensor or DoubleTensor, :attr:`alpha` must be
+a real number, otherwise it should be an integer.
+
+Args:
+    input (Tensor): the first input tensor
+    alpha (Number): the scalar multiplier for :attr:`other`
+    other (Tensor): the second input tensor
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([-0.7927,  1.7164, -0.0092, -0.7755])
+    >>> b = torch.randn(4, 1)
+    >>> b
+    tensor([[-1.3459],
+            [ 0.2565],
+            [ 0.6692],
+            [ 0.2509]])
+    >>> torch.add(a, 10, b)
+    tensor([[-14.2519, -11.7429, -13.4685, -14.2348],
+            [  1.7728,   4.2818,   2.5562,   1.7899],
+            [  5.8992,   8.4083,   6.6827,   5.9164],
+            [  1.7166,   4.2256,   2.5000,   1.7337]])
+""".format(**common_args))
+
 add_docstr(torch.addbmm,
            r"""
 addbmm(beta=1, input, alpha=1, batch1, batch2, out=None) -> Tensor

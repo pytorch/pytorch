@@ -226,6 +226,7 @@ Pointwise Ops
 .. autofunction:: sin
 .. autofunction:: sinh
 .. autofunction:: sqrt
+.. autofunction:: sub
 .. autofunction:: tan
 .. autofunction:: tanh
 .. autofunction:: trunc
