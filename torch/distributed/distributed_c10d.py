@@ -919,7 +919,7 @@ def all_reduce_coalesced(tensors,
     in all processes.
 
     Arguments:
-        tensor (List[Tensor]): Input and output of the collective. The function
+        tensors (List[Tensor]): Input and output of the collective. The function
             operates in-place.
         op (Optional[ReduceOp]): One of the values from
             ``torch.distributed.ReduceOp`` enum. Specifies an operation used for
