@@ -1042,7 +1042,7 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims, **k
     A = torch.randn(batch_dims + (matrix_size, matrix_size))
     u, _, v = A.svd()
     s = torch.arange(1., matrix_size + 1).mul_(1.0 / (matrix_size + 1)).diag()
-    return u.matmul(torch.diag(s.expand(batch_dims + (matrix_size, matrix_size))).matmul(v.transpose(-2, -1))
+    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(v.transpose(-2, -1)))
 
 
 def random_linalg_solve_processed_inputs(A_dims, b_dims, gen_fn, transform_fn, cast_fn):
