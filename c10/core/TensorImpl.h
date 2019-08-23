@@ -1396,21 +1396,22 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
           }
         }
-        is_contiguous_ = true;
-        return;
+        break;
       }
       case MemoryFormat::ChannelsLast: {
         TORCH_CHECK(
             dim() == 4,
             "required rank 4 tensor to use channels_last format");
         set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
-        is_channels_last_contiguous_ = true;
-        is_channels_last_ = true;
-        return;
+        break;
       }
       case MemoryFormat::Preserve:
         TORCH_CHECK(false, "unsupported memory format ", memory_format);
+        break;
     }
+    // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
+    // exclusive: #24090
+    refresh_contiguous();
   }
 
   bool is_strides_like_channels_last() const {

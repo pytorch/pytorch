@@ -12689,6 +12689,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         flat.resize_as_(nhwc)
         self.assertFalse(flat.is_contiguous(memory_format=torch.channels_last))
 
+    def test_memory_format_consistency(self):
+        x = torch.randn(10, 3, 1, 1)
+        x_rep = x.as_strided(x.size(), x.stride())
+        self.assertEqual(x.size(), x_rep.size())
+        self.assertEqual(x.stride(), x_rep.stride())
+        self.assertEqual(x.is_contiguous(), x_rep.is_contiguous())
+        self.assertEqual(x.is_contiguous(memory_format=torch.channels_last), x_rep.is_contiguous(memory_format=torch.channels_last))
+
     def test_memory_format_preserved_after_permute(self):
         x = torch.randn(10, 3, 32, 32)
         nhwc = x.contiguous(memory_format=torch.channels_last)
