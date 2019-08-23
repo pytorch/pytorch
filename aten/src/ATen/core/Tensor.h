@@ -712,7 +712,6 @@ class CAFFE2_API Tensor {
   Tensor & triu_(int64_t diagonal=0) const;
   Tensor & digamma_() const;
   Tensor & polygamma_(int64_t n) const;
-  Tensor & erfinv_() const;
   Tensor & renorm_(Scalar p, int64_t dim, Scalar maxnorm) const;
   Tensor & pow_(Scalar exponent) const;
   Tensor & pow_(const Tensor & exponent) const;
@@ -780,6 +779,7 @@ class CAFFE2_API Tensor {
   Tensor digamma() const;
   Tensor polygamma(int64_t n) const;
   Tensor erfinv() const;
+  Tensor & erfinv_() const;
   Tensor dist(const Tensor & other, Scalar p=2) const;
   Tensor atan2(const Tensor & other) const;
   Tensor lerp(const Tensor & end, Scalar weight) const;
