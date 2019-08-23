@@ -69,6 +69,12 @@ c10::OperatorOptions aliasAnalysisFromSchema() {
   return result;
 }
 
+c10::OperatorOptions aliasAnalysisConservative() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
+  return result;
+}
+
 c10::OperatorOptions aliasAnalysisSpecialCase() {
   c10::OperatorOptions result;
   result.setAliasAnalysis(c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
@@ -677,6 +683,10 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     // NB: backward op might write to every input tensors in the graph and it's
+     // much more expensive to analayze the leaves and sometimes it might retain
+     // the whole gradients in every tensor of the Autograd graph with
+     // create_graph=True so we use aliasAnalysisConservative for these two OPs
      Operator(
          "aten::backward(Tensor[](a!) tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
          [](Stack& stack) {
@@ -698,7 +708,7 @@ RegisterOperators reg(
                output_vars, gradients, retain_graph, create_graph);
            return 0;
          },
-         aliasAnalysisSpecialCase()),
+         aliasAnalysisConservative()),
      Operator(
          "aten::backward(Tensor(a!) self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
          [](Stack& stack) {
@@ -713,7 +723,7 @@ RegisterOperators reg(
            self.backward(gradient, keep_graph, create_graph);
            return 0;
          },
-         aliasAnalysisSpecialCase()),
+         aliasAnalysisConservative()),
      Operator(
          "prim::AutogradZero() -> Tensor",
          [](const Node* node) {
@@ -884,7 +894,7 @@ RegisterOperators reg(
              pop(stack, input, shape);
              shape = shape.contiguous();
              AT_ASSERT(shape.ndimension() == 1);
-             at::IntArrayRef shape_list(shape.data<int64_t>(), shape.size(0));
+             at::IntArrayRef shape_list(shape.data_ptr<int64_t>(), shape.size(0));
              push(stack, input.reshape(shape_list));
              return 0;
            };
@@ -1875,7 +1885,11 @@ int listSort<at::Tensor>(Stack& stack) {
   std::sort(
       list.begin(),
       list.end(),
-      [reverse](const at::Tensor& a, const at::Tensor& b) {
+      [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
+        // "strict weak ordering" issue - see other sort
+        if (a.getIntrusivePtr() == b.getIntrusivePtr()) {
+          return false;
+        }
         return (a.lt(b).is_nonzero()) ^ reverse;
       });
   return 0;
@@ -2054,18 +2068,19 @@ int dictPop(Stack& stack) {
   }
   auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
+  auto iter = dict.find(key);
+  if (iter == dict.end()) {
     if (has_default) {
       push(stack, default_value);
     } else {
       AT_ERROR("KeyError: ", key);
     }
   } else {
+    // note: before erase
+    push(stack, iter->value());
     auto erase_count = dict.erase(key);
     TORCH_CHECK(
         erase_count == 1, "Expected to erase 1 item, found ", erase_count);
-    push(stack, value->value());
   }
   return 0;
 }
@@ -2787,7 +2802,7 @@ RegisterOperators reg2({
           c10::List<int64_t> elems;
           elems.reserve(t.size(0));
           for (int i = 0; i < t.size(0); i++) {
-            elems.push_back(*t[i].data<int32_t>());
+            elems.push_back(*t[i].data_ptr<int32_t>());
           }
           push(stack, std::move(elems));
           return 0;

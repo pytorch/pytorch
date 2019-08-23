@@ -3,9 +3,16 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import numpy as np
 
 import torch
+import io
 
 from common_utils import TestCase, run_tests
 import tempfile
+
+class Foo(torch.nn.Module):
+    def __init__(self):
+        super(Foo, self).__init__()
+        self.qscheme = torch.per_tensor_symmetric
+
 
 class TestQuantizedTensor(TestCase):
     def test_qtensor(self):
@@ -61,6 +68,22 @@ class TestQuantizedTensor(TestCase):
         qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+
+    def test_per_channel_qtensor_creation(self):
+        numel = 10
+        ch_axis = 0
+        scales = torch.rand(numel, dtype=torch.double)
+        zero_points = torch.randint(0, 10, size=(numel,), dtype=torch.long)
+        q = torch._empty_per_channel_affine_quantized_like(scales, zero_points, [numel], [ch_axis], dtype=torch.quint8)
+        self.assertEqual(scales, q.q_per_channel_scales())
+        self.assertEqual(zero_points, q.q_per_channel_zero_points())
+
+        # create Tensor from uint8_t Tensor, scales and zero_points
+        int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8)
+        q = torch._per_channel_affine_qtensor(int_tensor, scales, zero_points, [ch_axis])
+        self.assertEqual(int_tensor, q.int_repr())
+        self.assertEqual(scales, q.q_per_channel_scales())
+        self.assertEqual(zero_points, q.q_per_channel_zero_points())
 
     def test_qtensor_creation(self):
         scale = 0.5
@@ -247,6 +270,17 @@ class TestQuantizedTensor(TestCase):
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         c = b.reshape(1, 4, 2, 3)
         self.assertEqual(b, c.reshape(1, 3, 2, 4))
+
+    def test_qscheme_pickle(self):
+
+        f = Foo()
+        buf = io.BytesIO()
+        torch.save(f, buf)
+
+        buf.seek(0)
+        f2 = torch.load(buf)
+
+        self.assertTrue(f2.qscheme == torch.per_tensor_symmetric)
 
 if __name__ == "__main__":
     run_tests()
