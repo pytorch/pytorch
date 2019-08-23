@@ -2563,22 +2563,20 @@ class _TestTorchMixin(torchtest):
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_float_scalar_pow_float_tensor(self, device):
-        def assertEqual(x, y):
-            self.assertEqual(np.nan_to_num(x), np.nan_to_num(y), allow_inf=True)
         floats = [2.0, -3 / 2, -1.0, -1 / 2, -1 / 3, 0.0,
                   1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
 
         tensor = torch.tensor(floats, dtype=torch.float32, device=device)
         nparr = np.array(floats, dtype=np.float32)
         for base in floats:
-            expected = np.power(base, nparr).astype(np.float32)
+            expected = torch.from_numpy(np.power(base, nparr).astype(np.float32))
 
             actual = torch.pow(base, tensor)
-            assertEqual(expected, actual.cpu().numpy())
+            self.assertEqual(expected, actual, allow_inf=True)
 
             actual2 = torch.pow(base, tensor, out=actual)
-            assertEqual(expected, actual.cpu().numpy())
-            assertEqual(expected, actual2.cpu().numpy())
+            self.assertEqual(expected, actual, allow_inf=True)
+            self.assertEqual(expected, actual2, allow_inf=True)
 
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
