@@ -153,6 +153,10 @@ Tensor rsub(const Tensor& self, const Tensor& other, Scalar alpha) {
   return native::sub(other, self, alpha);
 }
 
+Tensor& rsub_(Tensor& self, const Tensor& other, Scalar alpha) {
+  return native::sub_out(self, other, self, alpha);
+}
+
 Tensor& atan2_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
   atan2_stub(iter.device_type(), iter);
@@ -212,6 +216,10 @@ Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
+}
+
+Tensor& rsub_(Tensor& self, Scalar other, Scalar alpha) {
+  return native::rsub_(self, wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {

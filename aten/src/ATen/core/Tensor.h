@@ -618,6 +618,10 @@ class CAFFE2_API Tensor {
   Tensor & sub_(const Tensor & other, Scalar alpha=1) const;
   Tensor sub(Scalar other, Scalar alpha=1) const;
   Tensor & sub_(Scalar other, Scalar alpha=1) const;
+  Tensor rsub(const Tensor & other, Scalar alpha=1) const;
+  Tensor & rsub_(const Tensor & other, Scalar alpha=1) const;
+  Tensor rsub(Scalar other, Scalar alpha=1) const;
+  Tensor & rsub_(Scalar other, Scalar alpha=1) const;
   Tensor addmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & sparse_resize_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) const;

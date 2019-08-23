@@ -279,6 +279,17 @@ Example::
             [  1.7166,   4.2256,   2.5000,   1.7337]])
 """.format(**common_args))
 
+add_docstr(torch.rsub,
+           r"""
+.. function:: rsub(input, other)
+
+Equivalent to calling ``sub(other, input)``. See :meth:`torch.sub`.
+
+.. function:: sub(input, alpha=1, other, out=None)
+
+Equivalent to calling ``sub(other, input, alpha=alpha)``. See :meth:`torch.sub`.
+""")
+
 add_docstr(torch.addbmm,
            r"""
 addbmm(beta=1, input, alpha=1, batch1, batch2, out=None) -> Tensor

@@ -221,6 +221,7 @@ Pointwise Ops
 .. autofunction:: remainder
 .. autofunction:: round
 .. autofunction:: rsqrt
+.. autofunction:: rsub
 .. autofunction:: sigmoid
 .. autofunction:: sign
 .. autofunction:: sin

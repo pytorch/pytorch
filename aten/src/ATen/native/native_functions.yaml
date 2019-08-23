@@ -2551,12 +2551,20 @@
   named_guard: False
 
 - func: rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  variants: function
+  variants: function, method
+  named_guard: False
+
+- func: rsub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
+  variants: method
   named_guard: False
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
-  variants: function
+  variants: function, method
+  named_guard: False
+
+- func: rsub_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
+  variants: method
   named_guard: False
 
 - func: s_native_addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)

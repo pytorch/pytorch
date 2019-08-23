@@ -2366,6 +2366,38 @@ inline Tensor & Tensor::sub_(Scalar other, Scalar alpha) const {
     return table->getOp<Tensor & (Tensor &, Scalar, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other, alpha);
 #endif
 }
+inline Tensor Tensor::rsub(const Tensor & other, Scalar alpha) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::rsub(const_cast<Tensor&>(*this), other, alpha);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, const Tensor &, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other, alpha);
+#endif
+}
+inline Tensor & Tensor::rsub_(const Tensor & other, Scalar alpha) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::rsub_(const_cast<Tensor&>(*this), other, alpha);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::rsub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, const Tensor &, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other, alpha);
+#endif
+}
+inline Tensor Tensor::rsub(Scalar other, Scalar alpha) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::rsub(const_cast<Tensor&>(*this), other, alpha);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Scalar, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other, alpha);
+#endif
+}
+inline Tensor & Tensor::rsub_(Scalar other, Scalar alpha) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::rsub_(const_cast<Tensor&>(*this), other, alpha);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::rsub_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, Scalar, Scalar)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other, alpha);
+#endif
+}
 inline Tensor Tensor::addmm(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::addmm(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);

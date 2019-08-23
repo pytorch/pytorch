@@ -1790,6 +1790,28 @@ class _TestTorchMixin(torchtest):
             else:
                 self.assertEqual(m1 - m2, torch.tensor([1.11, 2.11], dtype=dtype))
 
+    @torchtest.for_all_device_types()
+    def test_rsub(self, device):
+        for dtype in torch.testing.get_all_dtypes():
+            m1 = torch.tensor([3.3, 4.4], dtype=dtype, device=device)
+            m2 = torch.tensor([1.3, 1.4], dtype=dtype, device=device)
+            if (dtype == torch.bool or
+                    (dtype == torch.bfloat16 and device != 'cpu') or
+                    (dtype == torch.half and device == 'cpu')):
+                self.assertRaises(RuntimeError, lambda: torch.rsub(m1, m2))
+                self.assertRaises(RuntimeError, lambda: m1.rsub(m2))
+                self.assertRaises(RuntimeError, lambda: m1.rsub_(m2))
+                self.assertRaises(RuntimeError, lambda: torch.rsub(m1, 9.3))
+                self.assertRaises(RuntimeError, lambda: m1.rsub(9.3))
+                self.assertRaises(RuntimeError, lambda: m1.rsub(9.3))
+                continue
+
+            expected_res = m2 - m1
+            self.assertEqual(torch.rsub(m1, m2), expected_res)
+            self.assertEqual(m1.rsub(m2), expected_res)
+            m1.rsub_(m2)
+            self.assertEqual(m1, expected_res)
+
     def test_csub(self):
         # with a tensor
         a = torch.randn(100, 90)

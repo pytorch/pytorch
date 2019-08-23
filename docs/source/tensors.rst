@@ -397,6 +397,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: round_
    .. automethod:: rsqrt
    .. automethod:: rsqrt_
+   .. automethod:: rsub
+   .. automethod:: rsub_
    .. automethod:: scatter
    .. automethod:: scatter_
    .. automethod:: scatter_add_
