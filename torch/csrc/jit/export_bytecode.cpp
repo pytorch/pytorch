@@ -6,7 +6,6 @@
 
 #include <torch/csrc/jit/pickle.h>
 
-#include <caffe2/proto/bytecode_pb.h>
 #include <caffe2/serialize/inline_container.h>
 
 #include <fstream>
@@ -19,13 +18,6 @@
 
 namespace torch {
 namespace jit {
-void convertAndWriteTensor(
-    size_t tensor_id,
-    const at::Tensor& tensor,
-    torch::TensorDef* tensor_proto,
-    std::unordered_map<const void*, std::string>& storageMap,
-    caffe2::serialize::PyTorchStreamWriter& writer);
-
 void writeArchive(const std::string& archive_name, const IValue& value,
                   caffe2::serialize::PyTorchStreamWriter& writer);
 
