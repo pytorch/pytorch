@@ -12659,6 +12659,16 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(nhwc, x)
 
     @torchtest.test_all_device_types()
+    @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
+    def test_memory_format_scatter_gather(self):
+        with memory_format_propagation():
+            nhwc = torch.randn((10, 3, 32, 32), device='cpu').contiguous(memory_format=torch.channels_last)
+            results = torch.cuda.comm.scatter(nhwc, (0, 1), None, 0)
+            for result in results:
+                self.assertFalse(result.is_contiguous())
+                self.assertTrue(result.is_contiguous(memory_format=torch.channels_last))
+
+    @pytorchtest.test_all_device_types()
     def test_memory_format_clone(self, device):
         with memory_format_propagation():
             nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
