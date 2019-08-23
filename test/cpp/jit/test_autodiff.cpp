@@ -169,7 +169,7 @@ void testADFormulas() {
 void testDifferentiate() {
   // Note: can't use IRParser for this test due to issue #23989
   auto graph = std::make_shared<Graph>();
-  const auto type = ProfiledTensorType::create(at::ScalarType::Float, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  const auto type = TensorType::create(at::ScalarType::Float, at::kCPU, {2, 3, 4}, {12, 4, 1});
 
   // Builds graph a * b * a + b
   auto* a = graph->addInput()->setType(type);
