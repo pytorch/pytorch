@@ -9,9 +9,9 @@ namespace {
       return "";
     }
     std::ostringstream str;
-    str << detail::dispatch_key_to_string(kernels.begin()->first);
+    str << toString(kernels.begin()->first);
     for (auto iter = ++kernels.begin(); iter != kernels.end(); ++iter) {
-      str << ", " << detail::dispatch_key_to_string(iter->first);
+      str << ", " << toString(iter->first);
     }
     return str.str();
   }
@@ -37,7 +37,7 @@ void OperatorEntry::prepareForDeregistration() {
 RegistrationHandleRAII OperatorEntry::registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
-  TORCH_CHECK(kernels_.is_left(), "Tried to register a kernel with dispatch key ", detail::dispatch_key_to_string(dispatch_key)," for an operator which already has a catch-all kernel registered. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is ", toString(schema_));
+  TORCH_CHECK(kernels_.is_left(), "Tried to register a kernel with dispatch key ", toString(dispatch_key)," for an operator which already has a catch-all kernel registered. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is ", toString(schema_));
 
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
@@ -82,11 +82,11 @@ RegistrationHandleRAII OperatorEntry::registerCatchallKernel(DispatchTableEntry 
 void OperatorEntry::deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTableEntry>::iterator kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
-  TORCH_CHECK(kernels_.is_left(), "Tried deregister a kernel for dispatch key ", detail::dispatch_key_to_string(dispatch_key), " for an operator that only has a catch-all kernel. The operator schema is ", toString(schema_));
+  TORCH_CHECK(kernels_.is_left(), "Tried deregister a kernel for dispatch key ", toString(dispatch_key), " for an operator that only has a catch-all kernel. The operator schema is ", toString(schema_));
 
   auto& kernels = kernels_.left();
   auto found = kernels.find(dispatch_key);
-  TORCH_INTERNAL_ASSERT(found != kernels.end(), "Tried to deregister a kernel for dispatch key ", detail::dispatch_key_to_string(dispatch_key), " but there are no kernels registered for this dispatch key. The operator schema is ", toString(schema_));
+  TORCH_INTERNAL_ASSERT(found != kernels.end(), "Tried to deregister a kernel for dispatch key ", toString(dispatch_key), " but there are no kernels registered for this dispatch key. The operator schema is ", toString(schema_));
   auto& k = found->second;
   k.erase(kernel);
   if (k.empty()) {
@@ -112,10 +112,45 @@ void OperatorEntry::deregisterCatchallKernel_(std::list<DispatchTableEntry>::ite
   updateCatchallDispatchTable_();
 }
 
+RegistrationHandleRAII OperatorEntry::registerUnboxedAutogradKernel(void* kernel_func) {
+  std::unique_lock<std::mutex> lock(unboxedAutogradKernelsMutex_);
+
+  TORCH_INTERNAL_ASSERT(kernel_func != nullptr);
+
+  unboxedAutogradKernels_.push_front(kernel_func);
+  std::list<void*>::iterator inserted = unboxedAutogradKernels_.begin();
+
+  updateCurrentUnboxedAutogradKernel_();
+
+  return RegistrationHandleRAII([this, inserted] {
+    // list iterators stay valid even if the list changes,
+    // so we can use the iterator to deregister the kernel from the list
+    deregisterUnboxedAutogradKernel_(inserted);
+  });
+}
+
+void OperatorEntry::deregisterUnboxedAutogradKernel_(std::list<void*>::iterator kernel) {
+  std::unique_lock<std::mutex> lock(unboxedAutogradKernelsMutex_);
+
+  unboxedAutogradKernels_.erase(kernel);
+
+  updateCurrentUnboxedAutogradKernel_();
+}
+
+void OperatorEntry::updateCurrentUnboxedAutogradKernel_() {
+  // precondition: unboxedAutogradKernelsMutex_ is locked
+
+  if (unboxedAutogradKernels_.empty()) {
+    currentUnboxedAutogradKernel_ = nullptr;
+  } else {
+    currentUnboxedAutogradKernel_ = unboxedAutogradKernels_.front();
+  }
+}
+
 void OperatorEntry::updateDispatchTable_(TensorTypeId dispatch_key) {
   // precondition: kernelsMutex_ is locked
 
-  TORCH_INTERNAL_ASSERT(kernels_.is_left(), "Can't update the dispatch table a dispatch key ", detail::dispatch_key_to_string(dispatch_key), " because the operator only has catch-all kernels. The operator schema is ", toString(schema_));
+  TORCH_INTERNAL_ASSERT(kernels_.is_left(), "Can't update the dispatch table a dispatch key ", toString(dispatch_key), " because the operator only has catch-all kernels. The operator schema is ", toString(schema_));
 
   auto& kernels = kernels_.left();
   auto k = kernels.find(dispatch_key);

@@ -1,65 +1,10 @@
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 
 #include <ATen/NamedTensorUtils.h>
+#include <bitset>
 #include <sstream>
 
 namespace at {
-
-// Two Dimnames cannot be in the same Tensor if one of them can refer to the other.
-// In practice, this constraint means that a Tensor cannot have duplicate names
-// unless they are tagged and the tags are different.
-static DimnameList::const_iterator find_incompatible_name(
-    DimnameList::const_iterator begin,
-    DimnameList::const_iterator end,
-    const Dimname& target) {
-  return std::find_if(begin, end,
-      [&target](const Dimname& candidate) {
-        return target.can_refer_to(candidate) || candidate.can_refer_to(target);
-      });
-}
-
-static void check_unique_names(DimnameList names) {
-  // Strategy: Compare each element with the ones that come after it.
-  // Although this is O(N^2), in practice N is small (no more than 25).
-  for (auto it = names.begin(); it != names.end(); ++it) {
-    auto dup = find_incompatible_name(it + 1, names.end(), *it);
-    while (dup != names.end()) {
-      // Simple error message if you're not using tags
-      TORCH_CHECK(it->type() == NameType::TAGGED || dup->type() == NameType::TAGGED,
-          "Cannot construct a tensor with duplicate names. Got names: ",
-          names, ".");
-
-      // Complicated error message if you're using tags
-      TORCH_CHECK(false,
-          "Cannot construct a tensor with duplicate names unless they are tagged ",
-          "and have different tags. Got names: ", names, ", offending names: (",
-          *it, " and ", *dup, ").");
-      dup = find_incompatible_name(dup + 1, names.end(), *it);
-    }
-  }
-}
-
-void internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
-  if (!names) {
-    tensor.unsafeGetTensorImpl()->set_named_tensor_meta(nullptr);
-    return;
-  }
-
-  auto ndim = tensor.dim();
-  TORCH_CHECK(ndim == names->size(),
-      "Number of names (", names->size(), ") and "
-      "number of dimensions in tensor (", ndim, ") ",
-      "do not match.");
-  check_unique_names(*names);
-
-  auto* meta = tensor.get_named_tensor_meta();
-  if (meta == nullptr) {
-    tensor.unsafeGetTensorImpl()->set_named_tensor_meta(
-        torch::make_unique<NamedTensorMeta>(*names));
-  } else {
-    meta->set_names_(*names);
-  }
-}
 
 // Returns "Tensor['N', 'C', 'H', 'W']" for a tensor with names ('N', 'C', 'H', 'W').
 static std::string toDimnameRepr(const Tensor& tensor) {
@@ -103,15 +48,204 @@ int64_t dimname_to_position(const Tensor& tensor, Dimname dim) {
   return std::distance(names.begin(), it);
 }
 
-namespace namedinference {
+std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, DimnameList dims) {
+  std::vector<int64_t> result;
+  result.reserve(dims.size());
+  for (const auto& name : dims) {
+    result.push_back(dimname_to_position(tensor, name));
+  }
+  return result;
+}
 
-optional<std::vector<Dimname>> erase_name(optional<DimnameList> self_names, int64_t dim) {
-  if (self_names == nullopt) {
+static void report_positional_error(
+    const Dimname& name,
+    const Dimname& other_name,
+    DimnameList names,
+    DimnameList other_names) {
+  // TODO(zou3519): Can improve message by checking if names are alignable and suggesting workarounds
+  TORCH_CHECK(false,
+      "Names ", name, " and ", other_name, " do not match positionally ",
+      "from the right in names ", names, " and ", other_names, ".");
+}
+
+static void check_for_misalignment(
+    const Dimname& name,
+    DimnameList names,
+    DimnameList other_names) {
+  if (name.is_wildcard()) {
+    return;
+  }
+  auto it = std::find_if(other_names.begin(), other_names.end(),
+      [&](const Dimname& candidate) { return name.can_refer_to(candidate); });
+  // TODO(zou3519): Can improve message by checking if names are alignable and suggesting workarounds
+  TORCH_CHECK(it == other_names.end(),
+      "Names ", names, " and ", other_names, " are misaligned: name ", name,
+      " appears in a different position from the right.");
+}
+
+// Assumption: A DimnameList can have no duplicate full names with
+// the exception of wildcards
+static std::vector<Dimname> unify_from_right(DimnameList names, DimnameList other_names) {
+  const auto wildcard = Dimname::wildcard();
+  const auto size = std::max(names.size(), other_names.size());
+  auto result = std::vector<Dimname>(size, wildcard);
+
+  auto names_it = names.rbegin();
+  auto other_it = other_names.rbegin();
+  auto result_it = result.rbegin();
+  while (names_it != names.rend() || other_it != other_names.rend()) {
+    const auto& name = names_it == names.rend() ? wildcard : *names_it;
+    const auto& other_name = other_it == other_names.rend() ? wildcard : *other_it;
+
+    // TODO(zou3519): Don't support tagged names for now. They're a little weird.
+    if (name.is_tagged() || other_name.is_tagged()) {
+      TORCH_INTERNAL_ASSERT("unify_from_right: NYI: tagged names.");
+    }
+
+    // Step 1: Check that the names match
+    const auto maybeName = unify(name, other_name);
+    if (!maybeName) {
+      report_positional_error(name, other_name, names, other_names);
+    }
+    *result_it = *maybeName;
+
+    // Step 2: Check that the names are not misaligned
+    if (!name.is_normal() || !other_name.is_normal()) {
+      // Let: N = max(len(names), len(other_names))
+      //      K = # of special names among names and other_names.
+      // This search (including the outer loop) is O(N*K) but typically # of dims is small.
+      check_for_misalignment(name, names, other_names);
+      check_for_misalignment(other_name, other_names, names);
+    }
+
+    if (names_it != names.rend()) {
+      ++names_it;
+    }
+    if (other_it != other_names.rend()) {
+      ++other_it;
+    }
+    ++result_it;
+  }
+  return result;
+}
+
+// Assumption: A DimnameList can have no duplicate full names with
+// the exception of wildcards
+CAFFE2_API optional<std::vector<Dimname>>
+unify_from_right(optional<DimnameList> names, optional<DimnameList> other_names) {
+  if (!names && !other_names) {
     return nullopt;
   }
-  auto outnames = self_names->vec();
-  outnames.erase(outnames.begin() + dim);
-  return outnames;
+  if (!names) {
+    return other_names.value().vec();
+  }
+  if (!other_names) {
+    return names.value().vec();
+  }
+  return unify_from_right(*names, *other_names);
+}
+
+
+namespace namedinference {
+
+static std::bitset<64> compute_included_idxs(IntArrayRef excluded_idxs) {
+  std::bitset<64> included_idxs;
+  for (auto i : excluded_idxs) {
+    TORCH_INTERNAL_ASSERT(
+        i < 64,
+        "Named tensors must have dimension less than 64.");
+    included_idxs.set(i);
+  }
+  included_idxs.flip();
+  return included_idxs;
+}
+
+static void assert_names_equal(DimnameList a, DimnameList b) {
+  TORCH_CHECK(a == b,
+      "Name mismatch: specified out tensor with names ", a,
+      " are not the same as the computed output names ", b,
+      ". Please rename the out tensor's dimensions.");
+}
+
+void propagate_names(TensorImpl* result, optional<DimnameList> names) {
+  if (!impl::get_names(result).has_value() && !names.has_value()) {
+    return;
+  }
+  if (!impl::has_names(result)) {
+    impl::internal_set_names_inplace(result, names);
+    return;
+  }
+  assert_names_equal(
+      *impl::get_names(result),
+      names.value_or(FIXME_default_names(result->dim())));
+}
+
+void propagate_names(TensorImpl* result, std::vector<Dimname>&& names, bool validate_names) {
+  if (!impl::has_names(result)) {
+    impl::internal_set_names_inplace(result, std::move(names), validate_names);
+    return;
+  }
+  assert_names_equal(*impl::get_names(result), names);
+}
+
+void propagate_names(Tensor& result, optional<DimnameList> names) {
+  propagate_names(result.unsafeGetTensorImpl(), names);
+}
+
+void propagate_names(Tensor& result, std::vector<Dimname>&& names, bool validate_names) {
+  propagate_names(result.unsafeGetTensorImpl(), std::move(names), validate_names);
+}
+
+void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs) {
+  auto src_names = src.names();
+  if (!src_names.has_value()) {
+    return;
+  }
+
+  auto result_dim = result.dim();
+  auto src_dim = src_names->size();
+  TORCH_INTERNAL_ASSERT(src_dim - excluded_idxs.size() == result_dim);
+
+  // fast path
+  if (excluded_idxs.size() == 1) {
+    std::vector<Dimname> outnames = src_names->vec();
+    outnames.erase(outnames.begin() + excluded_idxs[0]);
+    propagate_names(result, std::move(outnames), /*validate_names=*/false);
+    return;
+  }
+
+  std::vector<Dimname> outnames;
+  outnames.reserve(result_dim);
+  auto included_idxs = compute_included_idxs(excluded_idxs);
+  for (size_t dim = 0; dim < src_dim; ++dim) {
+    if (included_idxs[dim]) {
+      outnames.push_back((*src_names)[dim]);
+    }
+  }
+  propagate_names(result, std::move(outnames), /*validate_names=*/false);
+}
+
+void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef reduced_dims, bool keepdim) {
+  if (keepdim) {
+    propagate_names(result, src);
+    return;
+  }
+  // This actually means "full reduction"
+  if (reduced_dims.size() == 0) {
+    return;
+  }
+  propagate_names_except(result, src, reduced_dims);
+}
+
+void propagate_names(Tensor& result, const Tensor& src) {
+  propagate_names(result.unsafeGetTensorImpl(), src.unsafeGetTensorImpl());
+}
+
+void propagate_names(TensorImpl* result, TensorImpl* src) {
+  if (result == src) {
+    return;
+  }
+  propagate_names(result, impl::get_names(src));
 }
 
 } // namespace namedinference

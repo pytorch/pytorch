@@ -26,13 +26,15 @@ SKIP_PYTHON_BINDINGS = [
     '_indexCopy_', 'max_values', 'min_values',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
-    'arange.*', 'range.*', '_solve.*', '_getri.*', '_inverse.*',
-    '_cholesky.*', '_triangular_solve.*', '_qr.*',
+    'arange.*', 'range.*', '_solve.*', '_inverse.*',
+    '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*', '_svd.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
     'copy_sparse_to_sparse_', 'copy_',
     'numpy_T',  # this needs to be an attribute in Python, not a function
     'nonzero(_(out|numpy))?',
+    'set_quantizer_',
+    'set_data',
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -151,7 +153,7 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,double,int64_t>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
-    'QScheme',
+    'QScheme', 'double',
 }
 
 TENSOR_OPTIONS = CodeTemplate("""\
@@ -291,6 +293,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'const Device &': 'device',
         'c10::optional<DimnameList>': 'toDimnameListOptional',
         'c10::optional<ScalarType>': 'scalartypeOptional',
+        'c10::optional<MemoryFormat>': 'memoryformatOptional',
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
         'c10::optional<bool>': 'toBoolOptional',
@@ -366,6 +369,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 typename = 'IntArrayRef'
             if typename.startswith('LongTensor'):
                 typename = 'Tensor'
+            if typename == 'c10::optional<DimnameList>':
+                unpack_args = True
 
             if arg.get('python_default_init'):
                 assert typename in unpack_with_default_methods, \
@@ -548,7 +553,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['call_dispatch_out'] = emit_single_dispatch(dictionary['out'], out_idx, base_env)
             env['call_dispatch'] = emit_single_dispatch(dictionary['base'], out_idx, base_env)
 
-            has_dtype_bind = 'dtype' in [d['name'] for d in dictionary['out'].get('python_binding_arguments', [])]
+            has_dtype_bind = 'dtype' in (d['name'] for d in dictionary['out'].get('python_binding_arguments', []))
             if has_dtype_bind:
                 body = PY_VARIABLE_OUT_CHECK_TYPE.substitute(env, out_idx=out_idx, type_idx=out_idx + 1,
                                                              layout_idx=out_idx + 2, device_idx=out_idx + 3).split('\n')
@@ -766,9 +771,9 @@ def group_declarations(declarations):
                 v['signature'] = signature
 
     result = []
-    for _, dictionary in sorted(grouped.items()):
+    for x, dictionary in sorted(grouped.items()):
         if 'base' not in dictionary:
-            raise RuntimeError("'base' not in dictionary", dictionary)
+            raise RuntimeError("'base' not in dictionary for " + str(x), dictionary)
         result.append(dictionary)
     return sort_declarations(result)
 
@@ -871,7 +876,7 @@ def get_python_signature(declaration, include_out):
         default = None
         if arg.get('default') is not None:
             default = arg['default']
-            if default == 'nullptr' or default == 'nullopt' or default == '{}':
+            if default == 'nullptr' or default == 'c10::nullopt' or default == '{}':
                 default = 'None'
         if default is not None:
             param += '=' + str(default)

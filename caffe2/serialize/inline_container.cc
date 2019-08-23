@@ -274,13 +274,13 @@ PyTorchStreamWriter::PyTorchStreamWriter(
   writeRecord("version", version.str().c_str(), version.str().size());
 }
 
-void PyTorchStreamWriter::writeRecord(const std::string& name, const void* data, size_t size) {
+void PyTorchStreamWriter::writeRecord(const std::string& name, const void* data, size_t size, bool compress) {
   AT_ASSERT(!finalized_);
   std::stringstream ss;
   ss << archive_name_ << "/" << name;
   const std::string& full_name = ss.str();
   std::string padding = getPadding(ar_->m_archive_size, full_name, size);
-  uint32_t flags = 0;
+  uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   mz_zip_writer_add_mem_ex_v2(
       ar_.get(),
       full_name.c_str(),

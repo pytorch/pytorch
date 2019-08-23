@@ -1,6 +1,5 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/Formatting.h>
-#include <ATen/core/Type.h>
 
 #include <iostream>
 
@@ -26,10 +25,6 @@ void Tensor::enforce_invariants() {
           impl_->storage_initialized(),
           "Partially-initialized tensor not supported by at::Tensor");
     }
-    // Ensure LegacyTypeDispatch is initialized. In ATen it's done in tensor
-    // factory functions, but when we get a tensor from Caffe2 we might bypass
-    // those factory functions.
-    initializeLegacyTypeDispatchFor(*impl_);
   }
 }
 

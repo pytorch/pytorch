@@ -1,6 +1,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/tracer.h>
 
 namespace torch {
@@ -19,13 +20,13 @@ IValue wrap(IValue&& ivalue) {
   if (ivalue.isTensor()) {
     return wrap_tensor(std::move(ivalue).toTensor());
   } else if (ivalue.isTensorList()) {
-    c10::ListPtr<at::Tensor> list = std::move(ivalue).toTensorList();
+    c10::List<at::Tensor> list = std::move(ivalue).toTensorList();
     for (size_t i = 0; i < list.size(); ++i) {
       list[i] = wrap_tensor(list.extract(i));
     }
     return std::move(list);
   } else if (ivalue.isGenericList()) {
-    c10::impl::GenericListPtr list = std::move(ivalue).toGenericList();
+    c10::impl::GenericList list = std::move(ivalue).toGenericList();
     for (size_t i = 0; i < list.size(); ++i) {
       list[i] = wrap(list.extract(i));
     }
@@ -81,7 +82,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
                   reinterpret_cast<OptionalType*>(type.get())->getElementType();
             }
           }
-          if (type->isSubclass(TypeKind::TensorType)) {
+          if (type->isSubtypeOf(TensorType::get())) {
             AT_ASSERT(iter->isTensor());
             tracer::addInputs(node, args[i].name().c_str(), iter->toTensor());
           } else if (type->kind() == TypeKind::FloatType) {
@@ -100,7 +101,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           } else if (type->kind() == TypeKind::ListType) {
             const auto& elem_type =
                 reinterpret_cast<ListType*>(type.get())->getElementType();
-            if (elem_type->isSubclass(TypeKind::TensorType)) {
+            if (elem_type->isSubtypeOf(TensorType::get())) {
               AT_ASSERT(iter->isTensorList());
               auto list = iter->toTensorListRef();
               tracer::addInputs(node, args[i].name().c_str(), list);
@@ -148,13 +149,13 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
         for (auto iter = stack.end() - output_size; iter != stack.end();
              ++iter, ++i) {
           const auto& type = op.schema().returns()[i].type();
-          if (type->isSubclass(TypeKind::TensorType)) {
+          if (type->isSubtypeOf(TensorType::get())) {
             AT_ASSERT(iter->isTensor());
             tracer::addOutput(node, iter->toTensor());
           } else if (type->kind() == TypeKind::ListType) {
             const auto& elem_type =
                 reinterpret_cast<ListType*>(type.get())->getElementType();
-            if (elem_type->isSubclass(TypeKind::TensorType)) {
+            if (elem_type->isSubtypeOf(TensorType::get())) {
               AT_ASSERT(iter->isTensorList());
               tracer::addOutput(node, iter->toTensorList());
             } else {

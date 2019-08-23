@@ -13,7 +13,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <algorithm>
 #include <vector>
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
 #endif
 
@@ -403,13 +403,23 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   std::vector<int64_t> padded_size(num_new_dimensions, 1);
   padded_size.insert(padded_size.end(), self.sizes().begin(), self.sizes().end());
   std::vector<int64_t> target_size(repeats.size());
+  bool zero_tensor = false;
   for(size_t idx = 0; idx < repeats.size(); ++idx) {
+    if (repeats[idx] == 0) {
+      zero_tensor = true;
+    }
     target_size[idx] = padded_size[idx] * repeats[idx];
   }
 
   Tensor xtensor = self.expand(padded_size);
 
   Tensor result = at::empty(target_size, self.options());
+
+  // return an empty tensor if one of the repeat dimensions is zero
+  if (zero_tensor) {
+    return result;
+  }
+
   Tensor urtensor = at::alias(result);
   for (int64_t i = 0; i < xtensor.dim(); ++i) {
     // can't unfold with step 0, so make sure step is at least 1
@@ -429,7 +439,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   auto shape = infer_size(proposed_shape, self.numel());
 
   if (self.is_mkldnn()) {
-    return at::mkldnn_reshape(self, shape);
+    return at::_mkldnn_reshape(self, shape);
   }
 
   if (auto stride = THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
@@ -450,7 +460,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
   if (index < -size || index >= size) {
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
     if (self.names().has_value()) {
       AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()->at(dim));
@@ -459,9 +469,6 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
     AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
-#ifdef NAMEDTENSOR_ENABLED
-  const auto outnames = namedinference::erase_name(self.names(), dim);
-#endif
   if (index < 0) {
     index += size;
   }
@@ -471,13 +478,17 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   sizes.erase(sizes.begin() + dim);
   strides.erase(strides.begin() + dim);
   auto result = self.as_strided(sizes, strides, storage_offset);
-#ifdef NAMEDTENSOR_ENABLED
-  if (outnames) {
-    internal_set_names_inplace(result, *outnames);
-  }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_except(result, self, {dim});
 #endif
   return result;
 }
+
+#ifdef BUILD_NAMEDTENSOR
+Tensor select(const Tensor& self, Dimname dim, int64_t index) {
+  return at::select(self, dimname_to_position(self, dim), index);
+}
+#endif
 
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
   int64_t ndim = self.dim();
@@ -509,7 +520,11 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   auto len = end - start;
   sizes[dim] = (len + step - 1) / step;  // round-up
   strides[dim] *= step;
-  return self.as_strided(sizes, strides, storage_offset);
+  auto result = self.as_strided(sizes, strides, storage_offset);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, self);
+#endif
+  return result;
 }
 
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
@@ -624,6 +639,10 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
     return sparse_transpose_(self, dim0, dim1);
   }
 
+  if (self.is_mkldnn()) {
+    return at::_mkldnn_transpose_(self, dim0, dim1);
+  }
+
   auto strides = self.strides().vec();
   auto sizes = self.sizes().vec();
   std::swap(strides[dim0], strides[dim1]);
@@ -642,6 +661,10 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   if (self.is_sparse()) {
     Tensor self_clone = self.clone();  // yes, this is what THS does
     return sparse_transpose_(self_clone, dim0, dim1);
+  }
+
+  if (self.is_mkldnn()) {
+    return at::_mkldnn_transpose(self, dim0, dim1);
   }
 
   auto strides = self.strides().vec();
@@ -882,6 +905,43 @@ Tensor numpy_T(const Tensor &self) {
   }
   return self.permute(transpose_dims);
 }
+
+Tensor view(const Tensor& self, IntArrayRef size) {
+  auto inferred_size = at::infer_size(size, self.numel());
+  auto stride = at::detail::computeStride(self.sizes(),
+                                          self.strides(),
+                                          inferred_size);
+  TORCH_CHECK(stride.has_value(), "view size is "
+    "not compatible with input tensor's size and stride (at least one dimension"
+    " spans across two contiguous subspaces). Use .reshape(...) instead.");
+  auto stride_value = *stride;
+  auto self_ = self.alias();
+  self_.set_(
+    self.storage(), self.storage_offset(), inferred_size, stride_value);
+  return self_;
 }
 
+Tensor alias(const Tensor& self) {
+  Tensor self_;
+  if (self.is_quantized()) {
+    auto impl = c10::make_intrusive<QTensorImpl>(
+                    Storage(self.storage()),
+                    self.type_id(),
+                    get_qtensorimpl(self)->quantizer());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(self.sizes(), self.strides());
+    self_ = Tensor(std::move(impl));
+  } else {
+    auto impl = c10::make_intrusive<TensorImpl>(Storage(self.storage()),
+                                                self.type_id());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(self.sizes(), self.strides());
+    self_ = Tensor(std::move(impl));
+  }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(self_, self);
+#endif
+  return self_;
 }
+
+}} // at::native

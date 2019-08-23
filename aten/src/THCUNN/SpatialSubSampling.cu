@@ -1,7 +1,7 @@
 #include <THCUNN/THCUNN.h>
 #include <THC/THCTensor.hpp>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <THC/THCAtomics.cuh>
 
 #define CUDA_MAX_THREADS 1024   // this is safe, in reality 256 is our limit

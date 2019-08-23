@@ -5,6 +5,11 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
+#include <ATen/quantized/Quantizer.h>
+#include <ATen/MemoryOverlap.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 namespace {
 
@@ -29,10 +34,10 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   }
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, self.scalar_type(), "copy_", [&] {
-    scalar_t* sp = src.data<scalar_t>();
-    scalar_t* rp = self.data<scalar_t>();
-    scalar_t* bp = buf.data<scalar_t>();
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
+    scalar_t* sp = src.data_ptr<scalar_t>();
+    scalar_t* rp = self.data_ptr<scalar_t>();
+    scalar_t* bp = buf.data_ptr<scalar_t>();
 
     int64_t NR = src.size(0);
     int64_t NC = src.size(1);
@@ -68,6 +73,14 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
       }
     }
   });
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = unify_from_right(self.names(), src.names());
+  if (outnames.has_value()) {
+    namedinference::propagate_names(self, *outnames);
+  } else {
+    namedinference::propagate_names(self, nullopt);
+  }
+#endif
 }
 
 // Devices directly supported by this copy implementation. Other device types
@@ -85,7 +98,7 @@ namespace native {
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
-  TORCH_CHECK(self.defined(), "src is undefined");
+  TORCH_CHECK(src.defined(), "src is undefined");
 
   if (self.is_sparse() && src.is_sparse()) {
     return at::copy_sparse_to_sparse_(self, src, non_blocking);
@@ -112,28 +125,26 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
 
   if (self.is_quantized() && src.is_quantized()) {
-    // TODO: uncomment after qscheme diff is landed
-    // TORCH_CHECK(self.qscheme() == src.qscheme(),
-    //             "Quantized Copy only works with same qscheme");
-    TORCH_CHECK(self.q_scale().toFloat() == src.q_scale().toFloat(),
-                "Quantized Copy only works with same scale");
-    TORCH_CHECK(self.q_zero_point().toInt() == src.q_zero_point().toInt(),
-                "Quantized Copy only works with same zero_point");
+    TORCH_CHECK(self.qscheme() == src.qscheme(),
+                "Quantized Copy only works with same qscheme");
+    TORCH_CHECK(self.scalar_type() == src.scalar_type());
+    self.set_quantizer_(at::make_per_tensor_affine_quantizer(src.q_scale(), src.q_zero_point(), src.scalar_type()));
   }
 
-  auto builder = TensorIterator::Builder();
-  builder.add_output(self);
-  builder.add_input(src);
-  builder.dont_resize_outputs();
-  builder.dont_compute_common_dtype();
-  auto iter = builder.build();
+  auto iter = TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(self);
+  iter.add_input(src);
+  iter.dont_resize_outputs();
+  iter.dont_compute_common_dtype();
+  iter.build();
 
-  if (iter->numel() == 0) {
+  if (iter.numel() == 0) {
     return self;
   }
 
-  DeviceType device_type = iter->device_type(0);
-  if (iter->device_type(1) == kCUDA) {
+  DeviceType device_type = iter.device_type(0);
+  if (iter.device_type(1) == kCUDA) {
     device_type = kCUDA;
   }
 
@@ -142,7 +153,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     return self;
   }
 
-  copy_stub(device_type, *iter, non_blocking);
+  copy_stub(device_type, iter, non_blocking);
   return self;
 }
 

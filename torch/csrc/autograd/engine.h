@@ -12,13 +12,15 @@
 #include <exception>
 #include <functional>
 #include <memory>
+#include <queue>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <thread>
 
 namespace torch { namespace autograd {
 struct ReadyQueue;
-struct FunctionTask;
+struct NodeTask;
 struct GraphTask;
 }} // namespace torch::autograd
 
@@ -32,10 +34,10 @@ struct TORCH_API Engine {
   Engine();
   virtual ~Engine();
 
-  using ready_queue_type = std::deque<std::pair<std::shared_ptr<Function>, InputBuffer>>;
-  using dependencies_type = std::unordered_map<Function*, int>;
+  using ready_queue_type = std::deque<std::pair<std::shared_ptr<Node>, InputBuffer>>;
+  using dependencies_type = std::unordered_map<Node*, int>;
 
-  // Given a list of (Function, input number) pairs computes the value of the graph
+  // Given a list of (Node, input number) pairs computes the value of the graph
   // by following next_edge references.
   virtual variable_list execute(
       const edge_list& roots,
@@ -52,14 +54,17 @@ struct TORCH_API Engine {
   bool is_checkpoint_valid();
 
 protected:
-  void compute_dependencies(Function* root, GraphTask& task);
-  void evaluate_function(FunctionTask& task);
+  void compute_dependencies(Node* root, GraphTask& task);
+  void evaluate_function(NodeTask& task);
   ReadyQueue& ready_queue(at::Device device);
   ReadyQueue& ready_queue_by_index(int device_index);
   void start_threads();
   virtual void thread_init(int device);
   virtual void thread_main(GraphTask *graph_task);
-  virtual void thread_on_exception(FunctionTask& task, std::exception& e);
+  virtual void thread_on_exception(NodeTask& task, std::exception& e);
+  void reentrant_thread_init();
+  void add_thread_pool_task(GraphTask *graph_task);
+  void set_device(int device);
 
   // Ensures ready_queues_ are initialized only once
   std::once_flag start_threads_flag_;
@@ -68,6 +73,31 @@ protected:
   std::vector<std::function<void()>> final_callbacks_;
   // To protect reads and writes to final_callbacks_
   std::mutex post_callbacks_lock_;
+  // How many nested reentrant calls are allowed until a new thread is used
+  int max_recursion_depth_;
+
+  struct ThreadPoolShared {
+    // Data structures used by the threads for executing reentrant backwards
+    // tasks. See Note [Reentrant backwards]
+    // Number of available threads for processing new GraphTasks.
+    unsigned int num_workers_;
+    // The threads will wait on work_ to be notified of GraphTasks
+    std::condition_variable work_;
+    // To protect reads and writes to graphtask_queue_ and num_workers_
+    // and for synchronizing creating new threads when needed
+    std::mutex mutex_;
+    // Workers will process the GraphTasks added to this queue. A GraphTask is
+    // allocated inside Engine::execute and lives for the duration of execute
+    std::queue<GraphTask*> graphtasks_queue_;
+
+    ThreadPoolShared() : num_workers_(0) {}
+ };
+
+ // Temporary workaround until shutting down threads is done
+ // We need shared ownership of all these objects because the threads are leaked
+ // when Engine shuts down, so there may be threads waiting on work_
+ // for the graphtasks_queue_ to be nonempty.
+ std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
 };
 
 // allow python_engine to override the default engine when it loads

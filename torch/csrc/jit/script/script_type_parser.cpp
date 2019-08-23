@@ -182,7 +182,7 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
       return itr->second;
     }
     if (resolver_) {
-      if (auto typePtr = resolver_->resolveType(*name)) {
+      if (auto typePtr = resolver_->resolveType(*name, expr.range())) {
         return typePtr;
       }
     }
@@ -230,11 +230,12 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
       List<Stmt>::create(r, {ret}));
 
   CompilationUnit cu;
-  // set optimize to false since we don't need to run it in optimize mode
-  cu.set_optimized(false);
-  cu.define({def}, {resolver_}, nullptr);
+  cu.define(c10::nullopt, {def}, {resolver_}, nullptr);
   Stack stack;
-  cu.get_function("defaults").run(stack);
+  // XXX: We need to turn optimization off here because otherwise we try to
+  // recursively initialize stuff in DecomposeOps.
+  GraphOptimizerEnabledGuard guard(false);
+  cu.get_function(def.name().name()).run(stack);
   return stack.at(0).toTuple()->elements();
 }
 

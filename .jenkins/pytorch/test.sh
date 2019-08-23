@@ -35,30 +35,30 @@ fi
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # JIT C++ extensions require ninja.
-  pip_install ninja
+  pip_install --user ninja
   # ninja is installed in /var/lib/jenkins/.local/bin
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
   # TODO: move this to Docker
-  pip_install hypothesis
+  pip_install --user hypothesis
 
   # TODO: move this to Docker
   PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
   echo $PYTHON_VERSION
   # if [[ $PYTHON_VERSION == "2" ]]; then
-  #   pip_install https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl
+  #   pip_install --user https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl
   # else
-  #   pip_install https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl
+  #   pip_install --user https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl
   # fi
-  pip_install tb-nightly
+  pip_install --user tb-nightly
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
-  pip_install mypy || true
+  pip_install --user mypy || true
 fi
 
 # faulthandler become built-in since 3.3
 if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
-  pip_install faulthandler
+  pip_install --user faulthandler
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
@@ -92,10 +92,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export PYTORCH_TEST_WITH_ROCM=1
-fi
-
 if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
@@ -108,7 +104,7 @@ test_python_nn() {
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude nn --verbose
+  time python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized_conv quantized quantized_tensor quantized_nn_mods quantizer
   assert_git_not_dirty
 }
 
@@ -138,7 +134,7 @@ test_aten() {
 }
 
 test_torchvision() {
-  pip_install git+https://github.com/pytorch/vision.git@2f64dd90e14fe5463b4e5bd152d56e4a6f0419de
+  pip_install --user git+https://github.com/pytorch/vision.git@2b73a4846773a670632b29fb2fc2ac57df7bce5d
 }
 
 test_libtorch() {
@@ -166,6 +162,7 @@ test_custom_script_ops() {
     cp -a "$CUSTOM_OP_BUILD" build
     # Run tests Python-side and export a script module.
     python test_custom_ops.py -v
+    python test_custom_classes.py -v
     python model.py --export-script-module=model.pt
     # Run tests C++-side and load the exported script module.
     build/test_custom_ops ./model.pt

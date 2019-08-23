@@ -7,12 +7,15 @@ namespace jit {
 static ModuleHook emit_module_callback;
 void didFinishEmitModule(script::Module module) {
   if (emit_module_callback) {
+// [serialization forward compat]
+#ifndef FBCODE_CAFFE2
     emit_module_callback(std::move(module));
+#endif
   }
 }
 
 static FunctionHook emit_function_callback;
-void didFinishEmitFunction(std::shared_ptr<Function> fn) {
+void didFinishEmitFunction(StrongFunctionPtr fn) {
   if (emit_function_callback) {
     emit_function_callback(fn);
   }

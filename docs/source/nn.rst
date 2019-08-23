@@ -794,12 +794,6 @@ DataParallel layers (multi-GPU, distributed)
 .. autoclass:: torch.nn.parallel.DistributedDataParallel
     :members:
 
-:hidden:`DistributedDataParallelCPU`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: torch.nn.parallel.DistributedDataParallelCPU
-    :members:
-
 
 Utilities
 ---------
@@ -876,6 +870,8 @@ Utilities
 
 .. autofunction:: torch.nn.utils.rnn.pack_sequence
 
+:hidden:`Flatten`
+~~~~~~~~~~~~~~~~~
 
-
-
+.. autoclass:: Flatten
+    :members:

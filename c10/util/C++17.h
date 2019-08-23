@@ -8,6 +8,7 @@
 #include <sstream>
 #include <string>
 #include <cstdlib>
+#include <functional>
 #include <c10/macros/Macros.h>
 
 /*
@@ -229,6 +230,21 @@ constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
 #endif
 #endif
 
+template <typename Functor, typename... Args>
+typename std::enable_if<
+    std::is_member_pointer<typename std::decay<Functor>::type>::value,
+    typename std::result_of<Functor && (Args && ...)>::type>::type
+invoke(Functor&& f, Args&&... args) {
+  return std::mem_fn(f)(std::forward<Args>(args)...);
+}
+
+template <typename Functor, typename... Args>
+typename std::enable_if<
+    !std::is_member_pointer<typename std::decay<Functor>::type>::value,
+    typename std::result_of<Functor && (Args && ...)>::type>::type
+invoke(Functor&& f, Args&&... args) {
+  return std::forward<Functor>(f)(std::forward<Args>(args)...);
+}
 
 
 
@@ -243,6 +259,7 @@ namespace std {
 // std::to_string() call, then you're calling std::to_string() but should be calling
 // c10::guts::to_string().
 inline std::string to_string(c10::guts::detail::DummyClassForToString) { return ""; }
+
 }
 namespace c10 { namespace guts { namespace detail {
 

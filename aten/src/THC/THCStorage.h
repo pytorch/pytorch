@@ -12,4 +12,7 @@
 #include <THC/generic/THCStorage.h>
 #include <THC/THCGenerateBoolType.h>
 
+#include <THC/generic/THCStorage.h>
+#include <THC/THCGenerateBFloat16Type.h>
+
 #endif

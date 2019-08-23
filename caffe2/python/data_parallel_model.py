@@ -18,9 +18,14 @@ from caffe2.proto import caffe2_pb2
 import numpy as np
 import warnings
 
-dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/nccl:nccl_ops")
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops")
-dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_gpu")
+
+# We only import nccl operators when the machine has GPUs
+# Otherwise the binary can be compiled with CPU-only mode, and
+# will not be able to find those modules
+if workspace.NumGpuDevices() > 0:
+    dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/nccl:nccl_ops")
+    dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_gpu")
 
 log = logging.getLogger("data_parallel_model")
 log.setLevel(logging.INFO)

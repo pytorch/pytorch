@@ -40,7 +40,7 @@ void PythonEngine::thread_init(int device) {
   Engine::thread_init(device);
 }
 
-void PythonEngine::thread_on_exception(FunctionTask& task, std::exception& e) {
+void PythonEngine::thread_on_exception(NodeTask& task, std::exception& e) {
   auto python_err = dynamic_cast<python_error*>(&e);
   if (python_err) {
     python_err->persist();

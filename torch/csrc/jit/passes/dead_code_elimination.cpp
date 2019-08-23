@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 #include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -15,9 +16,10 @@ using namespace ::c10::prim;
 
 class DeadCodeEliminator {
  public:
-  explicit DeadCodeEliminator(std::shared_ptr<Graph> graph)
-      : aliasDb_(torch::make_unique<AliasDb>(std::move(graph))) {}
-  DeadCodeEliminator() = default;
+  explicit DeadCodeEliminator(std::shared_ptr<Graph> graph, DCESideEffectPolicy sideEffectPolicy)
+      : sideEffectPolicy_(sideEffectPolicy), aliasDb_(torch::make_unique<AliasDb>(std::move(graph))) {}
+  DeadCodeEliminator(DCESideEffectPolicy sideEffectPolicy)
+  : sideEffectPolicy_(sideEffectPolicy) {}
 
   // The algorithm is an inverse mark-and-sweep. Starting from the return node,
   // we mark "live" nodes that are necessary for the output. Nodes that have
@@ -56,6 +58,14 @@ class DeadCodeEliminator {
       Graph& g = *node->g(attr::Subgraph);
       for (size_t i = 0; i < g.inputs().size(); ++i) {
         if (!g.inputs().at(i)->hasUses()) {
+          GRAPH_UPDATE(
+              "Dead ",
+              i,
+              "-th input ",
+              node->inputs().at(i)->debugName(),
+              "(",
+              g.inputs().at(i)->debugName(),
+              " in a subgraph) will be removed");
           g.eraseInput(i);
           node->removeInput(i);
         }
@@ -79,9 +89,11 @@ class DeadCodeEliminator {
   // We want to be able to DCE all the %b stuff. So when processing block
   // returns, we only mark producers for values that "live" (i.e. used outside
   // the block).
-  void markReturnNode(Node* node) {
+  //
+  // Returns true iff this marked something we haven't marked before.
+  bool markReturnNode(Node* node) {
     if (marked_.count(node)) {
-      return;
+      return false;
     }
 
     AT_ASSERT(node->owningBlock()->return_node() == node);
@@ -122,30 +134,74 @@ class DeadCodeEliminator {
     }
 
     marked_.insert(node);
+    return true;
   }
 
-  void mark(Block* block) {
+  // Loops are special, because we need to run them to convergence.
+  // Consider the following loop:
+  //   for i in range(3):
+  //     tot += a[0][0]
+  //     b = a[0]
+  //     b[0] += 1
+  //   print(tot)
+  //
+  // If we only process the loop block once, we will conclude that `b[0]` and
+  // `b` are dead, even though `b[0] += 1` mutates a live memory location (since
+  // `b[0]` is an alias of `a`). i.e. `a` is used to compute `tot` in the next
+  // iteration
+  //
+  // We need to mark the loop again with the information that `a` is live, and
+  // repeat until we're not marking new stuff anymore.
+  //
+  // Returns true iff this marked something we haven't marked before.
+  bool markLoop(Node* node) {
+    TORCH_INTERNAL_ASSERT(node->kind() == prim::Loop);
+    // Did a single iteration over the loop block mark anything new?
+    // If this is false, we've converged.
+    bool marked = false;
+    // Did we ever mark anything new?
+    bool anyMarked = false;
+    do {
+      marked = mark(node->blocks().at(0));
+      anyMarked |= marked;
+    } while (marked);
+    return anyMarked;
+  }
+
+  // Returns true iff this marked something we haven't marked before.
+  bool mark(Block* block) {
+    bool anyMarked = false;
     // Mark all nodes with side effects.
     for (auto node : block->nodes()) {
-      if (hasSideEffects(node)) {
-        mark(node);
+      if (sideEffectPolicy_ ==
+              DCESideEffectPolicy::DONT_DELETE_NODES_WITH_SIDE_EFFECTS &&
+          hasSideEffects(node)) {
+        anyMarked |= mark(node);
       }
     }
 
     // Initialize by marking the return node
-    markReturnNode(block->return_node());
+    anyMarked |= markReturnNode(block->return_node());
 
     for (auto it = block->nodes().rbegin(); it != block->nodes().rend(); ++it) {
       auto node = *it;
-      for (auto subBlock : node->blocks()) {
-        mark(subBlock);
+      if (node->kind() == prim::Loop) {
+        // Special casing for loops, see comment in markLoop.
+        anyMarked |= markLoop(node);
+      } else {
+        // Other nodes with sub-blocks get marked normally.
+        for (auto subBlock : node->blocks()) {
+          anyMarked |= mark(subBlock);
+        }
       }
-      markIfLive(node);
+      anyMarked |= markIfLive(node);
     }
+    return anyMarked;
   }
 
   // If we output or write to a live memory location, mark this node
-  void markIfLive(Node* node) {
+  // Returns true iff this marked something we haven't marked before.
+  bool markIfLive(Node* node) {
     for (const auto output : node->outputs()) {
       if (liveValues_.count(output)) {
         return mark(node);
@@ -157,13 +213,15 @@ class DeadCodeEliminator {
         return mark(node);
       }
     }
+    return false;
   }
 
   // Mark this node as live and add this node's inputs and aliases to the live
   // value sets.
-  void mark(Node* node) {
+  // Returns true iff this marked something we haven't marked before.
+  bool mark(Node* node) {
     if (marked_.count(node)) {
-      return;
+      return false;
     }
 
     marked_.insert(node);
@@ -186,6 +244,7 @@ class DeadCodeEliminator {
       }
       liveValues_.insert(input);
     }
+    return true;
   }
 
   // Delete all unmarked nodes.
@@ -207,6 +266,13 @@ class DeadCodeEliminator {
       // Reverse_block is inlined in grad_desc.f before it's separated
       // to grad_desc.df.
       if (!(marked_.count(node) || node->hasUses())) {
+        GRAPH_UPDATE(
+            "Node ",
+            it->kind().toQualString(),
+            " w/ output ",
+            (node->outputs().size() > 0 ? node->outputs().at(0)->debugName()
+                                        : "n/a"),
+            " will be removed");
         it.destroyCurrent();
       }
     }
@@ -256,8 +322,20 @@ class DeadCodeEliminator {
     for (size_t i_1 = node->outputs().size(); i_1 > 0; --i_1) {
       size_t i = i_1 - 1;
       if (!node->outputs().at(i)->hasUses()) {
+        GRAPH_UPDATE(
+            "Dead ",
+            i,
+            "-th output ",
+            node->outputs().at(i)->debugName(),
+            " of node ",
+            node->kind().toQualString(),
+            " will be removed");
         node->eraseOutput(i);
         for (Block* b : node->blocks()) {
+          GRAPH_UPDATE(
+              "\tCorresponding block output ",
+              b->outputs().at(i)->debugName(),
+              " will be removed");
           b->eraseOutput(i);
         }
       }
@@ -276,6 +354,7 @@ class DeadCodeEliminator {
       size_t i = i_1 - 1;
       if (!node->outputs().at(i)->hasUses() &&
           !loop_body->inputs().at(loop_body_offset + i)->hasUses()) {
+        logDeadLoopOutputs(node, i, loop_input_offset, loop_body_offset);
         node->eraseOutput(i);
         node->removeInput(loop_input_offset + i);
         loop_body->eraseInput(loop_body_offset + i);
@@ -284,6 +363,39 @@ class DeadCodeEliminator {
     }
   }
 
+  void logDeadLoopOutputs(
+      Node* node,
+      size_t i,
+      size_t loop_input_offset,
+      size_t loop_body_offset) {
+    auto loop_body = node->blocks().at(0);
+    GRAPH_UPDATE(
+        "Dead ",
+        loop_input_offset + i,
+        "-th input ",
+        node->inputs().at(i)->debugName(),
+        " will be removed");
+    GRAPH_UPDATE(
+        "Dead ",
+        i,
+        "-th output ",
+        node->outputs().at(i)->debugName(),
+        " will be removed");
+    GRAPH_UPDATE(
+        "\tDead block input ",
+        loop_body->inputs().at(loop_body_offset + i)->debugName(),
+        "at offset ",
+        loop_body_offset + i,
+        " will be removed");
+    GRAPH_UPDATE(
+        "\tDead block output ",
+        loop_body->outputs().at(loop_body_offset + i)->debugName(),
+        "at offset ",
+        loop_body_offset + i,
+        " will be removed");
+  }
+
+  DCESideEffectPolicy sideEffectPolicy_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::unordered_map<Node*, bool> memo_;
   std::unordered_set<Node*> marked_;
@@ -292,18 +404,20 @@ class DeadCodeEliminator {
       [](const std::unordered_set<const Value*>&) {};
 };
 
-void EliminateDeadCode(const std::shared_ptr<Graph>& graph) {
-  DeadCodeEliminator(graph).run(graph->block(), /*recurse=*/true);
+void EliminateDeadCode(const std::shared_ptr<Graph>& graph, DCESideEffectPolicy sideEffectPolicy) {
+  DeadCodeEliminator(graph, sideEffectPolicy).run(graph->block(), /*recurse=*/true);
+  GRAPH_DUMP("After EliminateDeadCode: ", graph);
 }
 
-void EliminateDeadCode(Block* block, bool recurse) {
-  DeadCodeEliminator().run(block, recurse);
+void EliminateDeadCode(Block* block, bool recurse, DCESideEffectPolicy sideEffectPolicy) {
+  DeadCodeEliminator(sideEffectPolicy).run(block, recurse);
 }
 
 void EliminateDeadCode(
     Block* block,
-    std::function<void(const std::unordered_set<const Value*>&)> cb) {
-  DeadCodeEliminator eliminator;
+    std::function<void(const std::unordered_set<const Value*>&)> cb,
+    DCESideEffectPolicy sideEffectPolicy) {
+  DeadCodeEliminator eliminator(sideEffectPolicy);
   eliminator.setDeleteCallback(std::move(cb));
   eliminator.run(block, /*recurse=*/true);
 }

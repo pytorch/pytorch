@@ -10,6 +10,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/ThreadLocalDebugInfo.h>
 #include <c10/util/Exception.h>
 
 #include <atomic>
@@ -51,9 +52,14 @@ static thread_local bool checkpoint_valid = true;
 // engine thread affinity to the device can break this invariant, and we depend
 // on it in a few places (e.g. AccumulateGrad function).
 
-struct FunctionTask {
+// Number of nested reentrant backwards calls currently on this thread
+static thread_local int current_depth = 0;
+// Total nested reentrant backwards calls over all threads for workder_device
+static thread_local int total_depth = 0;
+
+struct NodeTask {
   GraphTask* base_;
-  std::shared_ptr<Function> fn_;
+  std::shared_ptr<Node> fn_;
   // This buffer serves as an implicit "addition" node for all of the
   // gradients flowing here.  Once all the dependencies are finished, we
   // use the contents of this buffer to run the function.
@@ -62,7 +68,9 @@ struct FunctionTask {
   // exit. The engine sends a shutdown task to every queue upon its destruction.
   bool isShutdownTask_;
 
-  FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs, bool isShutdownTask = false)
+  int getReentrantDepth() const;
+
+  NodeTask(GraphTask* base, std::shared_ptr<Node> fn, InputBuffer inputs, bool isShutdownTask = false)
     : base_(base)
     , fn_(std::move(fn))
     , inputs_(std::move(inputs))
@@ -70,31 +78,33 @@ struct FunctionTask {
 };
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
-// Shutdown tasks are first and then empty FunctionTask are next.
-struct CompareFunctionTaskTime {
-  bool operator()(FunctionTask const & t1, FunctionTask const & t2) {
+// Shutdown tasks are first and then empty NodeTask are next.
+struct CompareNodeTaskTime {
+  bool operator()(NodeTask const & t1, NodeTask const & t2) {
     if (t2.isShutdownTask_) {
       return true;
     } else if (!t1.fn_ || t1.isShutdownTask_) {
       return false;
     } else if (!t2.fn_) {
       return true;
-    } else {
+    } else if (t1.getReentrantDepth() == t2.getReentrantDepth()) {
       return t1.fn_->sequence_nr() < t2.fn_->sequence_nr();
+    } else {
+      return t1.getReentrantDepth() < t2.getReentrantDepth();
     }
   }
 };
 
 struct ReadyQueue {
-  std::priority_queue<FunctionTask, std::vector<FunctionTask>, CompareFunctionTaskTime> heap_;
+  std::priority_queue<NodeTask, std::vector<NodeTask>, CompareNodeTaskTime> heap_;
   // To notify threads waiting on the ReadyQueue of available tasks on the heap_
   std::condition_variable not_empty_;
   // To protect read and writes to heap_
   std::mutex mutex_;
 
-  void push(FunctionTask item);
+  void push(NodeTask item);
   void pushShutdownTask();
-  FunctionTask pop();
+  NodeTask pop();
 };
 
 // Note [Reentrant backwards]
@@ -117,22 +127,15 @@ struct ReadyQueue {
 // because then all of our backward executions (including the one we
 // just started) will deadlock!
 //
-// Here's our cunning idea: instead of blocking, just get back to work
-// on whatever task queue you should have been working on previously
-// (this is saved via the thread local variable worker_device)!  There are
-// "simply" two things you have to arrange for:
+// We maintain a pool of threads waiting for work to do
+// When a reentrant backwards call occurs, the current thread blocks
+// and a thread from the pool is woken up to complete the blocking tasks and an
+// any other tasks that would have been assigned to that worker. If there are no
+// threads available, a new thread is spawned. The new thread will continue
+// processing tasks from the same ReadyQueue as the parent worker
 //
-//  - We have to promptly kick ourselves out of the thread_main() loop
-//    when our graph_task complete, because we need to unblock the
-//    parent function tasks that started the reentrant execution in
-//    the first place.  This is why thread_main() takes an optional
-//    graph_task as input.
-//
-//  - When we finish a GraphTask, we have to make sure we wake up the worker
-//    thread so that it actually has a chance to exit the thread_main()
-//    loop.  Thus the faffing about in thread_main() after
-//    evaluate_function() completes.
-
+// When the GraphTask is finished, the parent worker thread that is waiting on
+// the task is notified and the current thread returns to the pool.
 
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask {
@@ -151,13 +154,13 @@ struct GraphTask {
   // Notified when a task finishes executing.  Check outstanding_tasks_ to see
   // if all tasks are done.
   std::condition_variable not_done_;
-  std::unordered_map<Function*, InputBuffer> not_ready_;
-  std::unordered_map<Function*, int> dependencies_;
+  std::unordered_map<Node*, InputBuffer> not_ready_;
+  std::unordered_map<Node*, int> dependencies_;
 
   struct ExecInfo {
     struct Capture {
       Capture(int input_idx, int output_idx) : input_idx_(input_idx), output_idx_(output_idx) {}
-      int input_idx_; // within Function inputs
+      int input_idx_; // within Node inputs
       int output_idx_; // within the output vector of a GraphTask
     };
 
@@ -174,29 +177,38 @@ struct GraphTask {
   // has needed == True should be executed.
   // exec_info_.empty() means it's .backward(), otherwise it's .grad().
   // exec_info_ is safe to read without synchronization
-  std::unordered_map<Function*, ExecInfo> exec_info_;
+  std::unordered_map<Node*, ExecInfo> exec_info_;
   std::vector<Variable> captured_vars_;
+  std::shared_ptr<at::ThreadLocalDebugInfoBase> debug_info_ =
+      at::getThreadLocalDebugInfo();
 
-  void init_to_execute(Function& graph_root, const edge_list& outputs);
+  void init_to_execute(Node& graph_root, const edge_list& outputs);
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
-  // Safe to read owner_ without synchronizaton
+  // Safe to read owner_ and reentrant_depth_ without synchronizaton
   int owner_;
+  // The number of parent graph tasks for this graph task
+  const int reentrant_depth_;
 
   bool can_checkpoint() {
     return exec_info_.empty();
   }
 
-  GraphTask(bool keep_graph, bool grad_mode)
+  GraphTask(bool keep_graph, bool grad_mode, int reentrant_depth)
     : has_error_(false)
     , outstanding_tasks_(0)
     , keep_graph_(keep_graph)
     , grad_mode_(grad_mode)
-    , owner_(NO_DEVICE) {}
+    , owner_(NO_DEVICE)
+    , reentrant_depth_(reentrant_depth) {}
 };
 
-auto ReadyQueue::push(FunctionTask item) -> void {
+int NodeTask::getReentrantDepth() const {
+  return base_->reentrant_depth_;
+}
+
+auto ReadyQueue::push(NodeTask item) -> void {
   {
     // Lock mutex for writing to heap_
     std::lock_guard<std::mutex> lock(mutex_);
@@ -209,21 +221,22 @@ auto ReadyQueue::push(FunctionTask item) -> void {
 auto ReadyQueue::pushShutdownTask() -> void {
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    heap_.push(FunctionTask(nullptr, nullptr, InputBuffer(0), true));
+    heap_.push(NodeTask(nullptr, nullptr, InputBuffer(0), true));
   }
   not_empty_.notify_one();
 }
 
-auto ReadyQueue::pop() -> FunctionTask {
+auto ReadyQueue::pop() -> NodeTask {
   // Lock mutex for accesses to heap_
   std::unique_lock<std::mutex> lock(mutex_);
   not_empty_.wait(lock, [this]{ return !heap_.empty(); });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto task = std::move(const_cast<FunctionTask&>(heap_.top())); heap_.pop();
+  auto task = std::move(const_cast<NodeTask&>(heap_.top())); heap_.pop();
   return task;
 }
 
-Engine::Engine() = default;
+// This limit is based on the default python recursion limit which is 1000
+Engine::Engine() : max_recursion_depth_(100) {}
 
 // Send shutdown tasks to all ReadyQueues if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest
@@ -240,6 +253,26 @@ Engine::~Engine() {
     }
   }
   // Othewise threads are leaked
+}
+
+void Engine::set_device(int device) {
+  // NB: We MUST NOT construct the guard for device -1,
+  // as in some settings we compile with cuda, but
+  // have lazy stubs for CUDA functionality (so actually
+  // attempting to setup a guard(-1) will cause an
+  // error, because it will still query cudaGetDevice).
+  //
+  // Don't use DeviceGuard here because its destructor may be called before the
+  // device is reset. This is fine because the device is thread local.
+  if (device != -1) {
+    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+      auto* impl = c10::impl::device_guard_impl_registry[i].load();
+      if (impl && device < impl->deviceCount()) {
+        impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
+      }
+    }
+  }
+  worker_device = device;
 }
 
 auto Engine::thread_init(int device) -> void {
@@ -261,31 +294,7 @@ auto Engine::thread_init(int device) -> void {
   // We don't have any good reason to prefer one or the other, so we've
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
-  //
-  // NB: We MUST NOT construct the guard for device -1,
-  // as in some settings we compile with cuda, but
-  // have lazy stubs for CUDA functionality (so actually
-  // attempting to setup a guard(-1) will cause an
-  // error, because it will still query cudaGetDevice).
-  //
-  // NB: These are not OptionalCUDAGuard/etc because engine.cpp
-  // is built as part of the CPU-only library; so we need to
-  // dynamic dispatch.
-  //
-  // NB: We need an array here since neither DeviceGuard nor OptionalDeviceGuard
-  // are movable.
-
-  // Don't use DeviceGuard here because its destructor may be called before the
-  // device is reset. This is fine because the device is thread local.
-  if (device != -1) {
-    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
-      auto* impl = c10::impl::device_guard_impl_registry[i].load();
-      if (impl && device < impl->deviceCount()) {
-        impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
-      }
-    }
-  }
-  worker_device = device;
+  set_device(device);
   thread_main(nullptr);
 }
 
@@ -308,7 +317,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
   // Why the test on graph_task->outstanding_tasks_?  See
   // Note [Reentrant backwards]
   while (!graph_task || graph_task->outstanding_tasks_ > 0) {
-    FunctionTask task = queue->pop();
+    NodeTask task = queue->pop();
     // This will only work if the worker is running a non backward task
     // TODO Needs to be fixed this to work in all cases
     if (task.isShutdownTask_) {
@@ -347,14 +356,41 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
         if (--task.base_->outstanding_tasks_ == 0) {
           // Synchronize outstanding_tasks_ with queue mutex
           std::atomic_thread_fence(std::memory_order_release);
-          ready_queue_by_index(base_owner).push(FunctionTask(task.base_, nullptr, InputBuffer(0)));
+          ready_queue_by_index(base_owner).push(NodeTask(task.base_, nullptr, InputBuffer(0)));
         }
       }
     }
   }
+
+  // When current_depth is 0 this worker thread is done and we need to notify
+  // the parent thread waiting on the graph_task
+  // NOTE: An edge case for this is when reentrant calls are repeatedly made in
+  // a thread which is at its maximum stack depth and they keep exiting right
+  // after. We will always switch to a new thread for each call, so, we'll keep
+  // oscillating between the two threads.
+  if (graph_task && current_depth == 0) {
+    graph_task->not_done_.notify_all();
+  }
 }
 
-auto Engine::thread_on_exception(FunctionTask& task, std::exception& e) -> void {
+void Engine::reentrant_thread_init() {
+  at::init_num_threads();
+  auto tp_shared= thread_pool_shared_;
+  while(true) {
+    std::unique_lock<std::mutex> lk(tp_shared->mutex_);
+    ++thread_pool_shared_->num_workers_;
+    tp_shared->work_.wait(lk, [&tp_shared]{ return !tp_shared->graphtasks_queue_.empty();});
+    --thread_pool_shared_->num_workers_;
+    auto graph_task = tp_shared->graphtasks_queue_.front();
+    tp_shared->graphtasks_queue_.pop();
+    lk.unlock();
+    set_device(graph_task->owner_);
+    total_depth = graph_task->reentrant_depth_;
+    thread_main(graph_task);
+  }
+}
+
+auto Engine::thread_on_exception(NodeTask& task, std::exception& e) -> void {
   // Lock mutex for writing to task.base_->exception_
   std::lock_guard<std::mutex> lock(task.base_->mutex_);
   if (!task.base_->has_error_.load()) {
@@ -366,14 +402,14 @@ auto Engine::thread_on_exception(FunctionTask& task, std::exception& e) -> void 
   }
 }
 
-static variable_list call_pre_hooks(Function& fn, variable_list inputs) {
+static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
   for (const auto& hook : fn.pre_hooks()) {
     inputs = (*hook)(inputs);
   }
   return inputs;
 }
 
-static variable_list call_post_hooks(Function& fn, variable_list outputs, const variable_list& inputs) {
+static variable_list call_post_hooks(Node& fn, variable_list outputs, const variable_list& inputs) {
   for (const auto& hook : fn.post_hooks()) {
     outputs = (*hook)(outputs, inputs);
   }
@@ -434,7 +470,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
   }
 }
 
-static variable_list call_function(FunctionTask& task) {
+static variable_list call_function(NodeTask& task) {
   bool prev_checkpoint_valid_state = checkpoint_valid;
   checkpoint_valid = task.base_->can_checkpoint() && prev_checkpoint_valid_state;
   auto& fn = *task.fn_;
@@ -447,23 +483,29 @@ static variable_list call_function(FunctionTask& task) {
   const auto has_post_hooks = !fn.post_hooks().empty();
   variable_list outputs;
 
-  if(has_post_hooks){
-    // In functions/accumulate_grad.cpp, there is some logic to check the conditions under which
-    // the incoming gradient can be stolen directly (which elides a deep copy) instead of cloned.
-    // One of these conditions is that the incoming gradient's refcount must be 1 (nothing else
-    // is referencing the same data).  Stashing inputs_copy here bumps the refcount, so if post hooks
-    // are employed, it's actually still ok for accumulate_grad.cpp to steal the gradient if the
-    // refcount is 2.
-    //
-    // "new_grad.use_count() <= 1 + !post_hooks().empty()" in accumulate_grad.cpp accounts for this,
-    // but also creates a silent dependency between engine.cpp (ie, this particular engine
-    // implementation) and accumulate_grad.cpp.
-    //
-    // If you change the logic here, make sure it's compatible with accumulate_grad.cpp.
-    auto inputs_copy = inputs;
-    outputs = fn(std::move(inputs_copy));
-  }else{
-    outputs = fn(std::move(inputs));
+  {
+    at::DebugInfoGuard guard(task.base_->debug_info_);
+    if (has_post_hooks) {
+      // In functions/accumulate_grad.cpp, there is some logic to check the
+      // conditions under which the incoming gradient can be stolen directly
+      // (which elides a deep copy) instead of cloned. One of these conditions
+      // is that the incoming gradient's refcount must be 1 (nothing else is
+      // referencing the same data).  Stashing inputs_copy here bumps the
+      // refcount, so if post hooks are employed, it's actually still ok for
+      // accumulate_grad.cpp to steal the gradient if the refcount is 2.
+      //
+      // "new_grad.use_count() <= 1 + !post_hooks().empty()" in
+      // accumulate_grad.cpp accounts for this, but also creates a silent
+      // dependency between engine.cpp (ie, this particular engine
+      // implementation) and accumulate_grad.cpp.
+      //
+      // If you change the logic here, make sure it's compatible with
+      // accumulate_grad.cpp.
+      auto inputs_copy = inputs;
+      outputs = fn(std::move(inputs_copy));
+    } else {
+      outputs = fn(std::move(inputs));
+    }
   }
 
   validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
@@ -480,7 +522,7 @@ static variable_list call_function(FunctionTask& task) {
   return outputs;
 }
 
-auto Engine::evaluate_function(FunctionTask& task) -> void {
+auto Engine::evaluate_function(NodeTask& task) -> void {
   // If exec_info_ is not empty, we have to instrument the execution
   auto & exec_info_ = task.base_->exec_info_;
   if (!exec_info_.empty()) {
@@ -553,7 +595,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
       input_buffer.add(next.input_nr, std::move(output));
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
-        queue.push(FunctionTask(task.base_, next.function, std::move(input_buffer)));
+        queue.push(NodeTask(task.base_, next.function, std::move(input_buffer)));
       } else {
         not_ready.emplace(next.function.get(), std::move(input_buffer));
       }
@@ -563,7 +605,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
       input_buffer.add(next.input_nr, std::move(output));
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
-        queue.push(FunctionTask(task.base_, next.function, std::move(input_buffer)));
+        queue.push(NodeTask(task.base_, next.function, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
       }
     }
@@ -571,10 +613,10 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
 }
 
 /* Computes the number of dependencies for each function which requires grad */
-auto Engine::compute_dependencies(Function* root, GraphTask& task) -> void {
+auto Engine::compute_dependencies(Node* root, GraphTask& task) -> void {
   // Just to make sure that they will never be added to the queue again
-  std::unordered_set<Function*> seen;
-  std::vector<Function*> queue { root };
+  std::unordered_set<Node*> seen;
+  std::vector<Node*> queue { root };
 
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
@@ -623,7 +665,7 @@ auto Engine::execute(const edge_list& roots,
   // Lock post_callbacks_lock_ before clearing final_callbacks_
   ClearCallbacks _cb_guard(final_callbacks_, post_callbacks_lock_);
 
-  GraphTask graph_task(keep_graph, create_graph);
+  GraphTask graph_task(keep_graph, create_graph, worker_device == NO_DEVICE ? 0 : total_depth+1);
   // Lock mutex while GraphTask is being set up
   std::unique_lock<std::mutex> lock(graph_task.mutex_);
 
@@ -633,7 +675,7 @@ auto Engine::execute(const edge_list& roots,
   if (!outputs.empty()) {
     graph_task.init_to_execute(*graph_root, outputs);
   }
-  ready_queue(at::kCPU).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
+  ready_queue(at::kCPU).push(NodeTask(&graph_task, std::move(graph_root), InputBuffer(0)));
 
   // Not a worker
   if (worker_device == NO_DEVICE) {
@@ -642,12 +684,24 @@ auto Engine::execute(const edge_list& roots,
       return graph_task.outstanding_tasks_.load() == 0;
     });
   } else {
-    // Get back to work while we wait for our new graph_task to
-    // complete!
-    // See Note [Reentrant backwards]
     graph_task.owner_ = worker_device;
-    lock.unlock();
-    thread_main(&graph_task);
+    ++total_depth;
+    if(current_depth >= max_recursion_depth_){
+      // See Note [Reentrant backwards]
+      // If reached the max depth, switch to a different thread
+      add_thread_pool_task(&graph_task);
+      graph_task.not_done_.wait(lock, [&graph_task]{
+        return graph_task.outstanding_tasks_.load() == 0;
+      });
+    } else {
+      // Get back to work while we wait for our new graph_task to
+      // complete!
+      ++current_depth;
+      lock.unlock();
+      thread_main(&graph_task);
+      --current_depth;
+    }
+    --total_depth;
   }
 
   // Check for an exception while running backwards
@@ -736,18 +790,39 @@ auto Engine::start_threads() -> void {
   ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
   for (auto& queue : ready_queues_)
     queue.reset(new ReadyQueue());
+
+  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
+
   for (int i = 0; i < num_threads; ++i) {
     std::thread t(&Engine::thread_init, this, i - 1);
     t.detach();
   }
 }
 
-void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) {
+void Engine::add_thread_pool_task(GraphTask *graph_task) {
+  std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
+  // There may already be some items on the graphtasks_queue_ added by other
+  // threads but not enough workers to get to the the new task that will be
+  // added
+  bool create_thread = (thread_pool_shared_->num_workers_ <= thread_pool_shared_->graphtasks_queue_.size());
+  thread_pool_shared_->graphtasks_queue_.push(graph_task);
+  // Don't need to be holding the lock while actually creating the thread
+  lck.unlock();
+  if (create_thread) {
+    std::thread t(&Engine::reentrant_thread_init, this);
+    t.detach();
+  }
+  // This works even if new thread is created because wait() will test the
+  // predicate before waiting
+  thread_pool_shared_->work_.notify_one();
+}
+
+void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs) {
   exec_info_[&graph_root].needed_ = true;
 
   int output_idx = 0;
   for (auto & output_edge : outputs) {
-    Function *output = output_edge.function.get();
+    Node *output = output_edge.function.get();
     auto & info = exec_info_[output];
     if (!info.captures_)
       info.captures_ = make_unique<std::vector<ExecInfo::Capture>>();
@@ -763,11 +838,11 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
   //                         for next_edge in fn.next_edges)
   //   return is_needed[fn]
   struct Frame {
-    Frame (Function *fn) : fn_(fn), next_next_fn_(0) {}
-    Function *fn_;
+    Frame (Node *fn) : fn_(fn), next_next_fn_(0) {}
+    Node *fn_;
     size_t next_next_fn_;
 
-    Function* get_next_fn() {
+    Node* get_next_fn() {
       const auto & next = fn_->next_edges();
       auto num_next = next.size();
       while (next_next_fn_ < num_next) {
@@ -778,13 +853,13 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
     }
   };
   std::vector<Frame> stack;
-  std::unordered_set<Function*> seen;
+  std::unordered_set<Node*> seen;
   for (const auto & input : graph_root.next_edges()) {
     if (seen.count(input.function.get()) > 0) continue;
     stack.emplace_back(input.function.get());
     while (!stack.empty()) {
       auto &frame = stack.back();
-      if (Function *next_fn = frame.get_next_fn()) {
+      if (Node *next_fn = frame.get_next_fn()) {
         if (/* bool unseen = */ seen.emplace(next_fn).second) {
           stack.emplace_back(next_fn);
           continue; // recurse

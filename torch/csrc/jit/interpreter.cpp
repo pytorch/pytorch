@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 
@@ -409,7 +410,7 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
-  std::vector<std::shared_ptr<Function>> function_table_;
+  std::vector<Function*> function_table_;
   std::vector<TypePtr> type_table_;
   int register_size_ = 0;
   size_t n_outputs;
@@ -438,6 +439,7 @@ struct CodeImpl {
 
   // out-of-line jumps for bailouts that are patched in at the end
   std::vector<BailoutBlock> bailout_blocks_;
+  std::vector<std::unique_ptr<Function>> bailout_functions_;
 
   CodeImpl(const std::shared_ptr<Graph>& graph)
       : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
@@ -602,7 +604,7 @@ struct CodeImpl {
   }
 
   void emitCall(
-      std::shared_ptr<Function> func,
+      Function* func,
       at::ArrayRef<Value*> inputs) {
     emitLoadInputs(inputs);
     insertInstruction(CALL, function_table_.size());
@@ -627,23 +629,39 @@ struct CodeImpl {
     }
   }
 
-  void emitBailOut(Node* node) {
-    // BailOut node has the `attr::Subgraph` which
-    // contains the original deoptimized version
-    // of a computational graph starting from the
-    // bailout point.
-    // BailOut node's first input is a guarded tensor
-    // the rest are inputs we need to be able to
-    // execute the bailout graph
-    emitLoadInputs(node->inputs().slice(0, 1));
+  size_t emitGuard(Node* node) {
+    // unoptimized graph is at index 0
+    // guarded input is at index 1
+    // the rest of args follow
+    emitLoadInputs(node->inputs().slice(1, 1));
     insertInstruction(GUARD, type_table_.size());
     type_table_.emplace_back(node->outputs().at(0)->type());
     insertInstruction(JF, 0 /* to be patched */);
-    size_t jf_index = instructions_.size() - 1;
-    emitLoadInputs(node->inputs().slice(1));
+
+    return instructions_.size() - 1;
+  }
+
+  void emitBailOut(Node* node) {
+    auto jf_index = emitGuard(node);
+    auto unoptimized_graph = node->inputs().at(0)->node()->g(attr::Subgraph);
+    // note, guaded input is already loaded onto the stack
+    // for GUARD instruction
+    emitLoadInputs(node->inputs().slice(2));
     insertInstruction(TAIL_CALL, function_table_.size());
-    auto func = std::make_shared<Function>("bailout", /*optimize=*/true, node->g(attr::Subgraph), nullptr);
-    function_table_.emplace_back(func);
+    TORCH_INTERNAL_ASSERT(node->kind() == prim::BailOut);
+    auto bailout_index = node->i(attr::index);
+    TORCH_INTERNAL_ASSERT(bailout_index >= 0);
+
+    auto build_bailout_graph = [bailout_index,
+                                unoptimized_graph](Function& func) {
+      BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
+    };
+
+    auto empty_graph = std::make_shared<Graph>();
+    auto func = torch::make_unique<Function>(
+        "bailout", empty_graph, build_bailout_graph);
+    function_table_.emplace_back(func.get());
+    bailout_functions_.emplace_back(std::move(func));
     createBailoutBlock(jf_index);
   }
 
@@ -795,7 +813,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     Instruction* instructions;
     IValue* constants;
     Operation* operators;
-    std::shared_ptr<Function>* functions;
+    Function** functions;
     TypePtr* types;
 
     ActiveFrame(const Frame& frame)
@@ -830,6 +848,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // function.
   IValue& reg(size_t reg) {
     return *(registers.end() - reg);
+  }
+
+  void dump(std::ostream& out, const Stack& stack) const {
+    out << "Stack:\n";
+    for (const auto& val : stack) {
+      out << val;
+      out << "\n";
+    }
   }
 
   bool runImpl(Stack& stack) {
@@ -997,12 +1023,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case GUARD: {
-            auto actual = ProfiledTensorType::create(stack.back().toTensor());
+            auto actual = TensorType::create(stack.back().toTensor());
             const TypePtr& expected = af.types[inst.X];
             push(stack, *expected == *actual);
             ++af.pc;
           } break;
           case TAIL_CALL: {
+            af.functions[inst.X]->ensure_defined();
             const Code& code =
                 af.functions[inst.X]->get_executor().getPlanFor(stack).code;
             size_t num_inputs = code.num_inputs();

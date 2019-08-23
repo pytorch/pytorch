@@ -1,5 +1,5 @@
 #pragma once
-#ifdef NAMEDTENSOR_ENABLED
+#ifdef BUILD_NAMEDTENSOR
 
 #include <ATen/core/interned_strings.h>
 #include <c10/util/ArrayRef.h>
@@ -19,6 +19,10 @@ struct CAFFE2_API Dimname {
   Symbol untagged_name() const { return untagged_name_; }
 
   bool can_refer_to(const Dimname& other) const;
+
+  bool is_normal() const { return type_ == NameType::NORMAL; }
+  bool is_wildcard() const { return type_ == NameType::WILDCARD; }
+  bool is_tagged() const { return type_ == NameType::TAGGED; }
 
  private:
   Dimname(Symbol name)
@@ -46,7 +50,15 @@ bool CAFFE2_API is_valid_identifier(const std::string& name);
 CAFFE2_API c10::optional<Dimname> unify(Dimname dimname, Dimname other);
 CAFFE2_API bool match(Dimname dimname, Dimname other);
 
-std::ostream& operator<<(std::ostream& out, const Dimname& dimname);
+CAFFE2_API std::ostream& operator<<(std::ostream& out, const Dimname& dimname);
+
+inline bool operator==(const Dimname& lhs, const Dimname& rhs) {
+  return lhs.full_name() == rhs.full_name();
+}
+
+inline bool operator!=(const Dimname& lhs, const Dimname& rhs) {
+  return !(lhs == rhs);
+}
 
 } // namespace at
 #endif

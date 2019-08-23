@@ -20,12 +20,14 @@ void init_num_threads() {
   if (nthreads > 0) {
     set_num_threads(nthreads);
   } else {
-#if defined(_OPENMP) && defined(TH_BLAS_MKL)
+#if defined(_OPENMP) && defined(TH_BLAS_MKL) && !defined(TH_BLAS_MKL_SEQ)
     // If we are using MKL an OpenMP make sure the number of threads match.
     // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
     // size of the OpenMP thread pool, resulting in worse performance (and memory
     // leaks in GCC 5.4)
     omp_set_num_threads(mkl_get_max_threads());
+#elif defined(_OPENMP)
+    omp_set_num_threads(intraop_default_num_threads());
 #endif
   }
 }

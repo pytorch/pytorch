@@ -101,4 +101,9 @@ bool GlobalInit() {
   char** mobile_argv = &mobile_name;
   return ::caffe2::GlobalInit(&mobile_argc, &mobile_argv);
 }
+
+bool unsafeRunCaffe2InitFunction(const char* name, int* pargc, char*** pargv) {
+  return internal::Caffe2InitializeRegistry::Registry()->RunNamedFunction(
+      name, pargc, pargv);
+}
 }  // namespace caffe2

@@ -364,7 +364,7 @@ class TestDBFileReader(TestCase):
 
         # Read data for the first time.
         cached_reader1 = CachedReader(
-            self._build_source_reader(ws, 100), db_path,
+            self._build_source_reader(ws, 100), db_path, loop_over=False,
         )
         build_cache_step = cached_reader1.build_cache_step()
         session.run(build_cache_step)

@@ -19,77 +19,60 @@ namespace native {
 // det(P) = \pm 1, this method returns a 3-tuple:
 //   (det(P), diag(U), info),
 // where info helps us identify singular matrices.
-static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor& self) {
-  Tensor p, lu, info;
-  std::tie(lu, p, info) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors=*/false);
-  int int_info = info.item<int32_t>();
-  TORCH_CHECK(int_info >= 0, "LU factorization (getrf) failed with info = ", int_info);
-  auto n = self.size(0);
-  auto num_exchanges = (at::arange(1, n + 1, p.options()) != p).nonzero().size(0);
-  if (num_exchanges % 2 == 1) {
-    return std::make_tuple(-1., lu.diag(), int_info);
-  } else {
-    return std::make_tuple(1., lu.diag(), int_info);
-  }
+static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
+  Tensor pivs, lu, infos;
+  std::tie(lu, pivs, infos) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors=*/false);
+  TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "Invalid argument passed to lu");
+  auto n = self.size(-1);
+  auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs).sum(-1, /*keepdim=*/false, /*dtype=*/self.scalar_type()).fmod_(2);
+  return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1),
+                                    lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1));
 }
 
 Tensor det(const Tensor& self) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) &&
-           self.dim() == 2 && self.size(0) == self.size(1),
-           "det(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
-           "of floating types");
-  double det_P;
-  Tensor diag_U;
-  int info;
-  std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
-  if (info > 0) {
-    return at::zeros({}, self.options());
-  } else {
-    return diag_U.prod().mul_(det_P);
-  }
+  squareCheckInputs(self);
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Expected a floating point tensor as input");
+
+  Tensor det_P, diag_U;
+  std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
+  // complete_det is 0 when U is singular (U(i, i) = 0 for some i in [1, self.size(-1)]).
+  // The product accumulation takes care of this case, and hence no special case handling is required.
+  auto complete_det = diag_U.prod(-1).mul_(det_P);
+  return complete_det;
 }
 
 Tensor logdet(const Tensor& self) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) &&
-           self.dim() == 2 && self.size(0) == self.size(1),
-           "logdet(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
-           "of floating types");
-  double det_P;
-  Tensor diag_U;
-  int info;
-  std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
-  if (info > 0) {
-    return at::full({}, -std::numeric_limits<double>::infinity(), self.options());
+  squareCheckInputs(self);
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Expected a floating point tensor as input");
+
+  Tensor det_P, diag_U;
+  std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
+  Tensor det_sign = diag_U.sign().prod(-1).mul_(det_P);
+
+  // If det_sign > 0, diag_U.abs_().log_().sum(-1) gives logdet (this means U is not singular).
+  // If det_sign <= 0, then we get proper nan (when det < 0, i.e., det_sign) or -inf (when det = 0, i.e., U is singular).
+  // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
+  Tensor logdet_vals = diag_U.abs_().log_().sum(-1);
+  if (self.dim() > 2) {
+    logdet_vals.index_put_((det_sign < 0).nonzero_numpy(), at::full({}, NAN, self.options()));
+  } else if (det_sign.item<double>() < 0) {
+    logdet_vals.fill_(NAN);
   }
-  // `det_sign` is the sign of the determinant. We work on `diag_U.sign()` for
-  // numerical stability when diag_U has a lot small values.
-  auto det_sign = diag_U.sign().prod().mul_(det_P);
-  // This synchronizes on GPU, but `_lu_det_P_diag_U_info` above already synchronizes
-  if (det_sign.item<double>() <= 0) {
-    return det_sign.log_();  // get proper nan (det<0) or -inf (det=0)
-  } else {
-    return diag_U.abs_().log_().sum();
-  }
+  return logdet_vals;
 }
 
 std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) &&
-           self.dim() == 2 && self.size(0) == self.size(1),
-           "slogdet(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
-           "of floating types");
-  double det_P;
-  Tensor diag_U;
-  int info;
-  std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
-  if (info > 0) {
-    return std::make_tuple(at::zeros({}, self.options()),
-                           at::full({}, -std::numeric_limits<double>::infinity(), self.options()));
-  } else {
-    // `det_sign` is the sign of the determinant. We work on `diag_U.sign()` for
-    // numerical stability when diag_U has a lot small values.
-    auto det_sign = diag_U.sign().prod().mul_(det_P);
-    return std::make_tuple(det_sign, diag_U.abs_().log_().sum());
-  }
+  squareCheckInputs(self);
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Expected a floating point tensor as input");
+
+  Tensor det_P, diag_U;
+  std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
+  auto det_sign = diag_U.sign().prod(-1).mul_(det_P);
+  // abslogdet_val is -inf if U is singular, in which case diag_U.abs_().log_().sum(-1) will return -inf.
+  // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
+  // Since abslogdet_val cannot take nan, no special case handling is required.
+  auto abslogdet_val = diag_U.abs_().log_().sum(-1);
+  return std::make_tuple(det_sign, abslogdet_val);
 }
 
 Tensor pinverse(const Tensor& self, double rcond) {
@@ -540,74 +523,18 @@ Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
   return at::sum_out(result, std::get<1>(at::svd(self)), 0, keepdim);
 }
 
-// Non-optimized batched svd implementation. This can be merged with at::svd
-// once at::svd has been ported to ATen.
-static std::tuple<Tensor, Tensor, Tensor>
-_batch_svd(const Tensor& self, bool some, bool compute_uv)
-{
-  const int64_t ndim = self.ndimension();
-
-  TORCH_CHECK(
-      ndim >= 2,
-      "Expected a tensor with at least 2 dimensions, but got a tensor with ",
-      self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
-
-  if (ndim == 2) {
-    return at::svd(self, some, compute_uv);
-  }
-
-  const int64_t n = self.size(-2);
-  const int64_t m = self.size(-1);
-  const int64_t k = std::min<int64_t>(n, m);
-  const int64_t nn = (some && compute_uv) ? k : n;
-  const int64_t mm = (some && compute_uv) ? k : m;
-  const int64_t p = batchCount(self);
-
-  Tensor t = self.reshape({p, n, m});
-
-  Tensor s = at::empty({p, k}, self.options());
-  Tensor u, v;
-  if (compute_uv) {
-    u = at::empty({p, n, nn}, self.options());
-    v = at::empty({p, m, mm}, self.options());
-  }
-
-  for (int64_t i = 0; i < p; i++) {
-    auto tuple = at::svd(t[i], some, compute_uv);
-    s[i] = std::get<1>(tuple);
-    if (compute_uv) {
-      u[i] = std::get<0>(tuple);
-      v[i] = std::get<2>(tuple);
-    }
-  }
-
-  std::vector<int64_t> shape = self.sizes().slice(0, ndim-1).vec();
-  shape[ndim-2] = k;
-  s = s.reshape(shape);
-
-  shape[ndim-2] = n;
-  shape.push_back(nn);
-  u = compute_uv ? u.reshape(shape) : at::zeros(shape, self.options());
-
-  shape[ndim-2] = m;
-  shape[ndim-1] = mm;
-  v = compute_uv ? v.reshape(shape) : at::zeros(shape, self.options());
-
-  return std::tuple<Tensor, Tensor, Tensor>(u, s, v);
-}
-
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
 
   Tensor p = _move_to_end(self, dim);
-  return at::sum(std::get<1>(_batch_svd(p, true, false)), -1, keepdim);
+  return at::sum(std::get<1>(at::svd(p, /*some=*/true, /*compute_uv=*/false)), -1, keepdim);
 }
 
 Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
 
   Tensor p = _move_to_end(self, dim);
-  return at::sum_out(result, std::get<1>(_batch_svd(p, true, false)), -1, keepdim);
+  return at::sum_out(result, std::get<1>(at::svd(p, /*some=*/true, /*compute_uv=*/false)), -1, keepdim);
 }
 
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {
@@ -660,7 +587,7 @@ Tensor chain_matmul(TensorList matrices) {
     // the chain (zero-indexed)
     std::vector<int64_t> p;
     p.push_back(matrices[0].size(0));
-    for (int64_t i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
       p.push_back(matrices[i].size(1));
     }
 

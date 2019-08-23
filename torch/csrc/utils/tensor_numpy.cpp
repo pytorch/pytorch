@@ -1,3 +1,4 @@
+#include <torch/csrc/THP.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/numpy_stub.h>
 
@@ -69,8 +70,6 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
   return result;
 }
 
-static int aten_to_numpy_dtype(const ScalarType scalar_type);
-
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   if (tensor.is_cuda()) {
     throw TypeError(
@@ -84,6 +83,11 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   }
   if (tensor.type().backend() != Backend::CPU) {
     throw TypeError("NumPy conversion for %s is not supported", tensor.type().toString().c_str());
+  }
+  if (tensor.requires_grad()) {
+    throw std::runtime_error(
+        "Can't call numpy() on Variable that requires grad. "
+        "Use var.detach().numpy() instead.");
   }
   auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
@@ -110,7 +114,8 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   // object of the ndarray to the tensor and disabling resizes on the storage.
   // This is not sufficient. For example, the tensor's storage may be changed
   // via Tensor.set_, which can free the underlying memory.
-  PyObject* py_tensor = THPVariable_Wrap(make_variable(tensor, false));
+  TORCH_INTERNAL_ASSERT(tensor.is_variable());
+  PyObject* py_tensor = THPVariable_Wrap(tensor);
   if (!py_tensor) throw python_error();
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
     return nullptr;
@@ -171,7 +176,7 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   );
 }
 
-static int aten_to_numpy_dtype(const ScalarType scalar_type) {
+int aten_to_numpy_dtype(const ScalarType scalar_type) {
   switch (scalar_type) {
     case kDouble: return NPY_DOUBLE;
     case kFloat: return NPY_FLOAT;
@@ -202,14 +207,14 @@ ScalarType numpy_dtype_to_aten(int dtype) {
       if (dtype == NPY_LONGLONG || dtype == NPY_INT64) {
         return kLong;
       } else {
-        break;
+        break;  // break as if this is one of the cases above because this is only a workaround
       }
   }
   auto pytype = THPObjectPtr(PyArray_TypeObjectFromType(dtype));
   if (!pytype) throw python_error();
   throw TypeError(
       "can't convert np.ndarray of type %s. The only supported types are: "
-      "float64, float32, float16, int64, int32, int16, int8, and uint8.",
+      "float64, float32, float16, int64, int32, int16, int8, uint8, and bool.",
       ((PyTypeObject*)pytype.get())->tp_name);
 }
 

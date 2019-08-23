@@ -47,6 +47,8 @@ std::string get_parallel_info() {
 
   ss << "ATen/Parallel:\n\tat::get_num_threads() : "
      << at::get_num_threads() << std::endl;
+  ss << "\tat::get_num_interop_threads() : "
+     << at::get_num_interop_threads() << std::endl;
 
   ss << at::get_openmp_version() << std::endl;
 #ifdef _OPENMP
@@ -69,7 +71,7 @@ std::string get_parallel_info() {
   ss << "\tMKL_NUM_THREADS : "
      << get_env_var("MKL_NUM_THREADS", "[not set]") << std::endl;
 
-  ss << "Parallel backend: ";
+  ss << "ATen parallel backend: ";
   #if AT_PARALLEL_OPENMP
   ss << "OpenMP";
   #elif AT_PARALLEL_NATIVE
@@ -78,6 +80,10 @@ std::string get_parallel_info() {
   ss << "native thread pool and TBB";
   #endif
   ss << std::endl;
+
+  #if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
+  ss << "Experimental: single thread pool" << std::endl;
+  #endif
 
   return ss.str();
 }

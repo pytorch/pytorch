@@ -9,7 +9,7 @@ import cimodel.lib.visualization as visualization
 
 
 class Conf(object):
-    def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, devtoolset_version):
+    def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, gcc_config_variant):
 
         self.os = os
         self.cuda_version = cuda_version
@@ -17,15 +17,17 @@ class Conf(object):
         self.parms = parms
         self.smoke = smoke
         self.libtorch_variant = libtorch_variant
-        self.devtoolset_version = devtoolset_version
+        self.gcc_config_variant = gcc_config_variant
 
     def gen_build_env_parms(self):
         elems = [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.cuda_version)]
-        if self.devtoolset_version is not None:
-            elems.append("devtoolset" + str(self.devtoolset_version))
+        if self.gcc_config_variant is not None:
+            elems.append(str(self.gcc_config_variant))
         return elems
 
     def gen_docker_image(self):
+        if self.gcc_config_variant == 'gcc5.4_cxx11-abi':
+            return miniutils.quote("yf225/pytorch-binary-docker-image-ubuntu16.04:latest")
 
         docker_word_substitution = {
             "manywheel": "manylinux",
@@ -34,8 +36,8 @@ class Conf(object):
 
         docker_distro_prefix = miniutils.override(self.pydistro, docker_word_substitution)
 
-        # The cpu nightlies are built on the soumith/manylinux-cuda80 docker image
-        alt_docker_suffix = self.cuda_version or "80"
+        # The cpu nightlies are built on the soumith/manylinux-cuda100 docker image
+        alt_docker_suffix = self.cuda_version or "100"
         docker_distro_suffix = "" if self.pydistro == "conda" else alt_docker_suffix
         return miniutils.quote("soumith/" + docker_distro_prefix + "-cuda" + docker_distro_suffix)
 
@@ -46,10 +48,10 @@ class Conf(object):
 
         parts = [self.get_name_prefix(), self.os] + self.gen_build_env_parms()
 
-        if self.smoke:
-            if self.libtorch_variant:
-                parts.append(self.libtorch_variant)
-        else:
+        if self.libtorch_variant:
+            parts.append(self.libtorch_variant)
+
+        if not self.smoke:
             parts.append(build_or_test)
 
         return "_".join(parts)
@@ -108,7 +110,7 @@ def gen_build_env_list(smoke):
             [c.find_prop("pyver")],
             c.find_prop("smoke"),
             c.find_prop("libtorch_variant"),
-            c.find_prop("devtoolset_version"),
+            c.find_prop("gcc_config_variant"),
         )
         newlist.append(conf)
 
@@ -116,7 +118,7 @@ def gen_build_env_list(smoke):
 
 
 def predicate_exclude_nonlinux_and_libtorch(config):
-    return config.os == "linux" and (config.smoke or config.pydistro != "libtorch")
+    return config.os == "linux"
 
 
 def add_build_entries(jobs_dict, phase, smoke, filter_predicate=lambda x: True):

@@ -94,6 +94,9 @@ and nvprof based (registers both CPU and GPU activity) using
 .. autoclass:: torch.autograd.profiler.profile
     :members:
 
+.. autoclass:: torch.autograd.profiler.record_function
+    :members:
+
 .. autoclass:: torch.autograd.profiler.emit_nvtx
     :members:
 

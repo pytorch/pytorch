@@ -6,34 +6,91 @@ namespace c10 {
 
 // This file exists because we need to reference module.h, which we can't from
 // c10. Sigh...
+FunctionType::FunctionType(Function* function)
+    : NamedType(TypeKind::FunctionType, function->qualname()),
+      function_(function) {}
 
-#ifndef C10_ANDROID
-namespace ivalue {
-Object::~Object() {
-  if (type_->is_module()) {
-    type_->compilation_unit()->drop_all_functions();
+Function* ClassType::getMethod(const std::string& name) const {
+  for (auto method : methods_) {
+    if (name == method->name()) {
+      return method;
+    }
   }
-}
-} // namespace ivalue
-#endif
-
-std::shared_ptr<Function> ClassType::getMethod(const std::string& name) const {
-  return compilation_unit_->find_function(name);
+  return nullptr;
 }
 
 std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
-  return compilation_unit_;
+  auto cu = compilation_unit_.lock();
+  TORCH_INTERNAL_ASSERT(cu);
+  return cu;
 }
 std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
-  return compilation_unit_;
+  auto cu = compilation_unit_.lock();
+  TORCH_INTERNAL_ASSERT(cu);
+  return cu;
 }
 
-std::vector<Function*> ClassType::methods() const {
-  std::vector<Function*> ret;
-  for (const auto& pr : compilation_unit()->get_functions()) {
-    ret.push_back(pr.get());
+ClassTypePtr ClassType::create(
+    c10::optional<QualifiedName> qualifiedName,
+    std::weak_ptr<CompilationUnit> cu,
+    bool is_module) {
+  return ClassTypePtr(new ClassType(std::move(qualifiedName), std::move(cu), is_module));
+}
+
+ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
+  auto ptr = ClassType::create(name(), compilation_unit_);
+  AT_ASSERT(numAttributes() == refined_slots.size());
+  for(size_t i = 0; i < attributeNames_.size(); ++i) {
+    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
+    ptr->addAttribute(attributeNames_[i], refined_slots[i]);
   }
-  return ret;
+  // Copy methods over
+  for (const auto& method : methods()) {
+    ptr->addMethod(method);
+  }
+  return ptr;
+}
+
+size_t ClassType::addAttribute(
+    const std::string& name,
+    TypePtr type,
+    bool is_parameter) {
+  for (size_t i = 0; i < attributeNames_.size(); ++i) {
+    TORCH_CHECK(
+        name != attributeNames_[i],
+        "attempting to add ",
+        is_parameter ? "parameter"
+                     : "attribute"
+                       " '",
+        name,
+        "' but a field of the same name already exists with type ",
+        attributeTypes_[i]->python_str());
+  }
+  size_t slot = attributeNames_.size();
+  attributeNames_.push_back(name);
+  attributeTypes_.push_back(type);
+  if (is_parameter) {
+    TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter to a non module");
+  }
+  if (is_module()) {
+    parameterSlots_->push_back(is_parameter);
+  }
+  return slot;
+}
+
+const std::vector<Function*>& ClassType::methods() const {
+  return methods_;
+}
+
+ClassType::ClassType(
+    c10::optional<QualifiedName> name,
+    std::weak_ptr<CompilationUnit> cu,
+    bool is_module)
+    : NamedType(TypeKind::ClassType, std::move(name)),
+      compilation_unit_(std::move(cu)) {
+  if (is_module) {
+    parameterSlots_ = std::make_shared<std::vector<bool>>();
+  }
 }
 
 bool ClassType::isSubtypeOf(const TypePtr rhs) const {

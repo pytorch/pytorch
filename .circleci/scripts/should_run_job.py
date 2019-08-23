@@ -11,13 +11,13 @@ import sys
 default_set = [
     # PyTorch CPU
     # Selected oldest Python 2 version to ensure Python 2 coverage
-    'pytorch-linux-trusty-py2.7.9',
+    'pytorch-linux-xenial-py2.7.9',
     # PyTorch CUDA
     'pytorch-linux-xenial-cuda9-cudnn7-py3',
     # PyTorch ASAN
     'pytorch-linux-xenial-py3-clang5-asan',
     # PyTorch DEBUG
-    'pytorch-linux-trusty-py3.6-gcc5.4',
+    'pytorch-linux-xenial-py3.6-gcc5.4',
 
     # Caffe2 CPU
     'caffe2-py2-mkl-ubuntu16.04',
@@ -32,8 +32,9 @@ default_set = [
     'caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04',
 
     # Binaries
-    'manywheel 2.7mu cpu devtoolset3',
-    'libtorch 2.7m cpu devtoolset3',
+    'manywheel 2.7mu cpu devtoolset7',
+    'libtorch 2.7m cpu devtoolset7',
+    'libtorch 2.7m cpu gcc5.4_cxx11-abi',
 
     # Caffe2 Android
     'caffe2-py2-android-ubuntu16.04',
@@ -44,9 +45,13 @@ default_set = [
     # PyTorch Android
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c',
 
+    # XLA
+    'pytorch-xla-linux-xenial-py3.6-clang7',
+
     # Other checks
     'pytorch-short-perf-test-gpu',
-    'pytorch-doc-push',
+    'pytorch-python-doc-push',
+    'pytorch-cpp-doc-push',
 ]
 
 # Takes in commit message to analyze via stdin

@@ -38,6 +38,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <c10/util/C++17.h>
 #include <stdexcept>
 #include <string>

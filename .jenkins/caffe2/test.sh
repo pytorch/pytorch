@@ -126,5 +126,14 @@ pip install --user pytest-sugar
 #####################
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   pip install -q --user git+https://github.com/pytorch/vision.git
+  pip install -q --user ninja
+  # JIT C++ extensions require ninja, so put it into PATH.
+  export PATH="/var/lib/jenkins/.local/bin:$PATH"
+  if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
+    # default pip version is too old(9.0.2), unable to support tag `manylinux2010`.
+    # Fix the pip error: Couldn't find a version that satisfies the requirement
+    sudo pip install --upgrade pip
+    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==0.5.0.dev817
+  fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
