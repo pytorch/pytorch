@@ -12658,7 +12658,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(nhwc.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(nhwc, x)
 
-    @torchtest.test_all_device_types()
     @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
     def test_memory_format_scatter_gather(self):
         with memory_format_propagation():
@@ -12668,7 +12667,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 self.assertFalse(result.is_contiguous())
                 self.assertTrue(result.is_contiguous(memory_format=torch.channels_last))
 
-    @pytorchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     def test_memory_format_clone(self, device):
         with memory_format_propagation():
             nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
@@ -12677,7 +12676,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertTrue(clone.is_contiguous(memory_format=torch.channels_last))
             self.assertEqual(nhwc, clone)
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     def test_memory_format_resize_as(self, device):
         with memory_format_propagation():
             nhwc = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
@@ -12702,7 +12701,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         alias.fill_(7)
         self.assertEqual(x, alias)
 
-    @torchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     def test_memory_format_permute(self, device):
         x = torch.randn((10, 3, 32, 32), device=device)
         nhwc = x.contiguous(memory_format=torch.channels_last)
@@ -12755,7 +12754,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         x = torch.empty((3, 3, 3, 3), memory_format=torch.channels_last)
         self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
 
-    @pytorchtest.test_all_device_types()
+    @torchtest.for_all_device_types()
     def test_memory_format_operators(self, device):
         def chunk_op(x, y):
             x1, x2 = x.chunk(2, dim=1)
