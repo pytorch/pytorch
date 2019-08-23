@@ -190,7 +190,6 @@ class TransformerDecoder(Module):
         >>> memory = torch.rand(10, 32, 512)
         >>> tgt = torch.rand(20, 32, 512)
         >>> out = transformer_decoder(tgt, memory)
-        
     """
 
     def __init__(self, decoder_layer, num_layers, norm=None):

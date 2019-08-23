@@ -907,6 +907,11 @@ Pattern Matching Assignments
     a, b = tuple_or_list
     a, b, *c = a_tuple
 
+Multiple Assignments
+    ::
+
+        a = b, c = tup
+
 Print Statements
 ^^^^^^^^^^^^^^^^
 ::
@@ -1650,5 +1655,3 @@ Q: I would like to trace module's method but I keep getting this error:
       - On the other hand, invoking ``trace`` with module's instance (e.g. ``my_module``) creates a new module and correctly copies parameters into the new module, so they can accumulate gradients if required.
 
     To trace a specific method on a module, see :func:`torch.jit.trace_module <torch.jit.trace_module>`
-
-
