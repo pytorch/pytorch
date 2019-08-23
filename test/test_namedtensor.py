@@ -416,7 +416,7 @@ class TestNamedTensor(TestCase):
             self.assertEqual(op(a, b).names, ('N', 'C'))
 
             d = torch.empty(2, 3, names=('C', None))
-            with self.assertRaisesRegex(RuntimeError, "misaligned"):
+            with self.assertRaisesRegex(RuntimeError, "Misaligned"):
                 op(d, c)
 
         def test_mixed_unnamed_named(op, is_inplace):
@@ -1016,6 +1016,44 @@ class TestNamedTensor(TestCase):
                 torch.addmm, device=device,
                 args=(create('N:3,H:5'), create('N:3,C:2'), create('W:2,N:5')),
                 maybe_raises_regex='with duplicate names')
+
+    def test_bmm(self):
+        for device in torch.testing.get_all_device_types():
+            # full names
+            self._test_name_inference(
+                torch.bmm, device=device,
+                args=(create('N:7,A:3,B:2'), create('N:7,A:2,B:5')),
+                expected_names=('N', 'A', 'B'))
+
+            # no name on left tensor
+            self._test_name_inference(
+                torch.bmm, device=device,
+                args=(create('7,3,2'), create('N:7,A:2,B:5')),
+                expected_names=('N', None, 'B'))
+
+            # no name on right tensor
+            self._test_name_inference(
+                torch.bmm, device=device,
+                args=(create('N:7,A:3,B:2'), create('7,2,5')),
+                expected_names=('N', 'A', None))
+
+            # out=
+            self._test_name_inference(
+                out_fn(torch.bmm), device=device,
+                args=(create('0'), create('N:7,A:3,B:2'), create('N:7,A:2,B:5')),
+                expected_names=('N', 'A', 'B'))
+
+            # duplicate names after mm
+            self._test_name_inference(
+                torch.bmm, device=device,
+                args=(create('N:7,A:3,B:2'), create('N:7,B:2,A:5')),
+                maybe_raises_regex='with duplicate names')
+
+            # misalignment (batch dimension is getting contracted)
+            self._test_name_inference(
+                torch.bmm, device=device,
+                args=(create('N:3,A:3,B:3'), create('A:3,N:3,B:3')),
+                maybe_raises_regex='Misaligned')
 
     def test_mv(self):
         for device in torch.testing.get_all_device_types():
