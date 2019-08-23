@@ -282,11 +282,7 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_Assign(ctx, stmt):
         rhs = build_expr(ctx, stmt.value)
-        if len(stmt.targets) > 1:
-            start_point = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + 1)
-            raise NotSupportedError(ctx.make_raw_range(start_point.start, rhs.range().end),
-                                    "Performing multiple assignments in a single line isn't supported")
-        lhs = build_expr(ctx, stmt.targets[0])
+        lhs = list(map(lambda x: build_expr(ctx, x), stmt.targets))
         return Assign(lhs, rhs)
 
     @staticmethod
