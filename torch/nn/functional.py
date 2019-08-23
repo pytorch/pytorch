@@ -1380,14 +1380,15 @@ def linear(input, weight, bias=None):
 def bilinear(input1, input2, weight, bias=None):
     # type: (Tensor, Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
-    Applies a bilinear transformation to the incoming data: :math:`y = x_1 A x_2 + b`
+    Applies a bilinear transformation to the incoming data:
+    :math:`y = x_1 A x_2 + b`
 
     Shape:
 
-        - input1: :math:`(N, *, H_{in1})` where :math:`H_{in1}=\text{in1\features}`
+        - input1: :math:`(N, *, H_{in1})` where :math:`H_{in1}=\text{in1\_features}`
           and :math:`*` means any number of additional dimensions.
           All but the last dimension of the inputs should be the same.
-        - input2: :math:`(N, *, H_{in2})` where :math:`H_{in2}=\text{in2\features}`
+        - input2: :math:`(N, *, H_{in2})` where :math:`H_{in2}=\text{in2\_features}`
         - weight: :math:`(\text{out\_features}, \text{in1\_features},
           \text{in2\_features})`
         - bias: :math:`(\text{out\_features})`
