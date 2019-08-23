@@ -1178,10 +1178,11 @@ graph(%x : Tensor,
             def forward(self, x):
                 return self.conv(x)
 
+        # re-enable later
+        torch._C._jit_set_inline_everything_mode(True)
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
         torch._C._jit_pass_constant_propagation(m.graph)
-
         m._c = torch._C._jit_pass_prepare_quant(m._c, "forward",
                                                 observer._c,
                                                 observer._c)
@@ -1190,10 +1191,9 @@ graph(%x : Tensor,
         def get_forward(m):
             return m._c._get_method('forward')
         get_forward(m)(data)
-
         # right now the result will have extra observer modules
         # will fix later when we figure out how to remove modules
-        m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
+        torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
 
         get_forward(m)(data)
         FileCheck().check("aten::quantize_linear") \
@@ -1211,6 +1211,16 @@ graph(%x : Tensor,
                    .check_next("aten::_dequantize_linear") \
                    .check("return") \
                    .run(str(m._c._get_method('forward').graph))
+        # Test for inline
+        # FileCheck().check("aten::quantize_linear") \
+        #            .check_next("aten::int_repr") \
+        #            .check_next("aten::_dequantize_linear") \
+        #            .check("prim::CallMethod[name=\"forward\"]") \
+        #            .check("aten::quantize_linear") \
+        #            .check_next("aten::int_repr") \
+        #            .check_next("aten::_dequantize_linear") \
+        #            .check("return") \
+        #            .run(str(get_forward(m).graph))
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
