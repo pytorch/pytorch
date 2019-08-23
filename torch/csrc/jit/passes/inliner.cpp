@@ -20,7 +20,7 @@ void inlineCalls(Block* block) {
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
         cur->removeInput(0);
-        // We need to decrerement `it` because inlineCallTo will destroy `cur`
+        // We need to decrement `it` because inlineCallTo will destroy `cur`
         // and potentially replace it with new nodes.
         it--;
         inlineCallTo(cur, *fun_type->function()->graph());
@@ -29,7 +29,7 @@ void inlineCalls(Block* block) {
         const std::string& name = cur->s(attr::name);
         auto function =
             cur->input(0)->type()->expect<ClassType>()->getMethod(name);
-        // We need to decrerement `it` because inlineCallTo will destroy `cur`
+        // We need to decrement `it` because inlineCallTo will destroy `cur`
         // and potentially replace it with new nodes.
         it--;
         inlineCallTo(cur, *function->graph());
