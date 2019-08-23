@@ -19,14 +19,14 @@ def foo3(x):
     return foo2(x)
 )JIT";
 
-
 namespace torch {
 namespace jit {
 using namespace script;
 using namespace testing;
 
 struct InlinerGuard {
-  InlinerGuard(bool shouldInline) : oldState_(getInlineEverythingMode()) {
+  explicit InlinerGuard(bool shouldInline)
+      : oldState_(getInlineEverythingMode()) {
     getInlineEverythingMode() = shouldInline;
   }
 
@@ -38,17 +38,33 @@ struct InlinerGuard {
 };
 
 void testInliner() {
-    {
-        // disable automatic inlining so we can test it manually
-        InlinerGuard(/*shouldInline=*/false);
+  {
+    // Test that the recursive inlining works
+    // disable automatic inlining so we can test it manually
+    InlinerGuard guard(/*shouldInline=*/false);
 
-        CompilationUnit cu(testSource);
-        auto& fn = cu.get_function("foo3");
+    CompilationUnit cu(testSource);
+    auto& fn = cu.get_function("foo3");
 
-        auto g = fn.graph();
-        Inline(*g, /*recurse=*/true);
-        FileCheck().check_count("prim::Print", 3)->run(*g);
-    }
+    auto g = fn.graph();
+    Inline(*g, /*recurse=*/true);
+    FileCheck().check_count("prim::Print", 3)->run(*g);
+  }
+  {
+    // disable automatic inlining so we can test it manually
+    InlinerGuard guard(/*shouldInline=*/false);
+
+    CompilationUnit cu(testSource);
+    auto& fn = cu.get_function("foo3");
+
+    auto g = fn.graph();
+    Inline(*g, /*recurse=*/false);
+    FileCheck()
+        .check("three")
+        ->check("two")
+        ->check_count("prim::CallFunction", 1)
+        ->run(*g);
+  }
 }
 } // namespace jit
 } // namespace torch

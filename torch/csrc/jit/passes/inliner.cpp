@@ -30,7 +30,7 @@ void inlineCalls(Block* block, bool recurse) {
         auto function =
             cur->input(0)->type()->expect<ClassType>()->getMethod(name);
         if (recurse) {
-          Inline(*function->graph());
+          Inline(*function->graph(), recurse);
         }
         inlineCallTo(cur, *function->graph());
       } break;
