@@ -7333,6 +7333,36 @@ class TestNN(NNTestCase):
         gradgradcheck(func, [v])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm
+    def test_batchnorm_cudnn_nhwc(self):
+        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda", requires_grad=True)
+        input = input.contiguous(memory_format=torch.channels_last)
+        input.retain_grad()
+        grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
+        grad = grad.contiguous(memory_format=torch.channels_last)
+        bn = nn.BatchNorm2d(8).cuda().float()
+        bn.weight.data.uniform_()
+        bn.bias.data.uniform_()
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_bn = nn.BatchNorm2d(8).cuda().float()
+        ref_bn.load_state_dict(bn.state_dict())
+
+        out = bn(input)
+        out.backward(grad)
+        ref_out = ref_bn(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(bn.weight.grad, ref_bn.weight.grad)
+        self.assertEqual(bn.bias.grad, ref_bn.bias.grad)
+        self.assertEqual(input.grad, ref_input.grad)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_batchnorm_cudnn_half(self):
         # THNN
         input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device="cuda", requires_grad=True)
@@ -8919,6 +8949,34 @@ class TestNN(NNTestCase):
         weights2 = Variable(torch.cuda.DoubleTensor([1]).expand(1, 1, 2)).contiguous()
         self.assertEqual(F.conv1d(input, weights1, bias=None, stride=2, dilation=2),
                          F.conv1d(input, weights2, bias=None, stride=2, dilation=2))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm
+    def test_conv_cudnn_nhwc(self):
+        input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device="cuda", requires_grad=True)
+        input = input.contiguous(memory_format=torch.channels_last)
+        input.retain_grad()
+        grad = torch.rand(2, 4, 2, 2, dtype=torch.float32, device="cuda")
+        grad = grad.contiguous(memory_format=torch.channels_last)
+        conv = nn.Conv2d(8, 4, 3).cuda().float()
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_conv = nn.Conv2d(8, 4, 3).cuda().float()
+        ref_conv.load_state_dict(conv.state_dict())
+
+        out = conv(input)
+        out.backward(grad)
+        ref_out = ref_conv(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
+        self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
+        self.assertEqual(input.grad, ref_input.grad)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(DOUBLE_TENSORTYPES)
