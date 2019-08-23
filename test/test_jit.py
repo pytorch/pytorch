@@ -629,6 +629,23 @@ class TestJit(JitTestCase):
         m_dropout.eval()
         self.assertEqual(dropout(input) + 1, m_dropout(input))
 
+    def test_script_autograd_grad(self):
+        def test_simple_grad(x, y):
+            # type: (Tensor, Tensor) -> List[Tensor]
+            z = x + 2 * y + x * y
+            return torch.autograd.grad((z.sum(), ), (x, y))
+
+        def test_simple_grad_with_grad_outputs(x, y):
+            # type: (Tensor, Tensor) -> List[Tensor]
+            z = x + 2 * y + x * y
+            grad_outputs = torch.jit.annotate(List[Optional[torch.Tensor]], [torch.ones((2, 2)), ])
+            return torch.autograd.grad((z, ), (x, y), grad_outputs)
+
+        x = torch.randn(2, 2, requires_grad=True)
+        y = torch.randn(2, 2, requires_grad=True)
+        self.checkScript(test_simple_grad, (x, y), inputs_requires_grad=True)
+        self.checkScript(test_simple_grad_with_grad_outputs, (x, y), inputs_requires_grad=True)
+
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
         def f(x, y):
@@ -1099,6 +1116,47 @@ graph(%x : Tensor,
                    .check("quantize_linear").check_next("int_repr") \
                    .check_next("_dequantize_linear").check("conv2d") \
                    .run(str(scriptModule.graph))
+
+    # TODO: rename after insert_observers is renamed
+    def test_prepare_quant(self):
+        class Observer(torch.nn.Module):
+            def __init__(self):
+                super(Observer, self).__init__()
+
+            def forward(self, x):
+                return x
+
+            @torch.jit.export
+            def calculate_qparams(self):
+                return torch.tensor([2.0]), torch.tensor([3])
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 5, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        m = torch.jit.script(M())
+        observer = torch.jit.script(Observer())
+
+        def get_forward(m):
+            return m._c._get_method("forward")
+        torch._C._jit_pass_constant_propagation(get_forward(m).graph)
+        m._c = torch._C._jit_pass_prepare_quant(m._c, "forward",
+                                                observer._c,
+                                                observer._c)
+        assert len([x for x, _ in m._c._get_modules()
+                    if x.startswith('observer_for_')]) == 3, \
+            'Expected to have 3 observer submodules'
+        FileCheck().check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                   .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                   .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                   .run(str(m._c._get_method("forward").graph))
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -2150,8 +2208,8 @@ graph(%Ra, %Rb):
         graph = f.graph_for(t, "hi")
         input_types = list(next(graph.inputs()).type().elements())
         w = input_types[0]
-        self.assertEqual(input_types[0].kind(), 'ProfiledTensorType')
-        self.assertEqual(input_types[1].elements()[1].kind(), 'ProfiledTensorType')
+        self.assertEqual(input_types[0].kind(), 'TensorType')
+        self.assertEqual(input_types[1].elements()[1].kind(), 'TensorType')
 
     def test_constant_prop_simple(self):
         @torch.jit.script
@@ -2412,8 +2470,8 @@ graph(%Ra, %Rb):
 
     def test_onnx_transpose_incomplete_tensor_type(self):
         # Smoke test to get us into the state where we are attempting to export
-        # a transpose op, where the input is a TensorType rather than a
-        # ProfiledTensorType. This would previously not work, since we would
+        # a transpose op, where the input is a TensorType without size information.
+        # This would previously not work, since we would
         # take the size of the input and use the length of its sizes as the
         # number of dimensions in the permutation.
         class Foo(torch.jit.ScriptModule):
@@ -4561,8 +4619,7 @@ a")
         x = torch.randn(3, 1, 5, requires_grad=True)
         fn = torch.jit.script(fn)
         graph = _propagate_shapes(fn.graph, (x,), False)
-        a = next(graph.outputs()).type().kind()
-        self.assertTrue(next(graph.outputs()).type().kind() != 'TensorType')
+        self.assertTrue(next(graph.outputs()).type().scalarType() == 'Double')
 
     def test_shape_prop_promotion(self):
         @torch.jit.script
@@ -5168,7 +5225,7 @@ a")
         res = fn(t, 1)
         self.assertEqual(res, 0)
         g = torch.jit.last_executed_optimized_graph()
-        self.assertEqual(next(g.inputs()).type().kind(), 'ProfiledTensorType')
+        self.assertEqual(next(g.inputs()).type().kind(), 'TensorType')
 
         @torch.jit.script
         def fn(x, y, b):
@@ -7394,6 +7451,22 @@ a")
             for sub in m.mods:
                 v = sub(v)
             self.assertEqual(o, v)
+
+    def test_attr_qscheme_script(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.qscheme = torch.per_tensor_affine
+
+            def forward(self):
+                if self.qscheme == torch.per_tensor_symmetric:
+                    return 3
+                else:
+                    return 4
+
+        f = Foo()
+        scripted = torch.jit.script(f)
+        self.assertEqual(f(), scripted())
 
     def test_script_module_const_submodule_fail(self):
         class Sub(torch.jit.ScriptModule):
@@ -10301,6 +10374,22 @@ a")
         with self.assertRaisesRegex(RuntimeError, 'does not support augmented assign'):
             scripted_aug_assign = torch.jit.script(subscript_tuple_augmented_assign)
 
+    def test_multiple_assign(self):
+        def test():
+            a = b, c = d, f = (1, 1)
+
+            # side effect
+            ten = torch.tensor(1)
+            ten1 = ten2 = ten.add_(1)
+
+            # ordering
+            x = 1
+            y = 3
+            x, y = y, x + y
+
+            return a, b, c, d, f, ten, ten1, ten2, x, y
+
+        self.checkScript(test, ())
 
     def test_multi_reduction(self):
         with self.assertRaisesRegex(
@@ -13259,48 +13348,158 @@ a")
 
         self.checkScript(test_uses, ())
 
-    @unittest.skipIf(True, "Removing weak script")
-    def test_overloading(self):
-        @torch._jit_internal.weak_module
-        class W(torch.nn.Module):
-            __overloads__ = {'forward': ['forward_tuple', 'forward_tensor']}
-
+    def test_method_overloading(self):
+        class Over(torch.nn.Module):
             def __init__(self):
-                super(W, self).__init__()
+                super(Over, self).__init__()
 
-            @torch._jit_internal.weak_script_method
-            def forward_tuple(self, x):
+            @torch.jit._overload_method  # noqa: F811
+            def forward(self, x):  # noqa: F811
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
-                return x[0] + 5
+                pass
 
-            def forward(self, x):
-                # manually do argument switching
-                if isinstance(x, tuple):
-                    return self.forward_tuple(x)
-                else:
-                    return self.forward_tensor(x)
-
-            @torch._jit_internal.weak_script_method
-            def forward_tensor(self, x):
+            @torch.jit._overload_method  # noqa: F811
+            def forward(self, x):  # noqa: F811
                 # type: (Tensor) -> Tensor
-                return x + 20
+                pass
+
+            def forward(self, x):  # noqa: F811
+                if isinstance(x, Tensor):
+                    return x + 20
+                else:
+                    return x[0] + 5
 
         class S(torch.jit.ScriptModule):
             def __init__(self):
                 super(S, self).__init__()
-                self.weak = W()
+                self.weak = Over()
 
             @torch.jit.script_method
             def forward(self, x):
                 return self.weak(x) + self.weak((x, x))
 
-        s = S()
+        s_mod = S()
         x = torch.ones(1)
-        self.assertEqual(s(x), x + 20 + 5 + x)
+        self.assertEqual(s_mod(x), x + 20 + 5 + x)
 
-        w = W()
-        self.assertEqual(w((x, x)), x + 5)
-        self.assertEqual(w((x)), x + 20)
+        over = Over()
+        self.assertEqual(over((x, x)), x + 5)
+        self.assertEqual(over((x)), x + 20)
+
+        class Unannotated(torch.nn.Module):
+            def __init__(self):
+                super(Unannotated, self).__init__()
+
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
+                pass
+
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
+                # type: (int) -> (int)
+                pass
+
+            def hello(self, x):  # noqa: F811
+                return x + 3
+
+            def forward(self):
+                return self.hello(1), self.hello(.5)
+
+        w = Unannotated()
+        with self.assertRaisesRegex(Exception, "explicitly add type annotations to overloaded functions"):
+            torch.jit.script(w)
+
+        class CompileOverloadError(torch.nn.Module):
+            def __init__(self):
+                super(CompileOverloadError, self).__init__()
+
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
+                # type: (str) -> (int)
+                pass
+
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
+                # type: (int) -> (int)
+                pass
+
+            def hello(self, x):  # noqa: F811
+                return x + 1
+
+            def forward(self):
+                return self.hello("hi"), self.hello(.5)
+
+        w = CompileOverloadError()
+        with self.assertRaisesRegex(Exception, "but instead found type \'str\'"):
+            torch.jit.script(w)
+
+        # testing overload declared first, then non-overload
+        with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+            class W3(torch.nn.Module):
+                def __init__(self):
+                    super(W3, self).__init__()
+
+                @torch.jit._overload_method  # noqa: F811
+                def forward(self, x):  # noqa: F811
+                    # type: (int) -> int
+                    pass
+
+                @torch.jit._overload_method  # noqa: F811
+                def forward(self, x):  # noqa: F811
+                    # type: (Tensor) -> Tensor
+                    pass
+
+                def forward(self, x):  # noqa: F811
+                    return x + 5
+
+            a = W3()
+            b = torch.jit.script(a)
+
+            class W3(torch.nn.Module):
+                def __init__(self):
+                    super(W3, self).__init__()
+
+                def forward(self, x):  # noqa: F811
+                    return x + 5 + 10
+
+            a = W3()
+            b = torch.jit.script(a)
+
+        # testing non-overload declared first, then overload
+        class W2(torch.nn.Module):
+            def __init__(self):
+                super(W2, self).__init__()
+
+            def hello(self, x1, x2):
+                return x1 + x2
+
+            def forward(self, x):
+                return self.hello(x, x)
+
+        a = torch.jit.script(W2())
+        self.assertEqual(a(torch.tensor(1)), torch.tensor(2))
+
+        class W2(torch.nn.Module):
+            def __init__(self):
+                super(W2, self).__init__()
+
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
+                pass
+
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
+                # type: (int) -> (int)
+                pass
+
+            def hello(self, x):  # noqa: F811
+                return x + 5 + 10
+
+            def forward(self, x):
+                return self.hello(1), self.hello(x)
+
+        with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+            a = torch.jit.script(W2())
 
     def test_select_after_chunk(self):
         def foo(x):
@@ -14247,6 +14446,17 @@ class TestRecursiveScript(JitTestCase):
         self.assertExportImportModule(sm, args)
 
         return sm
+
+    def test_init_error(self):
+        class M(nn.Module):
+            def __init__(self):
+                self.x = 2
+
+            def forward(self):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "has not been initialized"):
+            torch.jit.script(M())
 
     def test_module_name(self):
         class MyModule(torch.nn.Module):
@@ -18639,6 +18849,21 @@ class TestLogging(JitTestCase):
             self.assertEqual(logger.get_counter_val('foo'), 1)
         finally:
             torch.jit._logging.set_logger(old_logger)
+
+
+class TestDocs(unittest.TestCase):
+    @slowTest
+    def test_docs(self):
+        import subprocess
+        docs_dir = '../docs'
+        docs_dir = [os.path.dirname(__file__), '..', 'docs']
+        docs_dir = os.path.join(*docs_dir)
+
+        result = subprocess.run(['make', 'doctest'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
+        if result.returncode != 0:
+            out = result.stdout.decode('utf-8')
+            err = result.stderr.decode('utf-8')
+            raise RuntimeError("{}\n{}\nDocs build failed (run `cd docs && make doctest`)".format(err, out))
 
 
 for test in autograd_method_tests():

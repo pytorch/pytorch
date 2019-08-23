@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <aten/src/ATen/native/Pool.h>
+#include <ATen/native/Pool.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
 #include "init_qnnpack.h"
@@ -15,20 +15,16 @@ class QNNPACKMaxPool2D final : public torch::OperatorKernel {
 #ifdef USE_QNNPACK
   Tensor operator()(
       Tensor input,
-      std::vector<int64_t> kernel_size,
-      std::vector<int64_t> stride,
-      std::vector<int64_t> padding,
-      std::vector<int64_t> dilation) {
+      const torch::List<int64_t>& kernel_size,
+      const torch::List<int64_t>& stride,
+      const torch::List<int64_t>& padding,
+      const torch::List<int64_t>& dilation) {
     Tensor qy;
 
     TORCH_CHECK(
         input.ndimension() == 4,
         "qnnpack_maxpool(): Expected input to be 4-dimensional: got ",
         input.ndimension());
-    TORCH_CHECK(
-        input.numel() > 0,
-        "qnnpack_maxpool(): Got empty input tensor, size: ",
-        input.sizes());
     TORCH_CHECK(
         kernel_size.size() == 2,
         "qnnpack_maxpool(): Expected kernel_size to be 2-dimensional: got ",

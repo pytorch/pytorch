@@ -13,10 +13,7 @@ class QNNPACKAdd final : public torch::OperatorKernel {
  public:
 #ifdef USE_QNNPACK
   Tensor operator()(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
-    TORCH_CHECK(
-        qa.ndimension() > 0 && qa.numel() > 0,
-        "qnnpack_add(): Got empty input tensor, size: ",
-        qa.sizes());
+    TORCH_CHECK(qa.ndimension() > 0, "qnnpack_add(): Got empty input tensor.");
     TORCH_CHECK(
         qa.numel() == qb.numel(),
         "qnnpack_add(): Add operands must be the same size!");
@@ -34,6 +31,10 @@ class QNNPACKAdd final : public torch::OperatorKernel {
 
     Tensor qy = at::_empty_affine_quantized(
         qa_contig.sizes(), at::device(kCPU).dtype(kQUInt8), scale, zero_point);
+
+    if (qa_contig.size(0) == 0) {
+      return qy;
+    }
 
     initQNNPACK();
 

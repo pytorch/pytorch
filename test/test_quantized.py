@@ -117,6 +117,30 @@ class TestQuantizedOps(TestCase):
             op_(qY_hat)
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
+    """Tests the correctness of the quantized::relu op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qrelu6(self, X):
+        X, (scale, zero_point, torch_type) = X
+
+        Y = X.copy()
+        Y[Y < 0] = 0
+        Y[Y > 6.0] = 6.0
+        qY = torch.quantize_linear(torch.from_numpy(Y), scale=scale,
+                                   zero_point=zero_point, dtype=torch_type)
+        X = torch.from_numpy(X)
+        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
+                                   dtype=torch_type)
+
+        ops_under_test = {
+            'ops.quantized': torch.ops.quantized.relu6,
+            'module': torch.nn.quantized.ReLU6(),
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX)
+            self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
+
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
         add_relu = torch.ops.quantized.add_relu
@@ -991,9 +1015,9 @@ class TestQNNPackOps(TestCase):
         A = torch.ones((0, 2), dtype=torch.float32)
         qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point_A,
                                    dtype=torch.quint8)
-
-        with self.assertRaisesRegex(RuntimeError, "tensor.*size"):
-            qC_qnnp = torch.ops.quantized.qnnpack_add(qA, qB, scale_C, zero_point_C)
+        qC = torch.ops.quantized.qnnpack_add(qA, qA, scale_C, zero_point_C)
+        np.testing.assert_equal(qC.size(), qA.size(),
+                                "Quantized addition with batch size 0 failed.")
 
     """Tests the correctness of quantized::qnnpack_maxpool2d op."""
     @given(A=hu.tensor(shapes=hu.array_shapes(4, 4, 3, 5),
@@ -1048,9 +1072,9 @@ class TestQNNPackOps(TestCase):
         A = torch.ones((0, 4, 2, 2), dtype=torch.float32)
         qa = torch.quantize_linear(A, scale=scale, zero_point=zero_point,
                                    dtype=torch_type)
-
-        with self.assertRaisesRegex(RuntimeError, "tensor.*size"):
-            qa_pool = q_max_pool(qa, k, s, p, d)
+        qc = q_max_pool(qa, k, s, p, d)
+        np.testing.assert_equal(qc.size(), qa.size(),
+                                "Quantized maxpool2d with batch size 0 failed.")
 
 if __name__ == "__main__":
     run_tests()

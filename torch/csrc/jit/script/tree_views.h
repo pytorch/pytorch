@@ -596,14 +596,20 @@ struct Assign : public Stmt {
   }
   static Assign create(
       const SourceRange& range,
-      const Expr& lhs,
+      const List<Expr>& lhs,
       const Maybe<Expr>& rhs,
       const Maybe<Expr>& type) {
     return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs, type}));
   }
 
+  List<Expr> lhs_list() const {
+    return List<Expr>(subtree(0));
+  }
+
   Expr lhs() const {
-    return Expr(subtree(0));
+    const auto& li = lhs_list();
+    TORCH_INTERNAL_ASSERT(li.size() == 1);
+    return *li.begin();
   }
 
   Maybe<Expr> rhs() const {
