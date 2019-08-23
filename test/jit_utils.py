@@ -40,6 +40,10 @@ def execWrapper(code, glob, loc):
         exec(code, glob, loc)
 
 
+def do_input_map(fn, input):
+    return _nested_map(lambda t: isinstance(t, torch.Tensor), fn)(input)
+
+
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
     _restored_warnings = False
@@ -316,6 +320,7 @@ class JitTestCase(TestCase):
                     inputs,
                     name='func',
                     optimize=True,
+                    inputs_requires_grad=False,
                     capture_output=False,
                     frames_up=1):
         with torch.jit.optimized_execution(optimize):
@@ -347,15 +352,20 @@ class JitTestCase(TestCase):
                 scripted_fn = torch.jit.script(script, _frames_up=1)
                 python_fn = script
 
+            if inputs_requires_grad:
+                recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
+            else:
+                recording_inputs = inputs
+
             if capture_output:
                 with self.capture_stdout() as script_stdout:
-                    script_outputs = scripted_fn(*inputs)
+                    script_outputs = scripted_fn(*recording_inputs)
                 with self.capture_stdout() as _python_stdout:
                     python_outputs = python_fn(*inputs)
                 if not IS_WINDOWS:
                     self.assertExpected(script_stdout[0], subname='stdout')
             else:
-                script_outputs = scripted_fn(*inputs)
+                script_outputs = scripted_fn(*recording_inputs)
                 python_outputs = python_fn(*inputs)
             self.assertEqual(python_outputs, script_outputs)
 
@@ -376,9 +386,6 @@ class JitTestCase(TestCase):
             return sum(math.log(i + 2) * v.sum() for i, v in enumerate(vs) if v is not None)
         if input_tensors is None:
             input_tensors = reference_tensors
-
-        def do_input_map(fn, input):
-            return _nested_map(lambda t: isinstance(t, torch.Tensor), fn)(input)
 
         def flatten_inputs(inputs):
             def input_reduce(input, fn, acc):

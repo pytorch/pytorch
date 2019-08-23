@@ -169,7 +169,7 @@ struct Value {
     return type()->requires_grad();
   }
   bool isCompleteTensor() const {
-    if (auto pt = type()->cast<ProfiledTensorType>()) {
+    if (auto pt = type()->cast<TensorType>()) {
       return pt->isComplete();
     }
     return false;
