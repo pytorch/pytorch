@@ -209,6 +209,14 @@ void TensorIterator::allocate_outputs() {
         tensor_stride[dim] /= element_size;
       }
       op.tensor = at::empty_strided(tensor_shape, tensor_stride, op.options());
+      // Need additional dimensionality checks for the situation when one of
+      // inputs were channels last, but the output is the result of broadcasting
+      // to a bigger dimensionality.
+      if (requires_channels_last_output_ && op.tensor.dim() >= 3 &&
+          op.tensor.dim() <= 5) {
+        op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(
+            MemoryFormat::ChannelsLast);
+      }
     }
   }
 }
@@ -661,6 +669,11 @@ void TensorIterator::compute_shape() {
         // Preserve legacy resizing behavior of out=... arguments
         // TODO: issue warning
         tensor.resize_(shape_);
+        if (requires_channels_last_output_ && tensor.dim() >= 3 &&
+            tensor.dim() <= 5) {
+          tensor.unsafeGetTensorImpl()->empty_tensor_restride(
+              MemoryFormat::ChannelsLast);
+        }
         continue;
       }
       if (!is_reduction_) {
@@ -687,6 +700,15 @@ void TensorIterator::compute_strides() {
           op.stride_bytes[offset + i] = original_stride[i] * element_size_in_bytes;
         }
       }
+    }
+  }
+}
+
+void TensorIterator::analyze_memory_format() {
+  for (auto& op : operands_) {
+    if (op.tensor.defined() &&
+        op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
+      requires_channels_last_output_ = true;
     }
   }
 }
@@ -742,6 +764,8 @@ int TensorIterator::get_dim_to_split() const {
 }
 
 void TensorIterator::build() {
+  // check input tensors memory format to use it during output allocation
+  analyze_memory_format();
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
   // Check that the outputs have no internal overlap

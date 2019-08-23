@@ -16,6 +16,7 @@ import pickle
 import gzip
 import types
 import textwrap
+import inspect
 from torch._utils_internal import get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
@@ -12685,21 +12686,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
         self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_memory_format_preserved_during_device_transfer(self):
-        nhwc = torch.randn((10, 3, 32, 32), device='cpu').contiguous(memory_format=torch.channels_last)
-
-        on_cuda = nhwc.to('cuda')
-        self.assertFalse(on_cuda.is_contiguous(memory_format=torch.channels_last))
-        on_cuda = nhwc.cuda()
-        self.assertFalse(on_cuda.is_contiguous(memory_format=torch.channels_last))
-
-        with memory_format_propagation():
-            on_cuda = nhwc.to('cuda')
-            self.assertTrue(on_cuda.is_contiguous(memory_format=torch.channels_last))
-            on_cuda = nhwc.cuda()
-            self.assertTrue(on_cuda.is_contiguous(memory_format=torch.channels_last))
-
     def test_memory_format_contiguous_returns_same_tensor_if_already_satisfies(self):
         x = torch.randn(10, 32, 32, 3).permute(0, 3, 1, 2)
         alias = x.contiguous(memory_format=torch.channels_last)
@@ -12758,6 +12744,104 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             x = torch.empty((3, 3), memory_format=torch.channels_last)
         x = torch.empty((3, 3, 3, 3), memory_format=torch.channels_last)
         self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+
+    @pytorchtest.test_all_device_types()
+    def test_memory_format_operators(self, device):
+        def chunk_op(x, y):
+            x1, x2 = x.chunk(2, dim=1)
+            y1, y2 = x.chunk(2, dim=1)
+            y1 = y1.contiguous()
+            return y1 + x1
+
+        def unsqueeze_op_add(x, y):
+            return x[0].unsqueeze(0) + 3
+
+        def unsqueeze_op_clone(x, y):
+            return x[0].unsqueeze(0).clone()
+
+        x = torch.randn((10, 4, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
+        y = abs(torch.randn((10, 4, 32, 32), device=device)) + 1
+
+        single_tensor_fns = [
+            lambda x: x.clone(),
+            lambda x: x + 3,
+            lambda x: 3 * x,
+            lambda x: y + x,
+            lambda x: y * x,
+            lambda x: x.sin(),
+            lambda x: x.sinh(),
+            lambda x: x.sqrt(),
+            lambda x: abs(x),
+            lambda x: x.abs(),
+            lambda x: x.acos(),
+            lambda x: x.asin(),
+            lambda x: x.atan(),
+            lambda x: x.ceil(),
+            # lambda x: x.clamp(-1, 1), # TH at THTensorMath.cpp
+            lambda x: x.cos(),
+            lambda x: x.cosh(),
+            lambda x: x.div(0.5),
+            # lambda x: x.digamma(), # TH at THTensorMoreMath.cpp
+            lambda x: x.erf(),
+            lambda x: x.erfc(),
+            # lambda x: x.erfinv(), # TH at THTensorMoreMath.cpp
+            lambda x: x.exp(),
+            lambda x: x.expm1(),
+            lambda x: x.floor(),
+            # lambda x: x.fmod(2), # TH at THTensorEvenMoreMath.cpp
+            lambda x: x.frac(),
+            lambda x: x.log(),
+            lambda x: x.log10(),
+            lambda x: x.log1p(),
+            lambda x: x.log2(),
+            lambda x: x.mul(3),
+            # lambda x: x.clone().uniform_(1, 2).mvlgamma(2), # Reduction
+            lambda x: x.neg(),
+            # lambda x: x.pow(3), # TH at THTensorMath.cpp
+            # lambda x: torch.pow(3, x)
+            lambda x: x.reciprocal(),
+            # lambda x: x.remainder(2), # TH at THTensorEvenMoreMath.cpp
+            lambda x: x.round(),
+            lambda x: x.rsqrt(),
+            lambda x: x.sigmoid(),
+            # lambda x: x.sign(), # TH function at THTensorMoreMath.cpp
+            lambda x: x.sin(),
+            lambda x: x.sinh(),
+            lambda x: x.sqrt(),
+            lambda x: x.tan(),
+            lambda x: x.tanh(),
+            lambda x: x.trunc(),
+        ]
+        fns = [
+            lambda x, y: x + y,
+            lambda x, y: y + x,
+            lambda x, y: x * y,
+            lambda x, y: y * x,
+            lambda x, y: x.add(y, alpha=3),
+            # lambda x, y: x.addcdiv(2, y, y), # TH at THTensorMath.cpp
+            # lambda x, y: x.addcmul(2, y, y), # TH at THTensorMath.cpp
+            # lambda x, y: x.atan2(y), # TH at THTensorMoreMath.cpp
+            lambda x, y: x.div(y),
+            # lambda x, y: x.lerp(y, 0.5),
+            # lambda x, y: x.pow(y), # TH at THTensorMath.cpp
+            # lambda x, y: y.pow(x), # TH at THTensorMath.cpp
+            chunk_op,
+            unsqueeze_op_add,
+            unsqueeze_op_clone,
+         ]
+
+        with memory_format_propagation():
+            for fn in single_tensor_fns:
+                result = fn(x)
+                self.assertTrue(
+                    result.is_contiguous(memory_format=torch.channels_last),
+                    "result of the '{}' is not in channels_last format".format(inspect.getsource(fn).strip()))
+            for fn in fns:
+                result = fn(x, y)
+                self.assertTrue(
+                    result.is_contiguous(memory_format=torch.channels_last),
+                    "result of the '{}' is not in channels_last format".format(inspect.getsource(fn).strip()))
+
 
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor

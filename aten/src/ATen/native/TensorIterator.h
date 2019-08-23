@@ -292,6 +292,7 @@ struct CAFFE2_API TensorIterator {
   void build();
 
 protected:
+  void analyze_memory_format();
   void mark_outputs();
   void check_mem_overlaps();
   void compute_shape();
@@ -320,6 +321,7 @@ protected:
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
+  bool requires_channels_last_output_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover

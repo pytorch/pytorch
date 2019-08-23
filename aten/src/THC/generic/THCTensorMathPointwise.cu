@@ -184,6 +184,7 @@ static void propagate_names_if_named_tensor_enabled(THCTensor* result, THCTensor
 #endif
 }
 
+// vitalyf write issue to port this operators to Aten
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_(NAME, CFUNC, REAL)             \
   struct Tensor_##NAME##_##REAL##_Op {                                  \
     __device__ __forceinline__ void operator()(scalar_t* out, scalar_t* in) const { \
@@ -204,7 +205,9 @@ static void propagate_names_if_named_tensor_enabled(THCTensor* result, THCTensor
       }                                                                 \
     } else {                                                            \
       THCTensor_(resizeAs)(state, self_, src);                          \
-                                                                        \
+      at::Tensor src_wrap = THTensor_wrap(src);                   \
+      at::Tensor self_wrap = THTensor_wrap(self_);                   \
+      self_wrap.resize_as_(src_wrap); \
       if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src, Tensor_##NAME##_##REAL##_Op())) { \
         THArgCheck(false, 2, CUTORCH_DIM_WARNING);                      \
       }                                                                 \
@@ -301,7 +304,9 @@ void THCTensor_(sigmoid)(THCState* state, THCTensor* self_, THCTensor* src) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   } else {
-    THCTensor_(resizeAs)(state, self_, src);
+    at::Tensor src_wrap = THTensor_wrap(src);
+    at::Tensor self_wrap = THTensor_wrap(self_);
+    self_wrap.resize_as_(src_wrap);
 
     if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src, TensorSigmoidOp<scalar_t>())) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
