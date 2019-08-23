@@ -123,6 +123,8 @@ IMPLEMENT_VML(rsqrt)
 IMPLEMENT_VML_BUG(tan)
 IMPLEMENT_VML_BUG(tanh)
 IMPLEMENT_VML_BUG(trunc)
+IMPLEMENT_VML_BUG(lgamma)
+
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 
