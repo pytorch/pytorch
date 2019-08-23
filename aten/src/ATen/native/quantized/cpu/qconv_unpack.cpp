@@ -33,7 +33,6 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
 
     int C_per_G = input_channels / groups;
 
-
     // Tensor for unpacked weights
     // Unpacked format would be KRS(C/G)
    Tensor unpacked_weights;
