@@ -111,9 +111,9 @@ void syncStreams(
 
 } // namespace
 
-constexpr int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 100;
+const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 100;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
-constexpr int64_t ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis =
+const int64_t ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis =
     10 * 1000;
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
