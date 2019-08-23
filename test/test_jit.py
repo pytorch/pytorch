@@ -2195,6 +2195,25 @@ graph(%Ra, %Rb):
         self.checkScript(test_basic_sparse, (get_sparse(),))
         self.checkScript(test_basic_sparse, (torch.tensor([1]),))
 
+        def test_sparse_sum(input):
+            return torch.sparse.sum(input)
+
+        self.checkScript(test_sparse_sum, (get_sparse(),))
+
+        def test_sparse_mm(input1, input2):
+            return torch.sparse.mm(input1, input2)
+
+        self.checkScript(test_sparse_mm, (get_sparse(), torch.randn(3, 4)))
+
+        def test_sparse_addmm(input, input1, input2):
+            return torch.sparse.addmm(input, input1, input2)
+
+        def test_sparse_addmm_alpha_beta(input, input1, input2):
+            return torch.sparse.addmm(input, input1, input2, 1.3, 1.5)
+
+        self.checkScript(test_sparse_addmm, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
+        self.checkScript(test_sparse_addmm_alpha_beta, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
+
     def test_tuple_specialization(self):
         @torch.jit.script
         def f(t, s):
