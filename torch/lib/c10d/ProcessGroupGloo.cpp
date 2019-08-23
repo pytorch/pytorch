@@ -580,52 +580,25 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
-class AsyncAllreduceCoalescedWork: public ProcessGroupGloo::AsyncWork {
+class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
  public:
   AsyncAllreduceCoalescedWork(
-    std::shared_ptr<gloo::Context> context,
+    const std::shared_ptr<gloo::Context>& context,
     std::vector<at::Tensor>& inputs,
     ReduceOp reduceOp,
     uint32_t tag)
-    : context(std::move(context)), inputs(inputs), reduceOp(reduceOp), tag(tag) {}
-
-  std::shared_ptr<gloo::Context> context;
-  std::vector<at::Tensor> inputs;
-  const ReduceOp reduceOp;
-  const uint32_t tag;
+    : AsyncAllreduceWork(context, inputs, reduceOp, tag) {}
 
   void run() override {
     allreduceCoalesced(inputs);
   }
 
  private:
-  template <typename T>
-  void getFunction(gloo::AllreduceOptions::Func& fn, const ReduceOp op) {
-    fn = toFunction<T>(op);
-  }
-
-  gloo::AllreduceOptions::Func getFunction(
-      const at::ScalarType& dtype,
-      const ReduceOp op) {
-    gloo::AllreduceOptions::Func fn;
-    GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
-    return fn;
-  }
-
-  void allreduce(at::Tensor& tensor) {
-    const at::ScalarType& scalarType = tensor.scalar_type();
-    gloo::AllreduceOptions opts(context);
-    opts.setReduceFunction(getFunction(scalarType, reduceOp));
-    opts.setTag(tag);
-    GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensor);
-    gloo::allreduce(opts);
-  }
-
-  // gather and add.
   void allreduceCoalesced(std::vector<at::Tensor>& tensors) {
     // reduce coalesced, flattened tensors.
     at::Tensor coalescedTensor = flattenDenseTensors(tensors);
-    allreduce(coalescedTensor);
+    std::vector<at::Tensor> allreduceInput = {coalescedTensor};
+    allreduce(allreduceInput);
 
     // separate and reshape tensors.
     size_t offset = 0;
