@@ -53,11 +53,16 @@ template <bool ReLUFused = false>
 Tensor _add_scalar_(Tensor& self, Scalar other) {
 
   if (self.qscheme() == kPerTensorAffine) {
-    AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qadd", [&]() {
-      int64_t qmin = std::numeric_limits<typename T::underlying>::min();
-      int64_t qmax = std::numeric_limits<typename T::underlying>::max();
-      double new_s = s * ((max(qmax - z, 0) - min(qmin - z, 0)) / (qmax - qmin));
-      int64_t new_z = qmin - min(xmin + other_int, 0) / new_s;
+    double s = self.q_scale();
+    int64_t z = self.q_zero_point();
+    int64_t other_int = other.toInt();
+    AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qadd", [&]() {
+      int64_t qmin = std::numeric_limits<underlying_t>::min();
+      int64_t qmax = std::numeric_limits<underlying_t>::max();
+      double xmin = (double(qmin) - self.q_zero_point()) * self.q_scale();
+      double new_s = s * ((std::max<int64_t>(qmax - z, 0) - std::min<int64_t>(qmin - z, 0))
+                     / (qmax - qmin));
+      int64_t new_z = qmin - std::min<int64_t>(xmin + other_int, 0) / new_s;
       self.set_quantizer_(make_per_tensor_affine_quantizer(new_s, new_z,
                                                            self.scalar_type()));
     });
@@ -105,9 +110,8 @@ class QAddScalar final : public c10::OperatorKernel {
   TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
               "Only per tensor quantization is suuported in Add.");
-    auto qc = at::_empty_affine_quantized(qa.sizes(),
-      at::device(kCPU).dtype(qa.scalar_type()), scale, zero_point);
-    return _add_scalar_out<ReLUFused>(qc, qa, b);
+    auto out = qa.clone();
+    return _add_scalar_<ReLUFused>(out, b);
   }
 };
 
@@ -116,7 +120,8 @@ class QAddScalarOut final : public c10::OperatorKernel {
  public:
   Tensor operator()(Tensor qa, Scalar b, Tensor out) {
     check_inputs(qa, out);
-    return _add_scalar_out<ReLUFused>(out, qa, b);
+    out = qa.clone();
+    return _add_scalar_<ReLUFused>(out, b);
   }
 };
 
