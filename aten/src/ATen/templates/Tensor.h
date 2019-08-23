@@ -284,8 +284,14 @@ class CAFFE2_API Tensor {
     return this->unsafeGetTensorImpl()->data();
   }
 
+  template <typename T>
+  T * data_ptr() const;
+
   template<typename T>
-  T * data() const;
+  T * data() const {
+    TORCH_WARN("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.");
+    return data_ptr<T>();
+  }
 
   template <typename T>
   T item() const;
@@ -297,9 +303,9 @@ class CAFFE2_API Tensor {
   // dimension.
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() const& {
-    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
+    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
-    return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
+    return TensorAccessor<T,N>(data_ptr<T>(),sizes().data(),strides().data());
   }
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
@@ -311,9 +317,9 @@ class CAFFE2_API Tensor {
   // as an argument.
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
-    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
+    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
-    return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
+    return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
   }
   template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N> packed_accessor() && = delete;
@@ -390,6 +396,24 @@ namespace detail {
 template <typename T, typename... Args>
 Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
+}
+
+inline Backend infer_backend(const Tensor & t) {
+  TORCH_CHECK(t.defined(), "undefined Tensor");
+  return tensorTypeIdToBackend(t.type_id());
+}
+inline Backend infer_backend(const TensorList & tl) {
+  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+  return tensorTypeIdToBackend(tl[0].type_id());
+}
+
+inline bool infer_is_variable(const Tensor & t) {
+  TORCH_CHECK(t.defined(), "undefined Tensor");
+  return t.is_variable();
+}
+inline bool infer_is_variable(const TensorList & tl) {
+  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+  return tl[0].is_variable();
 }
 } // namespace detail
 
