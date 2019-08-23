@@ -272,6 +272,14 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Name \'N\' not found in '):
             torch.empty(2, 3, 4).stride('N')
 
+    def test_transpose_variants(self):
+        t = torch.randn(2, 3, 5, 7, names=('N', 'C', 'H', 'W'))
+        self.assertEqual(t.transpose('N', 'C').names, ['C', 'N', 'H', 'W'])
+        self.assertEqual(t.transpose(1, 3).names, ['N', 'W', 'H', 'C'])
+
+        t = torch.randn(2, 3, names=('N', 'C'))
+        self.assertEqual(t.t().names, ['C', 'N'])
+
     def test_info_smoke(self):
         # Smoke test for info functions / methods / attributes on named tensors.
         tensor = torch.empty(1, 1, names=('N', 'D'))
