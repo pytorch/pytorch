@@ -44,7 +44,7 @@ parser.add_argument(
     action='store_true',
     help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
 options = parser.parse_args()
-core_install_dir = os.path.join(options.install_dir, 'core') if options.install_dir is not None else None
+core_install_dir = options.install_dir + '/core' if options.install_dir is not None else None
 if options.install_dir is not None and not os.path.exists(options.install_dir):
     os.makedirs(options.install_dir)
 if core_install_dir is not None and not os.path.exists(core_install_dir):
