@@ -46,11 +46,11 @@ void Function::ensure_defined() {
   check_single_output();
 }
 
-  const FunctionSchema& Function::getSchema() const {
-    if (schema_ == nullptr) {
-      schema_ = make_unique<FunctionSchema>(defaultSchemaFor(*this));
-    }
-    return *schema_;
+const FunctionSchema& Function::getSchema() const {
+  if (schema_ == nullptr) {
+    schema_ = make_unique<FunctionSchema>(defaultSchemaFor(*this));
   }
+  return *schema_;
+}
 } // namespace jit
 } // namespace torch
