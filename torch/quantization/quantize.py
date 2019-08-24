@@ -245,7 +245,7 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
     model.eval()
     model = prepare(model)
     run_fn(model, run_args)
-    convert(model, mapping)
+    model = convert(model, mapping)
     return model
 
 DEFAULT_QCONFIG_DICT = {
@@ -257,7 +257,7 @@ def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_D
     """
     model.eval()
     propagate_qconfig(model, qconfig_dict)
-    convert(model, mapping)
+    model = convert(model, mapping)
     return model
 
 def prepare_qat(model):
@@ -271,7 +271,7 @@ def quantize_qat(model, run_fn, run_args):
     model.train()
     model = prepare_qat(model)
     run_fn(model, run_args)
-    convert(model)
+    model = convert(model)
     return model
 
 def convert(module, mapping=DEFAULT_MODULE_MAPPING):

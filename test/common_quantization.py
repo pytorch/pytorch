@@ -63,7 +63,7 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
     return train_loss, correct, total
 
 def convert_dynamic(module):
-    convert(module, DEFAULT_DYNAMIC_MODULE_MAPPING)
+    return convert(module, DEFAULT_DYNAMIC_MODULE_MAPPING)
 
 def prepare_dynamic(model, qconfig_dict=None):
     propagate_qconfig(model, qconfig_dict)

@@ -47,7 +47,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         self.checkObservers(model)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
@@ -75,7 +75,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         self.checkHasPrepModules(model.fc2)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
@@ -113,7 +113,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         model = prepare(model)
         checkPrepModules(model, True)
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             checkPrepModules(model)
@@ -150,7 +150,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkPrepModules(model, True)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             checkPrepModules(model)
@@ -190,7 +190,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkPrepModules(model, True)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             checkPrepModules(model)
@@ -215,7 +215,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         self.checkObservers(model)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.checkLinear(model.fc)
@@ -243,7 +243,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         self.checkObservers(model)
 
         test_only_eval_fn(model, self.calib_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.fc), nnq.Linear)
@@ -273,7 +273,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             '': default_dynamic_qconfig
         }
         model = prepare_dynamic(model, qconfig_dict)
-        convert_dynamic(model)
+        model = convert_dynamic(model)
 
         def checkQuantized(model):
             self.checkDynamicQuantizedLinear(model.fc1)
@@ -294,7 +294,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         }
         model = prepare_dynamic(model, qconfig_dict)
 
-        convert_dynamic(model)
+        model = convert_dynamic(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.fc1), torch.nn.Linear)
@@ -317,7 +317,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         }
 
         model = prepare_dynamic(model, qconfig_dict)
-        convert_dynamic(model)
+        model = convert_dynamic(model)
 
         def checkQuantized(model):
             self.checkLinear(model.sub1.fc)
@@ -342,7 +342,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         }
         model = prepare_dynamic(model, qconfig_dict)
 
-        convert_dynamic(model)
+        model = convert_dynamic(model)
 
         def checkQuantized(model):
             self.checkLinear(model.sub1.fc)
@@ -374,7 +374,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         }
         model = prepare_dynamic(model, qconfig_dynamic_dict)
 
-        convert_dynamic(model)
+        model = convert_dynamic(model)
 
         def checkQuantized(model):
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
@@ -400,7 +400,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         model = prepare_dynamic(model, qconfig_dict)
         test_only_eval_fn(model, self.calib_data)
-        convert_dynamic(model)
+        model = convert_dynamic(model)
 
         def checkQuantized(model):
             self.checkDynamicQuantizedLinear(model.sub1.fc)
@@ -427,7 +427,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         model = prepare_qat(model)
         self.checkObservers(model)
         test_only_train_fn(model, self.train_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.fc1), nnq.Linear)
@@ -460,7 +460,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         self.checkObservers(model)
 
         test_only_train_fn(model, self.img_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.conv), nnq.Conv2d)
@@ -541,7 +541,7 @@ class FusionTest(QuantizationTestCase):
 
         checkQAT(model)
         test_only_train_fn(model, self.img_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
@@ -589,7 +589,7 @@ class FusionTest(QuantizationTestCase):
         model = prepare(model)
         self.checkObservers(model)
         test_only_eval_fn(model, self.img_data)
-        convert(model)
+        model = convert(model)
 
         def checkQuantized(model):
             self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
