@@ -120,24 +120,5 @@ TORCH_API void InsertQuantDeQuant(
  */
 TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
 
-class QuantizeHelper {
- public:
-  QuantizeHelper(const script::Module& m) : module_(m) {}
-  IValue getQParam(Value* v);
-  void quantizeBias(Value* v);
-  void quantizeTensor(Value* v, bool insert_after=true);
-  void destroyNodes() {
-    // Destroy observer forward calls
-    for (auto& n: nodes_to_destroy_) {
-      n->destroy();
-    }
-  }
-
- private:
-  const script::Module& module_;
-  std::vector<std::string> observer_modules_to_remove_;
-  std::vector<Node*> nodes_to_destroy_;
-};
-
 } // namespace jit
 } // namespace torch
