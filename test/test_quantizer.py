@@ -65,6 +65,7 @@ class QuantizerTestCase(TestCase):
         # Eager mode
         fake_qconfig = QConfig(activation=Observer, weight=WeightObserver)
         eager_module = TestM(fake_qconfig)
+        # Script mode
         script_module = TestScriptM()
         script_module.conv.weight = torch.nn.Parameter(eager_module.conv.weight.detach())
         quantized_eager_module = quantize(eager_module, default_eval_fn, data)
@@ -72,7 +73,6 @@ class QuantizerTestCase(TestCase):
 
         def get_forward(m):
             return m._c._get_method('forward')
-        # Script mode
         # TODO: test jit.script as well
         torch._C._jit_pass_constant_propagation(get_forward(script_module).graph)
 
@@ -84,43 +84,22 @@ class QuantizerTestCase(TestCase):
                 activation=ScriptedObserver._c,
                 weight=ScriptedWeightObserver._c)
         }
-        print('--------- 1. Insert Observers --------')
         script_module._c = torch._C._jit_pass_insert_observers(script_module._c,
                                                                "forward",
                                                                qconfig_dict)
 
         # Run ScriptM Model and Collect statistics
-        print('--------- 2. Calibration ----------')
         get_forward(script_module)(data[0][0])
 
         # Insert quantize and dequantize calls
-        print('--------- 3. Convert --------------')
         torch._C._jit_pass_insert_quant_dequant(script_module._c, "forward")
         # Note that observer modules are not removed right now
-        # print(script_module._c._get_modules())
-        # torch._C._jit_pass_custom_pattern_based_rewrite_graph()
-        print('--------- 4. Fusion ---------------')
         torch._C._jit_pass_quant_fusion(script_module._c._get_method('forward').graph)
         get_forward(script_module)(data[0][0])
         print(get_forward(script_module).code)
         eager_result = quantized_eager_module(data[0][0])
         script_result = get_forward(script_module)(data[0][0])
         self.assertEqual(eager_result, script_result)
-        # Compare results for eager and graph mode
-
-    def test_module_rewriter(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 12, 3)
-                self.bn = torch.nn.BatchNorm2d(12)
-
-            def forward(self, x):
-                return self.bn(self.conv(x))
-
-        torch._C._jit_set_inline_everything_mode(False)
-        m = torch.jit.script(M())
-        m._c._dump(omit_method_bodies=False)
 
 if __name__ == '__main__':
     run_tests()

@@ -992,9 +992,7 @@ graph(%x : Tensor,
         get_forward(m)(data)
         # right now the result will have extra observer modules
         # will fix later when we figure out how to remove modules
-        print(get_forward(m).graph)
         torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
-        print(get_forward(m).graph)
 
         get_forward(m)(data)
         FileCheck().check("aten::quantize_linear") \
