@@ -298,6 +298,65 @@ pip install -r requirements.txt
 You can then build the documentation by running ``make <format>`` from the
 ``docs/`` folder. Run ``make`` to get a list of all available output formats.
 
+### Building the CPU-version Libtorch for 32-bit on Windows
+Please use Visual Studio 2017 to the latest version along with installing "VC++ 2017 version 15.4 v14.11 toolset".
+Please use [Anaconda](https://www.anaconda.com/distribution/#download-section) to set 32-bit environment by yourself.
+You need install Python in 32-bit,recommend the 3.7 version.
+Most of steps are same as build pytorch on Windows, a little different with building Libtorch for 32-bit on Windows:
+
+```cmd
+Do all steps in Anaconda Prompt
+:: [Optional]If you have not got the pytorch source, you can git clone pytorch repository here.
+git clone --recursive https://github.com/pytorch/pytorch
+cd pytorch
+git submodule sync
+git submodule update --init --recursive
+
+:: [Optional]Only add the next line if you want to generate Libtorch's libraries in debug mode. If you want libraries in release mode, ignore the next line.
+set DEBUG=1
+
+:: Switch anaconda's platform from win-64 to win-32.
+set CONDA_FORCE_32BIT=1
+
+:: Recommand to create a new enviroment in 32-bit, and activate this environment to do all next steps.
+:: Make sure in your environment,Python is in 32 bit
+:: If Python shows information like this [MSC v.1912 32 bit (Intel)],which mean its architecture is 32-bit. 
+conda create -n env_name python=3.7
+conda activate env_name
+
+:: Install common Dependencies.
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
+
+:: Disable CUDA, for just build CPU-version Libtorch
+set USE_CUDA=0
+
+:: Disable NINJA, and set CMake generate to Visual Studio 15 2017.
+set USE_NINJA=OFF
+set CMAKE_GENERATOR=Visual Studio 15 2017
+
+:: Make sure you have CMake >= 3.12 before you do this when you use the Visual Studio generator.
+:: It's an essential step if you use Python 3.5.
+set CMAKE_GENERATOR_TOOLSET_VERSION=14.11
+set DISTUTILS_USE_SDK=1
+
+:: set build Libtorch in x86 architecture in next line. 
+for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,16^) -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
+
+:: build Libtorch.
+cd tools
+python build_libtorch.py
+
+```
+#### Guide for using built Libtorch
+Copy the dll files (torch.dll and c10.dll) from /path/to/pytorch/torch/lib to the directory having executable file.
+
+If you use libtorch by CMake coresponding to [Installing C++ Distributions of PyTorch](https://pytorch.org/cppdocs/installing), you need to change DCMAKE_PREFIX_PATH=/absolute/path/to/pytorch/torch.
+
+If you use libtorch from File>New>Project to build [Minimal Example](https://pytorch.org/cppdocs/installing.html#minimal-example), you need to set some Properities in next three lines:
+Set Properities>C/C++>Language>Conformance mode to No.
+Add `\absolute\path\to\pytorch\torch\include` and `\absolute\path\to\pytorch\torch\include\torch\csrc\api\include` to Properities>C/C++>General>Additional Include Directories 
+Add `\absolute\path\to\pytorch\torch\lib\torch.lib` and `\absolute\path\to\pytorch\torch\lib\c10.lib` to Properities>C/C++>Input>Additional Dependencies
+
 ### Previous Versions
 
 Installation instructions and binaries for previous PyTorch versions may be found
