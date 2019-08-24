@@ -115,7 +115,7 @@ TEST_F(ModuleTest, ReplaceModule) {
   ASSERT_EQ(model->l1.get(), model->named_modules()["l1"]->as<Linear>());
 }
 
-TEST_F(ModuleTest, UnregisterModuleThrowsForUnknownModuleName) {
+TEST_F(ModuleTest, UnregisterModule) {
   struct TestModel : public torch::nn::Module {};
   TestModel model;
   ASSERT_THROWS_WITH(

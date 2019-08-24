@@ -383,8 +383,8 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
 
   /// Serializes the `Module` into the given `OutputArchive`.
   ///
-  /// If the `Module` contains unserializable submodules (e.g.
-  /// `nn::Functional`), those submodules are skipped when serializing.
+  /// If the `Module` contains unserializable submodules (e.g. `nn::Functional`),
+  /// those submodules are skipped when serializing.
   virtual void save(serialize::OutputArchive& archive) const;
 
   /// Deserializes the `Module` from the given `InputArchive`.
