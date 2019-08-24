@@ -101,7 +101,7 @@ skip_override_set = set(skip_override.keys())
 should_run_set = default_set - skip_override_set
 for spec in should_run_set:
     # if spec in args.build_environment:
-    if True
+    if True:
         print("Accepting {} as part of default set".format(args.build_environment))
         sys.exit(0)
 
