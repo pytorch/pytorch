@@ -11587,6 +11587,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # implements `==`
             for i in range(len(array)):
                 self.assertEqual(tensor_from_array[i], array[i])
+            # This is a special test case for Windows
+            # https://github.com/pytorch/pytorch/issues/22615
             array2 = array % 2
             tensor_from_array2 = torch.from_numpy(array2)
             for i in range(len(array2)):

@@ -197,17 +197,22 @@ ScalarType numpy_dtype_to_aten(int dtype) {
     case NPY_DOUBLE: return kDouble;
     case NPY_FLOAT: return kFloat;
     case NPY_HALF: return kHalf;
-    case NPY_INT32: return kInt;
     case NPY_INT16: return kShort;
     case NPY_INT8: return kChar;
     case NPY_UINT8: return kByte;
     case NPY_BOOL: return kBool;
     default:
       // Workaround: MSVC does not support two switch cases that have the same value
-      // if (dtype == NPY_INT || dtype == NPY_INT32) {
-      //   return kInt;
-      // } else
-      if (dtype == NPY_LONGLONG || dtype == NPY_INT64) {
+      if (dtype == NPY_INT || dtype == NPY_INT32) {
+        // To cover all cases we must use NPY_INT because
+        // NPY_INT32 is an alias which maybe equal to:
+        // - NPY_INT, when sizeof(int) = 4 and sizeof(long) = 8
+        // - NPY_LONG, when sizeof(int) = 4 and sizeof(long) = 4
+        return kInt;
+      } else if (dtype == NPY_LONGLONG || dtype == NPY_INT64) {
+        // NPY_INT64 is an alias which maybe equal to:
+        // - NPY_LONG, when sizeof(long) = 8 and sizeof(long long) = 8
+        // - NPY_LONGLONG, when sizeof(long) = 4 and sizeof(long long) = 8
         return kLong;
       } else {
         break;  // break as if this is one of the cases above because this is only a workaround
