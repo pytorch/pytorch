@@ -12,6 +12,16 @@ bool NamedTensorMeta::has_names() const {
       });
 }
 
+thread_local bool NamesMode_enabled = true;
+
+bool NamesMode::is_enabled() {
+  return NamesMode_enabled;
+}
+
+void NamesMode::set_enabled(bool enabled) {
+   NamesMode_enabled = enabled;
+}
+
 Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
   impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), names);
   return tensor;
@@ -63,6 +73,9 @@ static void check_unique_names(DimnameList names) {
 }
 
 static NamedTensorMeta* get_named_tensor_meta(TensorImpl* impl) {
+  if (!NamesMode::is_enabled()) {
+    return nullptr;
+  }
   return static_cast<NamedTensorMeta*>(impl->named_tensor_meta());
 }
 
