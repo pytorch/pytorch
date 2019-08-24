@@ -6,6 +6,10 @@ namespace c10 {
 
 // This file exists because we need to reference module.h, which we can't from
 // c10. Sigh...
+FunctionType::FunctionType(Function* function)
+    : NamedType(TypeKind::FunctionType),
+      function_(function),
+      name_(function->qualname()) {}
 
 Function* ClassType::getMethod(const std::string& name) const {
   for (auto method : methods_) {
@@ -40,6 +44,10 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   for(size_t i = 0; i < attributeNames_.size(); ++i) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
     ptr->addAttribute(attributeNames_[i], refined_slots[i]);
+  }
+  // Copy methods over
+  for (const auto& method : methods()) {
+    ptr->addMethod(method);
   }
   return ptr;
 }
@@ -79,7 +87,9 @@ ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module)
-    : NamedType(TypeKind::ClassType, name), compilation_unit_(std::move(cu)) {
+    : NamedType(TypeKind::ClassType),
+      compilation_unit_(std::move(cu)),
+      name_(std::move(name)) {
   if (is_module) {
     parameterSlots_ = std::make_shared<std::vector<bool>>();
   }

@@ -66,6 +66,7 @@ blacklist = [
     'triplet_margin_loss',
     # Somehow, these are defined in both _C and in functional. Ick!
     'broadcast_tensors',
+    'align_tensors',  # BUILD_NAMEDTENSOR only
     'meshgrid',
     'cartesian_prod',
     'norm',

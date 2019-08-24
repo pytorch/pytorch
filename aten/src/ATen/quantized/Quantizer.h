@@ -78,6 +78,11 @@ struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
    * dequantize a quantized Tensor into a float Tensor.
    */
   virtual Tensor dequantize(Tensor t) = 0;
+
+  /**
+   * Compare against `other` for equality.
+   */
+  virtual bool equalTo(QuantizerPtr other) = 0;
 };
 
 /**
@@ -113,62 +118,8 @@ struct CAFFE2_API AffineQuantizer : public UniformQuantizer {
   explicit AffineQuantizer(QScheme qscheme, ScalarType scalar_type) : UniformQuantizer(qscheme, scalar_type) {}
 };
 
-/**
- * SymmetricQuantizer is similar to AffineQuantizer except that it
- * does not have zero_point
- *
- * For quantize:
- * Y = clamp(round(X / scale), min, max)
- * For dequantize:
- * X = Y * scale
- */
-struct CAFFE2_API SymmetricQuantizer : public UniformQuantizer {
-  explicit SymmetricQuantizer(QScheme qscheme, ScalarType scalar_type) : UniformQuantizer(qscheme, scalar_type) {}
-};
-
-/**
- * PerTensorSymmetricQuantizer stores a single scale number which is
- * used for quantizing all the values in the given Tensor
- */
-struct CAFFE2_API PerTensorSymmetricQuantizer : public SymmetricQuantizer {
-  explicit PerTensorSymmetricQuantizer(ScalarType scalar_type, double scale)
-    : SymmetricQuantizer(kPerTensorSymmetric, scalar_type), scale_(scale) {}
-  double scale_{1.0};
-};
-
-/**
- * PerChannelSymmetricQuantizer stores a vector of scale number and
- * applys symmetric quantization using different scales on each channel.
- *
- * Also note that per channel quantization is mostly applied to output channels
- * of weights since per-input channel of weight quantization or per-channel
- * quantization for activations can't be efficiently supported in most of
- * processors since it requires each multiplication result within a single
- * dot-product to have a different scale.
- */
-struct CAFFE2_API PerChannelSymmetricQuantizer : public SymmetricQuantizer {
-  explicit PerChannelSymmetricQuantizer(
-      ScalarType scalar_type,
-      const std::vector<double>& scales,
-      IntArrayRef axis)
-    : SymmetricQuantizer(kPerChannelSymmetric, scalar_type), scales_(scales), axis_(axis.vec()) {
-    TORCH_CHECK(
-        axis_.size() == 1,
-        "Per channel symmetric quantization in multiple axis is not supported yet.");
-  }
-
-  std::vector<double> scales() const {
-    return scales_;
-  }
-
-  IntArrayRef axis() const {
-    return axis_;
-  }
-
- private:
-  const std::vector<double> scales_;
-  const SmallVector<int64_t, 1> axis_;
-};
+// Note that we will not have Symmetric Quantizer in backend to reduce
+// complications in quantized kernel implementation.
 
 /**
  * PerTensorAffineQuantizer stores a scale and a zero_point, which is used for
@@ -191,6 +142,17 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
     return zero_point_;
   }
 
+  bool equalTo(QuantizerPtr other) override {
+    if (auto* other_per_tensor_affine =
+            dynamic_cast<PerTensorAffineQuantizer*>(other.get())) {
+      return qscheme() == other_per_tensor_affine->qscheme() &&
+          scalar_type() == other_per_tensor_affine->scalar_type() &&
+          scale() == other_per_tensor_affine->scale() &&
+          zero_point() == other_per_tensor_affine->zero_point();
+    }
+    return false;
+  }
+
  private:
   const double scale_;
   // We use int64_t for consistency with Python
@@ -201,6 +163,12 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
  * PerChannelAffineQuantizer is the same as PerTensorAffineQuantizer
  * except that we have an independent scale and zero_point parameter
  * for each channel.
+ *
+ * Also note that per channel quantization is mostly applied to output channels
+ * of weights since per-input channel of weight quantization or per-channel
+ * quantization for activations can't be efficiently supported in most of
+ * processors since it requires each multiplication result within a single
+ * dot-product to have a different scale.
  */
 struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
   explicit PerChannelAffineQuantizer(
@@ -231,6 +199,18 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
 
   Tensor quantize(Tensor tensor) override;
   Tensor dequantize(Tensor tensor) override;
+
+  bool equalTo(QuantizerPtr other) override {
+    if (auto* other_per_channel_affine =
+            dynamic_cast<PerChannelAffineQuantizer*>(other.get())) {
+      return qscheme() == other_per_channel_affine->qscheme() &&
+          scalar_type() == other_per_channel_affine->scalar_type() &&
+          scales() == other_per_channel_affine->scales() &&
+          zero_points() == other_per_channel_affine->zero_points() &&
+          axis() == other_per_channel_affine->axis();
+    }
+    return false;
+  }
 
  private:
   const std::vector<double> scales_;

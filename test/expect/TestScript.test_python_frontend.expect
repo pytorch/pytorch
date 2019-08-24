@@ -20,11 +20,11 @@
     (option))
   (list
     (assign
-      (variable (ident q))
+      (list (variable (ident q)))
       (option (None))
       (option))
     (assign
-      (variable (ident q))
+      (list (variable (ident q)))
       (option
         (-
           (+
@@ -43,7 +43,7 @@
         (list (variable (ident q)))
         (list)))
     (assign
-      (variable (ident w))
+      (list (variable (ident w)))
       (option
         (unary minus
           (variable (ident z))))
@@ -56,7 +56,7 @@
         (variable (ident z)))
       (list
         (assign
-          (variable (ident m))
+          (list (variable (ident m)))
           (option
             (if
               (not
@@ -75,7 +75,7 @@
           (variable (ident z))))
       (list
         (assign
-          (variable (ident q))
+          (list (variable (ident q)))
           (option (variable (ident x)))
           (option))))
     (assert

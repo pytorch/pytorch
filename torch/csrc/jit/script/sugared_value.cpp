@@ -416,7 +416,7 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   auto& g = *m.graph();
   auto self = g.insertNode(g.createObject(type_))->output();
   if (!type_->getMethod("__init__")) {
-    throw ErrorReport(loc) << "Class " << type_->basename()
+    throw ErrorReport(loc) << "Class " << type_->name()->name()
                            << " does not have an __init__ function defined";
   }
 
@@ -446,7 +446,7 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
 
   auto schema = type_->schema();
   TORCH_INTERNAL_ASSERT(schema);
-  auto qualname = type_->qualified_name_obj();
+  auto qualname = type_->name();
   auto matched_schema = matchSchema(*schema, loc, g, inputs, attributes);
 
   auto self =
