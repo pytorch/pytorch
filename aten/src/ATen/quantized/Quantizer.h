@@ -60,6 +60,9 @@ struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
     return c10::intrusive_ptr<Quantizer>::reclaim(this);
   }
 
+  /**
+   * Each concrete Quantizer type should have a unique QScheme type.
+   */
   virtual QScheme qscheme() const = 0;
 
   ScalarType scalar_type() {
