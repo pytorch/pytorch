@@ -64,6 +64,16 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'construct a tensor with duplicate names'):
             x = factory(2, 1, 1, names=('N', 'C', 'N'), device=device)
 
+        names64 = ['A' * i for i in range(1, 65)]
+        x = factory([1] * 64, names=names64, device=device)
+        self.assertEqual(x.names, names64)
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'only support up to 64 dims'):
+            names65 = ['A' * i for i in range(1, 66)]
+            x = factory([1] * 65, names=names64, device=device)
+
         # Tests for tagged names
         x = factory(2, 3, 1, names=('C.in', 'H', 'C.out'), device=device)
         self.assertEqual(x.names, ('C.in', 'H', 'C.out'))
@@ -271,6 +281,14 @@ class TestNamedTensor(TestCase):
             t.stride('channels')
         with self.assertRaisesRegex(RuntimeError, 'Name \'N\' not found in '):
             torch.empty(2, 3, 4).stride('N')
+
+    def test_transpose_variants(self):
+        t = torch.randn(2, 3, 5, 7, names=('N', 'C', 'H', 'W'))
+        self.assertEqual(t.transpose('N', 'C').names, ['C', 'N', 'H', 'W'])
+        self.assertEqual(t.transpose(1, 3).names, ['N', 'W', 'H', 'C'])
+
+        t = torch.randn(2, 3, names=('N', 'C'))
+        self.assertEqual(t.t().names, ['C', 'N'])
 
     def test_info_smoke(self):
         # Smoke test for info functions / methods / attributes on named tensors.
