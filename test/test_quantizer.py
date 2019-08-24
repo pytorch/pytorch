@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch.jit
+from jit_utils import _inline_everything
 from torch._jit_internal import Optional
 import torch.nn as nn
 import torch.nn.functional as F
@@ -151,81 +152,7 @@ class QuantTemplate:
 
 
 class QuantizerTestCase(TestCase):
-    def test_compare_qparam_eager_script_default_deprecated(self):
-        # Simple test case with conv->relu->maxpool
-        class TestScriptM(torch.jit.ScriptModule):
-            def __init__(self, init_weight=None):
-                super(TestScriptM, self).__init__()
-                self.conv1 = nn.Conv2d(1, 20, 5, 1)
-                self.conv1.weight.data.fill_(1.0)
-                self.conv1.bias.data.fill_(0.01)
-
-            @torch.jit.script_method
-            def forward(self, x):
-                y = F.relu(self.conv1(x))
-                z = F.max_pool2d(y, 2, 2)
-                return z
-
-        class TestM(nn.Module):
-            def __init__(self, quantObj=None):
-                super(TestM, self).__init__()
-                self.conv1 = nn.Conv2d(1, 20, 5, 1)
-                self.conv1.weight.data.fill_(1.0)
-                self.conv1.bias.data.fill_(0.01)
-                self.quantObj = quantObj
-
-            def forward(self, x):
-                y = F.relu(self.conv1(x))
-                if self.quantObj is not None:
-                    self.quantObj.observer(y, "y")
-                z = F.max_pool2d(y, 2, 2)
-                if self.quantObj is not None:
-                    self.quantObj.observer(z, "z")
-                return z
-
-        # Test Data
-        data = torch.ones(1, 1, 28, 28)
-
-        # Eager mode
-
-        # Create QuantConfig object for eager mode
-        eagerQuantObj = QuantTemplate(qscheme='per_tensor_quant',
-                                      observerImpl=activationObserver,
-                                      calcQParamImpl=calcQParamFunc)
-        eagerM = TestM(quantObj=eagerQuantObj)
-
-        # Run EagerMode Model and Collect stats
-        eagerM.forward(data)
-        eagerM.quantObj.calcQParam()
-
-        # Script mode
-        scriptM = TestScriptM()
-
-        # Create QuantConfig object for script mode
-        activationQuantObj = QuantTemplate(qscheme='per_tensor_quant',
-                                           observerImpl=activationObserver,
-                                           calcQParamImpl=calcQParamFunc)
-
-        # This performs type analysis to identify tensors from other
-        # types. This info needed for further quantizer passes
-        torch._C._jit_pass_constant_propagation(scriptM.graph)
-
-        # Insert observers
-        torch._C._jit_pass_insert_observers(scriptM._c, "forward", activationQuantObj.observer)
-
-        # Run ScriptM Model and Collect statistics
-        scriptM.forward(data)
-        activationQuantObj.calcQParam()
-
-        # Compare results for eager and graph mode
-        eagerDict = eagerQuantObj.getQParamDict()
-        activationDict = activationQuantObj.getQParamDict()
-
-        # TODO - fix @eellison
-        self.assertTrue('z' in eagerDict and 'z.1' in activationDict)
-        self.assertAlmostEqual(eagerDict["z"][0], activationDict["z.1"][0], places=15)
-        self.assertAlmostEqual(eagerDict["z"][1], activationDict["z.1"][1], places=15)
-
+    @_inline_everything
     def test_compare_qparam_eager_script_default(self):
         class Observer(torch.nn.Module):
             __annotations__ = {'scale' : Optional[torch.Tensor], 'zero_point': Optional[torch.Tensor]}
@@ -263,7 +190,7 @@ class QuantizerTestCase(TestCase):
                 return self.dequant(self.conv(self.quant(x)))
 
         class TestScriptM(torch.jit.ScriptModule):
-            def __init__(self, init_weight=None):
+            def __init__(self):
                 super(TestScriptM, self).__init__()
                 self.conv = nn.Conv2d(3, 1, 3).float()
                 self.conv.bias.data.fill_(0.01)
@@ -283,7 +210,6 @@ class QuantizerTestCase(TestCase):
         script_module = TestScriptM()
         script_module.conv.weight = torch.nn.Parameter(eager_module.conv.weight.detach())
         quantized_eager_module = quantize(eager_module, default_eval_fn, data)
-        torch._C._jit_set_inline_everything_mode(False)
 
         def get_forward(m):
             return m._c._get_method('forward')
