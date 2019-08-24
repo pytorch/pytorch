@@ -11573,13 +11573,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             np.float,
             np.float16,
             np.int64,
-            np.long,
             np.int32,
-            np.int,
             np.int16,
-            np.short,
             np.int8,
-            np.byte,
             np.uint8,
             np.longlong,
             np.bool,
@@ -11591,6 +11587,10 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # implements `==`
             for i in range(len(array)):
                 self.assertEqual(tensor_from_array[i], array[i])
+            array2 = array + 1
+            tensor_from_array2 = torch.from_numpy(array2)
+            for i in range(len(array2)):
+                self.assertEqual(tensor_from_array2[i], array2[i])
 
         # Test unsupported type
         array = np.array([1, 2, 3, 4], dtype=np.complex)
