@@ -3198,71 +3198,31 @@ workflows:
       - pytorch_linux_xenial_py2_7_build:
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_py2_7_test:
           requires:
             - setup
             - pytorch_linux_xenial_py2_7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_py3_5_build:
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_py3_5_test:
           requires:
             - setup
             - pytorch_linux_xenial_py3_5_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_pynightly_build:
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_pynightly_test:
           requires:
             - setup
             - pytorch_linux_xenial_pynightly_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_py3_6_gcc4_8_build:
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_py3_6_gcc4_8_test:
           requires:
             - setup
             - pytorch_linux_xenial_py3_6_gcc4_8_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_py3_6_gcc5_4_build:
           requires:
             - setup
@@ -3280,20 +3240,10 @@ workflows:
       - pytorch_linux_xenial_py3_6_gcc7_build:
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_py3_6_gcc7_test:
           requires:
             - setup
             - pytorch_linux_xenial_py3_6_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_py3_clang5_asan_build:
           requires:
             - setup
@@ -3318,20 +3268,10 @@ workflows:
       - pytorch_linux_xenial_cuda9_cudnn7_py2_build:
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
           requires:
             - setup
             - pytorch_linux_xenial_cuda9_cudnn7_py2_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_cuda9_cudnn7_py3_build:
           requires:
             - setup
@@ -3378,45 +3318,20 @@ workflows:
       - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
           requires:
             - setup
             - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build:
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build:
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_test:
           requires:
             - setup
             - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
           requires:
             - setup
