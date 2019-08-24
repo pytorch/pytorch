@@ -173,7 +173,12 @@ class CAFFE2_API Tensor {
     return impl_->strides();
   }
 #ifdef BUILD_NAMEDTENSOR
-  optional<DimnameList> names() const {
+  // See impl::get_opt_names in ATen/NamedTensor.h for docs.
+  optional<DimnameList> opt_names() const {
+    return impl::get_opt_names(unsafeGetTensorImpl());
+  }
+  // See impl::get_names in ATen/NamedTensor.h for docs.
+  DimnameList names() const {
     return impl::get_names(unsafeGetTensorImpl());
   }
 #endif
@@ -289,6 +294,7 @@ class CAFFE2_API Tensor {
 
   template<typename T>
   T * data() const {
+    TORCH_WARN("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.");
     return data_ptr<T>();
   }
 
@@ -302,9 +308,9 @@ class CAFFE2_API Tensor {
   // dimension.
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() const& {
-    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
+    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
-    return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
+    return TensorAccessor<T,N>(data_ptr<T>(),sizes().data(),strides().data());
   }
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
@@ -316,9 +322,9 @@ class CAFFE2_API Tensor {
   // as an argument.
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
-    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
+    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
-    return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
+    return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
   }
   template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N> packed_accessor() && = delete;
@@ -589,6 +595,9 @@ class CAFFE2_API Tensor {
   Tensor tanh() const;
   Tensor & tanh_() const;
   Tensor transpose(int64_t dim0, int64_t dim1) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor transpose(Dimname dim0, Dimname dim1) const;
+  #endif
   Tensor & transpose_(int64_t dim0, int64_t dim1) const;
   Tensor flip(IntArrayRef dims) const;
   Tensor roll(IntArrayRef shifts, IntArrayRef dims={}) const;
@@ -640,6 +649,8 @@ class CAFFE2_API Tensor {
   Tensor dequantize() const;
   double q_scale() const;
   int64_t q_zero_point() const;
+  Tensor q_per_channel_scales() const;
+  Tensor q_per_channel_zero_points() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
@@ -711,7 +722,6 @@ class CAFFE2_API Tensor {
   Tensor & triu_(int64_t diagonal=0) const;
   Tensor & digamma_() const;
   Tensor & polygamma_(int64_t n) const;
-  Tensor & erfinv_() const;
   Tensor & renorm_(Scalar p, int64_t dim, Scalar maxnorm) const;
   Tensor & pow_(Scalar exponent) const;
   Tensor & pow_(const Tensor & exponent) const;
@@ -779,6 +789,7 @@ class CAFFE2_API Tensor {
   Tensor digamma() const;
   Tensor polygamma(int64_t n) const;
   Tensor erfinv() const;
+  Tensor & erfinv_() const;
   Tensor dist(const Tensor & other, Scalar p=2) const;
   Tensor atan2(const Tensor & other) const;
   Tensor lerp(const Tensor & end, Scalar weight) const;
@@ -836,6 +847,24 @@ namespace detail {
 template <typename T, typename... Args>
 Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
+}
+
+inline Backend infer_backend(const Tensor & t) {
+  TORCH_CHECK(t.defined(), "undefined Tensor");
+  return tensorTypeIdToBackend(t.type_id());
+}
+inline Backend infer_backend(const TensorList & tl) {
+  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+  return tensorTypeIdToBackend(tl[0].type_id());
+}
+
+inline bool infer_is_variable(const Tensor & t) {
+  TORCH_CHECK(t.defined(), "undefined Tensor");
+  return t.is_variable();
+}
+inline bool infer_is_variable(const TensorList & tl) {
+  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+  return tl[0].is_variable();
 }
 } // namespace detail
 

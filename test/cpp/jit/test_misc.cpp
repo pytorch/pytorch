@@ -15,7 +15,6 @@
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/jit/dynamic_dag.h"
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/interpreter.h"
@@ -1011,7 +1010,7 @@ static void checkShape(
     bool prev = true) {
   auto profile = (prev) ? n->inputs().at(0)->node() : n;
   auto tp = profile->output()->type();
-  auto ptp = tp->expect<ProfiledTensorType>();
+  auto ptp = tp->expect<TensorType>();
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
 
@@ -1044,7 +1043,9 @@ void testInsertAndEliminateRedundantGuards() {
     return n->kind() == prim::Guard;
   });
   ASSERT_NE(guard, nodes.end());
-  ASSERT_EQ(guard->input()->type()->cast<ProfiledTensorType>(), nullptr);
+  ASSERT_EQ(
+      guard->input()->type()->expect<TensorType>()->sizes().size(),
+      c10::nullopt);
   checkShape(*guard, {2, 3}, false);
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);

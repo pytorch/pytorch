@@ -226,7 +226,7 @@ void TensorIterator::propagate_names_to_outputs() {
     if (!op.tensor.has_names()) {
       continue;
     }
-    auto tensor_names = *op.tensor.names();
+    auto tensor_names = *op.tensor.opt_names();
     if (names.empty()) {
       names = tensor_names;
     } else {
