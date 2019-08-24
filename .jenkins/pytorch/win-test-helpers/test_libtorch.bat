@@ -5,3 +5,10 @@ set PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt\bin\x64;%TMP_DIR_WIN%\bu
 test_api.exe --gtest_filter="-IntegrationTest.MNIST*"
 
 if errorlevel 1 exit /b 1
+
+cd %TMP_DIR_WIN%\build\torch\test
+for /r "." %%a in (*.exe) do (
+    echo Running "%%~fa"
+    call "%%~fa"
+    if errorlevel 1 exit /b 1
+)
