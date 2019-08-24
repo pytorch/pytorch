@@ -28,7 +28,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
     conda install -y cpuonly -c pytorch
   fi
-  retry conda install -yq future numpy protobuf six
+  retry conda install -yq future numpy protobuf six requests
   if [[ "$DESIRED_CUDA" != 'cpu' ]]; then
     # DESIRED_CUDA is in format cu90 or cu100
     if [[ "${#DESIRED_CUDA}" == 4 ]]; then
@@ -40,7 +40,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   fi
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg"
-  retry pip install -q future numpy protobuf six
+  retry pip install -q future numpy protobuf six requests
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   pkg="\$(ls /final_pkgs/*-latest.zip)"

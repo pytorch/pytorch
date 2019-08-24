@@ -21,8 +21,10 @@ source activate test >/dev/null
 # Install the package
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   conda install -y "$pkg" --offline
+  conda install -y requests
 else
   pip install "$pkg" --no-index --no-dependencies -v
+  pip install requests -v
 fi
 
 # Test
