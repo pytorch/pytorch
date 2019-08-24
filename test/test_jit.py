@@ -629,6 +629,23 @@ class TestJit(JitTestCase):
         m_dropout.eval()
         self.assertEqual(dropout(input) + 1, m_dropout(input))
 
+    def test_script_autograd_grad(self):
+        def test_simple_grad(x, y):
+            # type: (Tensor, Tensor) -> List[Tensor]
+            z = x + 2 * y + x * y
+            return torch.autograd.grad((z.sum(), ), (x, y))
+
+        def test_simple_grad_with_grad_outputs(x, y):
+            # type: (Tensor, Tensor) -> List[Tensor]
+            z = x + 2 * y + x * y
+            grad_outputs = torch.jit.annotate(List[Optional[torch.Tensor]], [torch.ones((2, 2)), ])
+            return torch.autograd.grad((z, ), (x, y), grad_outputs)
+
+        x = torch.randn(2, 2, requires_grad=True)
+        y = torch.randn(2, 2, requires_grad=True)
+        self.checkScript(test_simple_grad, (x, y), inputs_requires_grad=True)
+        self.checkScript(test_simple_grad_with_grad_outputs, (x, y), inputs_requires_grad=True)
+
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
         def f(x, y):
@@ -1099,6 +1116,47 @@ graph(%x : Tensor,
                    .check("quantize_linear").check_next("int_repr") \
                    .check_next("_dequantize_linear").check("conv2d") \
                    .run(str(scriptModule.graph))
+
+    # TODO: rename after insert_observers is renamed
+    def test_prepare_quant(self):
+        class Observer(torch.nn.Module):
+            def __init__(self):
+                super(Observer, self).__init__()
+
+            def forward(self, x):
+                return x
+
+            @torch.jit.export
+            def calculate_qparams(self):
+                return torch.tensor([2.0]), torch.tensor([3])
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 5, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        m = torch.jit.script(M())
+        observer = torch.jit.script(Observer())
+
+        def get_forward(m):
+            return m._c._get_method("forward")
+        torch._C._jit_pass_constant_propagation(get_forward(m).graph)
+        m._c = torch._C._jit_pass_prepare_quant(m._c, "forward",
+                                                observer._c,
+                                                observer._c)
+        assert len([x for x, _ in m._c._get_modules()
+                    if x.startswith('observer_for_')]) == 3, \
+            'Expected to have 3 observer submodules'
+        FileCheck().check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                   .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                   .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                   .run(str(m._c._get_method("forward").graph))
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -2412,7 +2470,7 @@ graph(%Ra, %Rb):
 
     def test_onnx_transpose_incomplete_tensor_type(self):
         # Smoke test to get us into the state where we are attempting to export
-        # a transpose op, where the input is a TensorType without size information. 
+        # a transpose op, where the input is a TensorType without size information.
         # This would previously not work, since we would
         # take the size of the input and use the length of its sizes as the
         # number of dimensions in the permutation.
@@ -8978,6 +9036,7 @@ a")
             m_import = self.getExportImportCopy(m_orig)
 
             self.assertEqual(m_orig.foo(), m_import.foo())
+
             self.assertTrue(m_import.param1.storage().data_ptr() == m_import.param2.storage().data_ptr())
             self.assertTrue(m_import.param1.storage().data_ptr() != m_import.param3.storage().data_ptr())
 
@@ -10316,6 +10375,22 @@ a")
         with self.assertRaisesRegex(RuntimeError, 'does not support augmented assign'):
             scripted_aug_assign = torch.jit.script(subscript_tuple_augmented_assign)
 
+    def test_multiple_assign(self):
+        def test():
+            a = b, c = d, f = (1, 1)
+
+            # side effect
+            ten = torch.tensor(1)
+            ten1 = ten2 = ten.add_(1)
+
+            # ordering
+            x = 1
+            y = 3
+            x, y = y, x + y
+
+            return a, b, c, d, f, ten, ten1, ten2, x, y
+
+        self.checkScript(test, ())
 
     def test_multi_reduction(self):
         with self.assertRaisesRegex(
@@ -14372,6 +14447,17 @@ class TestRecursiveScript(JitTestCase):
         self.assertExportImportModule(sm, args)
 
         return sm
+
+    def test_init_error(self):
+        class M(nn.Module):
+            def __init__(self):
+                self.x = 2
+
+            def forward(self):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "has not been initialized"):
+            torch.jit.script(M())
 
     def test_module_name(self):
         class MyModule(torch.nn.Module):
@@ -18764,6 +18850,21 @@ class TestLogging(JitTestCase):
             self.assertEqual(logger.get_counter_val('foo'), 1)
         finally:
             torch.jit._logging.set_logger(old_logger)
+
+
+class TestDocs(unittest.TestCase):
+    @slowTest
+    def test_docs(self):
+        import subprocess
+        docs_dir = '../docs'
+        docs_dir = [os.path.dirname(__file__), '..', 'docs']
+        docs_dir = os.path.join(*docs_dir)
+
+        result = subprocess.run(['make', 'doctest'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
+        if result.returncode != 0:
+            out = result.stdout.decode('utf-8')
+            err = result.stderr.decode('utf-8')
+            raise RuntimeError("{}\n{}\nDocs build failed (run `cd docs && make doctest`)".format(err, out))
 
 
 for test in autograd_method_tests():
