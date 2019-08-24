@@ -36,6 +36,7 @@ class SubgraphMatcher {
  private:
   bool matchValues(const Value* v1, Value* v2);
   bool matchNodes(const Node* n1, Node* n2);
+  bool matchAttributes(const Node* n1, Node* n2);
 
   std::unordered_map<const Node*, Node*> nodes_map_;
   std::unordered_map<const Value*, Value*> values_map_;
@@ -93,6 +94,39 @@ bool SubgraphMatcher::matchValues(const Value* v1, Value* v2) {
   return matchNodes(v1->node(), v2->node());
 }
 
+bool SubgraphMatcher::matchAttributes(const Node* n1, Node* n2) {
+  if (n1->numAttributes() != n2->numAttributes()) {
+    return false;
+  }
+  for (const Symbol& attr_name : n1->attributeNames()) {
+    if (n1->kindOf(attr_name) != n2->kindOf(attr_name)) {
+      return false;
+    }
+    switch (n1->kindOf(attr_name)) {
+      case AttributeKind::s:
+        if (n1->s(attr_name) != n2->s(attr_name)) {
+          return false;
+        }
+        break;
+      case AttributeKind::f:
+        if (n1->f(attr_name) != n2->f(attr_name)) {
+          return false;
+        }
+        break;
+      case AttributeKind::i:
+        if (n1->i(attr_name) != n2->i(attr_name)) {
+          return false;
+        }
+        break;
+      default: {
+        // Other attributes types not supported yet
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 /**
  * Compare two Nodes. N1 is from pattern, N2 is from the actual graph.
  *
@@ -123,8 +157,10 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
 
   if (n1->kind() != n2->kind() ||
       n1->outputs().size() != n2->outputs().size() ||
-      n1->inputs().size() != n2->inputs().size() ||
-      n1->numAttributes() != n2->numAttributes()) {
+      n1->inputs().size() != n2->inputs().size()) {
+    return false;
+  }
+  if (!matchAttributes(n1, n2)) {
     return false;
   }
 
@@ -139,31 +175,6 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
   for (size_t i = 0; i < n1->inputs().size(); i++) {
     if (!matchValues(n1->inputs()[i], n2->inputs()[i])) {
       return false;
-    }
-  }
-  for (const Symbol& attr_name : n1->attributeNames()) {
-    if (n1->kindOf(attr_name) != n2->kindOf(attr_name)) {
-      return false;
-    }
-    switch (n1->kindOf(attr_name)) {
-      case AttributeKind::s:
-        if (n1->s(attr_name) != n2->s(attr_name)) {
-          return false;
-        }
-        break;
-      case AttributeKind::f:
-        if (n1->f(attr_name) != n2->f(attr_name)) {
-          return false;
-        }
-        break;
-      case AttributeKind::i:
-        if (n1->i(attr_name) != n2->i(attr_name)) {
-          return false;
-        }
-        break;
-      default:
-        // Other attributes types not supported yet
-        return false;
     }
   }
 
