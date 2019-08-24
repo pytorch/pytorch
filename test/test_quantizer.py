@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch.jit
+from jit_utils import _inline_everything
 from torch._jit_internal import Optional
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,6 +13,7 @@ from torch.quantization import QuantStub, DeQuantStub, \
     quantize, default_eval_fn, QConfig
 
 class QuantizerTestCase(TestCase):
+    @_inline_everything
     def test_compare_qparam_eager_script_default(self):
         class Observer(torch.nn.Module):
             __annotations__ = {'scale' : Optional[torch.Tensor], 'zero_point': Optional[torch.Tensor]}
@@ -49,7 +51,7 @@ class QuantizerTestCase(TestCase):
                 return self.dequant(self.conv(self.quant(x)))
 
         class TestScriptM(torch.jit.ScriptModule):
-            def __init__(self, init_weight=None):
+            def __init__(self):
                 super(TestScriptM, self).__init__()
                 self.conv = nn.Conv2d(3, 1, 3).float()
                 self.conv.bias.data.fill_(0.01)
@@ -69,7 +71,6 @@ class QuantizerTestCase(TestCase):
         script_module = TestScriptM()
         script_module.conv.weight = torch.nn.Parameter(eager_module.conv.weight.detach())
         quantized_eager_module = quantize(eager_module, default_eval_fn, data)
-        torch._C._jit_set_inline_everything_mode(False)
 
         def get_forward(m):
             return m._c._get_method('forward')
