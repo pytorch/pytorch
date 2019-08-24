@@ -204,6 +204,9 @@ ScalarType numpy_dtype_to_aten(int dtype) {
     case NPY_BOOL: return kBool;
     default:
       // Workaround: MSVC does not support two switch cases that have the same value
+      // if (dtype == NPY_INT || dtype == NPY_INT32) {
+      //   return kInt;
+      // } else
       if (dtype == NPY_LONGLONG || dtype == NPY_INT64) {
         return kLong;
       } else {
