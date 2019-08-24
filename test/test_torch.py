@@ -2258,7 +2258,6 @@ class _TestTorchMixin(torchtest):
     def _test_lu_solve_batched_many_batches(self, cast):
         def run_test(A_dims, b_dims, cast):
             b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, cast, True)
-            self.assertEqual(infos, torch.zeros_like(infos))
             x = torch.lu_solve(b, LU_data, LU_pivots)
             b_ = torch.matmul(A, x)
             self.assertEqual(b_, b.expand_as(b_))
