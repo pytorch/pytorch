@@ -47,6 +47,27 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
   std::vector<Dimname> names_;
 };
 
+// When NamesMode is disabled, then all operations ignore tensors' names fields.
+// Concretely speaking, all tensors are treated as having nullopt names.
+struct CAFFE2_API NamesMode {
+  static bool is_enabled();
+  static void set_enabled(bool enabled);
+};
+
+// A RAII, thread local (!) guard that enables or disables names upon
+// construction, and sets it back to the original value upon destruction.
+struct CAFFE2_API NoNamesGuard {
+  NoNamesGuard() : prev_mode(NamesMode::is_enabled()) {
+    NamesMode::set_enabled(false);
+  }
+  ~NoNamesGuard() {
+    NamesMode::set_enabled(prev_mode);
+  }
+ private:
+  bool prev_mode;
+};
+
+
 // Sets the names of `tensor` to be `names`.
 CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
 CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
