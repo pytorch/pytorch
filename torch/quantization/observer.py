@@ -32,7 +32,7 @@ class ObserverBase(ABC, nn.Module):
         assert self.dtype in (
             torch.qint8,
             torch.quint8,
-        ), "Default Observer only works for qint8 and quint data type"
+        ), "Default Observer only works for qint8 and quint8 data type"
 
     @abstractmethod
     def forward(self, x):
