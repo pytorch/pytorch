@@ -24,7 +24,7 @@ struct MaxPoolOptions {
   TORCH_ARG(ExpandingArray<D>, padding) = 0;
 
   /// a parameter that controls the stride of elements in the window
-  TORCH_ARG(ExpandingArray<D>, dialation) = 1;
+  TORCH_ARG(ExpandingArray<D>, dilation) = 1;
 
   /// if true, will return the max indices along with the outputs. Useful
   /// for `MaxUnpool1d` later

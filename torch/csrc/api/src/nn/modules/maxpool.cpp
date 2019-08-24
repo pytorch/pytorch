@@ -25,7 +25,7 @@ Tensor MaxPool1dImpl::forward(const Tensor& input) {
       options.kernel_size_,
       options.stride_,
       options.padding_,
-      options.dialation_,
+      options.dilation_,
       options.ceil_mode_);
 }
 
@@ -35,7 +35,7 @@ Tensor MaxPool2dImpl::forward(const Tensor& input) {
       options.kernel_size_,
       options.stride_,
       options.padding_,
-      options.dialation_,
+      options.dilation_,
       options.ceil_mode_);
 }
 
@@ -45,7 +45,7 @@ Tensor MaxPool3dImpl::forward(const Tensor& input) {
       options.kernel_size_,
       options.stride_,
       options.padding_,
-      options.dialation_,
+      options.dilation_,
       options.ceil_mode_);
 }
 

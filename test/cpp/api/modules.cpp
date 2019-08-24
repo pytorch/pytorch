@@ -106,55 +106,54 @@ TEST_F(ModulesTest, Conv3d) {
 
 TEST_F(ModulesTest, MaxPool1d) {
   MaxPool1d model(MaxPool1dOptions(3).stride(2));
-  auto x = torch::randn({1, 1, 5}, torch::requires_grad());
+  auto x = torch::ones({1, 1, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
-  std::cout << y.sizes() << std::endl;
   ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1 ,2})));
   ASSERT_EQ(s.ndimension(), 0);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
 TEST_F(ModulesTest, MaxPool2dEven) {
   MaxPool2d model(MaxPool2dOptions(3).stride(2));
-  auto x = torch::randn({2, 5, 5}, torch::requires_grad());
+  auto x = torch::ones({2, 5, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
   ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
   ASSERT_EQ(s.ndimension(), 0);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
 }
 
 TEST_F(ModulesTest, MaxPool2dUneven) {
   MaxPool2d model(MaxPool2dOptions({3, 2}).stride({2, 2}));
-  auto x = torch::randn({2, 5, 4}, torch::requires_grad());
+  auto x = torch::ones({2, 5, 4}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
   ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
   ASSERT_EQ(s.ndimension(), 0);
-  for (auto i = 0; i < 3; i++) {
-    ASSERT_EQ(y.size(i), 2);
-  }
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
 }
 
 TEST_F(ModulesTest, MaxPool3d) {
   MaxPool3d model(MaxPool3dOptions(3).stride(2));
-  auto x = torch::randn({2, 5, 5, 5}, torch::requires_grad());
+  auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
   ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
   ASSERT_EQ(s.ndimension(), 0);
-  for (auto i = 0; i < 4; i++) {
-    ASSERT_EQ(y.size(i), 2);
-  }
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
 }
 
 TEST_F(ModulesTest, Linear) {
