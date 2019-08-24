@@ -179,6 +179,11 @@ bool SubgraphMatcher::matchAttributes(const Node* n1, Node* n2) {
   return true;
 }
 
+static bool endsWith(const std::string& str, const std::string& suffix) {
+  return str.size() >= suffix.size() &&
+      0 == str.compare(str.size() - suffix.size(), suffix.size(), suffix);
+}
+
 /**
  * Compare two Nodes. N1 is from pattern, N2 is from the actual graph.
  *
@@ -212,17 +217,40 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
     return false;
   }
 
-  if (n1->kind() != n2->kind() ||
-      n1->outputs().size() != n2->outputs().size() ||
-      n1->inputs().size() != n2->inputs().size()) {
-    GRAPH_DEBUG(
-        "Nodes did not match in their kind or number of inputs/outputs:\n",
-        *n1,
-        *n2);
-    return false;
-  }
-  if (!matchAttributes(n1, n2)) {
-    return false;
+  // Special handling for matching modules
+  if (n1->kind() == Symbol::fromQualString("match::module")) {
+    if (n2->kind() == prim::GetAttr) {
+      if (!n1->hasAttributeS("name")) {
+        GRAPH_DEBUG(
+            "Nodes did not match because special node match::module does not have 'name' attribute:\n",
+            *n1,
+            *n2);
+        return false;
+      }
+      auto t = n2->output()->type()->expect<ClassType>();
+      auto real_typename = t->name()->qualifiedName();
+      auto pattern_typename = n1->s(attr::name);
+      if (!endsWith(real_typename, pattern_typename)) {
+        GRAPH_DEBUG("Nodes did not match because expected module type is different:\n");
+        GRAPH_DEBUG("  actualtype:    ", real_typename, "\n");
+        GRAPH_DEBUG("  expected type: ", pattern_typename, "\n");
+        GRAPH_DEBUG("Nodes:", *n1, *n2);
+        return false;
+      }
+    }
+  } else {
+    if (n1->kind() != n2->kind() ||
+        n1->outputs().size() != n2->outputs().size() ||
+        n1->inputs().size() != n2->inputs().size()) {
+      GRAPH_DEBUG(
+          "Nodes did not match in their kind or number of inputs/outputs:\n",
+          *n1,
+          *n2);
+      return false;
+    }
+    if (!matchAttributes(n1, n2)) {
+      return false;
+    }
   }
 
   // Add nodes to the map before calling matchValues to avoid infinite
