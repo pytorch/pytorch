@@ -414,6 +414,8 @@ def add_test(test_name, test_fn):
         raise RuntimeError("Found two tests with the same name: " + test_name)
     setattr(TestCppApiParity, test_name, test_fn)
 
+devices = ['cpu', 'cuda']
+
 torch_nn_test_params_map = {}
 
 torch_nn_module_names = set()
@@ -423,7 +425,7 @@ for test_params_dict in sample_module.module_tests + common_nn.module_tests:
     if module_name in torch_nn_has_parity:
         torch_nn_module_names.add(module_name)
         module_metadata = torch_nn_modules.module_metadata_map[module_name]
-        for device in ['cpu', 'cuda']:
+        for device in devices:
             test_params = _process_test_params(
                 test_params_dict=test_params_dict,
                 module_metadata=module_metadata,
@@ -446,6 +448,10 @@ for module_name in sorted(list(torch_nn_module_names)):
             module_name=self._testMethodName.replace('test_torch_nn_', '').replace('_ctor_args', ''))
 
     add_test(ctor_args_test_name, ctor_args_test)
+
+
+# Assert that there exists auto-generated tests for SampleModule
+assert len([name for name in TestCppApiParity.__dict__ if 'SampleModule' in name]) == len(sample_module.module_tests) * len(devices) + 1
 
 
 if __name__ == "__main__":
