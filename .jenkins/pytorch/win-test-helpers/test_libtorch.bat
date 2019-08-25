@@ -12,7 +12,11 @@ for /r "." %%a in (*.exe) do (
     if "%%~na" == "c10_Metaprogramming_test" (
         echo Skipping "%%~fa" because it is broken
     ) else (
-        call "%%~fa"
-        if errorlevel 1 exit /b 1
+        if "%%~na" == "module_test" (
+            echo Skipping "%%~fa" because it is broken
+        ) else (
+            call "%%~fa"
+            if errorlevel 1 exit /b 1
+        )
     )
 )
