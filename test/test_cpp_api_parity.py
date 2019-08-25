@@ -346,9 +346,9 @@ class TestCppApiParity(common.TestCase):
             cpp_module = self._compile_cpp_code_inline(
                 name=test_params.module_variant_name,
                 cpp_sources=cpp_sources,
-                functions=[
-                    '{}_test_{}'.format(test_params.module_variant_name, method_name)
-                        for method_name, _ in torch_nn_test_methods])
+                functions=['{}_test_{}'.format(
+                    test_params.module_variant_name,
+                    method_name) for method_name, _ in torch_nn_test_methods])
 
             for method_name, _ in torch_nn_test_methods:
                 args = args_map[method_name]
