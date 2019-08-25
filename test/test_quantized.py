@@ -679,7 +679,7 @@ class TestDynamicQuantizedLinear(TestCase):
             default_dynamic_module_mapping = {
                 torch.nn.LSTM: torch.nn.quantized.dynamic.LSTM,
             }
-            cell_int8 = torch.quantization.quantize_dynamic(
+            cell_int8 = quantize_dynamic(
                 cell, qconfig_dynamic_dict, default_dynamic_module_mapping
             )
 
