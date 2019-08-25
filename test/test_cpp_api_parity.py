@@ -346,7 +346,9 @@ class TestCppApiParity(common.TestCase):
             cpp_module = self._compile_cpp_code_inline(
                 name=test_params.module_variant_name,
                 cpp_sources=cpp_sources,
-                functions=['{}_test_{}'.format(test_params.module_variant_name, method_name) for method_name, _ in torch_nn_test_methods])
+                functions=[
+                    '{}_test_{}'.format(test_params.module_variant_name, method_name)
+                        for method_name, _ in torch_nn_test_methods])
 
             for method_name, _ in torch_nn_test_methods:
                 args = args_map[method_name]
@@ -452,8 +454,9 @@ for module_name in sorted(list(torch_nn_module_names)):
     add_test(ctor_args_test_name, ctor_args_test)
 
 
-# Assert that there exists auto-generated tests for SampleModule
-assert len([name for name in TestCppApiParity.__dict__ if 'SampleModule' in name]) == len(sample_module.module_tests) * len(devices) + 1
+# Assert that there exists auto-generated tests for SampleModule.
+assert len([name for name in TestCppApiParity.__dict__ if 'SampleModule' in name]) == \
+    len(sample_module.module_tests) * len(devices) + 1
 
 
 if __name__ == "__main__":
