@@ -219,13 +219,14 @@ class TestCppApiParity(common.TestCase):
             # We are generating the attribute equality checks manually here,
             # because it is not possible to have a `.attributes()` API that returns
             # non-parameter / non-buffer attributes in a C++ torch::nn module.
-            def generate_attr_equality_checks(module, stmts,
+            def generate_attr_equality_checks(module,
                                               script_module_prefix='m_init_by_python',
                                               cpp_module_prefix='m_init_by_cpp'):
+                stmts = []
                 for name, sub_module in module.named_children():
                     sub_script_module_prefix = '{}.get_module("{}")'.format(script_module_prefix, name)
                     sub_cpp_module_prefix = '{}->{}'.format(cpp_module_prefix, name)
-                    generate_attr_equality_checks(sub_module, stmts, sub_script_module_prefix, sub_cpp_module_prefix)
+                    stmts = generate_attr_equality_checks(sub_module, sub_script_module_prefix, sub_cpp_module_prefix)
                 for name, param in module._parameters.items():
                     stmts += CHECK_MODULE_PARAM_EQUALITY.substitute(
                         script_module_prefix=script_module_prefix,
@@ -242,6 +243,7 @@ class TestCppApiParity(common.TestCase):
                             script_module_prefix=script_module_prefix,
                             cpp_module_prefix=cpp_module_prefix,
                             attr_name=name)
+                return stmts
 
             device = test_params.device
             python_module_class = test_params.python_module_class
@@ -251,12 +253,10 @@ class TestCppApiParity(common.TestCase):
             torch.manual_seed(2)
             module = python_module_class(*python_constructor_args).to(device)
 
-            extra_stmt_list = []
-            generate_attr_equality_checks(module, extra_stmt_list)
-            extra_stmts = ''.join(extra_stmt_list)
+            extra_stmts_str = ''.join(generate_attr_equality_checks(module))
             return (([module], device),
                     generate_test_cpp_sources(
-                        test_params=test_params, template=TORCH_NN_MODULE_TEST_INIT, extra_stmts=extra_stmts))
+                        test_params=test_params, template=TORCH_NN_MODULE_TEST_INIT, extra_stmts=extra_stmts_str))
 
         def setup_forward_test(test_params):
             device = test_params.device
@@ -339,6 +339,8 @@ class TestCppApiParity(common.TestCase):
             for method_name, setup_test in torch_nn_test_methods:
                 args_map[method_name], test_cpp_sources = setup_test(test_params)
                 cpp_sources += test_cpp_sources
+
+            print(cpp_sources) # yf225 TODO debug
 
             cpp_module = self._compile_cpp_code_inline(
                 name=test_params.module_variant_name,
