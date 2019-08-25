@@ -116,6 +116,26 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_2d_neg_slice(self):
         self._test_index_generic(lambda input: input[0:-1, :])
 
+    def test_dict(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x_in):
+                x_out = {}
+                x_out["test_key_out"] = torch.add(x_in[list(x_in.keys())[0]], list(x_in.keys())[0])
+                return x_out
+
+        x = {torch.tensor(1.): torch.randn(1, 2, 3)}
+        self.run_test(MyModel(), (x,))
+
+    def test_dict_str(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x_in):
+                x_out = {}
+                x_out["test_key_out"] = torch.add(x_in["test_key_in"], 2.)
+                return x_out
+
+        x = {"test_key_in": torch.randn(1, 2, 3)}
+        self.run_test(MyModel(), (x,))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_trace(self):
         class FullModel(torch.nn.Module):
