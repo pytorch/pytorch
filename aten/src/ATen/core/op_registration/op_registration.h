@@ -317,7 +317,7 @@ public:
       return std::move(*this).kernel(
         std::move(dispatch_key),
         nullptr,
-        detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
+        nullptr,  // setting cache creator to nullptr so calling the kernel doesn't need to call it, which would be expensive
         reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
         detail::FunctionSchemaInferer<KernelFunctor>()()
       );

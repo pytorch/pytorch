@@ -358,10 +358,10 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
               BLOCK,
               BLOCK*sizeof(accscalar_t),
               stream>>>
-           (w.data<scalar_t>(),
-            norms.data<accscalar_t>(),
-            v.data<scalar_t>(),
-            g.data<scalar_t>(),
+           (w.data_ptr<scalar_t>(),
+            norms.data_ptr<accscalar_t>(),
+            v.data_ptr<scalar_t>(),
+            g.data_ptr<scalar_t>(),
             rowSize);
        });
   }
@@ -388,10 +388,10 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
               dim3(TILE_W,TILE_H),
               (TILE_W*TILE_H + TILE_W)*sizeof(accscalar_t),
               stream>>>
-           (w.data<scalar_t>(),
-            norms.data<accscalar_t>(),
-            v.data<scalar_t>(),
-            g.data<scalar_t>(),
+           (w.data_ptr<scalar_t>(),
+            norms.data_ptr<accscalar_t>(),
+            v.data_ptr<scalar_t>(),
+            g.data_ptr<scalar_t>(),
             fast_dim_size,
             slower_dims_size);
        });
@@ -446,12 +446,12 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
               BLOCK,
               BLOCK*sizeof(accscalar_t),
               stream>>>
-           (grad_v.data<scalar_t>(),
-            grad_g.data<scalar_t>(),
-            grad_w.data<scalar_t>(),
-            saved_v.data<scalar_t>(),
-            saved_g.data<scalar_t>(),
-            saved_norms.data<accscalar_t>(),
+           (grad_v.data_ptr<scalar_t>(),
+            grad_g.data_ptr<scalar_t>(),
+            grad_w.data_ptr<scalar_t>(),
+            saved_v.data_ptr<scalar_t>(),
+            saved_g.data_ptr<scalar_t>(),
+            saved_norms.data_ptr<accscalar_t>(),
             rowSize);
        });
   }
@@ -478,12 +478,12 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
               dim3(TILE_W,TILE_H),
               (TILE_W*TILE_H + TILE_W)*sizeof(accscalar_t),
               stream>>>
-           (grad_v.data<scalar_t>(),
-            grad_g.data<scalar_t>(),
-            grad_w.data<scalar_t>(),
-            saved_v.data<scalar_t>(),
-            saved_g.data<scalar_t>(),
-            saved_norms.data<accscalar_t>(),
+           (grad_v.data_ptr<scalar_t>(),
+            grad_g.data_ptr<scalar_t>(),
+            grad_w.data_ptr<scalar_t>(),
+            saved_v.data_ptr<scalar_t>(),
+            saved_g.data_ptr<scalar_t>(),
+            saved_norms.data_ptr<accscalar_t>(),
             fast_dim_size,
             slower_dims_size);
        });
