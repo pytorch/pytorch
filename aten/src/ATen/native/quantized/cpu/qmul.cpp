@@ -50,8 +50,7 @@ Tensor _mul_out(Tensor& out, const Tensor& self, const Tensor& other) {
 
 template <bool ReLUFused = false>
 Tensor& _mul_scalar_(Tensor& self, Scalar other) {
-  float other_float;
-  other_float = other.toFloat();
+  auto other_float = other.toDouble();
   if (self.qscheme() == kPerTensorAffine) {
     double new_scale = self.q_scale() / other_float;
     self.set_quantizer_(make_per_tensor_affine_quantizer(

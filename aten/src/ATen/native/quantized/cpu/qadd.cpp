@@ -12,8 +12,8 @@ namespace {
 
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
   TORCH_CHECK(
-      qa.qscheme() == kPerTensorAffine || qa.qscheme() == kPerTensorSymmetric,
-      "Only per tensor quantization is suuported in Add.");
+      qa.qscheme() == kPerTensorAffine,
+      "Only per tensor quantization is suported in Add.");
   TORCH_CHECK(
       qa.qscheme() == qb.qscheme(),
       "Both inputs to Add must have the same quantization shceme.");
@@ -51,21 +51,21 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
 
 template <bool ReLUFused = false>
 Tensor _add_scalar_(Tensor& self, Scalar other) {
-
   if (self.qscheme() == kPerTensorAffine) {
     double s = self.q_scale();
     int64_t z = self.q_zero_point();
     int64_t other_int = other.toInt();
+    int64_t qmin, qmax;
     AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qadd", [&]() {
-      int64_t qmin = std::numeric_limits<underlying_t>::min();
-      int64_t qmax = std::numeric_limits<underlying_t>::max();
-      double xmin = (double(qmin) - self.q_zero_point()) * self.q_scale();
-      double new_s = s * ((std::max<int64_t>(qmax - z, 0) - std::min<int64_t>(qmin - z, 0))
-                     / (qmax - qmin));
-      int64_t new_z = qmin - std::min<int64_t>(xmin + other_int, 0) / new_s;
-      self.set_quantizer_(make_per_tensor_affine_quantizer(new_s, new_z,
-                                                           self.scalar_type()));
+      qmin = std::numeric_limits<underlying_t>::min();
+      qmax = std::numeric_limits<underlying_t>::max();
     });
+    double xmin = (double(qmin) - self.q_zero_point()) * self.q_scale();
+    double new_s = s * ((std::max<int64_t>(qmax - z, 0) - std::min<int64_t>(qmin - z, 0))
+                   / (qmax - qmin));
+    int64_t new_z = qmin - std::min<int64_t>(xmin + other_int, 0) / new_s;
+    self.set_quantizer_(make_per_tensor_affine_quantizer(new_s, new_z,
+                                                         self.scalar_type()));
   } else {
     TORCH_CHECK(false, "Only per tensor affine is supported for now!!");
   }
