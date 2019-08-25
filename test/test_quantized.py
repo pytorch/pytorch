@@ -532,10 +532,9 @@ class TestQuantizedOps(TestCase):
 
 
 @unittest.skipIf(
-    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-    " Quantized Linear requires FBGEMM. FBGEMM does not play"
-    " well with UBSAN at the moment, so we skip the test if"
-    " we are in a UBSAN environment.",
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
 )
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
