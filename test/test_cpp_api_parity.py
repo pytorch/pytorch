@@ -55,6 +55,9 @@ CHECK_MODULE_PARAM_EQUALITY = Template("""\
 TORCH_CHECK(
   check_tensor_equality(${script_module_prefix}.get_parameter("${param_name}"), ${cpp_module_prefix}->${param_name}),
   parity_test_error_msg);
+TORCH_CHECK(
+  ${script_module_prefix}.get_parameter("${param_name}").requires_grad() == ${cpp_module_prefix}->${param_name}.requires_grad(),
+  parity_test_error_msg);
 """)
 
 CHECK_MODULE_BUFFER_EQUALITY = Template("""\
@@ -339,8 +342,6 @@ class TestCppApiParity(common.TestCase):
             for method_name, setup_test in torch_nn_test_methods:
                 args_map[method_name], test_cpp_sources = setup_test(test_params)
                 cpp_sources += test_cpp_sources
-
-            print(cpp_sources) # yf225 TODO debug
 
             cpp_module = self._compile_cpp_code_inline(
                 name=test_params.module_variant_name,
