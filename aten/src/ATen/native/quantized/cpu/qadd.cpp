@@ -12,8 +12,8 @@ namespace {
 
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
   TORCH_CHECK(
-      qa.qscheme() == kPerTensorAffine || qa.qscheme() == kPerTensorSymmetric,
-      "Only per tensor quantization is suuported in Add.");
+      qa.qscheme() == kPerTensorAffine,
+      "Only per tensor quantization is suported in Add.");
   TORCH_CHECK(
       qa.qscheme() == qb.qscheme(),
       "Both inputs to Add must have the same quantization shceme.");
@@ -60,7 +60,9 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qadd", [&]() {
     cpu_kernel(iter, [&](scalar_t a) -> scalar_t {
       const auto da = at::dequantize_val(self_scale, self_zero_point, a);
-      float c = da + other.toFloat();
+      double c = da + other.toFloat();
+      auto quant_val = at::quantize_val<scalar_t>(scale, zero_point, c);
+      auto dequant_val = at::dequantize_val(scale, zero_point, quant_val);
       if (ReLUFused) {
         c = std::max<float>(c, 0.0);
       }

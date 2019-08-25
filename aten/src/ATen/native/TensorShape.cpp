@@ -461,9 +461,9 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   auto size = self.size(dim);
   if (index < -size || index >= size) {
 #ifdef BUILD_NAMEDTENSOR
-    if (self.names().has_value()) {
+    if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
       AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
-                     self.sizes(), " at dimension ", self.names()->at(dim));
+                     self.sizes(), " at dimension ", self.names()[dim]);
     }
 #endif
     AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
@@ -633,8 +633,8 @@ static Tensor& propagate_transposed_names(
     const Tensor& other,
     int64_t dim0,
     int64_t dim1) {
-  if (other.names()) {
-    auto names = other.names()->vec();
+  if (other.has_names()) {
+    auto names = other.names().vec();
     std::swap(names[dim0], names[dim1]);
     namedinference::propagate_names(result, names);
   }
