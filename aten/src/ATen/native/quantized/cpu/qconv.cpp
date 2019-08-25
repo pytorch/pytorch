@@ -95,7 +95,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 
     Tensor act_contig = act.contiguous();
     const uint8_t* act_ptr =
-        reinterpret_cast<uint8_t*>(act_contig.data<c10::quint8>());
+        reinterpret_cast<uint8_t*>(act_contig.data_ptr<c10::quint8>());
 
     PackedConvWeight& pack_ptr =
         cpp_custom_type_hack::cast<PackedConvWeight>(packed_weight);
@@ -132,7 +132,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
           bias_vec.size(0) == K,
           "bias should have K elements: " + std::to_string(K));
       auto bias_contig = bias_vec.contiguous();
-      bias_ptr = reinterpret_cast<int32_t*>(bias_contig.data<c10::qint32>());
+      bias_ptr = reinterpret_cast<int32_t*>(bias_contig.data_ptr<c10::qint32>());
     }
 
     float act_scale = act.q_scale();
@@ -171,8 +171,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         conv_p,
         act_ptr,
         *packB,
-        reinterpret_cast<uint8_t*>(output.data<c10::quint8>()),
-        buffer.data<int32_t>(),
+        reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+        buffer.data_ptr<int32_t>(),
         outputProcObj,
         0 /* thread_id*/,
         1 /* num_threads */);
