@@ -588,6 +588,7 @@ struct CodeImpl {
   }
 
   void emitGetAttr(Node* node) {
+    emitLoadInputs(node->inputs());
     const auto type = node->input()->type()->expect<ClassType>();
     const auto& field = node->s(attr::name);
     uint64_t slot = type->getAttributeSlot(field);
@@ -841,6 +842,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto userObj = pop(stack).toObject();
             auto value = userObj->getSlot(inst.X);
             push(stack, std::move(value));
+            ++af.pc;
           } break;
           case JF:
             af.pc += (pop(stack).toBool()) ? 1 : inst.X;
