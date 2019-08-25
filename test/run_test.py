@@ -16,6 +16,7 @@ import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
+from torch._six import PY2
 
 TESTS = [
     'autograd',
@@ -59,7 +60,10 @@ TESTS = [
     'jit_fuser',
     'tensorboard',
     'namedtensor',
+    'jit_disabled',
 ]
+if not PY2:
+    TESTS.append('jit_py3')
 
 WINDOWS_BLACKLIST = [
     'distributed',
@@ -305,7 +309,7 @@ def get_executable_command(options):
     else:
         executable = [sys.executable]
     if options.pytest:
-        executable += ['-m', 'pytest', '--durations=10']
+        executable += ['-m', 'pytest']
     return executable
 
 

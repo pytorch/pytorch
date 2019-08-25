@@ -82,10 +82,18 @@ void div_kernel(TensorIterator& iter) {
 }
 
 void logical_xor_kernel(TensorIterator& iter) {
-  cpu_kernel(iter,
-    [](bool a, bool b) -> bool {
-      return a != b;
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_xor_cpu", [&]() {
+    using self_t = scalar_t;
+    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(2), "logical_xor_cpu", [&]() {
+      using other_t = scalar_t;
+      AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_xor_cpu", [&]() {
+        cpu_kernel(iter,
+          [](self_t a, other_t b) -> scalar_t {
+            return static_cast<scalar_t>(bool(a) != bool(b));
+        });
+      });
     });
+  });
 }
 
 } // anonymous namespace

@@ -48,7 +48,7 @@ Tensor& bitwise_not_(Tensor& self) {
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
   checkBackend("bitwise_not", result, self.type().backend());
   auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
+    /*check_mem_overlap=*/true);
   bitwise_not_stub(iter.device_type(), iter);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
@@ -57,7 +57,7 @@ Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor logical_not(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
   return at::logical_not_out(result, self);
 }
 
@@ -66,16 +66,13 @@ Tensor& logical_not_(Tensor& self) {
 }
 
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
-  TORCH_CHECK(self.scalar_type() == kBool,
-              "logical_not currently only supports bool tensors.");
-  TORCH_CHECK(result.scalar_type() == kBool,
-              "The output tensor of logical_not must be a bool tensor.");
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
+  TensorIterator iter;
+  iter.dont_compute_common_dtype();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(result);
+  iter.add_input(self);
+  iter.build();
   logical_not_stub(iter.device_type(), iter);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
@@ -207,7 +204,7 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     checkBackend(#op, result, Backend::CPU);                    \
     auto iter = TensorIterator::unary_op(result, self,          \
-      /*check_internal_overlap=*/true);                         \
+      /*check_mem_overlap=*/true);                              \
     op##_stub(iter.device_type(), iter);                        \
     return result;                                              \
   }
@@ -221,6 +218,7 @@ IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
+IMPLEMENT_UNARY_OP_VEC(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(expm1)
 IMPLEMENT_UNARY_OP_VEC(floor)
@@ -250,6 +248,7 @@ DEFINE_DISPATCH(cos_stub);
 DEFINE_DISPATCH(cosh_stub);
 DEFINE_DISPATCH(erf_stub);
 DEFINE_DISPATCH(erfc_stub);
+DEFINE_DISPATCH(erfinv_stub);
 DEFINE_DISPATCH(exp_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
