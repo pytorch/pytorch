@@ -965,9 +965,10 @@ def selu(g, input):
 
 @parse_args('v', 'i', 'v')
 def index_select(g, self, dim, index):
-    # In case of a scaler index, index_select returns a tensor with the same rank as the input.
-    # To match this bahavior in ONNX, we make index a 1D tensor so that the following gather
+    # In case of a scalar index, index_select returns a tensor with the same rank as the input.
+    # To match this behavior in ONNX, we make index a 1D tensor so that the following gather
     # also produces a tensor with the same rank as the input.
+
     index_const = sym_help._maybe_get_scalar(index)
     index_dim = index.type().dim()
     if not sym_help._is_value(index_const):
@@ -1145,6 +1146,16 @@ def _unique2(g, input, sorted, return_inverse, return_counts):
 for k, v in sym_help.cast_pytorch_to_onnx.items():
     name = '_cast_{}'.format(k)
     globals()[name] = parse_args('v', 'i')(partial(sym_help._cast_func_template, v))
+
+
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
+    return zeros(g, sizes, dtype, layout, device, pin_memory)
+
+
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+    return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 
 @parse_args('v', 'i', 'v', 'v', 'v')

@@ -842,6 +842,24 @@ class TestLayers(LayersTestCase):
         self.run_train_net_forward_only()
         self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
 
+    def testBPRLoss(self):
+        input_record = self.new_record(schema.Struct(
+            ('pos_prediction', schema.Scalar((np.float32, (1,)))),
+            ('neg_prediction', schema.List(np.float32)),
+        ))
+        pos_items = np.array([0.8, 0.9], dtype=np.float32)
+        neg_lengths = np.array([1, 2], dtype=np.int32)
+        neg_items = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+        schema.FeedRecord(
+            input_record,
+            [pos_items, neg_lengths, neg_items]
+        )
+        loss = self.model.BPRLoss(input_record)
+        self.run_train_net_forward_only()
+        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+        result = workspace.FetchBlob('bpr_loss/output')
+        np.testing.assert_array_almost_equal(np.array(1.24386, dtype=np.float32), result)
+
     def testBatchMSELoss(self):
         input_record = self.new_record(schema.Struct(
             ('label', schema.Scalar((np.float64, (1,)))),

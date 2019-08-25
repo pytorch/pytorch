@@ -372,9 +372,12 @@ view of a storage and defines numeric operations on it.
    .. automethod:: qscheme
    .. automethod:: q_scale
    .. automethod:: q_zero_point
+   .. automethod:: q_per_channel_scales
+   .. automethod:: q_per_channel_zero_points
    .. automethod:: random_
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
+   .. automethod:: record_stream
    .. automethod:: register_hook
    .. automethod:: remainder
    .. automethod:: remainder_
