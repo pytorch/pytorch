@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/instruction.h>
 #include <iostream>
+#include <cstring>
 
 namespace torch {
 namespace jit {
@@ -28,7 +29,7 @@ const char* OpInfo(OperatorCode op) {
 static_assert(sizeof(Instruction) == 8, "Instructions should be 8 bytes");
 std::ostream& operator<<(std::ostream& out, Instruction inst) {
   // TODO: use op info to print out the op in a more user-friendly way
-  int nargs = strlen(OpInfo(inst.op));
+  int nargs = std::strlen(OpInfo(inst.op));
   out << inst.op;
   if (nargs > 0) {
     out << " " << inst.X;
