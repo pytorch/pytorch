@@ -422,23 +422,25 @@ torch_nn_module_names = set()
 
 for test_params_dict in sample_module.module_tests + common_nn.module_tests:
     module_name = test_params_dict.get('module_name')
-    if module_name in torch_nn_has_parity:
-        torch_nn_module_names.add(module_name)
-        module_metadata = torch_nn_modules.module_metadata_map[module_name]
-        for device in devices:
-            test_params = _process_test_params(
-                test_params_dict=test_params_dict,
-                module_metadata=module_metadata,
-                device=device)
-            test_name = 'test_torch_nn_{}'.format(test_params.module_variant_name)
-            torch_nn_test_params_map[test_name] = test_params
+    if module_name not in torch_nn_has_parity:
+        continue
 
-            def test_fn(self):
-                self._test_torch_nn_module_variant(test_params=torch_nn_test_params_map[self._testMethodName])
+    torch_nn_module_names.add(module_name)
+    module_metadata = torch_nn_modules.module_metadata_map[module_name]
+    for device in devices:
+        test_params = _process_test_params(
+            test_params_dict=test_params_dict,
+            module_metadata=module_metadata,
+            device=device)
+        test_name = 'test_torch_nn_{}'.format(test_params.module_variant_name)
+        torch_nn_test_params_map[test_name] = test_params
 
-            if device == 'cuda':
-                test_fn = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")(test_fn)
-            add_test(test_name, test_fn)
+        def test_fn(self):
+            self._test_torch_nn_module_variant(test_params=torch_nn_test_params_map[self._testMethodName])
+
+        if device == 'cuda':
+            test_fn = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")(test_fn)
+        add_test(test_name, test_fn)
 
 for module_name in sorted(list(torch_nn_module_names)):
     ctor_args_test_name = 'test_torch_nn_{}_ctor_args'.format(module_name)
