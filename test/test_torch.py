@@ -2466,23 +2466,57 @@ class _TestTorchMixin(torchtest):
     def test_rpow(self):
         self._test_rpow(self, lambda x: x)
 
+    def _test_pow(self, base, exponent, np_exponent=None):
+        if np_exponent is None:
+            np_exponent = exponent
+
+        def to_np(value):
+            if isinstance(value, torch.Tensor):
+                return value.cpu().numpy()
+            return value
+
+        try:
+            expected = torch.from_numpy(
+                np.power(to_np(base), to_np(np_exponent)))
+        except ValueError as e:
+            err_msg = "Integers to negative integer powers are not allowed."
+            self.assertEqual(str(e), err_msg)
+            out = torch.empty_like(base)
+            test_cases = [
+                lambda: base.pow(exponent),
+                lambda: base.pow_(exponent),
+                lambda: torch.pow(base, exponent),
+                lambda: torch.pow(base, exponent, out=out)
+            ]
+            for test_case in test_cases:
+                self.assertRaisesRegex(RuntimeError, err_msg, test_case)
+        else:
+            if isinstance(base, torch.Tensor):
+                actual = base.pow(exponent)
+                self.assertEqual(actual, expected, allow_inf=True)
+
+                actual = base.clone()
+                actual2 = actual.pow_(exponent)
+                self.assertEqual(actual, expected, allow_inf=True)
+                self.assertEqual(actual2, expected, allow_inf=True)
+
+            actual = torch.pow(base, exponent)
+            self.assertEqual(actual, expected, allow_inf=True)
+
+            actual2 = torch.pow(base, exponent, out=actual)
+            self.assertEqual(actual, expected, allow_inf=True)
+            self.assertEqual(actual2, expected, allow_inf=True)
+
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_pow(self, device):
-
-        def _check_against_np(tensor, exp):
-            tensor_np = tensor.cpu().numpy()
-            exp_np = exp if isinstance(exp, int) else exp.cpu().numpy()
-            expected = torch.tensor(tensor_np ** exp_np, dtype=tensor.dtype)
-            self.assertEqual(torch.pow(tensor, exp), expected)
-            self.assertEqual(tensor.pow(exp), expected)
 
         def _test_integral_pow(dt, range, dev):
             tensor = torch.tensor((3, 3), dtype=dt, device=dev).random_(*range)
             exps = [0, 1, 2, 4,
                     torch.tensor((3, 3), dtype=dt, device=dev).random_(0, 5)]
             for exp in exps:
-                _check_against_np(tensor, exp)
+                self._test_pow(tensor, exp)
 
         _test_integral_pow(torch.int8, (-3, 4), device)
         _test_integral_pow(torch.uint8, (0, 4), device)
@@ -2498,38 +2532,16 @@ class _TestTorchMixin(torchtest):
                 -3, -2, -1, 0, 1, 2, 3,
                 torch.iinfo(torch.int32).max]
         neg_ints = [torch.iinfo(torch.int32).min, -3, -2, -1]
-
         tensor = torch.tensor(ints, dtype=torch.int32, device=device)
-        nparr = np.array(ints, dtype=np.int32)
-        out = torch.empty_like(tensor, device=device)
-
-        test_cases = [
-            lambda: tensor.pow(pow),
-            lambda: tensor.pow_(pow),
-            lambda: torch.pow(tensor, pow),
-            lambda: torch.pow(tensor, pow, out=out)
-        ]
-
         for pow in neg_ints:
-            self.assertRaisesRegex(
-                ValueError,
-                "Integers to negative integer powers are not allowed.",
-                lambda: np.power(nparr, pow))
-            for test_case in test_cases:
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    "Integers to negative integer powers are not allowed.",
-                    test_case)
+            self._test_pow(tensor, pow)
 
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_long_tensor_pow_floats(self, device):
         ints = [0, 1, 23, 4567]
         floats = [0.0, 1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
-
         tensor = torch.tensor(ints, dtype=torch.int64, device=device)
-        nparr = np.array(ints, dtype=np.int64)
-
         for pow in floats:
             if device == 'cuda' and not TEST_WITH_ROCM:
                 # Current pow CUDA implementation casts exponent
@@ -2538,45 +2550,21 @@ class _TestTorchMixin(torchtest):
                 # numpy pow 4 ^ 0.5 = 2
                 # This line must be deleted as soon as
                 # pow CUDA implementation is fixed.
-                pow = int(pow)
-
-            # pow CPU implementation is already fixed and
-            # does not cast exponent to tensor dtype,
-            # that why it is compatible with numpy.
-            expected = torch.from_numpy(np.power(nparr, pow).astype(np.int64))
-
-            actual = tensor.pow(pow)
-            self.assertEqual(actual, expected)
-
-            actual = tensor.clone()
-            actual2 = actual.pow_(pow)
-            self.assertEqual(actual, expected)
-            self.assertEqual(actual2, expected)
-
-            actual = torch.pow(tensor, pow)
-            self.assertEqual(actual, expected)
-
-            actual2 = torch.pow(tensor, pow, out=actual)
-            self.assertEqual(actual, expected)
-            self.assertEqual(actual2, expected)
+                self._test_pow(tensor, pow, np_exponent=int(pow))
+            else:
+                # pow CPU implementation is already fixed and
+                # does not cast exponent to tensor dtype,
+                # that why it is compatible with numpy.
+                self._test_pow(tensor, pow)
 
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_float_scalar_pow_float_tensor(self, device):
         floats = [2.0, -3 / 2, -1.0, -1 / 2, -1 / 3, 0.0,
                   1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
-
         tensor = torch.tensor(floats, dtype=torch.float32, device=device)
-        nparr = np.array(floats, dtype=np.float32)
         for base in floats:
-            expected = torch.from_numpy(np.power(base, nparr).astype(np.float32))
-
-            actual = torch.pow(base, tensor)
-            self.assertEqual(expected, actual, allow_inf=True)
-
-            actual2 = torch.pow(base, tensor, out=actual)
-            self.assertEqual(expected, actual, allow_inf=True)
-            self.assertEqual(expected, actual2, allow_inf=True)
+            self._test_pow(base, tensor)
 
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
@@ -2586,20 +2574,10 @@ class _TestTorchMixin(torchtest):
 
         def test_tensor_pow_tensor(values, torch_type, numpy_type):
             vals_tensor = torch.tensor(values, dtype=torch_type, device=dev)
-            vals_nparr = np.array(values, dtype=numpy_type)
-            out = torch.empty_like(vals_tensor)
             for i in range(len(values)):
                 pows = rotate(values, i)
                 pows_tensor = torch.tensor(pows, dtype=torch_type, device=dev)
-                pows_nparr = np.array(pows, dtype=numpy_type)
-                expected = torch.from_numpy(np.power(vals_nparr, pows_nparr))
-
-                actual = torch.pow(vals_tensor, pows_tensor)
-                self.assertEqual(expected, actual, allow_inf=True)
-
-                actual2 = torch.pow(vals_tensor, pows_tensor, out=actual)
-                self.assertEqual(expected, actual, allow_inf=True)
-                self.assertEqual(expected, actual2, allow_inf=True)
+                self._test_pow(vals_tensor, pows_tensor)
 
         ints = [0, 1, 2, 3]
         test_tensor_pow_tensor(ints, torch.int32, np.int32)
