@@ -15,6 +15,9 @@ import hypothesis_utils as hu
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams
 
+from torch.quantization import quantize_dynamic, default_dynamic_qconfig
+
+import copy
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
@@ -630,6 +633,128 @@ class TestDynamicQuantizedLinear(TestCase):
 
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          message="torch.ops.quantized.fbgemm_linear_dynamic results are off")
+
+    def test_quantized_rnn(self):
+        d_in, d_hid = 2, 2
+
+        for cell in [
+            torch.nn.LSTM(d_in, d_hid).float(),
+        ]:
+
+            # Replace parameter values s.t. the range of values is exactly
+            # 255, thus we will have 0 quantization error in the quantized
+            # GEMM call. This i s for testing purposes.
+            #
+            # Note that the current implementation does not support
+            # accumulation values outside of the range representable by a
+            # 16 bit integer, instead resulting in a saturated value. We
+            # must take care that in our test we do not end up with a dot
+            # product that overflows the int16 range, e.g.
+            # (255*127+255*127) = 64770. So, we hardcode the test values
+            # here and ensure a mix of signedness.
+            vals = [[100, -155],
+                    [100, -155],
+                    [-155, 100],
+                    [-155, 100],
+                    [100, -155],
+                    [-155, 100],
+                    [-155, 100],
+                    [100, -155]]
+            if isinstance(cell, torch.nn.LSTM):
+                num_chunks = 4
+            print(num_chunks)
+            vals = vals[:d_hid * num_chunks]
+            cell.weight_ih_l0 = torch.nn.Parameter(
+                torch.tensor(vals, dtype=torch.float),
+                requires_grad=False)
+            cell.weight_hh_l0 = torch.nn.Parameter(
+                torch.tensor(vals, dtype=torch.float),
+                requires_grad=False)
+
+            ref = copy.deepcopy(cell)
+
+            qconfig_dynamic_dict = {
+                torch.nn.LSTM: default_dynamic_qconfig,
+            }
+            default_dynamic_module_mapping = {
+                torch.nn.LSTM: torch.nn.quantized.dynamic.LSTM,
+            }
+            cell_int8 = torch.quantization.quantize_dynamic(
+                cell, qconfig_dynamic_dict, default_dynamic_module_mapping
+            )
+
+            # print("cell:")
+            # print(cell)
+            # print(type(cell))
+            # print("cell_int8:")
+            # print(cell_int8)
+            # print(type(cell_int8))
+
+            niter = 10
+            x = torch.tensor([[100, -155],
+                              [-155, 100],
+                              [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+            h0_vals = [[-155, 100],
+                       [-155, 155],
+                       [100, -155]]
+
+            hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+            cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+
+            if isinstance(ref, torch.nn.LSTM):
+                hiddens = (hx, cx)
+
+            ref_out, ref_hid = ref(x, hiddens)
+
+            # print("ref_out:")
+            # print(ref_out)
+            # print("ref_hid:")
+            # print(ref_hid)
+
+            # Compare int8 quantized to unquantized
+            output_int8, final_hiddens_int8 = cell_int8(x, hiddens)
+
+            # print("output_int8:")
+            # print(output_int8)
+            # print("final_hiddens_int8:")
+            # print(final_hiddens_int8)
+
+            torch.testing.assert_allclose(output_int8, ref_out)
+            self.assertEqual(output_int8, ref_out)
+
+#             for out, ref in zip(final_hiddens_int8, ref_hid):
+#                 torch.testing.assert_allclose(out, ref)
+# 
+#             def compare_quantized_unquantized(ScriptWrapper, cell):
+#                 wrapper = ScriptWrapper(cell)
+# 
+#                 # Compare quantize scripted module to unquantized
+#                 script_out, script_hid = wrapper(x, hiddens)
+#                 torch.testing.assert_allclose(script_out, ref_out)
+#                 for out, ref in zip(script_hid, ref_hid):
+#                     torch.testing.assert_allclose(out, ref)
+# 
+#                 # Compare export/import to unquantized
+#                 export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
+#                 ei_out, ei_hid = export_import_wrapper(x, hiddens)
+#                 torch.testing.assert_allclose(ei_out, ref_out)
+#                 for out, ref in zip(ei_hid, ref_hid):
+#                     torch.testing.assert_allclose(out, ref)
+# 
+#             if isinstance(cell, torch.jit.quantized.QuantizedLSTM):
+#                 for cell in [cell_int8,]:
+#                     class ScriptWrapper(torch.jit.ScriptModule):
+#                         def __init__(self, cell):
+#                             super(ScriptWrapper, self).__init__()
+#                             self.cell = cell
+# 
+#                         @torch.jit.script_method
+#                         def forward(self, x, hiddens):
+#                             # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
+#                             #        -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+#                             return self.cell(x, hiddens)
+#                     compare_quantized_unquantized(ScriptWrapper, cell)
+
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
