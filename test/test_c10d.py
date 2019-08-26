@@ -81,7 +81,7 @@ def simple_coalesced_reduce_tests(rank, world_size):
     return [
         (
             c10d.ReduceOp.SUM,
-            [torch.Tensor([rank + 1.0]), torch.Tensor([(rank + 1) ** 2])],
+            [torch.Tensor([rank + 1]), torch.Tensor([(rank + 1) ** 2])],
             [
                 torch.Tensor([float(world_size * (world_size + 1) / 2)]),
                 torch.Tensor([float(world_size * (world_size + 1) * (2 * world_size + 1) / 6)])
