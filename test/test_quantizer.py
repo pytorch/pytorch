@@ -7,7 +7,6 @@ import torch.jit
 from jit_utils import _inline_everything
 from torch._jit_internal import Optional
 import torch.nn as nn
-import torch.nn.functional as F
 from common_utils import TestCase, run_tests
 from torch.quantization import QuantStub, DeQuantStub, \
     quantize, default_eval_fn, QConfig
@@ -156,6 +155,7 @@ class QuantizerTestCase(TestCase):
     def test_compare_qparam_eager_script_default(self):
         class Observer(torch.nn.Module):
             __annotations__ = {'scale' : Optional[torch.Tensor], 'zero_point': Optional[torch.Tensor]}
+
             def __init__(self):
                 super(Observer, self).__init__()
                 self.dtype = torch.quint8
