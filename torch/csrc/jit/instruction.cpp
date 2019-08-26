@@ -26,7 +26,8 @@ const char* OpInfo(OperatorCode op) {
   return nullptr;
 }
 
-static_assert(sizeof(Instruction) == 8, "Instructions should be 8 bytes");
+static const size_t instruction_size = 8;
+static_assert(sizeof(Instruction) == instruction_size, "Instructions should be 8 bytes");
 std::ostream& operator<<(std::ostream& out, Instruction inst) {
   // TODO: use op info to print out the op in a more user-friendly way
   int nargs = std::strlen(OpInfo(inst.op));
