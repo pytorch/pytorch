@@ -595,6 +595,14 @@ struct CodeImpl {
     insertInstruction(GET_ATTR, slot);
   }
 
+  void emitSetAttr(Node* node) {
+    emitLoadInputs(node->inputs());
+    const auto type = node->inputs().at(0)->type()->expect<ClassType>();
+    const auto& field = node->s(attr::name);
+    const auto slot = type->getAttributeSlot(field);
+    insertInstruction(SET_ATTR, slot);
+  }
+
   void insertBailoutBlocks() {
     for(const BailoutBlock& block : bailout_blocks_) {
       TORCH_INTERNAL_ASSERT(instructions_[block.jf_instruction_index].op == JF)
@@ -650,6 +658,9 @@ struct CodeImpl {
         break;
       case prim::GetAttr:
         emitGetAttr(node);
+        break;
+      case prim::SetAttr:
+        emitSetAttr(node);
         break;
     }
   }
@@ -842,6 +853,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto userObj = pop(stack).toObject();
             auto value = userObj->getSlot(inst.X);
             push(stack, std::move(value));
+            ++af.pc;
+          } break;
+          case SET_ATTR: {
+            auto v = pop(stack);
+            auto userObj = pop(stack).toObject();
+            userObj->setSlot(inst.X, std::move(v));
             ++af.pc;
           } break;
           case JF:

@@ -33,7 +33,8 @@ namespace jit {
   _(CALL, "F") /* call function X */                                        \
   _(GUARD, "T") /* check guard against type_table, true if passes */        \
   _(TAIL_CALL, "F") /* replace current frame with function F */             \
-  _(GET_ATTR, "S") /* get attribute from slot X in an Object */
+  _(GET_ATTR, "S") /* get attribute from slot X in an Object */             \
+  _(SET_ATTR, "S") /* set attribute to slot X in an Object */
 
 enum OperatorCode : uint8_t {
 #define DEFINE_OP(op, _) op,
