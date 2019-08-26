@@ -16,6 +16,7 @@ import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
+from torch._six import PY2
 
 TESTS = [
     'autograd',
@@ -39,7 +40,6 @@ TESTS = [
     'multiprocessing_spawn',
     'nccl',
     'nn',
-    'nn_quantized',
     'numba_integration',
     'optim',
     'qat',
@@ -47,6 +47,7 @@ TESTS = [
     'quantized_conv',
     'quantized',
     'quantized_tensor',
+    'quantized_nn_mods',
     'quantizer',
     'rpc',
     'sparse',
@@ -58,7 +59,10 @@ TESTS = [
     'jit_fuser',
     'tensorboard',
     'namedtensor',
+    'jit_disabled',
 ]
+if not PY2:
+    TESTS.append('jit_py3')
 
 WINDOWS_BLACKLIST = [
     'distributed',
@@ -277,6 +281,15 @@ def parse_args():
         metavar='TESTS',
         help='select the last test to run (excludes following tests)')
     parser.add_argument(
+        '--bring-to-front',
+        nargs='+',
+        choices=TestChoices(TESTS),
+        default=[],
+        metavar='TESTS',
+        help='select a set of tests to run first. This can be used in situations'
+             ' where you want to run all tests, but care more about some set, '
+             'e.g. after making a change to a specific component')
+    parser.add_argument(
         '--ignore-win-blacklist',
         action='store_true',
         help='always run blacklisted windows tests')
@@ -294,7 +307,7 @@ def get_executable_command(options):
     else:
         executable = [sys.executable]
     if options.pytest:
-        executable += ['-m', 'pytest', '--durations=10']
+        executable += ['-m', 'pytest']
     return executable
 
 
@@ -348,6 +361,11 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 
 def get_selected_tests(options):
     selected_tests = options.include
+
+    if options.bring_to_front:
+        to_front = set(options.bring_to_front)
+        selected_tests = options.bring_to_front + list(filter(lambda name: name not in to_front,
+                                                              selected_tests))
 
     if options.first:
         first_index = find_test_index(options.first, selected_tests)

@@ -270,7 +270,7 @@ Vec256<float> inline operator^(const Vec256<float>& a, const Vec256<float>& b) {
 }
 
 template <>
-void convert(const float* src, float* dst, int64_t n) {
+inline void convert(const float* src, float* dst, int64_t n) {
   int64_t i;
 #pragma unroll
   for (i = 0; i <= (n - Vec256<float>::size()); i += Vec256<float>::size()) {

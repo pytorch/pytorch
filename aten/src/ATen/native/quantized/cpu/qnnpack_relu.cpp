@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
 #include "init_qnnpack.h"
 #include "qnnpack_utils.h"
@@ -58,16 +59,18 @@ class QNNPACKRelu final : public torch::OperatorKernel {
     const qnnp_status setupStatus = qnnp_setup_clamp_nc_u8(
         qnnpack_operator, /* clamp */
         input_contig.size(0) /* batch size */,
-        (uint8_t*)input_contig.data<c10::quint8>() /* input data */,
+        (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input data */,
         num_elems_x /* input stride */,
-        (uint8_t*)qy.data<c10::quint8>() /* output data */,
+        (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
         num_elems_y /* output stride */);
     TORCH_INTERNAL_ASSERT(
         setupStatus == qnnp_status_success,
         "failed to setup QNNPACK Relu operator");
 
+    pthreadpool_t threadpool = caffe2::mobile_threadpool();
+
     const qnnp_status runStatus =
-        qnnp_run_operator(qnnpack_operator, nullptr /* thread pool */);
+        qnnp_run_operator(qnnpack_operator, threadpool);
 
     TORCH_INTERNAL_ASSERT(
         runStatus == qnnp_status_success,

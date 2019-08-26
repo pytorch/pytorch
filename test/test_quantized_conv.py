@@ -13,12 +13,13 @@ from hypothesis import strategies as st
 import hypothesis_utils as hu
 
 from common_quantized import _conv_output_shape
-from common_utils import TestCase, run_tests, TEST_WITH_UBSAN
+from common_utils import TestCase, run_tests
 
-@unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-                 'Quantization requires FBGEMM. FBGEMM does not play'
-                 ' well with UBSAN at the moment, so we skip the test if'
-                 ' we are in a UBSAN environment.')
+@unittest.skipIf(
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
+)
 class QuantizedConvTest(TestCase):
     @given(X=hu.tensor_conv2d(min_batch=1, max_batch=3,
                               min_in_channels=1, max_in_channels=7,

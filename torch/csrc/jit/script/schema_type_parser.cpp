@@ -9,17 +9,15 @@
 
 using c10::AliasInfo;
 using c10::BoolType;
-using c10::CompleteTensorType;
+using c10::CapsuleType;
 using c10::DeviceObjType;
 using c10::DictType;
-using c10::DimensionedTensorType;
 using c10::FloatType;
 using c10::FutureType;
 using c10::GeneratorType;
 using c10::IntType;
 using c10::ListType;
 using c10::NoneType;
-using c10::CapsuleType;
 using c10::NumberType;
 using c10::OptionalType;
 using c10::StringType;
@@ -124,10 +122,10 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
 
 c10::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
     const std::string& dtype) {
-#define DEFINE_SCALAR_TYPE(_1, n, _2) {#n, at::ScalarType::n},
+#define DEFINE_SCALAR_TYPE(_1, n) {#n, at::ScalarType::n},
 
   static std::unordered_map<std::string, at::ScalarType> type_map = {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_STUBS(DEFINE_SCALAR_TYPE)};
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
   auto type = type_map.find(dtype);
   if (type != type_map.end()) {
@@ -149,7 +147,12 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       L.expect('*');
       num_dims++;
     });
-    ptr = DimensionedTensorType::create(dtype, at::DeviceType::CPU, num_dims);
+    ptr = at::TensorType::create(
+        dtype,
+        at::DeviceType::CPU,
+        c10::VaryingShape(num_dims),
+        c10::VaryingShape(num_dims),
+        c10::nullopt);
   } else {
     std::vector<int64_t> dims;
     parseList(TK_NOTHING, ',', ')', [&] {
@@ -163,8 +166,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       dims.push_back(dim);
     });
     at::IntArrayRef dims_ref(dims);
-    ptr =
-        CompleteTensorType::create(dtype, at::DeviceType::CPU, dims_ref, false);
+    ptr = at::TensorType::create(dtype, at::DeviceType::CPU, dims_ref, false);
   }
   return ptr;
 }

@@ -544,19 +544,11 @@ class LowerCholeskyTransform(Transform):
     def __eq__(self, other):
         return isinstance(other, LowerCholeskyTransform)
 
-    def _call_on_event(self, x):
-        return x.tril(-1) + x.diag().exp().diag()
-
-    def _inverse_on_event(self, y):
-        return y.tril(-1) + y.diag().log().diag()
-
     def _call(self, x):
-        flat_x = x.reshape((-1,) + x.shape[-2:])
-        return torch.stack([self._call_on_event(flat_x[i]) for i in range(flat_x.size(0))]).view(x.shape)
+        return x.tril(-1) + x.diagonal(dim1=-2, dim2=-1).exp().diag_embed()
 
     def _inverse(self, y):
-        flat_y = y.reshape((-1,) + y.shape[-2:])
-        return torch.stack([self._inverse_on_event(flat_y[i]) for i in range(flat_y.size(0))]).view(y.shape)
+        return y.tril(-1) + y.diagonal(dim1=-2, dim2=-1).log().diag_embed()
 
 
 class CatTransform(Transform):

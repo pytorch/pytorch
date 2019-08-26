@@ -1,4 +1,5 @@
 #include <aten/src/ATen/Context.h>
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -9,7 +10,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
@@ -644,6 +645,39 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? keep_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor[]",
+         [](Stack& stack) {
+           bool allow_unused = pop(stack).toBool();
+           bool create_graph = pop(stack).toBool();
+           auto keep_graph = pop(stack).toOptional<bool>();
+           auto grad_outputs = pop(stack);
+           auto inputs = pop(stack).toTensorList();
+           auto outputs = pop(stack).toTensorList();
+           std::vector<torch::autograd::Variable> input_vars(
+               inputs.begin(), inputs.end());
+           std::vector<torch::autograd::Variable> output_vars(outputs.begin(), outputs.end());
+           std::vector<torch::autograd::Variable> gradients;
+
+           if (!grad_outputs.isNone()) {
+             for (const IValue& v : grad_outputs.toGenericListRef()) {
+               gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
+             }
+           }
+
+           auto res = torch::autograd::grad(
+               output_vars,
+               input_vars,
+               gradients,
+               keep_graph,
+               create_graph,
+               allow_unused);
+
+           std::vector<at::Tensor> res_tensors(res.begin(), res.end());
+           push(stack, c10::impl::toList<at::Tensor>(std::move(res_tensors)));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::AutogradZero() -> Tensor",
          [](const Node* node) {
            return [](Stack& stack) {
@@ -656,19 +690,14 @@ RegisterOperators reg(
          "aten::save(t item, str filename) -> ()",
          [](Stack& stack) {
            auto filename = pop(stack).toStringRef();
-           auto value = pop(stack);
+           auto ivalue = pop(stack);
 
            // Pickle the tensor
-           Pickler p;
-           p.torchSaveStart();
-           p.protocol();
-           p.pushIValue(value);
-           p.stop();
-           p.torchSaveStop();
+           auto data = pickle({ivalue});
 
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);
-           output.write(p.stack().data(), p.stack().size());
+           output.write(data.data(), data.size());
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -818,7 +847,7 @@ RegisterOperators reg(
              pop(stack, input, shape);
              shape = shape.contiguous();
              AT_ASSERT(shape.ndimension() == 1);
-             at::IntArrayRef shape_list(shape.data<int64_t>(), shape.size(0));
+             at::IntArrayRef shape_list(shape.data_ptr<int64_t>(), shape.size(0));
              push(stack, input.reshape(shape_list));
              return 0;
            };
@@ -1809,7 +1838,11 @@ int listSort<at::Tensor>(Stack& stack) {
   std::sort(
       list.begin(),
       list.end(),
-      [reverse](const at::Tensor& a, const at::Tensor& b) {
+      [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
+        // "strict weak ordering" issue - see other sort
+        if (a.getIntrusivePtr() == b.getIntrusivePtr()) {
+          return false;
+        }
         return (a.lt(b).is_nonzero()) ^ reverse;
       });
   return 0;
@@ -1988,18 +2021,19 @@ int dictPop(Stack& stack) {
   }
   auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
+  auto iter = dict.find(key);
+  if (iter == dict.end()) {
     if (has_default) {
       push(stack, default_value);
     } else {
       AT_ERROR("KeyError: ", key);
     }
   } else {
+    // note: before erase
+    push(stack, iter->value());
     auto erase_count = dict.erase(key);
     TORCH_CHECK(
         erase_count == 1, "Expected to erase 1 item, found ", erase_count);
-    push(stack, value->value());
   }
   return 0;
 }
@@ -2721,7 +2755,7 @@ RegisterOperators reg2({
           c10::List<int64_t> elems;
           elems.reserve(t.size(0));
           for (int i = 0; i < t.size(0); i++) {
-            elems.push_back(*t[i].data<int32_t>());
+            elems.push_back(*t[i].data_ptr<int32_t>());
           }
           push(stack, std::move(elems));
           return 0;

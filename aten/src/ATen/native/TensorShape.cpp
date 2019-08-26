@@ -461,9 +461,9 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   auto size = self.size(dim);
   if (index < -size || index >= size) {
 #ifdef BUILD_NAMEDTENSOR
-    if (self.names().has_value()) {
+    if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
       AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
-                     self.sizes(), " at dimension ", self.names()->at(dim));
+                     self.sizes(), " at dimension ", self.names()[dim]);
     }
 #endif
     AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
@@ -627,6 +627,27 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
   return self;
 }
 
+#ifdef BUILD_NAMEDTENSOR
+static Tensor& propagate_transposed_names(
+    Tensor& result,
+    const Tensor& other,
+    int64_t dim0,
+    int64_t dim1) {
+  if (other.has_names()) {
+    auto names = other.names().vec();
+    std::swap(names[dim0], names[dim1]);
+    namedinference::propagate_names(result, names);
+  }
+  return result;
+}
+
+Tensor transpose(const Tensor& self, Dimname dim0, Dimname dim1) {
+  return at::transpose(
+      self, dimname_to_position(self, dim0), dimname_to_position(self, dim1));
+}
+
+#endif
+
 Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   auto ndims = self.dim();
   dim0 = maybe_wrap_dim(dim0, ndims);
@@ -671,7 +692,11 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   auto sizes = self.sizes().vec();
   std::swap(strides[dim0], strides[dim1]);
   std::swap(sizes[dim0], sizes[dim1]);
-  return self.as_strided(sizes, strides);
+  auto result = self.as_strided(sizes, strides);
+#ifdef BUILD_NAMEDTENSOR
+  propagate_transposed_names(result, self, dim0, dim1);
+#endif
+  return result;
 }
 
 static void check_t(const Tensor& self, const char *fn) {
@@ -938,6 +963,9 @@ Tensor alias(const Tensor& self) {
     impl->set_sizes_and_strides(self.sizes(), self.strides());
     self_ = Tensor(std::move(impl));
   }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(self_, self);
+#endif
   return self_;
 }
 
