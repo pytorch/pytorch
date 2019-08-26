@@ -1314,7 +1314,26 @@ void AliasDb::setWildcard(const Value* v) {
   TORCH_INTERNAL_ASSERT(e != nullptr);
   memoryDAG_->makePointerTo(getOrCreateElement(v), e);
 
-  // point everything v aliases to the wildcard
+  // this fixes a corner case where there's an aliasing chain
+  // v -> a1 -> a2 -> ... , and now v -> (*).
+  // if v may alias a wildcard anything v points to
+  // may **also** alias the wildcard.
+  // A simple example of this case would be:
+  //
+  // def fn():
+  //     x = torch.ones(2, 3)
+  //     x_1 = x.view(-1)
+  //     l = []
+  //     l.append(x_1)
+  //     x_view = l[0]
+  //     x.add_(torch.ones(2, 3))
+  //     return x_view
+  //
+  // if the fact that x points to (*) isn't recorded,
+  // `x.add_(torch.ones(2, 3))` will be removed by DCE,
+  // since x isn't alive at the end of `test_indirect`
+  // yet x, x_view, x1 all share the same memory
+  // and x_view is returned to the user.
   const auto &pointeeSet = getOrCreateElement(v)->getMemoryLocations();
   for (const auto &pointee : pointeeSet) {
     auto fe = memoryDAG_->fromIndex(pointee);
