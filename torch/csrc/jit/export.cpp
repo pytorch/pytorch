@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/source_range_serialization.h>
+#include <torch/csrc/jit/instruction.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -31,6 +32,7 @@
 
 namespace torch {
 namespace jit {
+std::ostream& operator<<(std::ostream& out, OperatorCode op);
 
 namespace {
 namespace onnx_torch = ::torch::onnx;
@@ -620,22 +622,58 @@ class ScriptModuleSerializer {
 //    is going to cause jitter)
 class ScriptModuleSerializer2 {
  public:
-  ScriptModuleSerializer2(const std::string& filename)
-      : writer_(filename.c_str()) {}
+  ScriptModuleSerializer2(const std::string& filename, bool bytecode_format)
+      : writer_(filename.c_str()), bytecode_format_(bytecode_format) {}
 
-  ScriptModuleSerializer2(std::ostream* ofs) : ofs_(), writer_(ofs) {}
+  ScriptModuleSerializer2(std::ostream* ofs, bool bytecode_format)
+      : ofs_(), writer_(ofs), bytecode_format_(bytecode_format) {}
   void serialize(
       const script::Module& module,
       const script::ExtraFilesMap& extra_files) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
-    // Serialize all code info.
-    writeCode(module.type());
-    // The tensor constants from the code are written to a separate archive
-    // so loading the code does not depend on loading the data
-    std::vector<IValue> ivalue_constants(
-        constant_table_.begin(), constant_table_.end());
-    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
+    if (bytecode_format_) {
+      auto compUnit = module.class_compilation_unit();
+      auto funcList = compUnit->get_functions();
+
+      for (auto func : funcList) {
+        torch::jit::Code code(func->graph());
+
+        // constants
+        auto constants = c10::ivalue::Tuple::create(code.constant_table());
+        writeArchive(func->name() + "/constants", constants);
+
+        // instructions and operators
+        std::vector<IValue> inss;
+        for (const auto& ins : code.instructions()) {
+          std::stringstream ss;
+          ss << ins.op;
+          std::vector<IValue> insv{ss.str(), ins.N, ins.X};
+          inss.emplace_back(c10::ivalue::Tuple::create(std::move(insv)));
+        }
+        auto instructions = c10::ivalue::Tuple::create(std::move(inss));
+
+        std::vector<IValue> opss;
+        for (const auto& opname : code.opname_table()) {
+          opss.emplace_back(c10::ivalue::Tuple::create({opname.name, opname.overload_name}));
+        }
+        auto operators = c10::ivalue::Tuple::create(std::move(opss));
+
+        auto elements = c10::ivalue::Tuple::create({instructions, operators});
+        std::vector<at::Tensor> temp_table;
+        auto bdata = pickle(elements, &temp_table);
+        writer_.writeRecord(func->name() + "/bytecode.pkl", bdata.data(), bdata.size());
+      }
+    }
+    else {
+      // Serialize all code info.
+      writeCode(module.type());
+      // The tensor constants from the code are written to a separate archive
+      // so loading the code does not depend on loading the data
+      std::vector<IValue> ivalue_constants(
+          constant_table_.begin(), constant_table_.end());
+      writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
+    }
     // finally we serialize the model
     writeArchive("data", module.module_object());
   }
@@ -785,6 +823,7 @@ class ScriptModuleSerializer2 {
     SourceRangeRecords debug_info;
   };
   OrderedDict<c10::NamedTypePtr, TypeInfo> converted_types_;
+  bool bytecode_format_;
 };
 
 // ScriptModuleSerializer's methods
@@ -1349,11 +1388,12 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
 void ExportModule(
     const script::Module& module,
     std::ostream& out,
-    const script::ExtraFilesMap& extra_files) {
+    const script::ExtraFilesMap& extra_files,
+    bool bytecode_format) {
 #ifdef FBCODE_CAFFE2
   ScriptModuleSerializer serializer(&out);
 #else
-  ScriptModuleSerializer2 serializer(&out);
+  ScriptModuleSerializer2 serializer(&out, bytecode_format);
 #endif
 
   serializer.serialize(module, extra_files);
@@ -1362,11 +1402,12 @@ void ExportModule(
 void ExportModule(
     const script::Module& module,
     const std::string& filename,
-    const script::ExtraFilesMap& extra_files) {
+    const script::ExtraFilesMap& extra_files,
+    bool bytecode_format) {
 #ifdef FBCODE_CAFFE2
   ScriptModuleSerializer serializer(filename);
 #else
-  ScriptModuleSerializer2 serializer(filename);
+  ScriptModuleSerializer2 serializer(filename, bytecode_format);
 #endif
   serializer.serialize(module, extra_files);
 }

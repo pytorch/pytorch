@@ -78,18 +78,20 @@ void Module::to(at::Device device, bool non_blocking) {
   to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
 }
 
-void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
+void Module::save(std::ostream& out, const ExtraFilesMap& extra_files,
+                  bool bytecode_format) const {
 #ifndef C10_MOBILE
-  ExportModule(*this, out, extra_files);
+  ExportModule(*this, out, extra_files, bytecode_format);
 #else
   AT_ERROR("Saving module is not supported on mobile.");
 #endif
 }
 
-void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
+void Module::save(const std::string& filename, const ExtraFilesMap& extra_files,
+                  bool bytecode_format)
     const {
 #ifndef C10_MOBILE
-  ExportModule(*this, filename, extra_files);
+  ExportModule(*this, filename, extra_files, bytecode_format);
 #else
   AT_ERROR("Saving module is not supported on mobile.");
 #endif

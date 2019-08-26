@@ -11,8 +11,8 @@
 #include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
@@ -332,6 +332,7 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
+  std::vector<c10::OperatorName> opname_table_;
   std::vector<Function*> function_table_;
   std::vector<TypePtr> type_table_;
   int register_size_ = 0;
@@ -374,6 +375,18 @@ struct CodeImpl {
     // we deferred the emission of bailout blocks so they appear at the end
     // emit them now and patch up the jumps
     insertBailoutBlocks();
+  }
+
+  const std::vector<c10::IValue>& constant_table() const {
+    return constant_table_;
+  }
+
+  const std::vector<Instruction>& instructions() const {
+    return instructions_;
+  }
+
+  const std::vector<c10::OperatorName>& opname_table() const {
+    return opname_table_;
   }
 
   void insertInstruction(OperatorCode op, int64_t X = 0, uint64_t N = 0) {
@@ -463,6 +476,10 @@ struct CodeImpl {
     emitLoadInputs(node->inputs());
     insertInstruction(OP, operator_table_.size());
     operator_table_.emplace_back(getOperation(node));
+    // Looks like all overload_names are empty? TODO: If the name is not unique,
+    // use inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
+    // as a backup.
+    opname_table_.emplace_back(node->schema().operator_name());
   }
 
   void emitWait(Node* node) {
@@ -1051,6 +1068,18 @@ size_t Code::num_inputs() const {
 
 size_t Code::num_outputs() const {
   return pImpl->n_outputs;
+}
+
+const std::vector<c10::IValue>& Code::constant_table() const {
+  return pImpl->constant_table();
+}
+
+const std::vector<Instruction>& Code::instructions() const {
+  return pImpl->instructions();
+}
+
+const std::vector<c10::OperatorName>& Code::opname_table() const {
+  return pImpl->opname_table();
 }
 
 InterpreterState::InterpreterState(const Code& code)
