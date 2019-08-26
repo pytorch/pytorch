@@ -16,10 +16,15 @@ void specializeAutogradZero(Graph& g) {
 
   for (Value* input : g.inputs()) {
     const auto& tp = input->type();
-    if (tp->isSubtypeOf(AutogradZeroTensorType::get())) {
-      state[input] = State::Zero;
-    } else if (tp->isSubtypeOf(TensorType::get())
-            || tp->isSubtypeOf(ListType::ofTensors())) {
+    if (auto tt = tp->cast<ProfiledTensorType>()) {
+      if (tt->autogradZero() && *tt->autogradZero()) {
+        state[input] = State::Zero;
+      } else {
+        state[input] = State::Nonzero;
+      }
+    } else if (
+        tp->isSubtypeOf(TensorType::get()) ||
+        tp->isSubtypeOf(ListType::ofTensors())) {
       state[input] = State::Nonzero;
     } else {
       state[input] = State::Unknown;

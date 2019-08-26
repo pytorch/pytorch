@@ -72,6 +72,10 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_bitshift.*'  # Needs implementation
                      '|test_round.*'  # Needs implementation
                      '|test_cumsum.*'  # Needs implementation
+                     '|test_clip.*'  # opset 11 is not supported yet
+                     '|test_gather_elements.*'  # opset 11 is not supported yet
+                     '|test_scatter.*'  # opset 11 is not supported yet
+                     '|test_unique.*'  # opset 11 is not supported yet
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.

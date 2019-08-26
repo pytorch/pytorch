@@ -2,7 +2,7 @@
 
 #include <ATen/Context.h>
 
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 
 #include <thread>
 #include <mutex>

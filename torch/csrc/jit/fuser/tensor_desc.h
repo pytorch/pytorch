@@ -41,8 +41,11 @@ struct TORCH_API TensorDesc {
   TensorDesc(const at::Tensor& t)
       : TensorDesc(t.scalar_type(), t.sizes(), t.strides()) {}
 
-  TensorDesc(const c10::CompleteTensorTypePtr& type)
-      : TensorDesc(type->scalarType(), type->sizes(), type->strides()) {}
+  TensorDesc(const c10::ProfiledTensorTypePtr& type)
+      : TensorDesc(
+            type->scalarType().value(),
+            type->sizes().concrete_sizes().value(),
+            type->strides().concrete_sizes().value()) {}
 
   // number of dimensions after contiguity compression
   size_t nDim() const {

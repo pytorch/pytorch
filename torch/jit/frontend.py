@@ -93,8 +93,12 @@ class FrontendError(Exception):
         self.source_range = source_range
         self.msg = msg
 
+        # This has to be instantiated here so the ErrorReport is accurate to the
+        # call stack when the FrontendError was raised
+        self.error_report = torch._C.ErrorReport(self.source_range)
+
     def __str__(self):
-        return self.msg + torch._C.ErrorReport(self.source_range).what()
+        return self.msg + self.error_report.what()
 
 
 class NotSupportedError(FrontendError):

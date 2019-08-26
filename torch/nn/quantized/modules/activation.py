@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from .. import functional as F
-from ...modules.activation import ReLU as NNReLU
+from torch.nn import ReLU as NNReLU
 
 class ReLU(NNReLU):
     r"""Applies quantized rectified linear unit function element-wise:

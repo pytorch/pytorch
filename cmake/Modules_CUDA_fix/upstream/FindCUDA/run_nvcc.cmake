@@ -85,7 +85,8 @@ list(REMOVE_DUPLICATES CUDA_NVCC_INCLUDE_DIRS)
 set(CUDA_NVCC_INCLUDE_ARGS)
 foreach(dir ${CUDA_NVCC_INCLUDE_DIRS})
   # Extra quotes are added around each flag to help nvcc parse out flags with spaces.
-  list(APPEND CUDA_NVCC_INCLUDE_ARGS "-I${dir}")
+  file(TO_CMAKE_PATH "${dir}" converted_dir)
+  list(APPEND CUDA_NVCC_INCLUDE_ARGS "-I${converted_dir}")
 endforeach()
 
 # Clean up list of compile definitions, add -D flags, and append to nvcc_flags

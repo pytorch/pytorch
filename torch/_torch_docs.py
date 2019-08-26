@@ -2539,6 +2539,57 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.logical_not,
+           r"""
+logical_not(input, out=None) -> Tensor
+
+Computes the element-wise logical NOT of the given input tensor. If not specified, the output tensor will have the bool
+dtype. If the input tensor is not a bool tensor, zeros are treated as ``False`` and non-zeros are treated as ``True``.
+
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.logical_not(torch.tensor([True, False]))
+    tensor([ False,  True])
+    >>> torch.logical_not(torch.tensor([0, 1, -10], dtype=torch.int8))
+    tensor([ True, False, False])
+    >>> torch.logical_not(torch.tensor([0., 1.5, -10.], dtype=torch.double))
+    tensor([ True, False, False])
+    >>> torch.logical_not(torch.tensor([0., 1., -10.], dtype=torch.double), out=torch.empty(3, dtype=torch.int16))
+    tensor([1, 0, 0], dtype=torch.int16)
+""".format(**common_args))
+
+add_docstr(torch.logical_xor,
+           r"""
+logical_xor(input, other, out=None) -> Tensor
+
+Computes the element-wise logical XOR of the given input tensors. Zeros are treated as ``False`` and nonzeros are
+treated as ``True``.
+
+Args:
+    {input}
+    other (Tensor): the tensor to compute XOR with
+    {out}
+
+Example::
+
+    >>> torch.logical_xor(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
+    tensor([ False, False,  True])
+    >>> a = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
+    >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
+    >>> torch.logical_xor(a, b)
+    tensor([ True,  True, False, False])
+    >>> torch.logical_xor(a.double(), b.double())
+    tensor([ True,  True, False, False])
+    >>> torch.logical_xor(a.double(), b)
+    tensor([ True,  True, False, False])
+    >>> torch.logical_xor(a, b, out=torch.empty(4, dtype=torch.int8))
+    tensor([1, 1, 0, 0], dtype=torch.int8)
+""".format(**common_args))
+
 add_docstr(torch.logspace,
            r"""
 logspace(start, end, steps=100, base=10.0, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor

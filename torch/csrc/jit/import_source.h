@@ -32,21 +32,6 @@ TORCH_API void LEGACY_import_methods(
     const std::vector<at::Tensor>& constant_table,
     // Callback to import any dependencies of this source before compiling
     const std::function<void(const std::string&)>& import_callback);
-
-// Add the functions defined in `src` to the compilation unit `cu`.
-// self is passed through the CompilationUnit's define function.
-// If present, it determines the SugaredValue for the first argument
-// and that argument is no longer expected to have type annotations.
-TORCH_API void import_functions(
-    // Prefix to use when importing these functions in to the CU
-    const c10::optional<c10::QualifiedName>& prefix,
-    // CompilationoUnit to define the functions in.
-    std::shared_ptr<CompilationUnit> cu,
-    const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& tensor_table,
-    const Self* self = nullptr,
-    const std::function<void(const std::string&)>& import_callback = nullptr);
-
 } // namespace script
 } // namespace jit
 } // namespace torch

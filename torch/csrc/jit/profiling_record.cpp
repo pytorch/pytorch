@@ -22,22 +22,21 @@ void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
     for (auto i : n->inputs()) {
-      if (!i->type()->isSubclass(TypeKind::TensorType) ||
+      if (!i->type()->isSubtypeOf(TensorType::get()) ||
           i->node()->kind() == prim::profile) {
         continue;
       }
 
       auto pn = createProfileNode(nullptr, {i});
       auto pno = pn->addOutput();
-      pno->setType(i->type());
+      pno->setType(TensorType::get());
       std::function<void(Stack&)> shape_profiler = [this, pno](Stack& stack) {
         IValue t;
         pop(stack, t);
         if (t.isTensor()) {
           auto pttp = ProfiledTensorType::create(t.toTensor());
           std::lock_guard<std::mutex> lock(this->mutex_);
-          if (pno->type()->isSubclass(TypeKind::ProfiledTensorType)) {
-            auto type = pno->type()->cast<ProfiledTensorType>();
+          if (auto type = pno->type()->cast<ProfiledTensorType>()) {
             pno->setType(type->merge(pttp));
           } else {
             pno->setType(pttp);

@@ -29,7 +29,7 @@ struct FBGEMM_API PackedConvWeight {
 };
 
 // PackWeight: Convert the weight from uint8 to int8.
-static void convert_uint8_int8(
+inline void convert_uint8_int8(
     int len,
     const uint8_t* src_uint8,
     int8_t* dst_int8) {
@@ -39,7 +39,7 @@ static void convert_uint8_int8(
 }
 
 // UnpackWeight: Convert the weight from int8 to uint8.
-static void convert_int8_uint8(
+inline void convert_int8_uint8(
     int len,
     const int8_t* src_int8,
     uint8_t* dst_uint8) {

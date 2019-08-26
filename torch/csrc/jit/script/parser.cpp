@@ -634,39 +634,15 @@ struct ParserImpl {
         paramlist.range(), List<Param>(paramlist), return_annotation);
   }
 
-  TreeRef parseNamedTuple(const Ident& name) {
-    const auto& range = name.range();
-    L.expect(')');
-    L.expect(':');
-    L.expect(TK_INDENT);
-    std::vector<Ident> fields;
-    std::vector<Maybe<Expr>> type_exprs;
-    while (L.cur().kind != TK_DEDENT) {
-      fields.push_back(parseIdent());
-      type_exprs.push_back(maybeParseTypeAnnotation());
-      L.expect(TK_NEWLINE);
-    }
-    L.expect(TK_DEDENT);
-    return NamedTupleDef::create(
-        range,
-        name,
-        List<Ident>::create(range, fields),
-        List<Maybe<Expr>>::create(range, type_exprs));
-  }
-
-  TreeRef parseClassLike() {
+TreeRef parseClass() {
     L.expect(TK_CLASS_DEF);
     const auto name = parseIdent();
     Maybe<Expr> superclass = Maybe<Expr>::create(name.range());
     if (L.nextIf('(')) {
       // Only support inheriting from NamedTuple right now.
       auto id = parseExp();
-      if (id.kind() == TK_VAR && Var(id).name().name() == "NamedTuple") {
-        return parseNamedTuple(name);
-      } else {
-        superclass = Maybe<Expr>::create(id.range(), id);
-        L.expect(')');
-      }
+      superclass = Maybe<Expr>::create(id.range(), id);
+      L.expect(')');
     }
     L.expect(':');
     const auto statements =
@@ -724,8 +700,8 @@ Parser::~Parser() = default;
 TreeRef Parser::parseFunction(bool is_method) {
   return pImpl->parseFunction(is_method);
 }
-TreeRef Parser::parseClassLike() {
-  return pImpl->parseClassLike();
+TreeRef Parser::parseClass() {
+  return pImpl->parseClass();
 }
 Lexer& Parser::lexer() {
   return pImpl->lexer();

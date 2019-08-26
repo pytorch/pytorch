@@ -569,7 +569,7 @@ static inline void shapeCheck3d(
   }
 
   /* sizes */
-  int64_t nslices = input.size(dimslices);
+  // int64_t nslices = input.size(dimslices);
   int64_t idepth = input.size(dimd);
   int64_t iheight = input.size(dimh);
   int64_t iwidth = input.size(dimw);
