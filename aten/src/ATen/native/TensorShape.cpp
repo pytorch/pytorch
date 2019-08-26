@@ -287,7 +287,11 @@ Tensor expand(const Tensor& self, IntArrayRef size, bool implicit) {
   std::vector<int64_t> expandedStrides;
   std::tie(expandedSizes, expandedStrides) = inferExpandGeometry(self.sizes(), self.strides(), size);
 
-  return self.as_strided(expandedSizes, expandedStrides);
+  auto result = self.as_strided(expandedSizes, expandedStrides);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_expand(result, self);
+#endif
+  return result;
 }
 
 Tensor expand_as(const Tensor& self, const Tensor& other) {

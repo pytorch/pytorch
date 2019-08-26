@@ -5,6 +5,7 @@ from collections import namedtuple
 import itertools
 import functools
 import torch
+from torch import Tensor
 import torch.nn.functional as F
 import sys
 
@@ -963,6 +964,21 @@ class TestNamedTensor(TestCase):
                 args=(create('N:3,C:2'), create('W:2,N:5')),
                 maybe_raises_regex='with duplicate names')
 
+    def test_expand(self):
+        for device in torch.testing.get_all_device_types():
+            self._test_name_inference(
+                Tensor.expand, device=device,
+                args=(create('D:1'), [3]), expected_names=('D'))
+
+            self._test_name_inference(
+                Tensor.expand, device=device,
+                args=(create('H:3,W:2'), [10, 3, 3, 2]),
+                expected_names=(None, None, 'H', 'W'))
+
+            self._test_name_inference(
+                Tensor.expand, device=device,
+                args=(create('3, 2'), [10, 3, 3, 2]),
+                expected_names=(None, None, None, None))
 
     def test_addmm(self):
         for device in torch.testing.get_all_device_types():
