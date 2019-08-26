@@ -1,5 +1,6 @@
 #pragma once
 #include <typeinfo>
+#include <stdint.h>
 
 namespace torch {
 namespace jit {
