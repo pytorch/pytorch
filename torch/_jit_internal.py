@@ -284,6 +284,11 @@ def ignore(drop_on_export=False):
         # This is OK since `training_method` is not saved, the call is replaced
         # with a `raise`.
         m.save("m.pt")
+
+    .. testcleanup::
+
+        import os
+        os.remove('m.pt')
     """
     if callable(drop_on_export):
         # used without any args, so drop_on_export is actually a function

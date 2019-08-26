@@ -446,10 +446,10 @@ class ModelForWrapping(torch.nn.Module):
         self.qconfig = default_qconfig
         self.mycat = nnq.FloatFunctional()
         self.myadd = nnq.FloatFunctional()
-        self.my_intrinsic_add = nni.AddReLU()
+        self.myaddrelu = nni.FloatFunctional()
 
     def forward(self, x):
         y = self.mycat.cat([x, x, x])
         z = self.myadd.add(y, y)
-        z = self.my_intrinsic_add(z, z)
+        z = self.myaddrelu.add_relu(z, z)
         return z

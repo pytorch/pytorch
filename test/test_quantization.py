@@ -480,10 +480,8 @@ class ScriptabilityTest(QuantizationTestCase):
     def setUp(self):
         from torch.quantization import default_eval_fn, QuantWrapper
 
-
         super(ScriptabilityTest, self).setUp()
         self.model_under_test = ModelForWrapping().float()
-
         self.qmodel_under_test = ModelForWrapping().float()
         self.qmodel_under_test = quantize(
             QuantWrapper(self.qmodel_under_test.float()),
