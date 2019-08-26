@@ -1333,6 +1333,33 @@ graph(%Ra, %Rb):
   return (%Ra)""", graph)
         FileCheck().run(input_str, graph)
 
+    @_tmp_donotuse_dont_inline_everything
+    def test_pattern_based_module_rewrite(self):
+        # Check match::module behavior
+        class Test(torch.nn.Module):
+            def __init__(self):
+                super(Test, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+        m = torch.jit.script(Test())
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+        graph(%self, %x):
+                %conv = match::module[name="Conv2d"](%self)
+                %y = prim::CallMethod[name="forward"](%conv, %x)
+                %bn = match::module[name="BatchNorm2d"](%self)
+                %z = prim::CallMethod[name="forward"](%bn, %y)
+                return (%z)""", """
+        graph(%self, %x):
+          %z = my::matched_conv_bn(%self, %x)
+          return (%z)""", m._c._get_method("forward").graph)
+
+        FileCheck().check("my::matched_conv_bn").run(m._c._get_method("forward").graph)
+
     def test_expand_quantlint(self):
         pass
 
@@ -2258,6 +2285,25 @@ graph(%Ra, %Rb):
 
         self.checkScript(test_basic_sparse, (get_sparse(),))
         self.checkScript(test_basic_sparse, (torch.tensor([1]),))
+
+        def test_sparse_sum(input):
+            return torch.sparse.sum(input)
+
+        self.checkScript(test_sparse_sum, (get_sparse(),))
+
+        def test_sparse_mm(input1, input2):
+            return torch.sparse.mm(input1, input2)
+
+        self.checkScript(test_sparse_mm, (get_sparse(), torch.randn(3, 4)))
+
+        def test_sparse_addmm(input, input1, input2):
+            return torch.sparse.addmm(input, input1, input2)
+
+        def test_sparse_addmm_alpha_beta(input, input1, input2):
+            return torch.sparse.addmm(input, input1, input2, 1.3, 1.5)
+
+        self.checkScript(test_sparse_addmm, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
+        self.checkScript(test_sparse_addmm_alpha_beta, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
 
     def test_tuple_specialization(self):
         @torch.jit.script
@@ -9100,6 +9146,7 @@ a")
             m_import = self.getExportImportCopy(m_orig)
 
             self.assertEqual(m_orig.foo(), m_import.foo())
+
             self.assertTrue(m_import.param1.storage().data_ptr() == m_import.param2.storage().data_ptr())
             self.assertTrue(m_import.param1.storage().data_ptr() != m_import.param3.storage().data_ptr())
 

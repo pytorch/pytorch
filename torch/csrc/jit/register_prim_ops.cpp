@@ -1838,7 +1838,11 @@ int listSort<at::Tensor>(Stack& stack) {
   std::sort(
       list.begin(),
       list.end(),
-      [reverse](const at::Tensor& a, const at::Tensor& b) {
+      [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
+        // "strict weak ordering" issue - see other sort
+        if (a.getIntrusivePtr() == b.getIntrusivePtr()) {
+          return false;
+        }
         return (a.lt(b).is_nonzero()) ^ reverse;
       });
   return 0;
@@ -2017,18 +2021,19 @@ int dictPop(Stack& stack) {
   }
   auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
+  auto iter = dict.find(key);
+  if (iter == dict.end()) {
     if (has_default) {
       push(stack, default_value);
     } else {
       AT_ERROR("KeyError: ", key);
     }
   } else {
+    // note: before erase
+    push(stack, iter->value());
     auto erase_count = dict.erase(key);
     TORCH_CHECK(
         erase_count == 1, "Expected to erase 1 item, found ", erase_count);
-    push(stack, value->value());
   }
   return 0;
 }

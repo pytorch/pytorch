@@ -16,9 +16,11 @@ import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
+from torch._six import PY2
 
 TESTS = [
     'autograd',
+    'cpp_api_parity',
     'cpp_extensions',
     'c10d',
     'c10d_spawn',
@@ -60,6 +62,8 @@ TESTS = [
     'namedtensor',
     'jit_disabled',
 ]
+if not PY2:
+    TESTS.append('jit_py3')
 
 WINDOWS_BLACKLIST = [
     'distributed',
@@ -67,6 +71,7 @@ WINDOWS_BLACKLIST = [
 
 ROCM_BLACKLIST = [
     'c10d',
+    'cpp_api_parity',
     'cpp_extensions',
     'distributed',
     'multiprocessing',
