@@ -688,6 +688,10 @@ def dispatch_scalar_type(option, dispatch_options, dispatch_tensor):
         return 'auto dispatch_scalar_type = infer_scalar_type({});'.format(dispatch_tensor)
     return '// dispatch_scalar_type omitted'
 
+def check_if_factory_method(args):
+    a = any(arg['type'] == 'c10::optional<ScalarType>' for arg in args) and any(arg['type'] == 'c10::optional<Layout>' for arg in args) and any(arg['type'] == 'c10::optional<Device>' for arg in args) and any(arg['type'] == 'c10::optional<bool>' for arg in args)
+    b = any('TensorOptions' in arg['type'] for arg in args)
+    return a or b
 
 def is_real_argument_to_wrapper(argument):
     # type: (THFormal) -> bool
@@ -727,7 +731,7 @@ def to_return_type(arg, option):
     }
 
 
-def create_generic(top_env, declarations):
+def create_generic(top_env, declarations, update_top_env):
     # type: (TopEnvironment, List[FunctionOption]) -> List[OutputDeclaration]
     # translates defaults from cwrap types to C++ values
     def translate_default(argument, type_str, default):
@@ -1231,7 +1235,8 @@ def create_generic(top_env, declarations):
         # For method-only entries, the first argument should be self
         if is_method and not is_namespace_function:
             assert formals[0]['name'] == 'self'
-        is_factory_method = find_formal('TensorOptions', formals) and 'method' not in option['variants']
+
+        is_factory_method = check_if_factory_method(option['arguments'])
 
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
@@ -1246,17 +1251,18 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        if BUILD_NAMEDTENSOR or not is_named_tensor_only:
-            top_env['registration_declarations'].append(
-                REGISTRATION_DECLARATION.substitute(option))
-        if option['use_c10_dispatcher']:
-            top_env['c10_ops_already_moved_from_aten_to_c10'].append(
-                check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
-            )
-        else:
-            top_env['c10_ops_not_moved_from_aten_to_c10_yet'].append(
-                check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
-            )
+        if update_top_env:
+            if BUILD_NAMEDTENSOR or not is_named_tensor_only:
+                top_env['registration_declarations'].append(
+                    REGISTRATION_DECLARATION.substitute(option))
+            if option['use_c10_dispatcher']:
+                top_env['c10_ops_already_moved_from_aten_to_c10'].append(
+                    check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
+                )
+            else:
+                top_env['c10_ops_not_moved_from_aten_to_c10_yet'].append(
+                    check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
+                )
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1270,7 +1276,7 @@ def create_generic(top_env, declarations):
         abstract = False
         if isinstance(type_method_dispatch, dict):
             abstract = True
-        else:
+        elif update_top_env:
             top_env['type_method_declarations'].append(
                 check_namedtensor_enabled(NATIVE_DISPATCH_DECLARATION.substitute(option)))
             top_env['type_method_definitions'].append(
@@ -1288,10 +1294,12 @@ def create_generic(top_env, declarations):
                     continue
                 if value not in generated_native_functions:
                     option['native_type_method_dispatch'] = value
-                    top_env['native_function_declarations'].append(
-                        check_namedtensor_enabled(NATIVE_DECLARATION.substitute(option)))
+                    
+                    if update_top_env:
+                        top_env['native_function_declarations'].append(
+                            check_namedtensor_enabled(NATIVE_DECLARATION.substitute(option)))
                     generated_native_functions.append(value)
-        else:
+        elif update_top_env:
             top_env['native_function_declarations'].append(
                 check_namedtensor_enabled(NATIVE_DECLARATION.substitute(option)))
 
@@ -1300,16 +1308,20 @@ def create_generic(top_env, declarations):
             code = gen_tensor_method(option)
             if is_named_tensor_only:
                 code = add_namedtensor_enabled_macro(code)
-            top_env['tensor_method_declarations'].append(code.declaration)
-            top_env['tensor_method_definitions'].append(code.definition)
+            
+            if update_top_env:
+                top_env['tensor_method_declarations'].append(code.declaration)
+                top_env['tensor_method_definitions'].append(code.definition)
             method_of.append('Tensor')
 
         if is_namespace_function:
             code = gen_namespace_function(option, dispatch_tensor, dispatch_options)
             if is_named_tensor_only:
                 code = add_namedtensor_enabled_macro(code)
-            top_env['function_definitions'].append(code.definition)
-            top_env['function_declarations'].append(code.declaration)
+            
+            if update_top_env:
+                top_env['function_definitions'].append(code.definition)
+                top_env['function_declarations'].append(code.declaration)
             method_of.append('namespace')
 
         if not BUILD_NAMEDTENSOR and is_named_tensor_only:

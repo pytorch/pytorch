@@ -407,15 +407,26 @@ def generate_outputs():
                     for d in cwrap_parser.parse(file)]
 
     declarations += nn_parse.run(nn_files)
-    declarations += native_parse.run(native_files)
+    declarations += native_parse.run(native_files, False)
+    declarations = preprocess_declarations.run(declarations)
+
+    foo = function_wrapper.create_generic(top_env, declarations, False)
+    foo = postprocess_output_declarations(foo)
+    file_manager.write("Declarations.yaml", format_yaml(foo))
+
+    declarations = [d
+                    for file in cwrap_files
+                    for d in cwrap_parser.parse(file)]
+
+    declarations += nn_parse.run(nn_files)
+    declarations += native_parse.run(native_files, True)
     declarations = preprocess_declarations.run(declarations)
 
     # note: this will fill in top_env['type/tensor_method_declarations/definitions']
     # and modify the declarations to include any information that will all_backends
     # be used by function_wrapper.create_derived
-    output_declarations = function_wrapper.create_generic(top_env, declarations)
+    output_declarations = function_wrapper.create_generic(top_env, declarations, True)
     output_declarations = postprocess_output_declarations(output_declarations)
-    file_manager.write("Declarations.yaml", format_yaml(output_declarations))
 
     # Filter out named-tensor only declarations.
     # They are necessary in create_generic because that generates Type.h, TensorBody.h,

@@ -248,18 +248,31 @@ def argument_order(decl):
     return decl.get('jit_argument_order') or list(range(len(decl['arguments'])))
 
 
+def getTOIndex(decl2):
+    if all(arg.get('type') for arg in decl2['arguments']):
+        a = any(arg['type'] == 'c10::optional<ScalarType>' for arg in decl2['arguments']) and any(arg['type'] == 'c10::optional<Layout>' for arg in decl2['arguments']) and any(arg['type'] == 'c10::optional<Device>' for arg in decl2['arguments']) and any(arg['type'] == 'c10::optional<bool>' for arg in decl2['arguments'])
+        b = any(arg['type'] == 'ScalarType' for arg in decl2['arguments']) and any(arg['type'] == 'Layout' for arg in decl2['arguments']) and any(arg['type'] == 'Device' for arg in decl2['arguments']) and any(arg['type'] == 'bool' for arg in decl2['arguments'])
+        
+        if a or b:
+            i = 0
+            for i in range(len(decl2['arguments'])):
+                if decl2['arguments'][i]['simple_type'] == 'ScalarType?' or decl2['arguments'][i]['simple_type'] == 'ScalarType':
+                    return i
+                i += 1
+    
+    return None
+
 def gen_jit_dispatch(declarations, out, template_path):
     REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
 
     ops = []
 
     def get_invocation(decl, args, num_inputs):
-
         # because the arg list can get lengthy we put them on a separate line
         def pack_arguments(args):
             return ',\n'.join(args)
         is_namespace_function = 'namespace' in decl['method_of']
-        tensor_options_arg_index = decl.get('tensor_options_arg_index', None)
+        tensor_options_arg_index = getTOIndex(decl)
         if tensor_options_arg_index is not None:
             dtype = args[tensor_options_arg_index]
             layout = args[tensor_options_arg_index + 1]
