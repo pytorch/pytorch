@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 
-from torch._jit_internal import Optional, Tuple
+from torch._jit_internal import Optional
 import torch.nn as nn
 import torch.nn._intrinsic as nni
 from torch.nn.modules import Module
@@ -120,6 +120,7 @@ class Linear(torch.nn.Module):
             [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8)
 
         self.set_weight(qweight)
+        self.weight_scale = 1.0
         self.scale = 1.0
         self.zero_point = 0
 
@@ -129,8 +130,14 @@ class Linear(torch.nn.Module):
         )
 
     def forward(self, x):
+        # Temporary work around for bias
+        # see Issue:https://github.com/pytorch/pytorch/issues/23874
+        bias = self.bias
+        if bias is not None:
+            bias = torch.quantize_linear(bias.dequantize(), float(self.weight_scale) * x.q_scale(), 0, torch.qint32)
+
         return torch.ops.quantized.fbgemm_linear(
-            x, self._packed_weight, self.bias, self.scale, self.zero_point)
+            x, self._packed_weight, bias, self.scale, self.zero_point)
 
     # ===== Serialization methods =====
     # The special consideration here is that we have to unpack the weights into their
@@ -192,6 +199,7 @@ class Linear(torch.nn.Module):
 
     def set_weight(self, w):
         self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
+        self.weight_scale = w.q_scale()
 
     @classmethod
     def from_float(cls, mod):
@@ -222,7 +230,7 @@ class Linear(torch.nn.Module):
         act_scale, act_zp = activation_observer.calculate_qparams()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
         wt_scale, wt_zp = weight_observer.calculate_qparams()
-        bias_scale = float(wt_scale * act_scale)
+        bias_scale = float(act_scale / (2**16))
         qweight = torch.quantize_linear(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
         if mod.bias is not None:
             qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
