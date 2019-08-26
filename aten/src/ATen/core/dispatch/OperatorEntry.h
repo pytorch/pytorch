@@ -54,7 +54,7 @@ public:
 
 private:
   explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator, void* unboxed_kernel)
-  : kernel_(kernel), cache_(cache_creator()), unboxed_kernel_(unboxed_kernel) {}
+  : kernel_(kernel), cache_(cache_creator ? cache_creator() : nullptr), unboxed_kernel_(unboxed_kernel) {}
   friend class impl::OperatorEntry;
 
   KernelFunction* kernel_; // can be nullptr, not all kernels have this
