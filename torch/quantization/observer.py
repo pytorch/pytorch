@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from abc import ABCMeta, abstractmethod
 from functools import partial
+import warnings
 
 from torch._jit_internal import Optional
 
@@ -54,19 +55,19 @@ class ObserverBase(ABC, nn.Module):
             qmin, qmax = -128, 127
         else:
             qmin, qmax = 0, 255
-
+        scale = 1.0
+        zero_point = 0
+        # We pull these out so that TorchScript optional type refinement works.
+        # We may be able to remove this in the future if TorchScript supports that
+        # feature on attributes
+        min_val = self.min_val
+        max_val = self.max_val
         if max_val is None or min_val is None:
-            raise Exception('must run observer before calling calculate_qparams!')
-        max_val, min_val = float(max_val), float(min_val)
-        # extend min/max values to include 0 to meet the requirement that 0 is
-        # exactly repsentable
-        min_val = min(0.0, min_val)
-        max_val = max(0.0, max_val)
-
-        if max_val == min_val:
-            scale = 1.0
-            zero_point = 0
+            warnings.warn("must run observer before calling calculate_qparams")
         else:
+            max_val, min_val = self.max_val.item(), self.min_val.item()
+            min_val = min(0.0, self.min_val.item())
+            max_val = max(0.0, self.max_val.item())
             if self.qscheme == torch.per_tensor_symmetric:
                 max_val = max(-min_val, max_val)
                 scale = max_val / ((qmax - qmin) / 2)
