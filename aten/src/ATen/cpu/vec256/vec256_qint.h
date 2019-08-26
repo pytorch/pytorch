@@ -69,7 +69,7 @@ struct Vec256<c10::qint8> {
         Vec256<c10::qint8> retval;
         // This should hopefully stay in-register with the copy optimized away
         auto rhs_data = (__m256)rhs;
-        at::quantize_vec<value_type>(scale, zero_point, (float*)&rhs_data, retval.vals.as_ints, 8);
+        at::quantize_vec<c10::qint8>(scale, zero_point, (float*)&rhs_data, (c10::qint8*)retval.vals.as_ints, 8);
         return retval;
     }
 
@@ -134,7 +134,7 @@ struct Vec256<c10::quint8> {
         Vec256<c10::quint8> retval;
         // This should hopefully stay in-register with the copy optimized away
         auto rhs_data = (__m256)rhs;
-        at::quantize_vec<value_type>(scale, zero_point, (float*)&rhs_data, retval.vals.as_ints, 8);
+        at::quantize_vec<c10::quint8>(scale, zero_point, (float*)&rhs_data, (c10::quint8*)retval.vals.as_ints, 8);
         return retval;
     }
 
@@ -190,7 +190,7 @@ struct Vec256<c10::qint32> {
     static Vec256<c10::qint32> quantize(const Vec256<float>& rhs, float scale, int32_t zero_point) {
         Vec256<c10::qint32> retval;
         auto rhs_data = (__m256)rhs;
-        at::quantize_vec<value_type, /*precision=*/32>(scale, zero_point, (float*)&rhs_data, retval.vals.as_ints, 8);
+        at::quantize_vec<c10::qint32, /*precision=*/32>(scale, zero_point, (float*)&rhs_data, (c10::qint32*)retval.vals.as_ints, 8);
         return retval;
     }
 
@@ -267,7 +267,7 @@ struct Vec256<c10::qint8> : public Vec256QuantizedConverter<c10::qint8> {
 
         rhs.store(float_vals, 8);
 
-        at::quantize_vec<value_type>(scale, zero_point, float_vals, qvals, 8);
+        at::quantize_vec<c10::qint8>(scale, zero_point, float_vals, (c10::qint8*)qvals, 8);
 
         return Vec256<c10::qint8>::loadu(qvals);
     }
@@ -288,7 +288,7 @@ struct Vec256<c10::quint8> : public Vec256QuantizedConverter<c10::quint8> {
 
         rhs.store(float_vals, 8);
 
-        at::quantize_vec<value_type>(scale, zero_point, float_vals, qvals, 8);
+        at::quantize_vec<c10::quint8>(scale, zero_point, float_vals, (c10::quint8*)qvals, 8);
 
         return Vec256<c10::quint8>::loadu(qvals);
     }
@@ -310,7 +310,7 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<c10::qint32> {
 
         rhs.store(float_vals, 8);
 
-        at::quantize_vec<value_type, /*precision=*/32>(scale, zero_point, float_vals, qvals, 8);
+        at::quantize_vec<c10::qint32, /*precision=*/32>(scale, zero_point, float_vals, (c10::qint32*)qvals, 8);
 
         return Vec256<c10::qint32>::loadu(qvals);
     }
