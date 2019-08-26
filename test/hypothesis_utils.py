@@ -104,7 +104,7 @@ def qparams(draw, dtypes=None, scale_min=None, scale_max=None,
         scale_min = torch.finfo(torch.float).eps
     if scale_max is None:
         scale_max = torch.finfo(torch.float).max
-    scale = draw(st.floats(min_value=scale_min, max_value=scale_max))
+    scale = draw(st.floats(min_value=scale_min, max_value=scale_max, width=32))
 
     return scale, zero_point, quantized_type
 
@@ -160,14 +160,14 @@ def tensor(draw, shapes=None, elements=None, qparams=None):
         _shape = draw(st.sampled_from(shapes))
     if qparams is None:
         if elements is None:
-            elements = st.floats(-1e6, 1e6)
+            elements = st.floats(-1e6, 1e6, width=32)
         X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
         assume(not (np.isnan(X).any() or np.isinf(X).any()))
         return X, None
     qparams = draw(qparams)
     if elements is None:
         min_value, max_value = _get_valid_min_max(qparams)
-        elements = st.floats(min_value, max_value)
+        elements = st.floats(min_value, max_value, width=32)
     X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
     return X, qparams
 
