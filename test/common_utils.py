@@ -731,7 +731,7 @@ class TestCase(expecttest.TestCase):
                 if diff.is_signed():
                     diff = diff.abs()
                 diff[nan_mask] = 0
-                max_err = diff.max()
+                max_err = diff.max().item()
                 self.assertGreaterEqual(max_err, prec, message)
         elif type(x) == str and type(y) == str:
             super(TestCase, self).assertNotEqual(x, y)
