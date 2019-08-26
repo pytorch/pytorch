@@ -5,12 +5,9 @@ from typing import NamedTuple, List, Optional
 
 import unittest
 import torch
-import sys
 
-PY36 = sys.version_info >= (3, 6)
 
 class TestScriptPy3(JitTestCase):
-    @unittest.skipIf(not PY36, "F strings added in 3.6")
     def test_joined_str(self):
         def func(x):
             hello, test = "Hello", "test"
