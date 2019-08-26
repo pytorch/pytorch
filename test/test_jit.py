@@ -1222,6 +1222,41 @@ graph(%x : Tensor,
         #            .check("return") \
         #            .run(str(get_forward(m).graph))
 
+    def test_quant_fusion(self):
+        input_str = """
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+        %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::int_repr
+        %a_intrepr = aten::int_repr(%a_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %w_quant = aten::quantize_linear(%w, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::int_repr
+        %w_intrepr = aten::int_repr(%w_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::int_repr
+        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
+        %b_intrepr = aten::int_repr(%b_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
+        # CHECK: quantized::fbgemm_conv_prepack
+        # CHECK: quantized::fbgemm_conv2d
+        # CHECK-NOT: aten::conv2d
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b_dequant, %c, %d, %e, %f)
+        # CHECK-NOT: aten::quantize_linear
+        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::int_repr
+        %r_intrepr = aten::int_repr(%r_quant)
+        # CHECK: aten::_dequantize_linear
+        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_dequant)
+)
+"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_quant_fusion(graph)
+        FileCheck().run(input_str, graph)
+
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
         # --> mulmul(mulmul(x,y,z), x, y)
