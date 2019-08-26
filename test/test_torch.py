@@ -4837,7 +4837,7 @@ class _TestTorchMixin(torchtest):
     def test_not_equal(self):
         ones = torch.ones(10, dtype=torch.int)
         self.assertRaisesRegex(AssertionError, "0 not greater than or equal to",
-                               lambda:self.assertNotEqual(ones, ones))
+                               lambda: self.assertNotEqual(ones, ones))
 
     @staticmethod
     def _test_random_neg_values(self, use_cuda=False):
