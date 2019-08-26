@@ -761,7 +761,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
             param_group['lr'] = lr
 
 class OneCycleLR(_LRScheduler):
-    """Sets the learning rate of each parameter group according to the
+    r"""Sets the learning rate of each parameter group according to the
     1cycle learning rate policy. The 1cycle policy anneals the learning
     rate from an initial learning rate to some maximum learning rate and then
     from that maximum learning rate to some minimum learning rate much lower
