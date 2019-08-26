@@ -2522,8 +2522,7 @@ class _TestTorchMixin(torchtest):
         _test_integral_pow(torch.uint8, (0, 4), device)
         _test_integral_pow(torch.int16, (-5, 5), device)
         _test_integral_pow(torch.int64, (-10, 10), device)
-        if not IS_WINDOWS:
-            _test_integral_pow(torch.int32, (-10, 10), device)
+        _test_integral_pow(torch.int32, (-10, 10), device)
 
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
@@ -2581,19 +2580,13 @@ class _TestTorchMixin(torchtest):
 
         ints = [0, 1, 2, 3]
         test_tensor_pow_tensor(ints, torch.int32, np.int32)
-
-        longs = [0, 1, 2, 3]
-        test_tensor_pow_tensor(longs, torch.int64, np.int64)
+        test_tensor_pow_tensor(ints, torch.int64, np.int64)
 
         floats = [-3.0, -2.0, -1.0, -1 / 2, -1 / 3,
                   0.0,
                   1 / 3, 1 / 2, 1.0, 2.0, 3.0]
         test_tensor_pow_tensor(floats, torch.float32, np.float32)
-
-        doubles = [-3.0, -2.0, -1.0, -1 / 2, -1 / 3,
-                   0.0,
-                   1 / 3, 1 / 2, 1.0, 2.0, 3.0]
-        test_tensor_pow_tensor(doubles, torch.float64, np.float64)
+        test_tensor_pow_tensor(floats, torch.float64, np.float64)
 
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):
