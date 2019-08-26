@@ -12,12 +12,26 @@
 using namespace torch::test;
 
 TEST(UtilsTest, WarnOnce) {
+  void torch_warn_once_A() {
+    TORCH_WARN_ONCE("warn once");
+  }
+
+  void torch_warn_once_B() {
+    TORCH_WARN_ONCE("warn something else once");
+  }
+
+  void torch_warn() {
+    TORCH_WARN("warn multiple times");
+  }
+
   {
     std::stringstream buffer;
     CerrRedirect cerr_redirect(buffer.rdbuf());
 
-    TORCH_WARN_ONCE("warn once");
-    TORCH_WARN_ONCE("warn something else once");
+    torch_warn_once_A();
+    torch_warn_once_A();
+    torch_warn_once_B();
+    torch_warn_once_B();
 
     ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn once"), 1);
     ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn something else once"), 1);
@@ -26,9 +40,9 @@ TEST(UtilsTest, WarnOnce) {
     std::stringstream buffer;
     CerrRedirect cerr_redirect(buffer.rdbuf());
 
-    TORCH_WARN("warn multiple times");
-    TORCH_WARN("warn multiple times");
-    TORCH_WARN("warn multiple times");
+    torch_warn();
+    torch_warn();
+    torch_warn();
 
     ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn multiple times"), 3);
   }
