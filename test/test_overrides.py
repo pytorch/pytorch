@@ -205,11 +205,10 @@ class TestGetImplementingArgs(unittest.TestCase):
         self.assertEqual(get_overloaded_types_and_args([a, 1]), ([type(a)], [a]))
         self.assertEqual(get_overloaded_types_and_args([a, a, a]), ([type(a)], [a]))
         self.assertEqual(get_overloaded_types_and_args([a, d, a]), ([type(a), type(d)], [a, d]))
-        # TODO
-        # self.assertEqual(get_overloaded_types_and_args([a, b]), ([type(b), type(a)], [b, a]))
+        self.assertEqual(get_overloaded_types_and_args([a, b]), ([type(a), type(b)], [b, a]))
         self.assertEqual(get_overloaded_types_and_args([b, a]), ([type(b), type(a)], [b, a]))
-        # self.assertEqual(get_overloaded_types_and_args([a, b, c]), ([type(b), type(c), type(a)], [b, c, a]))
-        # self.assertEqual(get_overloaded_types_and_args([a, c, b]), ([type(c), type(b), type(a)], [c, b, a]))
+        self.assertEqual(get_overloaded_types_and_args([a, b, c]), ([type(a), type(b), type(c)], [b, c, a]))
+        self.assertEqual(get_overloaded_types_and_args([a, c, b]), ([type(a), type(c), type(b)], [c, b, a]))
 
     @unittest.expectedFailure
     def test_too_many_duck_tensors(self):
