@@ -62,12 +62,23 @@ const MessageType& Message::type() const {
 
 bool Message::isRequest() const {
   return MessageType::SCRIPT_CALL == type_
-      || MessageType::PYTHON_CALL == type_;
+      || MessageType::PYTHON_CALL == type_
+      || MessageType::REMOTE_CALL == type_
+      || MessageType::RREF_FETCH == type_
+      || MessageType::RREF_ADD_FORK == type_
+      || MessageType::RREF_DEL_FORK == type_;
+}
+
+bool Message::requiresResponse() const {
+  return MessageType::SCRIPT_CALL == type_
+      || MessageType::PYTHON_CALL == type_
+      || MessageType::RREF_FETCH == type_;
 }
 
 bool Message::isResponse() const {
   return MessageType::SCRIPT_RET == type_
-      || MessageType::PYTHON_RET == type_;
+      || MessageType::PYTHON_RET == type_
+      || MessageType::RREF_VALUE == type_;
 }
 
 bool Message::isShutdown() const {

@@ -39,11 +39,17 @@ struct OperatorRegistry {
 
   // XXX - caller must be holding lock
   void registerPendingOperators() {
+    std::cout << "--- registring pending ops\n" << std::flush;
     for (const auto& op : to_register) {
       Symbol sym = Symbol::fromQualString(op->schema().name());
+
       operators[sym].push_back(op);
+
       operators_by_sig[canonicalSchemaString(op->schema())] = op;
+
     }
+    std::cout << "--- done registring "<< std::endl << std::flush;
+
     to_register.clear();
   }
 
@@ -80,11 +86,14 @@ struct OperatorRegistry {
 
   const std::vector<std::shared_ptr<Operator>>& getOperators(Symbol name) {
     std::lock_guard<std::mutex> guard(lock);
+
     registerPendingOperators();
+
     static std::vector<std::shared_ptr<Operator>> empty;
     auto it = operators.find(name);
     if (it != operators.end())
       return it->second;
+
     return empty;
   }
 

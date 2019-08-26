@@ -23,7 +23,7 @@ py::object to_py_obj(const Message& message) {
 
 std::shared_ptr<FutureMessage> py_rpc_builtin(
     RpcAgent& agent,
-    uint64_t dst,
+    worker_id_t dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
@@ -46,9 +46,10 @@ std::shared_ptr<FutureMessage> py_rpc_builtin(
       "(args: ", args, ", kwargs: ", kwargs, ") to a builtin operator");
 }
 
+
 std::shared_ptr<FutureMessage> py_rpc_python_udf(
     RpcAgent& agent,
-    uint64_t dst,
+    worker_id_t dst,
     const std::string& pickledPythonUDF) {
   std::vector<char> data(pickledPythonUDF.begin(), pickledPythonUDF.end());
   std::vector<torch::Tensor> tensor_table;
@@ -58,6 +59,38 @@ std::shared_ptr<FutureMessage> py_rpc_python_udf(
                             std::move(tensor_table),
                             MessageType::PYTHON_CALL));
 }
+
+
+std::shared_ptr<RRef> py_remote_builtin(
+    RpcAgent& agent,
+    worker_id_t dst,
+    const std::string& opName,
+    const py::args& args,
+    const py::kwargs& kwargs) {
+  if (opName.rfind("aten", 0) == 0) {
+    // builtin operators.
+    Symbol symbol = Symbol::fromQualString(opName);
+    for (const auto& op: torch::jit::getAllOperatorsFor(symbol)) {
+      try {
+        // FIXME: This is temporary solution. We should at least refactor
+        // ``createStackForSchema`` to avoid throwing an error.
+        Stack stack = torch::jit::createStackForSchema(
+            op->schema(), args, kwargs, c10::nullopt);
+
+        std::shared_ptr<RRef> ret =
+            RRefContext::getInstance()->createRRef<at::IValue>(dst);
+        agent.send(
+            dst, ScriptRemoteCall(
+                op, std::move(stack), ret->fork()).toMessage());
+        return ret;
+      } catch (std::runtime_error) {}
+    }
+  }
+
+  AT_ERROR("Failed to match operator name ", opName, " and arguments "
+      "(args: ", args, ", kwargs: ", kwargs, ") to a builtin operator");
+}
+
 
 }
 }

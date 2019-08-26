@@ -2,12 +2,14 @@
 
 #include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/message.h>
+//#include <torch/csrc/distributed/rpc/types.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
-using worker_id_t = uint64_t;
+using worker_id_t = int16_t;
+
 
 // ``RpcAgent`` is the base class for sending and receiving RPC messages. It
 // provides a unified ``send`` API for both request and response messages, and

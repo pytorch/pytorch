@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-from . import invoke_rpc_builtin, invoke_rpc_python_udf
+from . import invoke_rpc_builtin, invoke_rpc_python_udf, invoke_remote_builtin
+from . import init_rref_context
 from . import ProcessGroupAgent
 from .internal_rpc_utils import serialize, PythonUDF
 
@@ -70,6 +71,7 @@ def init_rpc(name, backend='pg'):
         from .distributed_c10d import _get_default_group
         group = _get_default_group()
         _agent = ProcessGroupAgent(name, group)
+        init_rref_context(_agent)
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)
 
@@ -81,6 +83,16 @@ def get_id(workerName=None):
     else:
         return _agent.get_id()
 
+def remote(to, func, args=None, kwargs=None):
+    qualified_name = torch.jit._find_builtin(func)
+
+    args = args if args else ()
+    kwargs = kwargs if kwargs else {}
+
+    if isinstance(to, str):
+        to = _agent.get_worker_id(to)
+
+    return invoke_remote_builtin(_agent, to, qualified_name, *args, **kwargs)
 
 def rpc(to, func, args=None, kwargs=None, async_call=False):
     r"""

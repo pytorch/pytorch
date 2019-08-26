@@ -175,7 +175,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
 
   auto requestId = nextId();
   auto future = std::make_shared<FutureMessage>();
-  if (message.isRequest()) {
+  if (message.requiresResponse()) {
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
       futures_[requestId] = future;

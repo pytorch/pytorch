@@ -15,7 +15,7 @@ using torch::jit::Operator;
 // A ScriptCall instance represents an invocation of a builtin operator for a
 // TorchScript function (not implemented yet). If it is a builtin operator, it
 // contains a shared ptr to the `Operator` and a list of arguments.
-class TORCH_API ScriptCall final {
+class TORCH_API ScriptCall {
  public:
   ScriptCall(std::shared_ptr<Operator> op, std::vector<at::IValue>&& args);
 
@@ -26,11 +26,15 @@ class TORCH_API ScriptCall final {
   Message toMessage();
   static ScriptCall fromMessage(const Message& message);
 
+ protected:
+  virtual void toIValues(std::vector<at::IValue>& ivalues) const;
+  static std::shared_ptr<Operator> fromIValues(
+      std::vector<at::IValue>& ivalues);
+
  private:
 
   // Given an operator symbol and a string schema, return the matched operator.
-  static std::shared_ptr<Operator> matchOperator(
-      at::Symbol& symbol, const std::string& str_schema);
+  static std::shared_ptr<Operator> matchOperator(const std::string& str_schema);
 
   static const std::string BUILTIN_OP_NAMESPACE_;
   static const std::string ATEN_PREFIX_;
