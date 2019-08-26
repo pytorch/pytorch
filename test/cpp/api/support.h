@@ -38,5 +38,16 @@ struct SeedingFixture : public ::testing::Test {
   }
 };
 
+struct CerrRedirect {
+  CerrRedirect(std::streambuf * new_buffer) : prev_buffer(std::cerr.rdbuf(new_buffer)) {}
+
+  ~CerrRedirect( ) {
+    std::cerr.rdbuf(prev_buffer);
+  }
+
+private:
+  std::streambuf * prev_buffer;
+};
+
 } // namespace test
 } // namespace torch
