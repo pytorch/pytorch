@@ -149,7 +149,7 @@ def type_argument_translations(arg):
     return t, name, default, nullable, size, annotation
 
 
-def parse_arguments(args, func_variants, declaration, func_return):
+def parse_arguments(args, func_variants, declaration, func_return, collapseTensorOptions):
     arguments = []
     kwarg_only = False
 
@@ -166,7 +166,6 @@ def parse_arguments(args, func_variants, declaration, func_return):
             continue
 
         t, name, default, nullable, size, annotation = type_argument_translations(arg)
-
         argument_dict = {'type': t.rstrip('?'), 'name': name, 'is_nullable': nullable, 'annotation': annotation}
         if size:
             argument_dict['size'] = size
@@ -256,32 +255,33 @@ def parse_arguments(args, func_variants, declaration, func_return):
     def is_tensor_option(argument):
         return argument['name'] in ['dtype', 'layout', 'device', 'pin_memory']
 
-    new_arguments = []
-    idx = 0
-    while idx < len(arguments):
-        argument = arguments[idx]
-        number_of_arguments = len(supported_topt_arguments[0])
-        if is_tensor_option(argument) and len(arguments) - idx >= number_of_arguments:
-            topt_representation = []
-            for i in range(number_of_arguments):
-                argument = arguments[idx]
-                if not is_tensor_option(argument):
-                    break
-                topt_representation.append(argument)
-                idx += 1
-            if len(topt_representation) == number_of_arguments:
-                merged_argument = check_topt_representation(topt_representation)
-                assert merged_argument, \
-                    "Unsupported combination of TensorOptions {}, the only currently supported combinations are {}"\
-                    .format(str(topt_representation), str(supported_topt_arguments))
-                new_arguments.append(merged_argument)
+    if (collapseTensorOptions):
+        new_arguments = []
+        idx = 0
+        while idx < len(arguments):
+            argument = arguments[idx]
+            number_of_arguments = len(supported_topt_arguments[0])
+            if is_tensor_option(argument) and len(arguments) - idx >= number_of_arguments:
+                topt_representation = []
+                for i in range(number_of_arguments):
+                    argument = arguments[idx]
+                    if not is_tensor_option(argument):
+                        break
+                    topt_representation.append(argument)
+                    idx += 1
+                if len(topt_representation) == number_of_arguments:
+                    merged_argument = check_topt_representation(topt_representation)
+                    assert merged_argument, \
+                        "Unsupported combination of TensorOptions {}, the only currently supported combinations are {}"\
+                        .format(str(topt_representation), str(supported_topt_arguments))
+                    new_arguments.append(merged_argument)
+                else:
+                    new_arguments += topt_representation
             else:
-                new_arguments += topt_representation
-        else:
-            new_arguments.append(argument)
-            idx += 1
+                new_arguments.append(argument)
+                idx += 1
 
-    arguments = new_arguments
+        arguments = new_arguments
 
     # Sanity checks
 
@@ -376,7 +376,7 @@ def is_named_tensor_only(declaration):
     return any(['Dimname' in arg['type'] for arg in declaration['arguments']])
 
 
-def run(paths):
+def run(paths, collapseTensorOptions=False):
     declarations = []
     for path in paths:
         for func in parse_native_yaml(path):
@@ -399,7 +399,8 @@ def run(paths):
                 declaration['overload_name'] = func.get('overload_name', overload_name)
                 declaration['inplace'] = re.search('(^__i|[^_]_$)', fn_name) is not None
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'], func)
-                arguments = parse_arguments(arguments, func.get('variants', []), declaration, return_arguments)
+                arguments = parse_arguments(arguments, func.get('variants', []), declaration, return_arguments, collapseTensorOptions)
+
                 output_arguments = [x for x in arguments if x.get('output')]
                 propagate_field_names(output_arguments, return_arguments)
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments

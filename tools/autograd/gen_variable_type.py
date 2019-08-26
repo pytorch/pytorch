@@ -350,6 +350,59 @@ def format_trace_op_name(declaration):
 
     return SELECT.substitute(select_params)
 
+def collapseTraceTO(args):
+    a = any(arg['type'] == 'c10::optional<at::ScalarType>' for arg in args) and any(arg['type'] == 'c10::optional<at::Layout>' for arg in args) and any(arg['type'] == 'c10::optional<at::Device>' for arg in args) and any(arg['type'] == 'c10::optional<bool>' for arg in args)
+    b = any(arg['type'] == 'at::ScalarType' for arg in args) and any(arg['type'] == 'at::Layout' for arg in args) and any(arg['type'] == 'at::Device' for arg in args) and any(arg['type'] == 'bool' for arg in args)
+    if a or b:
+        index = 0
+        for i in range(len(args)):
+            if args[i]['type'] == 'c10::optional<at::ScalarType>' or args[i]['type'] == 'at::ScalarType':
+                break
+            index += 1
+
+        if any(arg['type'] == 'c10::optional<at::ScalarType>' and arg['default'] == 'c10::nullopt' for arg in args) \
+            and any(arg['type'] == 'c10::optional<at::Layout>' and arg['default'] == 'c10::nullopt' for arg in args) \
+            and any(arg['type'] == 'c10::optional<at::Device>' and arg['default'] == 'c10::nullopt' for arg in args) \
+            and any(arg['type'] == 'c10::optional<bool>' and arg['default'] == 'c10::nullopt' for arg in args):
+            args.insert(index + 4, {"annotation" : "None", "default": "{}", "dynamic_type": "TensorOptions", "is_nullable": "False", "kwarg_only": "True", "name": "options", "type": "const TensorOptions &", "simple_type": "TensorOptions"})
+        elif any(arg['type'] == 'c10::optional<at::ScalarType>' and arg['default'] == 'long' for arg in args) \
+            and any(arg['type'] == 'c10::optional<at::Layout>' and arg['default'] == 'c10::nullopt' for arg in args) \
+            and any(arg['type'] == 'c10::optional<at::Device>' and arg['default'] == 'c10::nullopt' for arg in args) \
+            and any(arg['type'] == 'c10::optional<bool>' and arg['default'] == 'c10::nullopt' for arg in args):
+            args.insert(index + 4, {"annotation" : "None", "default": "long", "dynamic_type": "TensorOptions", "is_nullable": "False", "kwarg_only": "True", "name": "options", "type": "const TensorOptions &", "simple_type": "TensorOptions"})
+        else:
+            args.insert(index + 4, {"annotation" : "None", "dynamic_type": "TensorOptions", "is_nullable": "False", "kwarg_only": "True", "name": "options", "type": "const TensorOptions &", "simple_type": "TensorOptions"})
+
+        args.pop(index + 3)
+        args.pop(index + 2)
+        args.pop(index + 1)
+        args.pop(index)
+
+    return args
+
+def collapseTO2(args):
+    a = 'ScalarType dtype' in args and 'Layout layout' in args and 'Device device' in args and 'bool pin_memory' in args
+    b = 'at::ScalarType dtype' in args and 'at::Layout layout' in args and 'at::Device device' in args and 'bool pin_memory' in args
+    c = 'c10::optional<ScalarType> dtype' in args and 'c10::optional<Layout> layout' in args and 'c10::optional<Device> device' in args and 'c10::optional<bool> pin_memory' in args
+
+    index = -1
+    if a:
+        index = args.index('ScalarType dtype')
+
+    if b:
+        index = args.index('at::ScalarType dtype')
+
+    if c:
+        index = args.index('c10::optional<ScalarType> dtype')
+
+    if a or b or c:
+        args.pop(index + 3)
+        args.pop(index + 2)
+        args.pop(index + 1)
+        args.pop(index)
+
+        args.insert(index, 'const TensorOptions & options')
+    return args
 
 def format_trace_inputs(declaration):
     def dispatch_trace_input(arg_spec):
@@ -392,8 +445,19 @@ def format_trace_inputs(declaration):
         trace_inputs += SELECT.substitute(
             cond='tracer_state->force_outplace', true=outplace, false=inplace)
 
-    return trace_inputs
+    return collapseTraseTO(trace_inputs)
 
+
+def collapseTraseTO(trace):
+    TO1 = 'jit::tracer::addInputs(node, "dtype", dtype);\
+\njit::tracer::addInputs(node, "layout", layout);\
+\njit::tracer::addInputs(node, "device", device);\
+\njit::tracer::addInputs(node, "pin_memory", pin_memory);'
+
+    if TO1 in trace:
+        return trace.replace(TO1, 'jit::tracer::addInputs(node, \"options\", options);')
+
+    return trace
 
 def format_prerecord_trace(declaration):
     local = {}
@@ -415,7 +479,6 @@ def format_trace(declaration):
     if not should_trace(declaration):
         return ('', '')
     return (format_prerecord_trace(declaration), format_postrecord_trace(declaration))
-
 
 def gen_variable_type(out, aten_declarations, template_path):
     """VariableType.h and VariableType.cpp body
@@ -446,6 +509,47 @@ def gen_variable_type(out, aten_declarations, template_path):
         gen_variable_type_shard(out, shard, template_path, '_%d' % i, False)
     gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
 
+def fix_c10_type(type):
+    if type == "c10::optional<ScalarType>":
+        return "c10::optional<at::ScalarType>"
+
+    if type == "c10::optional<Layout>":
+        return "c10::optional<at::Layout>"
+
+    if type == "c10::optional<Device>":
+        return "c10::optional<at::Device>"
+
+    if type == "Device":
+        return "at::Device"
+
+    if type == "Layout":
+        return "at::Layout"
+
+    if type == "ScalarType":
+        return "at::ScalarType"
+
+    return type
+
+def fix_c10_type2(type):
+    if type == "c10::optional<ScalarType> dtype":
+        return "c10::optional<at::ScalarType> dtype"
+
+    if type == "c10::optional<Layout> layout":
+        return "c10::optional<at::Layout> layout"
+
+    if type == "c10::optional<Device> device":
+        return "c10::optional<at::Device> device"
+
+    if type == "Device device":
+        return "at::Device device"
+
+    if type == "Layout layout":
+        return "at::Layout layout"
+
+    if type == "ScalarType dtype":
+        return "at::ScalarType dtype"
+
+    return type
 
 def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
@@ -456,7 +560,20 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
     wrapper_registrations = []
 
     for declaration in aten_declarations:
-        formal_types = [arg['type'] for arg in declaration['arguments']]
+        formal_types = [fix_c10_type(arg['type']) for arg in declaration['arguments']]
+
+        for arg in declaration['arguments']:
+            arg['type'] = fix_c10_type(arg['type'])
+            arg['type'] = fix_c10_type2(arg['type'])
+
+
+        declaration['type_method_formals'] = collapseTO2(declaration['type_method_formals'])
+
+        for i, s in enumerate(declaration['formals']):
+            declaration['formals'][i] = fix_c10_type2(s)
+
+        declaration['arguments'] = collapseTraceTO(declaration['arguments'])
+
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
             body = emit_body(declaration)
@@ -470,15 +587,32 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
     }
+
     if header:
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
     else:
         write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
 
 
+def collapseTO(args):
+    a = any(arg['type'] == 'c10::optional<at::ScalarType>' for arg in args) and any(arg['type'] == 'c10::optional<at::Layout>' for arg in args) and any(arg['type'] == 'c10::optional<at::Device>' for arg in args) and any(arg['type'] == 'c10::optional<bool>' for arg in args)
+    b = any(arg['type'] == 'at::ScalarType' for arg in args) and any(arg['type'] == 'at::Layout' for arg in args) and any(arg['type'] == 'at::Device' for arg in args) and any(arg['type'] == 'bool' for arg in args)
+    if a or b:
+        index = 0
+        for i in range(len(args)):
+            if args[i]['type'] == 'c10::optional<at::ScalarType>' or args[i]['type'] == 'at::ScalarType':
+                break
+            index += 1
+
+        args.insert(index + 4, {"annotation" : "None", "dynamic_type": "TensorOptions", "is_nullable": "False", "kwarg_only": "True", "name": "options", "type": "const TensorOptions &", "simple_type": "TensorOptions"})
+        args.pop(index + 3)
+        args.pop(index + 2)
+        args.pop(index + 1)
+        args.pop(index)
+    return args
+
 def emit_body(declaration):
     strategy = dispatch_strategy(declaration)
-
     arguments = declaration['arguments']
     returns = declaration['returns']
     func = declaration['derivative']
@@ -512,7 +646,14 @@ def emit_body(declaration):
         return differentiable
 
     inputs = [arg for arg in arguments if not arg.get('output', False)]
+
+    for zz in inputs:
+        zz['type'] = fix_c10_type(zz['type'])
+
+    inputs = collapseTO(inputs)
+
     differentiable_inputs = list(filter(is_differentiable, inputs))
+
     args_with_derivatives = find_args_with_derivatives(differentiable_inputs)
     non_differentiable_arg_names = declaration.get('non_differentiable_arg_names', [])
     candidate_differentiable_outputs = list(filter(is_differentiable, returns))
@@ -766,7 +907,7 @@ def emit_body(declaration):
                 RUN_ONLY_IN_DEBUG_MODE.substitute(statements=enforce_same_ptrs_stmts)
         return call
 
-    def emit_call(env):
+    def emit_call(env, is_tensor_option = False):
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
@@ -781,6 +922,10 @@ def emit_body(declaration):
                 unpacked_method_args = combined['unpacked_args'][1:]
                 base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(
                     combined, unpacked_method_args=unpacked_method_args)
+
+            if (is_tensor_option):
+                base_type_call = base_type_call.replace('dtype, layout, device, pin_memory', 'options')
+
             if not modifies_arguments and not returns_void:
                 rhs_value, extra_wrapping_stmts = wrap_output('tmp')
                 call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
@@ -791,6 +936,15 @@ def emit_body(declaration):
                 call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
         else:
+            if (is_tensor_option):
+                if 'dtype' in declaration['type_method_args'] and 'layout' in declaration['type_method_args'] and 'device' in declaration['type_method_args'] and 'pin_memory' in declaration['type_method_args']:
+                    index = declaration['type_method_args'].index('dtype')
+                    declaration['type_method_args'].remove('dtype')
+                    declaration['type_method_args'].remove('layout')
+                    declaration['type_method_args'].remove('pin_memory')
+                    declaration['type_method_args'].remove('device')
+                    declaration['type_method_args'].insert(index, 'options')
+
             call = CALL_DEFAULT.substitute(declaration)
             if not modifies_arguments and not returns_void:
                 call = '{} = {}'.format(tie_return_values(), call)
@@ -798,6 +952,7 @@ def emit_body(declaration):
         for stmt in extra_wrapping_stmts:
             call += '\n' + stmt
         call = enforce_same_tensorimpl_and_storage(env, call)
+
         return call
 
     def tie_return_values():
@@ -863,6 +1018,8 @@ def emit_body(declaration):
     combined = nested_dict(env, declaration)
 
     body = []
+    foo = declaration['name'] == 'randn_like'
+
     if base_name not in DONT_PROFILE:
         input_names = record_function_input_names()
         body.append(
@@ -876,8 +1033,16 @@ def emit_body(declaration):
 
     pre_record_trace, post_record_trace = format_trace(declaration)
 
+    decl = declaration
+    a = any(arg['type'] == 'c10::optional<ScalarType>' for arg in decl['arguments']) and any(arg['type'] == 'c10::optional<Layout>' for arg in decl['arguments']) and any(arg['type'] == 'c10::optional<Device>' for arg in decl['arguments']) and any(arg['type'] == 'c10::optional<bool>' for arg in decl['arguments'])
+    a1 = any(arg['type'] == 'c10::optional<at::ScalarType>' for arg in decl['arguments']) and any(arg['type'] == 'c10::optional<at::Layout>' for arg in decl['arguments']) and any(arg['type'] == 'c10::optional<at::Device>' for arg in decl['arguments']) and any(arg['type'] == 'c10::optional<bool>' for arg in decl['arguments'])
+    b = any(arg['type'] == 'ScalarType' for arg in decl['arguments']) and any(arg['type'] == 'Layout' for arg in decl['arguments']) and any(arg['type'] == 'Device' for arg in decl['arguments']) and any(arg['type'] == 'bool' for arg in decl['arguments'])
+    b1 = any(arg['type'] == 'at::ScalarType' for arg in decl['arguments']) and any(arg['type'] == 'at::Layout' for arg in decl['arguments']) and any(arg['type'] == 'at::Device' for arg in decl['arguments']) and any(arg['type'] == 'bool' for arg in decl['arguments'])
+    c1 = any(arg['type'] == 'const TensorOptions &' for arg in decl['arguments'])
+    is_tensor_option = a or b or a1 or b1 or c1
+
     body.append(pre_record_trace)
-    body.append(emit_call(env))
+    body.append(emit_call(env, is_tensor_option))
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
@@ -897,10 +1062,13 @@ def unpack_args(env, declaration):
     def requires_unpack(arg):
         return 'Tensor' in arg['dynamic_type']
 
+    foo = declaration['name'] == 'randn_like'
+
     body = []
     unpacked_args = []
     unpacked_args_simple_type = {}
     for i, arg in enumerate(declaration['arguments']):
+
         if not requires_unpack(arg):
             unpacked_args.append(arg['name'])
             unpacked_args_simple_type[arg['name']] = arg['simple_type']
@@ -911,6 +1079,14 @@ def unpack_args(env, declaration):
             is_nullable = arg.get('is_nullable', False)
             ref = (not is_nullable) and dynamic_type not in ['TensorList']
             suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
+
+            if declaration['name'] == 'bartlett_window':
+                t = UNPACK_TENSOR.substitute(
+                    arg_name=arg['name'],
+                    arg_pos=i,
+                    suffix=suffix,
+                    ref='&' if ref else '',
+                )
 
             body.append(UNPACK_TENSOR.substitute(
                 arg_name=arg['name'],

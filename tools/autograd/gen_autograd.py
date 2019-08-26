@@ -19,7 +19,7 @@ torch/csrc/autograd/generated/
 #  gen_autograd_functions.py: generates subclasses of torch::autograd::Node
 #  gen_variable_type.py: generates VariableType.h which contains all tensor methods
 #  gen_python_functions.py: generates Python bindings to THPVariable
-#
+#  gen_variable_factories: generates variable_factories.h
 
 import argparse
 import copy

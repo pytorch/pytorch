@@ -118,6 +118,7 @@ DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
   .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
+
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
@@ -1231,7 +1232,17 @@ def create_generic(top_env, declarations):
         # For method-only entries, the first argument should be self
         if is_method and not is_namespace_function:
             assert formals[0]['name'] == 'self'
-        is_factory_method = find_formal('TensorOptions', formals) and 'method' not in option['variants']
+
+        a = any(arg['type'] == 'c10::optional<ScalarType>' for arg in option['arguments']) and any(arg['type'] == 'c10::optional<Layout>' for arg in option['arguments']) and any(arg['type'] == 'c10::optional<Device>' for arg in option['arguments']) and any(arg['type'] == 'c10::optional<bool>' for arg in option['arguments'])
+        b = any(arg['type'] == 'c10::optional<at::ScalarType>' for arg in option['arguments']) and any(arg['type'] == 'c10::optional<at::Layout>' for arg in option['arguments']) and any(arg['type'] == 'c10::optional<at::Device>' for arg in option['arguments']) and any(arg['type'] == 'c10::optional<bool>' for arg in option['arguments'])
+        c = any('TensorOptions' in arg['type'] for arg in option['arguments'])
+
+        is_factory_method = a or b or c
+        if type_method_dispatch == "randn":
+            print("\n\n\n hello")
+            print("type_method_dispatch : ", type_method_dispatch)
+            print("is_factory_method : ", is_factory_method)
+            print("args: ", option['arguments'])
 
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
@@ -1358,6 +1369,619 @@ def create_generic(top_env, declarations):
 
     return output_declarations
 
+def create_generic2(declarations):
+    # type: (TopEnvironment, List[FunctionOption]) -> List[OutputDeclaration]
+    # translates defaults from cwrap types to C++ values
+    def translate_default(argument, type_str, default):
+        # type: (THFormal, str, Any) -> Any
+        if default is None:
+            # cause the default constructor for the object to run
+            return '{}'
+        if 'if_true' in argument:
+            return argument['default'] == argument['if_true']
+        for pattern, replacement in HEADER_CONSTANT_REPLACEMENTS:
+            default = re.sub(pattern, replacement, str(default))
+        if type_str in {'Scalar', 'int64_t', 'double'}:
+            try:
+                return int(default)
+            except Exception:
+                try:
+                    return float(default)
+                except Exception:
+                    return default
+        elif type_str == 'bool':
+            assert default.lower() in ['true', 'false']
+            return default.lower() == 'true'
+        else:
+            return default
+
+    # change from THTensor* to Tensor & so we get how it will appear
+    # in the aten argument list...
+    def translate_formal(argument, option):
+        # type: (THFormal, FunctionOption) -> AtFormal
+        type_str = TYPE_FORMAL_GENERIC.get(argument['type'], argument['type'])
+        if type_str == 'Tensor &' and not is_mutable_formal_argument(argument, option):
+            type_str = 'const ' + type_str
+        translated = {
+            'name': argument['name'],
+            'type': type_str,
+            'dynamic_type': DYNAMIC_TYPE.get(argument['type'], argument['type']),
+        }  # type: AtFormal
+        if 'kwarg_only' in argument:
+            translated['kwarg_only'] = argument['kwarg_only']
+        if 'default' in argument:
+            default = translate_default(argument, type_str, argument['default'])
+            translated['default'] = default
+            translated['default_init'] = argument.get('default_init', default)
+        if argument.get('output'):
+            translated['output'] = True
+        if argument.get('size'):
+            translated['size'] = argument['size']
+        if argument.get('is_nullable') is not None:
+            translated['is_nullable'] = argument['is_nullable']
+        return translated
+
+    def get_formals(option, include_constants=False):
+        # type: (FunctionOption, bool) -> List[AtFormal]
+        seen = set()  # type: Set[str]
+        pos_args = []  # type: List[THFormal]
+        kwd_args = []  # type: List[THFormal]
+
+        def insert(argument):
+            # type: (THFormal) -> None
+            if argument['name'] not in seen:
+                seen.add(argument['name'])
+                if argument.get('kwarg_only', False):
+                    kwd_args.append(argument)
+                else:
+                    pos_args.append(argument)
+
+        def has_output_mask(argument):
+            # type: (THFormal) -> bool
+            return argument.get('allocate', False) and argument.get('mask', False)
+
+        for argument in option['arguments']:
+            if argument.get('output') and not argument.get('allocate', False):
+                insert(argument)
+        for argument in option['arguments']:
+            if include_constants and argument['type'] == 'CONSTANT':
+                insert(argument)
+            elif is_real_argument_to_wrapper(argument):
+                insert(argument)
+        if any(has_output_mask(arg) for arg in option['arguments']):
+            mask_size = sum(has_output_mask(arg) for arg in option['arguments'])
+            insert({
+                'name': 'output_mask',
+                # NB: Lack of space in comma works around parsing
+                # problem in gen_variable_type.py
+                'type': 'std::array<bool,{}>'.format(mask_size),
+                'default': '{{' + ', '.join(['true'] * mask_size) + '}}',
+            })
+
+        result = pos_args + kwd_args
+        return [translate_formal(argument, option) for argument in result]
+
+    def get_return_types(option):
+        # type: (FunctionOption) -> List[ReturnType]
+        ret = option['return']
+        if ret['kind'] == 'arguments':
+            argument_indices = ret['arguments']
+            if len(argument_indices) == 1:
+                the_arg = option['arguments'][argument_indices[0]]
+                return [to_return_type(the_arg, option)]
+            else:
+                return [to_return_type(option['arguments'][idx], option)
+                        for idx in argument_indices]
+        elif ret['kind'] == 'type':
+            return [{
+                'type': TYPE_RETURN.get(ret['type'], ret['type']),
+                'dynamic_type': DYNAMIC_TYPE.get(ret['type'], ret['type']),
+            }]
+        else:
+            raise Exception("format_return_type")
+
+    def format_return_type(return_types):
+        # type: (List[ReturnType]) -> str
+        if len(return_types) == 1:
+            return return_types[0]['type']
+        return "std::tuple<{}>".format(','.join(r['type'] for r in return_types))
+
+    def is_any_tensor_type(formal):
+        return (formal['dynamic_type'] == 'Tensor' or formal['dynamic_type'] == 'ByteTensor'
+                or formal['dynamic_type'] == 'IndexTensor' or formal['dynamic_type'] == 'BoolTensor')
+
+    def find_tensors(formals):
+        # type: (List[AtFormal]) -> List[str]
+        return [formal['name'] for formal in formals if is_any_tensor_type(formal)]
+
+    def find_tensorlists(formals):
+        # type: (List[AtFormal]) -> List[str]
+        return [formal['name'] for formal in formals if formal['dynamic_type'] == 'TensorList']
+
+    def find_dispatch_tensor(formals):
+        # type: (List[AtFormal]) -> Optional[str]
+        # dispatch to self if it's a parameter
+
+        for formal in formals:
+            if formal['name'] == 'self' and is_any_tensor_type(formal) and not formal.get('is_nullable', False):
+                return formal['name']
+        # otherwise dispatch to the first Tensor or TensorList
+        for formal in formals:
+            if 'TensorList' == formal['dynamic_type'] or is_any_tensor_type(formal) and \
+               not formal.get('is_nullable', False):
+                return formal['name']
+
+        return None
+
+    def format_formal(f):
+        # type: (AtFormal) -> str
+        return '{} {}'.format(f['type'], f['name'])
+
+    def formal_with_default(f):
+        # type: (AtFormal) -> str
+        s = format_formal(f)
+        v = f.get('default')
+        if v is None:
+            return s
+        if isinstance(v, bool):
+            v = str(v).lower()
+        return '{}={}'.format(s, v)
+
+    def get_broadcast_argument(option):
+        # type: (FunctionOption) -> Optional[THFormal]
+        for argument in option['arguments']:
+            if argument.get('broadcast'):
+                return argument
+        return None
+
+    def get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims):
+        # type: (THFormal, bool, bool) -> List[str]
+        # Note: broadcast_dims can change type...
+        # return the actuals that will be passed to the broadcast function.
+        # 1) in the common case, this is the broadcasted argument (e.g. "self") followed by the tensors
+        #    that it is broadcasted against (comma-separated) (e.g. "self, tensor1, tensor2").
+        # 2) in the broadcast_dims case, this is the broadcasted argument (e.g. "self") followed by the sizes
+        #    it is broadcasted to (as an initializer list), so e.g. the specification
+        #    "mat1.dim0,mat2.dim1" gets transformed to "self, {mat1.size(0),mat2.size(1)}"
+        if not broadcast_dims:
+            broadcast_actuals = [broadcast_arg['name']] + broadcast_arg['broadcast'].split()[0].split(",")
+        else:
+            broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
+            # generate size call for each dimension
+            broadcast_dims = ([x.split('.')[0] + '.size(' + x.split('.')[1].replace('dim', '') + ')'  # type: ignore
+                              for x in broadcast_dims_spec])
+            broadcast_dims_init_list = '{' + ','.join(broadcast_dims) + '}'  # type: ignore
+            broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
+
+        return broadcast_actuals
+
+    def emit_nn_body(option):
+        # type: (FunctionOption) -> Union[str, List[str]]
+        # Concrete definition on Type.cpp for NN functions. Delegates to the
+        # xxx_forward variant variant after creating any necessary buffers.
+        actuals = option['actuals']
+        base_name = option['name'][:-1] if option['inplace'] else option['name']
+        fwd_name = option['api_name'].replace(base_name, base_name + '_forward')
+
+        if len(option['buffers']) == 0:
+            return 'return {}({});'.format(fwd_name, ', '.join(actuals))
+
+        body = []  # type: List[str]
+        if option['api_name'].endswith('_out'):
+            # _out variants must create buffers and insert them in the
+            # arguments list between output and input arguments
+            for buffer in option['buffers']:
+                body.append('Tensor {} = at::empty({{0}}, this->options());'.format(buffer['name']))
+            actuals = [arg['name'] for arg in option['arguments'] if arg.get('output')]
+            actuals += [buffer['name'] for buffer in option['buffers']]
+            actuals += [arg['name'] for arg in option['arguments'] if not arg.get('output')]
+
+        body.append('return std::get<0>({}({}));'.format(fwd_name, ', '.join(actuals)))
+        return body
+
+    def process_option(option):
+        # type: (FunctionOption) -> None
+        option['inplace'] = re.search(
+            '(^__i|[^_]_$)', option['api_name']) is not None
+
+        # print(yaml.dump(option))
+        formals = get_formals(option)
+        option['formals_list'] = formals
+        option['formals'] = [format_formal(f) for f in formals]
+        option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
+        option['returns'] = get_return_types(option)
+        option['return_type'] = format_return_type(option['returns'])
+        option['return_call'] = 'return ' if option['return_type'] != 'void' else ''
+        option['actuals'] = [f['name'] for f in formals]
+
+        option['method_formals'] = [format_formal(f) for f in formals
+                                    if f['name'] != 'self']
+        option['method_formals_with_defaults'] = (
+            [formal_with_default(f) for f in formals if f['name'] != 'self'])
+        # *this is 'const Tensor&' since all Tensor methods are const and must
+        # be const_casted to be accepted as native function's non-const argument
+        option['method_actuals'] = [
+            f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
+
+        # There are no cases where these differ, but they do in native_functions
+        option['type_method_formals'] = option['formals']
+        option['type_method_actuals'] = option['actuals']
+
+        assert 'method' not in option['variants'], 'TH functions cannot be methods'
+        is_function = 'function' in option['variants']
+        dispatch_tensor = find_dispatch_tensor(formals)
+        is_namespace_function = is_function and dispatch_tensor is not None
+
+        broadcast_arg = get_broadcast_argument(option)
+        # "s_" for "same size".
+        option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
+        if option['mode'] == 'TH':
+            option['device_guard'] = False
+        option['device_guard_declaration'] = device_guard(option, False, dispatch_tensor)
+        option['named_guard_declaration'] = named_guard(option, find_tensors(formals),
+                                                        find_tensorlists(formals))
+        option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, False, dispatch_tensor)
+
+        assert option['extended_method'], 'Expected legacy operator to be an extended method'
+
+        if broadcast_arg is not None:
+            broadcast_inplace = 'inplace' in broadcast_arg['broadcast']
+            broadcast_dims = 'dims:' in broadcast_arg['broadcast']
+            option['broadcast_actuals'] = get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims)
+            if not broadcast_dims:
+                option['broadcast_returns'] = (["b_" + x for x in option['broadcast_actuals']
+                                               if x != broadcast_arg['name'] or not broadcast_inplace])
+            else:
+                option['broadcast_returns'] = ["b_" + broadcast_arg['name']]
+
+            option['broadcast_function'] = 'expand_' + ('inplace' if broadcast_inplace
+                                                        else 'size' if broadcast_dims else 'outplace')
+            option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
+                                                    for y in option['actuals']]
+
+    def native_get_formals(option, include_constants=False):
+        # type: (FunctionOption, bool) -> List[AtFormal]
+        seen = set()  # type: Set[str]
+        pos_args = []
+        kwd_args = []
+
+        def insert(argument):
+            # type: (AtFormal) -> None
+            if argument['name'] not in seen:
+                seen.add(argument['name'])
+                if argument.get('kwarg_only', False):
+                    kwd_args.append(argument)
+                else:
+                    pos_args.append(argument)
+
+        for argument in option['arguments']:
+            insert(argument)
+
+        # not clear we need dynamic_type translation as we can specify the correct type
+        # directly in native functions
+        def add_dynamic_type(argument, option):
+            # type: (AtFormal, FunctionOption) -> AtFormal
+            argument['dynamic_type'] = NATIVE_DYNAMIC_TYPE.get(argument['type'], argument['type'])
+            return argument
+
+        result = pos_args + kwd_args
+        result = [add_dynamic_type(argument, option) for argument in result]
+
+        # ensure we get reference-type formals when appropriate
+        def native_translate_formals(argument, option):
+            # type: (AtFormal, FunctionOption) -> AtFormal
+            def translate_map(const):
+                # type: (bool) -> Dict[str, str]
+                return {
+                    'Tensor': 'const Tensor &' if const else 'Tensor &',
+                    'Type': 'const Type &' if const else 'Type &',
+                    'TensorOptions': 'const TensorOptions &' if const else 'TensorOptions &',
+                    'TensorList': 'TensorList',
+                }
+
+            if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
+                argument['type'] = "c10::optional<{}>".format(argument['type'])
+
+            if (option['inplace'] and argument['name'] == 'self') or argument.get('output', False):
+                argument['type'] = translate_map(False).get(argument['type'], argument['type'])
+            else:
+                argument['type'] = translate_map(True).get(argument['type'], argument['type'])
+
+            return argument
+
+        result = [native_translate_formals(argument, option) for argument in result]
+        return result
+
+    # this can return multiple return types in a list, e.g. ['Tensor', 'Tensor']
+    def native_get_return_types(option):
+        # type: (FunctionOption) -> List[ReturnType]
+        ret = option['return']
+
+        return_types = []  # List[ReturnType]
+        for t_raw in ret:
+            # See Note [field_name versus name]
+            field_name = None
+            if isinstance(t_raw, string_type):
+                t = t_raw
+                name = None
+            elif t_raw is None:
+                t = 'void'
+                name = None
+            else:
+                t = t_raw['type']
+                name = t_raw['name']
+                if 'field_name' in t_raw:
+                    field_name = t_raw['field_name']
+
+            # can't actually return a TensorList (since it's a reference object)
+            actual_return_type = {'TensorList': 'std::vector<Tensor>'}.get(t, t)
+
+            if actual_return_type == 'Tensor' and (option['inplace'] or option['api_name'].endswith('_out')):
+                # follow normal ATen convention of returning Tensor & for inplace functions.
+                actual_return_type = 'Tensor &'
+
+            rtype = {
+                'type': actual_return_type,
+                'dynamic_type': NATIVE_DYNAMIC_TYPE.get(t, t),
+            }  # type: ReturnType
+            if name is not None:
+                rtype['name'] = name
+            if field_name is not None:
+                rtype['field_name'] = field_name
+            return_types.append(rtype)
+
+        return return_types
+
+    def process_native(option):
+        # type: (FunctionOption) -> Optional[OutputDeclaration]
+        assert option['python_module'] == '' or option['python_module'] == 'nn', \
+            "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
+                option['python_module'], option['name'])
+
+        formals = native_get_formals(option)
+        option['formals_list'] = formals
+        option['formals'] = [format_formal(f) for f in formals]
+        option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
+        option['returns'] = native_get_return_types(option)
+        option['return_type'] = format_return_type(option['returns'])
+        option['return_call'] = 'return ' if option['return_type'] != 'void' else ''
+        option['actuals'] = [f['name'] for f in formals]
+
+        option['formals_types'] = [f['type'] for f in option['formals_list']]
+        option['native_actuals'] = [f['name'] for f in option['formals_list']]
+
+        option['method_formals'] = [format_formal(f) for f in formals
+                                    if f['name'] != 'self']
+        option['method_formals_with_defaults'] = (
+            [formal_with_default(f) for f in formals if f['name'] != 'self'])
+        # *this is 'const Tensor&' since all Tensor methods are const and must
+        # be const_casted to be accepted as native function's non-const argument
+        option['method_actuals'] = [
+            f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
+
+        def find_formal(formal_name, formals):
+            for formal in formals:
+                if formal_name == formal['dynamic_type']:
+                    return formal
+            return None
+
+        def has_named_tensor_formals(formals):
+            return any(['Dimname' in formal['dynamic_type'] for formal in formals])
+
+        def gen_tensor_method(option):
+            # type: (Any) -> FunctionCode
+            if isinstance(type_method_dispatch, dict):
+                static_dispatch_function_switches = []
+                # NB: As this code is currently written, there will NEVER be
+                # a backend generated for variable dispatch.  There is nothing
+                # stopping us from actually implementing this, however, if you
+                # really wanted variable on mobile, there's nothing stopping
+                # you from implementing this (however, you would have an
+                # annoying phase problem, since code generation for variable
+                # happens in tools/ which happens later than here.)
+                #
+                # If you pass in a variable to the dispatch, and variable is
+                # enabled, this switch will fail.  This is intentional: you
+                # probably need to disable variable globally in the mobile
+                # calling code.
+                for backend in static_dispatch_backends:
+                    if backend in type_method_dispatch:
+                        static_dispatch_function_switches.append(STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT.substitute(
+                            option,
+                            backend=backend,
+                            backend_function=type_method_dispatch[backend],
+                            native_arguments=option['method_actuals']))
+                static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
+                    option,
+                    type_set='type_set()',
+                    static_dispatch_function_switches=static_dispatch_function_switches)
+            else:
+                static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
+                    option, native_arguments=option['method_actuals'])
+
+            return FunctionCode(
+                declaration=TENSOR_METHOD_DECLARATION.substitute(option, static_dispatch_method_body=static_dispatch_method_body),
+                definition=TENSOR_METHOD_DEFINITION.substitute(option, static_dispatch_method_body=static_dispatch_method_body))
+
+        def gen_namespace_function(option, dispatch_tensor, dispatch_options):
+            # type: (Any, Optional[str], Any) -> FunctionCode
+            if dispatch_tensor:
+                option['inferred_type_set'] = 'at::detail::infer_tensor_type_set({})'.format(dispatch_tensor)
+            elif dispatch_options:
+                option['inferred_type_set'] = '{}.type_set()'.format(dispatch_options['name'])
+            else:
+                # doesn't depend on a specific backend, use the empty set
+                # TODO: Does this actually work?
+                option['inferred_type_set'] = 'TensorTypeSet()'
+            declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
+            fn_declaration = declaration.substitute(option)
+
+            if isinstance(type_method_dispatch, dict):
+                static_dispatch_function_switches = []
+                for backend in static_dispatch_backends:
+                    if backend in type_method_dispatch:
+                        static_dispatch_function_switches.append(STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT.substitute(
+                            option,
+                            backend=backend,
+                            backend_function=type_method_dispatch[backend],
+                            native_arguments=option['native_actuals']))
+                static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
+                    option,
+                    type_set=option['inferred_type_set'],
+                    static_dispatch_function_switches=static_dispatch_function_switches)
+            else:
+                static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
+                    option, native_arguments=option['native_actuals'])
+
+            if is_factory_method:
+                fn_definition = FACTORY_DEFINITION.substitute(option, static_dispatch_function_body=static_dispatch_function_body)
+            else:
+                fn_definition = FUNCTION_DEFINITION.substitute(option, static_dispatch_function_body=static_dispatch_function_body)
+            return FunctionCode(definition=fn_definition, declaration=fn_declaration)
+
+        # Emit #ifdef BUILD_NAMEDTENSOR macros for any code generated here
+        # that is sent to top_env. This is because some of this code (Type.h,
+        # TensorBody.h, TensorMethods.h) is checked into the repo and must be
+        # the same regardless of BUILD_NAMEDTENSOR status.
+        is_named_tensor_only = (has_named_tensor_formals(formals) or
+                                option['api_name'] == 'align_tensors' or
+                                option['api_name'] == 'align_as')
+
+        def check_namedtensor_enabled(code):
+            if is_named_tensor_only:
+                return NAMEDTENSOR_CHECK.substitute(code=code)
+            return code
+
+        def add_namedtensor_enabled_macro(code):
+            # type: (FunctionCode) -> FunctionCode
+            return FunctionCode(
+                definition=NAMEDTENSOR_CHECK.substitute(code=code.definition),
+                declaration=NAMEDTENSOR_CHECK.substitute(code=code.declaration))
+
+        assert find_formal('Type', formals) is None, \
+            "Found Type argument in {}({}). Use TensorOptions instead.".format(
+                option['name'], ", ".join(option['method_formals_with_defaults']))
+
+        type_method_dispatch = option['type_method_definition_dispatch']
+
+        dispatch_options = find_formal('TensorOptions', formals)
+        # Only dispatch via tensor if there is no Options argument
+        dispatch_tensor = None if dispatch_options else find_dispatch_tensor(formals)
+
+        option['type_method_formals'] = [format_formal(f) for f in formals]
+        option['type_method_actuals'] = [f['name'] for f in formals]
+        option['native_actuals'] = [f['name'] for f in formals]
+
+        is_method = 'method' in option['variants']
+        is_namespace_function = 'function' in option['variants']
+        # For method-only entries, the first argument should be self
+        if is_method and not is_namespace_function:
+            assert formals[0]['name'] == 'self'
+
+
+        a = any(arg['type'] == 'c10::optional<ScalarType>' for arg in option['arguments']) and any(arg['type'] == 'c10::optional<Layout>' for arg in option['arguments']) and any(arg['type'] == 'c10::optional<Device>' for arg in option['arguments']) and any(arg['type'] == 'c10::optional<bool>' for arg in option['arguments'])
+        b = any(arg['type'] == 'c10::optional<at::ScalarType>' for arg in option['arguments']) and any(arg['type'] == 'c10::optional<at::Layout>' for arg in option['arguments']) and any(arg['type'] == 'c10::optional<at::Device>' for arg in option['arguments']) and any(arg['type'] == 'c10::optional<bool>' for arg in option['arguments'])
+
+        
+        is_factory_method = (a or b) and 'method' not in option['variants']
+
+        check_methods_do_not_start_with_underscore(option['name'], is_method)
+
+        option['method_prefix_derived'] = ''
+        option['device_guard_declaration'] = device_guard(option, dispatch_options, dispatch_tensor)
+        option['named_guard_declaration'] = named_guard(option, find_tensors(formals),
+                                                        find_tensorlists(formals))
+        option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, dispatch_options, dispatch_tensor)
+
+        broadcast_arg = get_broadcast_argument(option)
+        if broadcast_arg is not None:
+            raise Exception("broadcasting is not yet supported for native functions, "
+                            "but specified for function {}", option['name'])
+
+        option['native_type_method_dispatch'] = type_method_dispatch
+
+        # Note [Abstract ATen methods]
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # An abstract ATen method is one whose dispatch differs between
+        # types.  These are implemented in derived types (with a
+        # standard (throwing) definition in Type).  A concrete ATen
+        # method is one which has the same dispatch for all types;
+        # we just implement it in the base Type.  This is exposed
+        # in Declarations.yaml via a field named 'abstract'.
+        abstract = False
+        if isinstance(type_method_dispatch, dict):
+            abstract = True
+
+        # generate the at::native function declarations (i.e. what the user will implement)
+        if isinstance(type_method_dispatch, dict):
+            generated_native_functions = []  # type: List[str]
+            for key in sorted(type_method_dispatch.keys()):
+                value = type_method_dispatch[key]
+                # skip functions in different namespace, e.g. legacy::cpu
+                if "::" in value:
+                    continue
+                if value not in generated_native_functions:
+                    option['native_type_method_dispatch'] = value
+                    generated_native_functions.append(value)
+     
+        method_of = ['Type']
+        if is_method:
+            code = gen_tensor_method(option)
+            if is_named_tensor_only:
+                code = add_namedtensor_enabled_macro(code)
+            method_of.append('Tensor')
+
+        if is_namespace_function:
+            code = gen_namespace_function(option, dispatch_tensor, dispatch_options)
+            if is_named_tensor_only:
+                code = add_namedtensor_enabled_macro(code)
+            method_of.append('namespace')
+
+        if not BUILD_NAMEDTENSOR and is_named_tensor_only:
+            return None
+        return OutputDeclaration(
+            name=option['api_name'],
+            operator_name=option['operator_name'],
+            overload_name=option['overload_name'],
+            use_c10_dispatcher=option['use_c10_dispatcher'],
+            matches_jit_signature=option["matches_jit_signature"],
+            schema_string=option["schema_string"],
+            method_prefix_derived=option['method_prefix_derived'],
+            arguments=formals,
+            method_of=method_of,
+            mode=option['mode'],
+            python_module=option['python_module'],
+            buffers=None,
+            returns=option['returns'],
+            inplace=option['inplace'],
+            is_factory_method=is_factory_method,
+            # See Note [Abstract ATen methods]
+            abstract=abstract,
+            requires_tensor=option.get('requires_tensor', False),
+            device_guard=option.get('device_guard', True),
+            with_gil=option.get('with_gil', False),
+            deprecated=option['deprecated'],
+        )
+
+    output_declarations = []  # type: List[OutputDeclaration]
+    for declaration in declarations:
+        output_options = []  # type: List[OutputDeclaration]
+        for option in declaration['options']:
+            option["matches_jit_signature"] = declaration["matches_jit_signature"]
+            option["schema_string"] = declaration["schema_string"]
+            try:
+                if option['mode'] != 'native':
+                    # XXX: Does the following line do anything meaningful?
+                    process_option(option)
+                else:
+                    output_option = process_native(option)
+                    if output_option:
+                        output_options.append(output_option)
+            except NYIError:
+                option['skip'] = True
+        output_declarations.extend(output_options)
+
+    return output_declarations
 
 def create_derived(backend_type_env, declarations):
     # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[str], List[str], List[str]]

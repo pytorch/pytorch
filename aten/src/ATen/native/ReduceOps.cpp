@@ -179,6 +179,7 @@ Tensor cumprod(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype)
 }
 
 Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  std::cout << "\n\n\n cumprod_out" << std::endl;
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   TORCH_CHECK(
       !dtype.has_value() || (result.scalar_type() == dtype.value()),
