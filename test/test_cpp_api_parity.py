@@ -257,7 +257,7 @@ class TestCppApiParity(common.TestCase):
             module = python_module_class(*python_constructor_args).to(device)
 
             extra_stmts = generate_attr_equality_checks(module)
-            assert len(extra_stmts) == test_params.expected_num_attr_checks
+            assert len(extra_stmts) == test_params.num_attrs_recursive
             extra_stmts_str = ''.join(extra_stmts)
             return (([module], device),
                     generate_test_cpp_sources(
@@ -409,7 +409,7 @@ def _process_test_params(test_params_dict, module_metadata, device):
         has_parity=test_params_dict.get('has_parity', True),
         python_module_class=getattr(torch.nn, module_name),
         cpp_sources=module_metadata.get('cpp_sources', ''),
-        expected_num_attr_checks=module_metadata.get('expected_num_attr_checks'),
+        num_attrs_recursive=module_metadata.get('num_attrs_recursive'),
         device=device,
     )
 
