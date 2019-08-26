@@ -139,6 +139,37 @@ class TestQuantizedOps(TestCase):
             qY_hat = op(qX)
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
+    """Tests the correctness of the scalar addition."""
+    @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
+                       elements=st.floats(-1e6, 1e6, allow_nan=False),
+                       qparams=hu.qparams()),
+           b=st.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
+    def test_qadd_scalar_relu(self, A, b):
+        import copy
+        add_scalar = torch.ops.quantized.add_scalar
+        add_scalar_relu = torch.ops.quantized.add_scalar_relu
+
+        A, (scale, zero_point, dtype) = A
+        A = A.astype(np.float32)
+        qA = torch.quantize_linear(torch.from_numpy(A), scale, zero_point, dtype)
+
+        C = qA.dequantize() + b
+        C_relu = copy.deepcopy(C)
+        C_relu[C_relu < 0] = 0
+
+        C_ref = torch.quantize_linear(C, scale, zero_point, dtype)
+        C_relu_ref = torch.quantize_linear(C_relu, scale, zero_point, dtype)
+
+        C_hat = add_scalar(qA, b, scale=scale, zero_point=zero_point)
+        C_relu_hat = add_scalar_relu(qA, b, scale=scale, zero_point=zero_point)
+
+        self.assertEqual(C_ref, C_hat,
+                         message="Scalar add results don't match:\
+                         {} vs {}".format(C_ref, C_hat))
+        self.assertEqual(C_relu_ref, C_relu_hat,
+                         message="Scalar add relu results don't match:\
+                         {} vs {}".format(C_relu_ref, C_relu_hat))
+
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
         add_relu = torch.ops.quantized.add_relu
@@ -182,6 +213,7 @@ class TestQuantizedOps(TestCase):
         add_relu_out(qA, qB, out=qCrelu_out_hat)
         self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                          message="AddReLU.out failed")
+
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_different_qparams(self):
@@ -276,6 +308,16 @@ class TestQuantizedOps(TestCase):
         mul_relu_out(qA, qB, out=qCrelu_out_hat)
         self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                          message="mulReLU.out failed")
+
+        # Scalar addition
+        mul = torch.ops.quantized.mul_scalar
+        for b in B:
+            C_ref = qA.dequantize().numpy() * b.item()
+            qC = _quantize(C_ref, scale, zero_point)
+            dqC = _dequantize(qC, scale, zero_point)
+            qC_hat = mul(qA, b.item(), scale, zero_point)
+            dqC_hat = qC_hat.dequantize()
+            self.assertEqual(dqC, dqC_hat)
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_relu_different_qparams(self):
