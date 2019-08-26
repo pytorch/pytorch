@@ -632,16 +632,24 @@ class ScriptModuleSerializer2 {
       const script::ExtraFilesMap& extra_files) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
+    // Serialize all code info.
+    writeCode(module.type());
+    // The tensor constants from the code are written to a separate archive
+    // so loading the code does not depend on loading the data
+    std::vector<IValue> ivalue_constants(
+        constant_table_.begin(), constant_table_.end());
+    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format_) {
       auto compUnit = module.class_compilation_unit();
       auto funcList = compUnit->get_functions();
 
       for (auto func : funcList) {
         torch::jit::Code code(func->graph());
+        std::string foldername = "bytecode/" + func->name();
 
         // constants
         auto constants = c10::ivalue::Tuple::create(code.constant_table());
-        writeArchive(func->name() + "/constants", constants);
+        writeArchive(foldername + "/constants", constants);
 
         // instructions and operators
         std::vector<IValue> inss;
@@ -662,17 +670,8 @@ class ScriptModuleSerializer2 {
         auto elements = c10::ivalue::Tuple::create({instructions, operators});
         std::vector<at::Tensor> temp_table;
         auto bdata = pickle(elements, &temp_table);
-        writer_.writeRecord(func->name() + "/bytecode.pkl", bdata.data(), bdata.size());
+        writer_.writeRecord(foldername + "/instructions.pkl", bdata.data(), bdata.size());
       }
-    }
-    else {
-      // Serialize all code info.
-      writeCode(module.type());
-      // The tensor constants from the code are written to a separate archive
-      // so loading the code does not depend on loading the data
-      std::vector<IValue> ivalue_constants(
-          constant_table_.begin(), constant_table_.end());
-      writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     }
     // finally we serialize the model
     writeArchive("data", module.module_object());
