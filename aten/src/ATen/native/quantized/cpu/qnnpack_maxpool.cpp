@@ -117,9 +117,9 @@ class QNNPACKMaxPool2D final : public torch::OperatorKernel {
         batch_size /* batch size */,
         inH /* input height */,
         inW /* input width */,
-        (uint8_t*)input_contig.data<c10::quint8>() /* input */,
+        (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input */,
         inC /* input_pixel_stride */,
-        (uint8_t*)qy.data<c10::quint8>() /* output data */,
+        (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
         outC /* output_pixel_stride */,
         nullptr /* thread pool */);
     TORCH_INTERNAL_ASSERT(

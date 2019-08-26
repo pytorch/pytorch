@@ -1162,11 +1162,13 @@ class TestQNNPackOps(TestCase):
         qa_pool_int = qa_pool.dequantize()
         np.testing.assert_equal(a_pool_nhwc.numpy(), qa_pool_int.numpy())
 
-        A = torch.ones((0, 4, 2, 2), dtype=torch.float32)
+        A = torch.ones((0, 4, 4, 2), dtype=torch.float32)
         qa = torch.quantize_linear(A, scale=scale, zero_point=zero_point,
                                    dtype=torch_type)
         qc = q_max_pool(qa, k, s, p, d)
-        np.testing.assert_equal(qc.size(), qa.size(),
+        oH = pool_output_shape(4, kernel, padding, stride, dilation)
+        oW = pool_output_shape(4, kernel, padding, stride, dilation)
+        np.testing.assert_equal(qc.size(), (0, oH, oW, 2),
                                 "Quantized maxpool2d with batch size 0 failed.")
 
 if __name__ == "__main__":

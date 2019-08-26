@@ -66,11 +66,11 @@ class QNNPACKAdd final : public torch::OperatorKernel {
     const qnnp_status setupStatus = qnnp_setup_add_nc_q8(
         qnnpack_operator /* add op */,
         qa_contig.size(0) /* batch size */,
-        (uint8_t*)qa_contig.data<c10::quint8>() /* a data */,
+        (uint8_t*)qa_contig.data_ptr<c10::quint8>() /* a data */,
         num_elems /* A stride */,
-        (uint8_t*)qb_contig.data<c10::quint8>() /* b data */,
+        (uint8_t*)qb_contig.data_ptr<c10::quint8>() /* b data */,
         num_elems /* B stride */,
-        (uint8_t*)qy.data<c10::quint8>() /* output data */,
+        (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
         num_elems /* sum stride */);
     TORCH_INTERNAL_ASSERT(
         setupStatus == qnnp_status_success,
