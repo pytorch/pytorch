@@ -16,7 +16,6 @@ import numpy as np
 
 
 class BatchLRLoss(ModelLayer):
-
     def __init__(
         self,
         model,
@@ -30,6 +29,8 @@ class BatchLRLoss(ModelLayer):
         log_D_trick=False,
         unjoined_lr_loss=False,
         uncertainty_penalty=1.0,
+        focal_gamma=0.0,
+        stop_grad_in_focal_factor=False,
         **kwargs
     ):
         super(BatchLRLoss, self).__init__(model, name, input_record, **kwargs)
@@ -70,6 +71,10 @@ class BatchLRLoss(ModelLayer):
             np.float32,
             self.get_next_blob_reference('output')
         )
+
+        self.focal_gamma = focal_gamma
+        self.stop_grad_in_focal_factor = stop_grad_in_focal_factor
+
 
     def init_weight(self, jsd_weight, homotopy_weighting):
         if homotopy_weighting:
@@ -159,6 +164,39 @@ class BatchLRLoss(ModelLayer):
             log_D_trick=self.log_D_trick,
             unjoined_lr_loss=self.unjoined_lr_loss
         )
+
+        if self.focal_gamma != 0:
+            label = net.StopGradient(
+                [label],
+                [net.NextScopedBlob('label_stop_gradient')],
+            )
+
+            prediction = self.input_record.prediction()
+            # focal loss = (y(1-p) + p(1-y))^gamma * orginal LR loss
+            # y(1-p) + p(1-y) = y + p - 2 * yp
+            y_plus_p = net.Add(
+                [prediction, label],
+                net.NextScopedBlob("y_plus_p"),
+            )
+            yp = net.Mul([prediction, label], net.NextScopedBlob("yp"))
+            two_yp = net.Scale(yp, net.NextScopedBlob("two_yp"), scale=2.0)
+            y_plus_p_sub_two_yp = net.Sub(
+                [y_plus_p, two_yp], net.NextScopedBlob("y_plus_p_sub_two_yp")
+            )
+            focal_factor = net.Pow(
+                y_plus_p_sub_two_yp,
+                net.NextScopedBlob("y_plus_p_sub_two_yp_power"),
+                exponent=float(self.focal_gamma),
+            )
+            if self.stop_grad_in_focal_factor is True:
+                focal_factor = net.StopGradient(
+                    [focal_factor],
+                    [net.NextScopedBlob("focal_factor_stop_gradient")],
+                )
+            xent = net.Mul(
+                [xent, focal_factor], net.NextScopedBlob("focallossxent")
+            )
+
         # fuse with JSD
         if self.jsd_fuse:
             jsd = net.BernoulliJSD(
