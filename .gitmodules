@@ -81,4 +81,4 @@
 	url = https://github.com/houseroad/foxi.git
 [submodule "third_party/ideep"]
 	path = third_party/ideep
-	url = ssh://git-ccr-1.devtools.intel.com:29418/dl_framework-ideep_pytorch
+	url = https://github.com/intel/ideep.git 
