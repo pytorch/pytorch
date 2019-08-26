@@ -21,7 +21,7 @@ from setuptools.command.build_ext import build_ext
 
 IS_WINDOWS = sys.platform == 'win32'
 
-BUILD_NAMEDTENSOR = os.getenv('BUILD_NAMEDTENSOR', '').upper() == '1'
+BUILD_NAMEDTENSOR = os.getenv('BUILD_NAMEDTENSOR', '1').upper() == '1'
 
 def _find_cuda_home():
     '''Finds the CUDA install path.'''
