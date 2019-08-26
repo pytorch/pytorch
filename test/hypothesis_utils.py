@@ -40,7 +40,7 @@ def _get_valid_min_max(qparams):
     # make sure intermediate results are within the range of long
     min_value = max((long_min - zero_point) * scale, (long_min / scale + zero_point))
     max_value = min((long_max - zero_point) * scale, (long_max / scale + zero_point))
-    return min_value, max_value
+    return np.float32(min_value), np.float32(max_value)
 
 """Hypothesis filter to avoid overflows with quantized tensors.
 
