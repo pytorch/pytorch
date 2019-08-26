@@ -1448,6 +1448,7 @@
     CUDA: legacy::cuda::_th_mm
     SparseCPU: _sparse_mm
     SparseCUDA: _sparse_mm
+  named_guard: False
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1455,6 +1456,7 @@
     CUDA: legacy::cuda::_th_mm_out
     SparseCPU: _sparse_mm_out
     SparseCUDA: _sparse_mm_out
+  named_guard: False
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
 
@@ -2581,12 +2583,15 @@
 - func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  named_guard: False
 
 
 # NOTE [ Sparse: autograd and API ]
@@ -4411,16 +4416,19 @@
   dispatch:
     CPU: legacy::cpu::_th_addmm_out
     CUDA: legacy::cuda::_th_addmm_out
+  named_guard: False
 
 - func: _addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   dispatch:
     CPU: legacy::cpu::_th_addmm
     CUDA: legacy::cuda::_th_addmm
+  named_guard: False
 
 - func: _addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_addmm_
     CUDA: legacy::cuda::_th_addmm_
+  named_guard: False
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
