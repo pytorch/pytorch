@@ -26,7 +26,7 @@ from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, enable_cpu_fuser_if, enable_profiling_mode, \
+    _trace, enable_cpu_fuser_if, enable_profiling_mode, do_input_map, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything
 from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
@@ -646,6 +646,42 @@ class TestJit(JitTestCase):
         self.checkScript(test_simple_grad, (x, y), inputs_requires_grad=True)
         self.checkScript(test_simple_grad_with_grad_outputs, (x, y), inputs_requires_grad=True)
 
+    def test_script_backward(self):
+        def checkGradEquals(fn, inputs):
+            scripted_fn = torch.jit.script(fn)
+            recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
+
+            fn(*inputs)
+            scripted_fn(*recording_inputs)
+
+            for inp1, inp2 in zip(inputs, recording_inputs):
+                self.assertEqual(inp1.grad, inp2.grad)
+
+        def test_tensor_backward(input):
+            # type: (Tensor) -> None
+            output = torch.relu(input)
+            output = output.softmax(0)
+            sum_out = output.sum()
+            sum_out.backward()
+
+        def test_torch_autograd_backward(input):
+            # type: (Tensor) -> None
+            output = torch.relu(input)
+            output = output.softmax(0)
+            torch.autograd.backward(output.sum())
+
+        def test_torch_autograd_backward_with_grad_tensors(input):
+            # type: (Tensor) -> None
+            output = torch.relu(input)
+            output = output.softmax(0)
+            grad_outputs = torch.jit.annotate(List[Optional[torch.Tensor]], [torch.ones((2, 2)), ])
+            torch.autograd.backward((output,), grad_outputs)
+
+        inp = torch.randn(2, 2, requires_grad=True)
+        checkGradEquals(test_tensor_backward, (inp,))
+        checkGradEquals(test_torch_autograd_backward, (inp,))
+        checkGradEquals(test_torch_autograd_backward_with_grad_tensors, (inp,))
+
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
         def f(x, y):
@@ -1144,9 +1180,9 @@ graph(%x : Tensor,
         def get_forward(m):
             return m._c._get_method("forward")
         torch._C._jit_pass_constant_propagation(get_forward(m).graph)
-        m._c = torch._C._jit_pass_prepare_quant(m._c, "forward",
-                                                observer._c,
-                                                observer._c)
+        torch._C._jit_pass_prepare_quant(m._c, "forward",
+                                         observer._c,
+                                         observer._c)
         assert len([x for x, _ in m._c._get_modules()
                     if x.startswith('observer_for_')]) == 3, \
             'Expected to have 3 observer submodules'
@@ -1157,6 +1193,106 @@ graph(%x : Tensor,
                    .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                    .check_next('prim::CallMethod[name="forward"](%observer_for_') \
                    .run(str(m._c._get_method("forward").graph))
+
+    def test_insert_quant_dequant(self):
+        class Observer(torch.nn.Module):
+            def __init__(self):
+                super(Observer, self).__init__()
+
+            def forward(self, x):
+                return x
+
+            @torch.jit.export
+            def calculate_qparams(self):
+                return torch.tensor([2.0]), torch.tensor([3])
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 5, 3).float()
+
+            def forward(self, x):
+                return self.conv(x)
+
+        # re-enable later
+        torch._C._jit_set_inline_everything_mode(True)
+        m = torch.jit.script(M())
+        observer = torch.jit.script(Observer())
+        torch._C._jit_pass_constant_propagation(m.graph)
+        torch._C._jit_pass_prepare_quant(m._c, "forward",
+                                         observer._c,
+                                         observer._c)
+        data = torch.randn(1, 3, 10, 10, dtype=torch.float)
+
+        def get_forward(m):
+            return m._c._get_method('forward')
+        get_forward(m)(data)
+        # right now the result will have extra observer modules
+        # will fix later when we figure out how to remove modules
+        m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
+
+        get_forward(m)(data)
+        FileCheck().check("aten::quantize_linear") \
+                   .check_next("aten::int_repr") \
+                   .check_next("aten::_dequantize_linear") \
+                   .check("aten::quantize_linear") \
+                   .check_next("aten::int_repr") \
+                   .check_next("aten::_dequantize_linear") \
+                   .check("aten::quantize_linear") \
+                   .check_next("aten::int_repr") \
+                   .check_next("aten::_dequantize_linear") \
+                   .check("aten::conv2d") \
+                   .check("aten::quantize_linear") \
+                   .check_next("aten::int_repr") \
+                   .check_next("aten::_dequantize_linear") \
+                   .check("return") \
+                   .run(str(m._c._get_method('forward').graph))
+        # Test for inline
+        # FileCheck().check("aten::quantize_linear") \
+        #            .check_next("aten::int_repr") \
+        #            .check_next("aten::_dequantize_linear") \
+        #            .check("prim::CallMethod[name=\"forward\"]") \
+        #            .check("aten::quantize_linear") \
+        #            .check_next("aten::int_repr") \
+        #            .check_next("aten::_dequantize_linear") \
+        #            .check("return") \
+        #            .run(str(get_forward(m).graph))
+
+    def test_quant_fusion(self):
+        input_str = """
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
+%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+        %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
+        # CHECK-NOT: aten::int_repr
+        %a_intrepr = aten::int_repr(%a_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %w_quant = aten::quantize_linear(%w, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::int_repr
+        %w_intrepr = aten::int_repr(%w_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        # CHECK-NOT: aten::int_repr
+        %b_quant = aten::quantize_linear(%b, %b_scale, %b_zero_point, %b_dtype)
+        %b_intrepr = aten::int_repr(%b_quant)
+        # CHECK-NOT: aten::_dequantize_linear
+        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
+        # CHECK: quantized::fbgemm_conv_prepack
+        # CHECK: quantized::fbgemm_conv2d
+        # CHECK-NOT: aten::conv2d
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b_dequant, %c, %d, %e, %f)
+        # CHECK-NOT: aten::quantize_linear
+        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        # CHECK: aten::int_repr
+        %r_intrepr = aten::int_repr(%r_quant)
+        # CHECK: aten::_dequantize_linear
+        %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_dequant)
+)
+"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_quant_fusion(graph)
+        FileCheck().run(input_str, graph)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -1268,6 +1404,33 @@ graph(%Pa, %Pb):
 graph(%Ra, %Rb):
   return (%Ra)""", graph)
         FileCheck().run(input_str, graph)
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_pattern_based_module_rewrite(self):
+        # Check match::module behavior
+        class Test(torch.nn.Module):
+            def __init__(self):
+                super(Test, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+        m = torch.jit.script(Test())
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+        graph(%self, %x):
+                %conv = match::module[name="Conv2d"](%self)
+                %y = prim::CallMethod[name="forward"](%conv, %x)
+                %bn = match::module[name="BatchNorm2d"](%self)
+                %z = prim::CallMethod[name="forward"](%bn, %y)
+                return (%z)""", """
+        graph(%self, %x):
+          %z = my::matched_conv_bn(%self, %x)
+          return (%z)""", m._c._get_method("forward").graph)
+
+        FileCheck().check("my::matched_conv_bn").run(m._c._get_method("forward").graph)
 
     def test_expand_quantlint(self):
         pass
@@ -2194,6 +2357,25 @@ graph(%Ra, %Rb):
 
         self.checkScript(test_basic_sparse, (get_sparse(),))
         self.checkScript(test_basic_sparse, (torch.tensor([1]),))
+
+        def test_sparse_sum(input):
+            return torch.sparse.sum(input)
+
+        self.checkScript(test_sparse_sum, (get_sparse(),))
+
+        def test_sparse_mm(input1, input2):
+            return torch.sparse.mm(input1, input2)
+
+        self.checkScript(test_sparse_mm, (get_sparse(), torch.randn(3, 4)))
+
+        def test_sparse_addmm(input, input1, input2):
+            return torch.sparse.addmm(input, input1, input2)
+
+        def test_sparse_addmm_alpha_beta(input, input1, input2):
+            return torch.sparse.addmm(input, input1, input2, 1.3, 1.5)
+
+        self.checkScript(test_sparse_addmm, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
+        self.checkScript(test_sparse_addmm_alpha_beta, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
 
     def test_tuple_specialization(self):
         @torch.jit.script

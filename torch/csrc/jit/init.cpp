@@ -154,12 +154,22 @@ void initJITBindings(PyObject* module) {
       .def(
           // TODO: rename to insert_observers after we remove old code
           "_jit_pass_prepare_quant",
-          [](const script::Module& module,
+          [](script::Module& module,
              const std::string& method_name,
              const script::Module& observer_module,
              const script::Module& weight_observer_module) {
             return InsertObservers(module, method_name, observer_module, weight_observer_module);
           })
+      .def(
+          "_jit_pass_insert_quant_dequant",
+          [](script::Module& module,
+             const std::string& method_name) {
+            return InsertQuantDeQuant(module, method_name);
+          }
+      )
+      .def(
+          "_jit_pass_quant_fusion",
+          [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def(
           "_jit_pass_insert_observers",
           [](const StrongFunctionPtr& function_var,

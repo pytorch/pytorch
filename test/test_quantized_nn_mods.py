@@ -447,7 +447,10 @@ class ModuleAPITest(QuantizationTestCase):
 
         # Smoke test to make sure the module actually runs
         quantized_float_conv(qX)
-
+        # Check that bias is quantized based on output scale
+        if use_bias:
+            qbias = torch.quantize_linear(float_conv.bias, quantized_float_conv.scale / 2**16, 0, torch.qint32)
+            self.assertEqual(quantized_float_conv.bias.dequantize(), qbias.dequantize())
         # Smoke test extra_repr
         str(quantized_float_conv)
 

@@ -54,6 +54,8 @@ def linear(input, weight, bias=None, scale=None, zero_point=None):
     if zero_point is None:
         zero_point = input.q_zero_point()
     _packed_weight = torch.ops.quantized.fbgemm_linear_prepack(weight)
+    if bias is not None:
+        bias = torch.quantize_linear(bias.dequantize(), weight.q_scale() * input.q_scale(), 0, torch.qint32)
     return torch.ops.quantized.fbgemm_linear(input, _packed_weight, bias, scale,
                                              zero_point)
 
@@ -116,6 +118,8 @@ def conv2d(input, weight, bias,
 
     prepacked_weight = torch.ops.quantized.fbgemm_conv_prepack(
         weight.permute([0, 2, 3, 1]), stride, padding, dilation, groups)
+    if bias is not None:
+        bias = torch.quantize_linear(bias.dequantize(), weight.q_scale() * input.q_scale(), 0, torch.qint32)
     return torch.ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]),
                                              prepacked_weight, bias,
                                              stride, padding, dilation,

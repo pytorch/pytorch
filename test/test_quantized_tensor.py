@@ -52,13 +52,15 @@ class TestQuantizedTensor(TestCase):
         qr[:] = x
         self.assertEqual(qr.item(), 15)
         # we can also print a qtensor
-        self.assertEqual(str(qr),
+        self.assertEqual(' '.join(str(qr).split()),
                          "tensor([15.], size=(1,), dtype=torch.quint8, " +
+                         "quantization_scheme=torch.per_tensor_affine, " +
                          "scale=1.0, zero_point=2)")
         empty_r = torch.ones((0, 1), dtype=torch.float)
         empty_qr = torch.quantize_linear(empty_r, scale, zero_point, torch.quint8)
-        self.assertEqual(str(empty_qr),
+        self.assertEqual(' '.join(str(empty_qr).split()),
                          "tensor([], size=(0, 1), dtype=torch.quint8, " +
+                         "quantization_scheme=torch.per_tensor_affine, " +
                          "scale=1.0, zero_point=2)")
 
     def test_qtensor_quant_dequant(self):
@@ -68,6 +70,22 @@ class TestQuantizedTensor(TestCase):
         qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+
+    def test_per_channel_qtensor_creation(self):
+        numel = 10
+        ch_axis = 0
+        scales = torch.rand(numel, dtype=torch.double)
+        zero_points = torch.randint(0, 10, size=(numel,), dtype=torch.long)
+        q = torch._empty_per_channel_affine_quantized_like(scales, zero_points, [numel], [ch_axis], dtype=torch.quint8)
+        self.assertEqual(scales, q.q_per_channel_scales())
+        self.assertEqual(zero_points, q.q_per_channel_zero_points())
+
+        # create Tensor from uint8_t Tensor, scales and zero_points
+        int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8)
+        q = torch._per_channel_affine_qtensor(int_tensor, scales, zero_points, [ch_axis])
+        self.assertEqual(int_tensor, q.int_repr())
+        self.assertEqual(scales, q.q_per_channel_scales())
+        self.assertEqual(zero_points, q.q_per_channel_zero_points())
 
     def test_qtensor_creation(self):
         scale = 0.5
