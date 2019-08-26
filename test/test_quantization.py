@@ -451,6 +451,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         test_only_train_fn(model, self.train_data)
         convert(model)
 
+
         def checkQuantized(model):
             self.assertEqual(type(model.fc1), nnq.Linear)
             self.assertEqual(type(model.fc2), nnq.Linear)

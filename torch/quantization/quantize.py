@@ -199,7 +199,7 @@ DEFAULT_MODULE_MAPPING = {
     nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
-    nnq.FloatFunctional: nnq.QFunctional,
+    nn.quantized.FloatFunctional: nn.quantized.QFunctional,
     # Intrinsic modules:
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.LinearReLU: nniq.LinearReLU,
