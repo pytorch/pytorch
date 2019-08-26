@@ -42,9 +42,10 @@ void RRefContext::addFork(const at::IValue&& value) {
   AT_ASSERT(rfd.ownerId_ == getWorkerId(),
       "RRef user should never receive fork notification.");
   std::lock_guard<std::mutex> lock(mutex_);
-  AT_ASSERT(forks_[rfd.rrefId_].find(rfd.forkId_) == forks_[rfd.rrefId_].end(),
+  auto& rrefForks = forks_[rfd.rrefId_];
+  AT_ASSERT(rrefForks.find(rfd.forkId_) == rrefForks.end(),
       "Got fork notification twice on the same RRef ", rfd.rrefId_);
-  forks_[rfd.rrefId_].insert(rfd.forkId_);
+  rrefForks.insert(rfd.forkId_);
 }
 
 void RRefContext::delFork(const at::IValue&& value) {
@@ -52,11 +53,11 @@ void RRefContext::delFork(const at::IValue&& value) {
   AT_ASSERT(rfd.ownerId_ == getWorkerId(),
       "RRef user should never receive delete notification.");
   std::lock_guard<std::mutex> lock(mutex_);
-  //auto& rrefForks = forks_[rfd.rrefId_];
-  AT_ASSERT(forks_[rfd.rrefId_].find(rfd.forkId_) != forks_[rfd.rrefId_].end(),
+  auto& rrefForks = forks_[rfd.rrefId_];
+  AT_ASSERT(rrefForks.find(rfd.forkId_) != rrefForks.end(),
       "Attempt to delete a non-exist fork ", rfd.forkId_);
-  forks_[rfd.rrefId_].erase(rfd.forkId_);
-  if (forks_[rfd.rrefId_].empty()) {
+  rrefForks.erase(rfd.forkId_);
+  if (rrefForks.empty()) {
     rrefs_.erase(rfd.rrefId_);
     forks_.erase(rfd.rrefId_);
   }

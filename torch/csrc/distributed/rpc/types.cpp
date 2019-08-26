@@ -15,14 +15,6 @@ bool RRefId::operator==(const RRefId& other) const {
   return createdOn_ == other.createdOn_ && localId_ == other.localId_;
 }
 
-/*
-RRefId& RRefId::operator=(const RRefId& other) & {
-  this->createdOn_ = other.createdOn_;
-  this->localId_ = other.localId_;
-  return *this;
-}
-*/
-
 at::IValue RRefId::toIValue() const {
   std::vector<at::IValue> ivalues = {(int64_t)createdOn_, (int64_t)localId_};
   return c10::ivalue::Tuple::create(std::move(ivalues));
