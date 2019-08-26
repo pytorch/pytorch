@@ -1313,8 +1313,10 @@
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  named_guard: false
 
 - func: matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: false
 
 - func: matrix_rank.tol(Tensor self, float tol, bool symmetric=False) -> Tensor
 
