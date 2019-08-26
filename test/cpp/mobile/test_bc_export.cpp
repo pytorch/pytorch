@@ -20,5 +20,5 @@ int main(int argc, const char* argv[]) {
   module.save(nfile);
 
   // Save in bytecode format.
-  module.save(argv[2], torch::jit::script::ExtraFilesMap(), true);
+  module.save(argv[2], torch::jit::script::ExtraFilesMap(), true /*bytecode_format*/);
 }
