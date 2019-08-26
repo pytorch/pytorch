@@ -93,4 +93,21 @@ ClassType::ClassType(
   }
 }
 
+bool ClassType::isSubtypeOf(const TypePtr rhs) const {
+  // to improve performance, this check can be cached
+  if (auto iface = rhs->cast<InterfaceType>()) {
+    for (const FunctionSchema& schema : *iface->methods_) {
+      auto self_method = getMethod(schema.name());
+      if (!self_method) {
+        return false;
+      }
+      if (!self_method->getSchema().isSubtypeOf(schema, /*is_method=*/true)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return Type::isSubtypeOf(rhs);
+}
+
 } // namespace c10
