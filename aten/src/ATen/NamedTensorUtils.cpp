@@ -257,6 +257,27 @@ void propagate_names_for_addmm(
   propagate_names(result, std::move(add_outnames), /*validate_names=*/false);
 }
 
+// expand adds new None dimensions. This is consistent with name inference
+// rules for binary ops that expect the named dims to line up positionally
+// from the right. i.e.,
+// Tensor[H, W].expand(3, 3, 3, 3) -> Tensor[None, None, H, W]
+void propagate_names_for_expand(Tensor& result, const Tensor& self) {
+  if (!self.has_names()) {
+    return;
+  }
+  auto result_dim = result.dim();
+  if (self.dim() == result_dim) {
+    propagate_names(result, self);
+    return;
+  }
+  std::vector<Dimname> outnames(result_dim, Dimname::wildcard());
+  std::copy(
+      self.opt_names()->begin(),
+      self.opt_names()->end(),
+      outnames.begin() + result_dim - self.dim());
+  propagate_names(result, std::move(outnames), /*validate_names=*/false);
+}
+
 } // namespace namedinference
 } // namespace at
 #endif
