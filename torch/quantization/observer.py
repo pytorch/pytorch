@@ -46,6 +46,7 @@ class Observer(nn.Module):
         self.min_val = min_val
         self.max_val = max_val
         return x
+
     @torch.jit.export
     def calculate_qparams(self):
         if self.dtype == torch.qint8:
