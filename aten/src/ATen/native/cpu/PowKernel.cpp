@@ -45,41 +45,53 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
       if (exp == 0.5) {
         cpu_kernel_vec(iter,
           [](scalar_t base) -> scalar_t {
-            return std::sqrt((long double)base);
+            return std::sqrt(static_cast<long double>(base));
           },
           [](Vec base) -> Vec { return base.sqrt(); }
         );
       } else if (exp == 2) {
         cpu_kernel_vec(iter,
-          [](scalar_t base) -> scalar_t { return base * base; },
+          [](scalar_t base) -> scalar_t {
+            const auto ld_base = static_cast<long double>(base);
+            return ld_base * ld_base;
+          },
           [](Vec base) -> Vec { return base * base; }
         );
       } else if (exp == 3) {
         cpu_kernel_vec(iter,
-          [](scalar_t base) -> scalar_t { return base * base * base; },
+          [](scalar_t base) -> scalar_t {
+            const auto ld_base = static_cast<long double>(base);
+            return ld_base * ld_base * ld_base;
+          },
           [](Vec base) -> Vec { return base * base * base; }
         );
       } else if (exp == -0.5) {
         cpu_kernel_vec(iter,
           [](scalar_t base) -> scalar_t {
-            return 1.0 / std::sqrt((long double)base);
+            return 1.0 / std::sqrt(static_cast<long double>(base));
           },
           [](Vec base) -> Vec { return base.rsqrt(); }
         );
       } else if (exp == -1) {
         cpu_kernel_vec(iter,
-          [](scalar_t base) -> scalar_t { return 1.0 / base; },
+          [](scalar_t base) -> scalar_t {
+            return 1.0 / static_cast<long double>(base);
+          },
           [](Vec base) -> Vec { return base.reciprocal(); }
         );
       } else if (exp == -2) {
         cpu_kernel_vec(iter,
-          [](scalar_t base) -> scalar_t { return 1.0 / (base * base); },
+          [](scalar_t base) -> scalar_t {
+            const auto ld_base = static_cast<long double>(base);
+            return 1.0 / (ld_base * ld_base);
+          },
           [](Vec base) -> Vec { return (base * base).reciprocal(); }
         );
       } else {
         cpu_kernel_vec(iter,
           [=](scalar_t base) -> scalar_t {
-            return std::pow((long double)base, exp);
+            return std::pow(static_cast<long double>(base),
+                            static_cast<long double>(exp));
           },
           [=](Vec base) -> Vec { return base.pow(exp); }
         );
@@ -93,32 +105,48 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow", [&]() {
       if (exp == 0.5) {
         cpu_kernel(iter,
-          [](scalar_t base) -> scalar_t { return std::sqrt(base); }
+          [](scalar_t base) -> scalar_t {
+            return std::sqrt(static_cast<long double>(base));
+          }
         );
       } else if (exp == 2) {
         cpu_kernel(iter,
-          [](scalar_t base) -> scalar_t { return base * base; }
+          [](scalar_t base) -> scalar_t {
+            const auto ld_base = static_cast<long double>(base);
+            return ld_base * ld_base;
+          }
         );
       } else if (exp == 3) {
         cpu_kernel(iter,
-          [](scalar_t base) -> scalar_t { return base * base * base; }
+          [](scalar_t base) -> scalar_t {
+            const auto ld_base = static_cast<long double>(base);
+            return ld_base * ld_base * ld_base;
+          }
         );
       } else if (exp == -0.5) {
         cpu_kernel(iter,
-          [](scalar_t base) -> scalar_t { return 1.0 / std::sqrt(base); }
+          [](scalar_t base) -> scalar_t {
+            return 1.0 / std::sqrt(static_cast<long double>(base));
+          }
         );
       } else if (exp == -1) {
         cpu_kernel(iter,
-          [](scalar_t base) -> scalar_t { return 1.0 / base; }
+          [](scalar_t base) -> scalar_t {
+            return 1.0 / static_cast<long double>(base);
+          }
         );
       } else if (exp == -2) {
         cpu_kernel(iter,
-          [](scalar_t base) -> scalar_t { return 1.0 / (base * base); }
+          [](scalar_t base) -> scalar_t {
+            const auto ld_base = static_cast<long double>(base);
+            return 1.0 / (ld_base * ld_base);
+          }
         );
       } else {
         cpu_kernel(iter,
           [=](scalar_t base) -> scalar_t {
-            return std::pow((long double)base, exp);
+            return std::pow(static_cast<long double>(base),
+                            static_cast<long double>(exp));
           }
         );
       }
