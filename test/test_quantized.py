@@ -142,97 +142,110 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
-        add_relu = torch.ops.quantized.add_relu
-        add = torch.ops.quantized.add
-        add_out = torch.ops.quantized.add_out
-        add_relu_out = torch.ops.quantized.add_relu_out
+        for dtype in [torch.quint8, torch.qint8, torch.qint32]:
+            add_relu = torch.ops.quantized.add_relu
+            add = torch.ops.quantized.add
+            add_out = torch.ops.quantized.add_out
+            add_relu_out = torch.ops.quantized.add_relu_out
 
-        A = torch.arange(-25, 25, dtype=torch.float)
-        B = torch.arange(-25, 25, dtype=torch.float)
-        scale = 2.0
-        zero_point = 127
-        qA = torch.quantize_linear(A, scale=scale, zero_point=zero_point,
-                                   dtype=torch.quint8)
-        qB = torch.quantize_linear(B, scale=scale, zero_point=zero_point,
-                                   dtype=torch.quint8)
+            A = torch.arange(-25, 25, dtype=torch.float)
+            B = torch.arange(-25, 25, dtype=torch.float)
+            scale = 2.0
+            zero_point = 127
+            qA = torch.quantize_linear(A, scale=scale, zero_point=zero_point,
+                                       dtype=dtype)
+            qB = torch.quantize_linear(B, scale=scale, zero_point=zero_point,
+                                       dtype=dtype)
 
-        # Add ReLU ground truth
-        C = (qA.dequantize() + qB.dequantize()).numpy()
-        qC = _quantize(C, scale, zero_point)
-        qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
-        np.testing.assert_equal(qC, qC_hat.int_repr(),
-                                "Quantized addition failed.")
-        qC_out_hat = torch._empty_affine_quantized(qC.shape,
-                                                   scale=scale,
-                                                   zero_point=zero_point,
-                                                   dtype=torch.quint8)
-        add_out(qA, qB, out=qC_out_hat)
-        self.assertEqual(qC_hat, qC_out_hat, message="Add.out failed")
-
-        # Add + ReLU ground truth
-        Crelu = C.copy()
-        Crelu[C < 0] = 0
-        qCrelu = _quantize(Crelu, scale, zero_point)
-        qCrelu_hat = add_relu(qA, qB, scale=scale, zero_point=zero_point)
-        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
-                                "Quantized addition with ReLU failed.")
-        qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+            # Add ReLU ground truth
+            C = (qA.dequantize() + qB.dequantize()).numpy()
+            np_dtype = {
+                torch.quint8 : np.uint8,
+                torch.qint8 : np.int8,
+                torch.qint32 : np.int32
+            }
+            qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
+            # print('C', qC)
+            qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
+            np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                    "Quantized addition failed.")
+            qC_out_hat = torch._empty_affine_quantized(qC.shape,
                                                        scale=scale,
                                                        zero_point=zero_point,
-                                                       dtype=torch.quint8)
-        add_relu_out(qA, qB, out=qCrelu_out_hat)
-        self.assertEqual(qCrelu_hat, qCrelu_out_hat,
-                         message="AddReLU.out failed")
+                                                       dtype=dtype)
+            add_out(qA, qB, out=qC_out_hat)
+            self.assertEqual(qC_hat, qC_out_hat, message="Add.out failed")
+
+            # Add + ReLU ground truth
+            Crelu = C.copy()
+            Crelu[C < 0] = 0
+            qCrelu = _quantize(Crelu, scale, zero_point)
+            qCrelu_hat = add_relu(qA, qB, scale=scale, zero_point=zero_point)
+            np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                    "Quantized addition with ReLU failed.")
+            qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+                                                           scale=scale,
+                                                           zero_point=zero_point,
+                                                           dtype=dtype)
+            add_relu_out(qA, qB, out=qCrelu_out_hat)
+            self.assertEqual(qCrelu_hat, qCrelu_out_hat,
+                             message="AddReLU.out failed")
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_different_qparams(self):
-        add_relu = torch.ops.quantized.add_relu
-        add = torch.ops.quantized.add
-        add_out = torch.ops.quantized.add_out
-        add_relu_out = torch.ops.quantized.add_relu_out
+        for dtype in [torch.quint8, torch.qint8, torch.qint32]:
+            add_relu = torch.ops.quantized.add_relu
+            add = torch.ops.quantized.add
+            add_out = torch.ops.quantized.add_out
+            add_relu_out = torch.ops.quantized.add_relu_out
 
-        A = torch.arange(-25, 25, dtype=torch.float)
-        B = torch.arange(-25, 25, dtype=torch.float)
-        scale_A = 3.0
-        zero_point_A = 7
-        scale_B = 5.0
-        zero_point_B = 127
+            A = torch.arange(-25, 25, dtype=torch.float)
+            B = torch.arange(-25, 25, dtype=torch.float)
+            scale_A = 3.0
+            zero_point_A = 7
+            scale_B = 5.0
+            zero_point_B = 127
 
-        scale_C = 0.5
-        zero_point_C = 5
+            scale_C = 0.5
+            zero_point_C = 5
 
-        qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point_A,
-                                   dtype=torch.quint8)
-        qB = torch.quantize_linear(B, scale=scale_B, zero_point=zero_point_B,
-                                   dtype=torch.quint8)
+            qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point_A,
+                                       dtype=dtype)
+            qB = torch.quantize_linear(B, scale=scale_B, zero_point=zero_point_B,
+                                       dtype=dtype)
 
-        # Add ground truth
-        C = (qA.dequantize() + qB.dequantize()).numpy()
-        qC = _quantize(C, scale_C, zero_point_C)
-        qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point_C)
-        np.testing.assert_equal(qC, qC_hat.int_repr(),
-                                "Quantized addition failed.")
-        qC_out_hat = torch._empty_affine_quantized(qC.shape,
-                                                   scale=scale_C,
-                                                   zero_point=zero_point_C,
-                                                   dtype=torch.quint8)
-        add_out(qA, qB, out=qC_out_hat)
-        self.assertEqual(qC_hat, qC_out_hat, message="Add.out failed")
-
-        # Add + ReLU ground truth
-        Crelu = C.copy()
-        Crelu[C < 0] = 0
-        qCrelu = _quantize(Crelu, scale_C, zero_point_C)
-        qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
-        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
-                                "Quantized addition with ReLU failed.")
-        qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+            # Add ground truth
+            C = (qA.dequantize() + qB.dequantize()).numpy()
+            np_dtype = {
+                torch.quint8 : np.uint8,
+                torch.qint8 : np.int8,
+                torch.qint32 : np.int32
+            }
+            qC = _quantize(C, scale_C, zero_point_C, dtype=np_dtype[dtype])
+            qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point_C)
+            np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                    "Quantized addition failed.")
+            qC_out_hat = torch._empty_affine_quantized(qC.shape,
                                                        scale=scale_C,
                                                        zero_point=zero_point_C,
-                                                       dtype=torch.quint8)
-        add_relu_out(qA, qB, out=qCrelu_out_hat)
-        self.assertEqual(qCrelu_hat, qCrelu_out_hat,
-                         message="AddReLU.out failed")
+                                                       dtype=dtype)
+            add_out(qA, qB, out=qC_out_hat)
+            self.assertEqual(qC_hat, qC_out_hat, message="Add.out failed")
+
+            # Add + ReLU ground truth
+            Crelu = C.copy()
+            Crelu[C < 0] = 0
+            qCrelu = _quantize(Crelu, scale_C, zero_point_C)
+            qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
+            np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                    "Quantized addition with ReLU failed.")
+            qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+                                                           scale=scale_C,
+                                                           zero_point=zero_point_C,
+                                                           dtype=dtype)
+            add_relu_out(qA, qB, out=qCrelu_out_hat)
+            self.assertEqual(qCrelu_hat, qCrelu_out_hat,
+                             message="AddReLU.out failed")
 
     """Tests max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
