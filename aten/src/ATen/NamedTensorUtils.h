@@ -61,6 +61,12 @@ void propagate_names_for_addmm(
     /*const*/TensorImpl* m2,
     /*const*/TensorImpl* bias);
 
+void propagate_names_for_addmv(
+    TensorImpl* result,
+    TensorImpl* mat,
+    TensorImpl* vec,
+    TensorImpl* bias);
+
 void propagate_names_for_expand(Tensor& result, const Tensor& self);
 
 } // namespace namedinference
