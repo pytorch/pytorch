@@ -1180,9 +1180,9 @@ graph(%x : Tensor,
         def get_forward(m):
             return m._c._get_method("forward")
         torch._C._jit_pass_constant_propagation(get_forward(m).graph)
-        m._c = torch._C._jit_pass_prepare_quant(m._c, "forward",
-                                                observer._c,
-                                                observer._c)
+        torch._C._jit_pass_prepare_quant(m._c, "forward",
+                                         observer._c,
+                                         observer._c)
         assert len([x for x, _ in m._c._get_modules()
                     if x.startswith('observer_for_')]) == 3, \
             'Expected to have 3 observer submodules'
@@ -1219,9 +1219,9 @@ graph(%x : Tensor,
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
         torch._C._jit_pass_constant_propagation(m.graph)
-        m._c = torch._C._jit_pass_prepare_quant(m._c, "forward",
-                                                observer._c,
-                                                observer._c)
+        torch._C._jit_pass_prepare_quant(m._c, "forward",
+                                         observer._c,
+                                         observer._c)
         data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
         def get_forward(m):
@@ -1229,7 +1229,7 @@ graph(%x : Tensor,
         get_forward(m)(data)
         # right now the result will have extra observer modules
         # will fix later when we figure out how to remove modules
-        torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
+        m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
 
         get_forward(m)(data)
         FileCheck().check("aten::quantize_linear") \
@@ -1260,7 +1260,8 @@ graph(%x : Tensor,
 
     def test_quant_fusion(self):
         input_str = """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
+%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)

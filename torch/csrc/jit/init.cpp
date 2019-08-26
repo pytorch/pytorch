@@ -154,7 +154,7 @@ void initJITBindings(PyObject* module) {
       .def(
           // TODO: rename to insert_observers after we remove old code
           "_jit_pass_prepare_quant",
-          [](const script::Module& module,
+          [](script::Module& module,
              const std::string& method_name,
              const script::Module& observer_module,
              const script::Module& weight_observer_module) {
