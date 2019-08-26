@@ -3,6 +3,10 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/CUDAGenerator.h>
+#include <curand.h>
+#include <curand_kernel.h>
+#include <curand_philox4x32_x.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/cuda/Resize.cuh>
 #include <c10/util/Exception.h>
@@ -10,7 +14,6 @@
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCTensorRandom.h>
-#include <THC/THCGenerator.hpp>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
@@ -20,8 +23,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cmath>
-
-THCGenerator* THCRandom_getGenerator(THCState* state);
 
 namespace at {
 namespace native {
@@ -530,13 +531,13 @@ Tensor reservoir_sampling_cuda(
   auto options = x.options().dtype(at::kLong);
   dim3 threads(threadsPerBlock);
 
-  THCState *state = at::globalContext().getTHCState();
-  THCGenerator* gen = THCRandom_getGenerator(state);
-  uint64_t offset = gen->state.philox_seed_offset.fetch_add(4);
-  std::pair<uint64_t, uint64_t> next_philox_seed = std::make_pair(
-                                                    gen->state.initial_seed,
-                                                    offset
-                                                  );
+  auto gen = at::get_generator_or_default<at::CUDAGenerator>(nullptr, at::cuda::detail::getDefaultCUDAGenerator());
+  std::pair<uint64_t, uint64_t> next_philox_seed;
+  {
+       // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen->mutex_);
+      next_philox_seed = gen->philox_engine_inputs(4);
+  }
 
   if (weights.numel() == 0){ // Uniform Sampling
     Tensor indices_n = at::arange({n}, options);
@@ -560,7 +561,7 @@ Tensor reservoir_sampling_cuda(
     Tensor samples = at::arange({nb_iterations}, options);
 
     generate_samples<<<blocks, threads>>>(
-      samples.data<int64_t>(),
+      samples.data_ptr<int64_t>(),
       split,
       n,
       next_philox_seed
@@ -571,8 +572,8 @@ Tensor reservoir_sampling_cuda(
     // This must be done in a separeted kernel
     // since this algorithm isn't thread safe
     generate_reservoir<<<1, 1>>>(
-      indices_n.data<int64_t>(),
-      samples.data<int64_t>(),
+      indices_n.data_ptr<int64_t>(),
+      samples.data_ptr<int64_t>(),
       nb_iterations,
       split
     );
@@ -622,8 +623,8 @@ Tensor reservoir_sampling_cuda(
     dim3 all_blocks((n + threadsPerBlock - 1)/threadsPerBlock);
 
     generate_keys<<<all_blocks, threads>>>(
-      keys.data<float>(),
-      weights_contiguous.data<float>(),
+      keys.data_ptr<float>(),
+      weights_contiguous.data_ptr<float>(),
       n,
       next_philox_seed
     );
@@ -672,31 +673,31 @@ Tensor sampling_with_replacement_cuda(
     THAssert(props != NULL);
     int threadsPerBlock = props->maxThreadsPerBlock;
 
-    THCState *state = at::globalContext().getTHCState();
-    THCGenerator* gen = THCRandom_getGenerator(state);
-    uint64_t offset = gen->state.philox_seed_offset.fetch_add(4);
-    std::pair<uint64_t, uint64_t> next_philox_seed = std::make_pair(
-                                                      gen->state.initial_seed,
-                                                      offset
-                                                    );
-
+    auto gen = at::get_generator_or_default<at::CUDAGenerator>(nullptr, at::cuda::detail::getDefaultCUDAGenerator());
+    std::pair<uint64_t, uint64_t> next_philox_seed;
+    {
+         // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(gen->mutex_);
+        next_philox_seed = gen->philox_engine_inputs(4);
+    }
 
     samples = at::empty({k}, x.options().dtype(at::kLong));
     Tensor cdf = weights.cumsum(0).to(at::kFloat);
+    float sum_cdf = cdf[-1].item().toFloat();
 
     TORCH_CHECK(
-      cdf[-1].item().toFloat() > 0.0,
+      sum_cdf > 0.0,
       "The sum of all the weights must be strictly greater than zero."
     );
 
-    cdf /= cdf[-1];
+    cdf /= sum_cdf;
 
     dim3 threads(threadsPerBlock);
     dim3 blocks((k + threadsPerBlock - 1)/threadsPerBlock);
 
     sampling_with_replacement_kernel<<<blocks, threads>>>(
-      samples.data<int64_t>(),
-      cdf.data<float>(),
+      samples.data_ptr<int64_t>(),
+      cdf.data_ptr<float>(),
       n,
       k,
       next_philox_seed

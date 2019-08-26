@@ -9,7 +9,6 @@
 #include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHDispatcher.h>
 #include <ATen/core/Generator.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
@@ -895,7 +894,7 @@ Tensor reservoir_sampling_cpu(
     }
 
   reservoir_generator_cpu(
-    indices_n.data<int64_t>(),
+    indices_n.data_ptr<int64_t>(),
     n,
     split,
     generator
@@ -943,8 +942,8 @@ Tensor reservoir_sampling_cpu(
     Tensor keys = at::empty({n}, weights_contiguous.options());
 
     generate_keys(
-      keys.data<float>(),
-      weights_contiguous.data<float>(),
+      keys.data_ptr<float>(),
+      weights_contiguous.data_ptr<float>(),
       n,
       generator);
 
@@ -958,7 +957,7 @@ Tensor sampling_with_replacement_cpu(
   int64_t k
 ){
 
-	TORCH_CHECK(
+    TORCH_CHECK(
     x.dim() > 0,
     "The input Tensor must have at least one dimension"
   );
@@ -980,7 +979,7 @@ Tensor sampling_with_replacement_cpu(
 	    "The weights must have the same number of elements as the input's first dimension."
 	  );
 
-	  TORCH_CHECK(
+     TORCH_CHECK(
 	    weights.dim() == 1,
 	    "The weights must 1-dimensional."
 	  );
@@ -991,19 +990,22 @@ Tensor sampling_with_replacement_cpu(
                               );
 
     samples = at::empty({k}, x.options().dtype(at::kLong));
-    int64_t *samples_ptr = samples.data<int64_t>();
+    int64_t *samples_ptr = samples.data_ptr<int64_t>();
 
-    Tensor cdf = weights.cumsum(0).to(at::kFloat);
+    Tensor cdf = weights.cumsum(0).to(at::kFloat).clone();
+    float sum_cdf = cdf[-1].item().toFloat();
 
     TORCH_CHECK(
-      cdf[-1].item().toFloat() > 0.0,
+      sum_cdf > 0.0,
       "The sum of all the weights must be strictly greater than zero."
     );
 
-    cdf /= cdf[-1];
+    cdf /= sum_cdf;
+
     at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
 
-    float *cdf_ptr = cdf.data<float>();
+    float *cdf_ptr = cdf.data_ptr<float>();
+
     for(int i = 0; i < k; i++){
       float u = standard_uniform(generator);
       auto ptr = std::lower_bound(cdf_ptr, cdf_ptr + n, u);
