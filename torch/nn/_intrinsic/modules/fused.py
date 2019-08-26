@@ -32,10 +32,37 @@ class ConvBnReLU2d(torch.nn.Sequential):
         super(ConvBnReLU2d, self).__init__(conv, bn, relu)
 
 
-class AddReLU(torch.nn.Module):
-    def __init__(self):
-        super(AddReLU, self).__init__()
+class FloatFunctional(torch.nn.Module):
+    r"""State collector class for float operatitons.
 
-    def forward(self, a, b):
+    The instance of this class can be used instead of the ``torch.`` prefix for
+    some operations. See example usage below.
+
+    .. note::
+
+        This class does not provide a ``forward`` hook. Instead, you must use
+        one of the underlying functions (e.g. ``add_relu``).
+
+    .. Examples::
+
+        >>> f_add = FloatFunctional()
+        >>> a = torch.tensor(3.0)
+        >>> b = torch.tensor(4.0)
+        >>> f_add.add_relu(a, b)
+
+    Valid operations:
+        - add + ReLU
+    """
+    def __init__(self):
+        super(FloatFunctional, self).__init__()
+        self.observer = torch.nn.Identity()
+
+    def forward(self, x):
+        raise RuntimeError("FloatFunctional is not intended to use the " +
+                           "'forward'. Please use the underlying operation")
+
+    def add_relu(self, a, b):
         c = torch.add(a, b)
-        return torch.nn.functional.relu(c)
+        c = torch.nn.functional.relu(c)
+        c = self.observer(c)
+        return c

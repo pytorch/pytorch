@@ -90,7 +90,7 @@ def add_observer(module):
             forward_hooks
     """
     for child in module.children():
-        if type(child) == nnq.FloatFunctional:
+        if type(child) in (nnq.FloatFunctional, nni.FloatFunctional):
             child.observer = child.qconfig.activation()
         else:
             add_observer(child)
@@ -199,9 +199,10 @@ DEFAULT_MODULE_MAPPING = {
     nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
+    # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
+    nni.FloatFunctional: nniq.QFunctional,
     # Intrinsic modules:
-    nni.AddReLU: nniq.AddReLU,
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.LinearReLU: nniq.LinearReLU,
     nniqat.ConvReLU2d: nniq.ConvReLU2d,
@@ -287,10 +288,13 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING):
            module type, can be overwrritten to allow swapping user defined Modules
     """
     reassign = {}
+    # TODO(jerryzh): remove after deciding on the impl of
+    # intrinsic moudles
     SWAPPABLE_MODULES = (nni.ConvBn2d,
                          nni.ConvBnReLU2d,
                          nni.LinearReLU,
-                         nni.ConvReLU2d)
+                         nni.ConvReLU2d,
+                         nni.FloatFunctional)
 
     for name, mod in module.named_children():
         if type(mod) not in SWAPPABLE_MODULES:
