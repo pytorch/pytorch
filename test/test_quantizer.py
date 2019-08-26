@@ -85,10 +85,9 @@ class QuantizerTestCase(TestCase):
                 activation=ScriptedObserver._c,
                 weight=ScriptedWeightObserver._c)
         }
-        script_module._c = torch._C._jit_pass_insert_observers(script_module._c,
-                                                               "forward",
-                                                               qconfig_dict)
-
+        torch._C._jit_pass_insert_observers(script_module._c,
+                                            "forward",
+                                            qconfig_dict)
         # Run ScriptM Model and Collect statistics
         get_forward(script_module)(data[0][0])
 
@@ -97,7 +96,6 @@ class QuantizerTestCase(TestCase):
         # Note that observer modules are not removed right now
         torch._C._jit_pass_quant_fusion(script_module._c._get_method('forward').graph)
         get_forward(script_module)(data[0][0])
-        print(get_forward(script_module).code)
         eager_result = quantized_eager_module(data[0][0])
         script_result = get_forward(script_module)(data[0][0])
         self.assertEqual(eager_result, script_result)
