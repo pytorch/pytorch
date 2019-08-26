@@ -120,9 +120,15 @@ class QLinearInt8 final : public torch::OperatorKernel {
         /*bias=*/bias_ptr,
         /*nCol=*/N);
 
+    // The resulting matrix here is 2-D, let's view it with the original
+    // left hand dimensions of the input. Here are two examples:
+    // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
+    // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
+    std::vector<int64_t> out_sizes = input.sizes().vec();
+    out_sizes.back() = N;
     // Allocate output Tensor and a buffer for fbgemmPacked to use
     auto output = _empty_affine_quantized(
-        {M, N},
+        out_sizes,
         at::device(kCPU).dtype(kQUInt8),
         output_scale,
         output_zero_point);

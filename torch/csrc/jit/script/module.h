@@ -119,7 +119,7 @@ struct TORCH_API Module {
   ~Module() {}
 
   const c10::QualifiedName& name() const {
-    return *module_object()->type()->qualified_name_obj();
+    return *module_object()->type()->name();
   }
 
   void set_optimized(bool o) {
@@ -204,6 +204,11 @@ struct TORCH_API Module {
   slot_list get_parameters() const;
   slot_list get_attributes() const;
   slot_list get_module_slots() const;
+
+  void dump(
+      bool omit_method_bodies,
+      bool omit_attr_values,
+      bool omit_param_values) const;
 
   const std::vector<Method> get_methods() const {
     return fmap(
@@ -355,6 +360,12 @@ struct TORCH_API Module {
 
  private:
   Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
+
+  std::string _dump_to_string(
+      bool omit_method_bodies,
+      bool omit_attr_values,
+      bool omit_param_values,
+      int level) const;
 
   void clone_method(
       const Module& orig,

@@ -28,7 +28,7 @@ static void PrepareDivisionForONNXOnBlock(Block* block) {
       it->replaceInput(0, floattensor_inputs[0]);
       it->replaceInput(1, floattensor_inputs[1]);
       it->output()->setType(
-          CompleteTensorType::fromNumberType(FloatType::get()));
+          ProfiledTensorType::fromNumberType(FloatType::get()));
     }
   }
 }

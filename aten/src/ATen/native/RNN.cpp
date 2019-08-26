@@ -169,7 +169,7 @@ static std::vector<pair_of<T>> pair_vec(const std::vector<T>& vals) {
   TORCH_CHECK(vals.size() % 2 == 0, "Odd number of params or hiddens given to a bidirectional RNN");
   std::vector<pair_of<T>> result;
   result.reserve(vals.size() / 2);
-  for (int64_t i = 0; i < vals.size(); i += 2) {
+  for (size_t i = 0; i < vals.size(); i += 2) {
     result.emplace_back(vals[i], vals[i + 1]);
   }
   return result;
@@ -180,7 +180,7 @@ template<typename T>
 static std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
   std::vector<T> result;
   result.reserve(vals.size() * 2);
-  for (int64_t i = 0; i < vals.size(); i++) {
+  for (size_t i = 0; i < vals.size(); i++) {
     result.push_back(std::move(vals[i].first));
     result.push_back(std::move(vals[i].second));
   }
@@ -661,8 +661,8 @@ LayerOutput<io_type, std::vector<hidden_type>>
 apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const io_type& input,
                   const std::vector<hidden_type>& hiddens, const std::vector<weight_type>& weights,
                   int64_t num_layers, double dropout_p, bool train) {
-  TORCH_CHECK(num_layers == hiddens.size(), "Expected more hidden states in stacked_rnn");
-  TORCH_CHECK(num_layers == weights.size(), "Expected more weights in stacked_rnn");
+  TORCH_CHECK(num_layers == (int64_t)hiddens.size(), "Expected more hidden states in stacked_rnn");
+  TORCH_CHECK(num_layers == (int64_t)weights.size(), "Expected more weights in stacked_rnn");
 
   auto layer_input = input;
   auto hidden_it = hiddens.begin();

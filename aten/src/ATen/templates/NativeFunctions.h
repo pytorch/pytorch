@@ -4,8 +4,8 @@
 
 #include <ATen/Context.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/TensorOptions.h>
 #include <ATen/core/Reduction.h>
-#include <ATen/core/TensorOptions.h>
 
 #include <array>
 #include <functional>
@@ -26,7 +26,7 @@ namespace at {
 namespace native {
 
 // These functions are defined in native/TensorFactories.cpp.
-#define TENSOR(T, S, _1)                                                      \
+#define TENSOR(T, S)                                                          \
   CAFFE2_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options); \
   inline Tensor tensor(                                                       \
       std::initializer_list<T> values, const TensorOptions& options) {        \
@@ -44,7 +44,7 @@ namespace native {
   inline Tensor tensor(T value) {                                             \
     return native::tensor(ArrayRef<T>(value));                                \
   }
-AT_FORALL_SCALAR_TYPES_AND_BOOL(TENSOR)
+AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, TENSOR)
 #undef TENSOR
 
 ${native_function_declarations}

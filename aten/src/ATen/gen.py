@@ -374,6 +374,14 @@ def cmpfiles_with_eol_normalization(a, b, names):
     return results
 
 
+def is_namedtensor_only_decl(decl):
+    if 'Dimname' in decl['schema_string']:
+        return True
+    if decl['name'] == 'align_tensors':
+        return True
+    return False
+
+
 def generate_outputs():
     cwrap_files = filter_by_extension(options.files, '.cwrap')
     nn_files = filter_by_extension(options.files, 'nn.yaml', '.h')
@@ -400,7 +408,7 @@ def generate_outputs():
     # need to be consistent whether or not BUILD_NAMEDTENSOR is on/off.
     if not BUILD_NAMEDTENSOR:
         declarations = [decl for decl in declarations
-                        if 'Dimname' not in decl['schema_string']]
+                        if not is_namedtensor_only_decl(decl)]
 
     for backend, density in iterate_types():
         generate_storage_type_and_tensor(backend, density, declarations)

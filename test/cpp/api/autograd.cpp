@@ -432,6 +432,85 @@ TEST(CustomAutogradTest, ReentrantPriority) {
   ASSERT_EQ(order.back(), 0);
 }
 
+TEST(CustomAutogradTest, Hooks) {
+  Variable x = torch::ones({5,5}, torch::requires_grad());
+  Variable y = torch::ones({5,5})*4;
+  y.set_requires_grad(true);
+
+  int counter = 0;
+
+  std::function<void(int, Variable)> bw_hook([&counter](int inc, Variable grad){
+    counter += inc;
+  });
+
+  Variable z = x * x + x * 2 + x * y + y;
+  x.register_hook([&bw_hook](Variable grad){
+    bw_hook(0, grad);
+  });
+  auto hook_1 = z.register_hook([&bw_hook](Variable grad){
+    bw_hook(1, grad);
+  });
+  z.backward(torch::ones({5,5}), true, true);
+  ASSERT_EQ(counter, 1);
+
+  auto hook_2 = z.register_hook([&bw_hook](Variable grad){
+    bw_hook(2, grad);
+  });
+  z.backward(torch::ones({5,5}), true, true);
+  ASSERT_EQ(counter, 4);
+
+  z.remove_hook(hook_2);
+  z.backward(torch::ones({5,5}), true, true);
+  ASSERT_EQ(counter, 5);
+
+  std::function<Variable(Variable)> bw_hook_modify([](Variable grad){
+    return grad.mul(2);
+  });
+
+  z.remove_hook(hook_1);
+  z.register_hook(bw_hook_modify);
+  y.grad().zero_();
+  z.backward(torch::ones({5,5}), true, false);
+  ASSERT_VARIABLE_EQ(y.grad(), (x+1)*2);
+
+  y.register_hook(bw_hook_modify);
+  y.grad().zero_();
+  z.backward(torch::ones({5,5}), false, false);
+  ASSERT_VARIABLE_EQ(y.grad(), (x+1)*4);
+
+  ASSERT_THROWS_WITH(y.remove_hook(3), "Invalid index");
+}
+
+TEST(CustomAutogradTest, HookNone) {
+  struct NoneGradientFunction : public Function<NoneGradientFunction> {
+    static variable_list forward(AutogradContext *ctx, Variable x, Variable y) {
+      return {x,y};
+    }
+
+    static variable_list backward(AutogradContext *ctx, variable_list grad) {
+      return {grad[0], Variable()};
+    }
+  };
+
+  bool was_called = false;
+
+  auto hook = ([&was_called](Variable grad){
+    ASSERT_TRUE(grad.defined());
+    was_called = true;
+  });
+
+  auto x = torch::randn({5,5}, torch::requires_grad());
+  auto y = torch::randn({5,5});
+
+  auto out = NoneGradientFunction::apply(x,y);
+  Variable rx = x[0], ry = x[1];
+
+  rx.register_hook(hook);
+  ry.register_hook(hook);
+  (rx+ry).sum().backward();
+  ASSERT_TRUE(was_called);
+}
+
 // TODO add these tests if needed
 // test_once_differentiable
 // test_sparse_backward

@@ -117,7 +117,6 @@ void inline prelu_cpu_kernel_multi_weights(
   int64_t input_stride0,
   int64_t input_stride1) {
 
-  int64_t input_numel = input.numel();
   scalar_t* result_data = result.data<scalar_t>();
   scalar_t* input_data = input.data<scalar_t>();
   scalar_t* weight_data = weight.data<scalar_t>();
@@ -241,7 +240,6 @@ void inline prelu_cpu_backward_kernel_multi_weights(
   int64_t input_stride0,
   int64_t input_stride1) {
 
-  int64_t input_numel = input.numel();
   auto input_data = input.data<scalar_t>();
   auto weight_data = weight.data<scalar_t>();
   auto grad_out_data = grad_out.data<scalar_t>();

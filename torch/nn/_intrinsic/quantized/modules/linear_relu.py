@@ -1,9 +1,9 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-from torch.nn.quantized import Linear
-from torch.nn._intrinsic import LinearReLU as NNLinearReLU
+import torch.nn.quantized as nnq
+import torch.nn._intrinsic as nni
 import torch
 
-class LinearReLU(Linear):
+class LinearReLU(nnq.Linear):
     r"""
     A LinearReLU module fused from Linear and ReLU modules
 
@@ -20,7 +20,7 @@ class LinearReLU(Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    __FLOAT_MODULE = NNLinearReLU
+    _FLOAT_MODULE = nni.LinearReLU
 
     def __init__(self, in_features, out_features, bias=True):
         super(LinearReLU, self).__init__(in_features, out_features, bias)
@@ -32,3 +32,7 @@ class LinearReLU(Linear):
             float(self.scale),
             int(self.zero_point))
         return Y_q
+
+    @classmethod
+    def from_float(cls, mod):
+        return super(LinearReLU, self).from_float(mod)

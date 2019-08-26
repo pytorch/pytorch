@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 #include <ATen/Config.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/quantized/Quantizer.h>
@@ -95,8 +96,10 @@ class QNNPACKLinear final : public torch::OperatorKernel {
     TORCH_INTERNAL_ASSERT(
         setupStatus == qnnp_status_success,
         "failed to setup QNNPACK Linear operator");
+    pthreadpool_t threadpool = caffe2::mobile_threadpool();
+
     const qnnp_status runStatus =
-        qnnp_run_operator(qnnpack_operator, nullptr /* thread pool */);
+        qnnp_run_operator(qnnpack_operator, threadpool);
 
     TORCH_INTERNAL_ASSERT(
         runStatus == qnnp_status_success, "failed to run QNNPACK operator");
