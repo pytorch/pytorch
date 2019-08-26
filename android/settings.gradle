@@ -1,0 +1,3 @@
+include ':app', ':pytorch_android', ':fbjni'
+
+project(':fbjni').projectDir = file('libs/fbjni')

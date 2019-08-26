@@ -225,7 +225,7 @@ class QuantizerTestCase(TestCase):
         get_forward(script_module)(data[0][0])
 
         # Insert quantize and dequantize calls
-        torch._C._jit_pass_insert_quant_dequant(script_module._c, "forward")
+        script_module._c = torch._C._jit_pass_insert_quant_dequant(script_module._c, "forward")
         # Note that observer modules are not removed right now
         torch._C._jit_pass_quant_fusion(script_module._c._get_method('forward').graph)
         get_forward(script_module)(data[0][0])
