@@ -230,6 +230,33 @@ void propagate_names_for_copy(Tensor& result, const Tensor& src) {
   propagate_names(result, std::move(outnames), /*validate_names=*/false);
 }
 
+static std::vector<Dimname> compute_mm_outnames(
+    DimnameList mat1_names,
+    DimnameList mat2_names) {
+  return { mat1_names[0], mat2_names[1] };
+}
+
+void propagate_names_for_addmm(
+    TensorImpl* result,
+    TensorImpl* m1,
+    TensorImpl* m2,
+    TensorImpl* bias) {
+  if (!impl::has_names(m1) && !impl::has_names(m2) &&
+      !impl::has_names(bias) && !impl::has_names(result)) {
+    return;
+  }
+  auto mm_outnames = compute_mm_outnames(impl::get_names(m1), impl::get_names(m2));
+  TORCH_CHECK(
+    mm_outnames[0] == Dimname::wildcard() || mm_outnames[0] != mm_outnames[1],
+    "Matrix multiplying Tensor", impl::get_names(m1),
+    " with Tensor", impl::get_names(m2),
+    " would produce output tensor with duplicate names ",
+    "[", mm_outnames[0], ", ",  mm_outnames[1], "]",
+    ". Please rename the input tensors to prevent this.");
+  auto add_outnames = unify_from_right(mm_outnames, impl::get_names(bias));
+  propagate_names(result, std::move(add_outnames), /*validate_names=*/false);
+}
+
 } // namespace namedinference
 } // namespace at
 #endif
