@@ -1,6 +1,7 @@
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/Dimname.h>
 #include <c10/util/Exception.h>
+#include <cctype>
 
 namespace at {
 
