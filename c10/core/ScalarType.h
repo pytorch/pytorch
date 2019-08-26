@@ -306,7 +306,7 @@ static inline bool isSignedType(ScalarType t) {
       return std::is_signed<ctype>();
 
     switch (toUnderlying(t)) {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CASE_SIGNED)
+      AT_FORALL_SCALAR_TYPES(CASE_SIGNED)
       default:
         AT_ERROR("Unknown ScalarType");
     }

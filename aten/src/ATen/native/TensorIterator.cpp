@@ -168,12 +168,7 @@ static void validate_dtype(OperandInfo& op, ScalarType common_dtype, int ninputs
 static void maybe_promote_common_dtype(OperandInfo& op, ScalarType common_dtype) {
   if (op.tensor.defined() && op.tensor.scalar_type() != common_dtype)
   {
-    if (op.is_output) {
-      // to convert result back to a provided output type.
-      op.dtype = op.tensor.scalar_type();
-    } else {
-      op.dtype = common_dtype;
-    }
+    op.dtype = common_dtype;
     op.original_buffer = op.tensor;
     op.tensor = op.tensor.to(common_dtype);
     auto original_element_size = op.original_buffer.element_size();

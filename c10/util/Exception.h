@@ -140,7 +140,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // if this is used inside a lambda the __func__ macro expands to operator(),
 // which isn't very useful, but hard to fix in a macro so suppressing the warning.
 #define C10_THROW_ERROR(err_type, msg) \
-  throw ::c10::err_type({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg) // NOLINT(bugprone-lambda-function-name)
+  throw ::c10::err_type({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
 
 // Private helper macro for workaround MSVC misexpansion of nested macro
 // invocations involving __VA_ARGS__.  See
@@ -285,7 +285,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // arguments which are concatenated into the warning message using operator<<
 //
 #define TORCH_WARN(...) \
-  ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__)) // NOLINT(bugprone-lambda-function-name)
+  ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__))
 
 
 // ----------------------------------------------------------------------------
