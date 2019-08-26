@@ -11,19 +11,19 @@
 
 using namespace torch::test;
 
+void torch_warn_once_A() {
+  TORCH_WARN_ONCE("warn once");
+}
+
+void torch_warn_once_B() {
+  TORCH_WARN_ONCE("warn something else once");
+}
+
+void torch_warn() {
+  TORCH_WARN("warn multiple times");
+}
+
 TEST(UtilsTest, WarnOnce) {
-  void torch_warn_once_A() {
-    TORCH_WARN_ONCE("warn once");
-  }
-
-  void torch_warn_once_B() {
-    TORCH_WARN_ONCE("warn something else once");
-  }
-
-  void torch_warn() {
-    TORCH_WARN("warn multiple times");
-  }
-
   {
     std::stringstream buffer;
     CerrRedirect cerr_redirect(buffer.rdbuf());
