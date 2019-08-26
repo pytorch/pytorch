@@ -88,13 +88,13 @@ TEST(NamedTensorTest, internalSetNamesInplace) {
 
   // Set names
   at::internal_set_names_inplace(tensor, names);
-  const auto retrieved_names = tensor.names().value();
+  const auto retrieved_names = tensor.opt_names().value();
   ASSERT_TRUE(dimnames_equal(retrieved_names, names));
 
   // Drop names
   at::internal_set_names_inplace(tensor, at::nullopt);
   ASSERT_TRUE(tensor.get_named_tensor_meta() == nullptr);
-  ASSERT_TRUE(tensor.names() == at::nullopt);
+  ASSERT_TRUE(tensor.opt_names() == at::nullopt);
 }
 
 TEST(NamedTensorTest, empty) {
@@ -105,13 +105,13 @@ TEST(NamedTensorTest, empty) {
   std::vector<Dimname> names = { N, C, H, W };
 
   auto tensor = at::empty({});
-  ASSERT_EQ(tensor.names(), at::nullopt);
+  ASSERT_EQ(tensor.opt_names(), at::nullopt);
 
   tensor = at::empty({1, 2, 3});
-  ASSERT_EQ(tensor.names(), at::nullopt);
+  ASSERT_EQ(tensor.opt_names(), at::nullopt);
 
   tensor = at::empty({1, 2, 3, 4}, names);
-  ASSERT_TRUE(dimnames_equal(tensor.names().value(), names));
+  ASSERT_TRUE(dimnames_equal(tensor.opt_names().value(), names));
 
   ASSERT_THROW(at::empty({1, 2, 3}, names), c10::Error);
 }
@@ -184,7 +184,7 @@ TEST(NamedTensorTest, alias) {
 
   auto tensor = at::empty({2, 3}, std::vector<Dimname>{ N, C });
   auto aliased = tensor.alias();
-  ASSERT_TRUE(dimnames_equal(tensor.names().value(), aliased.names().value()));
+  ASSERT_TRUE(dimnames_equal(tensor.opt_names().value(), aliased.opt_names().value()));
 }
 
 TEST(NamedTensorTest, NoNamesGuard) {
@@ -197,8 +197,8 @@ TEST(NamedTensorTest, NoNamesGuard) {
   {
     at::NoNamesGuard guard;
     ASSERT_FALSE(at::NamesMode::is_enabled());
-    ASSERT_FALSE(tensor.names());
-    ASSERT_FALSE(at::impl::get_names(tensor.unsafeGetTensorImpl()));
+    ASSERT_FALSE(tensor.opt_names());
+    ASSERT_FALSE(at::impl::get_opt_names(tensor.unsafeGetTensorImpl()));
   }
   ASSERT_TRUE(at::NamesMode::is_enabled());
 }

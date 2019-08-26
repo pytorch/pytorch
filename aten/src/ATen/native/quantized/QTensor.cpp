@@ -78,6 +78,22 @@ int64_t q_zero_point_quant(const Tensor& self) {
   return static_cast<PerTensorAffineQuantizer*>(quantizer.get())->zero_point();
 }
 
+Tensor q_per_channel_scales_quant(const Tensor& self) {
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
+  return at::tensor(
+      static_cast<PerChannelAffineQuantizer*>(quantizer.get())->scales(),
+      self.options().dtype(at::kDouble));
+}
+
+Tensor q_per_channel_zero_points_quant(const Tensor& self) {
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
+  return at::tensor(
+      static_cast<PerChannelAffineQuantizer*>(quantizer.get())->zero_points(),
+      self.options().dtype(at::kLong));
+}
+
 Quantizer* quantizer(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer().get();
 }
@@ -116,6 +132,30 @@ Tensor per_tensor_affine_qtensor_cpu(
       memcpy(dst_data, self_data, self.nbytes());
     }
   });
+  return dst;
+}
+
+Tensor per_channel_affine_qtensor_cpu(
+    const Tensor& self,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    IntArrayRef axis) {
+  Tensor dst = at::_empty_per_channel_affine_quantized_like(
+      scales,
+      zero_points,
+      self.sizes(),
+      axis,
+      self.options().dtype(toQIntType(self.scalar_type())));
+  Tensor self_contig = self.contiguous();
+  AT_DISPATCH_QINT_TYPES(
+      dst.scalar_type(), "per_channel_affine_qtensor", [&]() {
+        underlying_t* self_data = self_contig.data<underlying_t>();
+        underlying_t* dst_data =
+            reinterpret_cast<underlying_t*>(dst.data<scalar_t>());
+        if (self.numel() > 0) {
+          memcpy(dst_data, self_data, self.nbytes());
+        }
+      });
   return dst;
 }
 

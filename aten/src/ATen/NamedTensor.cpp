@@ -32,8 +32,12 @@ Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names,
   return tensor;
 }
 
-std::vector<Dimname> FIXME_default_names(size_t len) {
-  return { len, Dimname::wildcard() };
+DimnameList default_names(size_t len) {
+  static std::vector<Dimname> all_unnamed(kMaxNamedTensorDim, Dimname::wildcard());
+    TORCH_INTERNAL_ASSERT(
+        len <= kMaxNamedTensorDim,
+        "Only tensors with up to ", kMaxNamedTensorDim, " are supported.");
+  return DimnameList(&all_unnamed.front(), len);
 }
 
 namespace impl {
@@ -81,10 +85,14 @@ static NamedTensorMeta* get_named_tensor_meta(TensorImpl* impl) {
 
 void check_valid_names(TensorImpl* impl, DimnameList names) {
   auto ndim = impl->dim();
+  TORCH_CHECK(
+      ndim <= kMaxNamedTensorDim,
+      "Named tensors only support up to ", kMaxNamedTensorDim, " dims: "
+      "Attempted to create a tensor with dim ", ndim, " with names ", names);
   TORCH_CHECK(ndim == names.size(),
       "Number of names (", names.size(), ") and "
       "number of dimensions in tensor (", ndim, ") ",
-      "do not match.");
+      "do not match. Attempted to create a tensor with names ", names);
   check_unique_names(names);
 }
 
@@ -98,7 +106,7 @@ void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names) {
   if (meta == nullptr) {
     impl->set_named_tensor_meta(torch::make_unique<NamedTensorMeta>(*names));
   } else {
-    meta->set_names_(*names);
+    meta->set_names(*names);
   }
 }
 
@@ -110,17 +118,25 @@ void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, 
   if (meta == nullptr) {
     impl->set_named_tensor_meta(torch::make_unique<NamedTensorMeta>(names));
   } else {
-    meta->set_names_(names);
+    meta->set_names(names);
   }
 }
 
-optional<DimnameList> get_names(TensorImpl* impl) {
+optional<DimnameList> get_opt_names(TensorImpl* impl) {
   const auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
     return nullopt;
   } else {
     return meta->names();
   }
+}
+
+DimnameList get_names(TensorImpl* impl) {
+  auto maybe_names = get_opt_names(impl);
+  if (maybe_names) {
+    return *maybe_names;
+  }
+  return default_names(impl->dim());
 }
 
 bool has_names(TensorImpl* impl) {
