@@ -676,5 +676,248 @@ TORCH_API script::Module InsertObservers(
   return input_module;
 }
 
+Node* insertQuantDeQuantCall(Value* v, const IValue& qparams, at::ScalarType t, bool insert_after=true) {
+  Graph* g = v->node()->owningGraph();
+  Node* quant = createQuantNode(v, g);
+  Node* intrepr = createIntReprNode(v, g);
+  Node* dequant = createDeQuantNode(v, g);
+  Node* insert_point = insert_after ? v->node() : *g->nodes().begin();
+  WithCurrentScope scope_guard(
+      *insert_point->owningGraph(), insert_point->scope());
+
+  // Add quant-intrepr-dequant nodes and replace for all uses of Value
+  // Create qparam constant nodes
+  TORCH_INTERNAL_ASSERT(qparams.isTuple(), "qparams must be tuple");
+  auto tp = qparams.toTuple();
+  IValue scale = tp->elements()[0].toTensor().item().toFloat();
+  IValue zero_point = tp->elements()[1].toTensor().item().toInt();
+  Value* scale_val = g->insertConstant(scale);
+  Value* zero_point_val = g->insertConstant(zero_point);
+
+  // Insert quant/int_repr/dequant nodes
+  if (insert_after) {
+    quant->insertAfter(insert_point);
+  } else {
+    quant->insertBefore(insert_point);
+  }
+
+  intrepr->insertAfter(quant);
+  dequant->insertAfter(intrepr);
+
+  // Attach inputs to quantization pattern nodes
+  quant->addInput(v);
+  intrepr->addInput(quant->output());
+  dequant->addInput(intrepr->output());
+
+  quant->addInput(scale_val);
+  quant->addInput(zero_point_val);
+  dequant->addInput(scale_val);
+  dequant->addInput(zero_point_val);
+
+  Value* scalar_type_val = insertScalarType(quant, t);
+  TORCH_INTERNAL_ASSERT(scalar_type_val != nullptr);
+  quant->addInput(scalar_type_val);
+  dequant->addInput(scalar_type_val);
+  return dequant;
+}
+
+// find the observer for Value `v` and return the name of the observer
+c10::optional<std::string> findObserverName(Value* v) {
+  for (const Use& u: v->uses()) {
+    // Note that here we just check for the name of observer, but the ideally
+    // we should be comparing the type of observer, this is a temporary
+    // work around until data only clone of module.clone is supported.
+    if (u.user->kind() == prim::CallMethod && u.user->s(attr::name) == "forward") {
+      auto module_instance = u.user->inputs().at(0);
+      if (module_instance->node()->kind() == prim::GetAttr &&
+          module_instance->node()->s(attr::name).find("observer_for_") != std::string::npos) {
+        return module_instance->node()->s(attr::name);
+      }
+    }
+  }
+  return c10::nullopt;
+}
+
+class QuantizeHelper {
+ public:
+  QuantizeHelper(const script::Module& m) : module_(m) {}
+  IValue getQParams(Value* v);
+  void quantizeBias(Value* v);
+  void quantizeTensor(Value* v, bool insert_after=true);
+  void removeObserver(Value* v, const std::string& observer_name);
+  void destroyNodes() {
+    // Destroy observer forward calls
+    for (auto& n: nodes_to_destroy_) {
+      n->destroy();
+    }
+  }
+
+ private:
+  const script::Module& module_;
+  std::vector<std::string> observer_modules_to_remove_;
+  std::vector<Node*> nodes_to_destroy_;
+};
+
+void QuantizeHelper::removeObserver(Value* v, const std::string& observer_name) {
+  // remove observer_module
+  observer_modules_to_remove_.push_back(observer_name);
+  // remove observer forward call
+  for (const Use& u: v->uses()) {
+    Node* user = u.user;
+    if (user->kind() == prim::CallMethod &&
+        user->s(attr::name) == "forward" &&
+        user->inputs()[0]->node()->kind() == prim::GetAttr &&
+        user->inputs()[0]->node()->s(attr::name) == observer_name) {
+      // Observer forward call node
+      nodes_to_destroy_.push_back(user);
+      // GetAttr node for observer module
+      nodes_to_destroy_.push_back(user->inputs()[0]->node());
+    }
+  }
+}
+
+IValue QuantizeHelper::getQParams(Value* v) {
+    TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
+    auto observer_name = findObserverName(v);
+    TORCH_INTERNAL_ASSERT(observer_name,
+                          "getQParams expects the corresponding observer for ",
+                          v->debugName(),
+                          " exists.");
+    auto observer_module = module_.find_module(observer_name.value());
+    TORCH_INTERNAL_ASSERT(observer_module,
+                          "getQParams expects the corresponding observer for ",
+                          v->debugName(),
+                          " exists.");
+    auto calculate_qparams = observer_module.value().get_method("calculate_qparams");
+    IValue qparams = calculate_qparams(std::vector<IValue>());
+    return qparams;
+}
+
+double getScale(const IValue& qparam) {
+  return qparam.toTuple()->elements()[0].toTensor().item().toDouble();
+}
+
+void QuantizeHelper::quantizeBias(Value* v) {
+  // Traverse to the place where this is used
+  std::vector<Symbol> ops_with_bias = {Symbol::aten("conv2d"), Symbol::aten("_convolution")};
+  for (const auto& use: v->uses()) {
+    if (std::find(ops_with_bias.begin(), ops_with_bias.end(),
+                  use.user->kind()) != ops_with_bias.end()) {
+      // Make sure there is no observer module for bias
+      auto observer_name = findObserverName(v);
+      TORCH_INTERNAL_ASSERT(!observer_name,
+                            "bias should not be observed!");
+      Value* activation = use.user->inputs()[0];
+      Value* weight = use.user->inputs()[1];
+      // Get qparam from activation
+      IValue act_qparam = getQParams(activation);
+      // Get qparam from weight
+      IValue weight_qparam = getQParams(weight);
+      IValue bias_scale =  at::scalar_tensor(
+          c10::Scalar(getScale(act_qparam) * getScale(weight_qparam)),
+          at::kDouble);
+      IValue bias_qparam = c10::ivalue::Tuple::create(
+          std::vector<IValue>({bias_scale,
+                               at::scalar_tensor(c10::Scalar(0))}), act_qparam.toTuple()->type);
+      Node* dequant = insertQuantDeQuantCall(v, bias_qparam, at::kQInt32);
+      v->replaceAllUsesWith(dequant->output());
+      Node* q = traverseToQuantNode(dequant);
+      TORCH_INTERNAL_ASSERT(q != nullptr);
+      q->replaceInputWith(dequant->output(), v);
+    }
+  }
+}
+
+void QuantizeHelper::quantizeTensor(Value* v,
+                                    bool insert_after) {
+  auto observer_name = findObserverName(v);
+  if (!observer_name) {
+    return;
+  }
+  IValue qparams = getQParams(v);
+  removeObserver(v, observer_name.value());
+  Node* dequant;
+  if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "weight") {
+    dequant = insertQuantDeQuantCall(v, qparams, at::kQInt8);
+  } else {
+    dequant = insertQuantDeQuantCall(v, qparams, at::kQUInt8, insert_after);
+  }
+  v->replaceAllUsesWith(dequant->output());
+  Node* q = traverseToQuantNode(dequant);
+  TORCH_INTERNAL_ASSERT(q);
+  q->replaceInputWith(dequant->output(), v);
+}
+
+void InsertQuantDeQuant(
+    script::Module& module,
+    const std::string& method_name) {
+  script::Method method = module.get_method(method_name);
+  auto graph = method.graph();
+  std::vector<Value*> values_to_quantize;
+  std::vector<Value*> input_values;
+
+  // For traversing all blocks in the graph including subblocks.
+  std::stack<Block*> blocks_to_visit;
+
+  // Add observer for external input nodes excluding parameters
+  // These are treated as activation as they vary across batches
+  // and need to be observed.
+
+  // prim::Param nodes do not belong to the graph. Hence the Insert
+  // point is the beginning of graph node. This also safe guards against
+  // observing a potentially mutated value due to some in-place operation
+  for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
+    auto& v = graph->inputs()[idx];
+    if (v->type()->isSubtypeOf(TensorType::get())) {
+      input_values.push_back(v);
+    }
+  }
+
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      // Skip nodes that we don't need to observe, e.g. 'prim::Constant' or
+      // observer nodes
+      if (!outputsNeedToBeObserved(n)) {
+        continue;
+      }
+
+      for (Value* v : n->outputs()) {
+        values_to_quantize.push_back(v);
+      }
+
+      // Schedule subblocks (if any) for visiting.
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+  QuantizeHelper qh(module);
+
+  for (Value* v : values_to_quantize) {
+    if (v->type()->isSubtypeOf(TensorType::get())) {
+      if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
+        qh.quantizeBias(v);
+      } else {
+        qh.quantizeTensor(v);
+      }
+    }
+  }
+
+  for (Value* v : input_values) {
+    if (v->type()->isSubtypeOf(TensorType::get())) {
+      qh.quantizeTensor(v, false);
+    }
+  }
+
+  qh.destroyNodes();
+
+  // NOTE: Remove observer module does not work right now, we'll return
+  // the module with observer modules as a temporary workaround
+  // TODO: remove observer modules after we have a remove_module API
+}
+
 } // namespace jit
 } // namespace torch
