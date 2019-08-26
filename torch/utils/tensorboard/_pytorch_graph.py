@@ -52,7 +52,7 @@ class NodePy(NodeBase):
                 io_tensor_sizes = []
                 for n in list_of_node:
                     io_unique_names.append(n.debugName())
-                    if n.type().kind() == 'CompleteTensorType':
+                    if n.isCompleteTensor():
                         io_tensor_sizes.append(n.type().sizes())
                     else:
                         io_tensor_sizes.append(None)
@@ -224,8 +224,6 @@ def graph(model, args, verbose=False):
       verbose (bool): Whether to print out verbose information while
         processing.
     """
-
-
     with torch.onnx.set_training(model, False):  # TODO: move outside of torch.onnx?
         try:
             trace = torch.jit.trace(model, args)

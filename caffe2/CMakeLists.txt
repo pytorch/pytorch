@@ -58,47 +58,51 @@ endif()
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
 
-if(NOT BUILD_ATEN_ONLY)
-  add_subdirectory(proto)
-  add_subdirectory(contrib)
+if (NOT BUILD_ATEN_ONLY)
   add_subdirectory(core)
-  add_subdirectory(utils)
-  add_subdirectory(predictor)
-  add_subdirectory(predictor/emulator)
-  add_subdirectory(core/nomnigraph)
+  add_subdirectory(proto)
   add_subdirectory(serialize)
-  if (USE_NVRTC)
-    add_subdirectory(cuda_rtc)
-  endif()
-  add_subdirectory(db)
-  add_subdirectory(distributed)
-  # add_subdirectory(experiments) # note, we may remove this folder at some point
-  add_subdirectory(ideep)
-  add_subdirectory(image)
-  add_subdirectory(video)
-  add_subdirectory(mobile)
-  add_subdirectory(mpi)
-  add_subdirectory(observers)
-  add_subdirectory(onnx)
-  if (BUILD_CAFFE2_OPS)
-    add_subdirectory(operators)
-    add_subdirectory(operators/rnn)
-    if (USE_FBGEMM)
-      add_subdirectory(quantization)
-      add_subdirectory(quantization/server)
-    endif()
-    if (USE_QNNPACK)
-      add_subdirectory(operators/quantized)
-    endif()
-  endif()
-  add_subdirectory(opt)
+  add_subdirectory(utils)
   add_subdirectory(perfkernels)
-  add_subdirectory(python)
-  add_subdirectory(queue)
-  add_subdirectory(sgd)
-  add_subdirectory(share)
-  # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
-  add_subdirectory(transforms)
+
+  # Skip modules that are not used by libtorch mobile yet.
+  if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
+    add_subdirectory(contrib)
+    add_subdirectory(predictor)
+    add_subdirectory(predictor/emulator)
+    add_subdirectory(core/nomnigraph)
+    if (USE_NVRTC)
+      add_subdirectory(cuda_rtc)
+    endif()
+    add_subdirectory(db)
+    add_subdirectory(distributed)
+    # add_subdirectory(experiments) # note, we may remove this folder at some point
+    add_subdirectory(ideep)
+    add_subdirectory(image)
+    add_subdirectory(video)
+    add_subdirectory(mobile)
+    add_subdirectory(mpi)
+    add_subdirectory(observers)
+    add_subdirectory(onnx)
+    if (BUILD_CAFFE2_OPS)
+      add_subdirectory(operators)
+      add_subdirectory(operators/rnn)
+      if (USE_FBGEMM)
+        add_subdirectory(quantization)
+        add_subdirectory(quantization/server)
+      endif()
+      if (USE_QNNPACK)
+        add_subdirectory(operators/quantized)
+      endif()
+    endif()
+    add_subdirectory(opt)
+    add_subdirectory(python)
+    add_subdirectory(queue)
+    add_subdirectory(sgd)
+    add_subdirectory(share)
+    # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
+    add_subdirectory(transforms)
+  endif()
 endif()
 
 # Advanced: if we have white list specified, we will do intersections for all
@@ -345,7 +349,9 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${GENERATED_CXX_TORCH}
     ${GENERATED_H_TORCH}
     ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/autograd.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/custom_function.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/cpp_hook.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/function_hook.cpp
@@ -362,12 +368,12 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/export.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pass_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import_source.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/pickle.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import_export_helpers.cpp
     ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
@@ -426,16 +432,17 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/exit_transforms.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/inline_loop_condition.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/class_type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/canonicalize_modified_loop.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
@@ -451,45 +458,38 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
-    ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
 
-  if (WIN32)
+  if (NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_win.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_ret.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/export.cpp
     )
-    if (USE_CUDA AND NOT USE_ROCM)
-      list(APPEND Caffe2_GPU_SRCS
-        ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
-      )
-      add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
-      target_link_libraries(thnvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
-      target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
-      install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+    if (NOT WIN32)
+      list(APPEND TORCH_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp)
     endif()
-  else ()
-    list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_unix.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
-    )
-    if (USE_CUDA AND NOT USE_ROCM)
-      list(APPEND Caffe2_GPU_SRCS
-        ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
-      )
-      add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
-      target_link_libraries(thnvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
-      target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
-      install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-
-    endif()
-  endif ()
+  endif()
 
   if (USE_CUDA)
+    if (NOT USE_ROCM)
+      list(APPEND Caffe2_GPU_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
+      )
+    endif()
     list(APPEND Caffe2_GPU_SRCS
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
     )
+    add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+    target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
+    target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+    install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
   if (USE_ROCM)
@@ -497,6 +497,13 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
     )
+    # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
+    # See NOTE [ ATen NVRTC Stub and HIP ]
+    add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+    target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
+    target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+    target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_HCC__)
+    install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
   if (NOT NO_API)
@@ -715,7 +722,7 @@ ENDIF()
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
     FILES_MATCHING PATTERN "*.h")
-  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h"
+  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h" "${TORCH_SRC_DIR}/custom_class.h"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 
@@ -867,23 +874,23 @@ target_compile_options(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 target_compile_definitions(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 
 
-# Parallelism settings
-#  OPENMP - OpenMP for intra-op, native thread pool for inter-op parallelism
+# ATen parallelism settings
+#  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
-#  NATIVE_TBB - using TBB for intra- and native thread pool for inter-op parallelism
-set(PARALLEL_BACKEND "OPENMP" CACHE STRING "ATen parallel backend")
-message(STATUS "Using parallel backend: ${PARALLEL_BACKEND}")
-if ("${PARALLEL_BACKEND}" STREQUAL "OPENMP")
+#  TBB - using TBB for intra- and native thread pool for inter-op parallelism
+set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
+if ("${ATEN_THREADING}" STREQUAL "OMP")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_OPENMP=1")
-elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE")
+elseif ("${ATEN_THREADING}" STREQUAL "NATIVE")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE=1")
-elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE_TBB")
+elseif ("${ATEN_THREADING}" STREQUAL "TBB")
   if (NOT USE_TBB)
-    message(FATAL_ERROR "Using NATIVE_TBB backend but USE_TBB is off")
+    message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
   endif()
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE_TBB=1")
 else()
-  message(FATAL_ERROR "Unknown parallel backend: ${PARALLEL_BACKEND}")
+  message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
 endif()
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")

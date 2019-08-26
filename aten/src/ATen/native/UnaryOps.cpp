@@ -47,9 +47,51 @@ Tensor& bitwise_not_(Tensor& self) {
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
   checkBackend("bitwise_not", result, self.type().backend());
-  assert_no_internal_overlap(result, "bitwise_not");
-  auto iter = TensorIterator::unary_op(result, self);
-  bitwise_not_stub(iter->device_type(), *iter);
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_mem_overlap=*/true);
+  bitwise_not_stub(iter.device_type(), iter);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
+}
+
+Tensor logical_not(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
+  return at::logical_not_out(result, self);
+}
+
+Tensor& logical_not_(Tensor& self) {
+  return at::logical_not_out(self, self);
+}
+
+Tensor& logical_not_out(Tensor& result, const Tensor& self) {
+  TensorIterator iter;
+  iter.dont_compute_common_dtype();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(result);
+  iter.add_input(self);
+  iter.build();
+  logical_not_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor neg(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::neg_out(result, self);
+}
+
+Tensor& neg_(Tensor& self) {
+  return at::neg_out(self, self);
+}
+
+Tensor& neg_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(self.scalar_type() != kBool,
+              "Negation, the `-` operator, on a bool tensor is not supported. "
+              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_internal_overlap=*/true);
+  neg_stub(iter.device_type(), iter);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
 #endif
@@ -119,21 +161,6 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   return result;
 }
 
-Tensor& fill_out(Tensor& self, const Scalar value) {
-  auto iter = TensorIterator::nullary_op(self);
-  fill_stub(iter->device_type(), *iter, value);
-  return self;
-}
-
-Tensor& fill_(Tensor& self, Scalar value) {
-  return fill_out(self, value);
-}
-
-Tensor& fill_(Tensor& self, const Tensor& value) {
-  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
-  return fill_out(self, value.item());
-}
-
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
            "mvlgamma is not implemented for ", self.type());
@@ -156,7 +183,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
 
-static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor& src) {
+inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor& src) {
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, src);
 #endif
@@ -176,10 +203,9 @@ static void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     checkBackend(#op, result, Backend::CPU);                    \
-    assert_no_internal_overlap(result, #op);                    \
-    auto iter = TensorIterator::unary_op(result, self);         \
-    op##_stub(iter->device_type(), *iter);                      \
-    propagate_names_if_namedtensor_enabled(result, self);       \
+    auto iter = TensorIterator::unary_op(result, self,          \
+      /*check_mem_overlap=*/true);                              \
+    op##_stub(iter.device_type(), iter);                        \
     return result;                                              \
   }
 
@@ -192,6 +218,7 @@ IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
+IMPLEMENT_UNARY_OP_VEC(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(expm1)
 IMPLEMENT_UNARY_OP_VEC(floor)
@@ -200,7 +227,6 @@ IMPLEMENT_UNARY_OP_VEC(log)
 IMPLEMENT_UNARY_OP_VEC(log10)
 IMPLEMENT_UNARY_OP_VEC(log1p)
 IMPLEMENT_UNARY_OP_VEC(log2)
-IMPLEMENT_UNARY_OP_VEC(neg)
 IMPLEMENT_UNARY_OP_VEC(reciprocal)
 IMPLEMENT_UNARY_OP_VEC(round)
 IMPLEMENT_UNARY_OP_VEC(rsqrt)
@@ -222,6 +248,7 @@ DEFINE_DISPATCH(cos_stub);
 DEFINE_DISPATCH(cosh_stub);
 DEFINE_DISPATCH(erf_stub);
 DEFINE_DISPATCH(erfc_stub);
+DEFINE_DISPATCH(erfinv_stub);
 DEFINE_DISPATCH(exp_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
@@ -230,6 +257,7 @@ DEFINE_DISPATCH(log_stub);
 DEFINE_DISPATCH(log10_stub);
 DEFINE_DISPATCH(log1p_stub);
 DEFINE_DISPATCH(log2_stub);
+DEFINE_DISPATCH(logical_not_stub);
 DEFINE_DISPATCH(neg_stub);
 DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
@@ -241,6 +269,5 @@ DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
 DEFINE_DISPATCH(trunc_stub);
-DEFINE_DISPATCH(fill_stub);
 }
 } // namespace at

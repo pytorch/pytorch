@@ -149,7 +149,7 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: device
    .. autoattribute:: grad
    .. autoattribute:: ndim
-   .. autoattribute:: T 
+   .. autoattribute:: T
 
    .. automethod:: abs
    .. automethod:: abs_
@@ -176,6 +176,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: argsort
    .. automethod:: asin
    .. automethod:: asin_
+   .. automethod:: as_strided
    .. automethod:: atan
    .. automethod:: atan2
    .. automethod:: atan2_
@@ -185,15 +186,13 @@ view of a storage and defines numeric operations on it.
    .. automethod:: baddbmm_
    .. automethod:: bernoulli
    .. automethod:: bernoulli_
+   .. automethod:: bfloat16
    .. automethod:: bincount
    .. automethod:: bitwise_not
    .. automethod:: bitwise_not_
    .. automethod:: bmm
    .. automethod:: bool
    .. automethod:: byte
-   .. automethod:: btrifact
-   .. automethod:: btrifact_with_info
-   .. automethod:: btrisolve
    .. automethod:: cauchy_
    .. automethod:: ceil
    .. automethod:: ceil_
@@ -271,7 +270,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: geometric_
    .. automethod:: geqrf
    .. automethod:: ger
-   .. automethod:: gesv
    .. automethod:: get_device
    .. automethod:: gt
    .. automethod:: gt_
@@ -318,7 +316,12 @@ view of a storage and defines numeric operations on it.
    .. automethod:: log2_
    .. automethod:: log_normal_
    .. automethod:: logsumexp
+   .. automethod:: logical_not
+   .. automethod:: logical_not_
+   .. automethod:: logical_xor
+   .. automethod:: logical_xor_
    .. automethod:: long
+   .. automethod:: lstsq
    .. automethod:: lt
    .. automethod:: lt_
    .. automethod:: lu
@@ -361,21 +364,20 @@ view of a storage and defines numeric operations on it.
    .. automethod:: permute
    .. automethod:: pin_memory
    .. automethod:: pinverse
-   .. automethod:: potrf
-   .. automethod:: potri
-   .. automethod:: potrs
    .. automethod:: pow
    .. automethod:: pow_
    .. automethod:: prod
-   .. automethod:: pstrf
    .. automethod:: put_
    .. automethod:: qr
    .. automethod:: qscheme
    .. automethod:: q_scale
    .. automethod:: q_zero_point
+   .. automethod:: q_per_channel_scales
+   .. automethod:: q_per_channel_zero_points
    .. automethod:: random_
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
+   .. automethod:: record_stream
    .. automethod:: register_hook
    .. automethod:: remainder
    .. automethod:: remainder_
@@ -456,7 +458,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tril_
    .. automethod:: triu
    .. automethod:: triu_
-   .. automethod:: trtrs
    .. automethod:: trunc
    .. automethod:: trunc_
    .. automethod:: type
@@ -475,9 +476,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: where
    .. automethod:: zero_
 
-.. class:: ByteTensor()
+.. class:: BoolTensor()
 
-   The following methods are unique to :class:`torch.ByteTensor`.
+   The following methods are unique to :class:`torch.BoolTensor`.
 
    .. automethod:: all
    .. automethod:: any

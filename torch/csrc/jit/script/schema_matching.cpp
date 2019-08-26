@@ -50,7 +50,7 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
 }
 
 // Applies implict conversion from value trying to turn it into type
-// concrete_type. It succeeds if `return_value->isSubclassOf(concrete_type)`
+// concrete_type. It succeeds if `return_value->isSubtypeOf(concrete_type)`
 Value* tryConvertToType(
     const SourceRange& loc,
     Graph& graph,
@@ -530,7 +530,7 @@ Value* emitBuiltinCall(
               allow_conversions)) {
         // we inline builtin calls because they are normally very small
         // wrappers and are not useful for keeping around to debug
-        return inlineCallTo(graph, *method->graph(), result->inputs).at(0);
+        return insertGraph(graph, *method->graph(), result->inputs).at(0);
       }
     }
   }

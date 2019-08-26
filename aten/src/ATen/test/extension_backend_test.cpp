@@ -2,8 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/ExtensionBackendRegistration.h>
-#include <iostream>
+#include <ATen/core/ATenDispatch.h>
 
 using namespace at;
 
@@ -18,40 +17,35 @@ Tensor empty_override(IntArrayRef size, const TensorOptions & options, c10::opti
   return Tensor(std::move(tensor_impl));
 }
 
-Tensor empty_like_override(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> optional_memory_format) {
-  test_int = 2;
-  return self;
-}
-
 Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
-  test_int = 3;
+  test_int = 2;
   return a;
 }
 
 TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(empty({5, 5}, at::kMSNPU));
-  register_extension_backend_op(
+  globalATenDispatch().registerOp(
     Backend::MSNPU,
-    "empty(IntArrayRef size, TensorOptions options, MemoryFormat memory_format) -> Tensor", &empty_override);
+    "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+    &empty_override);
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
   ASSERT_EQ(a.device().index(), 1);
   ASSERT_EQ(a.dtype(), caffe2::TypeMeta::Make<float>());
   ASSERT_EQ(test_int, 1);
 
-  EXPECT_ANY_THROW(empty_like(a, at::kMSNPU));
-  register_extension_backend_op(
-    Backend::MSNPU,
-    "empty_like(Tensor self, TensorOptions options, MemoryFormat memory_format) -> Tensor", &empty_like_override);
   Tensor b = empty_like(a, at::kMSNPU);
-  ASSERT_EQ(test_int, 2);
+  ASSERT_EQ(b.device().type(), at::kMSNPU);
+  ASSERT_EQ(b.device().index(), 1);
+  ASSERT_EQ(b.dtype(), caffe2::TypeMeta::Make<float>());
 
   EXPECT_ANY_THROW(add(a, b));
-  register_extension_backend_op(
+  globalATenDispatch().registerOp(
     Backend::MSNPU,
-    "add(Tensor self, Tensor other, Scalar alpha) -> Tensor", &add_override);
+    "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
+    &add_override);
   add(a, b);
-  ASSERT_EQ(test_int, 3);
+  ASSERT_EQ(test_int, 2);
 
   // Ensure that non-MSNPU operator still works
   Tensor d = empty({5, 5}, at::kCPU);
@@ -59,8 +53,9 @@ TEST(BackendExtensionTest, TestRegisterOp) {
 
   // Attempt to register on a schema that has already has a function
   EXPECT_ANY_THROW(
-    register_extension_backend_op(
+    globalATenDispatch().registerOp(
       Backend::MSNPU,
-      "empty(IntArrayRef size, TensorOptions options, MemoryFormat memory_format) -> Tensor", &empty_override)
+      "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      &empty_override)
   );
 }

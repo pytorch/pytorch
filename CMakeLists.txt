@@ -5,10 +5,17 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 # Use compiler ID "AppleClang" instead of "Clang" for XCode.
 # Not setting this sometimes makes XCode C compiler gets detected as "Clang",
 # even when the C++ one is detected as "AppleClang".
+cmake_policy(SET CMP0010 NEW)
 cmake_policy(SET CMP0025 NEW)
 
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
+
+if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+  set(LINUX TRUE)
+else()
+  set(LINUX FALSE)
+endif()
 
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
@@ -19,6 +26,7 @@ endif()
 if (DEFINED GLIBCXX_USE_CXX11_ABI)
   if (${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=1")
   endif()
 endif()
 
@@ -82,6 +90,7 @@ option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" ON)
 option(BUILD_NAMEDTENSOR "Experimental: compile with namedtensor support" OFF)
+option(USE_STATIC_DISPATCH "Use static dispatch for ATen operators" OFF)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
     "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
@@ -100,7 +109,7 @@ option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
-option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" OFF)
+option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
@@ -109,11 +118,20 @@ option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" OFF)
 option(USE_METAL "Use Metal for iOS build" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
-option(USE_NCCL "Use NCCL" ON)
-option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
+cmake_dependent_option(
+    USE_NCCL "Use NCCL" ON
+    "USE_CUDA;UNIX;NOT APPLE" OFF)
+cmake_dependent_option(
+    USE_STATIC_NCCL "Use static NCCL" OFF
+    "USE_NCCL" OFF)
+cmake_dependent_option(
+    USE_SYSTEM_NCCL "Use system-wide NCCL" OFF
+    "USE_NCCL" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
-option(USE_NUMA "Use NUMA (only available on Linux)" ON)
+cmake_dependent_option(
+    USE_NUMA "Use NUMA. Only available on Linux." ON
+    "LINUX" OFF)
 cmake_dependent_option(
     USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on." OFF
     "USE_CUDA" OFF)
@@ -158,7 +176,9 @@ option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside t
 # When generating debug symbols, CMake default to use the flag /Zi.
 # However, it is not compatible with sccache. So we rewrite it off.
 # But some users don't use sccache; this override is for them.
-option(MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON)
+cmake_dependent_option(
+  MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON
+  "MSVC" OFF)
 
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 
@@ -166,8 +186,12 @@ set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to bu
 # 1. Replace /Zi and /ZI with /Z7
 # 2. Switch off incremental linking in debug builds
 if (MSVC)
+  string(APPEND CMAKE_C_FLAGS " /EHa")
+  string(APPEND CMAKE_CXX_FLAGS " /EHa")
   if(MSVC_Z7_OVERRIDE)
     foreach(flag_var
+        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+        CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
         CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
         CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
       if(${flag_var} MATCHES "/Z[iI]")
@@ -209,6 +233,8 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(BUILD_CAFFE2_OPS OFF)
   set(USE_DISTRIBUTED OFF)
   set(FEATURE_TORCH_MOBILE ON)
+  set(NO_API ON)
+  set(USE_FBGEMM OFF)
 endif()
 
 if (BUILD_ATEN_ONLY)
@@ -291,6 +317,10 @@ endif()
 
 if(USE_QNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_QNNPACK")
+endif()
+
+if(USE_STATIC_DISPATCH)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_STATIC_DISPATCH")
 endif()
 
 # ---[ Whitelist file if whitelist is specified
@@ -438,6 +468,7 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR})
 include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
+include_directories(BEFORE ${PROJECT_BINARY_DIR}/aten/src/)
 
 # ---[ Main build
 add_subdirectory(c10)

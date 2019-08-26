@@ -27,7 +27,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
     'arange.*', 'range.*', '_solve.*', '_inverse.*',
-    '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*',
+    '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*', '_svd.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
     'copy_sparse_to_sparse_', 'copy_',
@@ -369,6 +369,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 typename = 'IntArrayRef'
             if typename.startswith('LongTensor'):
                 typename = 'Tensor'
+            if typename == 'c10::optional<DimnameList>':
+                unpack_args = True
 
             if arg.get('python_default_init'):
                 assert typename in unpack_with_default_methods, \
@@ -551,7 +553,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['call_dispatch_out'] = emit_single_dispatch(dictionary['out'], out_idx, base_env)
             env['call_dispatch'] = emit_single_dispatch(dictionary['base'], out_idx, base_env)
 
-            has_dtype_bind = 'dtype' in [d['name'] for d in dictionary['out'].get('python_binding_arguments', [])]
+            has_dtype_bind = 'dtype' in (d['name'] for d in dictionary['out'].get('python_binding_arguments', []))
             if has_dtype_bind:
                 body = PY_VARIABLE_OUT_CHECK_TYPE.substitute(env, out_idx=out_idx, type_idx=out_idx + 1,
                                                              layout_idx=out_idx + 2, device_idx=out_idx + 3).split('\n')

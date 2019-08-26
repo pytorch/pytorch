@@ -6,22 +6,34 @@ namespace c10 {
 
 // This file exists because we need to reference module.h, which we can't from
 // c10. Sigh...
+FunctionType::FunctionType(Function* function)
+    : NamedType(TypeKind::FunctionType),
+      function_(function),
+      name_(function->qualname()) {}
 
 Function* ClassType::getMethod(const std::string& name) const {
-  const auto qualname = QualifiedName(*qualified_name_obj(), name);
-  return compilation_unit_->find_function(qualname);
+  for (auto method : methods_) {
+    if (name == method->name()) {
+      return method;
+    }
+  }
+  return nullptr;
 }
 
 std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
-  return compilation_unit_;
+  auto cu = compilation_unit_.lock();
+  TORCH_INTERNAL_ASSERT(cu);
+  return cu;
 }
 std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
-  return compilation_unit_;
+  auto cu = compilation_unit_.lock();
+  TORCH_INTERNAL_ASSERT(cu);
+  return cu;
 }
 
 ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
-    std::shared_ptr<CompilationUnit> cu,
+    std::weak_ptr<CompilationUnit> cu,
     bool is_module) {
   return ClassTypePtr(new ClassType(std::move(qualifiedName), std::move(cu), is_module));
 }
@@ -32,6 +44,10 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   for(size_t i = 0; i < attributeNames_.size(); ++i) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
     ptr->addAttribute(attributeNames_[i], refined_slots[i]);
+  }
+  // Copy methods over
+  for (const auto& method : methods()) {
+    ptr->addMethod(method);
   }
   return ptr;
 }
@@ -63,25 +79,17 @@ size_t ClassType::addAttribute(
   return slot;
 }
 
-std::vector<Function*> ClassType::methods() const {
-  // TODO: this needs to be made more efficient!
-  // This grabs all the functions in the CU and filters them by qualified name.
-  auto cuFunctions = compilation_unit()->get_functions();
-  const auto& classname = *qualified_name_obj();
-  cuFunctions.erase(
-      std::remove_if(
-          cuFunctions.begin(),
-          cuFunctions.end(),
-          [&](Function* fn) { return !classname.isPrefixOf(fn->qualname()); }),
-      cuFunctions.end());
-  return cuFunctions;
+const std::vector<Function*>& ClassType::methods() const {
+  return methods_;
 }
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
-    std::shared_ptr<CompilationUnit> cu,
+    std::weak_ptr<CompilationUnit> cu,
     bool is_module)
-    : NamedType(TypeKind::ClassType, name), compilation_unit_(std::move(cu)) {
+    : NamedType(TypeKind::ClassType),
+      compilation_unit_(std::move(cu)),
+      name_(std::move(name)) {
   if (is_module) {
     parameterSlots_ = std::make_shared<std::vector<bool>>();
   }

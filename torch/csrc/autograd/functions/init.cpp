@@ -26,7 +26,7 @@ struct DelayedErrorCtor {
 };
 
 struct NoCtor {
-  Function* operator()(PyObject* args) {
+  Node* operator()(PyObject* args) {
     throw std::runtime_error("Cannot construct");
   }
 };

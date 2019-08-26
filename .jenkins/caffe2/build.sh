@@ -156,7 +156,9 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   build_args+=("TORCH_CUDA_ARCH_LIST=Maxwell")
 
   # Explicitly set path to NVCC such that the symlink to ccache or sccache is used
-  build_args+=("CUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/nvcc")
+  if [ -n "${CACHE_WRAPPER_DIR}" ]; then
+    build_args+=("CUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/nvcc")
+  fi
 
   # Ensure FindCUDA.cmake can infer the right path to the CUDA toolkit.
   # Setting PATH to resolve to the right nvcc alone isn't enough.
@@ -255,7 +257,7 @@ else
 
   # sccache will be stuck if  all cores are used for compiling
   # see https://github.com/pytorch/pytorch/pull/7361
-  if [[ -n "${SCCACHE}" ]]; then
+  if [[ -n "${SCCACHE}" && $BUILD_ENVIRONMENT != *rocm* ]]; then
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
@@ -270,5 +272,15 @@ fi
 
 # Install ONNX into a local directory
 pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+
+if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
+  ORIG_COMP=/opt/rocm/hcc/bin/clang-*_original
+  if [ -e $ORIG_COMP ]; then
+    # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
+    # note that the wrapping always names the compiler "clang-7.0_original"
+    WRAPPED=/opt/rocm/hcc/bin/clang-[0-99]
+    sudo mv $ORIG_COMP $WRAPPED
+  fi
+fi
 
 report_compile_cache_stats

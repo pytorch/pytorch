@@ -58,6 +58,7 @@ static void CanonicalizeOps(Block* block) {
           inputs.at(1) = new_other;
           Value* new_output =
               graph->insertNode(graph->create(it->kind(), inputs))->output();
+          new_output->copyMetadata(it->output());
           it->output()->replaceAllUsesWith(new_output);
         }
       }

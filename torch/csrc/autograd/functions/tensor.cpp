@@ -42,8 +42,8 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
 CopySlices::CopySlices(
     const Variable& base_var,
     at::TensorGeometry view_,
-    std::shared_ptr<Function> fn_)
-    : Function(),
+    std::shared_ptr<Node> fn_)
+    : Node(),
       base(base_var),
       view(std::move(view_)),
       fn(std::move(fn_)) {

@@ -28,9 +28,5 @@ TORCH_API void CustomFuseGraph(
     Symbol kind,
     size_t arg_limit=std::numeric_limits<size_t>::max());
 
-TORCH_API bool trackSingleGradSumToSizeToOutputs(
-    Value* gradSumToSizeOutput,
-    std::vector<int64_t>* outputGradSumToSizes);
-
 } // namespace jit
 } // namespace torch

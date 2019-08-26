@@ -36,6 +36,7 @@ Creation Ops
 .. autofunction:: tensor
 .. autofunction:: sparse_coo_tensor
 .. autofunction:: as_tensor
+.. autofunction:: as_strided
 .. autofunction:: from_numpy
 .. autofunction:: zeros
 .. autofunction:: zeros_like
@@ -48,6 +49,7 @@ Creation Ops
 .. autofunction:: eye
 .. autofunction:: empty
 .. autofunction:: empty_like
+.. autofunction:: empty_strided
 .. autofunction:: full
 .. autofunction:: full_like
 
@@ -209,6 +211,8 @@ Pointwise Ops
 .. autofunction:: log10
 .. autofunction:: log1p
 .. autofunction:: log2
+.. autofunction:: logical_not
+.. autofunction:: logical_xor
 .. autofunction:: mul
 .. autofunction:: mvlgamma
 .. autofunction:: neg
@@ -320,10 +324,6 @@ BLAS and LAPACK Operations
 .. autofunction:: addr
 .. autofunction:: baddbmm
 .. autofunction:: bmm
-.. autofunction:: btrifact
-.. autofunction:: btrifact_with_info
-.. autofunction:: btrisolve
-.. autofunction:: btriunpack
 .. autofunction:: chain_matmul
 .. autofunction:: cholesky
 .. autofunction:: cholesky_inverse
@@ -333,11 +333,11 @@ BLAS and LAPACK Operations
 .. autofunction:: gels
 .. autofunction:: geqrf
 .. autofunction:: ger
-.. autofunction:: gesv
 .. autofunction:: inverse
 .. autofunction:: det
 .. autofunction:: logdet
 .. autofunction:: slogdet
+.. autofunction:: lstsq
 .. autofunction:: lu
 .. autofunction:: lu_solve
 .. autofunction:: lu_unpack
@@ -349,17 +349,12 @@ BLAS and LAPACK Operations
 .. autofunction:: orgqr
 .. autofunction:: ormqr
 .. autofunction:: pinverse
-.. autofunction:: potrf
-.. autofunction:: potri
-.. autofunction:: potrs
-.. autofunction:: pstrf
 .. autofunction:: qr
 .. autofunction:: solve
 .. autofunction:: svd
 .. autofunction:: symeig
 .. autofunction:: trapz
 .. autofunction:: triangular_solve
-.. autofunction:: trtrs
 
 Utilities
 ----------------------------------

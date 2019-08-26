@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -204,8 +205,7 @@ SourceRange Node::sourceRange() const {
   if (source_range_) {
     return *source_range_;
   }
-  std::stringstream ss;
-  return SourceRange(ss.str());
+  return SourceRange();
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
@@ -315,10 +315,10 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   c10::optional<at::Device> device = c10::nullopt;
   auto checkValue = [&](const Value* v) {
-    if (CompleteTensorTypePtr type = v->type()->cast<CompleteTensorType>()) {
-      if (!has_device) {
+    if (TensorTypePtr type = v->type()->cast<TensorType>()) {
+      if (type->device() && !has_device) {
         has_device = true;
-        device = type->device();
+        device = *type->device();
       } else {
         AT_ASSERT(device == type->device());
       }
@@ -670,13 +670,7 @@ void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
 }
 
 void Value::inferTypeFrom(const at::Tensor& output) {
-  if (output.is_mkldnn()) {
-    // mkldnn tensor as opaque tensor doesn't have strides, so we can
-    // not create a CompleteTensorType
-    setType(DimensionedTensorType::create(output));
-    return;
-  }
-  setType(CompleteTensorType::create(output));
+  setType(TensorType::create(output));
 }
 
 bool Value::mustBeNone() const {
@@ -826,17 +820,34 @@ void Node::dump() const {
   std::cout << *this << "\n";
 }
 
-void Node::findSchema() const {
-  schema_ = &getOperatorFor(this).schema();
+const FunctionSchema& Node::schema() const {
+  if (op_) {
+    return op_->schema();
+  }
+  return getOperatorFor(this).schema();
 }
 
 const FunctionSchema* Node::maybeSchema() const {
-  if (!schema_) {
+  if (auto op = maybeOperator()) {
+    return &op->schema();
+  }
+  return nullptr;
+}
+
+const Operator& Node::getOperator() const {
+  if (!op_) {
+    op_ = &getOperatorFor(this);
+  }
+  return *op_;
+}
+
+const Operator* Node::maybeOperator() const {
+  if (!op_) {
     if (auto op = findOperatorFor(this)) {
-      schema_ = &op->schema();
+      op_ = op.get();
     }
   }
-  return schema_;
+  return op_;
 }
 
 bool Node::isNondeterministic() const {
@@ -885,8 +896,6 @@ bool Node::hasSideEffects() const {
     case prim::Print:
     case prim::RaiseException:
     case prim::SetAttr:
-    case aten::clear:
-    case aten::setdefault:
     case aten::warn:
     case aten::save:
     case aten::manual_seed:
@@ -897,14 +906,43 @@ bool Node::hasSideEffects() const {
     case prim::BailoutTemplate:
       return true;
   }
-  // All other builtin ops are known to be safe.
-  // see [custom operator aliasing]
-  if (kind_.is_aten() || kind_.is_prim() || kind_.is_onnx()) {
+
+  auto op = maybeOperator();
+  if (!op) {
+    TORCH_INTERNAL_ASSERT(
+        kind_.is_prim(),
+        "Only prim ops are allowed to not have a registered operator but ",
+        kind_.toDisplayString(),
+        " doesn't have one either. We don't know if this op has side effects.");
     return false;
   }
 
-  // Custom ops may have arbitrary side effects
-  return true;
+  if (kind_.is_prim() || kind_.is_aten()) {
+    // TODO There is nothing in the system that relies on aten:: and prim::
+    // ops using AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::INTERNAL_SPECIAL_CASE,
+    // but this is the intended behavior for all current ops and a good error check.
+    // We can consider lifting this constraint later if we have a use case for it.
+    TORCH_INTERNAL_ASSERT(
+        op->aliasAnalysisKind() == AliasAnalysisKind::INTERNAL_SPECIAL_CASE ||
+            op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA,
+        "aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE or AliasAnalysisKind::FROM_SCHEMA but ",
+        kind_.toDisplayString(),
+        " has ",
+        toString(op->aliasAnalysisKind()));
+  }
+
+  switch (op->aliasAnalysisKind()) {
+    case AliasAnalysisKind::PURE:
+      return false;
+    case AliasAnalysisKind::FROM_SCHEMA:
+      return false;
+    case AliasAnalysisKind::INTERNAL_SPECIAL_CASE:
+      return false;
+    case AliasAnalysisKind::CONSERVATIVE:
+      return true;
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unhandled AliasAnalysisKind case");
+  return false; // silence compiler warning
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and
@@ -969,7 +1007,7 @@ Node::Node(Graph* graph_, NodeKind kind_)
       graph_(graph_),
       owning_block_(nullptr),
       scope_(graph_->current_scope_),
-      schema_(nullptr),
+      op_(nullptr),
       topo_position_(0) {
   graph_->all_nodes.emplace(this);
 }
@@ -977,7 +1015,7 @@ Node::Node(Graph* graph_, NodeKind kind_)
 void Node::eraseOutput(size_t i) {
   AT_ASSERT(i < outputs_.size());
   AT_ASSERT(outputs_[i]->uses().empty());
-  schema_ = nullptr;
+  op_ = nullptr;
   Value* n = outputs_[i];
   outputs_.erase(outputs_.begin() + i);
   owningGraph()->freeValue(n);
@@ -987,14 +1025,14 @@ void Node::eraseOutput(size_t i) {
 }
 
 Block* Node::addBlock() {
-  schema_ = nullptr;
+  op_ = nullptr;
   blocks_.push_back(new Block(owningGraph(), this));
   return blocks_.back();
 }
 
 void Node::eraseBlock(size_t i) {
   AT_ASSERT(i < blocks_.size());
-  schema_ = nullptr;
+  op_ = nullptr;
   Block* n = blocks_[i];
   blocks_.erase(blocks_.begin() + i);
   n->destroy();
@@ -1032,7 +1070,7 @@ void Node::replaceAllUsesWith(Node* n) {
 
 Value* Node::insertInput(size_t i, Value* value) {
   AT_ASSERT(graph_ == value->owningGraph());
-  schema_ = nullptr;
+  op_ = nullptr;
   // First we update the offsets for all existing inputs that will reside
   // after the one we're inserting. Concretely, these are the inputs at
   // indices [i, # input). Since we're inserting one input before all of
@@ -1051,7 +1089,7 @@ Value* Node::insertInput(size_t i, Value* value) {
 
 Value* Node::addInput(Value* value) {
   AT_ASSERT(graph_ == value->owningGraph());
-  schema_ = nullptr;
+  op_ = nullptr;
   value->uses_.emplace_back(this, inputs_.size());
   inputs_.push_back(value);
   return value;
@@ -1059,7 +1097,7 @@ Value* Node::addInput(Value* value) {
 
 Value* Node::replaceInput(size_t i, Value* newValue) {
   AT_ASSERT(newValue->owningGraph() == graph_);
-  schema_ = nullptr;
+  op_ = nullptr;
   Value* old = dropInput(i);
   inputs_[i] = newValue;
   newValue->uses_.emplace_back(this, i);
@@ -1069,7 +1107,7 @@ Value* Node::replaceInput(size_t i, Value* newValue) {
 void Node::replaceInputWith(Value* from, Value* to) {
   AT_ASSERT(from->owningGraph() == graph_);
   AT_ASSERT(to->owningGraph() == graph_);
-  schema_ = nullptr;
+  op_ = nullptr;
   size_t i = 0;
   for (auto input : inputs()) {
     if (input == from) {
@@ -1081,12 +1119,12 @@ void Node::replaceInputWith(Value* from, Value* to) {
 
 Value* Node::addOutput() {
   outputs_.push_back(new Value(this, outputs_.size()));
-  schema_ = nullptr;
+  op_ = nullptr;
   return outputs_.back();
 }
 
 Value* Node::insertOutput(size_t i) {
-  schema_ = nullptr;
+  op_ = nullptr;
   outputs_.insert(outputs_.begin() + i, new Value(this, i));
   for (size_t itr = i + 1; itr < outputs_.size(); ++itr) {
     outputs_[itr]->setOffset(outputs_[itr]->offset() + 1);
@@ -1173,7 +1211,7 @@ void Node::moveBefore(Node* n) {
 }
 
 void Node::removeInput(size_t i) {
-  schema_ = nullptr;
+  op_ = nullptr;
   dropInput(i);
   // everything after this input shifts left,
   // so we need to update their use offsets to match
@@ -1185,7 +1223,7 @@ void Node::removeInput(size_t i) {
 }
 
 void Node::removeAllInputs() {
-  schema_ = nullptr;
+  op_ = nullptr;
   for (size_t i = 0; i < inputs().size(); ++i) {
     dropInput(i);
   }
@@ -1193,7 +1231,7 @@ void Node::removeAllInputs() {
 }
 
 void Node::permuteInputs(const std::vector<size_t>& new_order) {
-  schema_ = nullptr;
+  op_ = nullptr;
   AT_ASSERT(new_order.size() == inputs_.size());
   std::vector<Value*> new_inputs;
   new_inputs.reserve(new_order.size());
@@ -1208,7 +1246,7 @@ void Node::permuteInputs(const std::vector<size_t>& new_order) {
 }
 
 void Node::permuteOutputs(const std::vector<size_t>& new_order) {
-  schema_ = nullptr;
+  op_ = nullptr;
   AT_ASSERT(new_order.size() == outputs_.size());
   std::vector<Value*> new_outputs;
   new_outputs.reserve(new_order.size());
@@ -1359,7 +1397,13 @@ Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
-    AT_ASSERT(v->type()->isSubtypeOf(elem_type));
+    TORCH_CHECK(
+        v->type()->isSubtypeOf(elem_type),
+        "Expected a list element that subtypes '",
+        elem_type->python_str(),
+        "' but got an element of type '",
+        v->type()->python_str(),
+        "'");
   }
   n->output()->setType(ListType::create(elem_type));
   return n;
@@ -1395,7 +1439,7 @@ Node* Graph::createDict(
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
-  result->output()->setType(CompleteTensorType::fromNumberType(std::move(typ)));
+  result->output()->setType(TensorType::fromNumberType(std::move(typ)));
   return result;
 }
 
@@ -1447,7 +1491,9 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 Value* Graph::insertFunctionCall(
     Function* callee,
     script::MatchedSchema& matched) {
+  std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
+                           ->s_(attr::name, func_name)
                            ->output()
                            ->setType(FunctionType::create(std::move(callee)));
   std::vector<Value*> inputs = {fn_constant};
@@ -1547,10 +1593,47 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
 }
 
 std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    Graph& callee) {
+  WithInsertPoint guard(to_replace);
+  auto new_outputs =
+      insertGraph(*to_replace->owningGraph(), callee, to_replace->inputs());
+  const auto& old_outputs = to_replace->outputs();
+
+  AT_ASSERT(new_outputs.size() == old_outputs.size());
+  for (size_t i = 0; i < old_outputs.size(); ++i) {
+    if (old_outputs[i]->hasDebugName()) {
+      new_outputs[i]->setDebugName(old_outputs[i]->debugName());
+    }
+    old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
+  }
+  to_replace->destroy();
+
+  return new_outputs;
+}
+
+std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
+  std::vector<Value*> new_outputs;
+  if (outputs.size() != 1 || outputs.at(0)->type()->kind() != TupleType::Kind) {
+    return outputs;
+  }
+
+  auto tup = outputs[0];
+  for (Value* v : createTupleUnpack(tup)) {
+    new_outputs.emplace_back(v);
+  }
+  // if this was a peephole tuple unpack we can just get rid of
+  // the tuple construct here and prevent needing DCE
+  if (tup->node()->kind() == prim::TupleConstruct && !tup->node()->hasUses()) {
+    tup->node()->destroy();
+  }
+  return new_outputs;
+}
+
+std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
-    ArrayRef<Value*> inputs,
-    bool unpack_outputs) {
+    ArrayRef<Value*> inputs) {
   std::unordered_map<Value*, Value*> value_map;
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   AT_ASSERT(callee.inputs().size() == inputs.size());
@@ -1567,21 +1650,6 @@ std::vector<Value*> inlineCallTo(
   std::vector<Value*> outputs;
   for (auto* output : callee.outputs()) {
     outputs.push_back(value_map_func(output));
-  }
-
-  if (unpack_outputs && outputs.size() == 1 &&
-      callee.outputs().at(0)->type()->kind() == TupleType::Kind) {
-    auto tup = outputs[0];
-    outputs.clear();
-    for (Value* v : createTupleUnpack(tup)) {
-      outputs.emplace_back(v);
-    }
-    // if this was a peephole tuple unpack we can just get rid of
-    // the tuple construct here and prevent needing DCE
-    if (tup->node()->kind() == prim::TupleConstruct &&
-        !tup->node()->hasUses()) {
-      tup->node()->destroy();
-    }
   }
 
   return outputs;

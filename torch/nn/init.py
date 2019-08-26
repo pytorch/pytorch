@@ -122,7 +122,7 @@ def constant_(tensor, val):
 
 def ones_(tensor):
     # type: (Tensor) -> Tensor
-    r"""Fills the input Tensor with ones`.
+    r"""Fills the input Tensor with the scalar value `1`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -136,7 +136,7 @@ def ones_(tensor):
 
 def zeros_(tensor):
     # type: (Tensor) -> Tensor
-    r"""Fills the input Tensor with zeros`.
+    r"""Fills the input Tensor with the scalar value `0`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`

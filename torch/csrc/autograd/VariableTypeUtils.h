@@ -56,14 +56,14 @@ inline void throw_error_out_requires_grad(const char* name) {
 
 // TODO: Blegh, bare references
 
-inline void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn) {
+inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
   if (grad_fn && var.defined()) {
     grad_fn->add_input_metadata(var);
     var.rebase_history({std::move(grad_fn), 0});
   }
 }
 
-inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Function> grad_fn) {
+inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Node> grad_fn) {
   if (grad_fn) {
     for (auto& var : vars) {
       if (var.defined()) {
@@ -71,7 +71,7 @@ inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Functio
         auto output_nr = grad_fn->add_input_metadata(var);
         var.rebase_history({std::move(grad_fn), output_nr});
       } else {
-        grad_fn->add_input_metadata(Function::undefined_input());
+        grad_fn->add_input_metadata(Node::undefined_input());
       }
     }
   }

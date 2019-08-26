@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/graph_node_list.h>
 #include <torch/csrc/jit/named_value.h>
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/scope.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -168,7 +169,10 @@ struct Value {
     return type()->requires_grad();
   }
   bool isCompleteTensor() const {
-    return type()->kind() == TypeKind::CompleteTensorType;
+    if (auto pt = type()->cast<TensorType>()) {
+      return pt->isComplete();
+    }
+    return false;
   }
   TORCH_API bool mustBeNone() const;
   TORCH_API bool mustNotBeNone() const;
@@ -250,7 +254,7 @@ struct TORCH_API Node {
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
   // change the schema. note: mutable because schema_ is effectively a cache
-  mutable const FunctionSchema* schema_;
+  mutable const Operator* op_;
   topo_position_t topo_position_ = 0;
 
  protected:
@@ -617,13 +621,10 @@ struct TORCH_API Node {
       const char* signature_literal,
       at::ArrayRef<Symbol> const_inputs = {}) const;
 
-  const FunctionSchema& schema() const {
-    if (!schema_) {
-      findSchema();
-    }
-    return *schema_;
-  }
+  const FunctionSchema& schema() const;
   const FunctionSchema* maybeSchema() const;
+  const Operator& getOperator() const;
+  const Operator* maybeOperator() const;
 
   void dump() const;
 
@@ -792,7 +793,6 @@ struct TORCH_API Node {
   bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
   std::pair<Value*, const Argument&> findInput(Symbol name);
-  void findSchema() const;
   // Lookup iterator in use list of _input i_ that corresponds to its use of
   // _this_
   use_list::iterator findUseForInput(size_t i);
@@ -1252,7 +1252,7 @@ inline Value* Value::setType(TypePtr type) {
   AT_ASSERT(type);
   type_ = std::move(type);
   for (Use& use : uses_) {
-    use.user->schema_ = nullptr;
+    use.user->op_ = nullptr;
   }
   return this;
 }
@@ -1315,13 +1315,27 @@ struct TORCH_API PythonOp : public Node {
 TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
 
 TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
-// unpack_outputs - if true, and the callee returns a single tuple value, then
-// insert a tuple unpack node
-//                  and return the resulting values
-TORCH_API std::vector<Value*> inlineCallTo(
+
+/** Insert graph \p CALLEE into graph \p G using \p INPUTS as input values.
+ *
+ * The insertion happens at the current insertion point.
+ */
+TORCH_API std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
-    ArrayRef<Value*> inputs,
-    bool unpack_outputs = false);
+    ArrayRef<Value*> inputs);
+
+/** Insert graph \p CALLEE after node \p TO_REPLACE, remove the node and
+ * replace all its uses with corresponding outputs of the inserted graph. The
+ * function asserts that the number of outputs of the original node and the
+ * graph are the same.
+ */
+TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Graph& callee);
+
+/** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
+ * tuple unpack node and return the resulting values.
+ */
+TORCH_API std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs);
+
 } // namespace jit
 } // namespace torch

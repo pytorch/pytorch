@@ -3,9 +3,16 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import numpy as np
 
 import torch
+import io
 
 from common_utils import TestCase, run_tests
 import tempfile
+
+class Foo(torch.nn.Module):
+    def __init__(self):
+        super(Foo, self).__init__()
+        self.qscheme = torch.per_tensor_symmetric
+
 
 class TestQuantizedTensor(TestCase):
     def test_qtensor(self):
@@ -45,13 +52,15 @@ class TestQuantizedTensor(TestCase):
         qr[:] = x
         self.assertEqual(qr.item(), 15)
         # we can also print a qtensor
-        self.assertEqual(str(qr),
+        self.assertEqual(' '.join(str(qr).split()),
                          "tensor([15.], size=(1,), dtype=torch.quint8, " +
+                         "quantization_scheme=torch.per_tensor_affine, " +
                          "scale=1.0, zero_point=2)")
         empty_r = torch.ones((0, 1), dtype=torch.float)
         empty_qr = torch.quantize_linear(empty_r, scale, zero_point, torch.quint8)
-        self.assertEqual(str(empty_qr),
+        self.assertEqual(' '.join(str(empty_qr).split()),
                          "tensor([], size=(0, 1), dtype=torch.quint8, " +
+                         "quantization_scheme=torch.per_tensor_affine, " +
                          "scale=1.0, zero_point=2)")
 
     def test_qtensor_quant_dequant(self):
@@ -61,6 +70,22 @@ class TestQuantizedTensor(TestCase):
         qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+
+    def test_per_channel_qtensor_creation(self):
+        numel = 10
+        ch_axis = 0
+        scales = torch.rand(numel, dtype=torch.double)
+        zero_points = torch.randint(0, 10, size=(numel,), dtype=torch.long)
+        q = torch._empty_per_channel_affine_quantized_like(scales, zero_points, [numel], [ch_axis], dtype=torch.quint8)
+        self.assertEqual(scales, q.q_per_channel_scales())
+        self.assertEqual(zero_points, q.q_per_channel_zero_points())
+
+        # create Tensor from uint8_t Tensor, scales and zero_points
+        int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8)
+        q = torch._per_channel_affine_qtensor(int_tensor, scales, zero_points, [ch_axis])
+        self.assertEqual(int_tensor, q.int_repr())
+        self.assertEqual(scales, q.q_per_channel_scales())
+        self.assertEqual(zero_points, q.q_per_channel_zero_points())
 
     def test_qtensor_creation(self):
         scale = 0.5
@@ -164,9 +189,7 @@ class TestQuantizedTensor(TestCase):
                 torch.save(qr, f)
                 f.seek(0)
                 qr2 = torch.load(f)
-                self.assertEqual(qr.int_repr(), qr2.int_repr())
-                self.assertEqual(qr.q_scale(), qr2.q_scale())
-                self.assertEqual(qr.q_zero_point(), qr2.q_zero_point())
+                self.assertEqual(qr, qr2)
 
     def test_qtensor_copy(self):
         scale = 0.5
@@ -189,9 +212,7 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(q.q_zero_point(), zero_point)
         q.copy_(q2)
         # check scale and zero_points has been copied
-        self.assertEqual(q.int_repr(), q2.int_repr())
-        self.assertEqual(q.q_scale(), q2.q_scale())
-        self.assertEqual(q.q_zero_point(), q2.q_zero_point())
+        self.assertEqual(q, q2)
 
     def test_qtensor_clone(self):
         numel = 10
@@ -201,6 +222,67 @@ class TestQuantizedTensor(TestCase):
         q = q2.clone()
         # Check to make sure the scale and zero_point has been copied.
         self.assertEqual(q, q2)
+
+    def test_qtensor_view(self):
+        scale, zero_point, dtype = 1.0, 2, torch.quint8
+        q = torch._empty_affine_quantized(1, 2, 3, scale=scale, zero_point=zero_point, dtype=dtype)
+        q2 = q.view(1, 3, 2)
+        self.assertEqual(q.numel(), q2.numel())
+        # testing -1
+        self.assertEqual(q, q2.view(1, -1, 3))
+
+        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        c = a.view(1, 3, 2, 4)  # does not change tensor layout
+        self.assertEqual(b.size(), c.size())
+        self.assertEqual(b.q_scale(), c.q_scale())
+        self.assertEqual(b.q_zero_point(), c.q_zero_point())
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+
+
+        # a case can't view non-contiguos Tensor
+        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        err_str = "view size is not compatible with input tensor's size and stride*"
+        with self.assertRaisesRegex(RuntimeError, err_str):
+            b.view(1, 4, 2, 3)
+        # view on contiguous tensor is fine
+        b.contiguous().view(1, 4, 2, 3)
+
+
+    def test_qtensor_reshape(self):
+        scale, zero_point, dtype = 1.0, 2, torch.quint8
+        q = torch._empty_affine_quantized([3, 5], scale=scale, zero_point=zero_point, dtype=dtype)
+        q2 = q.reshape([15])
+        self.assertEqual(q.numel(), q2.numel())
+        self.assertEqual(q2.size(), [15])
+        # testing -1
+        self.assertEqual(q, q2.reshape([3, -1]))
+
+        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        c = a.reshape(1, 3, 2, 4)  # does not change tensor layout
+        self.assertEqual(b.size(), c.size())
+        self.assertEqual(b.q_scale(), c.q_scale())
+        self.assertEqual(b.q_zero_point(), c.q_zero_point())
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+
+        # we can use reshape for non-contiguous Tensor
+        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        c = b.reshape(1, 4, 2, 3)
+        self.assertEqual(b, c.reshape(1, 3, 2, 4))
+
+    def test_qscheme_pickle(self):
+
+        f = Foo()
+        buf = io.BytesIO()
+        torch.save(f, buf)
+
+        buf.seek(0)
+        f2 = torch.load(buf)
+
+        self.assertTrue(f2.qscheme == torch.per_tensor_symmetric)
 
 if __name__ == "__main__":
     run_tests()

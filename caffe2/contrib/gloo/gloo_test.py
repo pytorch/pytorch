@@ -529,10 +529,16 @@ class TestCase(hu.HypothesisTestCase):
                 self._test_allreduce_multicw,
                 device_option=device_option)
         else:
+            # Note: this test exercises the path where we fork a common world.
+            # We therefore don't need a comm size larger than 2. It used to be
+            # run with comm_size=8, which causes flaky results in a stress run.
+            # The flakiness was caused by too many listening sockets being
+            # created by Gloo context initialization (8 processes times
+            # 7 sockets times 20-way concurrency, plus TIME_WAIT).
             with TemporaryDirectory() as tmpdir:
                 self.run_test_locally(
                     self._test_allreduce_multicw,
-                    comm_size=8,
+                    comm_size=2,
                     device_option=device_option,
                     tmpdir=tmpdir)
 

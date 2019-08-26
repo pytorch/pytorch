@@ -2,6 +2,9 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <ATen/Config.h>
 namespace at {
@@ -22,6 +25,18 @@ int64_t stride(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim(), false);
   return self.strides()[dim];
 }
+
+#ifdef BUILD_NAMEDTENSOR
+int64_t size(const Tensor& self, Dimname dim) {
+  size_t pos_dim = dimname_to_position(self, dim);
+  return self.sizes()[pos_dim];
+}
+
+int64_t stride(const Tensor& self, Dimname dim) {
+  size_t pos_dim = dimname_to_position(self, dim);
+  return self.strides()[pos_dim];
+}
+#endif
 
 bool cudnn_is_acceptable(const Tensor& self) {
   if (!globalContext().userEnabledCuDNN()) return false;

@@ -21,9 +21,11 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/onnx.h>
+#include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
@@ -87,13 +89,7 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
-#if defined(_WIN32)
-void runJITCPPTests(bool runCuda) {
-  AT_ERROR("JIT tests not yet supported on Windows");
-}
-#else
-CAFFE2_API void runJITCPPTests(bool runCuda);
-#endif
+TORCH_API void runJITCPPTests(bool runCuda);
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -112,6 +108,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
+      .def("_jit_pass_onnx_cast_all_constant_to_floating", CastAllConstantToFloating)
       .def(
           "_jit_pass_onnx_constant_fold",
           [](std::shared_ptr<Graph>& graph,
@@ -153,6 +150,15 @@ void initJITBindings(PyObject* module) {
             InsertObserverNodes(moduleObj, methodName, new_node);
             // We don't need this node anymore, don't forget to remove it.
             new_node->destroy();
+          })
+      .def(
+          // TODO: rename to insert_observers after we remove old code
+          "_jit_pass_prepare_quant",
+          [](const script::Module& module,
+             const std::string& method_name,
+             const script::Module& observer_module,
+             const script::Module& weight_observer_module) {
+            return InsertObservers(module, method_name, observer_module, weight_observer_module);
           })
       .def(
           "_jit_pass_insert_observers",
@@ -269,8 +275,8 @@ void initJITBindings(PyObject* module) {
             }
             ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
             arg_spec_creator.specializeTypes(*graph, spec);
-            // We only get DimensionedTensorType from the arg_spec_creator, but
-            // we want CompleteTensorType. The alternative would be to have a
+            // We only get partial specialization from the arg_spec_creator, but
+            // we want full shape specialization. The alternative would be to have a
             // "complete type inference" function in ArguemntSpecCreator.
             auto g_inputs = graph->inputs();
             for (size_t i = 0; i < inputs.size(); ++i) {
@@ -283,6 +289,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
+      .def("_jit_pass_inline", Inline)
       .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
@@ -344,6 +351,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_set_inline_everything_mode",
           [](bool enabled) { script::getInlineEverythingMode() = enabled; })
+      .def(
+          "_jit_get_inline_everything_mode",
+          []() { return script::getInlineEverythingMode(); })
       .def(
           "_jit_try_infer_type",
           [](py::object obj) -> TypePtr {
@@ -426,29 +436,29 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_jit_get_operation",
-      [](const std::string& qualified_name) {
+      [](const std::string& op_name) {
         try {
-          auto symbol = Symbol::fromQualString(qualified_name);
+          auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
-          TORCH_CHECK(!operations.empty(), "No such operator ", qualified_name);
+          TORCH_CHECK(!operations.empty(), "No such operator ", op_name);
           TORCH_CHECK(
               operations.size() == 1,
               "Found ",
               operations.size(),
               " overloads for operator ",
-              qualified_name,
+              op_name,
               "! Overloads are not supported from Python.");
           std::shared_ptr<Operator> op = operations[0];
           AT_ASSERT(op != nullptr);
           std::ostringstream docstring;
-          docstring << "Automatically bound operator '" << qualified_name
+          docstring << "Automatically bound operator '" << op_name
                     << "' with schema: " << op->schema();
           return py::cpp_function(
               [op](py::args args, py::kwargs kwargs) {
                 return invokeOperatorFromPython(
                     *op, std::move(args), std::move(kwargs));
               },
-              py::name(qualified_name.c_str()),
+              py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
         } catch (const c10::Error& error) {
           throw std::runtime_error(error.what_without_backtrace());

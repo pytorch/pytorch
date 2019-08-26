@@ -90,7 +90,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     fi
 
     # Setup wrapper scripts
-    for compiler in cc c++ gcc g++; do
+    for compiler in cc c++ gcc g++ clang clang++; do
       (
         echo "#!/bin/sh"
         echo "exec $SCCACHE $(which $compiler) \"\$@\""
@@ -108,6 +108,15 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
   # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
+
+  ORIG_COMP=/opt/rocm/hcc/bin/clang-*_original
+  if [ -e $ORIG_COMP ]; then
+    # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
+    # note that the wrapping always names the compiler "clang-7.0_original"
+    WRAPPED=/opt/rocm/hcc/bin/clang-[0-99]
+    sudo mv $ORIG_COMP $WRAPPED
+
+  fi
   exit 0
 fi
 
@@ -126,7 +135,7 @@ if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   export TORCH_CUDA_ARCH_LIST="6.0"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc5.4* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xenial-py3.6-gcc5.4* ]]; then
   export DEBUG=1
 fi
 
@@ -134,6 +143,11 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   git clone --recursive https://github.com/pytorch/xla.git
   ./xla/scripts/apply_patches.sh
+fi
+
+if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
+  export CC=clang
+  export CXX=clang++
 fi
 
 
@@ -146,11 +160,14 @@ echo "The next three invocations are expected to fail with invalid command error
 # ppc64le build fails when WERROR=1
 # set only when building other architectures
 # only use for "python setup.py install" line
-if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
   WERROR=1 python setup.py install
 else
   python setup.py install
 fi
+
+echo 'PyTorch Build Statistics'
+sccache --show-stats
 
 assert_git_not_dirty
 
@@ -204,7 +221,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   pip_install lark-parser
 
   # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
-  sudo add-apt-repository "deb http://apt.llvm.org/trusty/ llvm-toolchain-trusty-7 main"
+  sudo add-apt-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-7 main"
   wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
   sudo apt-get -qq update
 
@@ -235,7 +252,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     exit 1
   fi
 
-  bazels3cache --bucket=ossci-compiler-cache-circleci-xla --maxEntrySizeBytes=0
+  bazels3cache --bucket=${XLA_CLANG_CACHE_S3_BUCKET_NAME} --maxEntrySizeBytes=0
   pushd xla
   export CC=clang-7 CXX=clang++-7
   # Use cloud cache to build when available.

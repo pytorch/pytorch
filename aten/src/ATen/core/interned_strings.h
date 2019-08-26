@@ -49,6 +49,9 @@ namespace c10 {
   _(prim, IgnoredPythonOp)           \
   _(prim, Reverse)                   \
   _(prim, Return)                    \
+  _(prim, ReturnStmt)              \
+  _(prim, BreakStmt)                 \
+  _(prim, ContinueStmt)              \
   _(prim, Store)                     \
   _(prim, AutogradZero)              \
   _(prim, AutogradAnyNonZero)        \
@@ -92,6 +95,7 @@ namespace c10 {
   _(aten, _size_if_not_equal)        \
   _(aten, _ncf_unsqueeze)            \
   _(aten, warn)                      \
+  _(aten, sorted)                    \
   _(aten, floordiv)                  \
   _(aten, __range_length)            \
   _(aten, __derive_index)            \
@@ -109,12 +113,14 @@ namespace c10 {
   _(prim, TimePoint)                 \
   _(prim, CallFunction)              \
   _(prim, CallMethod)                \
+  _(prim, LoopContinuation)          \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
   _(aten, __not__)                   \
   _(aten, __is__)                    \
   _(aten, __isnot__)                 \
+  _(aten, copy)                      \
   _(aten, copy_)                     \
   _(aten, t_)                        \
   _(aten, addbmm_)                   \

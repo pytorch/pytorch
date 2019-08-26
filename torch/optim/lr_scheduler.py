@@ -706,7 +706,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.T_mult = T_mult
         self.eta_min = eta_min
         super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch)
-        self.T_cur = last_epoch
+        self.T_cur = self.last_epoch
 
     def get_lr(self):
         return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2

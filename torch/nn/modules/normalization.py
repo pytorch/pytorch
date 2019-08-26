@@ -61,8 +61,8 @@ class CrossMapLRN2d(Module):
         self.k = k
 
     def forward(self, input):
-        return self._backend.CrossMapLRN2d(self.size, self.alpha, self.beta,
-                                           self.k)(input)
+        return self._backend.CrossMapLRN2d.apply(input, self.size, self.alpha, self.beta,
+                                                 self.k)
 
     def extra_repr(self):
         return '{size}, alpha={alpha}, beta={beta}, k={k}'.format(**self.__dict__)

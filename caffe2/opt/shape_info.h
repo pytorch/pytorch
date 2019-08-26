@@ -18,12 +18,6 @@ struct CAFFE2_API QShapeInfo {
   vector<float> scale;
 };
 
-CAFFE2_API void LoadInt8FCDNNLowPPackedWeightBlobInfoOfBlob(
-    std::vector<float>* scale,
-    std::vector<float>* offset,
-    uint32_t* axis,
-    const Blob* b);
-
 struct CAFFE2_API ShapeInfo {
   enum DimType : int8_t { UNKNOWN = 0, CONSTANT = 1, BATCH = 2, SEQ = 3 };
   ShapeInfo(bool q = false) : is_quantized(q) {}

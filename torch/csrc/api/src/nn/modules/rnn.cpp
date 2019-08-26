@@ -102,6 +102,18 @@ void RNNImplBase<Derived>::to(torch::Dtype dtype, bool non_blocking) {
 template <typename Derived>
 void RNNImplBase<Derived>::to(torch::Device device, bool non_blocking) {
   nn::Module::to(device, non_blocking);
+  const auto num_directions = options.bidirectional_ ? 2 : 1;
+  for (int64_t layer = 0; layer < options.layers_; layer++) {
+    for (auto direction = 0; direction < num_directions; direction++) {
+      const auto layer_idx = (layer * num_directions) + direction;
+      w_ih[layer_idx] = w_ih[layer_idx].to(device, non_blocking);
+      w_hh[layer_idx] = w_hh[layer_idx].to(device, non_blocking);
+      if (options.with_bias_) {
+        b_ih[layer_idx] = b_ih[layer_idx].to(device, non_blocking);
+        b_hh[layer_idx] = b_hh[layer_idx].to(device, non_blocking);
+      }
+    }
+  }
   flatten_parameters();
 }
 
@@ -144,8 +156,10 @@ RNNOutput RNNImplBase<Derived>::generic_forward(
   if (!state.defined()) {
     // #layers, batch size, state size
     const auto batch_size = input.size(options.batch_first_ ? 0 : 1);
+    const auto num_directions = options.bidirectional_ ? 2 : 1;
     state = torch::zeros(
-        {options.layers_, batch_size, options.hidden_size_}, input.options());
+      {options.layers_ * num_directions, batch_size, options.hidden_size_},
+      input.options());
   }
   Tensor output, new_state;
   std::tie(output, new_state) = function(
@@ -269,8 +283,9 @@ RNNOutput LSTMImpl::forward(const Tensor& input, Tensor state) {
   if (!state.defined()) {
     // 2 for hidden state and cell state, then #layers, batch size, state size
     const auto batch_size = input.size(options.batch_first_ ? 0 : 1);
+    const auto num_directions = options.bidirectional_ ? 2 : 1;
     state = torch::zeros(
-        {2, options.layers_, batch_size, options.hidden_size_},
+        {2, options.layers_ * num_directions, batch_size, options.hidden_size_},
         input.options());
   }
   Tensor output, hidden_state, cell_state;

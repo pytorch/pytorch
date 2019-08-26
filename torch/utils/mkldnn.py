@@ -27,7 +27,10 @@ class MkldnnLinear(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
-        return torch._C._nn.mkldnn_linear(x, self.weight, self.bias)
+        x_mkldnn = x if x.is_mkldnn else x.to_mkldnn()
+        y_mkldnn = torch._C._nn.mkldnn_linear(x_mkldnn, self.weight, self.bias)
+        y = y_mkldnn if x.is_mkldnn else y_mkldnn.to_dense()
+        return y
 
 
 class MkldnnConv2d(torch.jit.ScriptModule):
@@ -147,3 +150,19 @@ def to_mkldnn(module):
         return new_m
 
     return m_fn_rec(module)
+
+
+# **** WARNING: This is used to temporarily disable MKL-DNN convolution due
+# to a bug: https://github.com/pytorch/pytorch/issues/23825
+# Once this bug is fixed, this context manager as well as its callsites
+# should be removed!
+
+from contextlib import contextmanager
+
+@contextmanager
+def disable_mkldnn_conv():
+    torch._C._disable_mkldnn_conv()
+    try:
+        yield
+    finally:
+        torch._C._enable_mkldnn_conv()
