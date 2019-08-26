@@ -9,46 +9,28 @@
 
 #include <functional>
 
-void torch_warn_once() {
-  // TORCH_WARN_ONCE("TORCH_WARN_ONCE");
-}
-
-void torch_warn() {
-  TORCH_WARN("TORCH_WARN_MULTIPLE_TIMES");
-}
-
-int count_substr_occurrences(const std::string& str, const std::string& substr) {
-  int count = 0;
-  size_t pos = str.find(substr);
-
-  while (pos != std::string::npos) {
-    count++;
-    pos = str.find(substr, pos + substr.size());
-  }
-
-  return count;
-}
+using namespace torch::test;
 
 TEST(UtilsTest, WarnOnce) {
   {
     std::stringstream buffer;
-    torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());
+    CerrRedirect cerr_redirect(buffer.rdbuf());
 
-    // torch_warn_once();
-    // torch_warn_once();
+    TORCH_WARN_ONCE("warn once");
+    TORCH_WARN_ONCE("warn something else once");
 
-    // check that there is only one "torch_warn_once" in the string
-    // ASSERT_EQ(count_substr_occurrences(buffer.str(), "TORCH_WARN_ONCE"), 1);
+    ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn once"), 1);
+    ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn something else once"), 1);
   }
   {
     std::stringstream buffer;
-    torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());
+    CerrRedirect cerr_redirect(buffer.rdbuf());
 
-    torch_warn();
-    torch_warn();
-    torch_warn();
+    TORCH_WARN("warn multiple times");
+    TORCH_WARN("warn multiple times");
+    TORCH_WARN("warn multiple times");
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "TORCH_WARN_MULTIPLE_TIMES"), 3);
+    ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn multiple times"), 3);
   }
 }
 
