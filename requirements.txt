@@ -4,3 +4,4 @@ pyyaml
 setuptools
 six
 typing
+requests
