@@ -77,6 +77,7 @@ namespace c10 {
   _(prim, requires_grad)             \
   _(prim, AutogradAdd)               \
   _(prim, GradOf)                    \
+  _(aten, backward)                  \
   _(prim, Guard)                     \
   _(prim, BailOut)                   \
   _(prim, FusedConcat)               \
