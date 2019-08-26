@@ -118,7 +118,7 @@ Node* insertObserver(Value* v, Graph* g,
     } else {
       child_key = key + "." + child_module_name;
     }
-    auto m = InsertObservers(child_module.value(), "forward", qconfig_dict, child_key, parent_qconfig);
+    InsertObservers(child_module.value(), "forward", qconfig_dict, child_key, parent_qconfig);
   }
   script::Module observer_module;
   auto qconfig = getQConfig(key, parent_qconfig, qconfig_dict);
@@ -174,14 +174,13 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
-TORCH_API script::Module InsertObservers(
-    const script::Module& module,
+TORCH_API void InsertObservers(
+    script::Module& module,
     const std::string& method_name,
     const QConfigDict& qconfig_dict,
     const std::string& key,
     c10::optional<QConfig> parent_qconfig) {
-  script::Module input_module = module;
-  script::Method method = input_module.get_method(method_name);
+  script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   TORCH_CHECK(graph != nullptr);
   // For storing all values that need to be instrumented with an observer call.
@@ -204,7 +203,7 @@ TORCH_API script::Module InsertObservers(
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      auto observer_node = insertObserver(v, v->owningGraph(), input_module, qconfig_dict, key, parent_qconfig);
+      auto observer_node = insertObserver(v, v->owningGraph(), module, qconfig_dict, key, parent_qconfig);
       if (observer_node) {
         observer_for_input.emplace(observer_node);
       }
@@ -242,11 +241,10 @@ TORCH_API script::Module InsertObservers(
       if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
         continue;
       } else {
-        insertObserver(v, v->owningGraph(), input_module, qconfig_dict, key, parent_qconfig);
+        insertObserver(v, v->owningGraph(), module, qconfig_dict, key, parent_qconfig);
       }
     }
   }
-  return input_module;
 }
 
 Node* insertQuantDeQuantCall(Value* v, const IValue& qparams, at::ScalarType t, bool insert_after=true) {
@@ -257,6 +255,7 @@ Node* insertQuantDeQuantCall(Value* v, const IValue& qparams, at::ScalarType t, 
   Node* insert_point = insert_after ? v->node() : *g->nodes().begin();
   WithCurrentScope scope_guard(
       *insert_point->owningGraph(), insert_point->scope());
+  WithInsertPoint ins(insert_point);
 
   // Add quant-intrepr-dequant nodes and replace for all uses of Value
   // Create qparam constant nodes
@@ -421,9 +420,10 @@ void QuantizeHelper::quantizeTensor(Value* v,
   q->replaceInputWith(dequant->output(), v);
 }
 
-void InsertQuantDeQuant(
-    script::Module& module,
+script::Module InsertQuantDeQuant(
+    script::Module& input_module,
     const std::string& method_name) {
+  script::Module module = input_module.clone();
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   std::vector<Value*> values_to_quantize;
@@ -490,6 +490,7 @@ void InsertQuantDeQuant(
   // NOTE: Remove observer module does not work right now, we'll return
   // the module with observer modules as a temporary workaround
   // TODO: remove observer modules after we have a remove_module API
+  return module;
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {
