@@ -173,7 +173,12 @@ class CAFFE2_API Tensor {
     return impl_->strides();
   }
 #ifdef BUILD_NAMEDTENSOR
-  optional<DimnameList> names() const {
+  // See impl::get_opt_names in ATen/NamedTensor.h for docs.
+  optional<DimnameList> opt_names() const {
+    return impl::get_opt_names(unsafeGetTensorImpl());
+  }
+  // See impl::get_names in ATen/NamedTensor.h for docs.
+  DimnameList names() const {
     return impl::get_names(unsafeGetTensorImpl());
   }
 #endif
@@ -590,6 +595,9 @@ class CAFFE2_API Tensor {
   Tensor tanh() const;
   Tensor & tanh_() const;
   Tensor transpose(int64_t dim0, int64_t dim1) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor transpose(Dimname dim0, Dimname dim1) const;
+  #endif
   Tensor & transpose_(int64_t dim0, int64_t dim1) const;
   Tensor flip(IntArrayRef dims) const;
   Tensor roll(IntArrayRef shifts, IntArrayRef dims={}) const;
@@ -641,6 +649,8 @@ class CAFFE2_API Tensor {
   Tensor dequantize() const;
   double q_scale() const;
   int64_t q_zero_point() const;
+  Tensor q_per_channel_scales() const;
+  Tensor q_per_channel_zero_points() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;

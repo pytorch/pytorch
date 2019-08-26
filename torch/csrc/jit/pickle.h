@@ -50,18 +50,13 @@ TORCH_API void pickle(
     std::vector<at::Tensor>* tensor_table = nullptr);
 
 /// `reader` is a function that takes in a size to read from some pickled
-/// binary. `reader` should remember where it last read.
-///
-/// `bounds_checker` is a function that returns `true` if the reader can read
-/// more data, and `false` if it cannot (i.e. if a stream has hit its end of
-/// file)
-///
+/// binary. `reader` should remember where it last read, and return
+/// false if the read was not successful.
 /// See `torch::pickle` for details.
 TORCH_API IValue unpickle(
-    std::function<const char*(size_t)> reader,
-    std::function<bool()> bounds_chcker,
-    const std::vector<at::Tensor>* tensor_table = nullptr,
-    ClassResolver class_resolver = nullptr);
+    std::function<bool(char*, size_t)> reader,
+    ClassResolver class_resolver,
+    const std::vector<at::Tensor>* tensor_table);
 
 /// Decode a chunk of memory containing pickled data into its `torch::IValue`s.
 ///
@@ -72,8 +67,8 @@ TORCH_API IValue unpickle(
 TORCH_API IValue unpickle(
     const char* data,
     size_t size,
-    const std::vector<at::Tensor>* tensor_table = nullptr,
-    ClassResolver class_resolver = nullptr);
+    ClassResolver class_resolver = nullptr,
+    const std::vector<at::Tensor>* tensor_table = nullptr);
 
 } // namespace jit
 } // namespace torch
