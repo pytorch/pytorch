@@ -352,6 +352,9 @@ install_requires = []
 if sys.version_info <= (2, 7):
     install_requires += ['future']
 
+if sys.version_info[0] == 2:
+    install_requires += ['requests']
+
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
 Please install it via `conda install {module}` or `pip install {module}`
