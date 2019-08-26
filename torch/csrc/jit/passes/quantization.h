@@ -116,8 +116,8 @@ TORCH_API void InsertQuantDequantNodesForParam(
  * \param weight_observer_module the observer module that will be used
  * by weight
  */
-TORCH_API script::Module InsertObservers(
-    const script::Module& module,
+TORCH_API void InsertObservers(
+    script::Module& module,
     const std::string& method_name,
     const script::Module& observer_module,
     const script::Module& weight_observer_module);
@@ -133,7 +133,7 @@ TORCH_API script::Module InsertObservers(
  * \param module the input module
  * \param method_name the method we want to insert quantization calls for
  */
-TORCH_API void InsertQuantDeQuant(
+TORCH_API script::Module InsertQuantDeQuant(
     script::Module& module,
     const std::string& method_name);
 
