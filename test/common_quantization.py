@@ -471,3 +471,27 @@ class ModForWrapping(torch.nn.Module):
         new_mod.mycat = new_mod.mycat.from_float(mod.mycat)
         new_mod.myadd = new_mod.myadd.from_float(mod.myadd)
         return new_mod
+
+class ResNetBase(torch.nn.Module):
+    def __init__(self):
+        super(ResNetBase, self).__init__()
+        norm_layer = nn.BatchNorm2d
+        inplanes = 3
+        self.conv1 = nn.Conv2d(inplanes, inplanes, (1, 1), bias=False)
+        self.bn1 = norm_layer(inplanes)
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
+        self.downsample = torch.nn.Identity()
+        self.myop = nn.quantized.FloatFunctional()
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out)
+        identity = self.downsample(x)
+        out = self.myop.add(out, identity)
+        out = self.relu2(out)
+        out = self.avgpool(out)
+        return out
