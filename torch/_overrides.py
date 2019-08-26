@@ -20,10 +20,10 @@ from numpy.compat._inspect import getargspec
 
 from .tensor import Tensor
 
+TORCH_FUNCTION_ENABLED = True
 
 _TORCH_FUNCTION = Tensor.__torch_function__
 _TENSOR_ONLY = [Tensor]
-
 
 def get_overloaded_types_and_args(relevant_args):
     """Returns a list of arguments on which to call __torch_function__.

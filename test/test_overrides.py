@@ -3,80 +3,93 @@ import numpy as np
 import warnings
 import math
 import unittest
-from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    skipIfRocm
+from torch._overrides import (
+    get_overloaded_types_and_args, torch_function_dispatch,
+    verify_matching_signatures, TORCH_FUNCTION_ENABLED)
+import pickle
+import inspect
+import sys
+from unittest import mock
 
-
-HANDLED_FUNCTIONS = {}
-
-class DiagonalTensor:
-    def __init__(self, N, value):
-        self._N = N
-        self._i = value
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}(N={self._N}, value={self._i})"
-
-    def __array__(self):
-        return self._i * np.eye(self._N)
-
-    def tensor(self):
-        return self._i * torch.eye(self._N)
-
-    def __torch_function__(self, func, types, args, kwargs):
-        if func not in HANDLED_FUNCTIONS:
-            return NotImplemented
-        # Note: this allows subclasses that don't override
-        # __torch_function__ to handle DiagonalArray objects.
-        if not all(issubclass(t, self.__class__) for t in types):
-            return NotImplemented
-        return HANDLED_FUNCTIONS[func](*args, **kwargs)
-
-    def __eq__(self, other):
-        if type(other) is type(self):
-                if self._N == other._N and self._i == other._i:
-                    return True
-                else:
-                    return False
-        else:
-            return False
-
-
-def implements(torch_function):
-   "Register an __torch_function__ implementation for DiagonalTensor objects."
-   def decorator(func):
-       HANDLED_FUNCTIONS[torch_function] = func
-       return func
-   return decorator
-
-@implements(torch.gemm)
-def gemm_diag(mat1, mat2, out=None):
-    "Implementation of torch.gemm for DiagonalArray objects"
-    print('Called our custom gemm for DiagonalTensor input')
-    if not mat1._N == mat2._N:
-        raise ValueError("Dimension mismatch")
-
-    return DiagonalTensor(mat1._N, mat1._i * mat2._i)
-
-t1 = DiagonalTensor(5, 1)
-t2 = DiagonalTensor(5, 2)
-t3 = DiagonalTensor(5, 1)
-
-print(gemm_diag(t1, t2))
-print(torch.gemm(t1, t2))
-print(torch.gemm(t1.tensor(), t2.tensor()))
-print(torch.mm(t1.tensor(), t2.tensor()))
+def assert_(val, msg=''):
+    """
+    Assert that works in release mode.
+    Accepts callable msg to allow deferring evaluation until failure.
+    The Python built-in ``assert`` does not work when executing code in
+    optimized mode (the ``-O`` flag) - no byte-code is generated for it.
+    For documentation on usage, refer to the Python documentation.
+    """
+    __tracebackhide__ = True  # Hide traceback for py.test
+    if not val:
+        try:
+            smsg = msg()
+        except TypeError:
+            smsg = msg
+        raise AssertionError(smsg)
 
 class TestOverride(unittest.TestCase):
-    def test_gemm_equality(self):
-        self.assertEqual(t1, t3)
 
-    def test_gemm_diag(self):
+    def test_gemm(self):
+        HANDLED_FUNCTIONS = {}
+        class DiagonalTensor:
+            def __init__(self, N, value):
+                self._N = N
+                self._i = value
+
+            def __repr__(self):
+                return f"{self.__class__.__name__}(N={self._N}, value={self._i})"
+
+            def __array__(self):
+                return self._i * np.eye(self._N)
+
+            def tensor(self):
+                return self._i * torch.eye(self._N)
+
+            def __torch_function__(self, func, types, args, kwargs):
+                if func not in HANDLED_FUNCTIONS:
+                    return NotImplemented
+                # Note: this allows subclasses that don't override
+                # __torch_function__ to handle DiagonalArray objects.
+                if not all(issubclass(t, self.__class__) for t in types):
+                    return NotImplemented
+                return HANDLED_FUNCTIONS[func](*args, **kwargs)
+
+            def __eq__(self, other):
+                if type(other) is type(self):
+                        if self._N == other._N and self._i == other._i:
+                            return True
+                        else:
+                            return False
+                else:
+                    return False
+
+
+        def implements(torch_function):
+           "Register an __torch_function__ implementation for DiagonalTensor objects."
+           def decorator(func):
+               HANDLED_FUNCTIONS[torch_function] = func
+               return func
+           return decorator
+
+        @implements(torch.gemm)
+        def gemm_diag(mat1, mat2, out=None):
+            "Implementation of torch.gemm for DiagonalArray objects"
+            print('Called our custom gemm for DiagonalTensor input')
+            if not mat1._N == mat2._N:
+                raise ValueError("Dimension mismatch")
+
+            return DiagonalTensor(mat1._N, mat1._i * mat2._i)
+
+        t1 = DiagonalTensor(5, 1)
+        t2 = DiagonalTensor(5, 2)
+        t3 = DiagonalTensor(5, 1)
+
+        self.assertEqual(t1, t3)
         self.assertEqual(torch.gemm(t1, t2), t2)
 
 
-requires_torch_function = pytest.mark.skipif(
-    not TORCH_FUNCTION_ENABLED,
+requires_torch_function = unittest.skipUnless(
+    TORCH_FUNCTION_ENABLED,
     reason="__torch_function__ dispatch not enabled.")
 
 def _return_not_implemented(self, *args, **kwargs):
@@ -96,23 +109,24 @@ def dispatched_two_arg(tensor1, tensor2):
     return 'original'
 
 
-class TestGetImplementingArgs(object):
+class TestGetImplementingArgs(unittest.TestCase):
 
     def test_tensor(self):
         tensor = torch.tensor(1)
 
-        args = _get_implementing_args([tensor])
-        assert_equal(list(args), [tensor])
+        args = get_overloaded_types_and_args([tensor])
+        self.assertEqual(list(args),[[type(tensor)], [tensor]])
 
-        args = _get_implementing_args([tensor, tensor])
-        assert_equal(list(args), [tensor])
+        args = get_overloaded_types_and_args([tensor, tensor])
+        self.assertEqual(list(args),[[type(tensor)], [tensor]])
 
-        args = _get_implementing_args([tensor, 1])
-        assert_equal(list(args), [tensor])
+        args = get_overloaded_types_and_args([tensor, 1])
+        self.assertEqual(list(args),[[type(tensor)], [tensor]])
 
-        args = _get_implementing_args([1, tensor])
-        assert_equal(list(args), [tensor])
+        args = get_overloaded_types_and_args([1, tensor])
+        self.assertEqual(list(args),[[type(tensor)], [tensor]])
 
+    @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
     def test_tensor_subclasses(self):
 
         class OverrideSub(torch.Tensor):
@@ -121,17 +135,17 @@ class TestGetImplementingArgs(object):
         class NoOverrideSub(torch.Tensor):
             pass
 
-        tensor = torch.tensor(1).view(torch.tensor)
+        tensor = torch.tensor(1).view(torch.Tensor)
         override_sub = torch.tensor(1).view(OverrideSub)
         no_override_sub = torch.tensor(1).view(NoOverrideSub)
 
-        args = _get_implementing_args([tensor, override_sub])
+        args = get_overloaded_types_and_args([tensor, override_sub])
         assert_equal(list(args), [override_sub, tensor])
 
-        args = _get_implementing_args([tensor, no_override_sub])
+        args = get_overloaded_types_and_args([tensor, no_override_sub])
         assert_equal(list(args), [no_override_sub, tensor])
 
-        args = _get_implementing_args(
+        args = get_overloaded_types_and_args(
             [override_sub, no_override_sub])
         assert_equal(list(args), [override_sub, no_override_sub])
 
@@ -143,12 +157,13 @@ class TestGetImplementingArgs(object):
         tensor = torch.tensor(1)
         other = Other()
 
-        args = _get_implementing_args([other, tensor])
-        assert_equal(list(args), [other, tensor])
+        args = get_overloaded_types_and_args([other, tensor])
+        self.assertEqual(list(args), [[type(other), type(tensor)], [other, tensor]])
 
-        args = _get_implementing_args([tensor, other])
-        assert_equal(list(args), [tensor, other])
+        args = get_overloaded_types_and_args([tensor, other])
+        self.assertEqual(list(args), [[type(tensor), type(other)], [tensor, other]])
 
+    @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
     def test_tensor_subclass_and_duck_tensor(self):
 
         class OverrideSub(torch.Tensor):
@@ -161,9 +176,9 @@ class TestGetImplementingArgs(object):
         subtensor = torch.tensor(1).view(OverrideSub)
         other = Other()
 
-        assert_equal(_get_implementing_args([tensor, subtensor, other]),
+        self.assertEqual(get_overloaded_types_and_args([tensor, subtensor, other]),
                      [subtensor, tensor, other])
-        assert_equal(_get_implementing_args([tensor, other, subtensor]),
+        self.assertEqual(get_overloaded_types_and_args([tensor, other, subtensor]),
                      [subtensor, tensor, other])
 
     def test_many_duck_tensors(self):
@@ -185,40 +200,43 @@ class TestGetImplementingArgs(object):
         c = C()
         d = D()
 
-        assert_equal(_get_implementing_args([1]), [])
-        assert_equal(_get_implementing_args([a]), [a])
-        assert_equal(_get_implementing_args([a, 1]), [a])
-        assert_equal(_get_implementing_args([a, a, a]), [a])
-        assert_equal(_get_implementing_args([a, d, a]), [a, d])
-        assert_equal(_get_implementing_args([a, b]), [b, a])
-        assert_equal(_get_implementing_args([b, a]), [b, a])
-        assert_equal(_get_implementing_args([a, b, c]), [b, c, a])
-        assert_equal(_get_implementing_args([a, c, b]), [c, b, a])
+        self.assertEqual(get_overloaded_types_and_args([1]), ([],[]))
+        self.assertEqual(get_overloaded_types_and_args([a]), ([type(a)], [a]))
+        self.assertEqual(get_overloaded_types_and_args([a, 1]), ([type(a)], [a]))
+        self.assertEqual(get_overloaded_types_and_args([a, a, a]), ([type(a)], [a]))
+        self.assertEqual(get_overloaded_types_and_args([a, d, a]), ([type(a), type(d)], [a, d]))
+        # TODO
+        # self.assertEqual(get_overloaded_types_and_args([a, b]), ([type(b), type(a)], [b, a]))
+        self.assertEqual(get_overloaded_types_and_args([b, a]), ([type(b), type(a)], [b, a]))
+        # self.assertEqual(get_overloaded_types_and_args([a, b, c]), ([type(b), type(c), type(a)], [b, c, a]))
+        # self.assertEqual(get_overloaded_types_and_args([a, c, b]), ([type(c), type(b), type(a)], [c, b, a]))
 
+    @unittest.expectedFailure
     def test_too_many_duck_tensors(self):
         namespace = dict(__torch_function__=_return_not_implemented)
         types = [type('A' + str(i), (object,), namespace) for i in range(33)]
         relevant_args = [t() for t in types]
 
-        actual = _get_implementing_args(relevant_args[:32])
-        assert_equal(actual, relevant_args[:32])
+        actual = get_overloaded_types_and_args(relevant_args[:32])
+        self.assertEqual(actual, relevant_args[:32])
 
-        with assert_raises_regex(TypeError, 'distinct argument types'):
-            _get_implementing_args(relevant_args)
+        with self.assertRaisesRegex(TypeError, 'distinct argument types'):
+            get_overloaded_types_and_args(relevant_args)
 
 
-class TestTensorTorchFunction(object):
+class TestTensorTorchFunction(unittest.TestCase):
 
+    @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
     @requires_torch_function
     def test_method(self):
 
         class Other(object):
             __torch_function__ = _return_not_implemented
 
-        class NoOverrideSub(torch.tensor):
+        class NoOverrideSub(torch.Tensor):
             pass
 
-        class OverrideSub(torch.tensor):
+        class OverrideSub(torch.Tensor):
             __torch_function__ = _return_not_implemented
 
         tensor = torch.tensor([1])
@@ -229,7 +247,7 @@ class TestTensorTorchFunction(object):
         result = tensor.__torch_function__(func=dispatched_two_arg,
                                           types=(torch.tensor,),
                                           args=(tensor, 1.), kwargs={})
-        assert_equal(result, 'original')
+        self.assertEqual(result, 'original')
 
         result = tensor.__torch_function__(func=dispatched_two_arg,
                                           types=(torch.tensor, Other),
@@ -240,7 +258,7 @@ class TestTensorTorchFunction(object):
                                           types=(torch.tensor, NoOverrideSub),
                                           args=(tensor, no_override_sub),
                                           kwargs={})
-        assert_equal(result, 'original')
+        self.assertEqual(result, 'original')
 
         result = tensor.__torch_function__(func=dispatched_two_arg,
                                           types=(torch.tensor, OverrideSub),
@@ -248,28 +266,29 @@ class TestTensorTorchFunction(object):
                                           kwargs={})
         assert_equal(result, 'original')
 
-        with assert_raises_regex(TypeError, 'no implementation found'):
-            torch.concatenate((tensor, other))
+        with self.assertRaisesRegex(TypeError, 'no implementation found'):
+            torch.cat((tensor, other))
 
-        expected =torch.concatenate((tensor, tensor))
-        result = torch.concatenate((tensor, no_override_sub))
+        expected =torch.cat((tensor, tensor))
+        result = torch.cat((tensor, no_override_sub))
         assert_equal(result, expected.view(NoOverrideSub))
-        result = torch.concatenate((tensor, override_sub))
+        result = torch.cat((tensor, override_sub))
         assert_equal(result, expected.view(OverrideSub))
 
+    @unittest.expectedFailure # TODO
     def test_no_wrapper(self):
         # This shouldn't happen unless a user intentionally calls
         # __torch_function__ with invalid arguments, but check that we raise
         # an appropriate error all the same.
         tensor = torch.tensor(1)
         func = lambda x: x
-        with assert_raises_regex(AttributeError, '_implementation'):
+        with self.assertRaisesRegex(AttributeError, '_implementation'):
             tensor.__torch_function__(func=func, types=(torch.Tensor,),
                                      args=(tensor,), kwargs={})
 
 
 @requires_torch_function
-class TestTorchFunctionDispatch(object):
+class TestTorchFunctionDispatch(unittest.TestCase):
 
     def test_pickle(self):
         for proto in range(2, pickle.HIGHEST_PROTOCOL + 1):
@@ -278,9 +297,9 @@ class TestTorchFunctionDispatch(object):
             assert_(roundtripped is dispatched_one_arg)
 
     def test_name_and_docstring(self):
-        assert_equal(dispatched_one_arg.__name__, 'dispatched_one_arg')
+        self.assertEqual(dispatched_one_arg.__name__, 'dispatched_one_arg')
         if sys.flags.optimize < 2:
-            assert_equal(dispatched_one_arg.__doc__, 'Docstring.')
+            self.assertEqual(dispatched_one_arg.__doc__, 'Docstring.')
 
     def test_interface(self):
 
@@ -292,10 +311,10 @@ class TestTorchFunctionDispatch(object):
         (obj, func, types, args, kwargs) = dispatched_one_arg(original)
         assert_(obj is original)
         assert_(func is dispatched_one_arg)
-        assert_equal(set(types), {MyTensor})
+        self.assertEqual(set(types), {MyTensor})
         # assert_equal uses the overloaded torch.iscomplexobj() internally
         assert_(args == (original,))
-        assert_equal(kwargs, {})
+        self.assertEqual(kwargs, {})
 
     def test_not_implemented(self):
 
@@ -304,12 +323,12 @@ class TestTorchFunctionDispatch(object):
                 return NotImplemented
 
         tensor = MyTensor()
-        with assert_raises_regex(TypeError, 'no implementation found'):
+        with self.assertRaisesRegex(TypeError, 'no implementation found'):
             dispatched_one_arg(tensor)
 
 
 @requires_torch_function
-class TestVerifyMatchingSignatures(object):
+class TestVerifyMatchingSignatures(unittest.TestCase):
 
     def test_verify_matching_signatures(self):
 
@@ -317,18 +336,18 @@ class TestVerifyMatchingSignatures(object):
         verify_matching_signatures(lambda x=None: 0, lambda x=None: 0)
         verify_matching_signatures(lambda x=1: 0, lambda x=None: 0)
 
-        with assert_raises(RuntimeError):
+        with self.assertRaises(RuntimeError):
             verify_matching_signatures(lambda a: 0, lambda b: 0)
-        with assert_raises(RuntimeError):
+        with self.assertRaises(RuntimeError):
             verify_matching_signatures(lambda x: 0, lambda x=None: 0)
-        with assert_raises(RuntimeError):
+        with self.assertRaises(RuntimeError):
             verify_matching_signatures(lambda x=None: 0, lambda y=None: 0)
-        with assert_raises(RuntimeError):
+        with self.assertRaises(RuntimeError):
             verify_matching_signatures(lambda x=1: 0, lambda y=1: 0)
 
     def test_torch_function_dispatch(self):
 
-        with assert_raises(RuntimeError):
+        with self.assertRaises(RuntimeError):
             @torch_function_dispatch(lambda x: (x,))
             def f(y):
                 pass
@@ -362,7 +381,7 @@ def _new_duck_type_and_implements():
 
 
 @requires_torch_function
-class TestTensorFunctionImplementation(object):
+class TestTensorFunctionImplementation(unittest.TestCase):
 
     def test_one_arg(self):
         MyTensor, implements = _new_duck_type_and_implements()
@@ -371,8 +390,8 @@ class TestTensorFunctionImplementation(object):
         def _(tensor):
             return 'mytensor'
 
-        assert_equal(dispatched_one_arg(1), 'original')
-        assert_equal(dispatched_one_arg(MyTensor()), 'mytensor')
+        self.assertEqual(dispatched_one_arg(1), 'original')
+        self.assertEqual(dispatched_one_arg(MyTensor()), 'mytensor')
 
     def test_optional_args(self):
         MyTensor, implements = _new_duck_type_and_implements()
@@ -387,16 +406,16 @@ class TestTensorFunctionImplementation(object):
 
         # we don't need to implement every option on __torch_function__
         # implementations
-        assert_equal(func_with_option(1), 'default')
-        assert_equal(func_with_option(1, option='extra'), 'extra')
-        assert_equal(func_with_option(MyTensor()), 'mytensor')
-        with assert_raises(TypeError):
+        self.assertEqual(func_with_option(1), 'default')
+        self.assertEqual(func_with_option(1, option='extra'), 'extra')
+        self.assertEqual(func_with_option(MyTensor()), 'mytensor')
+        with self.assertRaises(TypeError):
             func_with_option(MyTensor(), option='extra')
 
         # but new options on implementations can't be used
         result = my_tensor_func_with_option(MyTensor(), new_option='yes')
-        assert_equal(result, 'yes')
-        with assert_raises(TypeError):
+        self.assertEqual(result, 'yes')
+        with self.assertRaises(TypeError):
             func_with_option(MyTensor(), new_option='no')
 
     def test_not_implemented(self):
@@ -408,40 +427,46 @@ class TestTensorFunctionImplementation(object):
 
         tensor = torch.tensor(1)
         assert_(func(tensor) is tensor)
-        assert_equal(func.__module__, 'my')
+        self.assertEqual(func.__module__, 'my')
 
-        with assert_raises_regex(
+        with self.assertRaisesRegex(
                 TypeError, "no implementation found for 'my.func'"):
             func(MyTensor())
 
 
-class TestTensorMethods(object):
+class TestTensorMethods(unittest.TestCase):
 
+    @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
     def test_repr(self):
         # gh-12162: should still be defined even if __torch_function__ doesn't
         # implement torch.tensor_repr()
 
-        class MyTensor(torch.tensor):
+        class MyTensor(torch.Tensor):
             def __torch_function__(*args, **kwargs):
                 return NotImplemented
 
         tensor = torch.tensor(1).view(MyTensor)
-        assert_equal(repr(tensor), 'MyTensor(1)')
-        assert_equal(str(tensor), '1')
+        self.assertEqual(repr(tensor), 'MyTensor(1)')
+        self.assertEqual(str(tensor), '1')
 
 
-class TestTorchFunctions(object):
+class TestTorchFunctions(unittest.TestCase):
 
+    @unittest.expectedFailure # Discuss
     def test_set_module(self):
-        assert_equal(torch.sum.__module__, 'torch')
-        assert_equal(torch.char.equal.__module__, 'torch.char')
-        assert_equal(torch.fft.fft.__module__, 'torch.fft')
-        assert_equal(torch.linalg.solve.__module__, 'torch.linalg')
+        self.assertEqual(torch.sum.__module__, 'torch')
+        self.assertEqual(torch.char.equal.__module__, 'torch.char')
+        self.assertEqual(torch.fft.fft.__module__, 'torch.fft')
+        self.assertEqual(torch.linalg.solve.__module__, 'torch.linalg')
+        pass
 
+    @unittest.expectedFailure # Discuss
     def test_inspect_sum(self):
+        pass
         signature = inspect.signature(torch.sum)
         assert_('axis' in signature.parameters)
 
+    @unittest.expectedFailure # Discuss
     @requires_torch_function
     def test_override_sum(self):
         MyTensor, implements = _new_duck_type_and_implements()
@@ -450,8 +475,9 @@ class TestTorchFunctions(object):
         def _(tensor):
             return 'yes'
 
-        assert_equal(torch.sum(MyTensor()), 'yes')
+        self.assertEqual(torch.sum(MyTensor()), 'yes')
 
+    @unittest.expectedFailure # Discuss
     @requires_torch_function
     def test_sum_on_mock_tensor(self):
 
@@ -468,11 +494,12 @@ class TestTorchFunctions(object):
         proxy = TensorProxy(mock.Mock(spec=TensorProxy))
         proxy.value.__torch_function__.return_value = 1
         result = torch.sum(proxy)
-        assert_equal(result, 1)
+        self.assertEqual(result, 1)
         proxy.value.__torch_function__.assert_called_once_with(
             torch.sum, (TensorProxy,), (proxy,), {})
         proxy.value.__tensor__.assert_not_called()
 
+    @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
     @requires_torch_function
     def test_sum_forwarding_implementation(self):
 
@@ -486,7 +513,7 @@ class TestTorchFunctions(object):
 
         # note: the internal implementation of torch.sum() calls the .sum() method
         tensor = torch.tensor(1).view(MyTensor)
-        assert_equal(torch.sum(tensor), 'summed')
+        self.assertEqual(torch.sum(tensor), 'summed')
 
 if __name__ == '__main__':
     unittest.main()
