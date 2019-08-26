@@ -887,8 +887,8 @@ class TestAutograd(TestCase):
             x.copy_(mu + i)
             ft = torch.tensor([float(i)])
             multiplied = x * ft
-            sum = multiplied.sum()
-            loss += sum
+            s = multiplied.sum()
+            loss += s
         loss.backward()
 
     def test_no_grad(self):
