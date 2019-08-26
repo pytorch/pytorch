@@ -456,7 +456,7 @@ struct ParserImpl {
           lhs_list.push_back(rhs);
           rhs = parseExpOrExpTuple();
         }
-        if (type.present()) {
+        if (type.present() && lhs_list.size() > 1) {
           throw ErrorReport(type.range())
               << "Annotated multiple assignment is not supported in python";
         }
