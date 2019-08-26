@@ -103,6 +103,7 @@ module_tests = [
 torch_nn_modules.module_metadata_map['SampleModule'] = dict(
     cpp_default_constructor_args='(true)',
     cpp_sources=SAMPLE_MODULE_CPP_SOURCE,
+    expected_num_attr_checks=6,
 )
 
 torch.nn.SampleModule = SampleModule

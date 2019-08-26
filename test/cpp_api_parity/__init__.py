@@ -11,6 +11,7 @@ TorchNNTestParams = namedtuple(
         'has_parity',
         'python_module_class',
         'cpp_sources',
+        'expected_num_attr_checks',
         'device',
     ]
 )

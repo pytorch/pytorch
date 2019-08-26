@@ -231,21 +231,21 @@ class TestCppApiParity(common.TestCase):
                     sub_cpp_module_prefix = '{}->{}'.format(cpp_module_prefix, name)
                     stmts = generate_attr_equality_checks(sub_module, sub_script_module_prefix, sub_cpp_module_prefix)
                 for name, param in module._parameters.items():
-                    stmts += CHECK_MODULE_PARAM_EQUALITY.substitute(
+                    stmts.append(CHECK_MODULE_PARAM_EQUALITY.substitute(
                         script_module_prefix=script_module_prefix,
                         cpp_module_prefix=cpp_module_prefix,
-                        param_name=name)
+                        param_name=name))
                 for name, buffer in module._buffers.items():
-                    stmts += CHECK_MODULE_BUFFER_EQUALITY.substitute(
+                    stmts.append(CHECK_MODULE_BUFFER_EQUALITY.substitute(
                         script_module_prefix=script_module_prefix,
                         cpp_module_prefix=cpp_module_prefix,
-                        buffer_name=name)
+                        buffer_name=name))
                 for name, attr in module.__dict__.items():
                     if name not in TORCH_NN_MODULE_IGNORED_ATTRS:
-                        stmts += CHECK_MODULE_ATTR_EQUALITY.substitute(
+                        stmts.append(CHECK_MODULE_ATTR_EQUALITY.substitute(
                             script_module_prefix=script_module_prefix,
                             cpp_module_prefix=cpp_module_prefix,
-                            attr_name=name)
+                            attr_name=name))
                 return stmts
 
             device = test_params.device
@@ -256,7 +256,9 @@ class TestCppApiParity(common.TestCase):
             torch.manual_seed(2)
             module = python_module_class(*python_constructor_args).to(device)
 
-            extra_stmts_str = ''.join(generate_attr_equality_checks(module))
+            extra_stmts = generate_attr_equality_checks(module)
+            assert len(extra_stmts) == test_params.expected_num_attr_checks
+            extra_stmts_str = ''.join(extra_stmts)
             return (([module], device),
                     generate_test_cpp_sources(
                         test_params=test_params, template=TORCH_NN_MODULE_TEST_INIT, extra_stmts=extra_stmts_str))
@@ -407,6 +409,7 @@ def _process_test_params(test_params_dict, module_metadata, device):
         has_parity=test_params_dict.get('has_parity', True),
         python_module_class=getattr(torch.nn, module_name),
         cpp_sources=module_metadata.get('cpp_sources', ''),
+        expected_num_attr_checks=module_metadata.get('expected_num_attr_checks'),
         device=device,
     )
 
