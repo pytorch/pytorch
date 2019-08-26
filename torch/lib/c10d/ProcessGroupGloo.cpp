@@ -1057,18 +1057,26 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
     const c10::Device& device = tensors[0].device();
     const c10::Layout& layout = tensors[0].layout();
 
+    // invalid arguments are detected early here before any calls to nextTag()
+    // which result in the collectiveCounter_ being incremented.
     switch (device.type()) {
-      case at::kCPU:
+      case c10::kCPU:
         break;
-      // TODO - CUDA support
       default:
         invalidArgument("unsupported device type");
+    }
+
+    switch (layout) {
+      case c10::kStrided:
+        break;
+      default:
+        invalidArgument("unsupported layout");
     }
 
     std::shared_ptr<AsyncWork> work;
     const uint32_t tag = nextTag();
     std::shared_ptr<gloo::Context> context = getContext(tag);
-    if (device.type() == at::kCPU) {
+    if (device.type() == c10::kCPU) {
       if (layout == c10::kStrided) {
         work = std::make_shared<AsyncAllreduceCoalescedWork>(
             std::move(context), tensors, opts.reduceOp, tag);

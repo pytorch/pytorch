@@ -759,6 +759,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts = c10d.AllreduceOptions()
             pg.allreduce_coalesced([t1, t3], opts)
 
+        with self.assertRaisesRegex(ValueError, "unsupported layout"):
+            opts = c10d.AllreduceOptions()
+            pg.allreduce_coalesced([t3, t3.clone()], opts)
+
+        with self.assertRaisesRegex(ValueError, "unsupported device type"):
+            opts = c10d.AllreduceOptions()
+            pg.allreduce_coalesced([t1.cuda(), t2.cuda()], opts)
+
     def _test_allreduce_coalesced_basics(self, fn):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
