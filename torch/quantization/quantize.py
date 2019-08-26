@@ -89,8 +89,7 @@ def add_observer(module):
     """
     for child in module.children():
         if type(child) == nnq.FloatFunctional:
-            if hasattr(child, 'qconfig') and child.qconfig is not None:
-                child.observer = child.qconfig.activation()
+            child.observer = child.qconfig.activation()
         else:
             add_observer(child)
 
