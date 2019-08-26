@@ -28,8 +28,8 @@ CAFFE2_API std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, Dimn
 // 2) Check misaligned: If a name `n` is in `names`, then it must appear at
 //    the same index from the right in other.
 // 3) The output names are obtained by unifying the names individually from the right.
-CAFFE2_API optional<std::vector<Dimname>>
-unify_from_right(optional<DimnameList> names, optional<DimnameList> other);
+CAFFE2_API std::vector<Dimname>
+unify_from_right(DimnameList names, DimnameList other);
 
 namespace namedinference {
 
@@ -50,6 +50,9 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
 
 // Used for reduction ops that have a `keepdim` arg.
 void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs, bool keepdim);
+
+// Tensor::copy_ name inference rule.
+void propagate_names_for_copy(Tensor& result, const Tensor& src);
 
 } // namespace namedinference
 
