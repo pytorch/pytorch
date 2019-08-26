@@ -208,10 +208,6 @@ class TestTypePromotion(TestCase):
         # this seems like odd behavior but ints also create float tensors, numpy doesn't have this function.
         self.assertEqual(torch.scalar_tensor(False), torch.tensor(0.))
 
-    def test_bool_ops(self):
-        self.assertEqual(torch.ones(5).norm(1), torch.ones(5).norm(True))
-
-
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
     def setUp(self):

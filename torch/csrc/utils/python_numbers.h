@@ -89,11 +89,6 @@ inline int64_t THPUtils_unpackIndex(PyObject* obj) {
   return THPUtils_unpackLong(obj);
 }
 
-inline bool THPUtils_checkBool(PyObject* obj) {
-  auto result = PyBool_Check(obj);
-  return result;
-}
-
 inline bool THPUtils_unpackBool(PyObject* obj) {
   if (obj == Py_True) {
     return true;
