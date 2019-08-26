@@ -936,8 +936,8 @@ graph(%x : Tensor,
             'conv': qconfig,
             'sub.linear': qconfig
         }
-        m._c = torch._C._jit_pass_insert_observers(m._c, "forward",
-                                                   qconfig_dict)
+        torch._C._jit_pass_insert_observers(m._c, "forward",
+                                            qconfig_dict)
         # check m is not observed
         check_not_observed(str(get_forward(m._c).graph))
         # check conv is observed
