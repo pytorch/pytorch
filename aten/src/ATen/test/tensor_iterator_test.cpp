@@ -96,7 +96,7 @@ AT_FORALL_SCALAR_TYPES(POINTWISE_TEST_ITER_FOR_TYPE)
 TEST(TensorIteratorTest, SerialLoopSingleThread) {
   std::thread::id thread_id = std::this_thread::get_id();
   Tensor out;
-  auto x = at::zeros({10000}, kCPU);
+  auto x = at::zeros({50000}, kCPU);
   auto iter = TensorIterator::unary_op(out, x);
   at::native::cpu_serial_kernel(iter, [=](int a) -> int {
     std::thread::id lambda_thread_id = std::this_thread::get_id();
