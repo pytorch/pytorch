@@ -99,7 +99,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
     });
   } else {
     // Integral types do not allow AVX2 vector optimizations for pow/sqrt/rsqrt.
-    // Trying to implement pow/sqrt/rsqrt as loops in vec256_int.h does not allow
+    // Trying to implement pow/sqrt/rsqrt as loop in vec256_int.h does not allow
     // powering integral tensor to float exponent. That's why we need this code
     // duplication:
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow", [&]() {

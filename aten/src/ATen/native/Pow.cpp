@@ -12,7 +12,7 @@ DEFINE_DISPATCH(pow_tensor_scalar_stub);
 
 Tensor& pow_out(Tensor& result, const Tensor& base, const Tensor& exp) {
   auto iter = TensorIterator::binary_op(result, base, exp,
-                                        /*check_internal_overlap=*/true);
+                                        /*check_mem_overlap=*/true);
   pow_tensor_tensor_stub(iter.device_type(), iter);
   return result;
 }
@@ -28,7 +28,7 @@ Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
     result.copy_(base);
   } else {
     auto iter = TensorIterator::unary_op(result, base,
-                                         /*check_internal_overlap=*/true);
+                                         /*check_mem_overlap=*/true);
     pow_tensor_scalar_stub(iter.device_type(), iter, exp);
   }
   return result;
