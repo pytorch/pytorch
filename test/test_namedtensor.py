@@ -1017,6 +1017,56 @@ class TestNamedTensor(TestCase):
                 args=(create('N:3,H:5'), create('N:3,C:2'), create('W:2,N:5')),
                 maybe_raises_regex='with duplicate names')
 
+    def test_mv(self):
+        for device in torch.testing.get_all_device_types():
+            self._test_name_inference(
+                torch.mv, device=device,
+                args=(create('N:3,C:2'), create('W:2')),
+                expected_names=('N',))
+
+            # left arg is unnamed
+            self._test_name_inference(
+                torch.mv, device=device,
+                args=(create('3,2'), create('W:2')),
+                expected_names=(None,))
+
+            # right arg is unnamed
+            self._test_name_inference(
+                torch.mv, device=device,
+                args=(create('N:3,C:2'), create('2')),
+                expected_names=('N',))
+
+            # out=
+            self._test_name_inference(
+                out_fn(torch.mv), device=device,
+                args=(create('0'), create('N:3,C:2'), create('W:2')),
+                expected_names=('N',))
+
+    def test_addmv(self):
+        for device in torch.testing.get_all_device_types():
+            # full names
+            self._test_name_inference(
+                torch.addmv, device=device,
+                args=(create('N:3'), create('N:3,C:2'), create('H:2')),
+                expected_names=['N'])
+
+            # no name on bias
+            self._test_name_inference(
+                torch.addmv, device=device,
+                args=(create('3'), create('N:3,C:2'), create('H:2')),
+                expected_names=('N',))
+
+            # out=
+            self._test_name_inference(
+                out_fn(torch.addmv), device=device,
+                args=(create('0'), create('N:3'), create('N:3,C:2'), create('H:2')),
+                expected_names=('N',))
+
+            # inplace
+            self._test_name_inference(
+                torch.Tensor.addmv_, device=device,
+                args=(create('N:3'), create('N:3,C:2'), create('H:2')),
+                expected_names=('N',))
 
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
