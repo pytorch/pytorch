@@ -37,23 +37,21 @@ class FloatFunctional(torch.nn.Module):
     def add(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
         r = torch.add(x, y)
-        # TODO: Fix for QAT.
-        self.observer(r)
+        r = self.observer(r)
         return r
 
     r"""Operation equivalent to ``torch.mul``"""
     def mul(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
         r = torch.mul(x, y)
-        # TODO: Fix for QAT.
-        self.observer(r)
+        r = self.observer(r)
         return r
 
     r"""Operation equivalent to ``torch.cat``"""
     def cat(self, x, dim=0):
         # type: (List[Tensor], int) -> Tensor
         r = torch.cat(x, dim=dim)
-        self.observer(r)
+        r = self.observer(r)
         return r
 
 
