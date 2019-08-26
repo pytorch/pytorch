@@ -173,12 +173,9 @@ T quantize_val(double scale, int64_t zero_point, float value) {
 
 template <typename T, int precision>
 void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, size_t count) {
-  fbgemm::Quantize<T>(
-    src,
-    dst,
-    count,
-    fbgemm::TensorQuantizationParams{scale, zero_point, precision}
-  );
+  for (int64_t i = 0; i < 8; ++i) {
+    dst[i] = quantize_val(scale, zero_point, src[i]);
+  }
 }
 
 template <typename T>
