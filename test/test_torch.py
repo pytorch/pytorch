@@ -5555,11 +5555,6 @@ class _TestTorchMixin(torchtest):
         self.assertEqual(torch.CharTensor(5).is_signed(), True)
         self.assertEqual(torch.FloatTensor(5).is_signed(), True)
         self.assertEqual(torch.HalfTensor(10).is_signed(), True)
-        W = torch.rand(2).float()
-        Wq = torch.quantize_linear(W, 0.1, 4, torch.qint8)
-        self.assertTrue(Wq.is_signed())
-        Wq = torch.quantize_linear(W, 0.1, 4, torch.quint8)
-        self.assertFalse(Wq.is_signed())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_is_signed_cuda(self):
@@ -5568,11 +5563,6 @@ class _TestTorchMixin(torchtest):
         self.assertEqual(torch.cuda.CharTensor(5).is_signed(), True)
         self.assertEqual(torch.cuda.FloatTensor(5).is_signed(), True)
         self.assertEqual(torch.cuda.HalfTensor(10).is_signed(), True)
-        W = torch.rand(2).float()
-        Wq = torch.quantize_linear(W, 0.1, 4, torch.qint8)
-        self.assertEqual(Wq.is_signed(), True)
-        Wq = torch.quantize_linear(W, 0.1, 4, torch.quint8)
-        self.assertEqual(Wq.is_signed(), False)
 
     @staticmethod
     def _test_solve(self, cast):
