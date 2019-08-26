@@ -54,6 +54,13 @@ void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRe
 // Tensor::copy_ name inference rule.
 void propagate_names_for_copy(Tensor& result, const Tensor& src);
 
+// result = m1 @ m2 + bias
+void propagate_names_for_addmm(
+    TensorImpl* result,
+    /*const*/TensorImpl* m1,
+    /*const*/TensorImpl* m2,
+    /*const*/TensorImpl* bias);
+
 } // namespace namedinference
 
 } // namespace at

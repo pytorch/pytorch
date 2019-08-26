@@ -3,6 +3,9 @@
 #else
 
 #include "ATen/cuda/CUDAContext.h"
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #define ERROR_ONLY_FP_TYPES(func) \
   THError("%s for CUDA tensors only supports floating-point types. Try converting the tensors with .float()", func);
@@ -255,6 +258,12 @@ void THCTensor_(addr)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor *
 
 void THCTensor_(addmm)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor *t, scalar_t alpha, THCTensor *m1, THCTensor *m2)
 {
+#ifdef BUILD_NAMEDTENSOR
+  // The logic in this function changes around the pointers, so save a copy of the originals.
+  THCTensor* orig_m1 = m1;
+  THCTensor* orig_m2 = m2;
+#endif
+
 #if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
 
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, m1, m2));
@@ -284,6 +293,9 @@ void THCTensor_(addmm)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
   {
     THCTensor_(resizeAs)(state, r_, t);
     if (ScalarConvert<scalar_t, double>::to(beta) != 0.0) {
+#ifdef BUILD_NAMEDTENSOR
+      at::NoNamesGuard guard;
+#endif
       THCTensor_(copy)(state, r_, t);
     }
   }
@@ -413,6 +425,10 @@ void THCTensor_(addmm)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
   }
 #else
   ERROR_ONLY_FP_TYPES("addmm");
+#endif
+
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmm(r_, orig_m1, orig_m2, t);
 #endif
 }
 
