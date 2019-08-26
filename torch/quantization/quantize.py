@@ -227,7 +227,7 @@ DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.Linear: nnqd.Linear
 }
 
-def quantize(model, run_fn=None, run_args=None, mapping=DEFAULT_MODULE_MAPPING):
+def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
     r"""Converts a float model to quantized model.
 
     First it will prepare the model for calibration or training, then it calls
@@ -246,8 +246,7 @@ def quantize(model, run_fn=None, run_args=None, mapping=DEFAULT_MODULE_MAPPING):
     """
     model.eval()
     model = prepare(model)
-    if run_fn:
-        run_fn(model, run_args)
+    run_fn(model, run_args)
     convert(model, mapping)
     return model
 
