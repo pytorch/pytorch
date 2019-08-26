@@ -1158,6 +1158,70 @@ graph(%x : Tensor,
                    .check_next('prim::CallMethod[name="forward"](%observer_for_') \
                    .run(str(m._c._get_method("forward").graph))
 
+    def test_insert_quant_dequant(self):
+        class Observer(torch.nn.Module):
+            def __init__(self):
+                super(Observer, self).__init__()
+
+            def forward(self, x):
+                return x
+
+            @torch.jit.export
+            def calculate_qparams(self):
+                return torch.tensor([2.0]), torch.tensor([3])
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 5, 3).float()
+
+            def forward(self, x):
+                return self.conv(x)
+
+        # re-enable later
+        torch._C._jit_set_inline_everything_mode(True)
+        m = torch.jit.script(M())
+        observer = torch.jit.script(Observer())
+        torch._C._jit_pass_constant_propagation(m.graph)
+        m._c = torch._C._jit_pass_prepare_quant(m._c, "forward",
+                                                observer._c,
+                                                observer._c)
+        data = torch.randn(1, 3, 10, 10, dtype=torch.float)
+
+        def get_forward(m):
+            return m._c._get_method('forward')
+        get_forward(m)(data)
+        # right now the result will have extra observer modules
+        # will fix later when we figure out how to remove modules
+        torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
+
+        get_forward(m)(data)
+        FileCheck().check("aten::quantize_linear") \
+                   .check_next("aten::int_repr") \
+                   .check_next("aten::_dequantize_linear") \
+                   .check("aten::quantize_linear") \
+                   .check_next("aten::int_repr") \
+                   .check_next("aten::_dequantize_linear") \
+                   .check("aten::quantize_linear") \
+                   .check_next("aten::int_repr") \
+                   .check_next("aten::_dequantize_linear") \
+                   .check("aten::conv2d") \
+                   .check("aten::quantize_linear") \
+                   .check_next("aten::int_repr") \
+                   .check_next("aten::_dequantize_linear") \
+                   .check("return") \
+                   .run(str(m._c._get_method('forward').graph))
+        # Test for inline
+        # FileCheck().check("aten::quantize_linear") \
+        #            .check_next("aten::int_repr") \
+        #            .check_next("aten::_dequantize_linear") \
+        #            .check("prim::CallMethod[name=\"forward\"]") \
+        #            .check("aten::quantize_linear") \
+        #            .check_next("aten::int_repr") \
+        #            .check_next("aten::_dequantize_linear") \
+        #            .check("return") \
+        #            .run(str(get_forward(m).graph))
+
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
         # --> mulmul(mulmul(x,y,z), x, y)
