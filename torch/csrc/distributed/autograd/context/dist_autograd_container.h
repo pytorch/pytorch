@@ -9,7 +9,6 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
-
 // Singleton class per worker which is responsible for storing the distributed
 // autograd context for each autograd pass and also cleans up data for an
 // autograd pass once its done.
