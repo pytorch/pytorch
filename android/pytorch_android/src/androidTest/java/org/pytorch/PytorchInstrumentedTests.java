@@ -214,6 +214,47 @@ public class PytorchInstrumentedTests {
     module.runMethod("test_undefined_method_throws_exception");
   }
 
+  @Test
+  public void testTensorMethods() {
+    long[] dims = new long[] {1, 3, 224, 224};
+    final int numel = (int) Tensor.numElements(dims);
+    int[] ints = new int[numel];
+    float[] floats = new float[numel];
+
+    byte[] bytes = new byte[numel];
+    for (int i = 0; i < numel; i++) {
+      bytes[i] = (byte) ((i % 255) - 128);
+      ints[i] = i;
+      floats[i] = i / 1000.f;
+    }
+
+    Tensor tensorBytes = Tensor.newByteTensor(dims, bytes);
+    assertTrue(tensorBytes.isByteTensor());
+    assertArrayEquals(bytes, tensorBytes.getDataAsByteArray());
+
+    Tensor tensorInts = Tensor.newIntTensor(dims, ints);
+    assertTrue(tensorInts.isIntTensor());
+    assertArrayEquals(ints, tensorInts.getDataAsIntArray());
+
+    Tensor tensorFloats = Tensor.newFloatTensor(dims, floats);
+    assertTrue(tensorFloats.isFloatTensor());
+    float[] floatsOut = tensorFloats.getDataAsFloatArray();
+    assertTrue(floatsOut.length == numel);
+    for (int i = 0; i < numel; i++) {
+      assertTrue(floats[i] == floatsOut[i]);
+    }
+  }
+
+  @Test(expected = IllegalStateException.class)
+  public void testTensorIllegalStateOnWrongType() {
+    long[] dims = new long[] {1, 3, 224, 224};
+    final int numel = (int) Tensor.numElements(dims);
+    float[] floats = new float[numel];
+    Tensor tensorFloats = Tensor.newFloatTensor(dims, floats);
+    assertTrue(tensorFloats.isFloatTensor());
+    tensorFloats.getDataAsByteArray();
+  }
+
   private static String assetFilePath(String assetName) throws IOException {
     final Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
     File file = new File(appContext.getFilesDir(), assetName);
