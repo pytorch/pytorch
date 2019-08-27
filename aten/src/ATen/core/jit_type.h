@@ -60,8 +60,7 @@ CAFFE2_API const char* typeKindToString(TypeKind kind);
 struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
-struct CAFFE2_API 
-Type : std::enable_shared_from_this<Type> {
+struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
  private:
   TypeKind kind_;
 

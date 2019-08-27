@@ -198,7 +198,10 @@ inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
 }
 
 // covariant subtyping of list of Arguments
-inline bool isSubtypeOfList(ArrayRef<Argument> child, ArrayRef<Argument> parent, std::ostream* why_not) {
+inline bool isSubtypeOfList(
+    ArrayRef<Argument> child,
+    ArrayRef<Argument> parent,
+    std::ostream* why_not) {
   if (child.size() != parent.size()) {
     return false;
   }
@@ -215,12 +218,16 @@ inline bool isSubtypeOfList(ArrayRef<Argument> child, ArrayRef<Argument> parent,
   return true;
 }
 
-inline bool FunctionSchema::isSubtypeOf(const FunctionSchema& rhs, bool as_method, std::ostream* why_not) const {
+inline bool FunctionSchema::isSubtypeOf(
+    const FunctionSchema& rhs,
+    bool as_method,
+    std::ostream* why_not) const {
   size_t start = as_method ? 1 : 0;
   // functions are covariant in arguments but contravariant in returns
   return isSubtypeOfList(
              ArrayRef<Argument>(arguments()).slice(start),
-             ArrayRef<Argument>(rhs.arguments()).slice(start), why_not) &&
+             ArrayRef<Argument>(rhs.arguments()).slice(start),
+             why_not) &&
       isSubtypeOfList(rhs.returns(), returns(), why_not);
 }
 
