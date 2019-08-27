@@ -12,11 +12,10 @@ bool NamedTensorMeta::has_names() const {
       });
 }
 
-/// thread_local is a feature that is not enabled by Caffe2 mobile
-/// build (e.g. iOS). Therefore, we only provide `at::GradMode`
-/// when we are not in mobile build or when FEATURE_TORCH_MOBILE
-/// is on.
-#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
+/// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
+/// thread_local is not supported. In that case, we don't provide
+/// `at::NonVariableTypeMode`.
+#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
 
 thread_local bool NamesMode_enabled = true;
 
