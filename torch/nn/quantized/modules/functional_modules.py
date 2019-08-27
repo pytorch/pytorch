@@ -96,6 +96,24 @@ class QFunctional(torch.nn.Module):
     """
     def __init__(self):
         super(QFunctional, self).__init__()
+        self.scale = 1.0
+        self.zero_point = 0
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(QFunctional, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'scale'] = torch.tensor(self.scale)
+        destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+
+        self.scale = float(state_dict[prefix + 'scale'])
+        state_dict.pop(prefix + 'scale')
+
+        self.zero_point = int(state_dict[prefix + 'zero_point'])
+        state_dict.pop(prefix + 'zero_point')
+        super(QFunctional, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                       missing_keys, unexpected_keys, error_msgs)
 
     def forward(self, x):
         raise RuntimeError("Functional is not intended to use the " +
