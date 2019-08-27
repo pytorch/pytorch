@@ -19,7 +19,7 @@ namespace at {
 namespace vec256 {
 namespace {
 
-#if defined(__AVX2__) && !defined(_MSC_VER)
+#if defined(__AVX__) && !defined(_MSC_VER)
 
 #include "immintrin.h"
 
