@@ -98,6 +98,25 @@ Tensor& neg_out(Tensor& result, const Tensor& self) {
   return result;
 }
 
+Tensor sign(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::sign_out(result, self);
+}
+
+Tensor& sign_(Tensor& self) {
+  return at::sign_out(self, self);
+}
+
+Tensor& sign_out(Tensor& result, const Tensor& self) {
+  auto iter = TensorIterator::unary_op(result, self,
+      /*check_internal_overlap=*/true);
+  sign_stub(iter.device_type(), iter);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(result, self);
+#endif
+  return result;
+}
+
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
@@ -263,6 +282,7 @@ DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
 DEFINE_DISPATCH(rsqrt_stub);
 DEFINE_DISPATCH(sigmoid_stub);
+DEFINE_DISPATCH(sign_stub);
 DEFINE_DISPATCH(sin_stub);
 DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);

@@ -400,6 +400,40 @@ class _TestTorchMixin(torchtest):
                         res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2, prec)
 
+    def test_sign_cpu(self):
+        for dtype in torch.testing.get_all_math_dtypes('cpu'):
+            for size in[(10, 10), (100, 100)]:
+                if dtype.is_floating_point:
+                    a = torch.rand(size=size, dtype=dtype)
+                elif dtype == torch.uint8:
+                    a = torch.randint(1, 5, size=size, dtype=dtype)
+                else:
+                    a = torch.randint(-5, 5, size=size, dtype=dtype)
+                b = a.numpy()
+                expected = b.sign()
+                actual = a.sign().numpy()
+                self.assertEqual(expected, actual)
+
+    def test_bool_sign_cpu(self):
+        for size in[(10, 10), (100, 100)]:
+            a = torch.randint(0, 1, size=size, dtype=torch.bool)
+            r = a.sign()
+            mask = a ^ r
+            self.assertTrue(mask.all().item())
+
+        for dtype in torch.testing.get_all_math_dtypes('cpu'):
+            for size in[(10, 10), (100, 100)]:
+                if dtype.is_floating_point:
+                    a = torch.rand(size=size, dtype=dtype)
+                elif dtype == torch.uint8:
+                    a = torch.randint(1, 5, size=size, dtype=dtype)
+                else:
+                    a = torch.randint(-5, 5, size=size, dtype=dtype)
+                b = a.numpy()
+                expected = b.sign()
+                actual = a.sign().numpy()
+                self.assertEqual(expected, actual)
+
     def test_logical_any(self):
         for device in torch.testing.get_all_device_types():
             x = torch.zeros([2, 3, 400], dtype=torch.uint8, device=device)

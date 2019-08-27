@@ -89,3 +89,8 @@ Date:  February 1996
 
 #undef CENTRAL_RANGE
 
+template <typename T>
+static inline int sgn(T val) {
+  return (T(0) < val) - (val < T(0));
+}
+

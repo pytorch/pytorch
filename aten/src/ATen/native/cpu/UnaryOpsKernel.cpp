@@ -141,6 +141,29 @@ static void erfinv_kernel(TensorIterator& iter) {
   });
 }
 
+static void sign_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Byte) {
+    auto one_vec = Vec256<uint8_t>(1);
+    cpu_kernel_vec(
+        iter,
+        [=](uint8_t a) -> uint8_t { return a & 1; },
+        [=](Vec256<uint8_t> a) { return a & one_vec; });
+  } else if (iter.dtype() == ScalarType::Bool) {
+    cpu_kernel_vec(
+        iter,
+        [=](bool a) -> bool { return !a; },
+        [=](Vec256<bool> a) { return a == false; });
+  } else {
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), "sign_cpu", [&]() {
+      auto one_vec = Vec256<scalar_t>((scalar_t)(1));
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return sgn(a); },
+          [=](Vec256<scalar_t> a) { return ((a > 0) & one_vec) | (a < 0); });
+    });
+  }
+}
+
 #if !AT_MKL_ENABLED()
 void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
   // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
@@ -258,6 +281,7 @@ REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel);
+REGISTER_DISPATCH(sign_stub, &sign_kernel);
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)

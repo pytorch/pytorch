@@ -1918,10 +1918,11 @@
 [[
   name: _th_sign
   cname: sign
-  cpu_bool: True
   cuda_bool: True
   variants:
     - function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1932,6 +1933,8 @@
   name: _th_sign_
   cname: sign
   variants: function
+  backends:
+    - CUDA
   return: self
   arguments:
     - THTensor* self
