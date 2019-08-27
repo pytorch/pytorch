@@ -31,3 +31,14 @@ C10_API const char* toString(TensorTypeId);
 C10_API std::ostream& operator<<(std::ostream&, TensorTypeId);
 
 } // namespace c10
+
+// NB: You really shouldn't use this instance; this enum is guaranteed
+// to be pretty small so a regular array should be acceptable.
+namespace std {
+template <>
+struct hash<c10::TensorTypeId> {
+  size_t operator()(c10::TensorTypeId x) const {
+    return static_cast<size_t>(x);
+  }
+};
+}
