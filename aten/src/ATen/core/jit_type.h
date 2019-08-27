@@ -741,11 +741,16 @@ struct NamedType;
 using NamedTypePtr = std::shared_ptr<NamedType>;
 
 struct CAFFE2_API NamedType : public Type {
-  NamedType(TypeKind tk) : Type(tk) {}
+  NamedType(TypeKind tk, c10::optional<QualifiedName> name)
+      : Type(tk), name_(std::move(name)) {}
 
   // Fully qualified name of type
   // Looks like: "foo.bar.Baz".
-  virtual const c10::optional<QualifiedName>& name() const = 0;
+  const c10::optional<QualifiedName>& name() const {
+    return name_;
+  }
+private:
+  c10::optional<QualifiedName> name_;
 };
 
 struct TupleType;
@@ -770,10 +775,6 @@ struct CAFFE2_API TupleType : public NamedType {
   
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
-  }
-
-  const c10::optional<c10::QualifiedName>& name() const override {
-    return name_;
   }
 
   bool operator==(const Type& rhs) const override;
@@ -823,7 +824,6 @@ struct CAFFE2_API TupleType : public NamedType {
 
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
-  c10::optional<c10::QualifiedName> name_;
   std::shared_ptr<FunctionSchema> schema_;
 };
 
@@ -982,15 +982,9 @@ struct CAFFE2_API FunctionType : public NamedType {
   }
   static const TypeKind Kind = TypeKind::FunctionType;
 
-  const c10::optional<c10::QualifiedName>& name() const override {
-    return name_;
-  }
-
  private:
   FunctionType(Function* function);
   Function* function_;
-  // Holder for the name so we can return a const ref
-  c10::optional<c10::QualifiedName> name_;
 };
 
 struct NoneType;
@@ -1313,10 +1307,6 @@ struct CAFFE2_API ClassType : public NamedType {
     return n.qualifiedName();
   }
 
-  const c10::optional<c10::QualifiedName>& name() const override {
-    return name_;
-  }
-
   TypePtr getAttribute(const std::string& name) const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t pos = 0;
@@ -1415,7 +1405,7 @@ struct CAFFE2_API ClassType : public NamedType {
   ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
 
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
-    auto ptr = ClassType::create(name_, compilation_unit_);
+    auto ptr = ClassType::create(name(), compilation_unit_);
     AT_ASSERT(numAttributes() == contained_types.size());
     for(size_t i = 0; i < attributeNames_.size(); ++i) {
       AT_ASSERT(attributeTypes_[i]->isSubtypeOf(contained_types[i]));
@@ -1462,7 +1452,6 @@ struct CAFFE2_API ClassType : public NamedType {
   // List of methods associated with this class.
   std::vector<Function*> methods_;
 
-  c10::optional<QualifiedName> name_;
 };
 
 } // namespace c10
