@@ -912,6 +912,14 @@ def all_reduce_coalesced(tensors,
                          group=group.WORLD,
                          async_op=False):
     """
+    WARNING: at this time individual shape checking is not implemented across nodes.
+    For example, if the rank 0 node passes [torch.rand(4), torch.rand(2)] and the
+    rank 1 node passes [torch.rand(2), torch.rand(2), torch.rand(2)], the allreduce
+    operation will proceed without complaint and return erroneous outputs. This lack
+    of shape checking results in significant performance improvements but users of this
+    function should take extra care to ensure that each node passes in tensors whose
+    shapes match across nodes.
+
     Reduces each tensor in tensors (residing on the same device) across all machines
     in such a way that all get the final result.
 
