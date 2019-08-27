@@ -230,19 +230,19 @@ class RpcTest(MultiProcessTestCase):
 
     @_wrap_with_rpc
     def test_py_multi_async_call(self):
-        if self.rank == 0:
-            n = self.rank + 1
-            dst_rank = n % self.world_size
-            fut1 = dist.rpc('worker{}'.format(dst_rank),
-                            my_class.my_static_method,
-                            args=(n + 10,),
-                            async_call=True)
-            fut2 = dist.rpc('worker{}'.format(dst_rank),
-                            min,
-                            args=(n, n + 1, n + 2),
-                            async_call=True)
-            self.assertEqual(fut1.wait(), my_class.my_static_method(n + 10))
-            self.assertEqual(fut2.wait(), min(n, n + 1, n + 2))
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        dst_worker_id = dist.get_worker_id('worker{}'.format(dst_rank))
+        fut1 = dist.rpc(dst_worker_id,
+                        my_class.my_static_method,
+                        args=(n + 10,),
+                        async_call=True)
+        fut2 = dist.rpc(dst_worker_id,
+                        min,
+                        args=(n, n + 1, n + 2),
+                        async_call=True)
+        self.assertEqual(fut1.wait(), my_class.my_static_method(n + 10))
+        self.assertEqual(fut2.wait(), min(n, n + 1, n + 2))
 
     @_wrap_with_rpc
     def test_py_no_return_result(self):
