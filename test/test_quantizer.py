@@ -149,7 +149,11 @@ class QuantTemplate:
     def getQParamDict(self):
         return self.qparam_dict
 
-
+@unittest.skipIf(
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
+)
 class QuantizerTestCase(TestCase):
     @_inline_everything
     def test_compare_qparam_eager_script_default(self):
