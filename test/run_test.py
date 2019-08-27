@@ -20,6 +20,7 @@ from torch._six import PY2
 
 TESTS = [
     'autograd',
+    'cpp_api_parity',
     'cpp_extensions',
     'c10d',
     'c10d_spawn',
@@ -70,6 +71,7 @@ WINDOWS_BLACKLIST = [
 
 ROCM_BLACKLIST = [
     'c10d',
+    'cpp_api_parity',
     'cpp_extensions',
     'distributed',
     'multiprocessing',
