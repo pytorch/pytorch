@@ -112,11 +112,11 @@ def wrap_nn(thnn_h_path, install_dir, template_path):
         os.makedirs(install_dir)
     except OSError:
         pass
-    with open(os.path.join(install_dir, 'THNN.cwrap'), 'w') as f:
-        f.write(wrapper)
-    cwrap(os.path.join(install_dir, 'THNN.cwrap'),
-          plugins=[NNExtension('torch._C._THNN'), NullableArguments()],
-          template_path=template_path)
+    #with open(os.path.join(install_dir, 'THNN.cwrap'), 'w') as f:
+    #    f.write(wrapper)
+    #cwrap(os.path.join(install_dir, 'THNN.cwrap'),
+    #      plugins=[NNExtension('torch._C._THNN'), NullableArguments()],
+    #      template_path=template_path)
 
 
 def wrap_cunn(thcunn_h_path, install_dir, template_path):
