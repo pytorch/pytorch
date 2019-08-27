@@ -376,7 +376,7 @@ struct CodeImpl {
     insertBailoutBlocks();
   }
 
-  void insertInstruction(OperatorCode op, int64_t X = 0, uint64_t N = 0) {
+  void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
     instructions_.emplace_back(op, X, N);
     instructions_source_.emplace_back(current_node_);
 
@@ -439,7 +439,7 @@ struct CodeImpl {
       int reg = registerFor(input);
       bool moved = input->uses().size() == ++use_count_[input];
 
-      OperatorCode op;
+      OpCode op;
       if (input->node()->kind() == prim::Constant) {
         op = LOADC;
       } else if (drop) {
