@@ -13,6 +13,7 @@ namespace jit {
 
 using QConfig = std::tuple<script::Module, script::Module>;
 using QConfigDict = std::unordered_map<std::string, QConfig>;
+using ModuleQConfigMap = std::unordered_map<const script::Module*, c10::optional<QConfig>>;
 
 /** \brief Propagates QParams through nodes that are not supposed to change it.
  *
