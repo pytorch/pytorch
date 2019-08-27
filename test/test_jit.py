@@ -18510,7 +18510,6 @@ class TestClassType(JitTestCase):
         @torch.jit.script
         def as_interface(x):
             # type: (OneTwo) -> OneTwo
-            x.two(torch.rand(3, 4))
             return x
 
         @torch.jit.script

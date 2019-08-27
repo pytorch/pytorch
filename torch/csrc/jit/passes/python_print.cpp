@@ -757,6 +757,8 @@ struct PythonPrintPass {
       if (tupleType->name()) {
         registerDependency(tupleType);
       }
+    } else if (const auto interfaceType = type->cast<InterfaceType>()) {
+      registerDependency(interfaceType);
     }
     for (const auto& containedType : type->containedTypes()) {
       registerClassDependencies(containedType);
