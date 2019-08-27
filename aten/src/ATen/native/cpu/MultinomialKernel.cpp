@@ -16,7 +16,7 @@ void multinomial_apply(Tensor& self, const Tensor& prob_dist, const int64_t n_sa
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 
-  int64_t n_categories = self.size(-1);
+  int64_t n_categories = prob_dist.size(-1);
   int64_t n_dist = prob_dist.dim() > 1 ? prob_dist.size(-2) : 1;
 
   /* cumulative probability distribution vector */
@@ -26,13 +26,13 @@ void multinomial_apply(Tensor& self, const Tensor& prob_dist, const int64_t n_sa
   scalar_t * const cum_dist_ptr = cum_dist.data_ptr<scalar_t>();
   int64_t * const self_ptr = self.data_ptr<int64_t>();
 
-  auto prod_dist_stride_0 = prob_dist.stride(-1);
-  auto prod_dist_stride_1 = prob_dist.dim() > 1 ? prob_dist.stride(-2) : 0;
+  auto prod_dist_stride_0 = prob_dist.dim() > 1 ? prob_dist.stride(-2) : 0;
+  auto prod_dist_stride_1 = prob_dist.stride(-1);
 
   auto cum_dist_stride_0 = cum_dist.stride(0);
 
-  auto self_dist_stride_0 = self.stride(-1);
-  auto self_dist_stride_1 = self.dim() > 1 ? self.stride(-2) : 0;
+  auto self_dist_stride_0 = self.dim() > 1 ? self.stride(-2) : 0;
+  auto self_dist_stride_1 = self.stride(-1);
 
   for (int64_t i = 0; i < n_dist; i++) {
     /* Get normalized cumulative distribution from prob distribution */
