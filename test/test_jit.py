@@ -231,24 +231,6 @@ def _sum_of_list(tensorlist):
     return s
 
 
-# helper function to generate test qparam
-def _helper_generate_qparam(script_module, input_data):
-    class TestGenQParam:
-        def __init__(self, qscheme):
-            self.qscheme = qscheme
-            self.qparam_dict = {}
-
-        def observer(self, x, name):
-            if name not in self.qparam_dict:
-                self.qparam_dict[name] = []
-            self.qparam_dict.update({name : (self.qscheme, 1.0, 0)})
-            return x
-    activationObj = TestGenQParam(qscheme='per_tensor_quant')
-    torch._C._jit_pass_insert_observers(script_module._c, "forward", activationObj.observer)
-    script_module.forward(input_data)
-    return activationObj.qparam_dict
-
-
 # has to be at top level or Pickle complains
 class FooToPickle(torch.nn.Module):  # noqa T484
     def __init__(self):
@@ -892,267 +874,6 @@ graph(%x : Tensor,
         self.run_pass('cse', graph)
         FileCheck().run(input_str, graph)
 
-    def test_expand_propagate_qinfo(self):
-        pass
-
-    def test_insert_observers(self):
-        x1 = torch.tensor([0.4, 0.3])
-        y1 = torch.tensor([0.7, 0.5])
-        x2 = torch.tensor([0.1, 0.9])
-        y2 = torch.tensor([1.1, 1.9])
-
-        # Function that we will use as a graph
-        def fn(x, y):
-            p = x + y
-            z = x - y
-            return p * z
-
-        # Custom observer function
-        value_stats = {}
-
-        def observe(x, name):
-            if name not in value_stats:
-                value_stats[name] = []
-            value_stats[name].append(x)
-            return x
-
-        m = torch.jit.script(fn)
-        # Insert observers
-        torch._C._jit_pass_insert_observers(m, observe)
-
-        # Collect statistics
-        m(x1, y1)
-
-        # Check what we collected
-        self.assertEqual(len(value_stats), 5)
-
-        # Run one more time and check the updated statistics
-        m(x2, y2)
-        self.assertEqual(len(value_stats), 5)
-
-    @_inline_everything
-    def test_insert_quantdequant_consecutive_qnodes_script(self):
-        input_data = torch.ones([1, 1, 5, 5])
-
-        class testModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super(testModule, self).__init__()
-                self.conv1 = nn.Conv2d(1, 20, 5, 1)
-
-            @torch.jit.script_method
-            def forward(self, x):
-                x = F.relu(self.conv1(x))
-                return x
-
-        scriptM = testModule()
-
-        # Constant Propagation step is performed because this pass is intended
-        # to insert quant-dequant nodes for quantizable tensors. The type analysis
-        # happens as part of this jit pass
-        torch._C._jit_pass_constant_propagation(scriptM.graph)
-        # TODO: Build the qparam_dict from parse_ir directly for this pass
-        qparam_dict = _helper_generate_qparam(scriptM, input_data)
-        torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward",
-                                               qparam_dict)
-
-        # We expect to see quant-dequant node before and after
-        # both conv and relu nodes and at external output since relu
-        # is last node. Constant nodes correspond to params for the
-        # quantization nodes
-        FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("_dequantize_linear") \
-                   .check("conv2d").check("quantize_linear") \
-                   .check_next("int_repr").check_next("_dequantize_linear") \
-                   .check("relu").check("quantize_linear") \
-                   .check_next("int_repr").check_next("_dequantize_linear") \
-                   .check_next("return").run(str(scriptM.graph))
-
-    def test_insert_quantdequant_consecutive_qnodes_trace(self):
-        input_data = torch.ones([1, 1, 5, 5])
-
-        class testModule(torch.nn.Module):
-            def __init__(self):
-                super(testModule, self).__init__()
-                self.conv1 = nn.Conv2d(1, 20, 5, 1)
-
-            def forward(self, x):
-                x = F.relu(self.conv1(x))
-                return x
-
-        scriptM = torch.jit.trace(testModule(), (input_data))
-
-        qparam_dict = _helper_generate_qparam(scriptM, input_data)
-        if not len(qparam_dict):
-            return
-        torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward",
-                                               qparam_dict)
-
-        # We expect to see quant-dequant node before and after
-        # both conv and relu nodes and at external output since relu
-        # is last node. Constant nodes correspond to params for the
-        # quantization nodes
-        FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("_dequantize_linear") \
-                   .check("_convolution").check("quantize_linear") \
-                   .check_next("int_repr").check_next("_dequantize_linear") \
-                   .check("relu").check("quantize_linear") \
-                   .check_next("int_repr").check_next("_dequantize_linear") \
-                   .check_next("return").run(str(scriptM.graph))
-
-    @_inline_everything
-    def test_insert_quantdequant_single_qnode(self):
-        input_data = torch.ones([1, 1, 5, 5])
-
-        class testModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super(testModule, self).__init__()
-                self.conv1 = nn.Conv2d(1, 20, 5, 1)
-
-            @torch.jit.script_method
-            def forward(self, x):
-                x = self.conv1(x)
-                x1 = torch.add(x, 1)
-                return x1
-
-        scriptM = testModule()
-
-        # Constant Propagation step is performed because this pass is intended
-        # to insert quant-dequant nodes for quantizable tensors. The type analysis
-        # happens as part of this jit pass
-        torch._C._jit_pass_constant_propagation(scriptM.graph)
-
-        qparam_dict = _helper_generate_qparam(scriptM, input_data)
-        torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward",
-                                               qparam_dict)
-
-        # We expect to see quant-dequant node before and after
-        # both conv and no quant-dequant after add. Constant nodes correspond
-        # to params for the quantization nodes
-        FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("_dequantize_linear") \
-                   .check("conv2d").check("quantize_linear") \
-                   .check_next("int_repr").check_next("_dequantize_linear") \
-                   .check_next("add").check_next("return").run(str(scriptM.graph))
-
-    @_inline_everything
-    def test_insert_quantdequant_alternate_qnode(self):
-        input_data = torch.ones([1, 1, 5, 5])
-
-        class testModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super(testModule, self).__init__()
-                self.conv1 = nn.Conv2d(1, 20, 5, 1)
-
-            @torch.jit.script_method
-            def forward(self, x):
-                x = self.conv1(x)
-                x1 = torch.add(x, 1)
-                x2 = F.relu(x1)
-                return x2
-
-        scriptM = testModule()
-
-        # Constant Propagation step is performed because this pass is intended
-        # to insert quant-dequant nodes for quantizable tensors. The type analysis
-        # happens as part of this jit pass
-        torch._C._jit_pass_constant_propagation(scriptM.graph)
-
-        qparam_dict = _helper_generate_qparam(scriptM, input_data)
-        torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward",
-                                               qparam_dict)
-
-        # We expect to see quant-dequant node before and after
-        # conv, relu and add. Constant nodes correspond to params for the
-        # quantization nodes
-        FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("_dequantize_linear").check("conv2d") \
-                   .check("quantize_linear").check_next("int_repr") \
-                   .check_next("_dequantize_linear").run(str(scriptM.graph))
-        FileCheck().check("add").check("quantize_linear") \
-                   .check_next("int_repr").check("_dequantize_linear") \
-                   .run(str(scriptM.graph))
-
-    @_inline_everything
-    def test_insert_quantdequant_for_weight(self):
-        input_data = torch.ones([1, 1, 1, 1])
-
-        class testModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super(testModule, self).__init__()
-                self.conv1 = nn.Conv2d(1, 1, 1, 1)
-
-            @torch.jit.script_method
-            def forward(self, x):
-                x = self.conv1(x)
-                return x
-
-        def getQParamFunc(value):
-            scale = 0.5
-            zero_point = 1
-            return 'per_tensor_quant', scale, zero_point
-
-        scriptModule = testModule()
-
-        # Constant Propagation step is performed because this pass is intended
-        # to insert quant-dequant nodes for quantizable tensors. The type analysis
-        # happens as part of this jit pass
-        torch._C._jit_pass_constant_propagation(scriptModule.graph)
-        torch._C._jit_pass_insert_quantdequant_for_weight_bias(scriptModule._c,
-                                                               "forward",
-                                                               "weight",
-                                                               getQParamFunc)
-
-        # We expect to see quant-dequant node before conv node for weight.
-        FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("_dequantize_linear") \
-                   .check("conv2d").run(str(scriptModule.graph))
-
-    @_inline_everything
-    def test_insert_quantdequant_for_bias(self):
-        # Inserting quant-dequant nodes for bias requires scale info present for
-        # activation and weight so q-dq pass done first for these inputs.
-
-        class testModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super(testModule, self).__init__()
-                self.conv1 = nn.Conv2d(1, 1, 1, 1).float()
-
-            @torch.jit.script_method
-            def forward(self, x):
-                x = x.quantize_linear(1.0, 0, torch.quint8)
-                x = x.int_repr()
-                x = torch._dequantize_linear(x, 1.0, 0, torch.quint8)
-                x = self.conv1(x)
-                return x
-
-        def getQParamFuncW(value):
-            return 'per_tensor_quant', 0.5, 1
-
-        def getQParamFunc(input_scale, weight_scale):
-            scale = 1 / input_scale / weight_scale
-            zero_point = 0
-            return 'per_tensor_quant', scale, zero_point
-
-        scriptModule = testModule()
-
-        torch._C._jit_pass_constant_propagation(scriptModule.graph)
-        torch._C._jit_pass_insert_quantdequant_for_weight_bias(scriptModule._c,
-                                                               "forward",
-                                                               "weight",
-                                                               getQParamFuncW)
-        torch._C._jit_pass_insert_quantdequant_for_weight_bias(scriptModule._c,
-                                                               "forward",
-                                                               "bias",
-                                                               getQParamFunc)
-        # We expect to see 3 pairs of quant-dequant nodes.
-
-        FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("_dequantize_linear").check("quantize_linear") \
-                   .check_next("int_repr").check_next("_dequantize_linear") \
-                   .check("quantize_linear").check_next("int_repr") \
-                   .check_next("_dequantize_linear").check("conv2d") \
-                   .run(str(scriptModule.graph))
-
     # TODO: rename after insert_observers is renamed
     def test_prepare_quant(self):
         class Observer(torch.nn.Module):
@@ -1180,9 +901,9 @@ graph(%x : Tensor,
         def get_forward(m):
             return m._c._get_method("forward")
         torch._C._jit_pass_constant_propagation(get_forward(m).graph)
-        m._c = torch._C._jit_pass_prepare_quant(m._c, "forward",
-                                                observer._c,
-                                                observer._c)
+        torch._C._jit_pass_prepare_quant(m._c, "forward",
+                                         observer._c,
+                                         observer._c)
         assert len([x for x, _ in m._c._get_modules()
                     if x.startswith('observer_for_')]) == 3, \
             'Expected to have 3 observer submodules'
@@ -1219,9 +940,9 @@ graph(%x : Tensor,
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
         torch._C._jit_pass_constant_propagation(m.graph)
-        m._c = torch._C._jit_pass_prepare_quant(m._c, "forward",
-                                                observer._c,
-                                                observer._c)
+        torch._C._jit_pass_prepare_quant(m._c, "forward",
+                                         observer._c,
+                                         observer._c)
         data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
         def get_forward(m):
@@ -1229,7 +950,7 @@ graph(%x : Tensor,
         get_forward(m)(data)
         # right now the result will have extra observer modules
         # will fix later when we figure out how to remove modules
-        torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
+        m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
 
         get_forward(m)(data)
         FileCheck().check("aten::quantize_linear") \
@@ -1260,7 +981,8 @@ graph(%x : Tensor,
 
     def test_quant_fusion(self):
         input_str = """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
+%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)
