@@ -19,51 +19,6 @@ namespace jit {
  */
 TORCH_API void PropagateQuantInfo(std::shared_ptr<Graph>& graph);
 
-/** \brief Inserts observer nodes for collecting distribution of values taken by
- * a tensor.
- *
- * The distribution can then be used for computing qparams for quantization.
- * \param moduleObj is the module object whose containing methods are modified.
- * \param methodName is module method whose containing graph is instrumented.
- * \param observer_node is a Node representing a call to observer function. It
- * will be cloned into all the places where we need to add instrumentation.
- */
-TORCH_API void InsertObserverNodes(
-    const script::Module& moduleObj,
-    const std::string& methodName,
-    Node* observer_node);
-
-/** \brief Inserts observer nodes for collecting distribution of values taken by
- * a tensor. This is overloaded InsertObserverNodes which takes in different
- * arguments and operates on pure functions not associated with module.
- *
- * The distribution can then be used for computing qparams for quantization.
- * \param function_var is a pure script function whose graph is instrumented
- * \param observer_node is a Node representing a call to observer function. It
- * will be cloned into all the places where we need to add instrumentation.
- */
-TORCH_API void InsertObserverNodes(
-    Function* function_var,
-    Node* observer_node);
-
-/** \brief Inserts quant-dequant nodes.
- *
- * This actually changes the numerical semantics of the original model and thus
- * we only run it when user explicitly wants that. This pass essentially
- * performs quantization of the model by inserting quant-dequant node pairs for
- * quantizatable tensors - later passes only cleanup the IR and
- * make sure the model runs faster/consumes less memory.
- * \moduleObj is the module object whose containing methods are modified.
- * \param method_name whose graph is instrumented for quant-dequant nodes.
- * \param qparam_dict dictionary of tensor unique names to qparams.
- *
- */
-TORCH_API void InsertQuantDequantNodes(
-    const script::Module& moduleObj,
-    const std::string& methodName,
-    const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
-        qparam_dict);
-
 /** \brief Check that all expected optimizations after quant-dequant nodes
  * insertion actually happened.
  *
@@ -83,26 +38,6 @@ TORCH_API void QuantLinting(std::shared_ptr<Graph>& graph);
  */
 TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
 
-/** \brief Inserts quant-dequant nodes for attributes.
- *
- * This is similar to Quant-Dequant pass but it inserts quant-dequant nodes
- * for module parameters. It changes the numerical semantics of the original
- * model and thus we only run it when user explicitly wants that. Later passes
- * only cleanup the IR and make sure the model runs faster/consumes less memory
- * \moduleObj is the module object whose containing methods are modified.
- * \param method_name whose graph is instrumented for quant-dequant nodes.
- * \param param_name parameter for which the nodes are inserted.
- * \param getQParamFunc function to compute qparams.
- * \at::ScalarType t Datatype for param
- */
-template <typename Fn>
-TORCH_API void InsertQuantDequantNodesForParam(
-    const script::Module& moduleObj,
-    const std::string& method_name,
-    const std::string& param_name,
-    const Fn& getQParamFunc,
-    at::ScalarType t);
-
 /** \brief Insert observer module and observer function call for
  *  the Tensors that needs to be observed.
  *
@@ -116,11 +51,36 @@ TORCH_API void InsertQuantDequantNodesForParam(
  * \param weight_observer_module the observer module that will be used
  * by weight
  */
-TORCH_API script::Module InsertObservers(
-    const script::Module& module,
+TORCH_API void InsertObservers(
+    script::Module& module,
     const std::string& method_name,
     const script::Module& observer_module,
     const script::Module& weight_observer_module);
+
+/** \brief Insert quantize - int_repr - dequantize calls to the Tensors
+ *  that are observed in insert_observers pass
+ *
+ * For each Tensor that is observed, get the observer module and call
+ * calculate_qparam on the observer module to get quantization parameters
+ * and add quantize - int_repr - dequantize function calls using these parameters
+ * we also have special handling for quantizing "bias" right now.
+ *
+ * \param module the input module
+ * \param method_name the method we want to insert quantization calls for
+ */
+TORCH_API script::Module InsertQuantDeQuant(
+    script::Module& module,
+    const std::string& method_name);
+
+/** \brief Backend specific pass to fuse dequantize - op - quantize calls
+ * as quantized_op calls.
+ *
+ * Right now this is a fusion for fbgemm backend and only works for quantized
+ * conv op, we'll extend to more ops and more backends in the future.
+ *
+ * \param graph the graph we want to apply fusion
+ */
+TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

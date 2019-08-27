@@ -2,7 +2,6 @@ from common_utils import run_tests
 from jit_utils import JitTestCase
 from torch.testing import FileCheck
 from typing import NamedTuple, List, Optional
-
 import unittest
 import torch
 
@@ -177,10 +176,12 @@ class TestScriptPy3(JitTestCase):
             a : List[int] = []
             b : torch.Tensor = torch.ones(2, 2)
             c : Optional[torch.Tensor] = None
+            d : Optional[torch.Tensor] = torch.ones(3, 4)
             for _ in range(10):
                 a.append(4)
                 c = torch.ones(2, 2)
-            return a, b, c
+                d = None
+            return a, b, c, d
 
         self.checkScript(fn, ())
 
@@ -195,6 +196,20 @@ class TestScriptPy3(JitTestCase):
         def parser_bug(o: Optional[torch.Tensor]):
             pass
 
+    def test_mismatched_annotation(self):
+        with self.assertRaisesRegex(RuntimeError, 'annotated with type'):
+            @torch.jit.script
+            def foo():
+                x : str = 4
+                return x
+
+    def test_reannotate(self):
+        with self.assertRaisesRegex(RuntimeError, 'declare and annotate'):
+            @torch.jit.script
+            def foo():
+                x = 5
+                if True:
+                    x : Optional[int] = 7
 
 
 if __name__ == '__main__':
