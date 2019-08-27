@@ -227,18 +227,17 @@ def main():
         current_env["LOCAL_RANK"] = str(local_rank)
 
         # spawn the processes
-        if args.use_env:
-            cmd = [sys.executable, "-u",
-                   args.training_script] + args.training_script_args
-        else:
-            cmd = [sys.executable,
-                   "-u",
-                   args.training_script,
-                   "--local_rank={}".format(local_rank)] + args.training_script_args
+        cmd = [sys.executable, "-u"]
 
-        # insert the -m flag for module launching
         if args.module:
-            cmd.insert(2, "-m")
+            cmd.append("-m")
+
+        cmd.append(args.training_script)
+
+        if not args.use_env:
+            cmd.append("--local_rank={}".format(local_rank))
+
+        cmd.extend(args.training_script_args)
 
         process = subprocess.Popen(cmd, env=current_env)
         processes.append(process)
