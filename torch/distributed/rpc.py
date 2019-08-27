@@ -80,7 +80,8 @@ def init_rpc(name, backend='pg'):
 @_require_initialized
 def get_worker_id(worker_name=None):
     r"""
-    Get worker id of a given worker name.
+    Get worker id of a given worker name. Use this worker id to avoid passing
+    an expensive string to ``rpc`` on every invocation.
 
     Arguments:
         worker_name (str): the string name of a worker. If ``None``, return the
@@ -89,7 +90,7 @@ def get_worker_id(worker_name=None):
     if worker_name:
         return _agent.get_worker_id(worker_name)
     else:
-        return _agent.get_id()
+        return _agent.get_worker_id()
 
 
 @_require_initialized
@@ -143,8 +144,9 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
         >>> dist.init_rpc("worker0")
-        >>> fut1 = dist.rpc("worker1", torch.add, args=(torch.ones(2), 3), async_call=True)
-        >>> fut2 = dist.rpc("worker1", min, args=(1, 2), async_call=True)
+        >>> worker1 = dist.get_worker_id("worker1")
+        >>> fut1 = dist.rpc(worker1, torch.add, args=(torch.ones(2), 3), async_call=True)
+        >>> fut2 = dist.rpc(worker1, min, args=(1, 2), async_call=True)
         >>> result = fut1.wait() + fut2.wait()
         >>> dist.join_rpc()
 
@@ -163,7 +165,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
     kwargs = kwargs if kwargs else {}
 
     if isinstance(to, str):
-        to = _agent.get_worker_id(to)
+        to = get_worker_id(to)
 
     if qualified_name is not None:
         fut = invoke_rpc_builtin(_agent, to, qualified_name, *args, **kwargs)

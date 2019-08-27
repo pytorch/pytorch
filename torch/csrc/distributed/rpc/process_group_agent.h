@@ -17,20 +17,20 @@ namespace rpc {
 // SendWork and RecvWork will be put into a task queue, and later picked up by
 // worker threads from the same ThreadPool.
 struct SendWork {
-  SendWork(const int to, Message&& message) :
+  SendWork(const WorkerId& to, Message&& message) :
     to_(to), message_(message) {}
 
-  const int to_;
+  const WorkerId& to_;
   Message message_;
 };
 
 // SendWork wraps a Message and RecvWork wraps a Tensor. The difference here is
 // to allow us to run serialization/deserialization in the worker threads.
 struct RecvWork {
-  RecvWork(const int from, MessageType type, torch::Tensor&& payload)
+  RecvWork(const WorkerId& from, MessageType type, torch::Tensor&& payload)
       : from_(from), type_(type), payload_(payload) {}
 
-  const int from_;
+  const WorkerId& from_;
   const MessageType type_;
   torch::Tensor payload_;
 };
@@ -46,11 +46,9 @@ class ProcessGroupAgent : public RpcAgent {
   // SendWork object, and put the SendWork into a queue. Another thread will
   // consume SendWork from the queue and send it out.
   std::shared_ptr<FutureMessage> send(
-      worker_id_t to, Message&& message) override;
+      const WorkerId& to, Message&& message) override;
 
-  worker_id_t getId() override;
-
-  worker_id_t getWorkerId(const std::string& workerName) override;
+  const WorkerId& getWorkerId(const std::string& workerName) const override;
 
   void join() override;
 
@@ -70,6 +68,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   // worker name -> rank
   std::unordered_map<std::string, int> nameMap_;
+  std::vector<WorkerId> workerIds_;
   bool stop_;
   std::shared_ptr<c10d::ProcessGroup> pg_;
   std::atomic<int64_t> nextId_;

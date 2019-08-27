@@ -4,10 +4,14 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-RpcAgent::RpcAgent(std::string workerName, worker_id_t id, RequestCallback cb)
-    : workerName_(std::move(workerName)), id_(id), cb_(std::move(cb)) {}
+RpcAgent::RpcAgent(WorkerId workerId, RequestCallback cb)
+    : workerId_(std::move(workerId)), cb_(std::move(cb)) {}
 
 RpcAgent::~RpcAgent() = default;
+
+const WorkerId& RpcAgent::getWorkerId() const {
+  return workerId_;
+}
 
 }
 }
