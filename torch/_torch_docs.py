@@ -4876,7 +4876,7 @@ add_docstr(torch.sub,
 .. function:: sub(input, other, alpha=1, out=None)
 
 Each element of the tensor :attr:`other` is multiplied by the scalar
-:attr:`-alpha` and subtracted from each element of the tensor :attr:`input`.
+:attr:`alpha` and subtracted from each element of the tensor :attr:`input`.
 The resulting tensor is returned.
 
 The shapes of :attr:`input` and :attr:`other` must be
