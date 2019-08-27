@@ -2903,6 +2903,28 @@ Args:
 """)
 
 
+cdist = _add_docstr(torch.cdist, r"""
+cdist(x1, x2, p=2) -> Tensor
+
+Computes the p-norm distance between each pair of the two collections of row vectors.
+
+If x1 has shape :math:`P \times M` and x2 has shape :math:`R \times M` then the 
+output will have shape :math:`P \times R`.
+
+This function is equivalent to `scipy.spatial.distance.cdist(input,
+'minkowski', p=p)` if :math:`p \in (0, \infty)`. When :math:`p = 0` it is
+equivalent to `scipy.spatial.distance.cdist(input, 'hamming') * M`.
+When :math:`p = \infty`, the closest scipy function is
+`scipy.spatial.distance.cdist(xn, lambda x, y: np.abs(x - y).max())`.
+
+Args:
+    x1: input tensor of shape :math:`P \times M`.
+    x2: input tensor of shape :math:`R \times M`.
+    p: p value for the p-norm distance to calculate between each vector pair
+        :math:`\in [0, \infty]`.
+""")
+
+
 cosine_similarity = _add_docstr(torch.cosine_similarity, r"""
 cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
 
