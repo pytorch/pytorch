@@ -33,7 +33,6 @@ default_set = set([
 
     # Binaries
     'manywheel 2.7mu cpu devtoolset7',
-    'manywheel 3.7m cu100 devtoolset7',
     'libtorch 2.7m cpu devtoolset7',
     'libtorch 2.7m cpu gcc5.4_cxx11-abi',
 
@@ -106,4 +105,8 @@ for spec in should_run_set:
         sys.exit(0)
 
 print("Rejecting {}".format(args.build_environment))
+for spec, issue in skip_override.items():
+    if spec in args.build_environment:
+        print("This job is temporarily excluded from running on PRs. Reason: {}".format(issue))
+        break
 sys.exit(1)
