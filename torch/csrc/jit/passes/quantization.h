@@ -13,7 +13,7 @@ namespace jit {
 
 using QConfig = std::tuple<script::Module, script::Module>;
 using QConfigDict = std::unordered_map<std::string, QConfig>;
-using ModuleQConfigMap = std::unordered_map<const script::Module*, c10::optional<QConfig>>;
+using ModuleQConfigMap = std::unordered_map<script::ModulePtr, c10::optional<QConfig>>;
 
 /** \brief Propagates QParams through nodes that are not supposed to change it.
  *
@@ -59,9 +59,7 @@ TORCH_API void InsertObservers(
     script::Module& module,
     const std::string& method_name,
     const std::unordered_map<std::string,
-    std::tuple<script::Module, script::Module>>& qconfig_dict,
-    const std::string& key = "",
-    c10::optional<QConfig> parent_qconfig=c10::nullopt);
+    std::tuple<script::Module, script::Module>>& qconfig_dict);
 
 /** \brief Insert quantize - int_repr - dequantize calls to the Tensors
  *  that are observed in insert_observers pass
