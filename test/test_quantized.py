@@ -750,7 +750,8 @@ class TestQuantizedLinear(unittest.TestCase):
             b = torch.from_numpy(_dequantize(
                 b_q0, X_scale * W_scales, 0)).to(dtype=torch.float) if use_bias else None
             b_q = torch.quantize_linear_per_channel(b, scales=torch.from_numpy(X_scale * W_scales).to(
-                torch.double), zero_points=torch.zeros(output_channels, dtype=torch.long), axis=[0], dtype=torch.qint32) if use_bias else None
+                torch.double), zero_points=torch.zeros(output_channels, dtype=torch.long),
+                axis=[0], dtype=torch.qint32) if use_bias else None
         else:
             W = torch.from_numpy(_dequantize(
                 W_q0, W_scales[0], W_zps[0])).to(dtype=torch.float)
