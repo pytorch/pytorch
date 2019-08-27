@@ -117,6 +117,7 @@ Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   return _clamp_out_cpu(self, self, min, max);
 }
 
+//used internally and not exposed by API
 Tensor& trigamma_out(Tensor& result, const Tensor& self) {
   checkBackend("trigamma", result, Backend::CPU);
   auto iter = TensorIterator::unary_op(result, self,

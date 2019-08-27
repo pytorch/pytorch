@@ -17,9 +17,6 @@
 
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/Math.h>
-#ifdef BUILD_NAMEDTENSOR
-#include <ATen/NamedTensorUtils.h>
-#endif
 
 
 #if AT_MKL_ENABLED()
@@ -166,9 +163,6 @@ static void polygamma_kernel(TensorIterator& iter, int64_t n) {
     case 1: trigamma_kernel(iter); break;
     default: AT_ERROR("polygamma(n,x) is not implemented for n>=2");
   }
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(r_, t);
-#endif
 }
 
 #if !AT_MKL_ENABLED()
