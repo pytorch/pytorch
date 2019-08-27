@@ -265,6 +265,43 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                          message="AddReLU.out failed")
 
+    """Tests the correctness of the scalar addition."""
+    from hypothesis import reproduce_failure
+    @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
+                       elements=st.floats(-1e3, 1e3, allow_nan=False),
+                       qparams=hu.qparams()),
+           b=st.floats(min_value=-1e3, max_value=1e3, allow_nan=False))
+    def test_qmul_scalar_relu(self, A, b):
+        import copy
+        mul_scalar = torch.ops.quantized.mul_scalar
+        mul_scalar_relu = torch.ops.quantized.mul_scalar_relu
+
+        A, (scale, zero_point, dtype) = A
+        A = A.astype(np.float32)
+        qA = torch.quantize_linear(torch.from_numpy(A), scale, zero_point, dtype)
+
+        C = qA.dequantize() * b
+        C_relu = copy.deepcopy(C)
+        C_relu[C_relu < 0] = 0
+
+        C_ref = torch.quantize_linear(C, scale, zero_point, dtype)
+        C_relu_ref = torch.quantize_linear(C_relu, scale, zero_point, dtype)
+
+        C_hat = mul_scalar(qA, b)
+        C_relu_hat = mul_scalar_relu(qA, b)
+
+        print("C", qA, b, C)
+        print("C_ref", C_ref)
+        print("C_hat", C_hat)
+        print("C_hat int_repr", C_hat.int_repr())
+        print("qA int_repr", qA, qA.int_repr())
+        self.assertEqual(C_ref.dequantize(), C_hat.dequantize(),
+                         message="Scalar mul results don't match: {} vs {}"\
+                         .format(C_ref.dequantize(), C_hat.dequantize()))
+        self.assertEqual(C_relu_ref.dequantize(), C_relu_hat.dequantize(),
+                         message="Scalar mul relu results don't match:{} vs {}"\
+                         .format(C_relu_ref.dequantize(), C_relu_hat.dequantize()))
+
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_relu_same_qparams(self):
         mul_relu = torch.ops.quantized.mul_relu
@@ -309,16 +346,6 @@ class TestQuantizedOps(TestCase):
         mul_relu_out(qA, qB, out=qCrelu_out_hat)
         self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                          message="mulReLU.out failed")
-
-        # Scalar addition
-        mul = torch.ops.quantized.mul_scalar
-        for b in B:
-            C_ref = qA.dequantize().numpy() * b.item()
-            qC = _quantize(C_ref, scale, zero_point)
-            dqC = _dequantize(qC, scale, zero_point)
-            qC_hat = mul(qA, b.item(), scale, zero_point)
-            dqC_hat = qC_hat.dequantize()
-            self.assertEqual(dqC, dqC_hat)
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_relu_different_qparams(self):
