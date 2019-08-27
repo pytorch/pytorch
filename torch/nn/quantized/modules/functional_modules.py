@@ -107,11 +107,8 @@ class QFunctional(torch.nn.Module):
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
 
-        self.scale = float(state_dict[prefix + 'scale'])
-        state_dict.pop(prefix + 'scale')
-
-        self.zero_point = int(state_dict[prefix + 'zero_point'])
-        state_dict.pop(prefix + 'zero_point')
+        self.scale = float(state_dict.pop(prefix + 'scale'))
+        self.zero_point = int(state_dict.pop(prefix + 'zero_point'))
         super(QFunctional, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                        missing_keys, unexpected_keys, error_msgs)
 
