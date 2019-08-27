@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import unittest
 import torch.jit
 from jit_utils import _inline_everything
 from torch._jit_internal import Optional
