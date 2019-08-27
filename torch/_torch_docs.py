@@ -143,33 +143,7 @@ Example::
 
 add_docstr(torch.add,
            r"""
-.. function:: add(input, other, out=None)
-
-Adds the scalar :attr:`other` to each element of the input :attr:`input`
-and returns a new resulting tensor.
-
-.. math::
-    \text{{out}} = \text{{input}} + \text{{other}}
-
-If :attr:`input` is of type FloatTensor or DoubleTensor, :attr:`other` must be
-a real number, otherwise it should be an integer.
-
-Args:
-    {input}
-    value (Number): the number to be added to each element of :attr:`input`
-
-Keyword arguments:
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.0202,  1.0985,  1.3506, -0.6056])
-    >>> torch.add(a, 20)
-    tensor([ 20.0202,  21.0985,  21.3506,  19.3944])
-
-.. function:: add(input, alpha=1, other, out=None)
+.. function:: add(input, other, alpha=1, out=None)
 
 Each element of the tensor :attr:`other` is multiplied by the scalar
 :attr:`alpha` and added to each element of the tensor :attr:`input`.
@@ -186,10 +160,10 @@ a real number, otherwise it should be an integer.
 
 Args:
     input (Tensor): the first input tensor
-    alpha (Number): the scalar multiplier for :attr:`other`
     other (Tensor): the second input tensor
 
 Keyword arguments:
+    alpha (Number): the scalar multiplier for :attr:`other`
     {out}
 
 Example::
@@ -4906,7 +4880,7 @@ Example::
 
 add_docstr(torch.sub,
            r"""
-.. function:: sub(input, alpha=1, other, out=None)
+.. function:: sub(input, other, alpha=1, out=None)
 
 Each element of the tensor :attr:`other` is multiplied by the scalar
 :attr:`-alpha` and subtracted from each element of the tensor :attr:`input`.
@@ -4923,10 +4897,10 @@ a real number, otherwise it should be an integer.
 
 Args:
     input (Tensor): the first input tensor
-    alpha (Number): the scalar multiplier for :attr:`other`
     other (Tensor): the second input tensor
 
 Keyword arguments:
+    alpha (Number): the scalar multiplier for :attr:`other`
     {out}
 
 Example::
