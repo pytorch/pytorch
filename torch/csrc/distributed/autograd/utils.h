@@ -14,8 +14,10 @@ namespace autograd {
 // TODO: Support Tensors which might be nested inside other IValue types
 //       (ex: List, Tuple)
 //
-// Returns a shared_ptr to the autograd function, so that we can hold a reference to it.
-std::shared_ptr<SendRpcBackwards> addSendRpcBackward(at::ArrayRef<c10::IValue> ivalues);
+// Returns a shared_ptr to the autograd function, so that we can hold a
+// reference to it.
+std::shared_ptr<SendRpcBackwards> addSendRpcBackward(
+    at::ArrayRef<c10::IValue> ivalues);
 
 } // namespace autograd
 } // namespace distributed

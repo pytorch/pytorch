@@ -15,7 +15,6 @@ import hypothesis_utils as hu
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams
 
-
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
 # for the 8-bit int multiplication. This instruction vertically multiplies each
@@ -140,6 +139,37 @@ class TestQuantizedOps(TestCase):
             qY_hat = op(qX)
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
+    """Tests the correctness of the scalar addition."""
+    @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
+                       elements=st.floats(-1e6, 1e6, allow_nan=False),
+                       qparams=hu.qparams()),
+           b=st.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
+    def test_qadd_scalar_relu(self, A, b):
+        import copy
+        add_scalar = torch.ops.quantized.add_scalar
+        add_scalar_relu = torch.ops.quantized.add_scalar_relu
+
+        A, (scale, zero_point, dtype) = A
+        A = A.astype(np.float32)
+        qA = torch.quantize_linear(torch.from_numpy(A), scale, zero_point, dtype)
+
+        C = qA.dequantize() + b
+        C_relu = copy.deepcopy(C)
+        C_relu[C_relu < 0] = 0
+
+        C_ref = torch.quantize_linear(C, scale, zero_point, dtype)
+        C_relu_ref = torch.quantize_linear(C_relu, scale, zero_point, dtype)
+
+        C_hat = add_scalar(qA, b, scale=scale, zero_point=zero_point)
+        C_relu_hat = add_scalar_relu(qA, b, scale=scale, zero_point=zero_point)
+
+        self.assertEqual(C_ref, C_hat,
+                         message="Scalar add results don't match:\
+                         {} vs {}".format(C_ref, C_hat))
+        self.assertEqual(C_relu_ref, C_relu_hat,
+                         message="Scalar add relu results don't match:\
+                         {} vs {}".format(C_relu_ref, C_relu_hat))
+
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
         add_relu = torch.ops.quantized.add_relu
@@ -183,6 +213,7 @@ class TestQuantizedOps(TestCase):
         add_relu_out(qA, qB, out=qCrelu_out_hat)
         self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                          message="AddReLU.out failed")
+
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_different_qparams(self):
@@ -233,6 +264,110 @@ class TestQuantizedOps(TestCase):
         add_relu_out(qA, qB, out=qCrelu_out_hat)
         self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                          message="AddReLU.out failed")
+
+    """Tests the correctness of the mul and mul_relu op."""
+    def test_qmul_relu_same_qparams(self):
+        mul_relu = torch.ops.quantized.mul_relu
+        mul = torch.ops.quantized.mul
+        mul_out = torch.ops.quantized.mul_out
+        mul_relu_out = torch.ops.quantized.mul_relu_out
+
+        A = torch.arange(-25, 25, dtype=torch.float)
+        B = torch.arange(-25, 25, dtype=torch.float)
+        scale = 2.0
+        zero_point = 127
+        qA = torch.quantize_linear(A, scale=scale, zero_point=zero_point,
+                                   dtype=torch.quint8)
+        qB = torch.quantize_linear(B, scale=scale, zero_point=zero_point,
+                                   dtype=torch.quint8)
+
+        # mul ReLU ground truth
+        C = (qA.dequantize() * qB.dequantize()).numpy()
+        qC = _quantize(C, scale, zero_point)
+        qC_hat = mul(qA, qB, scale=scale, zero_point=zero_point)
+        np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                "Quantized mulition failed.")
+        qC_out_hat = torch._empty_affine_quantized(qC.shape,
+                                                   scale=scale,
+                                                   zero_point=zero_point,
+                                                   dtype=torch.quint8)
+        mul_out(qA, qB, out=qC_out_hat)
+        self.assertEqual(qC_hat, qC_out_hat, message="mul.out failed")
+
+        # mul + ReLU ground truth
+        Crelu = C.copy()
+        Crelu[C < 0] = 0
+        qCrelu = _quantize(Crelu, scale, zero_point)
+        qCrelu_hat = mul_relu(qA, qB, scale=scale, zero_point=zero_point)
+        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                "Quantized mulition with ReLU failed.")
+        qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+                                                       scale=scale,
+                                                       zero_point=zero_point,
+                                                       dtype=torch.quint8)
+        mul_relu_out(qA, qB, out=qCrelu_out_hat)
+        self.assertEqual(qCrelu_hat, qCrelu_out_hat,
+                         message="mulReLU.out failed")
+
+        # Scalar addition
+        mul = torch.ops.quantized.mul_scalar
+        for b in B:
+            C_ref = qA.dequantize().numpy() * b.item()
+            qC = _quantize(C_ref, scale, zero_point)
+            dqC = _dequantize(qC, scale, zero_point)
+            qC_hat = mul(qA, b.item(), scale, zero_point)
+            dqC_hat = qC_hat.dequantize()
+            self.assertEqual(dqC, dqC_hat)
+
+    """Tests the correctness of the mul and mul_relu op."""
+    def test_qmul_relu_different_qparams(self):
+        mul_relu = torch.ops.quantized.mul_relu
+        mul = torch.ops.quantized.mul
+        mul_out = torch.ops.quantized.mul_out
+        mul_relu_out = torch.ops.quantized.mul_relu_out
+
+        A = torch.arange(-25, 25, dtype=torch.float)
+        B = torch.arange(-25, 25, dtype=torch.float)
+        scale_A = 3.0
+        zero_point_A = 7
+        scale_B = 5.0
+        zero_point_B = 127
+
+        scale_C = 0.5
+        zero_point_C = 5
+
+        qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point_A,
+                                   dtype=torch.quint8)
+        qB = torch.quantize_linear(B, scale=scale_B, zero_point=zero_point_B,
+                                   dtype=torch.quint8)
+
+        # mul ground truth
+        C = (qA.dequantize() * qB.dequantize()).numpy()
+        qC = _quantize(C, scale_C, zero_point_C)
+        qC_hat = mul(qA, qB, scale=scale_C, zero_point=zero_point_C)
+        np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                "Quantized multiplication failed.")
+        qC_out_hat = torch._empty_affine_quantized(qC.shape,
+                                                   scale=scale_C,
+                                                   zero_point=zero_point_C,
+                                                   dtype=torch.quint8)
+        mul_out(qA, qB, out=qC_out_hat)
+        self.assertEqual(qC_hat, qC_out_hat, message="mul.out failed")
+
+        # mul + ReLU ground truth
+        Crelu = C.copy()
+        Crelu[C < 0] = 0
+        qCrelu = _quantize(Crelu, scale_C, zero_point_C)
+        qCrelu_hat = mul_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
+        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                "Quantized multiplication with ReLU failed.")
+        qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+                                                       scale=scale_C,
+                                                       zero_point=zero_point_C,
+                                                       dtype=torch.quint8)
+        mul_relu_out(qA, qB, out=qCrelu_out_hat)
+        self.assertEqual(qCrelu_hat, qCrelu_out_hat,
+                         message="mulReLU.out failed")
 
     """Tests max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
@@ -438,10 +573,9 @@ class TestQuantizedOps(TestCase):
 
 
 @unittest.skipIf(
-    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-    " Quantized Linear requires FBGEMM. FBGEMM does not play"
-    " well with UBSAN at the moment, so we skip the test if"
-    " we are in a UBSAN environment.",
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
 )
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
@@ -690,12 +824,13 @@ class TestQuantizedConv(unittest.TestCase):
            dilation=st.integers(1, 1),
            X_scale=st.floats(0.2, 1.6),
            X_zero_point=st.integers(0, 4),
-           W_scale=st.floats(0.2, 1.6),
-           W_zero_point=st.integers(-5, 5),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
            Y_scale=st.floats(0.2, 1.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
-           use_relu=st.booleans())
+           use_relu=st.booleans(),
+           use_channelwise=st.booleans())
     def test_qconv(
             self,
             batch_size,
@@ -718,7 +853,8 @@ class TestQuantizedConv(unittest.TestCase):
             Y_scale,
             Y_zero_point,
             use_bias,
-            use_relu
+            use_relu,
+            use_channelwise
     ):
 
         qconv = torch.ops.quantized.fbgemm_conv2d
@@ -732,6 +868,12 @@ class TestQuantizedConv(unittest.TestCase):
         output_channels = output_channels_per_group * groups
 
         dilation_h = dilation_w = dilation
+
+        W_scale = W_scale * output_channels
+        W_zero_point = W_zero_point * output_channels
+        # Resize W_scale and W_zero_points arrays equal to output_channels
+        W_scale = W_scale[:output_channels]
+        W_zero_point = W_zero_point[:output_channels]
 
         # For testing, we use small values for weights and for activations so that no overflow occurs
         # in vpmaddubsw instruction. If the overflow occurs in qconv implementation and if there is no overflow
@@ -763,9 +905,16 @@ class TestQuantizedConv(unittest.TestCase):
 
         X = X_scale * (X_init - X_zero_point).to(dtype=torch.float)
 
-        W = W_scale * (W_init - W_zero_point).to(dtype=torch.float)
+        if use_channelwise:
+            W_scales_tensor = torch.tensor(W_scale, dtype=torch.float)
+            W_zero_points_tensor = torch.tensor(W_zero_point, dtype=torch.float)
+            W = W_scales_tensor.reshape(-1, 1, 1, 1) * (W_init.to(dtype=torch.float) -
+                                                        W_zero_points_tensor.reshape(-1, 1, 1, 1)).to(dtype=torch.float)
+            b = X_scale * W_scales_tensor * (b_init - 0).to(dtype=torch.float)
+        else:
+            W = W_scale[0] * (W_init - W_zero_point[0]).to(dtype=torch.float)
+            b = X_scale * W_scale[0] * (b_init - 0).to(dtype=torch.float)
 
-        b = X_scale * W_scale * (b_init - 0).to(dtype=torch.float)
 
         # Existing floating point conv operator
         conv_op = torch.nn.Conv2d(input_channels,
@@ -795,8 +944,20 @@ class TestQuantizedConv(unittest.TestCase):
         W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
 
         X_q = torch.quantize_linear(X_NHWC, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
-        W_q = torch.quantize_linear(W_KRSC, scale=W_scale, zero_point=W_zero_point, dtype=torch.qint8)
-        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32) if use_bias else None
+        if use_channelwise:
+            W_q = torch.quantize_linear_per_channel(W_KRSC,
+                                                    W_scales_tensor.to(dtype=torch.double),
+                                                    W_zero_points_tensor.to(dtype=torch.long),
+                                                    [0],
+                                                    dtype=torch.qint8)
+            b_q = torch.quantize_linear_per_channel(b,
+                                                    X_scale * W_scales_tensor.to(dtype=torch.double),
+                                                    torch.zeros(output_channels, dtype=torch.long),
+                                                    [0],
+                                                    dtype=torch.qint32) if use_bias else None
+        else:
+            W_q = torch.quantize_linear(W_KRSC, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
+            b_q = torch.quantize_linear(b, scale=X_scale * W_scale[0], zero_point=0, dtype=torch.qint32) if use_bias else None
 
         W_prepack = qconv_prepack(W_q, stride, pad, dilation, groups)
 
@@ -814,7 +975,6 @@ class TestQuantizedConv(unittest.TestCase):
 
         # Back to NCHW format
         Y_q = Y_q.permute([0, 3, 1, 2]).contiguous()
-
 
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
@@ -848,12 +1008,18 @@ class TestQuantizedConv(unittest.TestCase):
                                                   zero_point_min=0,
                                                   zero_point_max=0)]),
            strideH=st.integers(1, 3), strideW=st.integers(1, 3),
-           padH=st.integers(1, 2), padW=st.integers(1, 2))
-    def test_qconv_unpack(self, X, strideH, strideW, padH, padW):
+           padH=st.integers(1, 2), padW=st.integers(1, 2),
+           channelwise=st.booleans())
+    def test_qconv_unpack(self, X, strideH, strideW, padH, padW, channelwise):
         (inputs, filters, bias, groups) = X
         inputs, (inputs_scale, inputs_zero_point, inputs_qtype) = inputs
         filters, (filters_scale, filters_zero_point, filters_qtype) = filters
         bias, (bias_scale, bias_zero_point, bias_qtype) = bias
+
+        if channelwise:
+            output_channels = filters.shape[0]
+            filters_scale = torch.tensor([filters_scale] * output_channels).to(torch.double)
+            filters_zero_point = torch.tensor([filters_zero_point] * output_channels).to(torch.long)
 
         qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
         qconv_unpack = torch.ops.quantized.fbgemm_conv_unpack
@@ -862,7 +1028,14 @@ class TestQuantizedConv(unittest.TestCase):
         W = torch.from_numpy(filters).to(torch.float)
         # K(C/G)RS -> KRS(C/G)
         W_KRSC = W.permute([0, 2, 3, 1]).contiguous()
-        W_q = torch.quantize_linear(W_KRSC, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)
+        if channelwise:
+            W_q = torch.quantize_linear_per_channel(W_KRSC,
+                                                    scales=filters_scale,
+                                                    zero_points=filters_zero_point,
+                                                    axis=[0],
+                                                    dtype=filters_qtype)
+        else:
+            W_q = torch.quantize_linear(W_KRSC, scale=filters_scale, zero_point=filters_zero_point, dtype=filters_qtype)
 
         # Pack weights using weight packing operator
         strides = [strideH, strideW]
@@ -874,9 +1047,14 @@ class TestQuantizedConv(unittest.TestCase):
 
         # Assert equal
         np.testing.assert_equal(W_q.int_repr().numpy(), W_unpacked.int_repr().numpy())
-        np.testing.assert_equal(W_q.q_scale(), W_unpacked.q_scale())
-        np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
-
+        if channelwise:
+            np.testing.assert_array_almost_equal(np.float32(W_q.q_per_channel_scales().numpy()),
+                                                 np.float32(W_unpacked.q_per_channel_scales().numpy()),
+                                                 decimal=4)
+            np.testing.assert_equal(W_q.q_per_channel_zero_points().numpy(), W_unpacked.q_per_channel_zero_points().numpy())
+        else:
+            np.testing.assert_equal(np.float32(W_q.q_scale()), np.float32(W_unpacked.q_scale()))
+            np.testing.assert_equal(W_q.q_zero_point(), W_unpacked.q_zero_point())
 
 @unittest.skipIf(IS_WINDOWS, "QNNPACK has not been built for Windows")
 @unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")

@@ -14,8 +14,8 @@ class RegisterOperators::OperatorRegistrar final {
 public:
   explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<TensorTypeId> dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction&& cache_creator, void* unboxed_kernel, void* unboxed_autograd_kernel)
   : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt) {
-    // either both, kernel and cache_creator, or none must be set.
-    TORCH_INTERNAL_ASSERT((kernel != nullptr || unboxed_kernel != nullptr) == static_cast<bool>(cache_creator));
+    // cache creator can only be set if the kernel is also set
+    TORCH_INTERNAL_ASSERT((kernel != nullptr || unboxed_kernel != nullptr) || !static_cast<bool>(cache_creator));
 
     if (kernel != nullptr || unboxed_kernel != nullptr) {
       if (dispatch_key.has_value()) {
@@ -170,7 +170,7 @@ OperatorOptions RegisterOperators::makeOperatorOptions_(const RegisterOperators:
 }
 
 void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel, OperatorOptions&& operatorOptions, void* unboxedAutogradKernel) {
-  TORCH_INTERNAL_ASSERT((kernel.kernel_func != nullptr || kernel.unboxed_kernel_func != nullptr) && static_cast<bool>(kernel.cache_creator_func), "Kernel must be set");
+  TORCH_INTERNAL_ASSERT((kernel.kernel_func != nullptr || kernel.unboxed_kernel_func != nullptr), "Kernel must be set");
 
   registrars_.emplace_back(std::move(schema), std::move(operatorOptions), kernel.dispatch_key, kernel.kernel_func, std::move(kernel.cache_creator_func), kernel.unboxed_kernel_func, unboxedAutogradKernel);
 }

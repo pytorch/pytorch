@@ -6,7 +6,6 @@ import unittest
 
 import torch
 import torch.distributed as dist
-import torch.distributed.autograd as dist_autograd
 
 from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
@@ -71,7 +70,7 @@ if not dist.is_available():
 
 def _wrap_with_rpc(func):
     '''
-        We use this decorate for setting up and tearing down state since
+        We use this decorator for setting up and tearing down state since
         MultiProcessTestCase runs each `test*` method in a separate process and
         each process just runs the `test*` method without actually calling
         'setUp' and 'tearDown' methods of unittest.
@@ -318,42 +317,6 @@ class RpcTest(MultiProcessTestCase):
     @_wrap_with_rpc
     def test_stress_heavy_rpc(self):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
-
-    @_wrap_with_rpc
-    def test_autograd_send_function(self):
-        dst_rank = (self.rank + 1) % self.world_size
-        with dist_autograd.context() as context_id:
-            t1 = torch.ones(3, 3, requires_grad=True)
-            t2 = torch.zeros(3, 3, requires_grad=True)
-            ret = dist.rpc('worker{}'.format(dst_rank), torch.add,
-                           args=(t1, t2))
-
-            # Get send function.
-            ctx = dist_autograd._current_context()
-            self.assertEqual(context_id, ctx._context_id())
-            send_functions = ctx._send_functions()
-            self.assertEqual(1, len(send_functions))
-
-            # Retrieve the next functions in the graph.
-            next_funcs = send_functions[0].next_functions
-            self.assertEqual(2, len(next_funcs))
-
-            # We should now hit t1 and t2 in the autograd graph.
-            self.assertEqual('torch::autograd::AccumulateGrad', next_funcs[0][0].name())
-            self.assertEqual(t1, next_funcs[0][0].variable)
-            self.assertEqual(0, next_funcs[0][1])
-            self.assertEqual('torch::autograd::AccumulateGrad', next_funcs[1][0].name())
-            self.assertEqual(t2, next_funcs[1][0].variable)
-            self.assertEqual(0, next_funcs[1][1])
-
-        # autograd context should be cleaned up by now.
-        with self.assertRaises(RuntimeError):
-            ctx = dist_autograd._retrieve_context(context_id)
-
-        # No autograd context available.
-        with self.assertRaises(RuntimeError):
-            ctx = dist_autograd._current_context()
-
 
 if __name__ == "__main__":
     run_tests()
