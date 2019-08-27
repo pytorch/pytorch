@@ -288,9 +288,6 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // Report a warning to the user only once.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
-// Note that here we use line number to uniquely identify the warn-once statement
-// within a function, with the expectation that we never have more than one
-// `TORCH_WARN_ONCE` statement in the same line.
 #define TORCH_WARN_ONCE(...) \
   static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [] { \
     ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__)); \
