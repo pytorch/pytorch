@@ -65,7 +65,7 @@ struct Vec256<c10::qint8> {
 #else // __AVX2__
         __m256i int32_vals;
         for (int i = 0; i < 8; ++i) {
-            *((int32_t*)&int32_vals) = vals.as_vec[i];
+            ((int32_t*)&int32_vals)[i] = vals.as_vec[i];
         }
 #endif
         __at_align32__ __m256 float_vals = _mm256_cvtepi32_ps(int32_vals);
@@ -137,7 +137,7 @@ struct Vec256<c10::quint8> {
 #else // __AVX2__
         __m256i int32_vals;
         for (int i = 0; i < 8; ++i) {
-            *((uint32_t*)&int32_vals) = vals.as_vec[i];
+            ((uint32_t*)&int32_vals)[i] = vals.as_vec[i];
         }
 #endif
         __m256 float_vals = _mm256_cvtepi32_ps(int32_vals);
