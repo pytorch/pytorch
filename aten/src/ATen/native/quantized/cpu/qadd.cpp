@@ -37,6 +37,8 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
 
   // Broadcast out the parameters here to amortize out that cost across
   // loop iterations.
+  // TODO: we can optimize dequantization by doing a premultiplication
+  // of the zero point by scale and doing FMA on scale*x_q - (scale*zero_point)
   auto self_zero_point_vec = Vec256<float>((float)self_zero_point);
   auto self_scale_vec = Vec256<float>(self_scale);
   auto other_zero_point_vec = Vec256<float>((float)other_zero_point);
@@ -64,6 +66,9 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
       // TODO: fbgemm::Quantize doesn't support taking in the pre-broadcasted
       // parameters. We might be able to save some cycles by enabling that
       // in the API.
+      // TODO: specialize fbgemm::Quantize for a single vector and make it
+      // inlineable. This could help with interleaving as suggested by the
+      // TensorIterator implementations
       return Vec::quantize(c, scale, zero_point);
     });
   });
