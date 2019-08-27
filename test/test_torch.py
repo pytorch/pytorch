@@ -12938,7 +12938,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             "mul",
             "sub",
             "div",
-            "logical_xor"
         ]
 
         for fn in ops:
