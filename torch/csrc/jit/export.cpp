@@ -32,7 +32,7 @@
 
 namespace torch {
 namespace jit {
-std::ostream& operator<<(std::ostream& out, OperatorCode op);
+std::ostream& operator<<(std::ostream& out, OpCode op);
 
 namespace {
 namespace onnx_torch = ::torch::onnx;
