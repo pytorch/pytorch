@@ -406,11 +406,11 @@ class _TestTorchMixin(torchtest):
                 if dtype.is_floating_point:
                     a = torch.rand(size=size, dtype=dtype)
                 elif dtype == torch.uint8:
-                    a = torch.randint(1, 5, size=size, dtype=dtype)
+                    a = torch.randint(0, 5, size=size, dtype=dtype)
                 else:
                     a = torch.randint(-5, 5, size=size, dtype=dtype)
                 b = a.numpy()
-                expected = b.sign()
+                expected = np.sign(b)
                 actual = a.sign().numpy()
                 self.assertEqual(expected, actual)
 
@@ -420,19 +420,6 @@ class _TestTorchMixin(torchtest):
             r = a.sign()
             mask = a ^ r
             self.assertTrue(mask.all().item())
-
-        for dtype in torch.testing.get_all_math_dtypes('cpu'):
-            for size in[(10, 10), (100, 100)]:
-                if dtype.is_floating_point:
-                    a = torch.rand(size=size, dtype=dtype)
-                elif dtype == torch.uint8:
-                    a = torch.randint(1, 5, size=size, dtype=dtype)
-                else:
-                    a = torch.randint(-5, 5, size=size, dtype=dtype)
-                b = a.numpy()
-                expected = b.sign()
-                actual = a.sign().numpy()
-                self.assertEqual(expected, actual)
 
     def test_logical_any(self):
         for device in torch.testing.get_all_device_types():

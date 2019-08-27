@@ -146,8 +146,8 @@ static void sign_kernel(TensorIterator& iter) {
     auto one_vec = Vec256<uint8_t>(1);
     cpu_kernel_vec(
         iter,
-        [=](uint8_t a) -> uint8_t { return a & 1; },
-        [=](Vec256<uint8_t> a) { return a & one_vec; });
+        [=](uint8_t a) -> uint8_t { return a > 0; },
+        [=](Vec256<uint8_t> a) { return (a > 0) & one_vec; });
   } else if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel_vec(
         iter,
