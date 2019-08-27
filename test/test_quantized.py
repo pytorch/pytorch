@@ -563,7 +563,7 @@ class TestQuantizedOps(TestCase):
                 return False
             if qX.shape != qX2.shape:
                 return False
-            if (qX.qscheme() == torch.per_tensor_affine):
+            if qX.qscheme() == torch.per_tensor_affine:
                 if qX.q_scale() != qX2.q_scale():
                     return False
                 if qX.q_zero_point() != qX2.q_zero_point():
