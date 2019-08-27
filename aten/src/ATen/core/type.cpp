@@ -331,8 +331,7 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
     // invariant match required, but strip refinements
     auto unshaped_formal = unshapedType(it->second);
     auto unshaped_actual = unshapedType(actual);
-    if(unshaped_actual->isSubtypeOf(unshaped_formal) &&
-       unshaped_formal->isSubtypeOf(unshaped_actual)) {
+    if(*unshaped_actual == *unshaped_formal) {
       return actual;
     }
     std::stringstream ss;
