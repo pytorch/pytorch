@@ -60,7 +60,8 @@ CAFFE2_API const char* typeKindToString(TypeKind kind);
 struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
-struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
+struct CAFFE2_API 
+Type : std::enable_shared_from_this<Type> {
  private:
   TypeKind kind_;
 
@@ -72,7 +73,16 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
 
   // subtyping relation. By default, we return true for the case
   // when the type is exactly equal or if this <: T where rhs = Optional[T]
-  virtual bool isSubtypeOf(const TypePtr rhs) const;
+  
+  // if this returns false and the why_not stream is non-null, it contains
+  // additional details that describe why this is not a subtype of 'rhs'.
+  // This additional information should only contain details that are not obvious
+  // from the python_str() that describes the type. For instance it is clear that `int <: str` is false
+  // but not clear why `Foo <: InterfaceBar` might be false.
+  virtual bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const;
+  bool isSubtypeOf(const TypePtr rhs) const {
+    return isSubtypeOfExt(rhs, nullptr);
+  }
 
   // How this type will appear in FunctionSchema declarations
   virtual std::string str() const = 0;
@@ -235,12 +245,12 @@ struct CAFFE2_API OptionalType
     return create(contained_types[0]);
   }
 
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    if (Type::isSubtypeOf(rhs)) {
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+    if (Type::isSubtypeOfExt(rhs, why_not)) {
       return true;
     }
     if (auto rhs_ = rhs->cast<OptionalType>()) {
-      return getElementType()->isSubtypeOf(rhs_->getElementType());
+      return getElementType()->isSubtypeOfExt(rhs_->getElementType(), why_not);
     }
     return false;
   }
@@ -435,7 +445,7 @@ struct CAFFE2_API TensorType : public Type {
         strides() == rt->strides() && device() == rt->device() &&
         requiresGrad() == rt->requiresGrad() && autogradZero() == rt->autogradZero();
   }
-  bool isSubtypeOf(const TypePtr rhs) const override;
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
 
   std::string str() const override;
 
@@ -779,7 +789,7 @@ struct CAFFE2_API TupleType : public NamedType {
   }
 
   bool operator==(const Type& rhs) const override;
-  bool isSubtypeOf(const TypePtr rhs_) const override;
+  bool isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const override;
 
   std::string str() const override;
   std::string python_str() const override;
@@ -873,8 +883,8 @@ struct CAFFE2_API FloatType : public NumberType {
   std::string python_str() const override {
     return "float";
   }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOf(rhs);
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+    return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::FloatType;
   // global singleton
@@ -900,8 +910,8 @@ struct CAFFE2_API IntType : public NumberType {
   std::string python_str() const override {
     return "int";
   }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOf(rhs);
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+    return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::IntType;
   // global singleton
@@ -997,9 +1007,6 @@ struct CAFFE2_API NoneType : public Type {
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
-  }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    return rhs->kind() == TypeKind::NoneType;
   }
   std::string str() const override {
     return "None";
@@ -1428,7 +1435,7 @@ struct CAFFE2_API ClassType : public NamedType {
     return parameterSlots_->at(slot);
   }
 
-  bool isSubtypeOf(const TypePtr rhs) const override;
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
@@ -1485,7 +1492,7 @@ struct CAFFE2_API InterfaceType : public NamedType {
     return name()->qualifiedName();
   }
   
-  bool isSubtypeOf(const TypePtr rhs) const override;
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
 
   // try to find a method of this interface,
   // returns nullptr if not found.
