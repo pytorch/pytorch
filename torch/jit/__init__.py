@@ -1741,6 +1741,10 @@ def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"
     return x
 
+# primitive that returns True when in compilation and False otherwise
+def _is_scripting():
+    return False
+
 _builtin_table = None
 
 _modules_containing_builtins = (torch, torch._C._nn)
@@ -1754,6 +1758,7 @@ _builtin_ops = [
     (_triple, "aten::_triple"),
     (_unwrap_optional, "aten::_unwrap_optional"),
     (_wait, 'aten::wait'),
+    (_is_scripting, "aten::_is_scripting"),
     (cudnn.is_acceptable, "aten::cudnn_is_acceptable"),
     (math.ceil, "aten::ceil"),
     (math.copysign, "aten::copysign"),

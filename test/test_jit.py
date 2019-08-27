@@ -8177,6 +8177,15 @@ a")
 
         self.checkScript(test_if_tracing, (inp,))
 
+    def test_is_scripting(self):
+        def foo():
+            return torch.jit._is_scripting()
+
+        self.assertFalse(foo())
+        scripted = torch.jit.script(foo)
+        FileCheck().check("is_scripting").run(scripted.graph)
+        self.assertTrue(scripted())
+
     def test_script_outputs(self):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             @torch.jit.script
