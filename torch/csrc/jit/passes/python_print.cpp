@@ -1054,8 +1054,6 @@ struct PythonPrintPass {
             stmt << "annotate(" << node->output()->type()->python_str()
                  << ", [])";
           } else if (!elementTypeCanBeInferredFromMembers(elem_type)) {
-            // if the element type is a optional type, we annotate the list so
-            // that we could correctly infer the type on import
             stmt << "annotate(" << node->output()->type()->python_str() << ",";
             printValueList(stmt, node->inputs(), "[", "]");
             stmt << ")";
