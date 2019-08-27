@@ -565,7 +565,9 @@ class TestQuantizedOps(TestCase):
                 return False
             if X.shape != X2.shape:
                 return False
-            if (X != X2).any():
+            qX = _quantize(X, scale=params[0], zero_point=params[1], dtype=params[2])
+            qX2 = _quantize(X, scale=params[0], zero_point=params[1], dtype=params[2])
+            if (qX != qX2).any():
                 return False
             return True
 
