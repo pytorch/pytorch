@@ -50,9 +50,19 @@ Tensor _mul_out(Tensor& out, const Tensor& self, const Tensor& other) {
 
 template <bool ReLUFused = false>
 Tensor& _mul_scalar_(Tensor& self, Scalar other) {
-  auto other_float = other.toDouble();
+  float other_float = other.toFloat();
+  if (other_float == 0.0f) {
+    // TODO: Replace this when `quantized::zero_` is implemented.
+    auto iter = TensorIterator::unary_op(self, self);
+    AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qmul.scalar", [&]() {
+      cpu_kernel(iter, [&](scalar_t a) -> scalar_t {
+        return static_cast<scalar_t>(self.q_zero_point());
+      });
+    });
+    return self;
+  }
   if (self.qscheme() == kPerTensorAffine) {
-    double new_scale = self.q_scale() / other_float;
+    double new_scale = self.q_scale() * other_float;
     self.set_quantizer_(make_per_tensor_affine_quantizer(
       new_scale, self.q_zero_point(), self.scalar_type()));
   } else {
@@ -89,10 +99,8 @@ class QMulOut final : public c10::OperatorKernel {
 template <bool ReLUFused = false>
 class QMulScalar final : public c10::OperatorKernel {
  public:
-  Tensor operator()(Tensor qa, Scalar b,
-                    double scale, int64_t zero_point) {
-    TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
-                qa.qscheme() == kPerTensorSymmetric,
+  Tensor operator()(Tensor qa, Scalar b) {
+    TORCH_CHECK(qa.qscheme() == kPerTensorAffine,
               "Only per tensor quantization is suuported in Mul.");
     auto qc = qa.clone();
     return _mul_scalar_<ReLUFused>(qc, b);
@@ -127,11 +135,11 @@ static auto registry = c10::RegisterOperators()
     c10::RegisterOperators::options()
       .kernel<QMulOut</*ReLUFused=*/true>>(QuantizedCPUTensorId()))
 
-.op("quantized::mul_scalar(Tensor qa, Scalar b, float scale, int zero_point)"
+.op("quantized::mul_scalar(Tensor qa, Scalar b)"
      "-> Tensor qc",
     c10::RegisterOperators::options()
       .kernel<QMulScalar</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
-.op("quantized::mul_scalar_relu(Tensor qa, Scalar b, float scale, int zero_point)"
+.op("quantized::mul_scalar_relu(Tensor qa, Scalar b)"
      "-> Tensor qc",
     c10::RegisterOperators::options()
       .kernel<QMulScalar</*ReLUFused=*/true>>(QuantizedCPUTensorId()))
