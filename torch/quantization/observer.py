@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 from abc import ABCMeta, abstractmethod
 from functools import partial
-import warnings
 
 from torch._jit_internal import Optional
 
@@ -61,9 +60,7 @@ class ObserverBase(ABC, nn.Module):
         min_val = self.min_val
         max_val = self.max_val
         if max_val is None or min_val is None:
-            warnings.warn("must run observer before calling calculate_qparams.\
-                                    Returning default scale and zero point ")
-            return torch.tensor([1.0]), torch.tensor([0])
+            raise Exception('must run observer before calling calculate_qparams!')
         max_val, min_val = float(max_val), float(min_val)
         min_val = min(0.0, min_val)
         max_val = max(0.0, max_val)

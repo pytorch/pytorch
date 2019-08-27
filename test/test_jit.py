@@ -1180,9 +1180,9 @@ graph(%x : Tensor,
         def get_forward(m):
             return m._c._get_method("forward")
         torch._C._jit_pass_constant_propagation(get_forward(m).graph)
-        m._c = torch._C._jit_pass_prepare_quant(m._c, "forward",
-                                                observer._c,
-                                                observer._c)
+        torch._C._jit_pass_prepare_quant(m._c, "forward",
+                                         observer._c,
+                                         observer._c)
         assert len([x for x, _ in m._c._get_modules()
                     if x.startswith('observer_for_')]) == 3, \
             'Expected to have 3 observer submodules'
@@ -1219,9 +1219,9 @@ graph(%x : Tensor,
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
         torch._C._jit_pass_constant_propagation(m.graph)
-        m._c = torch._C._jit_pass_prepare_quant(m._c, "forward",
-                                                observer._c,
-                                                observer._c)
+        torch._C._jit_pass_prepare_quant(m._c, "forward",
+                                         observer._c,
+                                         observer._c)
         data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
         def get_forward(m):
@@ -1229,7 +1229,7 @@ graph(%x : Tensor,
         get_forward(m)(data)
         # right now the result will have extra observer modules
         # will fix later when we figure out how to remove modules
-        torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
+        m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward")
 
         get_forward(m)(data)
         FileCheck().check("aten::quantize_linear") \
@@ -1260,7 +1260,8 @@ graph(%x : Tensor,
 
     def test_quant_fusion(self):
         input_str = """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
+%b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
         # CHECK-NOT: aten::int_repr
         %a_intrepr = aten::int_repr(%a_quant)
@@ -18696,6 +18697,51 @@ class TestClassType(JitTestCase):
         input = torch.rand(2, 3)
         output = m_loaded(input)
         self.assertEqual(3 * input, output)
+
+    def test_interface(self):
+        with torch.jit._disable_emit_hooks():
+            @torch.jit.script
+            class Foo(object):
+                def __init__(self):
+                    pass
+
+                def one(self, x, y):
+                    return x + y
+
+                def two(self, x):
+                    return 2 * x
+
+            @torch.jit.script
+            class Bar(object):
+                def __init__(self):
+                    pass
+
+                def one(self, x, y):
+                    return x * y
+
+                def two(self, x):
+                    return 2 / x
+
+            @torch.jit.interface
+            class OneTwo(object):
+                def one(self, x, y):
+                    # type: (Tensor, Tensor) -> Tensor
+                    pass
+
+                def two(self, x):
+                    # type: (Tensor) -> Tensor
+                    pass
+
+            def use_them(x):
+                a = Foo()
+                b = Bar()
+                c = torch.jit.annotate(List[OneTwo], [a, b])
+                for i in range(len(c)):
+                    x = c[i].one(x, x)
+                    x = c[i].two(x)
+                return x
+            self.checkScript(use_them, (torch.rand(3, 4),))
+
 
     def test_overloaded_fn(self):
         @torch.jit.script
