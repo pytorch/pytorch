@@ -4796,7 +4796,7 @@ class _TestTorchMixin(torchtest):
         torch.randperm(0, out=res2)
         self.assertEqual(res1.numel(), 0)
         self.assertEqual(res2.numel(), 0)
-        
+
         # Test exceptions when n is too large for a floating point type
         for dtype, small_n, large_n in ((torch.half, 2**11 + 1, 2**11 + 2),
                                         (torch.float, 2**24 + 1, 2**24 + 2),
@@ -4818,7 +4818,7 @@ class _TestTorchMixin(torchtest):
     def test_randperm(self):
         self._test_randperm(self, 'cpu')
 
-            
+
     def test_choice(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         x1 = torch.arange(100)
@@ -4828,7 +4828,7 @@ class _TestTorchMixin(torchtest):
             x = x.to(device)
             w = torch.arange(100, device=device).float()
 
-            ############## Reproducibility ##############
+            # Reproducibility
 
             # 1 - UNIFORM Sampling WITHOUT replacement
             torch.manual_seed(2019)
@@ -4858,7 +4858,7 @@ class _TestTorchMixin(torchtest):
             res2 = torch.choice(x, size=25, replace=True, p=w)
             self.assertEqual(res1, res2, 0)
 
-            ############### Corner cases ################
+            # Corner cases
 
             # 1 - Squashed weights
             # This setup only works for sampling WITH replacement
@@ -4875,7 +4875,7 @@ class _TestTorchMixin(torchtest):
             res = torch.choice(x, size=25, replace=False, p=w)
             self.assertTrue((res.view(-1) < 25 * x.dim()).all())
 
-            ############### Correctness ################
+            # Correctness
 
             # 1 - UNIFORM Sampling WITHOUT replacement - Different values
             res = torch.choice(x, size=95, replace=False)
@@ -4885,7 +4885,7 @@ class _TestTorchMixin(torchtest):
             w = torch.arange(100).float().to(device)
             res = torch.choice(x, size=95, replace=False, p=w)
             self.assertTrue((res == res.unsqueeze(1)).sum() == 95 * x.dim())
-            
+
 
     def test_random(self):
         # This test is flaky with p<=(2/(ub-lb))^200=6e-36

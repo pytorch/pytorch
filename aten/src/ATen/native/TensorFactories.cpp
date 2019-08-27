@@ -898,7 +898,7 @@ Tensor reservoir_sampling_cpu(
     n,
     split,
     generator
-	);
+  );
 
   return x.index_select(
     0,
@@ -975,14 +975,14 @@ Tensor sampling_with_replacement_cpu(
     );
 
     TORCH_CHECK(
-	    n == weights.numel(),
-	    "The weights must have the same number of elements as the input's first dimension."
-	  );
+      n == weights.numel(),
+      "The weights must have the same number of elements as the input's first dimension."
+    );
 
      TORCH_CHECK(
-	    weights.dim() == 1,
-	    "The weights must 1-dimensional."
-	  );
+      weights.dim() == 1,
+      "The weights must 1-dimensional."
+    );
 
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(
                                 nullptr,

@@ -660,14 +660,14 @@ Tensor sampling_with_replacement_cuda(
 
 
     TORCH_CHECK(
-	    n == weights.numel(),
-	    "The weights must have the same number of elements as the input's first dimension."
-	  );
+      n == weights.numel(),
+      "The weights must have the same number of elements as the input's first dimension."
+    );
 
-	  TORCH_CHECK(
-	    weights.dim() == 1,
-	    "The weights must 1-dimensional."
-	  );
+    TORCH_CHECK(
+      weights.dim() == 1,
+      "The weights must 1-dimensional."
+    );
 
     cudaDeviceProp* props = at::cuda::getCurrentDeviceProperties();
     THAssert(props != NULL);
