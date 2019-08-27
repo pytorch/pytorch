@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include <c10/macros/Macros.h>
+#include <c10/core/EnableNamedTensor.h> 
 
 #if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 #include <ATen/core/aten_interned_strings.h>

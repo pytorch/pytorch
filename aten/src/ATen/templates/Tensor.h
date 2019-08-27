@@ -15,9 +15,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
-#endif
 
 namespace caffe2 {
 class Tensor;
