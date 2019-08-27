@@ -76,22 +76,22 @@ static void postSetStateValidate(const IValue& v) {
 }
 
 void Pickler::protocol() {
-  push<OpCode>(OpCode::PROTO);
+  push<PickleOpCode>(PickleOpCode::PROTO);
   push<uint8_t>(PROTOCOL_VERSION);
 }
 
 void Pickler::startTuple() {
   // All attributes get pushed into a tuple and their indices saved in the
   // module def
-  push<OpCode>(OpCode::MARK);
+  push<PickleOpCode>(PickleOpCode::MARK);
 }
 
 void Pickler::endTuple() {
-  push<OpCode>(OpCode::TUPLE);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
 }
 
 void Pickler::stop() {
-  push<OpCode>(OpCode::STOP);
+  push<PickleOpCode>(PickleOpCode::STOP);
 }
 
 void Pickler::torchSaveStop() {
@@ -101,15 +101,15 @@ void Pickler::torchSaveStop() {
   // As another pickle program in the same binary archive, add a list of
   // keys for each tensor (see torch/serialization.py)
   protocol();
-  push<OpCode>(OpCode::MARK);
+  push<PickleOpCode>(PickleOpCode::MARK);
   for (size_t i = 0; i < tensor_data_.size(); ++i) {
     std::string key = std::to_string(i);
-    push<OpCode>(OpCode::BINUNICODE);
+    push<PickleOpCode>(PickleOpCode::BINUNICODE);
     push<uint32_t>(key.size());
     pushBytes(key);
   }
 
-  push<OpCode>(OpCode::TUPLE);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
   stop();
 
   // Now dump the tensor binary data
@@ -124,7 +124,7 @@ void Pickler::torchSaveStart() {
   // Output data to match torch.save, see torch/serialization.py for details
   // Magic number (0x1950a86a20f9469cfc6c)
   protocol();
-  push<OpCode>(OpCode::LONG1);
+  push<PickleOpCode>(PickleOpCode::LONG1);
   // LONG1 size
   pushBytes("\x0a");
   // LONG1 data
@@ -133,14 +133,14 @@ void Pickler::torchSaveStart() {
 
   // Protocol Version (1001)
   protocol();
-  push<OpCode>(OpCode::BININT2);
+  push<PickleOpCode>(PickleOpCode::BININT2);
   pushBytes("\xe9\x03");
   stop();
 
   // sys_info, this isn't actually used in de-serialization so we can leave this
   // one empty
   protocol();
-  push<OpCode>(OpCode::EMPTY_DICT);
+  push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
   stop();
 }
 
@@ -156,9 +156,9 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushInt(ivalue.toInt());
   } else if (ivalue.isBool()) {
     if (ivalue.toBool()) {
-      push<OpCode>(OpCode::NEWTRUE);
+      push<PickleOpCode>(PickleOpCode::NEWTRUE);
     } else {
-      push<OpCode>(OpCode::NEWFALSE);
+      push<PickleOpCode>(PickleOpCode::NEWFALSE);
     }
   } else if (ivalue.isString()) {
     pushString(ivalue.toStringRef());
@@ -167,7 +167,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isGenericDict()) {
     pushDict(ivalue);
   } else if (ivalue.isNone()) {
-    push<OpCode>(OpCode::NONE);
+    push<PickleOpCode>(PickleOpCode::NONE);
   } else if (ivalue.isIntList()) {
     pushSpecializedList(
         ivalue, PicklerClass::INTLIST, [=](const IValue& ivalue) {
@@ -200,21 +200,21 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     auto obj = ivalue.toObject();
     auto type = obj->type();
     pushGlobal(type->name()->prefix(), type->name()->name());
-    push<OpCode>(OpCode::EMPTY_TUPLE);
-    push<OpCode>(OpCode::NEWOBJ);
+    push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
+    push<PickleOpCode>(PickleOpCode::NEWOBJ);
     if (checkHasValidSetGetState(type)) {
       Function* getstate = type->getMethod("__getstate__");
       pushIValue((*getstate)({obj}));
     } else {
-      push<OpCode>(OpCode::EMPTY_DICT);
-      push<OpCode>(OpCode::MARK);
+      push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
+      push<PickleOpCode>(PickleOpCode::MARK);
       for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
         pushString(type->getAttributeName(i));
         pushIValue(obj->getSlot(i));
       }
-      push<OpCode>(OpCode::SETITEMS);
+      push<PickleOpCode>(PickleOpCode::SETITEMS);
     }
-    push<OpCode>(OpCode::BUILD);
+    push<PickleOpCode>(PickleOpCode::BUILD);
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
@@ -247,16 +247,16 @@ void Pickler::pushIValue(const IValue& ivalue) {
 void Pickler::pushInt(int64_t n) {
   if (n >= std::numeric_limits<int8_t>::min() &&
       n <= std::numeric_limits<int8_t>::max()) {
-    push<OpCode>(OpCode::BININT1);
+    push<PickleOpCode>(PickleOpCode::BININT1);
     push<int8_t>(n);
   } else if (
       n >= std::numeric_limits<int32_t>::min() &&
       n <= std::numeric_limits<int32_t>::max()) {
-    push<OpCode>(OpCode::BININT);
+    push<PickleOpCode>(PickleOpCode::BININT);
     push<int32_t>(n);
   } else {
     // Push 8 byte integer
-    push<OpCode>(OpCode::LONG1);
+    push<PickleOpCode>(PickleOpCode::LONG1);
     push<uint8_t>(8);
     push<int64_t>(n);
   }
@@ -264,18 +264,18 @@ void Pickler::pushInt(int64_t n) {
 
 void Pickler::pushBinGet(uint32_t memo_id) {
   if (memo_id <= std::numeric_limits<uint8_t>::max()) {
-    push<OpCode>(OpCode::BINGET);
+    push<PickleOpCode>(PickleOpCode::BINGET);
     push<uint8_t>(memo_id);
   } else {
     // Memoized too many items, issue a LONG_BINGET instead
-    push<OpCode>(OpCode::LONG_BINGET);
+    push<PickleOpCode>(PickleOpCode::LONG_BINGET);
     push<uint32_t>(memo_id);
   }
 }
 
 // unmemoized encoding of a string
 void Pickler::pushStringImpl(const std::string& string) {
-  push<OpCode>(OpCode::BINUNICODE);
+  push<PickleOpCode>(PickleOpCode::BINUNICODE);
   push<uint32_t>(string.size());
   pushBytes(string);
 }
@@ -300,7 +300,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   }
 
   // Tuple for persistent_load
-  push<OpCode>(OpCode::MARK);
+  push<PickleOpCode>(PickleOpCode::MARK);
   // typename
   pushString("storage");
   // data_type
@@ -316,9 +316,9 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // size
   pushInt(tensor.storage().size());
   // view_metadata
-  push<OpCode>(OpCode::NONE);
-  push<OpCode>(OpCode::TUPLE);
-  push<OpCode>(OpCode::BINPERSID);
+  push<PickleOpCode>(PickleOpCode::NONE);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
+  push<PickleOpCode>(PickleOpCode::BINPERSID);
 
   memoized_storage_map_[addr] = pushNextBinPut();
   tensor_data_.push_back(getWriteableTensorData(tensor));
@@ -336,7 +336,7 @@ void Pickler::pushGlobal(
   std::string key = ss.str();
   auto memo_entry = memoized_globals_map_.find(key);
   if (memo_entry == memoized_globals_map_.end()) {
-    push<OpCode>(OpCode::GLOBAL);
+    push<PickleOpCode>(PickleOpCode::GLOBAL);
     pushBytes(key);
     // Push BINPUT without adding anything to the memoized_ivalues_
     size_t memo_id = pushNextBinPut();
@@ -369,7 +369,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   pushGlobal(
       "torch._utils", quantized ? "_rebuild_qtensor" : "_rebuild_tensor_v2");
 
-  push<OpCode>(OpCode::MARK);
+  push<PickleOpCode>(PickleOpCode::MARK);
 
   pushStorageOfTensor(tensor);
 
@@ -377,18 +377,18 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   pushInt(tensor.storage_offset());
 
   // size
-  push<OpCode>(OpCode::MARK);
+  push<PickleOpCode>(PickleOpCode::MARK);
   for (auto size : tensor.sizes()) {
     pushInt(size);
   }
-  push<OpCode>(OpCode::TUPLE);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
 
   // stride
-  push<OpCode>(OpCode::MARK);
+  push<PickleOpCode>(PickleOpCode::MARK);
   for (auto stride : tensor.strides()) {
     pushInt(stride);
   }
-  push<OpCode>(OpCode::TUPLE);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
 
   if (quantized) {
     pushDouble(tensor.q_scale());
@@ -400,14 +400,14 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
 
   // backward_hooks
   pushGlobal("collections", "OrderedDict");
-  push<OpCode>(OpCode::EMPTY_TUPLE);
+  push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
   // Construct the collections.OrderedDict for the backward_hooks
-  push<OpCode>(OpCode::REDUCE);
+  push<PickleOpCode>(PickleOpCode::REDUCE);
 
-  push<OpCode>(OpCode::TUPLE);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
 
   // Call torch._utils._rebuild_tensor_v2
-  push<OpCode>(OpCode::REDUCE);
+  push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
 void Pickler::pushClass(PicklerClass cls) {
@@ -420,11 +420,11 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
   int64_t tensor_id = tensor_table_->size() - 1;
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
   // so wrap in a tuple
-  push<OpCode>(OpCode::MARK);
+  push<PickleOpCode>(PickleOpCode::MARK);
   pushIValue(tensor_id);
-  push<OpCode>(OpCode::TUPLE);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
 
-  push<OpCode>(OpCode::REDUCE);
+  push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
 void Pickler::pushSpecializedList(
@@ -435,39 +435,39 @@ void Pickler::pushSpecializedList(
 
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
   // so wrap in a tuple
-  push<OpCode>(OpCode::MARK);
+  push<PickleOpCode>(PickleOpCode::MARK);
 
-  push<OpCode>(OpCode::EMPTY_LIST);
+  push<PickleOpCode>(PickleOpCode::EMPTY_LIST);
   // Mark list
-  push<OpCode>(OpCode::MARK);
+  push<PickleOpCode>(PickleOpCode::MARK);
 
   // Add all items
   item_pusher(ivalue);
 
   // Finish list
-  push<OpCode>(OpCode::APPENDS);
+  push<PickleOpCode>(PickleOpCode::APPENDS);
 
   // Finish tuple
-  push<OpCode>(OpCode::TUPLE);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
 
   // Call reduce
-  push<OpCode>(OpCode::REDUCE);
+  push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
 void Pickler::pushDouble(double value) {
   AT_ASSERT(sizeof(double) == 8);
   char* bytes = reinterpret_cast<char*>(&value);
 
-  push<OpCode>(OpCode::BINFLOAT);
+  push<PickleOpCode>(PickleOpCode::BINFLOAT);
   for (size_t i = 0; i < 8; ++i) {
     push<uint8_t>(bytes[8 - i - 1]);
   }
 }
 
 void Pickler::pushDict(const IValue& ivalue) {
-  push<OpCode>(OpCode::EMPTY_DICT);
+  push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
 
-  push<OpCode>(OpCode::MARK);
+  push<PickleOpCode>(PickleOpCode::MARK);
 
   // Sort the dict for deterministic keys
   auto dict_items = iterationOrder(ivalue.toGenericDict());
@@ -476,16 +476,16 @@ void Pickler::pushDict(const IValue& ivalue) {
     pushIValue(pair.second);
   }
 
-  push<OpCode>(OpCode::SETITEMS);
+  push<PickleOpCode>(PickleOpCode::SETITEMS);
 }
 
 size_t Pickler::pushNextBinPut() {
   if (memo_id_ <= std::numeric_limits<uint8_t>::max()) {
-    push<OpCode>(OpCode::BINPUT);
+    push<PickleOpCode>(PickleOpCode::BINPUT);
     push<uint8_t>(memo_id_);
   } else {
     // Memoized too many items, issue a LONG_BINPUT instead
-    push<OpCode>(OpCode::LONG_BINPUT);
+    push<PickleOpCode>(PickleOpCode::LONG_BINPUT);
     push<uint32_t>(memo_id_);
   }
   AT_ASSERT(memo_id_ <= std::numeric_limits<uint32_t>::max());
@@ -495,27 +495,27 @@ size_t Pickler::pushNextBinPut() {
 
 void Pickler::pushGenericList(const IValue& ivalue) {
   auto list = ivalue.toGenericListRef();
-  push<OpCode>(OpCode::EMPTY_LIST);
+  push<PickleOpCode>(PickleOpCode::EMPTY_LIST);
 
-  push<OpCode>(OpCode::MARK);
+  push<PickleOpCode>(PickleOpCode::MARK);
 
   for (const IValue& item : list) {
     pushIValue(item);
   }
 
-  push<OpCode>(OpCode::APPENDS);
+  push<PickleOpCode>(PickleOpCode::APPENDS);
 }
 
 void Pickler::pushTuple(const IValue& ivalue) {
   // TODO: Small tuple unrolling (e.g. TUPLE3)
-  push<OpCode>(OpCode::MARK);
+  push<PickleOpCode>(PickleOpCode::MARK);
   auto tuple = ivalue.toTuple();
 
   for (const IValue& item : tuple->elements()) {
     pushIValue(item);
   }
 
-  push<OpCode>(OpCode::TUPLE);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
 }
 
 IValue Unpickler::parse_ivalue() {
@@ -547,7 +547,7 @@ void Unpickler::run() {
   // Expect a PROTO opcode and protocol number at the start of blob
   auto opcode = readOpCode();
   TORCH_CHECK(
-      opcode == OpCode::PROTO,
+      opcode == PickleOpCode::PROTO,
       "Expected PROTO opcode at the start"
       " of pickle archive, found ", int(static_cast<uint8_t>(opcode)));
   uint8_t protocol = read<uint8_t>();
@@ -557,8 +557,8 @@ void Unpickler::run() {
       protocol);
 
   while (true) {
-    OpCode opcode = readInstruction();
-    if (opcode == OpCode::STOP) {
+    PickleOpCode opcode = readInstruction();
+    if (opcode == PickleOpCode::STOP) {
       return;
     }
   }
@@ -602,25 +602,25 @@ static std::vector<int64_t> tupleToIntList(const IValue& v) {
   });
 }
 
-OpCode Unpickler::readInstruction() {
+PickleOpCode Unpickler::readInstruction() {
   auto opcode = readOpCode();
   switch (opcode) {
-    case OpCode::EMPTY_LIST: {
+    case PickleOpCode::EMPTY_LIST: {
       stack_.emplace_back(
           c10::impl::GenericList(c10::impl::deprecatedUntypedList()));
     } break;
-    case OpCode::EMPTY_TUPLE: {
+    case PickleOpCode::EMPTY_TUPLE: {
       if (empty_tuple_.isNone()) {
         // we only need one object, since tuples are not mutable.
         empty_tuple_ = c10::ivalue::Tuple::create({});
       }
       stack_.emplace_back(empty_tuple_);
     } break;
-    case OpCode::BINPUT: {
+    case PickleOpCode::BINPUT: {
       size_t memo_id = read<uint8_t>();
       setInput(memo_id);
     } break;
-    case OpCode::LONG_BINPUT: {
+    case PickleOpCode::LONG_BINPUT: {
       TORCH_CHECK(
           std::numeric_limits<size_t>::max() >=
               std::numeric_limits<uint32_t>::max(),
@@ -629,41 +629,41 @@ OpCode Unpickler::readInstruction() {
       size_t memo_id = read<uint32_t>();
       setInput(memo_id);
     } break;
-    case OpCode::MARK: {
+    case PickleOpCode::MARK: {
       // Mark location of the container ivalue in the stack
       marks_.push_back(stack_.size());
     } break;
-    case OpCode::NEWTRUE: {
+    case PickleOpCode::NEWTRUE: {
       stack_.emplace_back(true);
     } break;
-    case OpCode::NEWFALSE: {
+    case PickleOpCode::NEWFALSE: {
       stack_.emplace_back(false);
     } break;
-    case OpCode::NONE: {
+    case PickleOpCode::NONE: {
       stack_.emplace_back(IValue());
     } break;
-    case OpCode::BININT1: {
+    case PickleOpCode::BININT1: {
       int8_t value = read<int8_t>();
       stack_.emplace_back(int64_t(value));
     } break;
-    case OpCode::BININT: {
+    case PickleOpCode::BININT: {
       int32_t value = read<int32_t>();
       stack_.emplace_back(int64_t(value));
     } break;
-    case OpCode::LONG1: {
+    case PickleOpCode::LONG1: {
       // Only read LONG1s with 8 as the length
       uint8_t length = read<uint8_t>();
       TORCH_CHECK(length == 8, "Expected length to be 8, got ", int(length));
       stack_.emplace_back(int64_t(read<int64_t>()));
     } break;
-    case OpCode::BINUNICODE: {
+    case PickleOpCode::BINUNICODE: {
       uint32_t length = read<uint32_t>();
       stack_.emplace_back(readBytes(length));
     } break;
-    case OpCode::BINFLOAT:
+    case PickleOpCode::BINFLOAT:
       stack_.emplace_back(readFloat());
       break;
-    case OpCode::TUPLE: {
+    case PickleOpCode::TUPLE: {
       size_t start = marks_.back();
       marks_.pop_back();
       auto tuple = c10::ivalue::Tuple::create({});
@@ -675,13 +675,13 @@ OpCode Unpickler::readInstruction() {
       stack_.erase(start_it, stack_.end());
       stack_.emplace_back(tuple);
     } break;
-    case OpCode::EMPTY_DICT:
+    case PickleOpCode::EMPTY_DICT:
       stack_.emplace_back(c10::impl::GenericDict(c10::impl::deprecatedUntypedDict()));
       break;
-    case OpCode::APPENDS: {
+    case PickleOpCode::APPENDS: {
       readList();
     } break;
-    case OpCode::SETITEMS: {
+    case PickleOpCode::SETITEMS: {
       size_t start = marks_.back();
       marks_.pop_back();
       auto dict = stack_.at(start - 1).toGenericDict();
@@ -690,15 +690,15 @@ OpCode Unpickler::readInstruction() {
       }
       stack_.erase(stack_.begin() + start, stack_.end());
     } break;
-    case OpCode::BINGET: {
+    case PickleOpCode::BINGET: {
       stack_.push_back(memo_table_.at(read<uint8_t>()));
     } break;
-    case OpCode::LONG_BINGET: {
+    case PickleOpCode::LONG_BINGET: {
       stack_.push_back(memo_table_.at(read<uint32_t>()));
     } break;
-    case OpCode::STOP:
+    case PickleOpCode::STOP:
       break;
-    case OpCode::GLOBAL: {
+    case PickleOpCode::GLOBAL: {
       // Module name, it's not needed for anything
       auto module_name = readString();
       auto class_name = readString();
@@ -840,14 +840,14 @@ OpCode Unpickler::readInstruction() {
       }
       stack_.emplace_back(int64_t(globals_.size() - 1));
     } break;
-    case OpCode::NEWOBJ: {
+    case PickleOpCode::NEWOBJ: {
       // pop empty tuple, the actual action is stored in the globals_stack_
       stack_.pop_back();
     } break;
     // because we have NEWOBJ do nothing, BUILD and REDUCE end up doing
     // the same thing
-    case OpCode::BUILD:
-    case OpCode::REDUCE: {
+    case PickleOpCode::BUILD:
+    case PickleOpCode::REDUCE: {
       // stack is: <functor_idx> <functor_arg>
       // extract <functor_idx> and remove from the stack:
       std::swap(*(stack_.end() - 2), *(stack_.end() - 1));
@@ -856,7 +856,7 @@ OpCode Unpickler::readInstruction() {
       // stack is: <functor_arg>
       globals_.at(idx)();
     } break;
-    case OpCode::BINPERSID: {
+    case PickleOpCode::BINPERSID: {
       auto args = pop(stack_).toTuple()->elements();
       AT_ASSERT(
           args.at(0).toStringRef() == "storage",
@@ -988,8 +988,8 @@ std::string Unpickler::readString() {
   return ss.str();
 }
 
-OpCode Unpickler::readOpCode() {
-  return static_cast<OpCode>(read<uint8_t>());
+PickleOpCode Unpickler::readOpCode() {
+  return static_cast<PickleOpCode>(read<uint8_t>());
 }
 
 WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {

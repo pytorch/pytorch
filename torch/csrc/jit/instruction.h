@@ -33,19 +33,19 @@ namespace jit {
   _(GUARD, "T") /* check guard against type_table, true if passes */        \
   _(TAIL_CALL, "F") /* replace current frame with function F */
 
-enum OperatorCode : uint8_t {
+enum OpCode : uint8_t {
 #define DEFINE_OP(op, _) op,
   FORALL_OPCODES(DEFINE_OP)
 #undef DEFINE_OP
 };
 
 struct Instruction {
-  OperatorCode op;
+  OpCode op;
   uint8_t padding; // currently unused
   uint16_t N;
   int32_t X;
   // TODO: check for overflow
-  Instruction(OperatorCode op, int32_t X, uint16_t N)
+  Instruction(OpCode op, int32_t X, uint16_t N)
       : op(op), padding(0), N(N), X(X) {}
 };
 }
