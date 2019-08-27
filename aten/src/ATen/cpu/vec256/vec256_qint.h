@@ -60,7 +60,14 @@ struct Vec256<c10::qint8> {
     }
 
     Vec256<float> dequantize(Vec256<float> scale, Vec256<float> zero_point) const {
-        __at_align32__ __m256i int32_vals = _mm256_cvtepi8_epi32(vals.as_vec);
+#ifdef __AVX2__
+        __m256i int32_vals = _mm256_cvtepi8_epi32(vals.as_vec);
+#else // __AVX2__
+        __m256i int32_vals;
+        for (int i = 0; i < 8; ++i) {
+            *((int32_t*)&int32_vals) = vals.as_vec[i];
+        }
+#endif
         __at_align32__ __m256 float_vals = _mm256_cvtepi32_ps(int32_vals);
         return scale * (Vec256<float>(float_vals) - zero_point);
     }
@@ -125,7 +132,14 @@ struct Vec256<c10::quint8> {
     }
 
     Vec256<float> dequantize(Vec256<float> scale, Vec256<float> zero_point) const {
+#ifdef __AVX2__
         __m256i int32_vals = _mm256_cvtepu8_epi32(vals.as_vec);
+#else // __AVX2__
+        __m256i int32_vals;
+        for (int i = 0; i < 8; ++i) {
+            *((uint32_t*)&int32_vals) = vals.as_vec[i];
+        }
+#endif
         __m256 float_vals = _mm256_cvtepi32_ps(int32_vals);
         return scale * (Vec256<float>(float_vals) - zero_point);
     }

@@ -98,7 +98,7 @@ void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, si
     src,
     (typename T::underlying*)dst,
     count,
-    fbgemm::TensorQuantizationParams{scale, zero_point, precision}
+    fbgemm::TensorQuantizationParams{(float)scale, (int32_t)zero_point, precision}
   );
 }
 
