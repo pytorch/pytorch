@@ -5,35 +5,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import numpy as np
 import torch
 
-"""Converts the input to its numpy equivalent.
-
-Returns:
-    - If input is non-quantized tensor:
-        Tensor.numpy()
-    - If input is a quantized tensor:
-        (Tensor.dequantize().numpy(), scale, zero_point, np.dtype)
-    - If input is a non-quantized dtype:
-        Numpy equivalent of the dtype.
-    - If input is a quantized dtype:
-        Numpy version of the underlying type of the quantized data type.
-"""
-def to_numpy(inp):
-    if isinstance(inp, torch.Tensor):
-        if inp.is_quantized:
-            return (inp.dequantize().numpy(), inp.q_scale(), inp.q_zero_point(),
-                    to_numpy(inp.dtype))
-        return inp.numpy()
-    if isinstance(inp, torch.dtype):
-        try:
-            qx = torch.tensor([0], dtype=inp)
-        except RuntimeError:
-            # Quantized tensor doesn't have `empty`.
-            qx = torch._empty_affine_quantized([0], scale=1.0, zero_point=0,
-                                               dtype=inp)
-            qx = qx.int_repr()
-        return qx.numpy().dtype
-    return inp
-
 """Computes the output shape given convolution parameters."""
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
                        output_padding=0):
@@ -43,8 +14,6 @@ def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
 # Quantization references
 def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
     """Quantizes a numpy array."""
-    x = to_numpy(x)
-    dtype = to_numpy(dtype)
     if qmin is None:
         qmin = np.iinfo(dtype).min
     if qmax is None:
