@@ -149,6 +149,62 @@ TEST(BoundShapeInference, LengthsRangeFill) {
       TensorProto_DataType_INT32);
 }
 
+TEST(BoundShapeInference, Slice_1) {
+  NetDef net;
+  net.add_op()->CopyFrom(
+      CreateOperatorDef("Slice", "", {"X", "Start", "End"}, {"Y"}, {}));
+  Workspace ws;
+  auto* start_tensor =
+      BlobGetMutableTensor(ws.CreateBlob("Start"), {2}, TensorOptions())
+          ->mutable_data<int>();
+  start_tensor[0] = 0;
+  start_tensor[1] = 4;
+  auto* end_tensor =
+      BlobGetMutableTensor(ws.CreateBlob("End"), {2}, TensorOptions())
+          ->mutable_data<int>();
+  end_tensor[0] = -1;
+  end_tensor[1] = 6;
+  ShapeInfoMap shape_map;
+  BoundShapeSpec spec(20, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, &ws);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "Y",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size, 2},
+      TensorProto_DataType_FLOAT);
+}
+
+TEST(BoundShapeInference, Slice_2) {
+  NetDef net;
+  net.add_op()->CopyFrom(
+      CreateOperatorDef("Slice", "", {"X", "Start", "End"}, {"Y"}, {}));
+  Workspace ws;
+  auto* start_tensor =
+      BlobGetMutableTensor(ws.CreateBlob("Start"), {2}, TensorOptions())
+          ->mutable_data<int>();
+  start_tensor[0] = 0;
+  start_tensor[1] = 0;
+  auto* end_tensor =
+      BlobGetMutableTensor(ws.CreateBlob("End"), {2}, TensorOptions())
+          ->mutable_data<int>();
+  end_tensor[0] = 30;
+  end_tensor[1] = 5;
+  ShapeInfoMap shape_map;
+  BoundShapeSpec spec(20, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, &ws);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "Y",
+      ShapeInfo::DimType::CONSTANT,
+      {30, 5},
+      TensorProto_DataType_FLOAT);
+}
+
 TEST(BoundShapeInference, Reshape) {
   NetDef net;
   std::vector<int> new_shape{-1, 8};

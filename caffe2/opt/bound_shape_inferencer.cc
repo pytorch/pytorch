@@ -44,12 +44,14 @@ void BoundShapeInferencer::EnsureShapeNames(
 
 void BoundShapeInferencer::InferOps(
     const OperatorDef& op,
-    caffe2::Workspace* /* ws */) {
+    caffe2::Workspace* ws) {
   if (op.type() == "SparseLengthsSum" ||
       op.type() == "SparseLengthsSumFused8BitRowwise" ||
       op.type() == "SparseLengthsWeightedSum" ||
       op.type() == "SparseLengthsWeightedSumFused8BitRowwise") {
     InferSparseLengthsSum(op);
+  } else if (op.type() == "Slice") {
+    InferSlice(op, ws);
   } else if (
       op.type() == "FC" || op.type() == "FCTransposed" ||
       op.type() == "FbFCPacked") {
@@ -215,6 +217,43 @@ void BoundShapeInferencer::InferLengthsRangeFill(const OperatorDef& op) {
       TensorProto_DataType_INT32,
       false);
   current_dim_type_ = ShapeInfo::DimType::SEQ;
+}
+
+void BoundShapeInferencer::InferSlice(
+    const OperatorDef& op,
+    const caffe2::Workspace* ws) {
+  if (op.input_size() > 1) {
+    CAFFE_ENFORCE(
+        op.input_size() == 3, "Slice needs to have data, starts and ends.");
+    if (ws->HasBlob(op.input(1)) && ws->HasBlob(op.input(2))) {
+      const auto& starts_tensor = ws->GetBlob(op.input(1))->Get<TensorCPU>();
+      const auto& starts = starts_tensor.data<int>();
+      const auto& ends_tensor = ws->GetBlob(op.input(2))->Get<TensorCPU>();
+      const auto& ends = ends_tensor.data<int>();
+      if (starts_tensor.size() && ends_tensor.size()) {
+        CAFFE_ENFORCE(
+            starts_tensor.size() == ends_tensor.size(),
+            "Starts and ends need to have same size");
+        vector<int64_t> dims(starts_tensor.size());
+        auto dimType = ShapeInfo::DimType::CONSTANT;
+        for (int i = 0; i < starts_tensor.size(); ++i) {
+          if (ends[i] == -1) {
+            if (i > 0) {
+              return;
+            }
+            dims[i] = spec_.max_batch_size;
+            dimType = ShapeInfo::DimType::BATCH;
+          } else {
+            dims[i] = ends[i] - starts[i];
+          }
+        }
+        CheckAndSetTensorShapeAndType(
+            op.output(0), dimType, dims, TensorProto_DataType_FLOAT, false);
+      }
+    }
+  } else {
+    InferCommonOp(op);
+  }
 }
 
 void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
