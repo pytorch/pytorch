@@ -341,10 +341,13 @@ struct Environment {
         // Special-cased error msg if we're trying to assign to a tensor list.
         if (simple_parent->type()->kind() == TypeKind::ListType &&
             as_simple_value->type()->kind() == TypeKind::ListType) {
-          error << "\n. (Note: empty lists are constructed as Tensor[]; "
-                << "if you want an empty list of a different type, "
-                << "use `torch.jit.annotate(List[T], [])`, "
-                << "where `T` is the type of elements in the list)";
+          // error << "\n. (Note: empty lists are constructed as Tensor[]; "
+          //       << "if you want an empty list of a different type, "
+          //       << "use `torch.jit.annotate(List[T], [])`, "
+          //       << "where `T` is the type of elements in the list)";
+          error << "\nEmpty lists default to List[Tensor]. Add a variable "
+                     "annotation to the assignment to create an empty list "
+                     "of another type (torch.jit.annotate() for Python 2)";
         }
         throw error;
       }
