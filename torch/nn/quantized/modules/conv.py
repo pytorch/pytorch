@@ -83,10 +83,15 @@ class Conv2d(torch.nn.Module):
             [out_channels, in_channels // self.groups, self.kernel_size[0],
                 self.kernel_size[1]],
             scale=1, zero_point=0, dtype=torch.qint8)
+        self.weight_scale = 1.0
         self.set_weight(qweight)
-        self.bias = torch._empty_affine_quantized([out_channels],
-                                                  scale=1, zero_point=0,
-                                                  dtype=torch.qint32)
+        if bias:
+            self.bias = torch._empty_affine_quantized([out_channels],
+                                                      scale=1, zero_point=0,
+                                                      dtype=torch.qint32)
+        else:
+            self.bias = None
+
         self.scale = 1.0
         self.zero_point = 0
 
@@ -106,6 +111,7 @@ class Conv2d(torch.nn.Module):
     def set_weight(self, w):
         self._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(
             w.permute([0, 2, 3, 1]), self.stride, self.padding, self.dilation, self.groups)
+        self.weight_scale = w.q_scale()
 
     def weight(self):
         return torch.ops.quantized.fbgemm_conv_unpack(
@@ -116,8 +122,13 @@ class Conv2d(torch.nn.Module):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
+        # Temporary work around for bias
+        # see Issue:https://github.com/pytorch/pytorch/issues/23874
+        bias = self.bias
+        if bias is not None:
+            bias = torch.quantize_linear(bias.dequantize(), self.weight_scale * input.q_scale(), 0, torch.qint32)
         output = ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]),
-                                             self._packed_weight, self.bias,
+                                             self._packed_weight, bias,
                                              self.stride, self.padding,
                                              self.dilation, self.groups,
                                              self.scale, self.zero_point)
@@ -151,7 +162,7 @@ class Conv2d(torch.nn.Module):
             self.weight(),
             self.bias,
             self.scale,
-            self.zero_point,
+            self.zero_point
         )
 
     # ===== Deserialization methods =====
@@ -227,7 +238,8 @@ class Conv2d(torch.nn.Module):
         act_scale, act_zp = activation_observer.calculate_qparams()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have a dtype of qint8'
         wt_scale, wt_zp = weight_observer.calculate_qparams()
-        bias_scale = float(wt_scale * act_scale)
+        bias_scale = float(act_scale / (2**16))
+
         qweight = torch.quantize_linear(
             mod.weight.float(),
             float(wt_scale), int(wt_zp), torch.qint8)
@@ -236,9 +248,11 @@ class Conv2d(torch.nn.Module):
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight(qweight)
         if mod.bias is not None:
-            qconv.bias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
+            qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
         else:
-            qconv.bias = None
+            qbias = None
+        qconv.bias = qbias
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
+
         return qconv
