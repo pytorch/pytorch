@@ -870,7 +870,7 @@ class FtrlOptimizer(Optimizer):
 class GFtrlOptimizer(Optimizer):
     """Group Lasso FTRL Optimizer."""
 
-    def __init__(self, alpha=0.01, beta=1e-4, lambda1=0, lambda2=0,
+    def __init__(self, alpha=0.01, beta=1e-4, lambda1=0.0, lambda2=0.0,
                  sparse_dedup_aggregator=None, engine=''):
         super(GFtrlOptimizer, self).__init__()
         self.alpha = alpha
