@@ -8,8 +8,32 @@ from jit_utils import _inline_everything
 from torch._jit_internal import Optional
 import torch.nn as nn
 from common_utils import TestCase, run_tests
+from common_quantization import NestedModel, AnnotatedNestedModel
 from torch.quantization import QuantStub, DeQuantStub, \
     quantize, default_eval_fn, QConfig
+
+class Observer(torch.nn.Module):
+    __annotations__ = {'scale' : Optional[torch.Tensor], 'zero_point': Optional[torch.Tensor]}
+
+    def __init__(self):
+        super(Observer, self).__init__()
+        self.dtype = torch.quint8
+        self.qscheme = torch.per_tensor_affine
+        self.scale, self.zero_point = None, None
+
+    def forward(self, x):
+        self.scale = torch.tensor([2.0])
+        self.zero_point = torch.tensor([3])
+        return x
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        return self.scale, self.zero_point
+
+class WeightObserver(Observer):
+    def __init__(self):
+        super(WeightObserver, self).__init__()
+        self.dtype = torch.qint8
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
@@ -19,29 +43,6 @@ from torch.quantization import QuantStub, DeQuantStub, \
 class QuantizerTestCase(TestCase):
     @_inline_everything
     def test_compare_qparam_eager_script_default(self):
-        class Observer(torch.nn.Module):
-            __annotations__ = {'scale' : Optional[torch.Tensor], 'zero_point': Optional[torch.Tensor]}
-
-            def __init__(self):
-                super(Observer, self).__init__()
-                self.dtype = torch.quint8
-                self.qscheme = torch.per_tensor_affine
-                self.scale, self.zero_point = None, None
-
-            def forward(self, x):
-                self.scale = torch.tensor([2.0])
-                self.zero_point = torch.tensor([3])
-                return x
-
-            @torch.jit.export
-            def calculate_qparams(self):
-                return self.scale, self.zero_point
-
-        class WeightObserver(Observer):
-            def __init__(self):
-                super(WeightObserver, self).__init__()
-                self.dtype = torch.qint8
-
         class TestM(nn.Module):
             def __init__(self, qconfig):
                 super(TestM, self).__init__()
@@ -101,6 +102,58 @@ class QuantizerTestCase(TestCase):
         # Note that observer modules are not removed right now
         torch._C._jit_pass_quant_fusion(script_module._c._get_method('forward').graph)
         get_forward(script_module)(data[0][0])
+        eager_result = quantized_eager_module(data[0][0])
+        script_result = get_forward(script_module)(data[0][0])
+        self.assertEqual(eager_result, script_result)
+
+    def test_qconfig_dict(self):
+        data = [(torch.randn(10, 5, dtype=torch.float), 1)]
+
+        # Eager mode
+        qconfig = QConfig(activation=Observer, weight=WeightObserver)
+        eager_module = AnnotatedNestedModel()
+        eager_module.fc3.qcofnig = qconfig
+        eager_module.sub2.fc1.qconfig = qconfig
+        script_module = torch.jit.script(NestedModel())
+        quantized_eager_module = quantize(eager_module, default_eval_fn, data)
+        torch._C._jit_set_inline_everything_mode(False)
+
+        def get_forward(m):
+            return m._c._get_method('forward')
+        # Script mode
+        torch._C._jit_pass_constant_propagation(get_forward(script_module).graph)
+
+        ScriptedObserver = torch.jit.script(Observer())
+        ScriptedWeightObserver = torch.jit.script(WeightObserver())
+        scripted_qconfig = QConfig(
+            activation=ScriptedObserver._c,
+            weight=ScriptedWeightObserver._c)
+        qconfig_dict = {
+            # '': scripted_qconfig,
+            'sub2.fc1': scripted_qconfig,
+            'fc3': scripted_qconfig
+        }
+        print('--------- 1. Insert Observers --------')
+        print(get_forward(script_module).graph)
+        torch._C._jit_pass_insert_observers(script_module._c,
+                                            "forward",
+                                            qconfig_dict)
+        print(get_forward(script_module).graph)
+
+        # Run ScriptM Model and Collect statistics
+        print('--------- 2. Calibration ----------')
+        get_forward(script_module)(data[0][0])
+
+        # Insert quantize and dequantize calls
+        print('--------- 3. Convert --------------')
+        script_module._c = torch._C._jit_pass_insert_quant_dequant(script_module._c, "forward")
+        # Note that observer modules are not removed right now
+        # print(script_module._c._get_modules())
+        # torch._C._jit_pass_custom_pattern_based_rewrite_graph()
+        print('--------- 4. Fusion ---------------')
+        torch._C._jit_pass_quant_fusion(script_module._c._get_method('forward').graph)
+        get_forward(script_module)(data[0][0])
+        print(get_forward(script_module).code)
         eager_result = quantized_eager_module(data[0][0])
         script_result = get_forward(script_module)(data[0][0])
         self.assertEqual(eager_result, script_result)
