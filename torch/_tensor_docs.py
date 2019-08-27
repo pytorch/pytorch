@@ -2165,9 +2165,6 @@ In-place version of :meth:`~Tensor.rsqrt`
 
 add_docstr_all('rsub',
                r"""
-rsub(value) -> Tensor
-rsub(value=1, other) -> Tensor
-
 See :func:`torch.rsub`
 """)
 

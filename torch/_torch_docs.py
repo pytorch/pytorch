@@ -4465,7 +4465,7 @@ is started (e.g. JIT execution).
 
 add_docstr(torch.rsub,
            r"""
-.. function:: rsub(input, alpha=1, other)
+.. function:: rsub(input, other, alpha=1)
 
 Equivalent to calling ``sub(other, input, alpha=alpha)``. See :meth:`torch.sub`.
 """)
