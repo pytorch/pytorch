@@ -25,7 +25,7 @@
 //     return a * b;
 //   });
 //
-// See BinaryOpsKernel.cu for the complete implementation
+// See MulKernel.cu for the complete implementation
 //
 
 #include <ATen/ATen.h>
