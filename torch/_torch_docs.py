@@ -155,8 +155,7 @@ The shapes of :attr:`input` and :attr:`other` must be
 .. math::
     \text{{out}} = \text{{input}} + \text{{alpha}} \times \text{{other}}
 
-If :attr:`other` is of type FloatTensor or DoubleTensor, :attr:`alpha` must be
-a real number, otherwise it should be an integer.
+If :attr:`other` is of an integral dtype, :attr:`alpha` should be an integer.
 
 Args:
     input (Tensor): the first input tensor
@@ -4892,8 +4891,7 @@ The shapes of :attr:`input` and :attr:`other` must be
 .. math::
     \text{{out}} = \text{{input}} - \text{{alpha}} \times \text{{other}}
 
-If :attr:`other` is of type FloatTensor or DoubleTensor, :attr:`alpha` must be
-a real number, otherwise it should be an integer.
+If :attr:`other` is of an integral dtype, :attr:`alpha` should be an integer.
 
 Args:
     input (Tensor): the first input tensor
