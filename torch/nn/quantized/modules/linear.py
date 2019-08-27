@@ -230,6 +230,8 @@ class Linear(torch.nn.Module):
         act_scale, act_zp = activation_observer.calculate_qparams()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
         wt_scale, wt_zp = weight_observer.calculate_qparams()
+        # Scale bias to activation_scale/2^16, this quantizes bias
+        # to about 24 bits of precision
         bias_scale = float(act_scale / (2**16))
         qweight = torch.quantize_linear(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
         if mod.bias is not None:
