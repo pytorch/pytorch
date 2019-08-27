@@ -123,12 +123,6 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     return std::make_shared<SimpleValue>(n->output());
   }
 
-  if (auto iface = value_->type()->cast<InterfaceType>()) {
-    if (auto schema = iface->getMethod(field)) {
-      return std::make_shared<MethodValue>(getValue(), field);
-    }
-  }
-
   return std::make_shared<BuiltinFunction>(
       Symbol::aten(field), NamedValue(loc, "self", value_));
 }
