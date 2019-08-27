@@ -4,26 +4,17 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-void sendException(
-    const std::string& from,
-    const Message& request,
-    RpcAgent& agent,
-    const std::exception& e) {
+Message createException(const Message& request, const std::exception& e) {
   const char* err = e.what();
   std::vector<char> payload(err, err + strlen(err));
-  agent.send(
-      from,
-      Message(
-          std::move(payload),
-          std::vector<torch::Tensor>(),
-          MessageType::EXCEPTION,
-          request.id()));
+  return Message(
+      std::move(payload),
+      std::vector<torch::Tensor>(),
+      MessageType::EXCEPTION,
+      request.id());
 }
 
-void processRequestBlocking(
-    const std::string& from,
-    Message&& request,
-    RpcAgent& agent) {
+std::unique_ptr<Message> processRequestBlocking(Message&& request) {
   switch (request.type()) {
     case MessageType::SCRIPT_CALL: {
       try {
@@ -40,24 +31,22 @@ void processRequestBlocking(
 
         auto response = ScriptRet(std::move(stack.front())).toMessage();
         response.setId(request.id());
-        agent.send(from, std::move(response));
+        return std::make_unique<Message>(response);
       } catch (std::exception& e) {
-        sendException(from, request, agent, e);
+        return std::make_unique<Message>(createException(request, e));
       }
       break;
     }
     case MessageType::PYTHON_CALL: {
       try {
         auto payload = PythonRpcHandler::generatePythonUDFResult(request);
-        agent.send(
-            from,
-            Message(
-                std::move(payload),
-                std::vector<torch::Tensor>(),
-                MessageType::PYTHON_RET,
-                request.id()));
+        return std::make_unique<Message>(Message(
+            std::move(payload),
+            std::vector<torch::Tensor>(),
+            MessageType::PYTHON_RET,
+            request.id()));
       } catch (std::exception& e) {
-        sendException(from, request, agent, e);
+        return std::make_unique<Message>(createException(request, e));
       }
       break;
     }
