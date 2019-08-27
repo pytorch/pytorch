@@ -84,7 +84,8 @@ class QAdd final : public c10::OperatorKernel {
         qa.sizes(),
         at::device(kCPU).dtype(qa.scalar_type()),
         scale,
-        zero_point);
+        zero_point,
+        qa.suggest_memory_format());
     return _add_out<ReLUFused>(qc, qa, qb);
   }
 };
