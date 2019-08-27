@@ -728,6 +728,11 @@ class TestOperators(TestCase):
         y = torch.randn(2, 1, 4)
         self.assertONNX(lambda x, y: torch.remainder(x, y), (x, y))
 
+    def test_fmod(self):
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 1, 4)
+        self.assertONNX(lambda x, y: torch.fmod(x, y), (x, y), opset_version=10)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

@@ -776,6 +776,25 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (2, 3))
         self.run_test(RemainderModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_fmod(self):
+        class FModModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.fmod(input, other)
+
+        x = torch.randn(4, 2, 3)
+        y = torch.randn(1, 2, 1)
+        self.run_test(FModModel(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_fmod_scalar(self):
+        class FModModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.fmod(input, 2.55)
+
+        x = torch.randint(10, (2, 3))
+        self.run_test(FModModel(), x)
+
     # TODO: enable opset 11 test once ORT support for cumsum is in
     @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
