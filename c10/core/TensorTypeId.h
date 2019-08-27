@@ -1,42 +1,33 @@
-#ifndef TENSOR_TYPE_ID_H_
-#define TENSOR_TYPE_ID_H_
+#pragma once
 
 #include <iostream>
 #include <string>
 #include "c10/macros/Macros.h"
-#include "c10/util/IdWrapper.h"
 
 namespace c10 {
 
-namespace details {
-using _tensorTypeId_underlyingType = uint8_t;
-}
-
-/**
- * Dynamic type ID of a Tensor argument.  It represents something like
- * CPUTensor, etc.
- */
-class C10_API TensorTypeId final
-    : public at::
-          IdWrapper<TensorTypeId, details::_tensorTypeId_underlyingType> {
- public:
-  // Don't use this!
-  // Unfortunately, a default constructor needs to be defined because of
-  // https://reviews.llvm.org/D41223
-  constexpr TensorTypeId() noexcept : IdWrapper(0) {}
-
- private:
-  constexpr explicit TensorTypeId(
-      details::_tensorTypeId_underlyingType id) noexcept
-      : IdWrapper(id) {}
-
-  friend class TensorTypeIdCreator;
-  friend C10_API std::ostream& operator<<(std::ostream&, TensorTypeId);
-  friend C10_API std::string toString(TensorTypeId);
+// NB: Ordering will be subject to change
+enum class TensorTypeId : uint8_t {
+  UndefinedTensorId,
+  CPUTensorId, // PyTorch/Caffe2 supported
+  CUDATensorId, // PyTorch/Caffe2 supported
+  SparseCPUTensorId, // PyTorch only
+  SparseCUDATensorId, // PyTorch only
+  MKLDNNTensorId, // Caffe2 only
+  OpenGLTensorId, // Caffe2 only
+  OpenCLTensorId, // Caffe2 only
+  IDEEPTensorId, // Caffe2 only
+  HIPTensorId, // PyTorch/Caffe2 supported
+  SparseHIPTensorId, // PyTorch only
+  MSNPUTensorId, // PyTorch only
+  XLATensorId, // PyTorch only
+  MkldnnCPUTensorId,
+  QuantizedCPUTensorId, // PyTorch only
+  ComplexCPUTensorId, // PyTorch only
+  ComplexCUDATensorId // PyTorch only
 };
 
+C10_API const char* toString(TensorTypeId);
+C10_API std::ostream& operator<<(std::ostream&, TensorTypeId);
+
 } // namespace c10
-
-C10_DEFINE_HASH_FOR_IDWRAPPER(c10::TensorTypeId)
-
-#endif // TENSOR_TYPE_ID_H_
