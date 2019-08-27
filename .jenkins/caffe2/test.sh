@@ -106,11 +106,6 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
   export LC_ALL=C.UTF-8
   export LANG=C.UTF-8
 fi
-
-if [[ "$BUILD_ENVIRONMENT" == *py2* ]]; then
-  pip install --user requests
-fi
-
 pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \
@@ -142,4 +137,3 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
-
