@@ -12885,6 +12885,7 @@ a")
                     a = 0
                     def backward(grad_output):
                         raise "Hi"
+                    a = a + 1
                 else:
                     return x
                 return a + 1
