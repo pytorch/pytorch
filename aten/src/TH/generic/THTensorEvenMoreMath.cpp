@@ -3,6 +3,9 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 // Finds non-zero elements of a tensor and returns their subscripts
 void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
@@ -762,6 +765,9 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
                    tensor_data += sz*tensor_stride;
                    src_data += sz*src_stride;
                    break;);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::check_names_for_dot(tensor, src);
+#endif
   return sum;
 }
 

@@ -184,9 +184,6 @@ In-place version of :meth:`~Tensor.acos`
 
 add_docstr_all('add',
                r"""
-add(value) -> Tensor
-add(value=1, other) -> Tensor
-
 See :func:`torch.add`
 """)
 
@@ -2499,9 +2496,6 @@ Example::
 
 add_docstr_all('sub',
                r"""
-sub(value) -> Tensor
-sub(value=1, other) -> Tensor
-
 See :func:`torch.sub`
 """)
 
