@@ -35,11 +35,31 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
 
     // Tensor for unpacked weights
     // Unpacked format would be KRS(C/G)
-    auto unpacked_weights = _empty_affine_quantized(
+   Tensor unpacked_weights;
+   if (pack_ptr.q_scheme == kPerTensorAffine) {
+     unpacked_weights = _empty_affine_quantized(
+         {output_channels, kernel_h, kernel_w, C_per_G},
+         device(kCPU).dtype(kQInt8),
+         pack_ptr.w_scale[0],
+         pack_ptr.w_zp[0]);
+   } else if (pack_ptr.q_scheme == kPerChannelAffine) {
+    auto scales = from_blob(
+        pack_ptr.w_scale.data(),
+        pack_ptr.w_scale.size(),
+        device(kCPU).dtype(kFloat));
+    auto zero_points = from_blob(
+        pack_ptr.w_zp.data(),
+        pack_ptr.w_zp.size(),
+        device(kCPU).dtype(kInt));
+
+    // The output channel axis is 0
+    unpacked_weights = _empty_per_channel_affine_quantized_like(
+        scales.toType(kDouble),
+        zero_points.toType(kLong),
         {output_channels, kernel_h, kernel_w, C_per_G},
-        device(kCPU).dtype(kQInt8),
-        pack_ptr.w_scale,
-        pack_ptr.w_zp);
+        {0},
+        device(kCPU).dtype(kQInt8));
+   }
     int8_t* unpacked_weights_p =
         reinterpret_cast<int8_t*>(unpacked_weights.data_ptr<c10::qint8>());
 
