@@ -878,7 +878,7 @@ Computes the p-norm distance between each pair of the two collections of row vec
 
 If x1 has shape :math:`P \times M` and x2 has shape :math:`R \times M` then the 
 output will have shape :math:`P \times R`.
- 
+
 This function is equivalent to `scipy.spatial.distance.cdist(input,'minkowski', p=p)` 
 if :math:`p \in (0, \infty)`. When :math:`p = 0` it is equivalent to 
 `scipy.spatial.distance.cdist(input, 'hamming') * M`. When :math:`p = \infty`, the closest 
