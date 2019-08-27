@@ -2,20 +2,34 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import sys
 import torch.distributed.autograd as dist_autograd
+from common_distributed import MultiProcessTestCase
+from functools import wraps
 import unittest
+
+def dist_init(func):
+    """
+    We use this decorator for setting up and tearing down state since
+    MultiProcessTestCase runs each `test*` method in a separate process and
+    each process just runs the `test*` method without actually calling
+    'setUp' and 'tearDown' methods of unittest.
+    """
+    @wraps(func)
+    def wrapper(self):
+        self.worker_id = self.rank
+        store = dist.FileStore(self.file.name, self.world_size)
+        dist.init_process_group(backend='gloo', rank=self.rank,
+                                world_size=self.world_size, store=store)
+        dist.init_model_parallel('worker%d' % self.rank)
+        func(self)
+        dist.join_rpc()
+
+    return wrapper
 
 @unittest.skipIf(sys.version_info < (3, 0), "Pytorch distributed autograd package "
                  "does not support python2")
-class TestDistAutograd(unittest.TestCase):
+class TestDistAutograd(MultiProcessTestCase):
 
-    def setUp(self):
-        self.worker_id = 16
-        # Using private init method here since 'init_model_parallel' currently
-        # requires ProcessGroupGloo which in turns requires at least two
-        # processes. We'd like to avoid multiprocessing in this unit test to
-        # keep it simple and hence we use the private _init method.
-        dist_autograd._init(self.worker_id)
-
+    @dist_init
     def test_autograd_context(self):
         context_ids = []
         for i in range(1000):
