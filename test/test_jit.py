@@ -1590,7 +1590,6 @@ graph(%Ra, %Rb):
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @skipIfRocm
-    @unittest.skipIf(True, "yep")
     def test_cpp(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
