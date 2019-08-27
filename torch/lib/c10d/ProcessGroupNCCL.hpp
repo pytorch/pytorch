@@ -154,7 +154,7 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
-      const AllreduceOptions& opts = AllreduceOptions()) override;
+      const AllreduceCoalescedOptions& opts = AllreduceCoalescedOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,

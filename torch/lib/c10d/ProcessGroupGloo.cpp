@@ -1034,7 +1034,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
   std::vector<at::Tensor>& tensors,
-  const AllreduceOptions& opts) {
+  const AllreduceCoalescedOptions& opts) {
     static auto invalidArgument = [](const std::string& msg) {
       throw std::invalid_argument("ProcessGroupGloo::allreduce_coalesced: " + msg);
     };

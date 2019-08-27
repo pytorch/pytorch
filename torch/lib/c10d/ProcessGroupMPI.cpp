@@ -357,7 +357,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
-    const AllreduceOptions& opts) {
+    const AllreduceCoalescedOptions& opts) {
   throw std::runtime_error("allreduce_coalesced is currently not supported with MPI");
 }
 

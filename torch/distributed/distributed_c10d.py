@@ -944,7 +944,7 @@ def all_reduce_coalesced(tensors,
     if _rank_not_in_group(group):
         return
 
-    opts = AllreduceOptions()
+    opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
     if group == GroupMember.WORLD:
         _check_default_pg()

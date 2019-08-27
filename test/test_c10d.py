@@ -748,23 +748,23 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         t3 = torch.sparse_coo_tensor([[0]], [1], size=(1,))
 
         with self.assertRaisesRegex(ValueError, "requires non-empty tensor list"):
-            opts = c10d.AllreduceOptions()
+            opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([], opts)
 
         with self.assertRaisesRegex(ValueError, "tensors must all have the same type"):
-            opts = c10d.AllreduceOptions()
+            opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t1, t2], opts)
 
         with self.assertRaisesRegex(ValueError, "invalid tensor layout at index"):
-            opts = c10d.AllreduceOptions()
+            opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t1, t3], opts)
 
         with self.assertRaisesRegex(ValueError, "unsupported layout"):
-            opts = c10d.AllreduceOptions()
+            opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t3, t3.clone()], opts)
 
         with self.assertRaisesRegex(ValueError, "unsupported device type"):
-            opts = c10d.AllreduceOptions()
+            opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t1.cuda(), t2.cuda()], opts)
 
     def _test_allreduce_coalesced_basics(self, fn):
@@ -773,7 +773,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         test_cases = simple_coalesced_reduce_tests(self.rank, self.world_size)
         for op, inputs, outputs in test_cases:
-            opts = c10d.AllreduceOptions()
+            opts = c10d.AllreduceCoalescedOptions()
             opts.reduceOp = op
             tensors = [fn(x) for x in inputs]
             work = pg.allreduce_coalesced(tensors, opts)
