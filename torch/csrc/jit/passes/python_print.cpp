@@ -929,9 +929,33 @@ struct PythonPrintPass {
     }
   }
 
+  void printIgnoredPythonOp(TaggedStringStream& stmt, Node* node) {
+    // When we initially compile an ignored python function, we use the
+    // function's annotated return type in compilation.
+    // To preserve the output type, we serialize the
+    // op as __ignored_python_op__(Output_Type, Tuple_Of_Inputs)
+    // e.g.
+    // def ignored_func(x, y) -> int
+    // ->
+    // __ignored_python_op__(int, (x, y))
+
+    stmt << "__ignored_python_op__(" << node->output()->type()->python_str()
+         << ", ";
+    // print op inputs as a tuple, adding a comma to make a tuple as needed
+    printValueList(stmt, node->inputs(), "(", "");
+    if (node->inputs().size() == 1) {
+      stmt << ",";
+    }
+    // close tuple and op invocation
+    stmt << "))";
+  }
+
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
   void printRHS(TaggedStringStream& stmt, Node* node) {
     switch (node->kind()) {
+      case prim::IgnoredPythonOp: {
+        printIgnoredPythonOp(stmt, node);
+      } break;
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
         if (enforce_importable_ && !value->ignore_on_export) {
@@ -941,16 +965,15 @@ struct PythonPrintPass {
               << "Did you forget add @script or @script_method annotation? "
               << "If this is a nn.ModuleList, add it to __constants__";
         }
-
         if (value->ignore_on_export) {
-          stmt << "ops.prim.IgnoredPythonOp";
+          printIgnoredPythonOp(stmt, node);
         } else {
           std::stringstream scalars_stream;
           stmt << "^" << value->name();
           value->writeScalars(scalars_stream);
           stmt << scalars_stream.str();
+          printValueList(stmt, node->inputs(), "(", ")");
         }
-        printValueList(stmt, node->inputs(), "(", ")");
       } break;
       case prim::Uninitialized: {
         stmt << "uninitialized(" << node->output()->type()->python_str() << ")";
@@ -1443,6 +1466,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   const static std::unordered_set<Symbol> handled = {
       prim::Constant,
       prim::Uninitialized,
+      prim::IgnoredPythonOp,
       prim::fork,
       prim::ListConstruct,
       prim::DictConstruct,

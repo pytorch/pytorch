@@ -13834,6 +13834,41 @@ a")
         with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
             m2.forward(torch.ones(1))
 
+    def test_ignored_as_value(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            @torch.jit.ignore(drop_on_export=True)
+            def tuple_ignored(self, x):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return x, x
+
+            @torch.jit.ignore(drop_on_export=True)
+            def single_val_ignored(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                return x
+
+            def forward(self, x, use_ignore_path):
+                # type: (Tensor, bool) -> Tuple[Tensor, Tensor]
+                if self.training:
+                    return self.tuple_ignored(x)
+                if use_ignore_path:
+                    return self.single_val_ignored(x, x), self.single_val_ignored(x, x)
+                return x, x
+
+        original = Model()
+        scripted = torch.jit.script(original)
+        self.assertEqual(scripted(torch.tensor(.5), False), (torch.tensor(.5), torch.tensor(.5)))
+
+        buffer = io.BytesIO()
+        torch.jit.save(scripted, buffer)
+        buffer.seek(0)
+        loaded = torch.jit.load(buffer)
+
+        with self.assertRaisesRegex(torch._C.JITException, "ignored operations are never executed after import"):
+            loaded(torch.tensor(.5), False)
+
     def test_module_error(self):
         class MyModule(torch.nn.Module):
             def __init__(self):

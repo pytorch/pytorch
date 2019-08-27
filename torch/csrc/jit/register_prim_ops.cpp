@@ -807,17 +807,19 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
 
      Operator(
-         "prim::IgnoredPythonOp(...) -> None",
-         [](Stack& stack) {
-           throw JITException(
-               "This Python function is annotated to be ignored"
-               " and cannot be and has not been included in the exported"
-               " binary, meaning that it cannot be executed now."
-               " Make sure that ignored operations are never executed after"
-               " import");
-           return 0;
+         prim::IgnoredPythonOp,
+         [](const Node* node) {
+           return [](Stack& stack) {
+             throw JITException(
+                 "This Python function is annotated to be ignored"
+                 " and cannot be and has not been included in the exported"
+                 " binary, meaning that it cannot be executed now."
+                 " Make sure that ignored operations are never executed after"
+                 " import");
+             return 0;
+           };
          },
-         aliasAnalysisFromSchema()),
+         aliasAnalysisSpecialCase()),
 
      // Load x, y
      // loads values from registers onto the stack, the actual callback does
