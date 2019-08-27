@@ -157,52 +157,6 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def(
-          "_jit_pass_insert_quantdequant",
-          [](const script::Module& moduleObj,
-             const std::string& methodName,
-             py::dict& pyQParamDict) {
-            if (!pyQParamDict.size()) {
-              return;
-            }
-
-            auto qparam_dict = py::cast<std::unordered_map<
-                std::string,
-                std::tuple<std::string, float, int>>>(pyQParamDict);
-            return InsertQuantDequantNodes(moduleObj, methodName, qparam_dict);
-          })
-      .def(
-          "_jit_pass_insert_quantdequant_for_weight_bias",
-          [](const script::Module& moduleObj,
-             const std::string& method_name,
-             const std::string& param_name,
-             py::function pyGetQParamFunc) {
-            // For different static params we pass different getQParamFunc via
-            // same interface exposed by the quantizer.
-            if (param_name == std::string("weight")) {
-              auto getQParamFunc =
-                  py::cast<std::function<std::tuple<std::string, float, int>(
-                      at::Tensor)>>(pyGetQParamFunc);
-              InsertQuantDequantNodesForParam(
-                  moduleObj,
-                  method_name,
-                  param_name,
-                  getQParamFunc,
-                  at::ScalarType::QInt8);
-            } else if (param_name == std::string("bias")) {
-              auto getQParamFunc =
-                  py::cast<std::function<std::tuple<std::string, float, int>(
-                      float, float)>>(pyGetQParamFunc);
-              InsertQuantDequantNodesForParam(
-                  moduleObj,
-                  method_name,
-                  param_name,
-                  getQParamFunc,
-                  at::ScalarType::QInt32);
-            } else {
-              TORCH_CHECK(false, "Invalid Param Name");
-            }
-          })
-      .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
       .def(
