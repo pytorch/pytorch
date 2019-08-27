@@ -17,3 +17,43 @@ TorchNNTestParams = namedtuple(
 )
 
 CppArg = namedtuple('CppArg', ['type', 'value'])
+
+ParityStatus = namedtuple('ParityStatus', ['has_impl_parity', 'has_doc_parity'])
+
+'''
+This function expects the parity tracker Markdown file to have the following format:
+
+## package1_name
+
+API | Implementation Parity | Doc Parity
+------------- | ------------- | -------------
+API_Name|No|No
+...
+
+## package2_name
+
+API | Implementation Parity | Doc Parity
+------------- | ------------- | -------------
+API_Name|No|No
+...
+'''
+def process_parity_tracker_table(file_path):
+    parity_tracker_dict = {}
+
+    with open(file_path, 'r') as f:
+        all_text = f.read()
+        packages = all_text.split('##')
+        for package in packages[1:]:
+            lines = [line for line in package.split('\n') if line.strip() != '']
+            package_name = lines[0].strip(' ')
+            if package_name in parity_tracker_dict:
+                raise RuntimeError("Duplicated package name `{}` found in {}".format(package_name, file_path))
+            else:
+                parity_tracker_dict[package_name] = {}
+            for api_status in lines[4:]:
+                api_name, has_impl_parity_str, has_doc_parity_str = api_status.split('|')
+                parity_tracker_dict[package_name][api_name] = ParityStatus(
+                    has_impl_parity=(has_impl_parity_str == 'Yes'),
+                    has_doc_parity=(has_doc_parity_str == 'Yes'))
+
+    return parity_tracker_dict

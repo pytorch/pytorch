@@ -12,12 +12,12 @@ import common_utils as common
 import common_nn
 from common_cuda import TEST_CUDA
 import torch.utils.cpp_extension
-from cpp_api_parity import sample_module, torch_nn_modules, TorchNNTestParams, CppArg
+from cpp_api_parity import sample_module, torch_nn_modules, TorchNNTestParams, CppArg, process_parity_tracker_table
 
 
-torch_nn_has_parity = set([
-    'SampleModule',
-])
+parity_table_path = os.path.join(os.path.dirname(__file__), 'cpp_api_parity/parity-tracker.md')
+
+parity_table = process_parity_tracker_table(parity_table_path)
 
 TORCH_NN_MODULE_COMMON_TEST_HARNESS = """\n
 #include <torch/script.h>
@@ -180,14 +180,21 @@ class TestCppApiParity(common.TestCase):
     def _test_torch_nn_module_ctor_args(self, module_name):
         python_module_class = getattr(torch.nn, module_name)
         module_metadata = torch_nn_modules.module_metadata_map[module_name]
-        cpp_default_constructor_args = module_metadata['cpp_default_constructor_args']
-
-        cpp_module_option = 'torch::nn::{}Options{}'.format(module_name, cpp_default_constructor_args)
+        cpp_default_constructor_args_str = module_metadata['cpp_default_constructor_args']
         if PY2:
             init_arg_spec = inspect.getargspec(python_module_class.__init__)
         else:
             init_arg_spec = inspect.getfullargspec(python_module_class.__init__)
         init_kwargs_defaults = init_arg_spec.defaults
+        python_default_constructor_arg_names = [x for x in init_arg_spec.args[1:-len(init_kwargs_defaults)] if x != 'has_parity']
+        cpp_default_constructor_arg_values = cpp_default_constructor_args_str.strip('()').split(',')
+        assert len(cpp_default_constructor_arg_values) == len(python_default_constructor_arg_names), \
+            "The constructor of torch::nn::{} in C++ must take the exact same number of non-keyword arguments ".format(module_name) + \
+            "as the constructor of torch.nn.{} in Python.\n".format(module_name) + \
+            "However, currently the C++ constructor expects {} non-keyword argument(s), while the Python constructor expects {}.".format(
+                len(cpp_default_constructor_arg_values), len(python_default_constructor_arg_names))
+
+        cpp_module_option = 'torch::nn::{}Options{}'.format(module_name, cpp_default_constructor_args_str)
         init_kwargs = init_arg_spec.args[-len(init_kwargs_defaults):]
         for arg_name, python_default_value in zip(init_kwargs, init_kwargs_defaults):
             cpp_module_option += '.{}({})'.format(arg_name, self._python_arg_to_cpp_arg(python_default_value).value)
@@ -387,17 +394,33 @@ class TestCppApiParity(common.TestCase):
 
 
 def _process_test_params(test_params_dict, module_metadata, device):
-    module_name = test_params_dict.get('module_name')
-    desc = test_params_dict.get('desc', None)
-    module_variant_name = module_name + (('_' + desc) if desc else '') + (('_' + device) if device != 'cpu' else '')
+    fullname = test_params_dict.get('fullname', None)
+    if fullname:
+        module_name = fullname.split('_')[0]
+        module_variant_name = fullname
+    else:
+        module_name = test_params_dict.get('module_name')
+        desc = test_params_dict.get('desc', None)
+        module_variant_name = module_name + (('_' + desc) if desc else '')
+    module_variant_name += ('_' + device) if device != 'cpu' else ''
+
     input_size = test_params_dict.get('input_size', None)
     input_fn = test_params_dict.get('input_fn', None)
-    if input_size:
+    input_value = test_params_dict.get('input', None)
+    if input_size is not None:
         example_inputs = [torch.randn(input_size)]
     elif input_fn:
-        example_inputs = list(input_fn())
+        example_inputs = input_fn()
+        if type(example_inputs) == tuple:
+            example_inputs = list(example_inputs)
+        elif type(example_inputs) == torch.Tensor:
+            example_inputs = [example_inputs]
+        else:
+            raise RuntimeError("Unexpected input type: {}".format(type(example_inputs)))
+    elif input_value:
+        example_inputs = [input_value]
     else:
-        raise RuntimeError("Missing `input_size` or `input_fn` for {}".format(module_variant_name))
+        raise RuntimeError("Missing `input_size`, `input_fn` or `input` for {}".format(module_variant_name))
     if device != 'cuda' or TEST_CUDA:
         example_inputs = [x.to(device) for x in example_inputs]
     return TorchNNTestParams(
@@ -413,9 +436,11 @@ def _process_test_params(test_params_dict, module_metadata, device):
         device=device,
     )
 
+def has_test(test_name):
+    return hasattr(TestCppApiParity, test_name)
 
 def add_test(test_name, test_fn):
-    if hasattr(TestCppApiParity, test_name):
+    if has_test(test_name):
         raise RuntimeError("Found two tests with the same name: " + test_name)
     setattr(TestCppApiParity, test_name, test_fn)
 
@@ -423,14 +448,47 @@ devices = ['cpu', 'cuda']
 
 torch_nn_test_params_map = {}
 
-torch_nn_module_names = set()
+all_module_tests = sample_module.module_tests + \
+    common_nn.module_tests + \
+    common_nn.new_module_tests + \
+    common_nn.criterion_tests
 
-for test_params_dict in sample_module.module_tests + common_nn.module_tests:
-    module_name = test_params_dict.get('module_name')
-    if module_name not in torch_nn_has_parity:
+for test_params_dict in all_module_tests:
+    # We skip all `torch.nn.functional` tests for now
+    if 'wrap_functional' in str(test_params_dict.get('constructor', '')):
         continue
 
-    torch_nn_module_names.add(module_name)
+    fullname = test_params_dict.get('fullname', None)
+    if fullname:
+        module_name = fullname.split('_')[0]
+    else:
+        module_name = test_params_dict.get('module_name')
+
+    assert hasattr(torch.nn, module_name), \
+        "`torch.nn` doesn't have module `{}`. ".format(module_name) + \
+        "If you are adding a new test, please name your test following format `ModuleName_desc`."
+
+    module_full_name = 'torch.nn.' + module_name
+    if module_full_name not in parity_table['torch.nn']:
+        raise RuntimeError(
+            'Module `{}` is not found in Python / C++ API parity table. Please update parity table at {}.'.format(
+                module_full_name, parity_table_path))
+
+    has_impl_parity, _ = parity_table['torch.nn'][module_full_name]
+
+    ctor_args_test_name = 'test_torch_nn_{}_ctor_args'.format(module_name)
+
+    def ctor_args_test(self):
+        self._test_torch_nn_module_ctor_args(
+            module_name=self._testMethodName.replace('test_torch_nn_', '').replace('_ctor_args', ''))
+
+    if not has_impl_parity:
+        ctor_args_test = unittest.expectedFailure(ctor_args_test)
+
+    # We only run one constructor args test per module
+    if not has_test(ctor_args_test_name):
+        add_test(ctor_args_test_name, ctor_args_test)
+
     module_metadata = torch_nn_modules.module_metadata_map[module_name]
     for device in devices:
         test_params = _process_test_params(
@@ -445,16 +503,11 @@ for test_params_dict in sample_module.module_tests + common_nn.module_tests:
 
         if device == 'cuda':
             test_fn = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")(test_fn)
-        add_test(test_name, test_fn)
 
-for module_name in sorted(list(torch_nn_module_names)):
-    ctor_args_test_name = 'test_torch_nn_{}_ctor_args'.format(module_name)
+        if not has_impl_parity:
+            test_fn = unittest.expectedFailure(test_fn)
 
-    def ctor_args_test(self):
-        self._test_torch_nn_module_ctor_args(
-            module_name=self._testMethodName.replace('test_torch_nn_', '').replace('_ctor_args', ''))
-
-    add_test(ctor_args_test_name, ctor_args_test)
+        add_test(test_name, test_fn)    
 
 
 # Assert that there exists auto-generated tests for SampleModule.
