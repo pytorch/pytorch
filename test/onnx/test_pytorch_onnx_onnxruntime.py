@@ -234,7 +234,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_test(NegSlice(), x)
 
-    @unittest.skip('https://github.com/pytorch/pytorch/issues/10984')
     def test_slice_neg_large_negone(self):
         class NegSlice(torch.nn.Module):
             def forward(self, x):
