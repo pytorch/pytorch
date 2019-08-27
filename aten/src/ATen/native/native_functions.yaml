@@ -735,8 +735,10 @@
   dispatch:
     CPU: legacy::cpu::_th_dot
     CUDA: legacy::cuda::_th_dot
+  named_guard: False
 
 - func: dot.out(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: einsum(str equation, Tensor[] tensors) -> Tensor
 
