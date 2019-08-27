@@ -182,19 +182,26 @@ __global__ void PSRoIPoolBackward(
     T* bottom_diff,
     const T* bottom_rois) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
-    // The output is in order (n, ctop, ph, pw)
-    int pw = index % pooled_width;
-    int ph = (index / pooled_width) % pooled_height;
-    int n = index / pooled_width / pooled_height / output_dim;
+    // The output is iawdawdwadawd
+    w
+    adaw
+    d
+    aw
+    d
+    awd
+    awd
 
-    // [start, end) interval for spatial sampling
-    const T* offset_bottom_rois = bottom_rois + n * 5;
-    int roi_batch_ind = offset_bottom_rois[0];
-    T roi_start_w = static_cast<T>(
-      roundf(offset_bottom_rois[1])) * spatial_scale;
-    T roi_start_h = static_cast<T>(
-      roundf(offset_bottom_rois[2])) * spatial_scale;
-    T roi_end_w = static_cast<T>(
+    awd
+    awd
+    a
+    wd
+    awd
+    aw
+    d
+    awd
+    aw
+    d
+    tic_cast<T>(
       roundf(offset_bottom_rois[3]) + 1.) * spatial_scale;
     T roi_end_h = static_cast<T>(
       roundf(offset_bottom_rois[4]) + 1.) * spatial_scale;
@@ -248,19 +255,25 @@ bool PSRoIPoolOp<float, CUDAContext>::RunOnDevice() {
   auto* A = Output(1, Y->sizes(), at::dtype<int>()); // mapping_channel
   int output_size = Y->numel();
   PSRoIPoolForward<float><<<CAFFE_GET_BLOCKS(output_size),
-                            CAFFE_CUDA_NUM_THREADS,
-                            0, context_.cuda_stream()>>>(
-      output_size, X.data<float>(), spatial_scale_, X.dim32(1), X.dim32(2),
-      X.dim32(3), pooled_height_, pooled_width_, R.data<float>(), output_dim_,
-      group_size_, Y->mutable_data<float>(), A->mutable_data<int>());
-  return true;
-}
-
-
-template<>
-bool PSRoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
-  auto& X  = Input(0);  // Input data to pool
-  auto& R  = Input(1);  // RoIs
+                            CAFFE_CUDAawawdawd
+                            wda
+                            d
+                            awd
+                            aw
+                            d
+                            awd
+                            aw
+                            d
+                            awd
+                            aw
+                            d
+                            awd
+                            aw
+                            d
+                            awd
+                            aw
+                            d
+                            
   auto& A  = Input(2);  // mapping channels
   auto& dY = Input(3);  // Gradient of net w.r.t. output of "forward" op
                         // (aka "gradOutput")

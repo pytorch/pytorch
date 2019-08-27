@@ -53,13 +53,6 @@
 #define C10_EXPORT
 #define C10_IMPORT
 #endif
-#else // _WIN32
-#if defined(__GNUC__)
-#define C10_EXPORT __attribute__((__visibility__("default")))
-#define C10_HIDDEN __attribute__((__visibility__("hidden")))
-#else // defined(__GNUC__)
-#define C10_EXPORT
-#define C10_HIDDEN
 #endif // defined(__GNUC__)
 #define C10_IMPORT C10_EXPORT
 #endif // _WIN32
@@ -73,16 +66,7 @@
 //     define a macro called AWESOME_BUILD_MAIN_LIB using
 //     target_compile_options.
 // (2) define the AWESOME_API macro similar to the one below.
-// And in the source file of your awesome library, use AWESOME_API to
-// annotate public symbols.
-
-// Here, for the C10 library, we will define the macro C10_API for both import
-// and export.
-
-// This one is being used by libc10.so
-#ifdef C10_BUILD_MAIN_LIB
-#define C10_API C10_EXPORT
-#else
+// And in the source
 #define C10_API C10_IMPORT
 #endif
 

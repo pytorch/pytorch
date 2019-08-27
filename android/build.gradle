@@ -5,14 +5,7 @@ buildscript {
         compileSdkVersion = 28
         buildToolsVersion = '28.0.3'
 
-        coreVersion = "1.2.0"
-        extJUnitVersion = "1.1.1"
-        runnerVersion = "1.2.0"
-        rulesVersion = "1.2.0"
-        junitVersion = "4.12"
-    }
-
-    repositories {
+        coreVersion 
         google()
         mavenLocal()
         mavenCentral()
