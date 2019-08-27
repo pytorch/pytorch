@@ -63,8 +63,9 @@ RRef::RRef(worker_id_t ownerId, RRefId rrefId, ForkId forkId)
         "User RRef's fork ID should not be the same as its rref Id");
     if (RRefContext::getInstance()->getWorkerId() == rrefId_.createdOn_) {
       // creator user, notify owner.
-      RRefContext::getInstance()->agent()->send(
-          ownerId_,
+      auto& agent = RRefContext::getInstance()->agent();
+      agent->send(
+          agent->getWorkerId(ownerId_),
           ScriptRRefAdd(
               RRefForkData(ownerId_, rrefId_, forkId_).toIValue()
           ).toMessage());
@@ -78,7 +79,7 @@ RRef::~RRef() {
   auto& ctx = RRefContext::getInstance();
   if (ctx->getWorkerId() != ownerId_) {
     ctx->agent()->send(
-        ownerId_,
+        ctx->agent()->getWorkerId(ownerId_),
         ScriptRRefDel(
             RRefForkData(ownerId_, rrefId_, forkId_).toIValue()
         ).toMessage());
@@ -108,7 +109,10 @@ IValue RRef::toHere() {
   } else {
     auto& agent = ctx->agent();
     std::shared_ptr<FutureMessage> fm =
-        agent->send(owner(), ScriptRRefFetch(id().toIValue()).toMessage());
+        agent->send(
+            agent->getWorkerId(ownerId_),
+            ScriptRRefFetch(id().toIValue()).toMessage()
+        );
     auto srv = ScriptRRefValue::fromMessage(fm->wait());
     return srv.value();
   }

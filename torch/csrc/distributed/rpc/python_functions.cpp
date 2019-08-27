@@ -23,7 +23,7 @@ py::object to_py_obj(const Message& message) {
 
 std::shared_ptr<FutureMessage> py_rpc_builtin(
     RpcAgent& agent,
-    worker_id_t dst,
+    const WorkerId& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
@@ -49,7 +49,7 @@ std::shared_ptr<FutureMessage> py_rpc_builtin(
 
 std::shared_ptr<FutureMessage> py_rpc_python_udf(
     RpcAgent& agent,
-    worker_id_t dst,
+    const WorkerId& dst,
     const std::string& pickledPythonUDF) {
   std::vector<char> data(pickledPythonUDF.begin(), pickledPythonUDF.end());
   std::vector<torch::Tensor> tensor_table;
@@ -63,7 +63,7 @@ std::shared_ptr<FutureMessage> py_rpc_python_udf(
 
 std::shared_ptr<RRef> py_remote_builtin(
     RpcAgent& agent,
-    worker_id_t dst,
+    const WorkerId& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
@@ -78,7 +78,7 @@ std::shared_ptr<RRef> py_remote_builtin(
             op->schema(), args, kwargs, c10::nullopt);
 
         std::shared_ptr<RRef> ret =
-            RRefContext::getInstance()->createRRef<at::IValue>(dst);
+            RRefContext::getInstance()->createRRef<at::IValue>(dst.id_);
         agent.send(
             dst, ScriptRemoteCall(
                 op, std::move(stack), ret->fork()).toMessage());

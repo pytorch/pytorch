@@ -26,7 +26,7 @@ RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
 }
 
 worker_id_t RRefContext::getWorkerId() const {
-  return agent_->getId();
+  return agent_->getWorkerId().id_;
 }
 
 RRefId RRefContext::genRRefId() {
