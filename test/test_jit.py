@@ -26,7 +26,7 @@ from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, enable_cpu_fuser_if, enable_profiling_mode, \
+    _trace, enable_cpu_fuser_if, enable_profiling_mode, do_input_map, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything
 from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
@@ -627,6 +627,42 @@ class TestJit(JitTestCase):
         y = torch.randn(2, 2, requires_grad=True)
         self.checkScript(test_simple_grad, (x, y), inputs_requires_grad=True)
         self.checkScript(test_simple_grad_with_grad_outputs, (x, y), inputs_requires_grad=True)
+
+    def test_script_backward(self):
+        def checkGradEquals(fn, inputs):
+            scripted_fn = torch.jit.script(fn)
+            recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
+
+            fn(*inputs)
+            scripted_fn(*recording_inputs)
+
+            for inp1, inp2 in zip(inputs, recording_inputs):
+                self.assertEqual(inp1.grad, inp2.grad)
+
+        def test_tensor_backward(input):
+            # type: (Tensor) -> None
+            output = torch.relu(input)
+            output = output.softmax(0)
+            sum_out = output.sum()
+            sum_out.backward()
+
+        def test_torch_autograd_backward(input):
+            # type: (Tensor) -> None
+            output = torch.relu(input)
+            output = output.softmax(0)
+            torch.autograd.backward(output.sum())
+
+        def test_torch_autograd_backward_with_grad_tensors(input):
+            # type: (Tensor) -> None
+            output = torch.relu(input)
+            output = output.softmax(0)
+            grad_outputs = torch.jit.annotate(List[Optional[torch.Tensor]], [torch.ones((2, 2)), ])
+            torch.autograd.backward((output,), grad_outputs)
+
+        inp = torch.randn(2, 2, requires_grad=True)
+        checkGradEquals(test_tensor_backward, (inp,))
+        checkGradEquals(test_torch_autograd_backward, (inp,))
+        checkGradEquals(test_torch_autograd_backward_with_grad_tensors, (inp,))
 
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
@@ -18382,6 +18418,51 @@ class TestClassType(JitTestCase):
         input = torch.rand(2, 3)
         output = m_loaded(input)
         self.assertEqual(3 * input, output)
+
+    def test_interface(self):
+        with torch.jit._disable_emit_hooks():
+            @torch.jit.script
+            class Foo(object):
+                def __init__(self):
+                    pass
+
+                def one(self, x, y):
+                    return x + y
+
+                def two(self, x):
+                    return 2 * x
+
+            @torch.jit.script
+            class Bar(object):
+                def __init__(self):
+                    pass
+
+                def one(self, x, y):
+                    return x * y
+
+                def two(self, x):
+                    return 2 / x
+
+            @torch.jit.interface
+            class OneTwo(object):
+                def one(self, x, y):
+                    # type: (Tensor, Tensor) -> Tensor
+                    pass
+
+                def two(self, x):
+                    # type: (Tensor) -> Tensor
+                    pass
+
+            def use_them(x):
+                a = Foo()
+                b = Bar()
+                c = torch.jit.annotate(List[OneTwo], [a, b])
+                for i in range(len(c)):
+                    x = c[i].one(x, x)
+                    x = c[i].two(x)
+                return x
+            self.checkScript(use_them, (torch.rand(3, 4),))
+
 
     def test_overloaded_fn(self):
         @torch.jit.script
