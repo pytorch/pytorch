@@ -19,14 +19,14 @@ py::object to_py_obj(const Message& message);
 
 std::shared_ptr<FutureMessage> py_rpc_builtin(
     RpcAgent& agent,
-    uint64_t dst,
+    worker_id_t dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs);
 
 std::shared_ptr<FutureMessage>  py_rpc_python_udf(
     RpcAgent& agent,
-    uint64_t dst,
+    worker_id_t dst,
     const std::string& pickledPythonUDF);
 
 }

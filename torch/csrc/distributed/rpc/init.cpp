@@ -69,7 +69,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def("invoke_rpc_builtin", [](
       RpcAgent& agent,
-      uint64_t dst,
+      worker_id_t dst,
       const std::string& opName,
       const py::args& args,
       const py::kwargs& kwargs) {
@@ -78,7 +78,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def("invoke_rpc_python_udf", [](
       RpcAgent& agent,
-      uint64_t dst,
+      worker_id_t dst,
       const std::string& pickledPythonUDF) {
     return py_rpc_python_udf(agent, dst, pickledPythonUDF);
   });

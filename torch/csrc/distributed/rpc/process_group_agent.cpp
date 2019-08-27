@@ -123,6 +123,9 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     worker_id_t to, Message&& message) {
   TORCH_CHECK(to != (worker_id_t)pg_->getRank(),
       "ProcessGroupAgent does not support making RPC calls to self.")
+  TORCH_CHECK(to < (worker_id_t)pg_->getSize(),
+      "Destination rank is out of bound, got ", to,
+      ", but world size is ", pg_->getRank());
 
   auto requestId = nextId();
   auto future = std::make_shared<FutureMessage>();

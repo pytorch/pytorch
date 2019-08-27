@@ -12,10 +12,13 @@ import torch
 _agent = None
 
 
-def _check_initialized():
-    if _agent is None:
-        raise RuntimeError("RPC has not been initialized. "
-                           "Call init_rpc(name) first.")
+def _require_initialized(func):
+    def wrapper(*args, **kwargs):
+        if _agent is None:
+            raise RuntimeError("RPC has not been initialized. "
+                               "Call init_rpc(name) first.")
+        return func(*args, **kwargs)
+    return wrapper
 
 
 def _collect_worker_names(name, group):
@@ -58,6 +61,7 @@ def join_rpc():
         _agent = None
 
 
+@_require_initialized
 def sync_rpc():
     r"""
     Block until all local and remote RPC processes reach this method and finish
@@ -65,11 +69,10 @@ def sync_rpc():
     level, if multiple threads are spawned, only one of them should call this
     method at a time.
     """
-    _check_initialized()
     _agent.sync()
 
 
-# TODO: add a context managet to wrap init_rpc and join_rpc
+# TODO: add a context manager to wrap init_rpc and join_rpc
 def init_rpc(name, backend='pg'):
     r"""
     Initialize the local RPC agent which immediately makes the current process
@@ -104,14 +107,22 @@ def init_rpc(name, backend='pg'):
         raise RuntimeError("Unrecognized RPC backend ", backend)
 
 
-def get_id(workerName=None):
-    _check_initialized()
-    if workerName:
-        return _agent.get_worker_id(workerName)
+@_require_initialized
+def get_worker_id(worker_name=None):
+    r"""
+    Get worker id of a given worker name.
+
+    Arguments:
+        worker_name (str): the string name of a worker. If ``None``, return the
+                           the id of the current worker. (default ``None``)
+    """
+    if worker_name:
+        return _agent.get_worker_id(worker_name)
     else:
         return _agent.get_id()
 
 
+@_require_initialized
 def rpc(to, func, args=None, kwargs=None, async_call=False):
     r"""
     Make an RPC call to run function ``func`` on worker ``to``. By default, it
@@ -173,7 +184,6 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         >>> dist.init_rpc("worker1")
         >>> dist.join_rpc()
     """
-    _check_initialized()
     if not callable(func):
         raise TypeError("function should be callable.")
 
