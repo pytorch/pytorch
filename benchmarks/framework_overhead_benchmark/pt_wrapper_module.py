@@ -25,11 +25,7 @@ class WrapperModule(object):
         self.module = wrapped_type(pt_fn)
         self.tensor_inputs = []
         self.module_name = wrapped_type.__name__
-        for _ in range(module_config.num_params):
-            self.tensor_inputs.append(torch.randn(1))
-        if module_config.graph_mode:
-            self.module = torch.jit.trace(self.module, self.tensor_inputs)
-            if save:
+        for _ in range(mod
                 file_name = self.module_name + "_" + pt_fn.__name__ + ".pt"
                 torch.jit.save(self.module, file_name)
                 print("Generated graph is saved in {}".format(file_name))
