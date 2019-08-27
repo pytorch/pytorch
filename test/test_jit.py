@@ -955,7 +955,7 @@ graph(%x : Tensor,
                        .check_next('prim::CallMethod[name="forward"](%observer_for_') \
                        .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                        .check_next('prim::CallMethod[name="forward"](%observer_for_') \
-                       .run(s)
+                       .run(str(s))
         def check_not_observed(s):
             FileCheck().check_not('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                        .check_not('prim::CallMethod[name="forward"](%observer_for_') \
@@ -979,13 +979,13 @@ graph(%x : Tensor,
         torch._C._jit_pass_insert_observers(m._c, "forward",
                                             qconfig_dict)
         # check m is not observed
-        check_not_observed(str(get_forward(m._c).graph))
+        check_not_observed(get_forward(m._c).graph)
         # check conv is observed
-        check_observed(str(get_forward(m._c._get_module('conv')).graph))
+        check_observed(get_forward(m._c._get_module('conv')).graph)
         # check sub is not observed
-        check_not_observed(str(get_forward(m._c._get_module('sub')).graph))
+        check_not_observed(get_forward(m._c._get_module('sub')).graph)
         # check forward of sub.linear is observed
-        check_observed(str(get_forward(m._c._get_module('sub')._get_module('linear')).graph))
+        check_observed(get_forward(m._c._get_module('sub')._get_module('linear')).graph)
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_quant_dequant(self):
