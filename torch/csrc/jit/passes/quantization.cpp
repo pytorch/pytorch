@@ -85,7 +85,7 @@ Node* insertObserver(Value* v, Graph* g,
     TORCH_INTERNAL_ASSERT(child_module, "Child module " + child_module_name + " does not exist");
     InsertObserversImpl(child_module.value(), "forward", module_qconfig_map);
   }
-  auto qconfig = module_qconfig_map.at(&module);
+  auto qconfig = module_qconfig_map.at(module.module_object());
   // Skip to insert observer if no qconfig is specified
   if (!qconfig) {
     return nullptr;
@@ -127,7 +127,7 @@ void getQConfigMapHelper(
     c10::optional<QConfig> parent_qconfig,
     ModuleQConfigMap& map) {
   auto qconfig = getQConfig(key, parent_qconfig, qconfig_dict);
-  map[&module] = qconfig;
+  map[module.module_object()] = qconfig;
   for (script::Slot s: module.get_module_slots()) {
     std::string child_key;
     if (key == "") {
@@ -215,29 +215,6 @@ void InsertObserversImpl(
       }
     }
   }
-}
-
-} // namespace
-
-// PyBind APIs
-void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
-  throw std::runtime_error("Pass not implemented yet!");
-}
-
-void QuantLinting(std::shared_ptr<Graph>& graph) {
-  throw std::runtime_error("Pass not implemented yet!");
-}
-
-void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
-  throw std::runtime_error("Pass not implemented yet!");
-}
-
-TORCH_API void InsertObservers(
-    script::Module& module,
-    const std::string& method_name,
-    const QConfigDict& qconfig_dict) {
-  auto module_qconfig_map = getQConfigMap(module, qconfig_dict);
-  InsertObserversImpl(module, method_name, module_qconfig_map);
 }
 
 Node* insertQuantDeQuantCall(Value* v, const IValue& qparams, at::ScalarType t, bool insert_after=true) {
@@ -413,10 +390,9 @@ void QuantizeHelper::quantizeTensor(Value* v,
   q->replaceInputWith(dequant->output(), v);
 }
 
-script::Module InsertQuantDeQuant(
-    script::Module& input_module,
+void InsertQuantDeQuantImpl(
+    script::Module& module,
     const std::string& method_name) {
-  script::Module module = input_module.clone();
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   std::vector<Value*> values_to_quantize;
@@ -471,7 +447,7 @@ script::Module InsertQuantDeQuant(
         if (child_module_name.find("observer_for_") == std::string::npos) {
           auto child_module = module.find_module(child_module_name);
           TORCH_INTERNAL_ASSERT(child_module, "InsertQuantDeQuant - Child module " + child_module_name + " does not exist");
-          InsertQuantDeQuant(child_module.value(), "forward");
+          InsertQuantDeQuantImpl(child_module.value(), "forward");
         }
       }
       if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
@@ -489,11 +465,41 @@ script::Module InsertQuantDeQuant(
   }
 
   qh.destroyNodes();
+}
+
+} // namespace
+
+TORCH_API void InsertObservers(
+    script::Module& module,
+    const std::string& method_name,
+    const QConfigDict& qconfig_dict) {
+  auto module_qconfig_map = getQConfigMap(module, qconfig_dict);
+  InsertObserversImpl(module, method_name, module_qconfig_map);
+}
+
+script::Module InsertQuantDeQuant(
+    script::Module& input_module,
+    const std::string& method_name) {
+  script::Module module = input_module.clone();
+  InsertQuantDeQuantImpl(module, method_name);
 
   // NOTE: Remove observer module does not work right now, we'll return
   // the module with observer modules as a temporary workaround
   // TODO: remove observer modules after we have a remove_module API
   return module;
+}
+
+// PyBind APIs
+void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
+  throw std::runtime_error("Pass not implemented yet!");
+}
+
+void QuantLinting(std::shared_ptr<Graph>& graph) {
+  throw std::runtime_error("Pass not implemented yet!");
+}
+
+void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
+  throw std::runtime_error("Pass not implemented yet!");
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {
