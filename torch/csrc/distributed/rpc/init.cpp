@@ -28,6 +28,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto module = py::handle(dist_module).cast<py::module>();
 
+  // not exposing WorkerId::id as it should an internal field specified for
+  // RpcAgent implementations.
+  auto workerId = shared_ptr_class_<WorkerId>(module, "WorkerId")
+      .def_readonly("name", &WorkerId::name_);
+
   auto rpcAgent = shared_ptr_class_<RpcAgent>(module, "RpcAgent")
       .def("join",
            &RpcAgent::join,
@@ -54,10 +59,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
                py::arg("name_map"),
                py::arg("process_group"),
                py::arg("num_send_recv_threads") = 4)
-          .def("get_id",
-               &ProcessGroupAgent::getId,
+          .def("get_worker_id",
+               (const WorkerId& (ProcessGroupAgent::*)(void) const)
+               &RpcAgent::getWorkerId,
                py::call_guard<py::gil_scoped_release>())
           .def("get_worker_id",
+               (const WorkerId& (ProcessGroupAgent::*)(const std::string&) const)
                &ProcessGroupAgent::getWorkerId,
                py::call_guard<py::gil_scoped_release>())
           .def("join",
@@ -69,7 +76,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def("invoke_rpc_builtin", [](
       RpcAgent& agent,
-      worker_id_t dst,
+      const WorkerId& dst,
       const std::string& opName,
       const py::args& args,
       const py::kwargs& kwargs) {
@@ -78,7 +85,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def("invoke_rpc_python_udf", [](
       RpcAgent& agent,
-      worker_id_t dst,
+      const WorkerId& dst,
       const std::string& pickledPythonUDF) {
     return py_rpc_python_udf(agent, dst, pickledPythonUDF);
   });

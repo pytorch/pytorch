@@ -5,7 +5,7 @@ namespace distributed {
 namespace rpc {
 
 void processRequestBlocking(
-    worker_id_t from, Message&& request, RpcAgent& agent) {
+    const WorkerId& from, Message&& request, RpcAgent& agent) {
   switch (request.type()) {
     case MessageType::SCRIPT_CALL: {
       ScriptCall op = ScriptCall::fromMessage(request);
