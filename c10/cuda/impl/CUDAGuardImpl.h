@@ -2,6 +2,7 @@
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
+#include "c10/util/Exception.h"
 
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAStream.h>
@@ -15,6 +16,7 @@ namespace impl {
 
 struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
+
   CUDAGuardImpl() {}
   CUDAGuardImpl(DeviceType t) {
     AT_ASSERT(t == DeviceType::CUDA);
@@ -57,6 +59,93 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   DeviceIndex deviceCount() const noexcept override {
     return device_count();
+  }
+
+  // Event-related functions
+  void createEvent(
+    cudaEvent_t* cuda_event,
+    const EventFlag flag) const {
+    // Maps PyTorch's Event::Flag to CUDA flag
+    auto cuda_flag = cudaEventDefault;
+    switch (flag) {
+      case EventFlag::PYTORCH_DEFAULT:
+      case EventFlag::CUDA_EVENT_DISABLE_TIMING:
+        cuda_flag = cudaEventDisableTiming;
+        break;
+      case EventFlag::BACKEND_DEFAULT:
+      case EventFlag::CUDA_EVENT_DEFAULT:
+        cuda_flag = cudaEventDefault;
+        break;
+      default:
+        AT_ERROR("CUDA event received unknown flag");
+    }
+
+    C10_CUDA_CHECK(cudaEventCreateWithFlags(cuda_event, cuda_flag));
+  }
+
+  void destroyEvent(
+    void* event,
+    const DeviceIndex device_index) const noexcept override {
+    if (!event) return;
+    auto cuda_event = static_cast<cudaEvent_t>(event);
+    int orig_device;
+    cudaGetDevice(&orig_device);
+    cudaSetDevice(device_index);
+    cudaEventDestroy(cuda_event);
+    cudaSetDevice(orig_device);
+  }
+
+  void record(
+    void** event,
+    const Stream& stream,
+    const DeviceIndex device_index,
+    const EventFlag flag) const override {
+    TORCH_CHECK(device_index == -1 || device_index == stream.device_index(),
+      "Event device index ",
+      device_index,
+      " does not match recording stream's device index ",
+      stream.device_index(),
+      ".");
+
+    cudaEvent_t cuda_event = static_cast<cudaEvent_t>(*event);
+    CUDAStream cuda_stream{stream};
+
+    // Moves to stream's device to record
+    const auto orig_device = getDevice();
+    setDevice(stream.device());
+
+    // Creates the event (lazily)
+    if (!cuda_event) createEvent(&cuda_event, flag);
+    C10_CUDA_CHECK(cudaEventRecord(cuda_event, cuda_stream));
+    // Makes the void* point to the (possibly just allocated) CUDA event
+    *event = cuda_event;
+
+    // Resets device
+    setDevice(orig_device);
+  }
+
+  void block(
+    void* event,
+    const Stream& stream) const override {
+    if (!event) return;
+    cudaEvent_t cuda_event = static_cast<cudaEvent_t>(event);
+    CUDAStream cuda_stream{stream};
+    const auto orig_device = getDevice();
+    setDevice(stream.device());
+    C10_CUDA_CHECK(cudaStreamWaitEvent(
+      cuda_stream,
+      cuda_event,
+      /*flags (must be zero)=*/ 0));
+    setDevice(orig_device);
+  }
+
+  // May be called from any device
+  bool queryEvent(void* event) const override {
+    if (!event) return true;
+    cudaEvent_t cuda_event = static_cast<cudaEvent_t>(event);
+    const cudaError_t err = cudaEventQuery(cuda_event);
+    if (err != cudaErrorNotReady) C10_CUDA_CHECK(err);
+    return (err == cudaSuccess);
   }
 };
 

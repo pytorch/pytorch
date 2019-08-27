@@ -592,12 +592,30 @@ struct PythonPrintPass {
   }
 
   void printAssignment(at::ArrayRef<Value*> lhs, at::ArrayRef<Value*> rhs) {
-    if (lhs.size() > 0) {
+    if (lhs.size() == 0) {
+      return;
+    }
+    indent();
+    printValueList(body_, lhs);
+    body_ << " = ";
+    printValueList(body_, rhs);
+    body_ << "\n";
+  }
+
+  bool requiresAnnotation(Value* lhs, Value* rhs) {
+    return *lhs->type() != *rhs->type();
+  }
+
+  void printAnnotatedAssignment(
+      at::ArrayRef<Value*> lhs,
+      at::ArrayRef<Value*> rhs) {
+    for (size_t i = 0; i < lhs.size(); ++i) {
       indent();
-      printValueList(body_, lhs);
-      body_ << " = ";
-      printValueList(body_, rhs);
-      body_ << "\n";
+      body_ << useOf(lhs[i]);
+      if (requiresAnnotation(lhs[i], rhs[i])) {
+        body_ << ": " << lhs[i]->type()->python_str();
+      }
+      body_ << " = " << useOf(rhs[i]) << "\n";
     }
   }
 
@@ -643,7 +661,7 @@ struct PythonPrintPass {
         });
 
     // Print initial assignments of loop node outputs = loop node inputs
-    printAssignment(stmt.carriedOutputs(), stmt.carriedInputs());
+    printAnnotatedAssignment(stmt.carriedOutputs(), stmt.carriedInputs());
 
     assignValuesToTheirUniqueNames(stmt.currentTripCount());
     // Loop header
@@ -1010,13 +1028,24 @@ struct PythonPrintPass {
              << node->i(attr::end) << "]";
       } break;
       case prim::ListConstruct: {
-        // when the list is empty and is not a list of tensors,
-        // we need to annotate it, otherwise it won't be possible
-        // to infer the type on import
-        if (node->inputs().size() == 0 &&
-            !node->output()->type()->isSubtypeOf(TensorType::get())) {
-          stmt << "annotate(" << node->output()->type()->python_str()
-               << ", [])";
+        ListTypePtr list_type = node->output()->type()->expect<ListType>();
+        TypePtr elem_type = list_type->getElementType();
+        if (!elem_type->isSubtypeOf(TensorType::get())) {
+          // when the list is empty and is not a list of tensors,
+          // we need to annotate it, otherwise it won't be possible
+          // to infer the type on import
+          if (node->inputs().size() == 0) {
+            stmt << "annotate(" << node->output()->type()->python_str()
+                 << ", [])";
+          } else if (elem_type->cast<OptionalType>()) {
+            // if the element type is a optional type, we annotate the list so
+            // that we could correctly infer the type on import
+            stmt << "annotate(" << node->output()->type()->python_str() << ",";
+            printValueList(stmt, node->inputs(), "[", "]");
+            stmt << ")";
+          } else {
+            printValueList(stmt, node->inputs(), "[", "]");
+          }
         } else {
           printValueList(stmt, node->inputs(), "[", "]");
         }
