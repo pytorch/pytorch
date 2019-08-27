@@ -400,11 +400,11 @@ def select(g, self, dim, index):
         # of Gather in caffe2. We need to change this as soon as possible.
         index_val = _parse_arg(index, 'i')
         if index_val == -1:
-            slice_node = sym_help._slice_helper(g, self, axes=[dim],
-                                                starts=[index_val], ends=[9223372036854775807])
+            end_index = 9223372036854775807
         else:
-            slice_node = sym_help._slice_helper(g, self, axes=[dim],
-                                                starts=[index_val], ends=[index_val + 1])
+            end_index = index_val + 1
+        slice_node = sym_help._slice_helper(g, self, axes=[dim],
+                                                starts=[index_val], ends=[end_index])
         return g.op("Squeeze", slice_node, axes_i=[dim])
     else:
         return g.op("Gather", self, index, axis_i=dim)
