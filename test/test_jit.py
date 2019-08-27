@@ -957,6 +957,7 @@ graph(%x : Tensor,
                        .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                        .check_next('prim::CallMethod[name="forward"](%observer_for_') \
                        .run(str(s))
+
         def check_not_observed(s):
             FileCheck().check_not('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                        .check_not('prim::CallMethod[name="forward"](%observer_for_') \

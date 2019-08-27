@@ -59,13 +59,6 @@ Node* createIntReprNode(Value* v, Graph* g) {
   return intrepr;
 }
 
-c10::optional<QConfig> getQConfig(std::string key, c10::optional<QConfig> parent_qconfig, const QConfigDict& qconfig_dict) {
-  if (qconfig_dict.find(key) != qconfig_dict.end()) {
-    return qconfig_dict.at(key);
-  }
-  return parent_qconfig;
-}
-
 // forward decl for InsertObserversImpl
 void InsertObserversImpl(
     script::Module& module,
@@ -118,6 +111,13 @@ Node* insertObserver(Value* v, Graph* g,
   call->output()->setDebugName(v->debugName() + ".observed");
   call->insertAfter(observer_instance);
   return call;
+}
+
+c10::optional<QConfig> getQConfig(const std::string& key, const c10::optional<QConfig>& parent_qconfig, const QConfigDict& qconfig_dict) {
+  if (qconfig_dict.find(key) != qconfig_dict.end()) {
+    return qconfig_dict.at(key);
+  }
+  return parent_qconfig;
 }
 
 void getQConfigMapHelper(
