@@ -403,8 +403,7 @@ def select(g, self, dim, index):
             end_index = 9223372036854775807
         else:
             end_index = index_val + 1
-        slice_node = sym_help._slice_helper(g, self, axes=[dim],
-                                                starts=[index_val], ends=[end_index])
+        slice_node = sym_help._slice_helper(g, self, axes=[dim], starts=[index_val], ends=[end_index])
         return g.op("Squeeze", slice_node, axes_i=[dim])
     else:
         return g.op("Gather", self, index, axis_i=dim)
