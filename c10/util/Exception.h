@@ -285,9 +285,6 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #define TORCH_WARN(...) \
   ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__))
 
-#define TORCH_CONCAT_TWO_NAMES(a,b)         TORCH_CONCAT_TWO_NAMES_HIDDEN(a,b)
-#define TORCH_CONCAT_TWO_NAMES_HIDDEN(a,b)  a ## b
-
 // Report a warning to the user only once.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
@@ -295,7 +292,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // within a function, with the expectation that we never have more than one
 // `TORCH_WARN_ONCE` statement in the same line.
 #define TORCH_WARN_ONCE(...) \
-  static const auto TORCH_CONCAT_TWO_NAMES(torch_warn_once_,__LINE__) = [] { \
+  static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [] { \
     ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__)); \
     return true; \
   }()
