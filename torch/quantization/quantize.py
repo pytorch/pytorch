@@ -11,7 +11,7 @@ from .QConfig import default_dynamic_qconfig
 import torch.nn.qat as nnqat
 
 
-DEFAULT_SKIP_LIST = [nn.Identity, nn.MaxPool2d]
+DEFAULT_SKIP_LIST = [nn.Identity, nn.MaxPool2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d]
 
 def propagate_qconfig_helper(module, qconfig_dict, skip_list=DEFAULT_SKIP_LIST, qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig`
@@ -91,7 +91,8 @@ def add_observer(module):
     """
     for child in module.children():
         if type(child) in (nnq.FloatFunctional, nni.FloatFunctional):
-            child.observer = child.qconfig.activation()
+            if hasattr(child, 'qconfig') and child.qconfig is not None:
+                child.observer = child.qconfig.activation()
         else:
             add_observer(child)
 
@@ -171,6 +172,9 @@ class QuantStub(nn.Module):
     Args:
         qconfig: quantization configuration for the tensor,
             if qconfig is not provided, we will get qconfig from parent modules
+
+    Return:
+        Quantized model
     """
     def __init__(self, qconfig=None):
         super(QuantStub, self).__init__()
@@ -242,6 +246,9 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
         run_fn: a function for evaluating the prepared model, can be a
             function that simply runs the prepared model or a training loop
         run_args: positional arguments for `run_fn`
+
+    Return:
+        Quantized model.
     """
 
     model = copy.deepcopy(model)
@@ -271,6 +278,15 @@ def prepare_qat(model):
 
 def quantize_qat(model, run_fn, run_args):
     r"""Do quantization aware training and output a quantized model
+
+    Args:
+        model: input model
+        run_fn: a function for evaluating the prepared model, can be a
+            function that simply runs the prepared model or a training loop
+        run_args: positional arguments for `run_fn`
+
+    Return:
+        Quantized model.
     """
     model = copy.deepcopy(model)
     model.train()
