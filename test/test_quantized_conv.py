@@ -80,7 +80,7 @@ class QuantizedConvTest(TestCase):
                                          inputs_zero_point, inputs_qtype)
         q_filters = torch.quantize_linear(filters, filters_scale,
                                           filters_zero_point, filters_qtype)
-        q_bias = torch.quantize_linear(bias, bias_scale, bias_zero_point,
+        q_bias = torch.quantize_linear(bias, inputs_scale * filters_scale, 0,
                                        bias_qtype)
 
         # Reference op

@@ -251,7 +251,6 @@ void SchemaTypeParser::parseList(
   if (end != TK_NOTHING)
     L.expect(end);
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch
