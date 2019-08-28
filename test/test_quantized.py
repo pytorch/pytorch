@@ -14,6 +14,7 @@ import hypothesis_utils as hu
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams
+from common_quantization import no_deadline
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
@@ -416,7 +417,7 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          message="ops.quantized.max_pool2d results are off")
 
-    @unittest.skip("Flaky, see https://github.com/pytorch/pytorch/issues/25097")
+    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=5),
                        qparams=hu.qparams()),
