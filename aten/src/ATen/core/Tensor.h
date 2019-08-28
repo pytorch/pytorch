@@ -727,7 +727,6 @@ class CAFFE2_API Tensor {
   Tensor & pow_(const Tensor & exponent) const;
   Tensor & lerp_(const Tensor & end, Scalar weight) const;
   Tensor & lerp_(const Tensor & end, const Tensor & weight) const;
-  Tensor & sign_() const;
   Tensor & fmod_(Scalar other) const;
   Tensor & fmod_(const Tensor & other) const;
   Tensor & remainder_(Scalar other) const;
@@ -790,12 +789,13 @@ class CAFFE2_API Tensor {
   Tensor polygamma(int64_t n) const;
   Tensor erfinv() const;
   Tensor & erfinv_() const;
+  Tensor sign() const;
+  Tensor & sign_() const;
   Tensor dist(const Tensor & other, Scalar p=2) const;
   Tensor atan2(const Tensor & other) const;
   Tensor lerp(const Tensor & end, Scalar weight) const;
   Tensor lerp(const Tensor & end, const Tensor & weight) const;
   Tensor histc(int64_t bins=100, Scalar min=0, Scalar max=0) const;
-  Tensor sign() const;
   Tensor fmod(Scalar other) const;
   Tensor fmod(const Tensor & other) const;
   Tensor remainder(Scalar other) const;
