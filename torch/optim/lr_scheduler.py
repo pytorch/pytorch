@@ -9,11 +9,12 @@ from torch._six import inf
 from .optimizer import Optimizer
 
 
-EPOCH_DEPRECATION_WARNING = ("The epoch parameter in `scheduler.step()` was "
-        "not necessary and is being deprecated where possible. Please use "
-        "`scheduler.step()` to step the scheduler. During the deprecation, if "
-        "epoch is different from None, the closed form is used instead of the "
-        "new chainable form, where available.")
+EPOCH_DEPRECATION_WARNING = (
+    "The epoch parameter in `scheduler.step()` was not necessary and is being "
+    "deprecated where possible. Please use `scheduler.step()` to step the "
+    "scheduler. During the deprecation, if epoch is different from None, the "
+    "closed form is used instead of the new chainable form, where available."
+)
 
 
 class _LRScheduler(object):
@@ -87,7 +88,7 @@ class _LRScheduler(object):
 
     def get_lr(self):
         warnings.warn("The method `get_lr()` is renamed `get_computed_values()`. "
-                "Please use the latter instead.", DeprecationWarning)
+                      "Please use the latter instead.", DeprecationWarning)
         return self.get_computed_values()
 
     def step(self, epoch=None):
