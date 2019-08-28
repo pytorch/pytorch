@@ -14502,7 +14502,7 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, x):
                 return MyScriptClass()
 
-        with self.assertRaisesRegex(RuntimeError, "cannot instantiate class object"):
+        with self.assertRaisesRegex(torch.jit.frontend.FrontendError, "Cannot instantiate class"):
             t = torch.jit.script(TestModule())
 
     def test_method_call(self):
