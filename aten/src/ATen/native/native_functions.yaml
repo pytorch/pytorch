@@ -4089,12 +4089,6 @@
     CPU: polygamma
     CUDA: legacy::cuda::_th_polygamma
 
-- func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  named_guard: False
-  dispatch:
-    CPU: _erfinv_out_cpu
-    CUDA: _erfinv_out_cuda
-
 - func: erfinv(Tensor self) -> Tensor
   named_guard: False
   variants: method, function
@@ -4102,9 +4096,12 @@
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
   variants: method
+
+- func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
-    CPU: _erfinv__cpu
-    CUDA: _erfinv__cuda
+    CPU: erfinv_out
+    CUDA: erfinv_out
 
 - func: sign(Tensor self) -> Tensor
   variants: function, method

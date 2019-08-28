@@ -63,6 +63,10 @@ Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor ceil(const Tensor& self) { return unary_op_impl(self, ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, ceil_out); }
 
+Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erfinv_stub); }
+Tensor erfinv(const Tensor& self) { return unary_op_impl(self, erfinv_out); }
+Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, erfinv_out); }
+
 Tensor& neg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
@@ -259,11 +263,6 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
   IMPLEMENT_UNARY_OP_CORE(op)                                          \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
-#define IMPLEMENT_UNARY_OP(op)                                         \
-  IMPLEMENT_UNARY_OP_CORE(op)                                          \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)                       \
-
 IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
@@ -291,8 +290,6 @@ IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
-
-IMPLEMENT_UNARY_OP(erfinv)
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);

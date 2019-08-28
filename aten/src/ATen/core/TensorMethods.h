@@ -4462,13 +4462,7 @@ inline Tensor Tensor::erfinv() const {
 }
 inline Tensor & Tensor::erfinv_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::erfinv_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("erfinv_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::erfinv_(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::erfinv_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
