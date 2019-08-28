@@ -517,14 +517,15 @@ class ScriptabilityTest(QuantizationTestCase):
             torch.save(self.qmodel_under_test, f)
             f.seek(0)
             loaded = torch.load(f)
-        self.assertEqual(self.qmodel_under_test.myadd.zero_point, loaded.myadd.zero_point)
-        state_dict = self.qmodel_under_test.state_dict()
-        assert('myadd.zero_point' in state_dict.keys())
-
-        x = torch.rand(10, 1, dtype=torch.float)
-        xq = torch.quantize_linear(x, 1.0, 0, torch.qint8)
-        self.checkScriptable(self.qmodel_under_test, [(xq, xq)], check_save_load=True)
-        self.checkScriptable(self.model_under_test, [(xq, xq)], check_save_load=True)
+        self.assertEqual(self.qmodel_under_test.module.myadd.zero_point,
+                         loaded.module.myadd.zero_point)
+        state_dict = self.qmodel_under_test.module.state_dict()
+        self.assertTrue('myadd.zero_point' in state_dict.keys(),
+                        'zero point not in state dict for functional modules')
+        self.checkScriptable(self.qmodel_under_test, [(self.x, self.x)],
+                             check_save_load=True)
+        self.checkScriptable(self.model_under_test, [(self.x, self.x)],
+                             check_save_load=True)
 
     def test_quantized(self):
         qtraced_model = torch.jit.trace(self.qmodel_under_test, self.x,
