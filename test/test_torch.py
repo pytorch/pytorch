@@ -244,7 +244,7 @@ class _TestTorchMixin(torchtest):
                        'rename',  # BUILD_NAMEDTENSOR only
                        )
         test_namespace(torch.nn)
-        test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear', 'feature_alpha_dropout')
+        test_namespace(torch.nn.functional, 'assert_int_or_pair', 'feature_alpha_dropout')
         # TODO: add torch.* tests when we have proper namespacing on ATen functions
         # test_namespace(torch)
 
