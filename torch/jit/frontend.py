@@ -505,7 +505,8 @@ class ExprBuilder(Builder):
         sub_expr = build_expr(ctx, expr.operand)
         op = type(expr.op)
         op_token = ExprBuilder.unop_map.get(op)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(op_token))
+        token_len = len(op_token) if op_token is not None else 0
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + token_len)
         if op_token is None:
             err_range = ctx.make_raw_range(r.start, sub_expr.range().end)
             raise NotSupportedError(err_range, "unsupported unary operator: " + op.__name__)
