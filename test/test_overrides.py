@@ -11,21 +11,6 @@ import inspect
 import sys
 from unittest import mock
 
-def assert_(val, msg=''):
-    """
-    Assert that works in release mode.
-    Accepts callable msg to allow deferring evaluation until failure.
-    The Python built-in ``assert`` does not work when executing code in
-    optimized mode (the ``-O`` flag) - no byte-code is generated for it.
-    For documentation on usage, refer to the Python documentation.
-    """
-    __tracebackhide__ = True  # Hide traceback for py.test
-    if not val:
-        try:
-            smsg = msg()
-        except TypeError:
-            smsg = msg
-        raise AssertionError(smsg)
 
 class TestOverride(unittest.TestCase):
 
@@ -251,7 +236,7 @@ class TestTensorTorchFunction(unittest.TestCase):
         result = tensor.__torch_function__(func=dispatched_two_arg,
                                           types=(torch.tensor, Other),
                                           args=(tensor, other), kwargs={})
-        assert_(result is NotImplemented)
+        assert result is NotImplemented
 
         result = tensor.__torch_function__(func=dispatched_two_arg,
                                           types=(torch.tensor, NoOverrideSub),
@@ -293,7 +278,7 @@ class TestTorchFunctionDispatch(unittest.TestCase):
         for proto in range(2, pickle.HIGHEST_PROTOCOL + 1):
             roundtripped = pickle.loads(
                     pickle.dumps(dispatched_one_arg, protocol=proto))
-            assert_(roundtripped is dispatched_one_arg)
+            assert roundtripped is dispatched_one_arg
 
     def test_name_and_docstring(self):
         self.assertEqual(dispatched_one_arg.__name__, 'dispatched_one_arg')
@@ -308,11 +293,11 @@ class TestTorchFunctionDispatch(unittest.TestCase):
 
         original = MyTensor()
         (obj, func, types, args, kwargs) = dispatched_one_arg(original)
-        assert_(obj is original)
-        assert_(func is dispatched_one_arg)
+        assert obj is original
+        assert func is dispatched_one_arg
         self.assertEqual(set(types), {MyTensor})
         # assert_equal uses the overloaded torch.iscomplexobj() internally
-        assert_(args == (original,))
+        assert args == (original,)
         self.assertEqual(kwargs, {})
 
     def test_not_implemented(self):
@@ -425,7 +410,7 @@ class TestTensorFunctionImplementation(unittest.TestCase):
             return tensor
 
         tensor = torch.tensor(1)
-        assert_(func(tensor) is tensor)
+        assert func(tensor) is tensor
         self.assertEqual(func.__module__, 'my')
 
         with self.assertRaisesRegex(
@@ -457,13 +442,11 @@ class TestTorchFunctions(unittest.TestCase):
         self.assertEqual(torch.char.equal.__module__, 'torch.char')
         self.assertEqual(torch.fft.fft.__module__, 'torch.fft')
         self.assertEqual(torch.linalg.solve.__module__, 'torch.linalg')
-        pass
 
     @unittest.expectedFailure # Discuss
     def test_inspect_sum(self):
-        pass
         signature = inspect.signature(torch.sum)
-        assert_('axis' in signature.parameters)
+        assert 'axis' in signature.parameters
 
     @unittest.expectedFailure # Discuss
     @requires_torch_function
