@@ -1,7 +1,7 @@
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #include <ATen/core/Tensor.h>
-#include <torch/csrc/utils/memory.h>
+#include <c10/util/C++17.h>
 
 namespace at {
 
@@ -111,7 +111,7 @@ void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names) {
   check_valid_names(impl, *names);
   auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
-    impl->set_named_tensor_meta(torch::make_unique<NamedTensorMeta>(*names));
+    impl->set_named_tensor_meta(c10::guts::make_unique<NamedTensorMeta>(*names));
   } else {
     meta->set_names(*names);
   }
@@ -123,7 +123,7 @@ void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, 
   }
   auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
-    impl->set_named_tensor_meta(torch::make_unique<NamedTensorMeta>(names));
+    impl->set_named_tensor_meta(c10::guts::make_unique<NamedTensorMeta>(names));
   } else {
     meta->set_names(names);
   }
