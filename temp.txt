@@ -1,1 +1,2 @@
+Tested on aarch/cuda
 Todo: Remove this file
