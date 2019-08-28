@@ -1,9 +1,8 @@
-#ifdef BUILD_NAMEDTENSOR
-
 #include <ATen/NamedTensorUtils.h>
 #include <bitset>
 #include <sstream>
 
+#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 // Returns "Tensor['N', 'C', 'H', 'W']" for a tensor with names ('N', 'C', 'H', 'W').

@@ -8,9 +8,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
-#ifdef BUILD_NAMEDTENSOR
-#include <ATen/NamedTensor.h>
-#endif
+#include <ATen/core/NamedTensor.h>
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
 #include <ATen/CPUType.h>
