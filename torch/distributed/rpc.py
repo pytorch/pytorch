@@ -95,6 +95,7 @@ def get_worker_id(worker_name=None):
     else:
         return _agent.get_worker_id()
 
+
 def remote(to, func, args=None, kwargs=None):
     r"""
     Make a ``remote`` call to run ``func`` on worker ``to``, and returns an
@@ -113,6 +114,24 @@ def remote(to, func, args=None, kwargs=None):
     Returns:
         A user ``RRef`` instance to the result value. Use the blocking API
         ``RRef.to_here()`` to retrieve the result value locally.
+
+    Example::
+
+        On worker 0:
+        >>> import torch.distributed as dist
+        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
+        >>> dist.init_rpc("worker0")
+        >>> worker1 = dist.get_worker_id("worker1")
+        >>> rref1 = dist.remote(worker1, torch.add, args=(torch.ones(2), 3))
+        >>> rref2 = dist.remote(worker1, torch.add, args=(torch.ones(2), 1))
+        >>> x = rref1.to_here() + rref2.to_here()
+        >>> dist.join_rpc()
+
+        One worker 1:
+        >>> import torch.distributed as dist
+        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
+        >>> dist.init_rpc("worker1")
+        >>> dist.join_rpc()
     """
     qualified_name = torch.jit._find_builtin(func)
 
@@ -123,6 +142,7 @@ def remote(to, func, args=None, kwargs=None):
         to = _agent.get_worker_id(to)
 
     return invoke_remote_builtin(_agent, to, qualified_name, *args, **kwargs)
+
 
 @_require_initialized
 def rpc(to, func, args=None, kwargs=None, async_call=False):
