@@ -323,7 +323,7 @@ struct Environment {
             << value->kind() << " and " << name
             << " is not a first-class value.  Only reassignments to first-class values are allowed";
       }
-
+      
       auto parent_type = unshapedType(simple_parent->type());
       as_simple_value = tryConvertToType(
           loc,
@@ -331,7 +331,8 @@ struct Environment {
           parent_type,
           as_simple_value,
           /*allow_conversions=*/true);
-      if (!as_simple_value->type()->isSubtypeOf(parent_type)) {
+      std::stringstream why_not;
+      if (!as_simple_value->type()->isSubtypeOfExt(parent_type, &why_not)) {
         auto error = ErrorReport(loc);
         error << "Variable '" << name << "' previously has type "
               << simple_parent->type()->python_str()
@@ -346,6 +347,7 @@ struct Environment {
                 << "use `torch.jit.annotate(List[T], [])`, "
                 << "where `T` is the type of elements in the list)";
         }
+        error << "\n" << why_not.str();
         throw error;
       }
     }
@@ -2167,10 +2169,13 @@ struct to_ir {
       bool forget_opt_annotate =
           opt_type && *opt_type->getElementType() == *type;
 
-      if (!forget_opt_annotate && !expr->type()->isSubtypeOf(type)) {
+      std::stringstream why_not;
+      if (!forget_opt_annotate &&
+          !expr->type()->isSubtypeOfExt(type, &why_not)) {
         throw ErrorReport(apply.inputs())
             << "expected an expression of type " << type->python_str()
-            << " but found " << expr->type()->python_str();
+            << " but found " << expr->type()->python_str() << "\n"
+            << why_not.str();
       }
       return std::make_shared<SimpleValue>(expr);
     } else if (auto getattr = dynamic_cast<GetAttrValue*>(sv.get())) {
@@ -2617,11 +2622,13 @@ struct to_ir {
           }
         }
         for (auto v : values) {
-          if (!v->type()->isSubtypeOf(elem_type)) {
+          std::stringstream ss;
+          if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
                 << elem_type->python_str() << " but found "
-                << v->type()->python_str() << " instead";
+                << v->type()->python_str() << " instead.\n"
+                << ss.str();
           }
         }
         Value* result =
