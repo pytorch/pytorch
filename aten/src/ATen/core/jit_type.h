@@ -1491,6 +1491,9 @@ struct CAFFE2_API InterfaceType : public NamedType {
   // returns nullptr if not found.
   const FunctionSchema* getMethod(const std::string& name) const;
   void addMethod(FunctionSchema schema);
+  const std::vector<FunctionSchema>& methods() {
+    return *methods_;
+  }
   static const TypeKind Kind = TypeKind::InterfaceType;
   ~InterfaceType() override;
  private:
