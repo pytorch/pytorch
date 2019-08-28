@@ -188,9 +188,6 @@ if (MSVC)
   # for actually telling where the error came from.
   set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON")
 
-  string(APPEND CMAKE_C_FLAGS " /EHa")
-  string(APPEND CMAKE_CXX_FLAGS " /EHa")
-
   foreach(flag_var
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
       CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
@@ -203,10 +200,13 @@ if (MSVC)
     # Turn off warnings on Windows.  In an ideal world we'd be warning
     # clean on Windows too, but this is too much work for our
     # non-Windows developers.
-    string(REPLACE "/W3" "/w" ${flag_var} "${${flag_var}}")
+    string(REPLACE "/W3" "" ${flag_var} "${${flag_var}}")
     # Suppress EHs is overridden by EHa warning
     string(REPLACE "/EHsc" "" ${flag_var} "${${flag_var}}")
     string(REPLACE "/EHs" "" ${flag_var} "${${flag_var}}")
+
+    string(APPEND ${flag_var} " /EHa /w")
+    string(APPEND ${flag_var} " /EHa /w")
   endforeach(flag_var)
 
   foreach(flag_var
