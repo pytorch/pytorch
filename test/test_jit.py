@@ -2787,6 +2787,35 @@ graph(%Ra, %Rb):
             with self.assertRaisesRegex(RuntimeError, "is a zip"):
                 torch.load(f.name)
 
+    def test_torch_load_fake_zip(self):
+        # data = [0] * 400
+        data = [
+            ord('P'),
+            ord('K'),
+            5,
+            6
+        ]
+        for i in range(0, 100):
+            data.append(0)
+        t = torch.tensor(data, dtype=torch.uint8)
+
+        @torch.jit.script
+        def fn(x):
+            return x + 10
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(t, f.name)
+
+            # If this check is False for all Python versions (i.e. the fix
+            # has been backported), this test and torch.serialization._is_zipfile
+            # can be deleted
+            self.assertTrue(zipfile.is_zipfile(f))
+            self.assertFalse(torch.serialization._is_zipfile(f))
+
+        with tempfile.NamedTemporaryFile() as f:
+            fn.save(f.name)
+            self.assertTrue(torch.serialization._is_zipfile(f))
+
     def test_python_bindings(self):
         lstm_cell = torch.jit.script(LSTMCellS)
 
