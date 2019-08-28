@@ -72,6 +72,12 @@ class TestONNXRuntime(unittest.TestCase):
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
 
+    def setUp(self):
+        torch.manual_seed(0)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(0)
+        np.random.seed(seed=0)
+
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True, batch_size=2, use_gpu=True):
         run_model_test(self, model, batch_size=batch_size,
                        input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
