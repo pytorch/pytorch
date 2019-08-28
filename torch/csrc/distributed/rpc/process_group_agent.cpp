@@ -53,57 +53,39 @@ Message deserialize(MessageType type, std::istream& is) {
   return Message(std::move(payload), std::move(tensors), type, id);
 }
 
-std::unordered_map<std::string, int> collectNames(
-    const std::string& workerName, std::shared_ptr<c10d::ProcessGroup>& pg) {
+} // namespace
 
-  const auto worldSize = pg->getSize();
-  // collect lengths
+void ProcessGroupAgent::collectNames() {
+  const std::string& workerName = workerId_.name_;
+  const auto worldSize = pg_->getSize();
   const int64_t length = workerName.length();
-  std::vector<torch::Tensor> inputLength =
-      { torch::tensor({length}, {torch::kInt64}) };
-  std::vector<std::vector<torch::Tensor>> outputLengths (1);
-  for (int i = 0; i < worldSize; ++i) {
-    outputLengths[0].emplace_back(torch::empty({1}, {torch::kInt64}));
-  }
-  pg->allgather(outputLengths, inputLength)->wait();
 
-  // convert collected length tensors into integers
-  std::vector<int64_t> nameLengths(worldSize);
-  int64_t maxLen = 0;
-  for (int i = 0; i < worldSize; ++i) {
-    nameLengths[i] = outputLengths[0][i].storage().data<int64_t>()[0];
-    maxLen = std::max(maxLen, nameLengths[i]);
-  }
-
-  // collect names
-  torch::Tensor nameTensor = torch::empty({maxLen}, torch::kChar);
+  // use c10d allgather to collect names
+  torch::Tensor nameTensor =
+      torch::zeros({WorkerId::MAX_NAME_LEN}, torch::kChar);
   memcpy(nameTensor.storage().data(), workerName.c_str(), length);
   std::vector<torch::Tensor> inputName = {nameTensor};
   std::vector<std::vector<torch::Tensor>> outputNames(1);
   for (int i = 0; i < worldSize; ++i) {
-    outputNames[0].emplace_back(torch::empty({maxLen}, {torch::kChar}));
+    outputNames[0].emplace_back(
+        torch::empty({WorkerId::MAX_NAME_LEN}, {torch::kChar})
+    );
   }
-  pg->allgather(outputNames, inputName)->wait();
+  pg_->allgather(outputNames, inputName)->wait();
 
   // convert collected name tensors into string names
-  std::unordered_map<std::string, int> nameMap(worldSize);
   for (int i = 0; i < worldSize; ++i) {
     torch::Tensor& tensor = outputNames[0][i];
     std::string peerName(
-        (const char*)tensor.storage().data<signed char>(),
-        nameLengths[i]
+        (const char*)tensor.storage().data<signed char>()
     );
 
-    TORCH_CHECK(nameMap.find(peerName) == nameMap.end(),
+    TORCH_CHECK(nameMap_.find(peerName) == nameMap_.end(),
         "RpcAgent name ", peerName, " is not unique.");
 
-    nameMap[std::move(peerName)] = i;
+    nameMap_[std::move(peerName)] = i;
   }
-
-  return nameMap;
 }
-
-} // namespace
 
 ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
@@ -113,12 +95,12 @@ ProcessGroupAgent::ProcessGroupAgent(
           WorkerId(std::move(workerName), pg->getRank()),
           processRequestBlocking
       ),
-      stop_(false),
       pg_(std::move(pg)),
+      stop_(false),
       nextId_(0),
       sendMutexes_(pg_->getSize()),
       threadPool_(numSendRecvThreads) {
-  nameMap_ = collectNames(workerId_.name_, pg_);
+  collectNames();
   TORCH_CHECK(nameMap_.size() > 1, "ProcessGroupAgent requires world_size to "
       "be at least 2, but got ", nameMap_.size());
   auto workerRankIter = nameMap_.find(workerId_.name_);
@@ -143,7 +125,8 @@ ProcessGroupAgent::ProcessGroupAgent(
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
-const WorkerId& ProcessGroupAgent::getWorkerId(const std::string& workerName) const {
+const WorkerId& ProcessGroupAgent::getWorkerId(
+    const std::string& workerName) const {
   const auto idIter = nameMap_.find(workerName);
   TORCH_CHECK(idIter != nameMap_.end(),
       "Unknown destination worker ", workerName);

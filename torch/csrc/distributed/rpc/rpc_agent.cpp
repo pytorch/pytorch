@@ -4,6 +4,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+const size_t WorkerId::MAX_NAME_LEN=128;
+
 RpcAgent::RpcAgent(WorkerId workerId, RequestCallback cb)
     : workerId_(std::move(workerId)), cb_(std::move(cb)) {}
 

@@ -4,6 +4,8 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
+#include <algorithm>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -11,13 +13,36 @@ namespace rpc {
 // A globally unique ID to identify an RpcAgent
 struct WorkerId {
   WorkerId(std::string name, int id)
-      : name_(std::move(name)), id_(id) {
+      : WorkerId(std::move(name), (worker_id_t)id) {
     TORCH_CHECK(id <= std::numeric_limits<worker_id_t>::max(),
         "RPC worker id ", id, " out of bound of int16_t.");
   }
 
   WorkerId(std::string name, worker_id_t id)
-      : name_(std::move(name)), id_(id) {}
+      : name_(std::move(name)), id_(id) {
+    bool validSize = name_.length() < MAX_NAME_LEN && name_.length() > 0;
+    bool validChar =
+        find_if(
+            name_.begin(),
+            name_.end(),
+            [](char c) {
+              return !(isalnum(c) || c == '-' || c == '_') ;
+            }
+        ) == name_.end();
+    TORCH_CHECK(validSize && validChar,
+        "Worker name must match ^[A-Za-z0-9-_]*$, "
+        "and must be non-empty and shorter than ", MAX_NAME_LEN, " chars, "
+        "but got ", name_);
+  }
+
+  static bool isValidName(const std::string& name) {
+    return name.length() < MAX_NAME_LEN &&
+        find_if(
+            name.begin(), name.end(), [](char c) { return !isalnum(c);}
+        ) == name.end();
+  }
+
+  static const size_t MAX_NAME_LEN;
 
   const std::string name_;
   const worker_id_t id_;
