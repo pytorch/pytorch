@@ -7,6 +7,10 @@ import functools
 import torch
 from torch import Tensor
 import torch.nn.functional as F
+from multiprocessing.reduction import ForkingPickler
+import pickle
+import io
+import os
 import sys
 
 
@@ -158,6 +162,23 @@ class TestNamedTensor(TestCase):
 
         none_named_tensor = torch.zeros(2, 3).names_(None, None)
         self.assertEqual(repr(none_named_tensor), expected)
+
+    def test_no_save_support(self):
+        named_tensor = torch.zeros(2, 3, names=('N', 'C'))
+        buf = io.BytesIO()
+        with self.assertRaisesRegex(RuntimeError, "NYI"):
+            torch.save(named_tensor, buf)
+
+    def test_no_pickle_support(self):
+        named_tensor = torch.zeros(2, 3, names=('N', 'C'))
+        with self.assertRaisesRegex(RuntimeError, "NYI"):
+            serialized = pickle.dumps(named_tensor)
+
+    def test_no_multiprocessing_support(self):
+        named_tensor = torch.zeros(2, 3, names=('N', 'C'))
+        buf = io.BytesIO()
+        with self.assertRaisesRegex(RuntimeError, "NYI"):
+            ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
 
     def test_noncontig_contiguous(self):
         # This type of contiguous is special-cased and therefore needs its own test
