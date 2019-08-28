@@ -1,10 +1,15 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import sys
+import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 from common_distributed import MultiProcessTestCase
 from functools import wraps
 import unittest
+
+if not dist.is_available():
+    print("c10d not available, skipping tests")
+    sys.exit(0)
 
 def dist_init(func):
     """
