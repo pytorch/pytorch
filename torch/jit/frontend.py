@@ -282,11 +282,7 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_Assign(ctx, stmt):
         rhs = build_expr(ctx, stmt.value)
-        if len(stmt.targets) > 1:
-            start_point = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + 1)
-            raise NotSupportedError(ctx.make_raw_range(start_point.start, rhs.range().end),
-                                    "Performing multiple assignments in a single line isn't supported")
-        lhs = build_expr(ctx, stmt.targets[0])
+        lhs = list(map(lambda x: build_expr(ctx, x), stmt.targets))
         return Assign(lhs, rhs)
 
     @staticmethod
@@ -294,7 +290,7 @@ class StmtBuilder(Builder):
         rhs = build_expr(ctx, stmt.value)
         lhs = build_expr(ctx, stmt.target)
         the_type = build_expr(ctx, stmt.annotation)
-        return Assign(lhs, rhs, the_type)
+        return Assign([lhs], rhs, the_type)
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -422,18 +418,23 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Attribute(ctx, expr):
-        # NB: the only attributes we support are for getting methods
-        value = build_expr(ctx, expr.value)
-        # <sigh> name is just a string, so it's not annotated in any way.
-        source = ctx.source
-        pos = find_after(ctx, value.range().end, '.').end  # Start with the dot
-        while source[pos] in string.whitespace:  # Skip whitespace
-            pos += 1
-        start_pos = pos
-        while source[pos] in _identifier_chars:  # Find the identifier itself
-            pos += 1
-        name_range = ctx.make_raw_range(start_pos, pos)
-        return Select(value, Ident(name_range, expr.attr))
+        base = build_expr(ctx, expr.value)
+        # expr.attr is just a string, so it's not annotated in any way, so we have
+        # to build the range manually
+        source = ctx.source.encode('utf-8')
+
+        def get_char(index):
+            if PY2:
+                return source[index]
+            else:
+                return chr(source[index])
+
+        start_pos = base.range().end + 1
+        while get_char(start_pos) in string.whitespace:  # Skip whitespace
+            start_pos += 1
+        end_pos = start_pos + len(expr.attr)
+        name_range = ctx.make_raw_range(start_pos, end_pos)
+        return Select(base, Ident(name_range, expr.attr))
 
     @staticmethod
     def build_Call(ctx, expr):
@@ -691,11 +692,6 @@ class ExprBuilder(Builder):
 
 build_expr = ExprBuilder()
 build_stmt = StmtBuilder()
-
-
-def find_after(ctx, pos, substr, offsets=(0, 0)):
-    new_pos = pos + ctx.source[pos:].index(substr)
-    return ctx.make_raw_range(new_pos + offsets[0], new_pos + len(substr) + offsets[1])
 
 
 def find_before(ctx, pos, substr, offsets=(0, 0)):

@@ -56,16 +56,14 @@ struct WorkerId {
 // construction.
 class RpcAgent;
 
-// ``RpcAgent`` implementation should invoke ``RequestCallback`` to process
-// received requests. There is no restriction on the implementation's threading
-// model. This function takes the ``WorkerId`` of the request sender, the an
-// rvalue reference of the Message object, and a reference to the ``RpcAgent``.
-// Having a reference to the ``RpcAgent`` allows the ``RequestCallback``
-// implementation to be both stateless and non-blocking. For example, it may
-// enqueue the message and the ``RpcAgent`` reference, and use a different pool
-// of threads to process them later.
-using RequestCallback =
-    std::function<void(const WorkerId&, Message&&, RpcAgent&)>;
+// RpcAgent implementation should invoke ``RequestCallback`` to process received
+// requests. There is no restriction on the implementation's threading model.
+// This function takes an rvalue reference of the Message object.
+// It is expected to return the response message or message containing an
+// exception. Different rpc agent implementations are expected to ensure
+// delivery of the response/exception based on their implementation specific
+// mechanisms.
+using RequestCallback = std::function<Message(Message&&)>;
 
 class RpcAgent {
  public:

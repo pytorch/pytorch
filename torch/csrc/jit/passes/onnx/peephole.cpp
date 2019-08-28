@@ -129,13 +129,13 @@ void fuseBroadcast(Block* b) {
       // Not all broadcasts are supported by ONNX broadcast.
       c10::optional<size_t> axis = fusibleExpandTo(
           unexpanded_input->type()
-              ->expect<ProfiledTensorType>()
+              ->expect<TensorType>()
               ->sizes()
               .concrete_sizes()
               .value(), // from
           n->output()
               ->type()
-              ->expect<ProfiledTensorType>()
+              ->expect<TensorType>()
               ->sizes()
               .concrete_sizes()
               .value()); // to
@@ -296,14 +296,13 @@ void pushPackingPastRnn(Block* b) {
     // unhygenic way, Pytorch ends up propagating an incorrect type.
     // Until a long-term cleanup comes around, we can fix this by
     // resetting the size to the correct value.
-    ProfiledTensorTypePtr oldType =
-        rnn->inputs().at(0)->type()->cast<ProfiledTensorType>();
+    TensorTypePtr oldType = rnn->inputs().at(0)->type()->cast<TensorType>();
     if (oldType && oldType->isComplete()) {
       std::vector<int64_t> new_sizes;
       new_sizes.push_back(*oldType->sizes()[0]);
       new_sizes.push_back(*oldType->sizes()[1]);
       new_sizes.push_back(rnn->i(attr::hidden_size));
-      ProfiledTensorTypePtr newType = ProfiledTensorType::createContiguous(
+      TensorTypePtr newType = TensorType::createContiguous(
           *oldType->scalarType(), *oldType->device(), new_sizes);
       next->outputs().at(0)->setType(newType);
     }

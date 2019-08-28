@@ -320,7 +320,8 @@ struct PreprocessGraph {
   _(WAIT, "") /* wait for a future to be complete */                        \
   _(CALL, "F") /* call function X */                                        \
   _(GUARD, "T") /* check guard against type_table, true if passes */        \
-  _(TAIL_CALL, "F") /* replace current frame with function F */
+  _(TAIL_CALL, "F") /* replace current frame with function F */             \
+  _(INTERFACE_CALL, "CI") /* call method X on the first argument (of N) */
 
 enum OpCode : uint8_t {
 #define DEFINE_OP(op, _) op,
@@ -679,7 +680,13 @@ struct CodeImpl {
           instructions_source_[block.jf_instruction_index]);
     }
   }
-
+  void emitInterfaceCall(
+      std::string method_name_str,
+      c10::ArrayRef<Value*> inputs) {
+    emitLoadInputs(inputs);
+    auto method_name = insertConstant(std::move(method_name_str));
+    insertInstruction(INTERFACE_CALL, method_name, inputs.size());
+  }
   void emitNode(Node* node) {
     WithCurrentNode guard(&current_node_, node);
     switch (node->kind()) {
@@ -709,10 +716,11 @@ struct CodeImpl {
             node->inputs().slice(1));
         break;
       case prim::CallMethod:
-        emitCall(
-            node->inputs().at(0)->type()->expect<ClassType>()->getMethod(
-                node->s(attr::name)),
-            node->inputs());
+        if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
+          emitCall(class_type->getMethod(node->s(attr::name)), node->inputs());
+        } else {
+          emitInterfaceCall(node->s(attr::name), node->inputs());
+        }
         break;
       case prim::BailOut:
         emitBailOut(node);
@@ -936,6 +944,20 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             enterFrame(code, stack.size() - code.num_inputs());
             af = ActiveFrame(frames.back());
           } break;
+          case INTERFACE_CALL: {
+            // note the hash table lookup to find the function
+            // this can be more optimized if necessary, caching parts
+            // of the hashing computation or storing the offset when
+            // the object is turned into an interface
+            auto function = peek(stack, 0, inst.N)
+                                .toObject()
+                                ->type()
+                                ->getMethod(af.constants[inst.X].toStringRef());
+            const Code& code = function->get_executor().getPlanFor(stack).code;
+            frames.back().pc = af.pc + 1;
+            enterFrame(code, stack.size() - inst.N);
+            af = ActiveFrame(frames.back());
+          } break;
           case RET:
             if (frames.size() > 1) {
               leaveFrame();
@@ -1001,7 +1023,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case GUARD: {
-            auto actual = ProfiledTensorType::create(stack.back().toTensor());
+            auto actual = TensorType::create(stack.back().toTensor());
             const TypePtr& expected = af.types[inst.X];
             push(stack, *expected == *actual);
             ++af.pc;

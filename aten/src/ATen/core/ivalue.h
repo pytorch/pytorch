@@ -106,6 +106,15 @@ struct CAFFE2_API IValue final {
     // Other types can be compared by their ptr value
     return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
   }
+
+  size_t use_count() const noexcept {
+    if (!is_intrusive_ptr) {
+      return 1;
+    }
+
+    return c10::raw::intrusive_ptr::use_count(payload.as_intrusive_ptr);
+  }
+
   void swap(IValue & rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
@@ -578,6 +587,9 @@ struct StrongTypePtr {
 };
 
 TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();
+
+#ifndef C10_MOBILE
+
 template<typename T>
 c10::StrongTypePtr getCustomClassType() {
   auto tmap = c10::getCustomClassTypeMap();
@@ -593,6 +605,20 @@ inline bool isCustomClassRegistered() {
   auto tmap = c10::getCustomClassTypeMap();
   return tmap.find(typeid(T).name()) != tmap.end();
 }
+
+#else  // C10_MOBILE
+
+template<typename T>
+c10::StrongTypePtr getCustomClassType() {
+  throw c10::Error("Custom class is not supported on mobile.", "");
+}
+
+template<typename T>
+inline bool isCustomClassRegistered() {
+  return false;
+}
+
+#endif  // C10_MOBILE
 
 TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
 getClassConverter();

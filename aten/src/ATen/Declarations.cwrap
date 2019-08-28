@@ -1123,6 +1123,8 @@
 [[
   name: _th_topk
   cname: topk
+  backends:
+    - CUDA
   variants:
     - function
   return: argument 0,1
@@ -1259,7 +1261,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - function
@@ -1274,7 +1275,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   cname: digamma
   variants: function
@@ -1289,7 +1289,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - function
@@ -1305,7 +1304,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   cname: polygamma
   variants: function
@@ -1502,7 +1500,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   cname: erfinv
   variants: function
@@ -1517,7 +1514,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - function
@@ -1914,28 +1910,6 @@
     - THTensor* self
     - arg: long dim
       wrap_dim: self
-]]
-[[
-  name: _th_sign
-  cname: sign
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_sign_
-  cname: sign
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
 ]]
 [[
   name: _th_trace
