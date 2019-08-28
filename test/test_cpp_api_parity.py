@@ -412,15 +412,19 @@ as the constructor of `torch.nn.{}` in Python. However, currently the C++ constr
         test_methods(test_params)
 
 
-def _process_test_params(test_params_dict, module_metadata, device):
+def _compute_module_name(test_params_dict):
     fullname = test_params_dict.get('fullname', None)
     if fullname:
         module_name = fullname.split('_')[0]
-        module_variant_name = fullname
     else:
         module_name = test_params_dict.get('module_name')
-        desc = test_params_dict.get('desc', None)
-        module_variant_name = module_name + (('_' + desc) if desc else '')
+    return module_name
+
+
+def _process_test_params(test_params_dict, module_metadata, device):
+    module_name = _compute_module_name(test_params_dict)
+    desc = test_params_dict.get('desc', None)
+    module_variant_name = test_params_dict.get('fullname', module_name + (('_' + desc) if desc else ''))
     module_variant_name += ('_' + device) if device != 'cpu' else ''
 
     input_size = test_params_dict.get('input_size', None)
@@ -478,11 +482,7 @@ for test_params_dict in all_module_tests:
     if 'FunctionalModule' in str(test_params_dict.get('constructor', '')):
         continue
 
-    fullname = test_params_dict.get('fullname', None)
-    if fullname:
-        module_name = fullname.split('_')[0]
-    else:
-        module_name = test_params_dict.get('module_name')
+    module_name = _compute_module_name(test_params_dict)
 
     assert hasattr(torch.nn, module_name), \
         "`torch.nn` doesn't have module `{}`. ".format(module_name) + \
