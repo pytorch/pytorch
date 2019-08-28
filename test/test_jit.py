@@ -932,6 +932,7 @@ graph(%x : Tensor,
                    .run(str(get_forward_graph(m._c._get_module("conv"))))
 
 
+    @_tmp_donotuse_dont_inline_everything
     def test_insert_observers_child_qconfig(self):
         class Observer(torch.nn.Module):
             def __init__(self):
@@ -975,7 +976,6 @@ graph(%x : Tensor,
                        .check_not('prim::CallMethod[name="forward"](%observer_for_') \
                        .run(str(s))
 
-        torch._C._jit_set_inline_everything_mode(False)
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
 
