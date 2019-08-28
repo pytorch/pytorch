@@ -54,23 +54,23 @@ bool check_ivalue_equality(const c10::IValue& ivalue1, const c10::IValue& ivalue
 CHECK_MODULE_PARAM_EQUALITY = Template("""\
 TORCH_CHECK(
   check_tensor_equality(${script_module_prefix}.get_parameter("${param_name}"), ${cpp_module_prefix}->${param_name}),
-  parity_test_error_msg);
+  parity_test_error_msg, ": `${cpp_module_prefix}->${param_name}` does not match the corresponding Python value");
 TORCH_CHECK(
   ${script_module_prefix}.get_parameter("${param_name}").requires_grad() == ${cpp_module_prefix}->${param_name}.requires_grad(),
-  parity_test_error_msg);
+  parity_test_error_msg, ": `${cpp_module_prefix}->${param_name}.requires_grad()` does not match the corresponding Python value");
 """)
 
 CHECK_MODULE_BUFFER_EQUALITY = Template("""\
 TORCH_CHECK(
   check_tensor_equality(${script_module_prefix}.get_buffer("${buffer_name}"), ${cpp_module_prefix}->${buffer_name}),
-  parity_test_error_msg);
+  parity_test_error_msg, ": `${cpp_module_prefix}->${buffer_name}` does not match the corresponding Python value");
 """)
 
 CHECK_MODULE_ATTR_EQUALITY = Template("""\
 TORCH_CHECK(
   check_ivalue_equality(
     ${script_module_prefix}.get_attribute("${attr_name}"), c10::IValue(${cpp_module_prefix}->${attr_name})),
-  parity_test_error_msg);
+  parity_test_error_msg, ": `${cpp_module_prefix}->${attr_name}` does not match the corresponding Python value");
 """)
 
 TORCH_NN_MODULE_TEST_CTOR_ARGS = Template("""\n
@@ -136,7 +136,7 @@ void ${module_variant_name}_test_backward(
     auto grad = grad_module->parameters()[i];
     TORCH_CHECK(
       check_tensor_equality(named_param->grad(), grad),
-      parity_test_error_msg, ": ", "gradient value of `", named_param.key(), "` doesn't match");
+      parity_test_error_msg, ": gradient value of `", named_param.key(), "` doesn't match");
   }
 
   ${extra_stmts}
