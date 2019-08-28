@@ -899,6 +899,7 @@ bool Node::hasSideEffects() const {
     case aten::warn:
     case aten::save:
     case aten::manual_seed:
+    case aten::set_grad_enabled:
     case prim::AddStatValue:
     case prim::TimePoint:
     case prim::CallFunction:

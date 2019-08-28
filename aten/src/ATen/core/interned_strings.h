@@ -141,6 +141,7 @@ namespace c10 {
   _(aten, __getitem__)               \
   _(aten, _set_item)                 \
   _(aten, manual_seed)               \
+  _(aten, set_grad_enabled)          \
   _(aten, set_)                      \
   _(aten, index_put_)                \
   _(aten, device)                    \
