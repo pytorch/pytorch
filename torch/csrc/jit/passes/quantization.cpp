@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/subgraph_matcher.h>
+#include <torch/csrc/jit/irparser.h>
 
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/node_hashing.h>
@@ -10,6 +12,56 @@
 namespace torch {
 namespace jit {
 namespace {
+
+void findValuesInPattern(
+    Graph& graph,
+    const std::string& pattern,
+    std::unordered_set<Value*>& values) {
+  Graph pattern_graph;
+  std::unordered_map<std::string, Value*> vmap;
+  script::parseIR(pattern, &pattern_graph, vmap);
+
+  auto matches = findPatternMatches(pattern_graph, graph);
+  for (auto match: matches) {
+    for (auto item: match.values_map) {
+      if (item.first == vmap["output"]) {
+        values.emplace(item.second);
+      }
+    }
+  }
+}
+
+std::unordered_set<Value*> valuesNeedToSkipObserver(
+    const script::Module& module,
+    const std::string& method_name) {
+  script::Method method = module.get_method(method_name);
+  auto graph = method.graph();
+
+  // Note that the name of the value we want to skip inserting observer for
+  // is hard coded as "output"
+  std::string conv_functional_relu = R"(
+graph(%self, %input, %inplace):
+    %relu = prim::Constant[name="relu"]()
+    %conv = match::module[name="Conv2d"](%self)
+    %output = prim::CallMethod[name="forward"](%conv, %input)
+    %r = prim::CallFunction(%relu, %output, %inplace)
+    return (%r))";
+  std::string conv_relu_module = R"(
+graph(%self, %input):
+    %conv = match::module[name="Conv2d"](%self)
+    %output = prim::CallMethod[name="forward"](%conv, %input)
+    %relu = match::module[name="ReLU"](%self)
+    %r = prim::CallMethod[name="forward"](%relu, %output)
+    return (%r))";
+  std::vector<std::string> patterns = {conv_functional_relu, conv_relu_module};
+
+  std::unordered_set<Value*> values;
+  for (auto pattern: patterns) {
+    findValuesInPattern(*graph, pattern, values);
+  }
+
+  return values;
+}
 
 static bool outputsNeedToBeObserved(Node* n) {
   return n->kind() != prim::Constant;
@@ -159,7 +211,6 @@ void InsertObserversImpl(
     const ModuleQConfigMap& module_qconfig_map) {
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
-  TORCH_CHECK(graph != nullptr);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -187,6 +238,8 @@ void InsertObserversImpl(
     }
   }
 
+  auto values_to_skip = valuesNeedToSkipObserver(module, method_name);
+
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
@@ -201,7 +254,9 @@ void InsertObserversImpl(
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
-        values_to_observe.push_back(v);
+        if (values_to_skip.count(v) == 0) {
+          values_to_observe.push_back(v);
+        }
       }
 
       // Schedule subblocks (if any) for visiting.
@@ -510,7 +565,6 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {
-  SubgraphRewriter rewriter;
   std::string pattern = R"(
 graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_intrepr = aten::int_repr(%a_quant)
@@ -537,6 +591,7 @@ graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale,
         %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
         %r_perm = aten::permute(%r, %out_param)
         return (%r_perm))";
+  SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(pattern, replacement);
   rewriter.runOnGraph(graph);
 }
