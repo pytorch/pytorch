@@ -496,38 +496,43 @@ for test_params_dict in all_module_tests:
 
     has_impl_parity, _ = parity_table['torch.nn'][module_full_name]
 
-    ctor_args_test_name = 'test_torch_nn_{}_ctor_args'.format(module_name)
+    def add_ctor_args_test_for_module(module_name, has_impl_parity):
+        ctor_args_test_name = 'test_torch_nn_{}_ctor_args'.format(module_name)
 
-    def ctor_args_test(self):
-        self._test_torch_nn_module_ctor_args(
-            module_name=self._testMethodName.replace('test_torch_nn_', '').replace('_ctor_args', ''))
-
-    if not has_impl_parity:
-        ctor_args_test = unittest.expectedFailure(ctor_args_test)
-
-    # We only run one constructor args test per module
-    if not has_test(ctor_args_test_name):
-        add_test(ctor_args_test_name, ctor_args_test)
-
-    module_metadata = torch_nn_modules.module_metadata_map[module_name]
-    for device in devices:
-        test_params = _process_test_params(
-            test_params_dict=test_params_dict,
-            module_metadata=module_metadata,
-            device=device)
-        test_name = 'test_torch_nn_{}'.format(test_params.module_variant_name)
-        torch_nn_test_params_map[test_name] = test_params
-
-        def test_fn(self):
-            self._test_torch_nn_module_variant(test_params=torch_nn_test_params_map[self._testMethodName])
-
-        if device == 'cuda':
-            test_fn = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")(test_fn)
+        def ctor_args_test(self):
+            self._test_torch_nn_module_ctor_args(
+                module_name=self._testMethodName.replace('test_torch_nn_', '').replace('_ctor_args', ''))
 
         if not has_impl_parity:
-            test_fn = unittest.expectedFailure(test_fn)
+            ctor_args_test = unittest.expectedFailure(ctor_args_test)
 
-        add_test(test_name, test_fn)    
+        # We only run one constructor args test per module
+        if not has_test(ctor_args_test_name):
+            add_test(ctor_args_test_name, ctor_args_test)
+
+    def add_variant_test_for_module(module_name, test_params_dict, has_impl_parity):
+        module_metadata = torch_nn_modules.module_metadata_map[module_name]
+        for device in devices:
+            test_params = _process_test_params(
+                test_params_dict=test_params_dict,
+                module_metadata=module_metadata,
+                device=device)
+            test_name = 'test_torch_nn_{}'.format(test_params.module_variant_name)
+            torch_nn_test_params_map[test_name] = test_params
+
+            def test_fn(self):
+                self._test_torch_nn_module_variant(test_params=torch_nn_test_params_map[self._testMethodName])
+
+            if device == 'cuda':
+                test_fn = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")(test_fn)
+
+            if not has_impl_parity:
+                test_fn = unittest.expectedFailure(test_fn)
+
+            add_test(test_name, test_fn)
+
+    add_ctor_args_test_for_module(module_name, has_impl_parity)
+    add_variant_test_for_module(module_name, test_params_dict, has_impl_parity)
 
 
 # Assert that there exists auto-generated tests for SampleModule.
