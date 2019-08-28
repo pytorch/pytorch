@@ -11,66 +11,66 @@ import inspect
 import sys
 from unittest import mock
 
-
-class TestOverride(unittest.TestCase):
-
-    def test_gemm(self):
-        HANDLED_FUNCTIONS = {}
-        class DiagonalTensor:
-            def __init__(self, N, value):
-                self._N = N
-                self._i = value
-
-            def __repr__(self):
-                return f"{self.__class__.__name__}(N={self._N}, value={self._i})"
-
-            def __array__(self):
-                return self._i * np.eye(self._N)
-
-            def tensor(self):
-                return self._i * torch.eye(self._N)
-
-            def __torch_function__(self, func, types, args, kwargs):
-                if func not in HANDLED_FUNCTIONS:
-                    return NotImplemented
-                # Note: this allows subclasses that don't override
-                # __torch_function__ to handle DiagonalArray objects.
-                if not all(issubclass(t, self.__class__) for t in types):
-                    return NotImplemented
-                return HANDLED_FUNCTIONS[func](*args, **kwargs)
-
-            def __eq__(self, other):
-                if type(other) is type(self):
-                        if self._N == other._N and self._i == other._i:
-                            return True
-                        else:
-                            return False
-                else:
-                    return False
+from common_utils import TestCase
 
 
-        def implements(torch_function):
-           "Register an __torch_function__ implementation for DiagonalTensor objects."
-           def decorator(func):
-               HANDLED_FUNCTIONS[torch_function] = func
-               return func
-           return decorator
+HANDLED_FUNCTIONS = {}
 
-        @implements(torch.gemm)
-        def gemm_diag(mat1, mat2, out=None):
-            "Implementation of torch.gemm for DiagonalArray objects"
-            print('Called our custom gemm for DiagonalTensor input')
-            if not mat1._N == mat2._N:
-                raise ValueError("Dimension mismatch")
+def implements(torch_function):
+   "Register an implementation of a torch function for a Tensor-like object."
+   def decorator(func):
+       HANDLED_FUNCTIONS[torch_function] = func
+       return func
+   return decorator
 
-            return DiagonalTensor(mat1._N, mat1._i * mat2._i)
 
-        t1 = DiagonalTensor(5, 1)
-        t2 = DiagonalTensor(5, 2)
-        t3 = DiagonalTensor(5, 1)
+class DiagonalTensor:
+    """A class with __torch_function__ and a specific diagonal representation"""
+    def __init__(self, N, value):
+        self._N = N
+        self._i = value
 
-        self.assertEqual(t1, t3)
-        self.assertEqual(torch.gemm(t1, t2), t2)
+    def __repr__(self):
+        return f"{self.__class__.__name__}(N={self._N}, value={self._i})"
+
+    def __array__(self):
+        return self._i * np.eye(self._N)
+
+    def tensor(self):
+        return self._i * torch.eye(self._N)
+
+    def __torch_function__(self, func, types, args, kwargs):
+        if func not in HANDLED_FUNCTIONS:
+            return NotImplemented
+        # Note: this allows subclasses that don't override
+        # __torch_function__ to handle DiagonalArray objects.
+        if not all(issubclass(t, self.__class__) for t in types):
+            return NotImplemented
+        return HANDLED_FUNCTIONS[func](*args, **kwargs)
+
+    def __eq__(self, other):
+        if type(other) is type(self):
+            if self._N == other._N and self._i == other._i:
+                return True
+            else:
+                return False
+        else:
+            return False
+
+
+@implements(torch.unique)
+def unique_diag(mat1):
+    "Implementation of torch.unique for DiagonalArray objects"
+    return torch.Tensor([0, mat1._i])
+
+
+class TestOverride(TestCase):
+
+    def test_unique(self):
+        t1 = DiagonalTensor(5, 2)
+        t2 = torch.eye(5) * 2
+        self.assertEqual(t1.tensor(), t2)
+        self.assertEqual(torch.unique(t1), torch.unique(t2))
 
 
 def _return_not_implemented(self, *args, **kwargs):
@@ -90,7 +90,7 @@ def dispatched_two_arg(tensor1, tensor2):
     return 'original'
 
 
-class TestGetImplementingArgs(unittest.TestCase):
+class TestGetImplementingArgs(TestCase):
 
     def test_tensor(self):
         tensor = torch.tensor(1)
@@ -204,7 +204,7 @@ class TestGetImplementingArgs(unittest.TestCase):
             get_overloaded_types_and_args(relevant_args)
 
 
-class TestTensorTorchFunction(unittest.TestCase):
+class TestTensorTorchFunction(TestCase):
 
     @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
     def test_method(self):
@@ -266,7 +266,7 @@ class TestTensorTorchFunction(unittest.TestCase):
                                      args=(tensor,), kwargs={})
 
 
-class TestTorchFunctionDispatch(unittest.TestCase):
+class TestTorchFunctionDispatch(TestCase):
 
     def test_pickle(self):
         for proto in range(2, pickle.HIGHEST_PROTOCOL + 1):
@@ -305,7 +305,7 @@ class TestTorchFunctionDispatch(unittest.TestCase):
             dispatched_one_arg(tensor)
 
 
-class TestVerifyMatchingSignatures(unittest.TestCase):
+class TestVerifyMatchingSignatures(TestCase):
 
     def test_verify_matching_signatures(self):
 
@@ -357,7 +357,7 @@ def _new_duck_type_and_implements():
     return (MyTensor, implements)
 
 
-class TestTensorFunctionImplementation(unittest.TestCase):
+class TestTensorFunctionImplementation(TestCase):
 
     def test_one_arg(self):
         MyTensor, implements = _new_duck_type_and_implements()
@@ -410,7 +410,7 @@ class TestTensorFunctionImplementation(unittest.TestCase):
             func(MyTensor())
 
 
-class TestTensorMethods(unittest.TestCase):
+class TestTensorMethods(TestCase):
 
     @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
     def test_repr(self):
@@ -426,7 +426,7 @@ class TestTensorMethods(unittest.TestCase):
         self.assertEqual(str(tensor), '1')
 
 
-class TestTorchFunctions(unittest.TestCase):
+class TestTorchFunctions(TestCase):
 
     @unittest.expectedFailure # Discuss
     def test_set_module(self):

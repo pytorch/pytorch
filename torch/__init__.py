@@ -93,20 +93,6 @@ if platform.system() != 'Windows':
 ################################################################################
 
 
-# TODO: remove. This is temporary functionality to test the pure-Python version
-#       of __torch_function__
-from ._overrides import torch_function_dispatch
-
-def gemm_dispatcher(input, mat2, out=None):
-    return (input, mat2, out)
-
-
-@torch_function_dispatch(gemm_dispatcher)
-def gemm(input, mat2, out=None):
-    return torch.mm(input, mat2, out=None)
-# End of TODO
-
-
 def typename(o):
     if isinstance(o, torch.Tensor):
         return o.type()

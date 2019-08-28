@@ -392,6 +392,12 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
 del torch.unique_dim
 
 
+def _unique_dispatcher(input, sorted=None, return_inverse=None,
+                       return_counts=None, dim=None):
+    return (input,)
+
+
+@torch_function_dispatch(_unique_dispatcher)
 def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     r"""Returns the unique elements of the input tensor.
 
