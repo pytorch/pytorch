@@ -1,4 +1,4 @@
-#include <ATen/NamedTensor.h>
+#include <ATen/core/NamedTensor.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/C++17.h>
 
