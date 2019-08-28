@@ -129,7 +129,6 @@ TH_API void THTensor_(clamp)(THTensor *r_, THTensor *t, scalar_t min_value, scal
 TH_API void THTensor_(cadd)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src);
 TH_API void THTensor_(csub)(THTensor *self, THTensor *src1, scalar_t value, THTensor *src2);
 TH_API void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src);
-TH_API void THTensor_(cpow)(THTensor *r_, THTensor *t, THTensor *src);
 TH_API void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src);
 TH_API void THTensor_(clshift)(THTensor *r_, THTensor *t, THTensor *src);
 TH_API void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src);
@@ -151,8 +150,6 @@ TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);
 TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder);
 TH_API void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k);
 
-TH_API void THTensor_(pow)(THTensor *r_, THTensor *t, scalar_t value);
-TH_API void THTensor_(tpow)(THTensor *r_, scalar_t value, THTensor *t);
 TH_API void THTensor_(abs)(THTensor *r_, THTensor *t);
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
@@ -160,9 +157,6 @@ TH_API void THTensor_(abs)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(sigmoid)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(log)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(lgamma)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(digamma)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(trigamma)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t);
 TH_API void THTensor_(log10)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(log1p)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(log2)(THTensor *r_, THTensor *t);
