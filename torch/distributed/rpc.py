@@ -57,6 +57,8 @@ def init_rpc(name, backend='pg'):
     Arguments:
         name (str): a globally unique name of the local RPC agent. (e.g.,
                     ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
+                    Name can only contain number, alphabet, underscore, and/or
+                    dash, and must be shorter than 128 characters.
         backend (str): type of RPC backend implementation. Currently,
                        process group backend ``"pg"`` is the only available
                        backend implementation. (default: ``"pg"``).
