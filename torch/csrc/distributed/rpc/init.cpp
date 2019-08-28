@@ -5,8 +5,8 @@
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -61,37 +61,36 @@ PyObject* rpc_init(PyObject* /* unused */) {
           },
           py::call_guard<py::gil_scoped_release>());
 
-  auto processGroupAgent =
-      shared_ptr_class_<ProcessGroupAgent>(
-          module, "ProcessGroupAgent", rpcAgent)
-          .def(py::init<std::string,
-                        std::shared_ptr<::c10d::ProcessGroup>,
-                        int>(),
-               py::arg("name"),
-               py::arg("process_group"),
-               py::arg("num_send_recv_threads") = 4)
-          .def("get_worker_id",
-               (const WorkerId& (ProcessGroupAgent::*)(void) const)
+  auto processGroupAgent = shared_ptr_class_<ProcessGroupAgent>(
+      module, "ProcessGroupAgent", rpcAgent)
+      .def(py::init<std::string,
+                    std::shared_ptr<::c10d::ProcessGroup>,
+                    int>(),
+           py::arg("name"),
+           py::arg("process_group"),
+           py::arg("num_send_recv_threads") = 4)
+      .def("get_worker_id",
+           (const WorkerId& (ProcessGroupAgent::*)(void) const)
+           &RpcAgent::getWorkerId,
+           py::call_guard<py::gil_scoped_release>())
+      .def("get_worker_id",
+           (const WorkerId& (ProcessGroupAgent::*)(void) const)
                &RpcAgent::getWorkerId,
-               py::call_guard<py::gil_scoped_release>())
-          .def("get_worker_id",
-               (const WorkerId& (ProcessGroupAgent::*)(void) const)
-                   &RpcAgent::getWorkerId,
-               py::call_guard<py::gil_scoped_release>())
-          .def("get_worker_id",
-               (const WorkerId& (ProcessGroupAgent::*)(const std::string&) const)
-                   &ProcessGroupAgent::getWorkerId,
-               py::call_guard<py::gil_scoped_release>())
-          .def("get_worker_id",
-               (const WorkerId& (ProcessGroupAgent::*)(worker_id_t) const)
-                   &ProcessGroupAgent::getWorkerId,
-               py::call_guard<py::gil_scoped_release>())
-          .def("join",
-               &ProcessGroupAgent::join,
-               py::call_guard<py::gil_scoped_release>())
-          .def("sync",
-               &ProcessGroupAgent::sync,
-               py::call_guard<py::gil_scoped_release>());
+           py::call_guard<py::gil_scoped_release>())
+      .def("get_worker_id",
+           (const WorkerId& (ProcessGroupAgent::*)(const std::string&) const)
+               &ProcessGroupAgent::getWorkerId,
+           py::call_guard<py::gil_scoped_release>())
+      .def("get_worker_id",
+           (const WorkerId& (ProcessGroupAgent::*)(worker_id_t) const)
+               &ProcessGroupAgent::getWorkerId,
+           py::call_guard<py::gil_scoped_release>())
+      .def("join",
+           &ProcessGroupAgent::join,
+           py::call_guard<py::gil_scoped_release>())
+      .def("sync",
+           &ProcessGroupAgent::sync,
+           py::call_guard<py::gil_scoped_release>());
 
   module.def("init_rref_context", [](std::shared_ptr<RpcAgent> agent){
     RRefContext::initInstance(agent);

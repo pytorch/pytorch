@@ -1,6 +1,6 @@
+#include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/script_rref_proto.h>
-#include <torch/csrc/distributed/rpc/rref_context.h>
 
 
 namespace torch {
@@ -8,9 +8,6 @@ namespace distributed {
 namespace rpc {
 
 std::atomic<local_id_t> RRefContext::nextLocalId_ {0};
-
-//////////////////////////  RRefId  /////////////////////////////////////
-
 
 //////////////////////////  RRefForkData  /////////////////////////////////
 
@@ -122,6 +119,7 @@ at::IValue RRef::fork() const {
   return RRefForkData(
       ownerId_, rrefId_, RRefContext::getInstance()->genRRefId()
   ).toIValue();
+  // NB: does not support sharing RRefs between users
   // TODO: notify the owner
 }
 

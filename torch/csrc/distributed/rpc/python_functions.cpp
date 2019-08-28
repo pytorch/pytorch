@@ -57,7 +57,6 @@ std::shared_ptr<FutureMessage> py_rpc_builtin(
       ") to a builtin operator");
 }
 
-
 std::shared_ptr<FutureMessage> py_rpc_python_udf(
     RpcAgent& agent,
     const WorkerId& dst,
