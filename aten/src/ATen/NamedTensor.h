@@ -3,7 +3,7 @@
 
 #include <ATen/Dimname.h>
 #include <c10/core/TensorImpl.h>
-#include <torch/csrc/utils/memory.h>
+#include <c10/util/C++17.h>
 
 namespace at {
 
@@ -27,7 +27,7 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
     : names_(std::move(names)) {}
 
   std::unique_ptr<c10::NamedTensorMetaInterface> clone() const override {
-    return torch::make_unique<NamedTensorMeta>(names_);
+    return c10::guts::make_unique<NamedTensorMeta>(names_);
   }
 
   bool has_names() const;
