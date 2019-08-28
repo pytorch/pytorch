@@ -216,12 +216,6 @@ class CAFFE2_API Tensor {
     return impl_->itemsize();
   }
 
-  DeprecatedTypeProperties & type() const {
-    return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        tensorTypeIdToBackend(type_id()),
-        scalar_type(),
-        is_variable());
-  }
   TensorTypeId type_id() const {
     return impl_->type_id();
   }
