@@ -27,12 +27,13 @@ void inlineCalls(Block* block, bool recurse) {
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
-        auto function =
-            cur->input(0)->type()->expect<ClassType>()->getMethod(name);
-        if (recurse) {
-          Inline(*function->graph(), recurse);
+        if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
+          auto function = class_type->getMethod(name);
+          if (recurse) {
+            Inline(*function->graph(), recurse);
+          }
+          inlineCallTo(cur, *function->graph());
         }
-        inlineCallTo(cur, *function->graph());
       } break;
       default: {
         for (auto b : cur->blocks()) {

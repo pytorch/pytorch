@@ -354,7 +354,7 @@ Containers are assumed to have type ``Tensor`` and be non-optional (see
 tell the TorchScript compiler what the type should be. Python 3 style type hints are
 now supported.
 
-.. testcode::
+::
 
     import torch
     from typing import Dict, Optional
@@ -365,7 +365,7 @@ now supported.
         x['hi'] = 2
         b: Optional[int] = None
         if flag:
-            b = 2;
+            b = 2
         return x, b
 
 
@@ -493,7 +493,7 @@ use `Python 3 type hints`_. If you are on Python 2, you can use ``torch.jit.anno
 
 Example (type annotations for Python 3):
 
-.. testcode::
+::
 
     import torch
     import torch.nn as nn
@@ -906,6 +906,11 @@ Pattern Matching Assignments
 
     a, b = tuple_or_list
     a, b, *c = a_tuple
+
+Multiple Assignments
+    ::
+
+        a = b, c = tup
 
 Print Statements
 ^^^^^^^^^^^^^^^^
@@ -1650,5 +1655,3 @@ Q: I would like to trace module's method but I keep getting this error:
       - On the other hand, invoking ``trace`` with module's instance (e.g. ``my_module``) creates a new module and correctly copies parameters into the new module, so they can accumulate gradients if required.
 
     To trace a specific method on a module, see :func:`torch.jit.trace_module <torch.jit.trace_module>`
-
-
