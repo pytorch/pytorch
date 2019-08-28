@@ -294,7 +294,7 @@ class CAFFE2_API Tensor {
 
   template<typename T>
   T * data() const {
-    TORCH_WARN("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.");
+    TORCH_WARN_ONCE("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.");
     return data_ptr<T>();
   }
 
