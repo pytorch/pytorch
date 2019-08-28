@@ -141,6 +141,38 @@ static void erfinv_kernel(TensorIterator& iter) {
   });
 }
 
+static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_scalar) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "clamp_cpu", [&]() {
+    auto min = min_scalar.to<scalar_t>();
+    auto max = max_scalar.to<scalar_t>();
+    auto min_vec = Vec256<scalar_t>(min);
+    auto max_vec = Vec256<scalar_t>(max);
+    cpu_kernel_vec(iter,
+     [=](scalar_t a) -> scalar_t { return a < min ? min : (a > max ? max : a); },
+     [=](Vec256<scalar_t> a) { return vec256::minimum(max_vec, vec256::maximum(min_vec, a)); });
+  });
+}
+
+static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "clamp_max_cpu", [&]() {
+    auto max = max_scalar.to<scalar_t>();
+    auto max_vec = Vec256<scalar_t>(max);
+    cpu_kernel_vec(iter,
+     [=](scalar_t a) -> scalar_t { return a > max ? max : a; },
+     [=](Vec256<scalar_t> a) { return vec256::minimum(max_vec, a); });
+  });
+}
+
+static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "clamp_min_cpu", [&]() {
+    auto min = min_scalar.to<scalar_t>();
+    auto min_vec = Vec256<scalar_t>(min);
+    cpu_kernel_vec(iter,
+     [=](scalar_t a) -> scalar_t { return a < min ? min : a; },
+     [=](Vec256<scalar_t> a) { return vec256::maximum(min_vec, a); });
+  });
+}
+
 #if !AT_MKL_ENABLED()
 void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
   // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
@@ -258,6 +290,9 @@ REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel);
+REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
+REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
+REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)
