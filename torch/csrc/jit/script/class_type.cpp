@@ -93,21 +93,34 @@ ClassType::ClassType(
   }
 }
 
-bool ClassType::isSubtypeOf(const TypePtr rhs) const {
+bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   // to improve performance, this check can be cached
   if (auto iface = rhs->cast<InterfaceType>()) {
     for (const FunctionSchema& schema : *iface->methods_) {
       auto self_method = getMethod(schema.name());
       if (!self_method) {
+        if (why_not) {
+          *why_not << "Class '" << python_str() << "' does not have method '"
+                   << schema.name() << "' but '" << rhs->python_str()
+                   << "' does.\n";
+        }
         return false;
       }
-      if (!self_method->getSchema().isSubtypeOf(schema, /*is_method=*/true)) {
-        return false;
+      if (!self_method->getSchema().isSubtypeOf(
+              schema, /*is_method=*/true, why_not)) {
+        if (why_not) {
+          *why_not << "Method on class '" << python_str()
+                   << "' (1) is not compatible with interface '"
+                   << rhs->python_str() << "' (2)\n"
+                   << "  (1) " << self_method->getSchema() << "\n"
+                   << "  (2) " << schema << "\n";
+          return false;
+        }
       }
     }
     return true;
   }
-  return Type::isSubtypeOf(rhs);
+  return Type::isSubtypeOfExt(rhs, why_not);
 }
 
 } // namespace c10
