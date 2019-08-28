@@ -155,6 +155,8 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   git clone --recursive https://github.com/pytorch/xla.git
   ./xla/scripts/apply_patches.sh
+  # Disable MKLDNN build for XLA test
+  export USE_MKLDNN=0
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
