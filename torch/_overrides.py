@@ -20,7 +20,6 @@ from numpy.compat._inspect import getargspec
 
 from .tensor import Tensor
 
-TORCH_FUNCTION_ENABLED = True
 
 _TORCH_FUNCTION = Tensor.__torch_function__
 _TENSOR_ONLY = [Tensor]

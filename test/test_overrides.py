@@ -5,7 +5,7 @@ import math
 import unittest
 from torch._overrides import (
     get_overloaded_types_and_args, torch_function_dispatch,
-    verify_matching_signatures, TORCH_FUNCTION_ENABLED)
+    verify_matching_signatures)
 import pickle
 import inspect
 import sys
@@ -72,10 +72,6 @@ class TestOverride(unittest.TestCase):
         self.assertEqual(t1, t3)
         self.assertEqual(torch.gemm(t1, t2), t2)
 
-
-requires_torch_function = unittest.skipUnless(
-    TORCH_FUNCTION_ENABLED,
-    reason="__torch_function__ dispatch not enabled.")
 
 def _return_not_implemented(self, *args, **kwargs):
     return NotImplemented
@@ -211,7 +207,6 @@ class TestGetImplementingArgs(unittest.TestCase):
 class TestTensorTorchFunction(unittest.TestCase):
 
     @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
-    @requires_torch_function
     def test_method(self):
 
         class Other(object):
@@ -271,7 +266,6 @@ class TestTensorTorchFunction(unittest.TestCase):
                                      args=(tensor,), kwargs={})
 
 
-@requires_torch_function
 class TestTorchFunctionDispatch(unittest.TestCase):
 
     def test_pickle(self):
@@ -311,7 +305,6 @@ class TestTorchFunctionDispatch(unittest.TestCase):
             dispatched_one_arg(tensor)
 
 
-@requires_torch_function
 class TestVerifyMatchingSignatures(unittest.TestCase):
 
     def test_verify_matching_signatures(self):
@@ -364,7 +357,6 @@ def _new_duck_type_and_implements():
     return (MyTensor, implements)
 
 
-@requires_torch_function
 class TestTensorFunctionImplementation(unittest.TestCase):
 
     def test_one_arg(self):
@@ -449,7 +441,6 @@ class TestTorchFunctions(unittest.TestCase):
         assert 'axis' in signature.parameters
 
     @unittest.expectedFailure # Discuss
-    @requires_torch_function
     def test_override_sum(self):
         MyTensor, implements = _new_duck_type_and_implements()
 
@@ -460,7 +451,6 @@ class TestTorchFunctions(unittest.TestCase):
         self.assertEqual(torch.sum(MyTensor()), 'yes')
 
     @unittest.expectedFailure # Discuss
-    @requires_torch_function
     def test_sum_on_mock_tensor(self):
 
         # We need a proxy for mocks because __torch_function__ is only looked
@@ -482,7 +472,6 @@ class TestTorchFunctions(unittest.TestCase):
         proxy.value.__tensor__.assert_not_called()
 
     @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
-    @requires_torch_function
     def test_sum_forwarding_implementation(self):
 
         class MyTensor(torch.Tensor):
