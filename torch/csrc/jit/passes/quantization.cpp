@@ -485,8 +485,8 @@ static bool tryExtractingConvBNParameters(
     script::Module& conv,
     script::Module& bn,
     ConvBNParameters& r) {
-  if (!conv.find_parameter("weight") || !conv.find_parameter("bias") ||
-      !bn.find_parameter("weight") || !bn.find_parameter("bias")) {
+  if (!conv.find_parameter("weight") || !bn.find_parameter("weight") ||
+      !bn.find_parameter("bias")) {
     return false;
   }
   if (!bn.find_attribute("running_mean") || !bn.find_attribute("running_var") ||
@@ -495,9 +495,6 @@ static bool tryExtractingConvBNParameters(
     return false;
   }
 
-  r.conv_w = conv.get_parameter("weight");
-  r.conv_b = conv.get_parameter("bias");
-
   r.bn_rm = bn.get_attribute("running_mean").toTensor();
   r.bn_rv = bn.get_attribute("running_var").toTensor();
   r.bn_eps = 1e-5; // TODO: allow access to the actual value. NOLINT
@@ -505,6 +502,14 @@ static bool tryExtractingConvBNParameters(
                    // in __constants__ and lose all tracks of them.
   r.bn_w = bn.get_parameter("weight");
   r.bn_b = bn.get_parameter("bias");
+
+  r.conv_w = conv.get_parameter("weight");
+  if (conv.find_parameter("bias")) {
+    r.conv_b = conv.get_parameter("bias");
+  } else {
+    r.conv_b = at::zeros_like(r.bn_rm);
+  }
+
   return true;
 }
 
@@ -521,10 +526,11 @@ graph(%self, %x):
   std::unordered_map<std::string, Value*> vmap;
   script::parseIR(pattern, &pattern_graph, vmap);
   Value* pattern_conv_out = vmap["conv_out"];
+  Value* pattern_bn_out = vmap["bn_out"];
   Value* pattern_conv_submodule = vmap["conv_submodule"];
   Value* pattern_bn_submodule = vmap["bn_submodule"];
   Node* pattern_conv = pattern_conv_out->node();
-  Node* pattern_bn = pattern_conv_out->uses().begin()->user;
+  Node* pattern_bn = pattern_bn_out->node();
 
   // We will put submodules into this worklist and keep processing items from it
   // one by one. We start by just putting the top module there.
@@ -574,6 +580,11 @@ graph(%self, %x):
         continue;
       }
 
+      // We are using a separate vector for saving Values we want to rewrite to
+      // make sure that the order in which we perform these transformations is
+      // deterministic. Iterating through keys of rewrite_map would result in
+      // non-determinism that might not manifest as a bug now, but can bite us
+      // later.
       values_to_rewrite.push_back(matched_bn->output());
       rewrite_map[matched_bn->output()] = matched_conv->output();
       GRAPH_UPDATE(

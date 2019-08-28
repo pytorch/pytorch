@@ -1016,14 +1016,14 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         FileCheck().run(input_str, graph)
 
     @_tmp_donotuse_dont_inline_everything
-    def test_foldbn(self):
+    def test_foldbn_trivial(self):
         def get_forward(m):
             return m._c._get_method("forward")
 
         # Test trivial case
-        class TestModule1(torch.nn.Module):
+        class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule1, self).__init__()
+                super(TestModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
                 self.bn = torch.nn.BatchNorm2d(num_features=20)
 
@@ -1032,15 +1032,73 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
                 x = self.bn(x)
                 return x
 
-        m = TestModule1()
-        s1 = torch.jit.script(m)
+        eager = TestModule()
+        scripted = torch.jit.script(eager)
+        eager.eval()
+        scripted.eval()
+
+        # Check that in the original script module's forward we have two
+        # CallMethod nodes. One of them should be for conv.forward and the other
+        # for bn.forward.
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-            .run(str(get_forward(s1).graph))
+            .run(str(get_forward(scripted).graph))
 
-        torch._C._jit_pass_fold_convbn(s1._c)
+        # Run FoldConvBatchnorm2d pass.
+        torch._C._jit_pass_fold_convbn(scripted._c)
 
+        # Check that after the pass one of the CallMethods is gone (supposedly,
+        # the bn.forward).
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
-            .run(str(get_forward(s1).graph))
+            .run(str(get_forward(scripted).graph))
+
+        # Check that the transformation doesn't change numerics
+        x = torch.rand(1, 1, 6, 6)
+        self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_foldbn_trivial_nobias(self):
+        def get_forward(m):
+            return m._c._get_method("forward")
+
+        # Test trivial case
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1, bias=False)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        eager = TestModule()
+        scripted = torch.jit.script(eager)
+        eager.eval()
+        scripted.eval()
+
+        # Check that in the original script module's forward we have two
+        # CallMethod nodes. One of them should be for conv.forward and the other
+        # for bn.forward.
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+            .run(str(get_forward(scripted).graph))
+
+        # Run FoldConvBatchnorm2d pass.
+        torch._C._jit_pass_fold_convbn(scripted._c)
+
+        # Check that after the pass one of the CallMethods is gone (supposedly,
+        # the bn.forward).
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
+            .run(str(get_forward(scripted).graph))
+
+        # Check that the transformation doesn't change numerics
+        x = torch.rand(1, 1, 6, 6)
+        self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_foldbn_in_submodule(self):
+        def get_forward(m):
+            return m._c._get_method("forward")
 
         # Test that we find Conv-BN patterns in submodules
         class SubModule(torch.nn.Module):
@@ -1054,23 +1112,23 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
                 x = self.bn(x)
                 return x
 
-        class TestModule2(torch.nn.Module):
+        class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule2, self).__init__()
+                super(TestModule, self).__init__()
                 self.sub = SubModule()
 
             def forward(self, x):
                 x = self.sub(x)
                 return x
 
-        s2 = torch.jit.script(TestModule2())
+        m = torch.jit.script(TestModule())
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-            .run(str(get_forward(s2.sub).graph))
+            .run(str(get_forward(m.sub).graph))
 
-        torch._C._jit_pass_fold_convbn(s2._c)
+        torch._C._jit_pass_fold_convbn(m._c)
 
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
-            .run(str(get_forward(s2.sub).graph))
+            .run(str(get_forward(m.sub).graph))
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -12942,12 +13000,13 @@ a")
                     a = 0
                     def backward(grad_output):
                         raise "Hi"
+                    a = a + 1
                 else:
                     return x
                 return a + 1
         ''')
         func = torch.jit.CompilationUnit(code).test_exit_pair_reset
-        self.assertEqual(func(1,), 1)
+        self.assertEqual(func(1,), 2)
         self.assertEqual(func(-1,), -1)
         FileCheck().check_count("prim::If", 2, exactly=True).check("aten::add")\
             .run(func.graph)  # if added to guard a + 1
@@ -18475,6 +18534,129 @@ class TestClassType(JitTestCase):
         input = torch.rand(2, 3)
         output = m_loaded(input)
         self.assertEqual(3 * input, output)
+
+    def test_interface(self):
+        @torch.jit.script
+        class Foo(object):
+            def __init__(self):
+                pass
+
+            def one(self, x, y):
+                return x + y
+
+            def two(self, x):
+                return 2 * x
+
+        @torch.jit.script
+        class Bar(object):
+            def __init__(self):
+                pass
+
+            def one(self, x, y):
+                return x * y
+
+            def two(self, x):
+                return 2 / x
+
+        @torch.jit.interface
+        class OneTwo(object):
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+            def two(self, x):
+                # type: (Tensor) -> Tensor
+                pass
+
+        @torch.jit.interface
+        class OneTwoThree(object):
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+            def two(self, x):
+                # type: (Tensor) -> Tensor
+                pass
+
+            def three(self, x):
+                # type: (Tensor) -> Tensor
+                pass
+
+        @torch.jit.interface
+        class OneTwoWrong(object):
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+            def two(self, x):
+                # type: (int) -> int
+                pass            
+
+        @torch.jit.script
+        class NotMember(object):
+            def __init__(self):
+                pass
+
+            def one(self, x, y):
+                return x + y
+            # missing two
+
+        @torch.jit.script
+        class NotMember2(object):
+            def __init__(self):
+                pass
+
+            def one(self, x, y):
+                return x + y
+
+            def two(self, x):
+                # type: (int) -> int
+                return 3
+
+        def use_them(x):
+            a = Foo()
+            b = Bar()
+            c = torch.jit.annotate(List[OneTwo], [a, b])
+            for i in range(len(c)):
+                x = c[i].one(x, x)
+                x = c[i].two(x)
+            return x
+        self.checkScript(use_them, (torch.rand(3, 4),))
+
+        @torch.jit.script
+        def as_interface(x):
+            # type: (OneTwo) -> OneTwo
+            return x
+
+        @torch.jit.script
+        def inherit(x):
+            # type: (OneTwoThree) -> OneTwo
+            return as_interface(x)
+
+        with self.assertRaisesRegex(RuntimeError, "does not have method"):
+            @torch.jit.script
+            def wrong1():
+                return as_interface(NotMember())
+
+        with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
+            @torch.jit.script
+            def wrong2():
+                return as_interface(NotMember2())
+
+        with self.assertRaisesRegex(RuntimeError, "does not have method"):
+            @torch.jit.script
+            def wrong3():
+                return inherit(as_interface(Foo()))
+
+        with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
+
+            @torch.jit.script
+            def wrong4(x):
+                # type: (OneTwoWrong) -> int
+                return as_interface(x)
+
+    # TODO test: interface-interface class-interface inheritance errors,
+    # NamedTuple inheritance errors
 
     def test_overloaded_fn(self):
         @torch.jit.script

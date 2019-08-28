@@ -117,6 +117,29 @@ static void neg_kernel(TensorIterator& iter) {
   });
 }
 
+static void sign_kernel(TensorIterator& iter){
+  if(iter.dtype() == ScalarType::Bool){
+      cpu_kernel(iter, [=](bool x) -> bool { return x; });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
+        auto zero_vec = Vec256<scalar_t>((scalar_t)(0));
+        auto one_vec = Vec256<scalar_t>((scalar_t)(1));
+
+        cpu_kernel_vec(
+            iter,
+            [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
+            [=](Vec256<scalar_t> self_vec){
+
+                // Comparision operators returns bitmask.
+                auto left = Vec256<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
+                auto right = Vec256<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
+
+                return left - right;
+            });
+    });
+  }
+}
+
 static void sinh_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel(
@@ -246,8 +269,8 @@ static void rsqrt_kernel(TensorIterator& iter) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
-REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel)
+REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
+REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
@@ -255,6 +278,7 @@ REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
+REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel);
