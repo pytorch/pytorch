@@ -30,6 +30,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 
    torch
    nn
+   nn.functional
    tensors
    tensor_attributes
    torch.autograd <autograd>
@@ -38,7 +39,6 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    torch.distributions <distributions>
    torch.hub <hub>
    torch.jit <jit>
-   nn.functional
    nn.init
    onnx
    optim
