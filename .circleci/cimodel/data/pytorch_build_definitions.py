@@ -21,6 +21,7 @@ DOCKER_IMAGE_VERSION = 336
 class Conf:
     distro: str
     parms: List[str]
+    parms_list_ignored_for_docker_image: Optional[List[str]] = None
     pyver: Optional[str] = None
     cuda_version: Optional[str] = None
     # TODO expand this to cover all the USE_* that we want to test for
@@ -51,7 +52,10 @@ class Conf:
         cuda_parms = []
         if self.cuda_version:
             cuda_parms.extend(["cuda" + self.cuda_version, "cudnn7"])
-        return leading + ["linux", self.distro] + cuda_parms + self.parms
+        result = leading + ["linux", self.distro] + cuda_parms + self.parms
+        if (not for_docker and self.parms_list_ignored_for_docker_image is not None):
+            result = result + self.parms_list_ignored_for_docker_image
+        return result
 
     def gen_docker_image_path(self):
 
@@ -194,6 +198,7 @@ def instantiate_configs():
         distro_name = fc.find_prop("distro_name")
         compiler_name = fc.find_prop("compiler_name")
         is_xla = fc.find_prop("is_xla") or False
+        parms_list_ignored_for_docker_image = []
 
         python_version = None
         if compiler_name == "cuda" or compiler_name == "android":
@@ -211,6 +216,8 @@ def instantiate_configs():
             # TODO: do we need clang to compile host binaries like protoc?
             parms_list.append("clang5")
             parms_list.append("android-ndk-" + android_ndk_version)
+            android_abi = fc.find_prop("android_abi")
+            parms_list_ignored_for_docker_image.append(android_abi)
             restrict_phases = ["build"]
 
         elif compiler_name:
@@ -237,6 +244,7 @@ def instantiate_configs():
         c = Conf(
             distro_name,
             parms_list,
+            parms_list_ignored_for_docker_image,
             python_version,
             cuda_version,
             is_xla,
