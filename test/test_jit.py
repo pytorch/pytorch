@@ -18453,6 +18453,51 @@ class TestClassType(JitTestCase):
                 # type: (Tensor) -> Tensor
                 pass
 
+        @torch.jit.interface
+        class OneTwoThree(object):
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+            def two(self, x):
+                # type: (Tensor) -> Tensor
+                pass
+
+            def three(self, x):
+                # type: (Tensor) -> Tensor
+                pass
+
+        @torch.jit.interface
+        class OneTwoWrong(object):
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+            def two(self, x):
+                # type: (int) -> int
+                pass            
+
+        @torch.jit.script
+        class NotMember(object):
+            def __init__(self):
+                pass
+
+            def one(self, x, y):
+                return x + y
+            # missing two
+
+        @torch.jit.script
+        class NotMember2(object):
+            def __init__(self):
+                pass
+
+            def one(self, x, y):
+                return x + y
+
+            def two(self, x):
+                # type: (int) -> int
+                return 3
+
         def use_them(x):
             a = Foo()
             b = Bar()
@@ -18463,6 +18508,40 @@ class TestClassType(JitTestCase):
             return x
         self.checkScript(use_them, (torch.rand(3, 4),))
 
+        @torch.jit.script
+        def as_interface(x):
+            # type: (OneTwo) -> OneTwo
+            return x
+
+        @torch.jit.script
+        def inherit(x):
+            # type: (OneTwoThree) -> OneTwo
+            return as_interface(x)
+
+        with self.assertRaisesRegex(RuntimeError, "does not have method"):
+            @torch.jit.script
+            def wrong1():
+                return as_interface(NotMember())
+
+        with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
+            @torch.jit.script
+            def wrong2():
+                return as_interface(NotMember2())
+
+        with self.assertRaisesRegex(RuntimeError, "does not have method"):
+            @torch.jit.script
+            def wrong3():
+                return inherit(as_interface(Foo()))
+
+        with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
+
+            @torch.jit.script
+            def wrong4(x):
+                # type: (OneTwoWrong) -> int
+                return as_interface(x)
+
+    # TODO test: interface-interface class-interface inheritance errors,
+    # NamedTuple inheritance errors
 
     def test_overloaded_fn(self):
         @torch.jit.script
