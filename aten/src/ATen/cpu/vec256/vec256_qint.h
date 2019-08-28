@@ -7,6 +7,9 @@
 #include <c10/util/quint8.h>
 #include <c10/util/qint32.h>
 
+
+#include <array>
+
 // This file defines Vec256<> for the quantized types.
 //
 //
@@ -26,63 +29,89 @@ namespace {
 template<>
 struct Vec256<c10::qint8> {
     static constexpr int size() {
-        return 8;
+        return 32;
     }
 
+    static constexpr int float_num_vecs() {
+        return 4;
+    }
+
+    using float_vec_return_type = std::array<Vec256<float>, 4>;
     using value_type = int8_t;
 
-    // Top 64 bits (starting at &as_vec + 8) are don't-care
-    union {
-        __m128i as_vec;
-        value_type as_ints[16];
-    } vals __attribute__((aligned(64)));
+    __m256i vals __attribute__((aligned(64)));
 
     // Broadcast constructor
     Vec256(const c10::qint8& val) {
         value_type uw = val.val_;
-        for (int i = 0; i < 16; ++i) {
-            vals.as_ints[i] = uw;
+        for (int i = 0; i < size(); ++i) {
+            ((value_type*)&vals)[i] = uw;
         }
     }
 
     // This is needed because the compiler emits awful code for the default
     // constructor for moving the enum
     Vec256(const Vec256<c10::qint8>& other) {
-        vals.as_vec = other.vals.as_vec;
+        vals = other.vals;
     }
 
     void store(void* ptr, int count = size()) const {
-        memcpy(ptr, &vals.as_ints, count * sizeof(value_type));
+        if (count != size()) {
+            memcpy(ptr, &vals, count * sizeof(value_type));
+        } else {
+            _mm256_storeu_si256((__m256i*)ptr, vals);
+        }
     }
 
     static Vec256<c10::qint8> loadu(const void* ptr) {
         return Vec256<c10::qint8>(ptr);
     }
 
-    Vec256<float> dequantize(Vec256<float> scale, Vec256<float> zero_point) const {
+ private:
+    __m256i cvtepi8_epi32(__m128i val) const {
 #ifdef __AVX2__
-        __m256i int32_vals = _mm256_cvtepi8_epi32(vals.as_vec);
-#else // __AVX2__
+        return _mm256_cvtepi8_epi32(val);
+#else  // __AVX2__
         __m256i int32_vals;
         for (int i = 0; i < 8; ++i) {
-            ((int32_t*)&int32_vals)[i] = vals.as_vec[i];
+            ((int32_t*)&int32_vals)[i] = vals[i];
         }
+        return int32_vals;
 #endif
-        __at_align32__ __m256 float_vals = _mm256_cvtepi32_ps(int32_vals);
-        return scale * (Vec256<float>(float_vals) - zero_point);
     }
 
-    static Vec256<c10::qint8> quantize(const Vec256<float>& rhs, float scale, int32_t zero_point) {
+    // This needs to be a separate template function because _mm256_extract_epi64
+    // requires an immediate operand for the index
+    template <int idx>
+    Vec256<float> extract_and_dequantize(Vec256<float> scale, Vec256<float> zero_point) const {
+        __m128i int_val;
+        int_val[0] = _mm256_extract_epi64(vals, idx);
+        __m256 float_val =  _mm256_cvtepi32_ps(cvtepi8_epi32(int_val));
+        // TODO this could probably be an FMA
+        return scale * (Vec256<float>(float_val) - zero_point);
+    }
+
+ public:
+    float_vec_return_type dequantize(Vec256<float> scale, Vec256<float> zero_point) const {
+        return {
+            extract_and_dequantize<0>(scale, zero_point),
+            extract_and_dequantize<1>(scale, zero_point),
+            extract_and_dequantize<2>(scale, zero_point),
+            extract_and_dequantize<3>(scale, zero_point)
+        };
+    }
+
+
+    static Vec256<c10::qint8> quantize(const float_vec_return_type& rhs, float scale, int32_t zero_point) {
         Vec256<c10::qint8> retval;
-        // This should hopefully stay in-register with the copy optimized away
-        auto rhs_data = (__m256)rhs;
-        at::quantize_vec<c10::qint8>(scale, zero_point, (float*)&rhs_data, (c10::qint8*)retval.vals.as_ints, 8);
+        auto *rhs_data = (float*)rhs.data();
+        at::quantize_vec<c10::qint8>(scale, zero_point,rhs_data, (c10::qint8*)&retval.vals, 32);
         return retval;
     }
 
     void dump() const {
-        for (size_t i = 0; i < 8; ++i) {
-            std::cout << (int)vals.as_ints[i] << " ";
+        for (size_t i = 0; i < size(); ++i) {
+            std::cout << (int)((value_type*)&vals)[i] << " ";
         }
         std::cout << std::endl;
     }
@@ -91,70 +120,93 @@ struct Vec256<c10::qint8> {
 
     // Load from memory constructor
     Vec256(const void* ptr) {
-        memcpy(&vals.as_ints, ptr, size() * sizeof(value_type));
+        vals = _mm256_loadu_si256((const __m256i*)ptr);
     }
 };
 
 template<>
 struct Vec256<c10::quint8> {
     static constexpr int size() {
-        return 8;
+        return 32;
     }
 
+    static constexpr int float_num_vecs() {
+        return 4;
+    }
+
+    using float_vec_return_type = std::array<Vec256<float>, 4>;
     using value_type = uint8_t;
 
-    // Top 64 bits (starting at &as_vec + 8) are don't-care
-    union {
-        __m128i as_vec;
-        value_type as_ints[16];
-    } vals __attribute__((aligned(64)));
+    __m256i vals;
 
     // Broadcast constructor
     Vec256(const c10::quint8& val) {
         value_type uw = val.val_;
-        for (int i = 0; i < 16; ++i) {
-            vals.as_ints[i] = uw;
+        for (int i = 0; i < size(); ++i) {
+            ((value_type*)&vals)[i] = uw;
         }
     }
 
-    // This is needed because the compiler emits awful code for the default
-    // constructor for moving the enum
     Vec256(const Vec256<c10::quint8>& other) {
-        vals.as_vec = other.vals.as_vec;
+        vals = other.vals;
     }
 
     void store(void* ptr, int count = size()) const {
-        memcpy(ptr, &vals.as_ints, count * sizeof(value_type));
+        if (count != size()) {
+            memcpy(ptr, &vals, count * sizeof(value_type));
+        } else {
+            _mm256_storeu_si256((__m256i*)ptr, vals);
+        }
     }
 
     static Vec256<c10::quint8> loadu(const void* ptr) {
         return Vec256<c10::quint8>(ptr);
     }
 
-    Vec256<float> dequantize(Vec256<float> scale, Vec256<float> zero_point) const {
+ private:
+    __m256i cvtepu8_epi32(__m128i val) const {
 #ifdef __AVX2__
-        __m256i int32_vals = _mm256_cvtepu8_epi32(vals.as_vec);
-#else // __AVX2__
+        return _mm256_cvtepu8_epi32(val);
+#else  // __AVX2__
         __m256i int32_vals;
         for (int i = 0; i < 8; ++i) {
-            ((uint32_t*)&int32_vals)[i] = vals.as_vec[i];
+            ((uint32_t*)&int32_vals)[i] = vals[i];
         }
+        return int32_vals;
 #endif
-        __m256 float_vals = _mm256_cvtepi32_ps(int32_vals);
-        return scale * (Vec256<float>(float_vals) - zero_point);
     }
 
-    static Vec256<c10::quint8> quantize(const Vec256<float>& rhs, float scale, int32_t zero_point) {
+    // This needs to be a separate template function because _mm256_extract_epi64
+    // requires an immediate operand for the index
+    template <int idx>
+    Vec256<float> extract_and_dequantize(Vec256<float> scale, Vec256<float> zero_point) const {
+        __m128i int_val;
+        int_val[0] = _mm256_extract_epi64(vals, idx);
+        __m256 float_val =  _mm256_cvtepu32_ps(cvtepu8_epi32(int_val));
+        // TODO this could probably be an FMA
+        return scale * (Vec256<float>(float_val) - zero_point);
+    }
+
+ public:
+    float_vec_return_type dequantize(Vec256<float> scale, Vec256<float> zero_point) const {
+        return {
+            extract_and_dequantize<0>(scale, zero_point),
+            extract_and_dequantize<1>(scale, zero_point),
+            extract_and_dequantize<2>(scale, zero_point),
+            extract_and_dequantize<3>(scale, zero_point)
+        };
+    }
+
+    static Vec256<c10::quint8> quantize(const float_vec_return_type& rhs, float scale, int32_t zero_point) {
         Vec256<c10::quint8> retval;
-        // This should hopefully stay in-register with the copy optimized away
-        auto rhs_data = (__m256)rhs;
-        at::quantize_vec<c10::quint8>(scale, zero_point, (float*)&rhs_data, (c10::quint8*)retval.vals.as_ints, 8);
+        auto *rhs_data = (float*)rhs.data();
+        at::quantize_vec<c10::quint8>(scale, zero_point,rhs_data, (c10::quint8*)&retval.vals, 32);
         return retval;
     }
 
     void dump() const {
-        for (size_t i = 0; i < 8; ++i) {
-            std::cout << (int)vals.as_ints[i] << " ";
+        for (size_t i = 0; i < size(); ++i) {
+            std::cout << (int)((value_type*)&vals)[i] << " ";
         }
         std::cout << std::endl;
     }
@@ -163,7 +215,7 @@ struct Vec256<c10::quint8> {
 
     // Load from memory constructor
     Vec256(const void* ptr) {
-        memcpy(&vals.as_ints, ptr, size() * sizeof(value_type));
+        vals = _mm256_loadu_si256((const __m256i*)ptr);
     }
 };
 
@@ -173,6 +225,11 @@ struct Vec256<c10::qint32> {
         return 8;
     }
 
+    static constexpr int float_num_vecs() {
+        return 1;
+    }
+
+    using float_vec_return_type = std::array<Vec256<float>, 1>;
     using value_type = int32_t;
 
     union {
@@ -196,14 +253,14 @@ struct Vec256<c10::qint32> {
         return Vec256<c10::qint32>(ptr);
     }
 
-    Vec256<float> dequantize(Vec256<float> scale, Vec256<float> zero_point) const {
+    float_vec_return_type dequantize(Vec256<float> scale, Vec256<float> zero_point) const {
         __m256 float_vals = _mm256_cvtepi32_ps(vals.as_vec);
-        return scale * (Vec256<float>(float_vals) - zero_point);
+        return {scale * (Vec256<float>(float_vals) - zero_point)};
     }
 
-    static Vec256<c10::qint32> quantize(const Vec256<float>& rhs, float scale, int32_t zero_point) {
+    static Vec256<c10::qint32> quantize(const float_vec_return_type& rhs, float scale, int32_t zero_point) {
         Vec256<c10::qint32> retval;
-        auto rhs_data = (__m256)rhs;
+        auto rhs_data = (__m256)rhs[0];
         at::quantize_vec<c10::qint32, /*precision=*/32>(scale, zero_point, (float*)&rhs_data, (c10::qint32*)retval.vals.as_ints, 8);
         return retval;
     }

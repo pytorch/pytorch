@@ -65,6 +65,8 @@ class _ConvNd(Module):
             s += ', groups={groups}'
         if self.bias is None:
             s += ', bias=False'
+        if self.padding_mode != 'zeros':
+            s += ', padding_mode={padding_mode}'
         return s.format(**self.__dict__)
 
     def __setstate__(self, state):
