@@ -18,6 +18,7 @@ enum MessageType {
   RREF_ADD_FORK,
   RREF_DEL_FORK,
   SHUTDOWN,
+  EXCEPTION,
   UNKNOWN
 };
 

@@ -1,6 +1,5 @@
 #pragma once
 
-
 #include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
@@ -12,7 +11,6 @@
 #include <torch/csrc/distributed/rpc/script_ret.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
-
 
 namespace torch {
 namespace distributed {
@@ -27,7 +25,7 @@ std::shared_ptr<FutureMessage> py_rpc_builtin(
     const py::args& args,
     const py::kwargs& kwargs);
 
-std::shared_ptr<FutureMessage>  py_rpc_python_udf(
+std::shared_ptr<FutureMessage> py_rpc_python_udf(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& pickledPythonUDF);
@@ -38,6 +36,7 @@ std::shared_ptr<RRef> py_remote_builtin(
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs);
-}
-}
-}
+
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

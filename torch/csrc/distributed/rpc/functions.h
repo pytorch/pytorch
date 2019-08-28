@@ -3,14 +3,14 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-
 namespace torch {
 namespace distributed {
 namespace rpc {
 
-void processRequestBlocking(
-    const WorkerId& from, Message&& message, RpcAgent& agent);
+Message processRequestBlocking(Message&& message);
 
-} // rpc
-} // distributed
-} // torch
+Message createException(const Message& request, const std::exception& e);
+
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

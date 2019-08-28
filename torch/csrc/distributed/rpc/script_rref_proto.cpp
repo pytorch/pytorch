@@ -27,7 +27,8 @@ at::IValue ScriptRRefBase::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
-  auto value = jit::unpickle(payload, payload_size, &message.tensors());
+  auto value = jit::unpickle(
+      payload, payload_size, nullptr, &message.tensors());
   auto values = value.toTuple()->elements();
 
   AT_ASSERT(values.size() == 1, "Expect a single IValue from message.");

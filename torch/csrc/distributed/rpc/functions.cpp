@@ -13,32 +13,50 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-void processRequestBlocking(
-    const WorkerId& from, Message&& request, RpcAgent& agent) {
+Message createException(const Message& request, const std::exception& e) {
+  const char* err = e.what();
+  std::vector<char> payload(err, err + strlen(err));
+  return Message(
+      std::move(payload),
+      std::vector<torch::Tensor>(),
+      MessageType::EXCEPTION,
+      request.id());
+}
+
+Message processRequestBlocking(Message&& request) {
   switch (request.type()) {
     case MessageType::SCRIPT_CALL: {
-      ScriptCall op = ScriptCall::fromMessage(request);
+      try {
+        ScriptCall op = ScriptCall::fromMessage(request);
 
-      auto stack = op.stack();
-      op.op()->getOperation()(stack);
-      AT_ASSERT(stack.size() == 1, "Return value of a builtin operator or a "
-          "TorchScript function should be a single IValue, got a vector of "
-          "size ", stack.size());
+        auto stack = op.stack();
+        op.op()->getOperation()(stack);
+        AT_ASSERT(
+            stack.size() == 1,
+            "Return value of a builtin operator or a "
+            "TorchScript function should be a single IValue, got a vector of "
+            "size ",
+            stack.size());
 
-      auto response = ScriptRet(std::move(stack.front())).toMessage();
-      response.setId(request.id());
-      agent.send(from, std::move(response));
+        auto response = ScriptRet(std::move(stack.front())).toMessage();
+        response.setId(request.id());
+        return response;
+      } catch (std::exception& e) {
+        return createException(request, e);
+      }
       break;
     }
     case MessageType::PYTHON_CALL: {
-      std::vector<torch::Tensor> tensorTable;
-      agent.send(
-          from,
-          Message(
-              PythonRpcHandler::generatePythonUDFResult(request),
-              std::move(tensorTable),
-              MessageType::PYTHON_RET,
-              request.id()));
+      try {
+        auto payload = PythonRpcHandler::generatePythonUDFResult(request);
+        return Message(
+            std::move(payload),
+            std::vector<torch::Tensor>(),
+            MessageType::PYTHON_RET,
+            request.id());
+      } catch (std::exception& e) {
+        return createException(request, e);
+      }
       break;
     }
     case MessageType::REMOTE_CALL: {
@@ -55,7 +73,7 @@ void processRequestBlocking(
           ->getOrCreateRRef<IValue>(std::move(rrefForkIValue))
           ->setValue(std::move(stack.front()));
 
-      break;
+      return Message();
     }
     case MessageType::RREF_FETCH: {
       ScriptRRefFetch srf = ScriptRRefFetch::fromMessage(request);
@@ -66,18 +84,17 @@ void processRequestBlocking(
           );
       auto response = ScriptRRefValue(rref->getValue()).toMessage();
       response.setId(request.id());
-      agent.send(from, std::move(response));
-      break;
+      return response;
     }
     case MessageType::RREF_ADD_FORK: {
       ScriptRRefAdd sra = ScriptRRefAdd::fromMessage(request);
       RRefContext::getInstance()->addFork(std::move(sra.value()));
-      break;
+      return Message();
     }
     case MessageType::RREF_DEL_FORK: {
       ScriptRRefDel srd = ScriptRRefDel::fromMessage(request);
       RRefContext::getInstance()->delFork(std::move(srd.value()));
-      break;
+      return Message();
     }
     default: {
       AT_ERROR("Request type ", request.type(), " not supported.");
@@ -85,6 +102,6 @@ void processRequestBlocking(
   }
 }
 
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
