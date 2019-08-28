@@ -451,7 +451,8 @@ torch_nn_test_params_map = {}
 all_module_tests = sample_module.module_tests + \
     common_nn.module_tests + \
     common_nn.new_module_tests + \
-    common_nn.criterion_tests
+    common_nn.criterion_tests + \
+    common_nn.new_criterion_tests
 
 for test_params_dict in all_module_tests:
     # We skip all `torch.nn.functional` tests for now
