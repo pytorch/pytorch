@@ -27,7 +27,7 @@ class C10_API Scalar {
 #define DEFINE_IMPLICIT_CTOR(type, name)      \
   Scalar(type vv) : Scalar(vv, true) { }
 
-  AT_FORALL_SCALAR_TYPES_AND(BFloat16, DEFINE_IMPLICIT_CTOR)
+  AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, DEFINE_IMPLICIT_CTOR)
 
 #undef DEFINE_IMPLICIT_CTOR
 
