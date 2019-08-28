@@ -543,9 +543,8 @@ TupleType::TupleType(
     std::vector<TypePtr> elements,
     c10::optional<c10::QualifiedName> name,
     std::shared_ptr<FunctionSchema> schema)
-    : NamedType(TypeKind::TupleType),
+    : NamedType(TypeKind::TupleType, std::move(name)),
       elements_(std::move(elements)),
-      name_(std::move(name)),
       schema_(std::move(schema)) {
   has_free_variables_ =
       std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
@@ -594,8 +593,8 @@ bool TupleType::operator==(const Type& rhs) const {
 
 std::string TupleType::str() const {
   std::stringstream ss;
-  if (schema_ && name_) {
-    ss << name_->qualifiedName();
+  if (schema_ && name()) {
+    ss << name()->qualifiedName();
   } else {
     ss << "(";
     for(size_t i = 0; i < elements().size(); ++i) {
@@ -609,8 +608,8 @@ std::string TupleType::str() const {
 }
 std::string TupleType::python_str() const {
   std::stringstream ss;
-  if (schema_ && name_) {
-    ss << name_->qualifiedName();
+  if (schema_ && name()) {
+    ss << name()->qualifiedName();
   } else {
     ss << "Tuple[";
     for(size_t i = 0; i < elements().size(); ++i) {

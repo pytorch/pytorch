@@ -333,8 +333,8 @@ static bool are_distinct(DimnameList batch_dims, DimnameList feature_dims) {
 //
 // Tensor[N, A, B1] @ Tensor[N, B2] -> Misaligned! The user may have intended
 // to batch multiply matrices of size [A, B1] with vectors of size [B2]
-// (contracting dim B1 and B2 together) but instead matmul contracts
-// B1 and B2. In this case, we're able to warn the user.
+// but instead matmul treats it as batch multiplying matrices of size [A, B1]
+// with matrices of size [N, B2]. In this case, we're able to warn the user.
 static void check_batch_and_feature_dims_are_distinct(
     DimnameList self_names,
     DimnameList other_names) {
