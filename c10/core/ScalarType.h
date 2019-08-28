@@ -266,6 +266,21 @@ static inline bool isComplexType(ScalarType t) {
       t == ScalarType::ComplexDouble);
 }
 
+static inline bool isHalfPrecision(ScalarType t) {
+  return (
+      t == ScalarType::Half || t == ScalarType::ComplexHalf);
+}
+
+static inline bool isSinglePrecision(ScalarType t) {
+  return (
+      t == ScalarType::Float || t == ScalarType::ComplexFloat);
+}
+
+static inline bool isDoublePrecision(ScalarType t) {
+  return (
+      t == ScalarType::Double || t == ScalarType::ComplexDouble);
+}
+
 static inline bool isQIntType(ScalarType t) {
   // Don't forget to extend this when adding new QInt types
   return t == ScalarType:: QInt8 || t == ScalarType::QUInt8 || t == ScalarType::QInt32;
@@ -311,15 +326,13 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   constexpr auto f2 = ScalarType::Half;
   constexpr auto f4 = ScalarType::Float;
   constexpr auto f8 = ScalarType::Double;
+  constexpr auto c4 = ScalarType::ComplexFloat;
+  constexpr auto c8 = ScalarType::ComplexDouble;
   constexpr auto b1 = ScalarType::Bool;
   constexpr auto bf = ScalarType::BFloat16;
   constexpr auto ud = ScalarType::Undefined;
   if (a == ud || b == ud) {
     return ScalarType::Undefined;
-  }
-  if (isComplexType(a) || isComplexType(b)) {
-    AT_ERROR(
-        "promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be");
   }
 
   // For QInt types, we only allow exact match
@@ -338,17 +351,17 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   static constexpr ScalarType _promoteTypesLookup[static_cast<int>(
       ScalarType::NumOptions)][static_cast<int>(ScalarType::NumOptions)] = {
         /*        u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1  q1  q2  q3  bf*/
-        /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, u1, ud, ud, ud, ud},
-        /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, i1, ud, ud, ud, ud},
-        /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, i2, ud, ud, ud, ud},
-        /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, ud, ud, ud, i4, ud, ud, ud, ud},
-        /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, ud, ud, ud, i8, ud, ud, ud, ud},
-        /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, ud, ud, ud, f2, ud, ud, ud, ud},
-        /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, ud, ud, ud, f4, ud, ud, ud, ud},
-        /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, ud, ud, ud, f8, ud, ud, ud, ud},
-        /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-        /* c4 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-        /* c8 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+        /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, ud, c4, c8, u1, ud, ud, ud, ud},
+        /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, ud, c4, c8, i1, ud, ud, ud, ud},
+        /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, ud, c4, c8, i2, ud, ud, ud, ud},
+        /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, ud, c4, c8, i4, ud, ud, ud, ud},
+        /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, ud, c4, c8, i8, ud, ud, ud, ud},
+        /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, ud, c4, c8, f2, ud, ud, ud, ud},
+        /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, ud, c4, c8, f4, ud, ud, ud, ud},
+        /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, ud, c8, c8, f8, ud, ud, ud, ud},
+        /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, c4, c8, ud, ud, ud, ud, ud},
+        /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, ud, ud, ud, ud, ud},
+        /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, ud, ud, ud, ud, ud},
         /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, b1, ud, ud, ud, ud},
         /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
         /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
