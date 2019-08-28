@@ -107,8 +107,8 @@ class TestGetImplementingArgs(TestCase):
         args = get_overloaded_types_and_args([1, tensor])
         self.assertEqual(list(args),[[type(tensor)], [tensor]])
 
-    @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
     def test_tensor_subclasses(self):
+        # Check order in which args are returned: subclasses before superclasses
 
         class OverrideSub(torch.Tensor):
             __torch_function__ = _return_not_implemented
@@ -116,19 +116,19 @@ class TestGetImplementingArgs(TestCase):
         class NoOverrideSub(torch.Tensor):
             pass
 
-        tensor = torch.tensor(1).view(torch.Tensor)
-        override_sub = torch.tensor(1).view(OverrideSub)
-        no_override_sub = torch.tensor(1).view(NoOverrideSub)
+        tensor = torch.tensor([1])
+        override_sub = OverrideSub([2])
+        no_override_sub = NoOverrideSub([3])
 
         args = get_overloaded_types_and_args([tensor, override_sub])
-        assert_equal(list(args), [override_sub, tensor])
+        self.assertEqual(args[1], [override_sub, tensor])
 
         args = get_overloaded_types_and_args([tensor, no_override_sub])
-        assert_equal(list(args), [no_override_sub, tensor])
+        self.assertEqual(args[1], [no_override_sub, tensor])
 
         args = get_overloaded_types_and_args(
             [override_sub, no_override_sub])
-        assert_equal(list(args), [override_sub, no_override_sub])
+        self.assertEqual(args[1], [override_sub, no_override_sub])
 
     def test_tensor_and_duck_tensor(self):
 
