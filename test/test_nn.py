@@ -7694,6 +7694,80 @@ class TestNN(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, "expected input and grid to be on same device"):
                 F.grid_sample(input.cuda(), grid, align_corners=False)
 
+    def test_affine_grid_error_checking(self):
+        # 2D affine
+        theta = torch.empty(1, 2, 3, dtype=torch.double)
+        size = torch.Size([1, 1, 2, 2])
+
+        # assert no error
+        F.affine_grid(theta, size, align_corners=False)
+
+        # check for warning for empty span along dimension
+        with warnings.catch_warnings(record=True) as w:
+            # Ensure warnings are being shown
+            warnings.simplefilter("always")
+            # Should not trigger warning
+            F.affine_grid(theta, torch.Size([1, 1, 2, 1]), align_corners=False)
+            # Check no warning occurs
+            self.assertNotIn('See the documentation of affine_grid for details.', ' '.join(map(str, w)))
+            # Should trigger warning
+            F.affine_grid(theta, torch.Size([1, 1, 2, 1]), align_corners=True)
+            # Check warning occurs
+            self.assertIn('See the documentation of affine_grid for details.', ' '.join(map(str, w)))
+
+        with self.assertRaisesRegex(ValueError, "Expected theta to have floating point type"):
+            F.affine_grid(theta.int(), size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 2D affine matrices of shape Nx2x3"):
+            F.affine_grid(theta[0], size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 2D affine matrices of shape Nx2x3"):
+            F.affine_grid(theta.unsqueeze(0), size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 2D affine matrices of shape Nx2x3"):
+            F.affine_grid(theta.repeat(1, 2, 1), size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 2D affine matrices of shape Nx2x3"):
+            F.affine_grid(theta.repeat(1, 1, 2), size, align_corners=False)
+
+        # 3D affine
+        theta = torch.empty(1, 3, 4, dtype=torch.double)
+        size = torch.Size([1, 1, 2, 2, 2])
+
+        # assert no error
+        F.affine_grid(theta, size, align_corners=False)
+
+        # check for warning for empty span along dimension
+        with warnings.catch_warnings(record=True) as w:
+            # Ensure warnings are being shown
+            warnings.simplefilter("always")
+            # Should not trigger warning
+            F.affine_grid(theta, torch.Size([1, 1, 3, 2, 1]), align_corners=False)
+            # Check no warning occurs
+            self.assertNotIn('See the documentation of affine_grid for details.', ' '.join(map(str, w)))
+            # Should trigger warning
+            F.affine_grid(theta, torch.Size([1, 1, 3, 2, 1]), align_corners=True)
+            # Check warning occurs
+            self.assertIn('See the documentation of affine_grid for details.', ' '.join(map(str, w)))
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 3D affine matrices of shape Nx3x4"):
+            F.affine_grid(theta[0], size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 3D affine matrices of shape Nx3x4"):
+            F.affine_grid(theta.unsqueeze(0), size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 3D affine matrices of shape Nx3x4"):
+            F.affine_grid(theta.repeat(1, 2, 1), size, align_corners=False)
+
+        with self.assertRaisesRegex(ValueError, "Expected a batch of 3D affine matrices of shape Nx3x4"):
+            F.affine_grid(theta.repeat(1, 1, 2), size, align_corners=False)
+
+        with self.assertRaisesRegex(NotImplementedError, "affine_grid only supports 4D and 5D sizes"):
+            F.affine_grid(theta, torch.Size([1, 2, 2]), align_corners=False)
+
+        with self.assertRaisesRegex(NotImplementedError, "affine_grid only supports 4D and 5D sizes"):
+            F.affine_grid(theta, torch.Size([1, 1, 2, 2, 2, 2]), align_corners=False)
+
     def test_grid_sample(self):
         def test(N, C, H, W, mode, padding_mode, align_corners):
             def test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners):
@@ -8037,17 +8111,82 @@ class TestNN(NNTestCase):
             W = random.randint(1, 8)
             sz = torch.Size([N, C, H, W])
             inp = torch.randn(N, 2, 3, requires_grad=True)
-            self.assertTrue(gradcheck(lambda inp: F.affine_grid(inp, sz, align_corners=align_corners), (inp,)))
+            with warnings.catch_warnings(record=True):
+                warnings.simplefilter("always")  # python2 requires this so other tests can trigger
+                self.assertTrue(gradcheck(
+                    lambda inp: F.affine_grid(inp, sz, align_corners=align_corners),
+                    (inp,)))
 
         # test CPU against CUDA
-        if TEST_CUDNN:
+        if TEST_CUDA:
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            H = random.randint(1, 8)
+            W = random.randint(1, 8)
+            sz = torch.Size([N, C, H, W])
             for align_corners in (True, False):
                 input_cpu = torch.randn(N, 2, 3, requires_grad=True)
-                out_cpu = F.affine_grid(input_cpu, sz, align_corners=align_corners)
+                with warnings.catch_warnings(record=True):
+                    warnings.simplefilter("always")  # python2 requires this so other tests can trigger
+                    out_cpu = F.affine_grid(input_cpu, sz, align_corners=align_corners)
                 gradients = torch.randn(out_cpu.size())
                 out_cpu.backward(gradients)
                 input_gpu = input_cpu.detach().cuda().requires_grad_()
-                out_cuda = F.affine_grid(input_gpu, sz, align_corners=align_corners)
+                with warnings.catch_warnings(record=True):
+                    warnings.simplefilter("always")  # python2 requires this so other tests can trigger
+                    out_cuda = F.affine_grid(input_gpu, sz, align_corners=align_corners)
+                out_cuda.backward(gradients.cuda())
+                self.assertEqual(out_cpu, out_cuda)
+                self.assertEqual(input_cpu.grad, input_gpu.grad)
+
+    def test_affine_grid_3d(self):
+        # test known input on CPU
+        input = torch.arange(1., 13).view(1, 3, 4)
+        output = F.affine_grid(input, torch.Size([1, 1, 2, 2, 2]), align_corners=True)
+        groundtruth = torch.Tensor(
+            [[[[[-2, -10, -18], [0, 0, 0]], [[2, 2, 2], [4, 12, 20]]],
+              [[[4, 4, 4], [6, 14, 22]], [[8, 16, 24], [10, 26, 42]]]]]).view(1, 2, 2, 2, 3)
+        self.assertEqual(output, groundtruth)
+        output = F.affine_grid(input, torch.Size([1, 1, 2, 2, 2]), align_corners=False)
+        groundtruth = torch.Tensor(
+            [[[[[1, -1, -3], [2, 4, 6]], [[3, 5, 7], [4, 10, 16]]],
+              [[[4, 6, 8], [5, 11, 17]], [[6, 12, 18], [7, 17, 27]]]]]).view(1, 2, 2, 2, 3)
+        self.assertEqual(output, groundtruth)
+
+        for align_corners in (True, False):
+            # do gradcheck
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            D = random.randint(1, 8)
+            H = random.randint(1, 8)
+            W = random.randint(1, 8)
+            sz = torch.Size([N, C, D, H, W])
+            inp = torch.randn(N, 3, 4, requires_grad=True)
+            with warnings.catch_warnings(record=True):
+                warnings.simplefilter("always")  # python2 requires this so other tests can trigger
+                self.assertTrue(gradcheck(
+                    lambda inp: F.affine_grid(inp, sz, align_corners=align_corners),
+                    (inp,)))
+
+        # test CPU against CUDA
+        if TEST_CUDA:
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            D = random.randint(1, 8)
+            H = random.randint(1, 8)
+            W = random.randint(1, 8)
+            sz = torch.Size([N, C, D, H, W])
+            for align_corners in (True, False):
+                input_cpu = torch.randn(N, 3, 4, requires_grad=True)
+                with warnings.catch_warnings(record=True):
+                    warnings.simplefilter("always")  # python2 requires this so other tests can trigger
+                    out_cpu = F.affine_grid(input_cpu, sz, align_corners=align_corners)
+                gradients = torch.randn(out_cpu.size())
+                out_cpu.backward(gradients)
+                input_gpu = input_cpu.detach().cuda().requires_grad_()
+                with warnings.catch_warnings(record=True):
+                    warnings.simplefilter("always")  # python2 requires this so other tests can trigger
+                    out_cuda = F.affine_grid(input_gpu, sz, align_corners=align_corners)
                 out_cuda.backward(gradients.cuda())
                 self.assertEqual(out_cpu, out_cuda)
                 self.assertEqual(input_cpu.grad, input_gpu.grad)

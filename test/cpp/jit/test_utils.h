@@ -5,12 +5,10 @@
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/irparser.h"
-#include "torch/csrc/jit/symbolic_variable.h"
 
 namespace torch {
 namespace jit {
 
-using Var = SymbolicVariable;
 using tensor_list = std::vector<at::Tensor>;
 using namespace torch::autograd;
 
@@ -29,14 +27,6 @@ std::pair<tensor_list, tensor_list> runGradient(
     Gradient& grad_spec,
     tensor_list& tensors_in,
     tensor_list& tensor_grads_in);
-
-std::tuple<Var, Var> build_lstm_body(
-    Graph& g,
-    Var input,
-    Var hx,
-    Var cx,
-    Var w_ih,
-    Var w_hh);
 
 std::shared_ptr<Graph> build_lstm();
 
