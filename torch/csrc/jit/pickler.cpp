@@ -206,13 +206,16 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
       Function* getstate = type->getMethod("__getstate__");
       pushIValue((*getstate)({obj}));
     } else {
-      push<OpCode>(OpCode::EMPTY_DICT);
-      push<OpCode>(OpCode::MARK);
-      for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
-        pushString(type->getAttributeName(i));
-        pushIValue(obj->getSlot(i));
+      if (type->numAttributes() == 0) {
+        push<OpCode>(OpCode::EMPTY_DICT);
+      } else {
+        push<OpCode>(OpCode::MARK);
+        for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
+          pushString(type->getAttributeName(i));
+          pushIValue(obj->getSlot(i));
+        }
+        push<OpCode>(OpCode::DICT);
       }
-      push<OpCode>(OpCode::SETITEMS);
     }
     push<OpCode>(OpCode::BUILD);
   } else {
@@ -432,9 +435,8 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
   int64_t tensor_id = tensor_table_->size() - 1;
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
   // so wrap in a tuple
-  push<OpCode>(OpCode::MARK);
   pushIValue(tensor_id);
-  push<OpCode>(OpCode::TUPLE);
+  push<OpCode>(OpCode::TUPLE1);
 
   push<OpCode>(OpCode::REDUCE);
 }
@@ -447,9 +449,7 @@ void Pickler::pushSpecializedList(
 
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
   // so wrap in a tuple
-  push<OpCode>(OpCode::MARK);
 
-  push<OpCode>(OpCode::EMPTY_LIST);
   // Mark list
   push<OpCode>(OpCode::MARK);
 
@@ -457,10 +457,10 @@ void Pickler::pushSpecializedList(
   item_pusher(ivalue);
 
   // Finish list
-  push<OpCode>(OpCode::APPENDS);
+  push<OpCode>(OpCode::LIST);
 
   // Finish tuple
-  push<OpCode>(OpCode::TUPLE);
+  push<OpCode>(OpCode::TUPLE1);
 
   // Call reduce
   push<OpCode>(OpCode::REDUCE);
@@ -477,18 +477,23 @@ void Pickler::pushDouble(double value) {
 }
 
 void Pickler::pushDict(const IValue& ivalue) {
-  push<OpCode>(OpCode::EMPTY_DICT);
+  const auto& dict = ivalue.toGenericDict();
+
+  if (dict.empty()) {
+    push<OpCode>(OpCode::EMPTY_DICT);
+    return;
+  }
 
   push<OpCode>(OpCode::MARK);
 
   // Sort the dict for deterministic keys
-  auto dict_items = iterationOrder(ivalue.toGenericDict());
+  auto dict_items = iterationOrder(dict);
   for (const auto& pair : dict_items) {
     pushIValue(pair.first);
     pushIValue(pair.second);
   }
 
-  push<OpCode>(OpCode::SETITEMS);
+  push<OpCode>(OpCode::DICT);
 }
 
 size_t Pickler::pushNextBinPut() {
@@ -507,7 +512,6 @@ size_t Pickler::pushNextBinPut() {
 
 void Pickler::pushGenericList(const IValue& ivalue) {
   auto list = ivalue.toGenericListRef();
-  push<OpCode>(OpCode::EMPTY_LIST);
 
   push<OpCode>(OpCode::MARK);
 
@@ -515,7 +519,7 @@ void Pickler::pushGenericList(const IValue& ivalue) {
     pushIValue(item);
   }
 
-  push<OpCode>(OpCode::APPENDS);
+  push<OpCode>(OpCode::LIST);
 }
 
 void Pickler::pushTuple(const IValue& ivalue) {
@@ -724,11 +728,28 @@ OpCode Unpickler::readInstruction() {
         auto tuple = c10::ivalue::Tuple::create(pop(stack_, 3));
         stack_.emplace_back(tuple);
     } break;
-    case OpCode::EMPTY_DICT:
+    case OpCode::EMPTY_DICT: {
       stack_.emplace_back(c10::impl::GenericDict(c10::impl::deprecatedUntypedDict()));
-      break;
+    } break;
     case OpCode::APPENDS: {
-      readList();
+      size_t start = marks_.back();
+      auto list_ivalue = stack_.at(start - 1);
+      readList(list_ivalue);
+    } break;
+    case OpCode::LIST: {
+      IValue list_ivalue = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
+      readList(list_ivalue);
+      stack_.push_back(std::move(list_ivalue));
+    } break;
+    case OpCode::DICT: {
+      size_t start = marks_.back();
+      marks_.pop_back();
+      auto dict = c10::impl::GenericDict(c10::impl::deprecatedUntypedDict());
+      for (size_t i = start; i < stack_.size(); i += 2) {
+        dict.insert_or_assign(stack_[i], stack_[i + 1]);
+      }
+      stack_.erase(stack_.begin() + start, stack_.end());
+      stack_.push_back(std::move(dict));
     } break;
     case OpCode::SETITEMS: {
       size_t start = marks_.back();
@@ -967,10 +988,9 @@ std::string Unpickler::readBytes(size_t length) {
 
 // Pop all the list items off of the stack and append them to the list at
 // the corresponding MARK
-void Unpickler::readList() {
+void Unpickler::readList(IValue& list_ivalue) {
   size_t start = marks_.back();
   marks_.pop_back();
-  auto list_ivalue = stack_.at(start - 1);
   auto num_elements = stack_.size() - start;
   auto elements = at::ArrayRef<IValue>(stack_).slice(start);
   if (list_ivalue.isIntList()) {
