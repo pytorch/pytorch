@@ -916,6 +916,8 @@ endif()
 
 # ---[ NCCL
 if(USE_NCCL)
+  # Call set_use_gpu() to set USE_GPU based on updated value of USE_CUDA/USE_ROCM
+  set_use_gpu()
   if(NOT USE_GPU)
     message(WARNING
         "Not using CUDA/ROCM, so disabling USE_NCCL. Suppress this warning with "
