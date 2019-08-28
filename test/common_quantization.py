@@ -485,4 +485,3 @@ class ResNetBase(torch.nn.Module):
         out = self.relu2(out)
         out = self.avgpool(out)
         return out
-
