@@ -157,7 +157,6 @@ struct PythonResolver : public Resolver {
             tt->python_str());
             return type;
       }
-
       get_python_cu()->register_type(tt);
       return tt;
     }
@@ -799,6 +798,14 @@ void initJitScriptBindings(PyObject* module) {
         }
         const auto self = SimpleSelf(classType);
         cu->define(classname, methodDefs, rcbs, &self);
+      });
+  m.def(
+      "_jit_script_interface_compile",
+      [](const std::string& qualifiedName,
+         const ClassDef& classDef,
+         ResolutionCallback rcb) {
+        get_python_cu()->define_interface(
+            c10::QualifiedName(qualifiedName), classDef, pythonResolver(rcb));
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {

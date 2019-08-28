@@ -290,7 +290,7 @@ class StmtBuilder(Builder):
         rhs = build_expr(ctx, stmt.value)
         lhs = build_expr(ctx, stmt.target)
         the_type = build_expr(ctx, stmt.annotation)
-        return Assign(lhs, rhs, the_type)
+        return Assign([lhs], rhs, the_type)
 
     @staticmethod
     def build_Return(ctx, stmt):

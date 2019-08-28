@@ -95,29 +95,6 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
   return equal;
 }
 
-void THTensor_(sign)(THTensor *r_, THTensor *t)
-{
-  THTensor_(resizeAs)(r_, t);
-
-#if defined (TH_REAL_IS_BYTE)
-  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-    if (*t_data > 0) *r__data = 1;
-    else *r__data = 0;);
-#elif defined (TH_REAL_IS_BOOL)
-TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-  if (*t_data == true) *r__data = false;
-  else *r__data = true;);
-#else
-  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-    if (*t_data > 0) *r__data = 1;
-    else if (*t_data < 0) *r__data = -1;
-    else *r__data = 0;);
-#endif
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(r_, t);
-#endif
-}
-
 // Helper function to be used in a reduction operation.
 // Due to resize semantics of outputs, if the specified output tensor r_ has
 // same size as the output of the reduction operation, then any noncontiguities

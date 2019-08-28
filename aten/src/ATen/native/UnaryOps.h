@@ -37,6 +37,7 @@ DECLARE_DISPATCH(unary_fn, reciprocal_stub);
 DECLARE_DISPATCH(unary_fn, round_stub);
 DECLARE_DISPATCH(unary_fn, rsqrt_stub);
 DECLARE_DISPATCH(unary_fn, sigmoid_stub);
+DECLARE_DISPATCH(unary_fn, sign_stub);
 DECLARE_DISPATCH(unary_fn, sin_stub);
 DECLARE_DISPATCH(unary_fn, sinh_stub);
 DECLARE_DISPATCH(unary_fn, sqrt_stub);
@@ -55,6 +56,5 @@ DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t), polygamma_stub);
 // clone
 // contiguous
 // clamp/_min/_max
-// sign
 // zero
 }} // namespace at::native
