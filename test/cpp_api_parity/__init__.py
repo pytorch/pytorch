@@ -51,6 +51,13 @@ Dict[package_name]
 ```
 '''
 def parse_parity_tracker_table(file_path):
+    def parse_parity_choice(str):
+        if str in ['Yes', 'No']:
+            return str == 'Yes'
+        else:
+            raise RuntimeError(
+                '{} is not a supported parity choice. The valid choices are "Yes" and "No".'.format(str))
+
     parity_tracker_dict = {}
 
     with open(file_path, 'r') as f:
@@ -66,7 +73,7 @@ def parse_parity_tracker_table(file_path):
             for api_status in lines[3:]:
                 api_name, has_impl_parity_str, has_doc_parity_str = api_status.split('|')
                 parity_tracker_dict[package_name][api_name] = ParityStatus(
-                    has_impl_parity=(has_impl_parity_str == 'Yes'),
-                    has_doc_parity=(has_doc_parity_str == 'Yes'))
+                    has_impl_parity=parse_parity_choice(has_impl_parity_str),
+                    has_doc_parity=parse_parity_choice(has_doc_parity_str))
 
     return parity_tracker_dict
