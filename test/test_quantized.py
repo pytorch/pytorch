@@ -570,10 +570,10 @@ class TestQuantizedOps(TestCase):
                     return False
             elif qX.qscheme() == torch.per_channel_affine:
                 if (qX.q_per_channel_scales() !=
-                    qX2.q_per_channel_scales()).any():
+                   qX2.q_per_channel_scales()).any():
                     return False
                 if (qX.q_per_channel_zero_points() !=
-                    qX2.q_per_channel_zero_points()).any():
+                   qX2.q_per_channel_zero_points()).any():
                     return False
             else:
                 raise NotImplementedError("Don't know what to do with",
