@@ -1575,196 +1575,196 @@ jobs:
 ##############################################################################
 # Binary build specs individual job specifications
 ##############################################################################
-  binary_linux_manywheel_2.7m_cpu_devtoolset7_build:
+  binary_linux_manywheel_2_7m_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7mu_cpu_devtoolset7_build:
+  binary_linux_manywheel_2_7mu_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.5m_cpu_devtoolset7_build:
+  binary_linux_manywheel_3_5m_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.6m_cpu_devtoolset7_build:
+  binary_linux_manywheel_3_6m_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.7m_cpu_devtoolset7_build:
+  binary_linux_manywheel_3_7m_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7m_cu92_devtoolset7_build:
+  binary_linux_manywheel_2_7m_cu92_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cu92 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda92"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7mu_cu92_devtoolset7_build:
+  binary_linux_manywheel_2_7mu_cu92_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cu92 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda92"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.5m_cu92_devtoolset7_build:
+  binary_linux_manywheel_3_5m_cu92_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cu92 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda92"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.6m_cu92_devtoolset7_build:
+  binary_linux_manywheel_3_6m_cu92_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cu92 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda92"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.7m_cu92_devtoolset7_build:
+  binary_linux_manywheel_3_7m_cu92_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cu92 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda92"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7m_cu100_devtoolset7_build:
+  binary_linux_manywheel_2_7m_cu100_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7mu_cu100_devtoolset7_build:
+  binary_linux_manywheel_2_7mu_cu100_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.5m_cu100_devtoolset7_build:
+  binary_linux_manywheel_3_5m_cu100_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.6m_cu100_devtoolset7_build:
+  binary_linux_manywheel_3_6m_cu100_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.7m_cu100_devtoolset7_build:
+  binary_linux_manywheel_3_7m_cu100_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_conda_2.7_cpu_devtoolset7_build:
+  binary_linux_conda_2_7_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cpu devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.5_cpu_devtoolset7_build:
+  binary_linux_conda_3_5_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cpu devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.6_cpu_devtoolset7_build:
+  binary_linux_conda_3_6_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cpu devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.7_cpu_devtoolset7_build:
+  binary_linux_conda_3_7_cpu_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cpu devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_2.7_cu92_devtoolset7_build:
+  binary_linux_conda_2_7_cu92_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cu92 devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.5_cu92_devtoolset7_build:
+  binary_linux_conda_3_5_cu92_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cu92 devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.6_cu92_devtoolset7_build:
+  binary_linux_conda_3_6_cu92_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cu92 devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.7_cu92_devtoolset7_build:
+  binary_linux_conda_3_7_cu92_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cu92 devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_2.7_cu100_devtoolset7_build:
+  binary_linux_conda_2_7_cu100_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cu100 devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.5_cu100_devtoolset7_build:
+  binary_linux_conda_3_5_cu100_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cu100 devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.6_cu100_devtoolset7_build:
+  binary_linux_conda_3_6_cu100_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cu100 devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.7_cu100_devtoolset7_build:
+  binary_linux_conda_3_7_cu100_devtoolset7_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cu100 devtoolset7"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_build:
+  binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -1772,7 +1772,7 @@ jobs:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_build:
+  binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-without-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -1780,7 +1780,7 @@ jobs:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_build:
+  binary_linux_libtorch_2_7m_cpu_devtoolset7_static-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -1788,7 +1788,7 @@ jobs:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_build:
+  binary_linux_libtorch_2_7m_cpu_devtoolset7_static-without-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -1796,7 +1796,7 @@ jobs:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_build:
+  binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -1804,7 +1804,7 @@ jobs:
       - image: "soumith/manylinux-cuda92"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps_build:
+  binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-without-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -1812,7 +1812,7 @@ jobs:
       - image: "soumith/manylinux-cuda92"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps_build:
+  binary_linux_libtorch_2_7m_cu92_devtoolset7_static-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -1820,7 +1820,7 @@ jobs:
       - image: "soumith/manylinux-cuda92"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_build:
+  binary_linux_libtorch_2_7m_cu92_devtoolset7_static-without-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -1828,7 +1828,7 @@ jobs:
       - image: "soumith/manylinux-cuda92"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_build:
+  binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -1836,7 +1836,7 @@ jobs:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_build:
+  binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-without-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -1844,7 +1844,7 @@ jobs:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_build:
+  binary_linux_libtorch_2_7m_cu100_devtoolset7_static-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -1852,7 +1852,7 @@ jobs:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_build:
+  binary_linux_libtorch_2_7m_cu100_devtoolset7_static-without-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -1860,7 +1860,7 @@ jobs:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_build:
+  binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -1868,7 +1868,7 @@ jobs:
       - image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-without-deps_build:
+  binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-without-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -1876,7 +1876,7 @@ jobs:
       - image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-with-deps_build:
+  binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -1884,7 +1884,7 @@ jobs:
       - image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-without-deps_build:
+  binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-without-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -1892,7 +1892,7 @@ jobs:
       - image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-with-deps_build:
+  binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -1900,7 +1900,7 @@ jobs:
       - image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-without-deps_build:
+  binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-without-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -1908,7 +1908,7 @@ jobs:
       - image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-with-deps_build:
+  binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -1916,7 +1916,7 @@ jobs:
       - image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-without-deps_build:
+  binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-without-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -1924,7 +1924,7 @@ jobs:
       - image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-with-deps_build:
+  binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -1932,7 +1932,7 @@ jobs:
       - image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-without-deps_build:
+  binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-without-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -1940,7 +1940,7 @@ jobs:
       - image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-with-deps_build:
+  binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-with-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -1948,7 +1948,7 @@ jobs:
       - image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-without-deps_build:
+  binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-without-deps_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -1956,47 +1956,47 @@ jobs:
       - image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_build
 
-  binary_macos_wheel_2.7_cpu_build:
+  binary_macos_wheel_2_7_cpu_build:
     environment:
       BUILD_ENVIRONMENT: "wheel 2.7 cpu"
     <<: *binary_mac_build
 
-  binary_macos_wheel_3.5_cpu_build:
+  binary_macos_wheel_3_5_cpu_build:
     environment:
       BUILD_ENVIRONMENT: "wheel 3.5 cpu"
     <<: *binary_mac_build
 
-  binary_macos_wheel_3.6_cpu_build:
+  binary_macos_wheel_3_6_cpu_build:
     environment:
       BUILD_ENVIRONMENT: "wheel 3.6 cpu"
     <<: *binary_mac_build
 
-  binary_macos_wheel_3.7_cpu_build:
+  binary_macos_wheel_3_7_cpu_build:
     environment:
       BUILD_ENVIRONMENT: "wheel 3.7 cpu"
     <<: *binary_mac_build
 
-  binary_macos_conda_2.7_cpu_build:
+  binary_macos_conda_2_7_cpu_build:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cpu"
     <<: *binary_mac_build
 
-  binary_macos_conda_3.5_cpu_build:
+  binary_macos_conda_3_5_cpu_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cpu"
     <<: *binary_mac_build
 
-  binary_macos_conda_3.6_cpu_build:
+  binary_macos_conda_3_6_cpu_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cpu"
     <<: *binary_mac_build
 
-  binary_macos_conda_3.7_cpu_build:
+  binary_macos_conda_3_7_cpu_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cpu"
     <<: *binary_mac_build
 
-  binary_macos_libtorch_2.7_cpu_build:
+  binary_macos_libtorch_2_7_cpu_build:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7 cpu"
     <<: *binary_mac_build
@@ -2006,37 +2006,37 @@ jobs:
 # These are the smoke tests run right after the build, before the upload.
 # If these fail, the upload doesn't happen.
 ##############################################################################
-  binary_linux_manywheel_2.7m_cpu_devtoolset7_test:
+  binary_linux_manywheel_2_7m_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7mu_cpu_devtoolset7_test:
+  binary_linux_manywheel_2_7mu_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.5m_cpu_devtoolset7_test:
+  binary_linux_manywheel_3_5m_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.6m_cpu_devtoolset7_test:
+  binary_linux_manywheel_3_6m_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.7m_cpu_devtoolset7_test:
+  binary_linux_manywheel_3_7m_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7m_cu92_devtoolset7_test:
+  binary_linux_manywheel_2_7m_cu92_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda92"
@@ -2044,7 +2044,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7mu_cu92_devtoolset7_test:
+  binary_linux_manywheel_2_7mu_cu92_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda92"
@@ -2052,7 +2052,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.5m_cu92_devtoolset7_test:
+  binary_linux_manywheel_3_5m_cu92_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda92"
@@ -2060,7 +2060,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.6m_cu92_devtoolset7_test:
+  binary_linux_manywheel_3_6m_cu92_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda92"
@@ -2068,7 +2068,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.7m_cu92_devtoolset7_test:
+  binary_linux_manywheel_3_7m_cu92_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda92"
@@ -2076,7 +2076,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7m_cu100_devtoolset7_test:
+  binary_linux_manywheel_2_7m_cu100_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
@@ -2084,7 +2084,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7mu_cu100_devtoolset7_test:
+  binary_linux_manywheel_2_7mu_cu100_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
@@ -2092,7 +2092,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.5m_cu100_devtoolset7_test:
+  binary_linux_manywheel_3_5m_cu100_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
@@ -2100,7 +2100,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.6m_cu100_devtoolset7_test:
+  binary_linux_manywheel_3_6m_cu100_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
@@ -2108,7 +2108,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.7m_cu100_devtoolset7_test:
+  binary_linux_manywheel_3_7m_cu100_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
@@ -2116,31 +2116,31 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_conda_2.7_cpu_devtoolset7_test:
+  binary_linux_conda_2_7_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cpu devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test
 
-  binary_linux_conda_3.5_cpu_devtoolset7_test:
+  binary_linux_conda_3_5_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cpu devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test
 
-  binary_linux_conda_3.6_cpu_devtoolset7_test:
+  binary_linux_conda_3_6_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cpu devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test
 
-  binary_linux_conda_3.7_cpu_devtoolset7_test:
+  binary_linux_conda_3_7_cpu_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cpu devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test
 
-  binary_linux_conda_2.7_cu92_devtoolset7_test:
+  binary_linux_conda_2_7_cu92_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2148,7 +2148,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_conda_3.5_cu92_devtoolset7_test:
+  binary_linux_conda_3_5_cu92_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2156,7 +2156,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_conda_3.6_cu92_devtoolset7_test:
+  binary_linux_conda_3_6_cu92_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2164,7 +2164,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_conda_3.7_cu92_devtoolset7_test:
+  binary_linux_conda_3_7_cu92_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2172,7 +2172,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_conda_2.7_cu100_devtoolset7_test:
+  binary_linux_conda_2_7_cu100_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2180,7 +2180,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_conda_3.5_cu100_devtoolset7_test:
+  binary_linux_conda_3_5_cu100_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2188,7 +2188,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_conda_3.6_cu100_devtoolset7_test:
+  binary_linux_conda_3_6_cu100_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2196,7 +2196,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_conda_3.7_cu100_devtoolset7_test:
+  binary_linux_conda_3_7_cu100_devtoolset7_test:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2204,35 +2204,35 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_test:
+  binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_test:
+  binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_test:
+  binary_linux_libtorch_2_7m_cpu_devtoolset7_static-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_test:
+  binary_linux_libtorch_2_7m_cpu_devtoolset7_static-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_test:
+  binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -2241,7 +2241,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps_test:
+  binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -2250,7 +2250,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps_test:
+  binary_linux_libtorch_2_7m_cu92_devtoolset7_static-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -2259,7 +2259,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_test:
+  binary_linux_libtorch_2_7m_cu92_devtoolset7_static-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -2268,7 +2268,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_test:
+  binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -2277,7 +2277,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_test:
+  binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -2286,7 +2286,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_test:
+  binary_linux_libtorch_2_7m_cu100_devtoolset7_static-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -2295,7 +2295,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_test:
+  binary_linux_libtorch_2_7m_cu100_devtoolset7_static-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -2304,35 +2304,35 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_test:
+  binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
       DOCKER_IMAGE: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-without-deps_test:
+  binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
       DOCKER_IMAGE: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-with-deps_test:
+  binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
       DOCKER_IMAGE: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-without-deps_test:
+  binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
       DOCKER_IMAGE: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-with-deps_test:
+  binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -2341,7 +2341,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-without-deps_test:
+  binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -2350,7 +2350,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-with-deps_test:
+  binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -2359,7 +2359,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-without-deps_test:
+  binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -2368,7 +2368,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-with-deps_test:
+  binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -2377,7 +2377,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-without-deps_test:
+  binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -2386,7 +2386,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-with-deps_test:
+  binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-with-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -2395,7 +2395,7 @@ jobs:
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-without-deps_test:
+  binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-without-deps_test:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -2427,326 +2427,326 @@ jobs:
 ##############################################################################
 # Binary build uploads
 ##############################################################################
-  binary_linux_manywheel_2.7m_cpu_devtoolset7_upload:
+  binary_linux_manywheel_2_7m_cpu_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7mu_cpu_devtoolset7_upload:
+  binary_linux_manywheel_2_7mu_cpu_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.5m_cpu_devtoolset7_upload:
+  binary_linux_manywheel_3_5m_cpu_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.6m_cpu_devtoolset7_upload:
+  binary_linux_manywheel_3_6m_cpu_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.7m_cpu_devtoolset7_upload:
+  binary_linux_manywheel_3_7m_cpu_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7m_cu92_devtoolset7_upload:
+  binary_linux_manywheel_2_7m_cu92_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cu92 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7mu_cu92_devtoolset7_upload:
+  binary_linux_manywheel_2_7mu_cu92_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cu92 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.5m_cu92_devtoolset7_upload:
+  binary_linux_manywheel_3_5m_cu92_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cu92 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.6m_cu92_devtoolset7_upload:
+  binary_linux_manywheel_3_6m_cu92_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cu92 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.7m_cu92_devtoolset7_upload:
+  binary_linux_manywheel_3_7m_cu92_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cu92 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7m_cu100_devtoolset7_upload:
+  binary_linux_manywheel_2_7m_cu100_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7mu_cu100_devtoolset7_upload:
+  binary_linux_manywheel_2_7mu_cu100_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.5m_cu100_devtoolset7_upload:
+  binary_linux_manywheel_3_5m_cu100_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.6m_cu100_devtoolset7_upload:
+  binary_linux_manywheel_3_6m_cu100_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.7m_cu100_devtoolset7_upload:
+  binary_linux_manywheel_3_7m_cu100_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_2.7_cpu_devtoolset7_upload:
+  binary_linux_conda_2_7_cpu_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.5_cpu_devtoolset7_upload:
+  binary_linux_conda_3_5_cpu_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.6_cpu_devtoolset7_upload:
+  binary_linux_conda_3_6_cpu_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.7_cpu_devtoolset7_upload:
+  binary_linux_conda_3_7_cpu_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_2.7_cu92_devtoolset7_upload:
+  binary_linux_conda_2_7_cu92_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cu92 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.5_cu92_devtoolset7_upload:
+  binary_linux_conda_3_5_cu92_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cu92 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.6_cu92_devtoolset7_upload:
+  binary_linux_conda_3_6_cu92_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cu92 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.7_cu92_devtoolset7_upload:
+  binary_linux_conda_3_7_cu92_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cu92 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_2.7_cu100_devtoolset7_upload:
+  binary_linux_conda_2_7_cu100_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.5_cu100_devtoolset7_upload:
+  binary_linux_conda_3_5_cu100_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.6_cu100_devtoolset7_upload:
+  binary_linux_conda_3_6_cu100_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.7_cu100_devtoolset7_upload:
+  binary_linux_conda_3_7_cu100_devtoolset7_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_upload:
+  binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_upload:
+  binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-without-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_upload:
+  binary_linux_libtorch_2_7m_cpu_devtoolset7_static-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_upload:
+  binary_linux_libtorch_2_7m_cpu_devtoolset7_static-without-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_upload:
+  binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps_upload:
+  binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-without-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps_upload:
+  binary_linux_libtorch_2_7m_cu92_devtoolset7_static-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_upload:
+  binary_linux_libtorch_2_7m_cu92_devtoolset7_static-without-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_upload:
+  binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_upload:
+  binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-without-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_upload:
+  binary_linux_libtorch_2_7m_cu100_devtoolset7_static-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_upload:
+  binary_linux_libtorch_2_7m_cu100_devtoolset7_static-without-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_upload:
+  binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-without-deps_upload:
+  binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-without-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-with-deps_upload:
+  binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-without-deps_upload:
+  binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-without-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-with-deps_upload:
+  binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-without-deps_upload:
+  binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-without-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-with-deps_upload:
+  binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-without-deps_upload:
+  binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-without-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-with-deps_upload:
+  binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-without-deps_upload:
+  binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-without-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-with-deps_upload:
+  binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-with-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-without-deps_upload:
+  binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-without-deps_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
     <<: *binary_linux_upload
 
-  binary_macos_wheel_2.7_cpu_upload:
+  binary_macos_wheel_2_7_cpu_upload:
     environment:
       BUILD_ENVIRONMENT: "wheel 2.7 cpu"
     <<: *binary_mac_upload
 
-  binary_macos_wheel_3.5_cpu_upload:
+  binary_macos_wheel_3_5_cpu_upload:
     environment:
       BUILD_ENVIRONMENT: "wheel 3.5 cpu"
     <<: *binary_mac_upload
 
-  binary_macos_wheel_3.6_cpu_upload:
+  binary_macos_wheel_3_6_cpu_upload:
     environment:
       BUILD_ENVIRONMENT: "wheel 3.6 cpu"
     <<: *binary_mac_upload
 
-  binary_macos_wheel_3.7_cpu_upload:
+  binary_macos_wheel_3_7_cpu_upload:
     environment:
       BUILD_ENVIRONMENT: "wheel 3.7 cpu"
     <<: *binary_mac_upload
 
-  binary_macos_conda_2.7_cpu_upload:
+  binary_macos_conda_2_7_cpu_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cpu"
     <<: *binary_mac_upload
 
-  binary_macos_conda_3.5_cpu_upload:
+  binary_macos_conda_3_5_cpu_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cpu"
     <<: *binary_mac_upload
 
-  binary_macos_conda_3.6_cpu_upload:
+  binary_macos_conda_3_6_cpu_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cpu"
     <<: *binary_mac_upload
 
-  binary_macos_conda_3.7_cpu_upload:
+  binary_macos_conda_3_7_cpu_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cpu"
     <<: *binary_mac_upload
 
-  binary_macos_libtorch_2.7_cpu_upload:
+  binary_macos_libtorch_2_7_cpu_upload:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7 cpu"
     <<: *binary_mac_upload
@@ -2754,37 +2754,37 @@ jobs:
 ##############################################################################
 # Smoke test specs individual job specifications
 ##############################################################################
-  smoke_linux_manywheel_2.7m_cpu_devtoolset7:
+  smoke_linux_manywheel_2_7m_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7mu_cpu_devtoolset7:
+  smoke_linux_manywheel_2_7mu_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.5m_cpu_devtoolset7:
+  smoke_linux_manywheel_3_5m_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.6m_cpu_devtoolset7:
+  smoke_linux_manywheel_3_6m_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.7m_cpu_devtoolset7:
+  smoke_linux_manywheel_3_7m_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7m_cu92_devtoolset7:
+  smoke_linux_manywheel_2_7m_cu92_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda92"
@@ -2792,7 +2792,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7mu_cu92_devtoolset7:
+  smoke_linux_manywheel_2_7mu_cu92_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda92"
@@ -2800,7 +2800,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.5m_cu92_devtoolset7:
+  smoke_linux_manywheel_3_5m_cu92_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda92"
@@ -2808,7 +2808,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.6m_cu92_devtoolset7:
+  smoke_linux_manywheel_3_6m_cu92_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda92"
@@ -2816,7 +2816,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.7m_cu92_devtoolset7:
+  smoke_linux_manywheel_3_7m_cu92_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda92"
@@ -2824,7 +2824,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7m_cu100_devtoolset7:
+  smoke_linux_manywheel_2_7m_cu100_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
@@ -2832,7 +2832,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7mu_cu100_devtoolset7:
+  smoke_linux_manywheel_2_7mu_cu100_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
@@ -2840,7 +2840,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.5m_cu100_devtoolset7:
+  smoke_linux_manywheel_3_5m_cu100_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
@@ -2848,7 +2848,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.6m_cu100_devtoolset7:
+  smoke_linux_manywheel_3_6m_cu100_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
@@ -2856,7 +2856,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.7m_cu100_devtoolset7:
+  smoke_linux_manywheel_3_7m_cu100_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
@@ -2864,31 +2864,31 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_conda_2.7_cpu_devtoolset7:
+  smoke_linux_conda_2_7_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cpu devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.5_cpu_devtoolset7:
+  smoke_linux_conda_3_5_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cpu devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.6_cpu_devtoolset7:
+  smoke_linux_conda_3_6_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cpu devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.7_cpu_devtoolset7:
+  smoke_linux_conda_3_7_cpu_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cpu devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *smoke_linux_test
 
-  smoke_linux_conda_2.7_cu92_devtoolset7:
+  smoke_linux_conda_2_7_cu92_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2896,7 +2896,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.5_cu92_devtoolset7:
+  smoke_linux_conda_3_5_cu92_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2904,7 +2904,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.6_cu92_devtoolset7:
+  smoke_linux_conda_3_6_cu92_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2912,7 +2912,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.7_cu92_devtoolset7:
+  smoke_linux_conda_3_7_cu92_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cu92 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2920,7 +2920,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_conda_2.7_cu100_devtoolset7:
+  smoke_linux_conda_2_7_cu100_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2928,7 +2928,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.5_cu100_devtoolset7:
+  smoke_linux_conda_3_5_cu100_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2936,7 +2936,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.6_cu100_devtoolset7:
+  smoke_linux_conda_3_6_cu100_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2944,7 +2944,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.7_cu100_devtoolset7:
+  smoke_linux_conda_3_7_cu100_devtoolset7:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/conda-cuda"
@@ -2952,35 +2952,35 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps:
+  smoke_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps:
+  smoke_linux_libtorch_2_7m_cpu_devtoolset7_shared-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps:
+  smoke_linux_libtorch_2_7m_cpu_devtoolset7_static-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps:
+  smoke_linux_libtorch_2_7m_cpu_devtoolset7_static-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps:
+  smoke_linux_libtorch_2_7m_cu92_devtoolset7_shared-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -2989,7 +2989,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps:
+  smoke_linux_libtorch_2_7m_cu92_devtoolset7_shared-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -2998,7 +2998,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps:
+  smoke_linux_libtorch_2_7m_cu92_devtoolset7_static-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -3007,7 +3007,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps:
+  smoke_linux_libtorch_2_7m_cu92_devtoolset7_static-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -3016,7 +3016,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps:
+  smoke_linux_libtorch_2_7m_cu100_devtoolset7_shared-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -3025,7 +3025,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps:
+  smoke_linux_libtorch_2_7m_cu100_devtoolset7_shared-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -3034,7 +3034,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps:
+  smoke_linux_libtorch_2_7m_cu100_devtoolset7_static-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -3043,7 +3043,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps:
+  smoke_linux_libtorch_2_7m_cu100_devtoolset7_static-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -3052,35 +3052,35 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps:
+  smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
       DOCKER_IMAGE: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-without-deps:
+  smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
       DOCKER_IMAGE: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-with-deps:
+  smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
       DOCKER_IMAGE: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-without-deps:
+  smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
       DOCKER_IMAGE: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-with-deps:
+  smoke_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -3089,7 +3089,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-without-deps:
+  smoke_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -3098,7 +3098,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-with-deps:
+  smoke_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -3107,7 +3107,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-without-deps:
+  smoke_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -3116,7 +3116,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-with-deps:
+  smoke_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-with-deps"
@@ -3125,7 +3125,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-without-deps:
+  smoke_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "shared-without-deps"
@@ -3134,7 +3134,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-with-deps:
+  smoke_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-with-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-with-deps"
@@ -3143,7 +3143,7 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-without-deps:
+  smoke_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-without-deps:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
       LIBTORCH_VARIANT: "static-without-deps"
@@ -3152,47 +3152,47 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_macos_wheel_2.7_cpu:
+  smoke_macos_wheel_2_7_cpu:
     environment:
       BUILD_ENVIRONMENT: "wheel 2.7 cpu"
     <<: *smoke_mac_test
 
-  smoke_macos_wheel_3.5_cpu:
+  smoke_macos_wheel_3_5_cpu:
     environment:
       BUILD_ENVIRONMENT: "wheel 3.5 cpu"
     <<: *smoke_mac_test
 
-  smoke_macos_wheel_3.6_cpu:
+  smoke_macos_wheel_3_6_cpu:
     environment:
       BUILD_ENVIRONMENT: "wheel 3.6 cpu"
     <<: *smoke_mac_test
 
-  smoke_macos_wheel_3.7_cpu:
+  smoke_macos_wheel_3_7_cpu:
     environment:
       BUILD_ENVIRONMENT: "wheel 3.7 cpu"
     <<: *smoke_mac_test
 
-  smoke_macos_conda_2.7_cpu:
+  smoke_macos_conda_2_7_cpu:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cpu"
     <<: *smoke_mac_test
 
-  smoke_macos_conda_3.5_cpu:
+  smoke_macos_conda_3_5_cpu:
     environment:
       BUILD_ENVIRONMENT: "conda 3.5 cpu"
     <<: *smoke_mac_test
 
-  smoke_macos_conda_3.6_cpu:
+  smoke_macos_conda_3_6_cpu:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cpu"
     <<: *smoke_mac_test
 
-  smoke_macos_conda_3.7_cpu:
+  smoke_macos_conda_3_7_cpu:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cpu"
     <<: *smoke_mac_test
 
-  smoke_macos_libtorch_2.7_cpu:
+  smoke_macos_libtorch_2_7_cpu:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7 cpu"
     <<: *smoke_mac_test
@@ -3678,184 +3678,184 @@ workflows:
                 - master
     jobs:
       - setup
-      - smoke_linux_manywheel_2.7m_cpu_devtoolset7:
+      - smoke_linux_manywheel_2_7m_cpu_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_2.7mu_cpu_devtoolset7:
+      - smoke_linux_manywheel_2_7mu_cpu_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_3.5m_cpu_devtoolset7:
+      - smoke_linux_manywheel_3_5m_cpu_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_3.6m_cpu_devtoolset7:
+      - smoke_linux_manywheel_3_6m_cpu_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_3.7m_cpu_devtoolset7:
+      - smoke_linux_manywheel_3_7m_cpu_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_2.7m_cu92_devtoolset7:
+      - smoke_linux_manywheel_2_7m_cu92_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_2.7mu_cu92_devtoolset7:
+      - smoke_linux_manywheel_2_7mu_cu92_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_3.5m_cu92_devtoolset7:
+      - smoke_linux_manywheel_3_5m_cu92_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_3.6m_cu92_devtoolset7:
+      - smoke_linux_manywheel_3_6m_cu92_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_3.7m_cu92_devtoolset7:
+      - smoke_linux_manywheel_3_7m_cu92_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_2.7m_cu100_devtoolset7:
+      - smoke_linux_manywheel_2_7m_cu100_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_2.7mu_cu100_devtoolset7:
+      - smoke_linux_manywheel_2_7mu_cu100_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_3.5m_cu100_devtoolset7:
+      - smoke_linux_manywheel_3_5m_cu100_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_3.6m_cu100_devtoolset7:
+      - smoke_linux_manywheel_3_6m_cu100_devtoolset7:
           requires:
             - setup
-      - smoke_linux_manywheel_3.7m_cu100_devtoolset7:
+      - smoke_linux_manywheel_3_7m_cu100_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_2.7_cpu_devtoolset7:
+      - smoke_linux_conda_2_7_cpu_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_3.5_cpu_devtoolset7:
+      - smoke_linux_conda_3_5_cpu_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_3.6_cpu_devtoolset7:
+      - smoke_linux_conda_3_6_cpu_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_3.7_cpu_devtoolset7:
+      - smoke_linux_conda_3_7_cpu_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_2.7_cu92_devtoolset7:
+      - smoke_linux_conda_2_7_cu92_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_3.5_cu92_devtoolset7:
+      - smoke_linux_conda_3_5_cu92_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_3.6_cu92_devtoolset7:
+      - smoke_linux_conda_3_6_cu92_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_3.7_cu92_devtoolset7:
+      - smoke_linux_conda_3_7_cu92_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_2.7_cu100_devtoolset7:
+      - smoke_linux_conda_2_7_cu100_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_3.5_cu100_devtoolset7:
+      - smoke_linux_conda_3_5_cu100_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_3.6_cu100_devtoolset7:
+      - smoke_linux_conda_3_6_cu100_devtoolset7:
           requires:
             - setup
-      - smoke_linux_conda_3.7_cu100_devtoolset7:
+      - smoke_linux_conda_3_7_cu100_devtoolset7:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps:
+      - smoke_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps:
+      - smoke_linux_libtorch_2_7m_cpu_devtoolset7_shared-without-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps:
+      - smoke_linux_libtorch_2_7m_cpu_devtoolset7_static-with-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps:
+      - smoke_linux_libtorch_2_7m_cpu_devtoolset7_static-without-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps:
+      - smoke_linux_libtorch_2_7m_cu92_devtoolset7_shared-with-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps:
+      - smoke_linux_libtorch_2_7m_cu92_devtoolset7_shared-without-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps:
+      - smoke_linux_libtorch_2_7m_cu92_devtoolset7_static-with-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps:
+      - smoke_linux_libtorch_2_7m_cu92_devtoolset7_static-without-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps:
+      - smoke_linux_libtorch_2_7m_cu100_devtoolset7_shared-with-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps:
+      - smoke_linux_libtorch_2_7m_cu100_devtoolset7_shared-without-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps:
+      - smoke_linux_libtorch_2_7m_cu100_devtoolset7_static-with-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps:
+      - smoke_linux_libtorch_2_7m_cu100_devtoolset7_static-without-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps:
+      - smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-without-deps:
+      - smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-without-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-with-deps:
+      - smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-with-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-without-deps:
+      - smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-without-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-with-deps:
+      - smoke_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-with-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-without-deps:
+      - smoke_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-without-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-with-deps:
+      - smoke_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-with-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-without-deps:
+      - smoke_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-without-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-with-deps:
+      - smoke_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-with-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-without-deps:
+      - smoke_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-without-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-with-deps:
+      - smoke_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-with-deps:
           requires:
             - setup
-      - smoke_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-without-deps:
+      - smoke_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-without-deps:
           requires:
             - setup
-      - smoke_macos_wheel_2.7_cpu:
+      - smoke_macos_wheel_2_7_cpu:
           requires:
             - setup
-      - smoke_macos_wheel_3.5_cpu:
+      - smoke_macos_wheel_3_5_cpu:
           requires:
             - setup
-      - smoke_macos_wheel_3.6_cpu:
+      - smoke_macos_wheel_3_6_cpu:
           requires:
             - setup
-      - smoke_macos_wheel_3.7_cpu:
+      - smoke_macos_wheel_3_7_cpu:
           requires:
             - setup
-      - smoke_macos_conda_2.7_cpu:
+      - smoke_macos_conda_2_7_cpu:
           requires:
             - setup
-      - smoke_macos_conda_3.5_cpu:
+      - smoke_macos_conda_3_5_cpu:
           requires:
             - setup
-      - smoke_macos_conda_3.6_cpu:
+      - smoke_macos_conda_3_6_cpu:
           requires:
             - setup
-      - smoke_macos_conda_3.7_cpu:
+      - smoke_macos_conda_3_7_cpu:
           requires:
             - setup
-      - smoke_macos_libtorch_2.7_cpu:
+      - smoke_macos_libtorch_2_7_cpu:
           requires:
             - setup
 
@@ -3872,394 +3872,394 @@ workflows:
                 - master
     jobs:
       - setup
-      - binary_linux_manywheel_2.7m_cpu_devtoolset7_build:
+      - binary_linux_manywheel_2_7m_cpu_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_2.7mu_cpu_devtoolset7_build:
+      - binary_linux_manywheel_2_7mu_cpu_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.5m_cpu_devtoolset7_build:
+      - binary_linux_manywheel_3_5m_cpu_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.6m_cpu_devtoolset7_build:
+      - binary_linux_manywheel_3_6m_cpu_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.7m_cpu_devtoolset7_build:
+      - binary_linux_manywheel_3_7m_cpu_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_2.7m_cu92_devtoolset7_build:
+      - binary_linux_manywheel_2_7m_cu92_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_2.7mu_cu92_devtoolset7_build:
+      - binary_linux_manywheel_2_7mu_cu92_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.5m_cu92_devtoolset7_build:
+      - binary_linux_manywheel_3_5m_cu92_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.6m_cu92_devtoolset7_build:
+      - binary_linux_manywheel_3_6m_cu92_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.7m_cu92_devtoolset7_build:
+      - binary_linux_manywheel_3_7m_cu92_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_2.7m_cu100_devtoolset7_build:
+      - binary_linux_manywheel_2_7m_cu100_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_2.7mu_cu100_devtoolset7_build:
+      - binary_linux_manywheel_2_7mu_cu100_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.5m_cu100_devtoolset7_build:
+      - binary_linux_manywheel_3_5m_cu100_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.6m_cu100_devtoolset7_build:
+      - binary_linux_manywheel_3_6m_cu100_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_manywheel_3.7m_cu100_devtoolset7_build:
+      - binary_linux_manywheel_3_7m_cu100_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_2.7_cpu_devtoolset7_build:
+      - binary_linux_conda_2_7_cpu_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_3.5_cpu_devtoolset7_build:
+      - binary_linux_conda_3_5_cpu_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_3.6_cpu_devtoolset7_build:
+      - binary_linux_conda_3_6_cpu_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_3.7_cpu_devtoolset7_build:
+      - binary_linux_conda_3_7_cpu_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_2.7_cu92_devtoolset7_build:
+      - binary_linux_conda_2_7_cu92_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_3.5_cu92_devtoolset7_build:
+      - binary_linux_conda_3_5_cu92_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_3.6_cu92_devtoolset7_build:
+      - binary_linux_conda_3_6_cu92_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_3.7_cu92_devtoolset7_build:
+      - binary_linux_conda_3_7_cu92_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_2.7_cu100_devtoolset7_build:
+      - binary_linux_conda_2_7_cu100_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_3.5_cu100_devtoolset7_build:
+      - binary_linux_conda_3_5_cu100_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_3.6_cu100_devtoolset7_build:
+      - binary_linux_conda_3_6_cu100_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_conda_3.7_cu100_devtoolset7_build:
+      - binary_linux_conda_3_7_cu100_devtoolset7_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_build:
+      - binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_build:
+      - binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_build:
+      - binary_linux_libtorch_2_7m_cpu_devtoolset7_static-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_build:
+      - binary_linux_libtorch_2_7m_cpu_devtoolset7_static-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_build:
+      - binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps_build:
+      - binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps_build:
+      - binary_linux_libtorch_2_7m_cu92_devtoolset7_static-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_build:
+      - binary_linux_libtorch_2_7m_cu92_devtoolset7_static-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_build:
+      - binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_build:
+      - binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_build:
+      - binary_linux_libtorch_2_7m_cu100_devtoolset7_static-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_build:
+      - binary_linux_libtorch_2_7m_cu100_devtoolset7_static-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_build:
+      - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-without-deps_build:
+      - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-with-deps_build:
+      - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-without-deps_build:
+      - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-with-deps_build:
+      - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-without-deps_build:
+      - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-with-deps_build:
+      - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-without-deps_build:
+      - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-with-deps_build:
+      - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-without-deps_build:
+      - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-without-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-with-deps_build:
+      - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-with-deps_build:
           requires:
             - setup
-      - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-without-deps_build:
+      - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-without-deps_build:
           requires:
             - setup
-      - binary_macos_wheel_2.7_cpu_build:
+      - binary_macos_wheel_2_7_cpu_build:
           requires:
             - setup
-      - binary_macos_wheel_3.5_cpu_build:
+      - binary_macos_wheel_3_5_cpu_build:
           requires:
             - setup
-      - binary_macos_wheel_3.6_cpu_build:
+      - binary_macos_wheel_3_6_cpu_build:
           requires:
             - setup
-      - binary_macos_wheel_3.7_cpu_build:
+      - binary_macos_wheel_3_7_cpu_build:
           requires:
             - setup
-      - binary_macos_conda_2.7_cpu_build:
+      - binary_macos_conda_2_7_cpu_build:
           requires:
             - setup
-      - binary_macos_conda_3.5_cpu_build:
+      - binary_macos_conda_3_5_cpu_build:
           requires:
             - setup
-      - binary_macos_conda_3.6_cpu_build:
+      - binary_macos_conda_3_6_cpu_build:
           requires:
             - setup
-      - binary_macos_conda_3.7_cpu_build:
+      - binary_macos_conda_3_7_cpu_build:
           requires:
             - setup
-      - binary_macos_libtorch_2.7_cpu_build:
+      - binary_macos_libtorch_2_7_cpu_build:
           requires:
             - setup
 
 ##############################################################################
 # Nightly tests
 ##############################################################################
-      - binary_linux_manywheel_2.7m_cpu_devtoolset7_test:
+      - binary_linux_manywheel_2_7m_cpu_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_2.7m_cpu_devtoolset7_build
-      - binary_linux_manywheel_2.7mu_cpu_devtoolset7_test:
+            - binary_linux_manywheel_2_7m_cpu_devtoolset7_build
+      - binary_linux_manywheel_2_7mu_cpu_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_2.7mu_cpu_devtoolset7_build
-      - binary_linux_manywheel_3.5m_cpu_devtoolset7_test:
+            - binary_linux_manywheel_2_7mu_cpu_devtoolset7_build
+      - binary_linux_manywheel_3_5m_cpu_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.5m_cpu_devtoolset7_build
-      - binary_linux_manywheel_3.6m_cpu_devtoolset7_test:
+            - binary_linux_manywheel_3_5m_cpu_devtoolset7_build
+      - binary_linux_manywheel_3_6m_cpu_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.6m_cpu_devtoolset7_build
-      - binary_linux_manywheel_3.7m_cpu_devtoolset7_test:
+            - binary_linux_manywheel_3_6m_cpu_devtoolset7_build
+      - binary_linux_manywheel_3_7m_cpu_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.7m_cpu_devtoolset7_build
-      - binary_linux_manywheel_2.7m_cu92_devtoolset7_test:
+            - binary_linux_manywheel_3_7m_cpu_devtoolset7_build
+      - binary_linux_manywheel_2_7m_cu92_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_2.7m_cu92_devtoolset7_build
-      - binary_linux_manywheel_2.7mu_cu92_devtoolset7_test:
+            - binary_linux_manywheel_2_7m_cu92_devtoolset7_build
+      - binary_linux_manywheel_2_7mu_cu92_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_2.7mu_cu92_devtoolset7_build
-      - binary_linux_manywheel_3.5m_cu92_devtoolset7_test:
+            - binary_linux_manywheel_2_7mu_cu92_devtoolset7_build
+      - binary_linux_manywheel_3_5m_cu92_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.5m_cu92_devtoolset7_build
-      - binary_linux_manywheel_3.6m_cu92_devtoolset7_test:
+            - binary_linux_manywheel_3_5m_cu92_devtoolset7_build
+      - binary_linux_manywheel_3_6m_cu92_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.6m_cu92_devtoolset7_build
-      - binary_linux_manywheel_3.7m_cu92_devtoolset7_test:
+            - binary_linux_manywheel_3_6m_cu92_devtoolset7_build
+      - binary_linux_manywheel_3_7m_cu92_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.7m_cu92_devtoolset7_build
-      - binary_linux_manywheel_2.7m_cu100_devtoolset7_test:
+            - binary_linux_manywheel_3_7m_cu92_devtoolset7_build
+      - binary_linux_manywheel_2_7m_cu100_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_2.7m_cu100_devtoolset7_build
-      - binary_linux_manywheel_2.7mu_cu100_devtoolset7_test:
+            - binary_linux_manywheel_2_7m_cu100_devtoolset7_build
+      - binary_linux_manywheel_2_7mu_cu100_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_2.7mu_cu100_devtoolset7_build
-      - binary_linux_manywheel_3.5m_cu100_devtoolset7_test:
+            - binary_linux_manywheel_2_7mu_cu100_devtoolset7_build
+      - binary_linux_manywheel_3_5m_cu100_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.5m_cu100_devtoolset7_build
-      - binary_linux_manywheel_3.6m_cu100_devtoolset7_test:
+            - binary_linux_manywheel_3_5m_cu100_devtoolset7_build
+      - binary_linux_manywheel_3_6m_cu100_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.6m_cu100_devtoolset7_build
-      - binary_linux_manywheel_3.7m_cu100_devtoolset7_test:
+            - binary_linux_manywheel_3_6m_cu100_devtoolset7_build
+      - binary_linux_manywheel_3_7m_cu100_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_manywheel_3.7m_cu100_devtoolset7_build
-      - binary_linux_conda_2.7_cpu_devtoolset7_test:
+            - binary_linux_manywheel_3_7m_cu100_devtoolset7_build
+      - binary_linux_conda_2_7_cpu_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_2.7_cpu_devtoolset7_build
-      - binary_linux_conda_3.5_cpu_devtoolset7_test:
+            - binary_linux_conda_2_7_cpu_devtoolset7_build
+      - binary_linux_conda_3_5_cpu_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_3.5_cpu_devtoolset7_build
-      - binary_linux_conda_3.6_cpu_devtoolset7_test:
+            - binary_linux_conda_3_5_cpu_devtoolset7_build
+      - binary_linux_conda_3_6_cpu_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_3.6_cpu_devtoolset7_build
-      - binary_linux_conda_3.7_cpu_devtoolset7_test:
+            - binary_linux_conda_3_6_cpu_devtoolset7_build
+      - binary_linux_conda_3_7_cpu_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_3.7_cpu_devtoolset7_build
-      - binary_linux_conda_2.7_cu92_devtoolset7_test:
+            - binary_linux_conda_3_7_cpu_devtoolset7_build
+      - binary_linux_conda_2_7_cu92_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_2.7_cu92_devtoolset7_build
-      - binary_linux_conda_3.5_cu92_devtoolset7_test:
+            - binary_linux_conda_2_7_cu92_devtoolset7_build
+      - binary_linux_conda_3_5_cu92_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_3.5_cu92_devtoolset7_build
-      - binary_linux_conda_3.6_cu92_devtoolset7_test:
+            - binary_linux_conda_3_5_cu92_devtoolset7_build
+      - binary_linux_conda_3_6_cu92_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_3.6_cu92_devtoolset7_build
-      - binary_linux_conda_3.7_cu92_devtoolset7_test:
+            - binary_linux_conda_3_6_cu92_devtoolset7_build
+      - binary_linux_conda_3_7_cu92_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_3.7_cu92_devtoolset7_build
-      - binary_linux_conda_2.7_cu100_devtoolset7_test:
+            - binary_linux_conda_3_7_cu92_devtoolset7_build
+      - binary_linux_conda_2_7_cu100_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_2.7_cu100_devtoolset7_build
-      - binary_linux_conda_3.5_cu100_devtoolset7_test:
+            - binary_linux_conda_2_7_cu100_devtoolset7_build
+      - binary_linux_conda_3_5_cu100_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_3.5_cu100_devtoolset7_build
-      - binary_linux_conda_3.6_cu100_devtoolset7_test:
+            - binary_linux_conda_3_5_cu100_devtoolset7_build
+      - binary_linux_conda_3_6_cu100_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_3.6_cu100_devtoolset7_build
-      - binary_linux_conda_3.7_cu100_devtoolset7_test:
+            - binary_linux_conda_3_6_cu100_devtoolset7_build
+      - binary_linux_conda_3_7_cu100_devtoolset7_test:
           requires:
             - setup
-            - binary_linux_conda_3.7_cu100_devtoolset7_build
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_test:
+            - binary_linux_conda_3_7_cu100_devtoolset7_build
+      - binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_build
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_test:
+            - binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_build
+      - binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-without-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_build
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_test:
+            - binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-without-deps_build
+      - binary_linux_libtorch_2_7m_cpu_devtoolset7_static-with-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_build
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_test:
+            - binary_linux_libtorch_2_7m_cpu_devtoolset7_static-with-deps_build
+      - binary_linux_libtorch_2_7m_cpu_devtoolset7_static-without-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_build
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_test:
+            - binary_linux_libtorch_2_7m_cpu_devtoolset7_static-without-deps_build
+      - binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-with-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_build
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps_test:
+            - binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-with-deps_build
+      - binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-without-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps_build
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps_test:
+            - binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-without-deps_build
+      - binary_linux_libtorch_2_7m_cu92_devtoolset7_static-with-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps_build
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_test:
+            - binary_linux_libtorch_2_7m_cu92_devtoolset7_static-with-deps_build
+      - binary_linux_libtorch_2_7m_cu92_devtoolset7_static-without-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_build
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_test:
+            - binary_linux_libtorch_2_7m_cu92_devtoolset7_static-without-deps_build
+      - binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-with-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_build
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_test:
+            - binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-with-deps_build
+      - binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-without-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_build
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_test:
+            - binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-without-deps_build
+      - binary_linux_libtorch_2_7m_cu100_devtoolset7_static-with-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_build
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_test:
+            - binary_linux_libtorch_2_7m_cu100_devtoolset7_static-with-deps_build
+      - binary_linux_libtorch_2_7m_cu100_devtoolset7_static-without-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_build
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_test:
+            - binary_linux_libtorch_2_7m_cu100_devtoolset7_static-without-deps_build
+      - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_build
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-without-deps_test:
+            - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
+      - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-without-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-without-deps_build
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-with-deps_test:
+            - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-without-deps_build
+      - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-with-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-with-deps_build
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-without-deps_test:
+            - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-with-deps_build
+      - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-without-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-without-deps_build
-      - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-with-deps_test:
+            - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-without-deps_build
+      - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-with-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-with-deps_build
-      - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-without-deps_test:
+            - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-with-deps_build
+      - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-without-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-without-deps_build
-      - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-with-deps_test:
+            - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-without-deps_build
+      - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-with-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-with-deps_build
-      - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-without-deps_test:
+            - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-with-deps_build
+      - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-without-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-without-deps_build
-      - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-with-deps_test:
+            - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-without-deps_build
+      - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-with-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-with-deps_build
-      - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-without-deps_test:
+            - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-with-deps_build
+      - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-without-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-without-deps_build
-      - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-with-deps_test:
+            - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-without-deps_build
+      - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-with-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-with-deps_build
-      - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-without-deps_test:
+            - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-with-deps_build
+      - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-without-deps_test:
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-without-deps_build
+            - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-without-deps_build
       #- binary_linux_libtorch_2.7m_cpu_test:
       #    requires:
       #      - binary_linux_libtorch_2.7m_cpu_build
@@ -4271,306 +4271,306 @@ workflows:
       #      - binary_linux_libtorch_2.7m_cu100_build
 
       # Nightly uploads
-      - binary_linux_manywheel_2.7m_cpu_devtoolset7_upload:
+      - binary_linux_manywheel_2_7m_cpu_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_2.7m_cpu_devtoolset7_test
-      - binary_linux_manywheel_2.7mu_cpu_devtoolset7_upload:
+            - binary_linux_manywheel_2_7m_cpu_devtoolset7_test
+      - binary_linux_manywheel_2_7mu_cpu_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_2.7mu_cpu_devtoolset7_test
-      - binary_linux_manywheel_3.5m_cpu_devtoolset7_upload:
+            - binary_linux_manywheel_2_7mu_cpu_devtoolset7_test
+      - binary_linux_manywheel_3_5m_cpu_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_3.5m_cpu_devtoolset7_test
-      - binary_linux_manywheel_3.6m_cpu_devtoolset7_upload:
+            - binary_linux_manywheel_3_5m_cpu_devtoolset7_test
+      - binary_linux_manywheel_3_6m_cpu_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_3.6m_cpu_devtoolset7_test
-      - binary_linux_manywheel_3.7m_cpu_devtoolset7_upload:
+            - binary_linux_manywheel_3_6m_cpu_devtoolset7_test
+      - binary_linux_manywheel_3_7m_cpu_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_3.7m_cpu_devtoolset7_test
-      - binary_linux_manywheel_2.7m_cu92_devtoolset7_upload:
+            - binary_linux_manywheel_3_7m_cpu_devtoolset7_test
+      - binary_linux_manywheel_2_7m_cu92_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_2.7m_cu92_devtoolset7_test
-      - binary_linux_manywheel_2.7mu_cu92_devtoolset7_upload:
+            - binary_linux_manywheel_2_7m_cu92_devtoolset7_test
+      - binary_linux_manywheel_2_7mu_cu92_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_2.7mu_cu92_devtoolset7_test
-      - binary_linux_manywheel_3.5m_cu92_devtoolset7_upload:
+            - binary_linux_manywheel_2_7mu_cu92_devtoolset7_test
+      - binary_linux_manywheel_3_5m_cu92_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_3.5m_cu92_devtoolset7_test
-      - binary_linux_manywheel_3.6m_cu92_devtoolset7_upload:
+            - binary_linux_manywheel_3_5m_cu92_devtoolset7_test
+      - binary_linux_manywheel_3_6m_cu92_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_3.6m_cu92_devtoolset7_test
-      - binary_linux_manywheel_3.7m_cu92_devtoolset7_upload:
+            - binary_linux_manywheel_3_6m_cu92_devtoolset7_test
+      - binary_linux_manywheel_3_7m_cu92_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_3.7m_cu92_devtoolset7_test
-      - binary_linux_manywheel_2.7m_cu100_devtoolset7_upload:
+            - binary_linux_manywheel_3_7m_cu92_devtoolset7_test
+      - binary_linux_manywheel_2_7m_cu100_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_2.7m_cu100_devtoolset7_test
-      - binary_linux_manywheel_2.7mu_cu100_devtoolset7_upload:
+            - binary_linux_manywheel_2_7m_cu100_devtoolset7_test
+      - binary_linux_manywheel_2_7mu_cu100_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_2.7mu_cu100_devtoolset7_test
-      - binary_linux_manywheel_3.5m_cu100_devtoolset7_upload:
+            - binary_linux_manywheel_2_7mu_cu100_devtoolset7_test
+      - binary_linux_manywheel_3_5m_cu100_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_3.5m_cu100_devtoolset7_test
-      - binary_linux_manywheel_3.6m_cu100_devtoolset7_upload:
+            - binary_linux_manywheel_3_5m_cu100_devtoolset7_test
+      - binary_linux_manywheel_3_6m_cu100_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_3.6m_cu100_devtoolset7_test
-      - binary_linux_manywheel_3.7m_cu100_devtoolset7_upload:
+            - binary_linux_manywheel_3_6m_cu100_devtoolset7_test
+      - binary_linux_manywheel_3_7m_cu100_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_manywheel_3.7m_cu100_devtoolset7_test
-      - binary_linux_conda_2.7_cpu_devtoolset7_upload:
+            - binary_linux_manywheel_3_7m_cu100_devtoolset7_test
+      - binary_linux_conda_2_7_cpu_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_2.7_cpu_devtoolset7_test
-      - binary_linux_conda_3.5_cpu_devtoolset7_upload:
+            - binary_linux_conda_2_7_cpu_devtoolset7_test
+      - binary_linux_conda_3_5_cpu_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_3.5_cpu_devtoolset7_test
-      - binary_linux_conda_3.6_cpu_devtoolset7_upload:
+            - binary_linux_conda_3_5_cpu_devtoolset7_test
+      - binary_linux_conda_3_6_cpu_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_3.6_cpu_devtoolset7_test
-      - binary_linux_conda_3.7_cpu_devtoolset7_upload:
+            - binary_linux_conda_3_6_cpu_devtoolset7_test
+      - binary_linux_conda_3_7_cpu_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_3.7_cpu_devtoolset7_test
-      - binary_linux_conda_2.7_cu92_devtoolset7_upload:
+            - binary_linux_conda_3_7_cpu_devtoolset7_test
+      - binary_linux_conda_2_7_cu92_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_2.7_cu92_devtoolset7_test
-      - binary_linux_conda_3.5_cu92_devtoolset7_upload:
+            - binary_linux_conda_2_7_cu92_devtoolset7_test
+      - binary_linux_conda_3_5_cu92_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_3.5_cu92_devtoolset7_test
-      - binary_linux_conda_3.6_cu92_devtoolset7_upload:
+            - binary_linux_conda_3_5_cu92_devtoolset7_test
+      - binary_linux_conda_3_6_cu92_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_3.6_cu92_devtoolset7_test
-      - binary_linux_conda_3.7_cu92_devtoolset7_upload:
+            - binary_linux_conda_3_6_cu92_devtoolset7_test
+      - binary_linux_conda_3_7_cu92_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_3.7_cu92_devtoolset7_test
-      - binary_linux_conda_2.7_cu100_devtoolset7_upload:
+            - binary_linux_conda_3_7_cu92_devtoolset7_test
+      - binary_linux_conda_2_7_cu100_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_2.7_cu100_devtoolset7_test
-      - binary_linux_conda_3.5_cu100_devtoolset7_upload:
+            - binary_linux_conda_2_7_cu100_devtoolset7_test
+      - binary_linux_conda_3_5_cu100_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_3.5_cu100_devtoolset7_test
-      - binary_linux_conda_3.6_cu100_devtoolset7_upload:
+            - binary_linux_conda_3_5_cu100_devtoolset7_test
+      - binary_linux_conda_3_6_cu100_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_3.6_cu100_devtoolset7_test
-      - binary_linux_conda_3.7_cu100_devtoolset7_upload:
+            - binary_linux_conda_3_6_cu100_devtoolset7_test
+      - binary_linux_conda_3_7_cu100_devtoolset7_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_conda_3.7_cu100_devtoolset7_test
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_upload:
+            - binary_linux_conda_3_7_cu100_devtoolset7_test
+      - binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps_test
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_upload:
+            - binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_test
+      - binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps_test
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_upload:
+            - binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-without-deps_test
+      - binary_linux_libtorch_2_7m_cpu_devtoolset7_static-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps_test
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_upload:
+            - binary_linux_libtorch_2_7m_cpu_devtoolset7_static-with-deps_test
+      - binary_linux_libtorch_2_7m_cpu_devtoolset7_static-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps_test
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_upload:
+            - binary_linux_libtorch_2_7m_cpu_devtoolset7_static-without-deps_test
+      - binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-with-deps_test
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps_upload:
+            - binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-with-deps_test
+      - binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_devtoolset7_shared-without-deps_test
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps_upload:
+            - binary_linux_libtorch_2_7m_cu92_devtoolset7_shared-without-deps_test
+      - binary_linux_libtorch_2_7m_cu92_devtoolset7_static-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-with-deps_test
-      - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_upload:
+            - binary_linux_libtorch_2_7m_cu92_devtoolset7_static-with-deps_test
+      - binary_linux_libtorch_2_7m_cu92_devtoolset7_static-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_devtoolset7_static-without-deps_test
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_upload:
+            - binary_linux_libtorch_2_7m_cu92_devtoolset7_static-without-deps_test
+      - binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps_test
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_upload:
+            - binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-with-deps_test
+      - binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps_test
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_upload:
+            - binary_linux_libtorch_2_7m_cu100_devtoolset7_shared-without-deps_test
+      - binary_linux_libtorch_2_7m_cu100_devtoolset7_static-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps_test
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_upload:
+            - binary_linux_libtorch_2_7m_cu100_devtoolset7_static-with-deps_test
+      - binary_linux_libtorch_2_7m_cu100_devtoolset7_static-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps_test
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_upload:
+            - binary_linux_libtorch_2_7m_cu100_devtoolset7_static-without-deps_test
+      - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-with-deps_test
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-without-deps_upload:
+            - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test
+      - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_shared-without-deps_test
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-with-deps_upload:
+            - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-without-deps_test
+      - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-with-deps_test
-      - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-without-deps_upload:
+            - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-with-deps_test
+      - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cpu_gcc5.4_cxx11-abi_static-without-deps_test
-      - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-with-deps_upload:
+            - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_static-without-deps_test
+      - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-with-deps_test
-      - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-without-deps_upload:
+            - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-with-deps_test
+      - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_shared-without-deps_test
-      - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-with-deps_upload:
+            - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_shared-without-deps_test
+      - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-with-deps_test
-      - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-without-deps_upload:
+            - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-with-deps_test
+      - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu92_gcc5.4_cxx11-abi_static-without-deps_test
-      - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-with-deps_upload:
+            - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_static-without-deps_test
+      - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-with-deps_test
-      - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-without-deps_upload:
+            - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-with-deps_test
+      - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_shared-without-deps_test
-      - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-with-deps_upload:
+            - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_shared-without-deps_test
+      - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-with-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-with-deps_test
-      - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-without-deps_upload:
+            - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-with-deps_test
+      - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-without-deps_upload:
           context: org-member
           requires:
             - setup
-            - binary_linux_libtorch_2.7m_cu100_gcc5.4_cxx11-abi_static-without-deps_test
-      - binary_macos_wheel_2.7_cpu_upload:
+            - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_static-without-deps_test
+      - binary_macos_wheel_2_7_cpu_upload:
           context: org-member
           requires:
             - setup
-            - binary_macos_wheel_2.7_cpu_build
-      - binary_macos_wheel_3.5_cpu_upload:
+            - binary_macos_wheel_2_7_cpu_build
+      - binary_macos_wheel_3_5_cpu_upload:
           context: org-member
           requires:
             - setup
-            - binary_macos_wheel_3.5_cpu_build
-      - binary_macos_wheel_3.6_cpu_upload:
+            - binary_macos_wheel_3_5_cpu_build
+      - binary_macos_wheel_3_6_cpu_upload:
           context: org-member
           requires:
             - setup
-            - binary_macos_wheel_3.6_cpu_build
-      - binary_macos_wheel_3.7_cpu_upload:
+            - binary_macos_wheel_3_6_cpu_build
+      - binary_macos_wheel_3_7_cpu_upload:
           context: org-member
           requires:
             - setup
-            - binary_macos_wheel_3.7_cpu_build
-      - binary_macos_conda_2.7_cpu_upload:
+            - binary_macos_wheel_3_7_cpu_build
+      - binary_macos_conda_2_7_cpu_upload:
           context: org-member
           requires:
             - setup
-            - binary_macos_conda_2.7_cpu_build
-      - binary_macos_conda_3.5_cpu_upload:
+            - binary_macos_conda_2_7_cpu_build
+      - binary_macos_conda_3_5_cpu_upload:
           context: org-member
           requires:
             - setup
-            - binary_macos_conda_3.5_cpu_build
-      - binary_macos_conda_3.6_cpu_upload:
+            - binary_macos_conda_3_5_cpu_build
+      - binary_macos_conda_3_6_cpu_upload:
           context: org-member
           requires:
             - setup
-            - binary_macos_conda_3.6_cpu_build
-      - binary_macos_conda_3.7_cpu_upload:
+            - binary_macos_conda_3_6_cpu_build
+      - binary_macos_conda_3_7_cpu_upload:
           context: org-member
           requires:
             - setup
-            - binary_macos_conda_3.7_cpu_build
-      - binary_macos_libtorch_2.7_cpu_upload:
+            - binary_macos_conda_3_7_cpu_build
+      - binary_macos_libtorch_2_7_cpu_upload:
           context: org-member
           requires:
             - setup
-            - binary_macos_libtorch_2.7_cpu_build
+            - binary_macos_libtorch_2_7_cpu_build
 
   # Scheduled to run 4 hours after the binary jobs start
   # These jobs need to run after all the binary jobs run, regardless of if the
