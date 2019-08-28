@@ -180,7 +180,7 @@ class TestCppApiParity(common.TestCase):
     def _test_torch_nn_module_ctor_args(self, module_name):
         python_module_class = getattr(torch.nn, module_name)
         module_metadata = torch_nn_modules.module_metadata_map[module_name]
-        cpp_default_constructor_args_str = module_metadata['cpp_default_constructor_args']
+        cpp_default_constructor_args_str = module_metadata.cpp_default_constructor_args
         if PY2:
             init_arg_spec = inspect.getargspec(python_module_class.__init__)
         else:
@@ -199,7 +199,7 @@ as the constructor of `torch.nn.{}` in Python. However, currently the C++ constr
         for arg_name, python_default_value in zip(init_kwargs, init_kwargs_defaults):
             cpp_module_option += '.{}({})'.format(arg_name, self._python_arg_to_cpp_arg(python_default_value).value)
 
-        cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + module_metadata.get('cpp_sources', '')
+        cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + module_metadata.cpp_sources
         cpp_sources += TORCH_NN_MODULE_TEST_CTOR_ARGS.substitute(
             module_name=module_name,
             module_qualified_name='torch::nn::{}'.format(module_name),
@@ -431,8 +431,8 @@ def _process_test_params(test_params_dict, module_metadata, device):
         example_inputs=example_inputs,
         has_parity=test_params_dict.get('has_parity', True),
         python_module_class=getattr(torch.nn, module_name),
-        cpp_sources=module_metadata.get('cpp_sources', ''),
-        num_attrs_recursive=module_metadata.get('num_attrs_recursive'),
+        cpp_sources=module_metadata.cpp_sources,
+        num_attrs_recursive=module_metadata.num_attrs_recursive,
         device=device,
     )
 
