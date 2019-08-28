@@ -445,7 +445,11 @@ Tensor triu_indices_cuda(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ choice ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-__global__ void generate_samples(
+__global__
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
+void generate_samples(
   int64_t *samples,
   int64_t k,
   int64_t n,
@@ -460,7 +464,11 @@ __global__ void generate_samples(
   }
 }
 
-__global__ void generate_keys(
+__global__
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
+void generate_keys(
   float *keys,
   float *weights,
   int64_t n,
@@ -475,7 +483,11 @@ __global__ void generate_keys(
   }
 }
 
-__global__ void sampling_with_replacement_kernel(
+__global__
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
+void sampling_with_replacement_kernel(
   int64_t *samples,
   float *cdf,
   int64_t n,
@@ -492,7 +504,11 @@ __global__ void sampling_with_replacement_kernel(
   }
 }
 
-__global__ void generate_reservoir(
+__global__
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
+void generate_reservoir(
   int64_t *indices,
   int64_t *samples,
   int64_t nb_iterations,
@@ -531,7 +547,11 @@ Tensor reservoir_sampling_cuda(
   auto options = x.options().dtype(at::kLong);
   dim3 threads(threadsPerBlock);
 
-  auto gen = at::get_generator_or_default<at::CUDAGenerator>(nullptr, at::cuda::detail::getDefaultCUDAGenerator());
+  auto gen = at::get_generator_or_default<at::CUDAGenerator>(
+    nullptr,
+    at::cuda::detail::getDefaultCUDAGenerator()
+  );
+
   std::pair<uint64_t, uint64_t> next_philox_seed;
   {
        // See Note [Acquire lock when using random generators]
@@ -673,7 +693,11 @@ Tensor sampling_with_replacement_cuda(
     THAssert(props != NULL);
     int threadsPerBlock = props->maxThreadsPerBlock;
 
-    auto gen = at::get_generator_or_default<at::CUDAGenerator>(nullptr, at::cuda::detail::getDefaultCUDAGenerator());
+    auto gen = at::get_generator_or_default<at::CUDAGenerator>(
+      nullptr,
+      at::cuda::detail::getDefaultCUDAGenerator()
+    );
+    
     std::pair<uint64_t, uint64_t> next_philox_seed;
     {
          // See Note [Acquire lock when using random generators]
