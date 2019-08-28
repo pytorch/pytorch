@@ -12885,12 +12885,13 @@ a")
                     a = 0
                     def backward(grad_output):
                         raise "Hi"
+                    a = a + 1
                 else:
                     return x
                 return a + 1
         ''')
         func = torch.jit.CompilationUnit(code).test_exit_pair_reset
-        self.assertEqual(func(1,), 1)
+        self.assertEqual(func(1,), 2)
         self.assertEqual(func(-1,), -1)
         FileCheck().check_count("prim::If", 2, exactly=True).check("aten::add")\
             .run(func.graph)  # if added to guard a + 1
