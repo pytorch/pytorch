@@ -1035,7 +1035,7 @@ graph(%x : Tensor,
         def get_forward(m):
             return m._c._get_method("forward")
 
-        def test_module(module):
+        def test_module(module, relu_call):
             m = torch.jit.script(module())
             observer = torch.jit.script(Observer())
 
@@ -1054,11 +1054,12 @@ graph(%x : Tensor,
                        .check_next('prim::CallMethod[name="forward"](%observer_for_') \
                        .check('ClassType<Conv2d> = prim::GetAttr[name="conv"]') \
                        .check_next('prim::CallMethod[name="forward"]') \
+                       .check(relu_call) \
                        .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                        .check_next('prim::CallMethod[name="forward"](%observer_for_') \
                        .run(str(get_forward(m).graph))
-        test_module(M)
-        test_module(M2)
+        test_module(M, 'prim::CallFunction(')
+        test_module(M2, 'prim::CallMethod[name="forward"]')
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_quant_dequant(self):
