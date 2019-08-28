@@ -282,8 +282,8 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
-// Note that if running under Python, `TORCH_WARN` routes to Python
-// warning handler which tries to acquire GIL. If someone calls `TORCH_WARN`
+// Note that if running under Python, `TORCH_WARN` routes to Python warning handler
+// which tries to acquire GIL. If someone calls the function that uses `TORCH_WARN`
 // without releasing the GIL first it will deadlock badly.
 //
 #define TORCH_WARN(...) \
@@ -292,8 +292,8 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // Report a warning to the user only once.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
-// Note that if running under Python, `TORCH_WARN_ONCE` routes to Python
-// warning handler which tries to acquire GIL. If someone calls `TORCH_WARN_ONCE`
+// Note that if running under Python, `TORCH_WARN_ONCE` routes to Python warning handler
+// which tries to acquire GIL. If someone calls the function that uses `TORCH_WARN_ONCE`
 // without releasing the GIL first it will deadlock badly.
 //
 #define TORCH_WARN_ONCE(...) \
