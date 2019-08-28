@@ -1790,6 +1790,8 @@
 ]]
 [[
   name: _th_pow
+  backends:
+    - CUDA
   cname: pow
   variants:
     - function
@@ -1804,6 +1806,8 @@
 ]]
 [[
   name: _th_pow
+  backends:
+    - CUDA
   variants:
     - function
   return: argument 0
@@ -1818,6 +1822,8 @@
 ]]
 [[
   name: _th_pow
+  backends:
+    - CUDA
   variants:
     - function
   return: argument 0
@@ -1831,6 +1837,8 @@
 ]]
 [[
   name: _th_pow_
+  backends:
+    - CUDA
   return: argument 0
   cname: pow
   variants: function
