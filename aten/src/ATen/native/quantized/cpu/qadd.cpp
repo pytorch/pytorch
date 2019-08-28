@@ -74,7 +74,8 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
       // TODO: specialize fbgemm::Quantize for a single vector and make it
       // inlineable. This could help with interleaving as suggested by the
       // TensorIterator implementations
-      return Vec::quantize(retvals, scale, zero_point);
+      auto rv = Vec::quantize(retvals, scale, zero_point);
+      return rv;
     });
   });
   return out;

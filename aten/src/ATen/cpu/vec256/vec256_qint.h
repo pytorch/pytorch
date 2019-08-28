@@ -343,12 +343,10 @@ struct Vec256QuantizedConverter {
       Vec256<float> zero_point) const {
     float_vec_return_type rv;
     for (int i = 0; i < float_num_vecs(); ++i) {
-      float float_vals[size()];
-      for (int i = 0; i < size(); ++i) {
-        float_vals[i] =
-            at::dequantize_val<T>(scale[i], zero_point[i], T(vals[i]));
+      for (int j = 0; j < 8; ++j) {
+        rv[i][j] =
+            at::dequantize_val<T>(scale[j], zero_point[j], T(vals[8 * i + j]));
       }
-      rv[i] = Vec256<float>::loadu(float_vals);
     }
     return rv;
   }

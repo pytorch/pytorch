@@ -174,8 +174,7 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
-        # for dtype in [torch.quint8, torch.qint8, torch.qint32]:
-        for dtype in [torch.qint8]:
+        for dtype in [torch.quint8, torch.qint8, torch.qint32]:
             add_relu = torch.ops.quantized.add_relu
             add = torch.ops.quantized.add
             add_out = torch.ops.quantized.add_out
@@ -227,8 +226,7 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_different_qparams(self):
-        # for dtype in [torch.quint8, torch.qint8, torch.qint32]:
-        for dtype in [torch.quint8, torch.qint8]:
+        for dtype in [torch.quint8, torch.qint8, torch.qint32]:
             add_relu = torch.ops.quantized.add_relu
             add = torch.ops.quantized.add
             add_out = torch.ops.quantized.add_out
