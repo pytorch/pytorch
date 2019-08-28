@@ -776,17 +776,28 @@ class _TestTorchMixin(torchtest):
     def test_erfc(self):
         self._test_math_by_name('erfc')
 
-    def test_erfinv(self):
-        def checkType(tensor):
-            inputValues = torch.randn(4, 4, out=tensor()).clamp(-2., 2.)
-            self.assertEqual(tensor(inputValues).erf().erfinv(), tensor(inputValues))
+    @torchtest.for_all_device_types()
+    def test_erfinv(self, device):
+        def checkType(dtype):
+            # general testing. Narrow the range to avoid accuracy issues
+            input_values = torch.randn(4, 4, dtype=dtype, device=device).clamp(-0.3, 0.3)
+            self.assertEqual(input_values.erf().erfinv(), input_values)
             # test inf
-            self.assertTrue(torch.equal(tensor([-1, 1]).erfinv(), tensor([-inf, inf])))
+            self.assertTrue(torch.equal(torch.tensor([-1, 1], dtype=dtype, device=device).erfinv(),
+                            torch.tensor([-inf, inf], dtype=dtype, device=device)))
             # test nan
-            self.assertEqual(tensor([-2, 2]).erfinv(), tensor([nan, nan]))
+            self.assertEqual(torch.tensor([-2, 2], dtype=dtype, device=device).erfinv(),
+                             torch.tensor([nan, nan], dtype=dtype, device=device))
 
-        checkType(torch.FloatTensor)
-        checkType(torch.DoubleTensor)
+        if device != 'cpu':
+            checkType(torch.half)
+        checkType(torch.float)
+        checkType(torch.double)
+
+        # double precision
+        a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
+        self.assertAlmostEqual(a[0].item(), 0.47693627620447, places=13)
+        self.assertAlmostEqual(a[1].item(), 0.90619380243682, places=13)
 
     def test_exp(self):
         def exp(x):

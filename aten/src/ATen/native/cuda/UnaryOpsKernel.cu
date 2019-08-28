@@ -63,10 +63,20 @@ void sign_kernel_cuda(TensorIterator& iter){
     }
 }
 
+// overloading erfinv and erfinvf
+template <typename scalar_t>
+__host__ __device__ static inline scalar_t erfinv_wrapper(scalar_t a) {
+  return static_cast<scalar_t>(::erfinvf(static_cast<float>(a)));
+}
+
+__host__ __device__ static inline double erfinv_wrapper(double a) {
+  return ::erfinv(a);
+}
+
 void erfinv_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "erfinv_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return erfinvf(a);
+      return erfinv_wrapper(a);
     });
   });
 }
