@@ -337,6 +337,9 @@ Tensor matmul(
     c10::optional<Tensor> out_opt,
     const Tensor& tensor1,
     const Tensor& tensor2) {
+#ifdef BUILD_NAMEDTENSOR
+  NoNamesGuard guard;
+#endif
   auto dim_tensor1 = tensor1.dim();
   auto dim_tensor2 = tensor2.dim();
   auto has_out = out_opt.has_value();
@@ -444,11 +447,24 @@ Tensor matmul(
 }
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
-  return at::native::matmul(c10::nullopt, tensor1, tensor2);
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
+#endif
+  auto result = at::native::matmul(c10::nullopt, tensor1, tensor2);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor2) {
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
+#endif
   at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
   return result;
 }
 

@@ -79,6 +79,8 @@ optional<std::vector<Dimname>> compute_baddbmm_outnames(
     TensorImpl* other,
     TensorImpl* bias);
 
+optional<std::vector<Dimname>> compute_matmul_outnames(const Tensor& self, const Tensor& other);
+
 optional<std::vector<Dimname>> compute_bmm_outnames(
     Tensor& result,
     const Tensor& self,
