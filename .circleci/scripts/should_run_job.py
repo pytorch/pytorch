@@ -11,42 +11,42 @@ import sys
 default_set = set([
     # PyTorch CPU
     # Selected oldest Python 2 version to ensure Python 2 coverage
-    'pytorch-linux-xenial-py2_7_9',
+    'pytorch-linux-xenial-py2.7.9',
     # PyTorch CUDA
     'pytorch-linux-xenial-cuda9-cudnn7-py3',
     # PyTorch ASAN
     'pytorch-linux-xenial-py3-clang5-asan',
     # PyTorch DEBUG
-    'pytorch-linux-xenial-py3_6-gcc5_4',
+    'pytorch-linux-xenial-py3.6-gcc5.4',
 
     # Caffe2 CPU
-    'caffe2-py2-mkl-ubuntu16_04',
+    'caffe2-py2-mkl-ubuntu16.04',
     # Caffe2 CUDA
-    'caffe2-py2-cuda9_1-cudnn7-ubuntu16_04',
+    'caffe2-py2-cuda9.1-cudnn7-ubuntu16.04',
     # Caffe2 ONNX
-    'caffe2-onnx-py2-gcc5-ubuntu16_04',
-    'caffe2-onnx-py3_6-clang7-ubuntu16_04',
+    'caffe2-onnx-py2-gcc5-ubuntu16.04',
+    'caffe2-onnx-py3.6-clang7-ubuntu16.04',
     # Caffe2 Clang
-    'caffe2-py2-clang7-ubuntu16_04',
+    'caffe2-py2-clang7-ubuntu16.04',
     # Caffe2 CMake
-    'caffe2-cmake-cuda9_0-cudnn7-ubuntu16_04',
+    'caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04',
 
     # Binaries
-    'manywheel 2_7mu cpu devtoolset7',
-    'libtorch 2_7m cpu devtoolset7',
-    'libtorch 2_7m cpu gcc5_4_cxx11-abi',
+    'manywheel 2.7mu cpu devtoolset7',
+    'libtorch 2.7m cpu devtoolset7',
+    'libtorch 2.7m cpu gcc5.4_cxx11-abi',
 
     # Caffe2 Android
-    'caffe2-py2-android-ubuntu16_04',
+    'caffe2-py2-android-ubuntu16.04',
     # Caffe2 OSX
-    'caffe2-py2-system-macos10_13',
+    'caffe2-py2-system-macos10.13',
     # PyTorch OSX
-    'pytorch-macos-10_13-cuda9_2-cudnn7-py3',
+    'pytorch-macos-10.13-cuda9.2-cudnn7-py3',
     # PyTorch Android
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build',
 
     # XLA
-    'pytorch-xla-linux-xenial-py3_6-clang7',
+    'pytorch-xla-linux-xenial-py3.6-clang7',
 
     # Other checks
     'pytorch-short-perf-test-gpu',
