@@ -1049,10 +1049,16 @@ class TestNamedTensor(TestCase):
                 args=(create('N:7,A:3,B:2'), create('N:7,B:2,A:5')),
                 maybe_raises_regex='with duplicate names')
 
+            # matching error (batch dimensions must be alignable)
+            self._test_name_inference(
+                torch.bmm, device=device,
+                args=(create('N:3,A:3,B:3'), create('M:3,A:3,B:3')),
+                maybe_raises_regex='do not match')
+
             # misalignment (batch dimension is getting contracted)
             self._test_name_inference(
                 torch.bmm, device=device,
-                args=(create('N:3,A:3,B:3'), create('A:3,N:3,B:3')),
+                args=(create('N:3,A:3,B:3'), create('None:3,N:3,B:3')),
                 maybe_raises_regex='Misaligned')
 
     def test_mv(self):
