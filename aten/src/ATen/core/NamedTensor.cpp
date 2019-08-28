@@ -1,8 +1,8 @@
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/C++17.h>
 
-#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 bool NamedTensorMeta::has_names() const {

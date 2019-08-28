@@ -6,7 +6,9 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
 
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
+#endif
 
 namespace at {
 namespace native {

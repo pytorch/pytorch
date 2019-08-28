@@ -4,7 +4,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Utils.h>
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
+#endif
 #include <ATen/${Generator}.h>
 #include <ATen/ExpandUtils.h>
 ${th_headers}

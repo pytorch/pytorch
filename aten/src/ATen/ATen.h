@@ -10,7 +10,9 @@
 #include <ATen/DynamicLibrary.h>
 #include <ATen/Formatting.h>
 #include <ATen/Functions.h>
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
+#endif
 #include <ATen/ScalarOps.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorGeometry.h>

@@ -2,7 +2,9 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <ATen/Config.h>
 namespace at {

@@ -1,10 +1,11 @@
 #pragma once
+#ifdef BUILD_NAMEDTENSOR
+
 #include <ATen/NamedTensor.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/DimVector.h>
 #include <functional>
 
-#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
