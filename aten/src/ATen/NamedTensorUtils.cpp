@@ -362,8 +362,9 @@ static void check_batch_and_feature_dims_are_distinct(
 static std::vector<Dimname> compute_matmul_outnames(
     DimnameList self_names,
     DimnameList other_names) {
-  TORCH_INTERNAL_ASSERT(self_names.size() >= 1);
-  TORCH_INTERNAL_ASSERT(other_names.size() >= 1);
+  TORCH_CHECK(self_names.size() >= 1 && other_names.size() >= 1,
+      "both arguments to matmul need to be at least 1D, but they are ",
+      self_names.size(), "D and ", other_names.size(), "D");
 
   check_batch_and_feature_dims_are_distinct(self_names, other_names);
 
@@ -457,6 +458,15 @@ void propagate_names_for_expand(Tensor& result, const Tensor& self) {
       self.opt_names()->end(),
       outnames.begin() + result_dim - self.dim());
   propagate_names(result, std::move(outnames), /*validate_names=*/false);
+}
+
+optional<std::vector<Dimname>> compute_matmul_outnames(
+    const Tensor& self,
+    const Tensor& other) {
+  if (!self.has_names() && !other.has_names()) {
+    return nullopt;
+  }
+  return compute_matmul_outnames(self.names(), other.names());
 }
 
 optional<std::vector<Dimname>> compute_bmm_outnames(
