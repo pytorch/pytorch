@@ -1035,7 +1035,6 @@ def whichmodule(obj):
             pass
     return '__main__'
 
-
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
     _jit_script_class_compile(qualified_name, ast, rcb)
@@ -1203,6 +1202,18 @@ def _gen_rcb(obj, _frames_up):
         return stack_rcb(name)
 
     return _rcb
+
+
+def interface(obj):
+    if not inspect.isclass(obj):
+        raise RuntimeError("interface must be applied to a class")
+    if not _is_new_style_class(obj):
+        raise RuntimeError("TorchScript interfaces must inherit from 'object'")
+    qualified_name = _qualified_name(obj)
+    ast = get_jit_class_def(obj, obj.__name__)
+    rcb = _jit_internal.createResolutionCallback(1)
+    torch._C._jit_script_interface_compile(qualified_name, ast, rcb)
+    return obj
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
@@ -1801,6 +1812,7 @@ _builtin_ops = [
     (math.radians, "aten::radians"),
     (math.ldexp, "aten::ldexp"),
     (torch.autograd.grad, "aten::grad"),
+    (torch.autograd.backward, "aten::backward"),
     (torch._C._infer_size, "aten::_infer_size"),
     (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
     (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),

@@ -88,26 +88,6 @@ void THCTensor_(cbitxor)(THCState* state, THCTensor *self_, THCTensor *src1, THC
 #endif
 }
 
-void THCTensor_(sign)(THCState* state, THCTensor* self_, THCTensor* src) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  if (self_ == src) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorSignOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src, TensorSignOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(self_, src);
-#endif
-}
-
 void THCTensor_(cmax)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self, src1, src2));
@@ -243,7 +223,6 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  atan, THCNumerics<scalar_t>::atan,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  tanh, THCNumerics<scalar_t>::tanh,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(   erf, THCNumerics<scalar_t>::erf,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  erfc, THCNumerics<scalar_t>::erfc,  Real)
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(erfinv, THCNumerics<scalar_t>::erfinv,Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC( round, THCNumerics<scalar_t>::round, Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  frac, THCNumerics<scalar_t>::frac,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cinv, THCNumerics<scalar_t>::cinv,  Real)
@@ -416,6 +395,11 @@ void THCTensor_(cpow)(THCState *state, THCTensor *self_, THCTensor *src1, THCTen
 }
 
 void THCTensor_(pow)(THCState *state, THCTensor *self_, THCTensor *src, scalar_t value) {
+#if defined(THC_REAL_IS_BYTE) || defined(THC_REAL_IS_CHAR) || defined(THC_REAL_IS_SHORT) || defined(THC_REAL_IS_INT) || defined(THC_REAL_IS_LONG)
+  if (THCNumerics<scalar_t>::lt(value, ScalarConvert<int, scalar_t>::to(0))) {
+    THError("Integers to negative integer powers are not allowed.");
+  }
+#endif
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
   if (self_ == src) {
     if (THCNumerics<scalar_t>::eq(value, ScalarConvert<int, scalar_t>::to(1))) {

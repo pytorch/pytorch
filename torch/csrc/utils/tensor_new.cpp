@@ -166,7 +166,8 @@ ScalarType infer_scalar_type(PyObject *obj) {
     return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
   }
   if (PyArray_CheckScalar(obj)) {
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)(PyArray_FromScalar(obj, nullptr))));
+    THPObjectPtr arr(PyArray_FromScalar(obj, nullptr));
+    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*) arr.get()));
   }
 #endif
   if (THPUtils_checkString(obj)) {
