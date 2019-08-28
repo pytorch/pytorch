@@ -308,15 +308,12 @@ static inline ScalarType toUnderlying(ScalarType t) {
 }
 
 static inline bool isSignedType(ScalarType t) {
-  if (t == ScalarType::Half) {
-    return true;
-  }
   #define CASE_SIGNED(ctype, name) \
     case ScalarType::name:                       \
       return std::is_signed<ctype>();
 
     switch (t) {
-      AT_FORALL_SCALAR_TYPES(CASE_SIGNED)
+      AT_FORALL_SCALAR_TYPES_AND(Half, CASE_SIGNED)
       default:
         AT_ERROR("Unknown ScalarType");
     }
