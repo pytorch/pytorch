@@ -952,16 +952,21 @@ def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_s
 
 @parse_args('v', 'i', 'i', 'i')
 def unfold(g, input, dimension, size, step):
-    sizedim = input.type().sizes()[dimension]
-    low_indices = range(0, sizedim, step)
-    hi_indices = range(size, sizedim + 1, step)
-    stack = [sym_help._slice_helper(g, input, axes=[dimension], starts=[low], ends=[hi])
-             for low, hi in zip(low_indices, hi_indices)]
-    ndim = input.type().dim()
-    perm = list(range(0, ndim))
-    perm.append(perm.pop(dimension))
-    unsqueeze = [g.op("Unsqueeze", g.op("Transpose", t, perm_i=perm), axes_i=[dimension]) for t in stack]
-    return g.op("Concat", *unsqueeze, axis_i=dimension)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
+    if input.isCompleteTensor():
+        sizedim = input.type().sizes()[dimension]
+        low_indices = range(0, sizedim, step)
+        hi_indices = range(size, sizedim + 1, step)
+        stack = [sym_help._slice_helper(g, input, axes=[dimension], starts=[low], ends=[hi])
+                 for low, hi in zip(low_indices, hi_indices)]
+        ndim = input.type().dim()
+        perm = list(range(0, ndim))
+        perm.append(perm.pop(dimension))
+        unsqueeze = [g.op("Unsqueeze", g.op("Transpose", t, perm_i=perm), axes_i=[dimension]) for t in stack]
+        return g.op("Concat", *unsqueeze, axis_i=dimension)
+    else:
+        return _unimplemented("Unfold", "input size not accessible")
 
 
 @parse_args('v', 'v', 'i')
