@@ -64,10 +64,10 @@ class QLinearInt8 final : public torch::OperatorKernel {
     // quantization scheme is PerTensorAffine if the number of scales is
     // 1 and it's kPerChannelAffine if the number of scales is equal to
     // N (output channels)
-    if (pack_ptr.w_scale.size() == 1) {
+    if (pack_ptr.q_scheme = kPerTensorAffine) {
       output_multiplier_float[0] = (input_scale_float * pack_ptr.w_scale[0]) /
           static_cast<float>(output_scale);
-    } else if (pack_ptr.w_scale.size() == N) {
+    } else if (pack_ptr.q_scheme == kPerChannelAffine) {
       output_multiplier_float.resize(N, 0.0);
       for (int i = 0; i < N; ++i) {
         output_multiplier_float[i] = (input_scale_float * pack_ptr.w_scale[i]) /
@@ -134,6 +134,8 @@ class QLinearInt8 final : public torch::OperatorKernel {
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
     if (pack_ptr.q_scheme == kPerTensorAffine) {
+      // Process the per tensor quantization.
+      //
       // After the uint8 * int8 matrix multiplication is performed, this
       // operation does:
       //  1) Add in row and column offsets to the rows and columns,
@@ -161,6 +163,8 @@ class QLinearInt8 final : public torch::OperatorKernel {
           /*thread_id=*/0,
           /*num_threads=*/1);
     } else if (pack_ptr.q_scheme == kPerChannelAffine) {
+      // Process the per channel quantization.
+      //
       // After the uint8 * int8 matrix multiplication is performed, this
       // operation does:
       //  1) Add in row and column offsets to the rows and columns,

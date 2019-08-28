@@ -76,9 +76,6 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 
     q_params.precision = precision;
 
-    // float weight_scale_float = pack_ptr.w_scale;
-    // int32_t weight_zero_point_int32 = pack_ptr.w_zp;
-
     // This operation does the following:
     // 1) Quantizes the input matrix given the statistics we've calculated above
     // 2) Creates a "row buffer" vector with offset values that must be added
@@ -195,8 +192,6 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     }
 
     return output;
-    TORCH_CHECK(
-        false, "This PyTorch installation was not built with FBGEMM operators");
   }
 #else // USE_FBGEMM
   at::Tensor operator()(
