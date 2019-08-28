@@ -962,7 +962,6 @@ graph(%x : Tensor,
                        .check_not('prim::CallMethod[name="forward"](%observer_for_') \
                        .run(str(s))
 
-
         torch._C._jit_set_inline_everything_mode(False)
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
@@ -18494,51 +18493,6 @@ class TestClassType(JitTestCase):
         input = torch.rand(2, 3)
         output = m_loaded(input)
         self.assertEqual(3 * input, output)
-
-    def test_interface(self):
-        with torch.jit._disable_emit_hooks():
-            @torch.jit.script
-            class Foo(object):
-                def __init__(self):
-                    pass
-
-                def one(self, x, y):
-                    return x + y
-
-                def two(self, x):
-                    return 2 * x
-
-            @torch.jit.script
-            class Bar(object):
-                def __init__(self):
-                    pass
-
-                def one(self, x, y):
-                    return x * y
-
-                def two(self, x):
-                    return 2 / x
-
-            @torch.jit.interface
-            class OneTwo(object):
-                def one(self, x, y):
-                    # type: (Tensor, Tensor) -> Tensor
-                    pass
-
-                def two(self, x):
-                    # type: (Tensor) -> Tensor
-                    pass
-
-            def use_them(x):
-                a = Foo()
-                b = Bar()
-                c = torch.jit.annotate(List[OneTwo], [a, b])
-                for i in range(len(c)):
-                    x = c[i].one(x, x)
-                    x = c[i].two(x)
-                return x
-            self.checkScript(use_them, (torch.rand(3, 4),))
-
 
     def test_overloaded_fn(self):
         @torch.jit.script

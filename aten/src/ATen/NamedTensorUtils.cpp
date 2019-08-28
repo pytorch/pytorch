@@ -307,6 +307,19 @@ void propagate_names_for_addmm(
   propagate_names(result, std::move(add_outnames), /*validate_names=*/false);
 }
 
+void check_names_for_dot(
+    TensorImpl* vec1,
+    TensorImpl* vec2) {
+  if (!impl::has_names(vec1) && !impl::has_names(vec2)) {
+    return;
+  }
+  compute_dot_product_outnames(
+      impl::get_names(vec1),
+      /*tensor_dotted_dim=*/0,
+      impl::get_names(vec2),
+      /*other_dotted_dim=*/0);
+}
+
 // expand adds new None dimensions. This is consistent with name inference
 // rules for binary ops that expect the named dims to line up positionally
 // from the right. i.e.,

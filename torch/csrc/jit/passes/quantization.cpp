@@ -65,29 +65,14 @@ void InsertObserversImpl(
     const std::string& method_name,
     const ModuleQConfigMap& module_qconfig_map);
 
-// Clone observer module and add it to the original module,
-// and insert a call to observer forward function
 Node* insertObserver(Value* v, Graph* g,
                      script::Module& module,
-                     const ModuleQConfigMap& module_qconfig_map) {
-  if (v->node()->kind() == prim::CallMethod && v->node()->s(attr::name) == "forward") {
-    auto child_instance = v->node()->inputs()[0];
-    TORCH_INTERNAL_ASSERT(child_instance->node()->kind() == prim::GetAttr, "Child instance should come from GetAttr.");
-    auto child_module_name = child_instance->node()->s(attr::name);
-    auto child_module = module.find_module(child_module_name);
-    TORCH_INTERNAL_ASSERT(child_module, "Child module " + child_module_name + " does not exist");
-    InsertObserversImpl(child_module.value(), "forward", module_qconfig_map);
-  }
-  auto qconfig = module_qconfig_map.at(module.module_object());
-  // Skip to insert observer if no qconfig is specified
-  if (!qconfig) {
-    return nullptr;
-  }
+                     const QConfig& qconfig) {
   script::Module observer_module;
   if (v->node()->kind() == prim::GetAttr && v->node()->s(attr::name) == "weight") {
-    std::tie(std::ignore, observer_module) = qconfig.value();
+    observer_module = std::get<1>(qconfig);
   } else {
-    std::tie(observer_module, std::ignore) = qconfig.value();
+    observer_module = std::get<0>(qconfig);
   }
   std::string observer_name = "observer_for_" + v->debugName();
   script::Module observer = observer_module.clone();
@@ -111,6 +96,28 @@ Node* insertObserver(Value* v, Graph* g,
   call->output()->setDebugName(v->debugName() + ".observed");
   call->insertAfter(observer_instance);
   return call;
+}
+
+// Clone observer module and add it to the original module,
+// and insert a call to observer forward function
+Node* insertObserver(Value* v, Graph* g,
+                     script::Module& module,
+                     const ModuleQConfigMap& module_qconfig_map) {
+  if (v->node()->kind() == prim::CallMethod && v->node()->s(attr::name) == "forward") {
+    auto child_instance = v->node()->inputs()[0];
+    TORCH_INTERNAL_ASSERT(child_instance->node()->kind() == prim::GetAttr,
+                          "Child instance should come from GetAttr.");
+    auto child_module_name = child_instance->node()->s(attr::name);
+    auto child_module = module.find_module(child_module_name);
+    TORCH_INTERNAL_ASSERT(child_module, "Child module " + child_module_name + " does not exist");
+    InsertObserversImpl(child_module.value(), "forward", module_qconfig_map);
+  }
+  auto qconfig = module_qconfig_map.at(module.module_object());
+  // Skip to insert observer if no qconfig is specified
+  if (!qconfig) {
+    return nullptr;
+  }
+  return insertObserver(v, g, module, qconfig.value());
 }
 
 c10::optional<QConfig> getQConfig(const std::string& key, const c10::optional<QConfig>& parent_qconfig, const QConfigDict& qconfig_dict) {
