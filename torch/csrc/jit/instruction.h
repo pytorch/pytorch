@@ -33,6 +33,7 @@ namespace jit {
   _(CALL, "F") /* call function X */                                        \
   _(GUARD, "T") /* check guard against type_table, true if passes */        \
   _(TAIL_CALL, "F") /* replace current frame with function F */             \
+  _(INTERFACE_CALL, "CI") /* call method X on the first argument (of N) */  \
   _(GET_ATTR, "S") /* get attribute from slot X in an Object */             \
   _(SET_ATTR, "S") /* set attribute to slot X in an Object */
 
