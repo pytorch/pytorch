@@ -68,6 +68,7 @@ libtorch_sources = [
     "torch/csrc/jit/import.cpp",
     "torch/csrc/jit/pickle.cpp",
     "torch/csrc/jit/import_export_helpers.cpp",
+    "torch/csrc/jit/instruction.cpp",
     "torch/csrc/jit/interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/irparser.cpp",
