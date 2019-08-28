@@ -4,7 +4,7 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
-#include <iostream>
+#include <ostream>
 
 namespace at {
 
