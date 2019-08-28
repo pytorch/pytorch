@@ -132,6 +132,8 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
     if (pack_ptr.q_scheme == kPerTensorAffine) {
+      // Process the per tensor quantization.
+      //
       // After the uint8 * int8 matrix multiplication is performed, this
       // operation does:
       //  1) Add in row and column offsets to the rows and columns, respectively
@@ -160,6 +162,8 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
           /*num_threads=*/1);
 
     } else if (pack_ptr.q_scheme == kPerChannelAffine) {
+      // Process the per channel quantization.
+      //
       // After the uint8 * int8 matrix multiplication is performed, this
       // operation does:
       //  1) Add in row and column offsets to the rows and columns, respectively
