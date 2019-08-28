@@ -418,10 +418,10 @@ class TestQuantizedOps(TestCase):
 
     @unittest.skip("Flaky, see https://github.com/pytorch/pytorch/issues/25097")
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
-                                              min_side=1, max_side=10),
+                                              min_side=1, max_side=5),
                        qparams=hu.qparams()),
-           output_size_h=st.integers(1, 10),
-           output_size_w=st.integers(1, 10))
+           output_size_h=st.integers(1, 5),
+           output_size_w=st.integers(1, 5))
     def test_adaptive_avg_pool2d(self, X, output_size_h, output_size_w):
         X, (scale, zero_point, torch_type) = X
 
