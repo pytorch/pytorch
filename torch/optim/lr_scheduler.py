@@ -9,29 +9,24 @@ from torch._six import inf
 from .optimizer import Optimizer
 
 
-EPOCH_DEPRECATION_WARNING = ("The epoch parameter in `scheduler.step()` was"
-        "not necessary and is being deprecated where possible. Please use"
-        "`scheduler.step()` to step the scheduler. During the deprecation, if"
-        "epoch is different from None, the closed form is used instead of the"
+EPOCH_DEPRECATION_WARNING = ("The epoch parameter in `scheduler.step()` was "
+        "not necessary and is being deprecated where possible. Please use "
+        "`scheduler.step()` to step the scheduler. During the deprecation, if "
+        "epoch is different from None, the closed form is used instead of the "
         "new chainable form, where available.")
-
-
-def _attach_opt(self, optimizer):
-    if not isinstance(optimizer, Optimizer):
-        raise TypeError('{} is not an Optimizer'.format(
-            type(optimizer).__name__))
-    self.optimizer = optimizer
 
 
 class _LRScheduler(object):
 
     def __init__(self, optimizer, last_epoch=-1):
-        _attach_opt(self, optimizer)
-        self._init_epoch_and_base(optimizer, last_epoch)
-        self._ensure_opt_first_helper()
-        self.step()
 
-    def _init_epoch_and_base(self, optimizer, last_epoch):
+        # Attach optimizer
+        if not isinstance(optimizer, Optimizer):
+            raise TypeError('{} is not an Optimizer'.format(
+                type(optimizer).__name__))
+        self.optimizer = optimizer
+
+        # Initialize epoch and base learning rates
         if last_epoch == -1:
             for group in optimizer.param_groups:
                 group.setdefault('initial_lr', group['lr'])
@@ -43,7 +38,6 @@ class _LRScheduler(object):
         self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
         self.last_epoch = last_epoch
 
-    def _ensure_opt_first_helper(self):
         # Following https://github.com/pytorch/pytorch/issues/20124
         # We would like to ensure that `lr_scheduler.step()` is called after
         # `optimizer.step()`
@@ -58,6 +52,8 @@ class _LRScheduler(object):
         self.optimizer.step = with_counter(self.optimizer.step, self.optimizer)
         self.optimizer._step_count = 0
         self._step_count = 0
+
+        self.step()
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
@@ -77,11 +73,9 @@ class _LRScheduler(object):
         self.__dict__.update(state_dict)
 
     def get_computed_values(self):
-        # Return last computed learning rate by current scheduler
-        try:
-            return self._last_computed_values
-        except AttributeError:
-            raise RuntimeError("Run `step()` at least once before `get_computed_values()`.")
+        """ Return last computed learning rate by current scheduler.
+        """
+        return self._last_computed_values
 
     def _compute_values(self):
         # Compute learning rate using chainable form of the scheduler
@@ -92,13 +86,8 @@ class _LRScheduler(object):
         raise NotImplementedError
 
     def get_lr(self):
-        warnings.warn("`get_computed_values()` is now the supported method to"
-                "obtain the last computed learning rate. `get_lr()` now"
-                "returns the same, but will be deprecated in favor of"
-                "`get_computed_values()`. Prior to this, `get_lr()` was an"
-                "internal method to compute new scheduler values within"
-                "`step()`, leading to unexpected behavior when invoked"
-                "directly.", DeprecationWarning)
+        warnings.warn("The method `get_lr()` is renamed `get_computed_values()`. "
+                "Please use the latter instead.", DeprecationWarning)
         return self.get_computed_values()
 
     def step(self, epoch=None):
@@ -121,9 +110,8 @@ class _LRScheduler(object):
                               "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
         self._step_count += 1
 
-
         if epoch is None:
-            self.last_epoch = self.last_epoch + 1
+            self.last_epoch += 1
             values = self._compute_values()
         else:
             warnings.warn(EPOCH_DEPRECATION_WARNING, DeprecationWarning)
@@ -434,7 +422,11 @@ class ReduceLROnPlateau(object):
             raise ValueError('Factor should be < 1.0.')
         self.factor = factor
 
-        _attach_opt(self, optimizer)
+        # Attach optimizer
+        if not isinstance(optimizer, Optimizer):
+            raise TypeError('{} is not an Optimizer'.format(
+                type(optimizer).__name__))
+        self.optimizer = optimizer
 
         if isinstance(min_lr, list) or isinstance(min_lr, tuple):
             if len(min_lr) != len(optimizer.param_groups):
@@ -652,7 +644,11 @@ class CyclicLR(_LRScheduler):
                  max_momentum=0.9,
                  last_epoch=-1):
 
-        _attach_opt(self, optimizer)
+        # Attach optimizer
+        if not isinstance(optimizer, Optimizer):
+            raise TypeError('{} is not an Optimizer'.format(
+                type(optimizer).__name__))
+        self.optimizer = optimizer
 
         base_lrs = self._format_param('base_lr', optimizer, base_lr)
         if last_epoch == -1:
@@ -795,16 +791,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.T_mult = T_mult
         self.eta_min = eta_min
 
-        # TODO Invoke super instead of repeating the parent __init__ with epoch passed to self.step
-        # super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch)
-
-        _attach_opt(self, optimizer)
-        self._init_epoch_and_base(optimizer, last_epoch)
-        self._ensure_opt_first_helper()
-
-        if last_epoch == -1:
-            self.last_epoch = 0
-        self.step(self.last_epoch)
+        super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch)
 
         self.T_cur = self.last_epoch
 
@@ -837,6 +824,10 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
             >>> scheduler.step(26)
             >>> scheduler.step() # scheduler.step(27), instead of scheduler(20)
         """
+
+        if epoch is None and self.last_epoch < 0:
+            epoch = 0
+
         if epoch is None:
             epoch = self.last_epoch + 1
             self.T_cur = self.T_cur + 1

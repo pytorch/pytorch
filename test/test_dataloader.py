@@ -17,7 +17,7 @@ from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
 from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, PY3,
                           IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
-                          load_tests)
+                          load_tests, TEST_WITH_TSAN)
 
 try:
     import psutil
@@ -88,6 +88,10 @@ if torch.multiprocessing._supports_context:
     supported_multiprocessing_contexts += list(torch.multiprocessing.get_all_start_methods())
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDatasetRandomSplit(TestCase):
     def test_lengths_must_equal_dataset_size(self):
         with self.assertRaises(ValueError):
@@ -169,6 +173,10 @@ class CountingIterableDataset(IterableDataset):
         return self.n
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestTensorDataset(TestCase):
 
     def test_len(self):
@@ -212,6 +220,10 @@ class TestTensorDataset(TestCase):
             self.assertEqual(t3[i], source[i][3])
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestConcatDataset(TestCase):
 
     def test_concat_two_singletons(self):
@@ -671,6 +683,10 @@ def error_worker_init_fn(_):
     raise RuntimeError("Error in worker_init_fn")
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDataLoader(TestCase):
 
     def setUp(self):
@@ -1522,6 +1538,10 @@ class StringDataset(Dataset):
         return (self.s[ndx], ndx)
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestStringDataLoader(TestCase):
     def setUp(self):
         super(TestStringDataLoader, self).setUp()
@@ -1548,6 +1568,10 @@ class DictDataset(Dataset):
         }
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDictDataLoader(TestCase):
     def setUp(self):
         super(TestDictDataLoader, self).setUp()
@@ -1592,6 +1616,10 @@ class NamedTupleDataset(Dataset):
                           label=str(ndx))
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestNamedTupleDataLoader(TestCase):
     def setUp(self):
         super(TestNamedTupleDataLoader, self).setUp()
@@ -1638,6 +1666,10 @@ def collate_into_packed_sequence_batch_first(batch):
     return torch.nn.utils.rnn.pack_padded_sequence(data, lengths, batch_first=True, enforce_sorted=False)
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestCustomPinFn(TestCase):
     def setUp(self):
         super(TestCustomPinFn, self).setUp()
@@ -1691,6 +1723,10 @@ class TestWorkerQueueDataset(Dataset):
         return len(self.data)
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
         super(TestIndividualWorkerQueue, self).setUp()

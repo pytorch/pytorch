@@ -1099,14 +1099,14 @@ class TestCuda(TestCase):
     def test_bitwise_not(self):
         _TestTorchMixin._test_bitwise_not(self, 'cuda')
 
+    def test_logical_not(self):
+        _TestTorchMixin._test_logical_not(self, 'cuda')
+
+    def test_logical_xor(self):
+        _TestTorchMixin._test_logical_xor(self, 'cuda')
+
     def test_isinf(self):
         _TestTorchMixin._test_isinf(self, lambda t: t.cuda())
-
-    def test_inplace_unary_mem_overlap(self):
-        _TestTorchMixin._test_inplace_unary_mem_overlap(self, device='cuda')
-
-    def test_inplace_binary_mem_overlap(self):
-        _TestTorchMixin._test_inplace_binary_mem_overlap(self, device='cuda')
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_arithmetic_large_tensor(self):
@@ -1439,6 +1439,9 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float64, 'cuda')
         _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float16, 'cuda')
         _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
+        # test that it works with bool tensors
+        _TestTorchMixin._test_bernoulli(self, torch.bool, torch.float16, 'cuda')
         _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
 
     def test_cat_bad_input_sizes(self):
@@ -2583,9 +2586,6 @@ class TestCuda(TestCase):
 
     def test_rpow(self):
         _TestTorchMixin._test_rpow(self, lambda x: x.cuda())
-
-    def test_int_pow(self):
-        _TestTorchMixin._test_int_pow(self, lambda x: x.cuda())
 
     def test_remainder_overflow(self):
         _TestTorchMixin._test_remainder_overflow(self, dtype=torch.int64, device='cuda')

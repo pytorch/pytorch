@@ -3,9 +3,11 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import cpp_extension # noqa
 import functools
 import numpy as np
 import timeit
+import torch
 import json
 
 import benchmark_utils
@@ -169,6 +171,10 @@ class BenchmarkRunner(object):
         """
         curr_test_total_time = 0
         while True:
+            # Wipe cache
+            if self.args.wipe_cache:
+                torch.ops.operator_benchmark._clear_cache()
+
             run_time_sec = launch_test(test_case, iters)
             curr_test_total_time += run_time_sec
             # Analyze time after each run to decide if the result is stable

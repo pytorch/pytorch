@@ -6,6 +6,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/module.h>
@@ -93,15 +94,7 @@ inline MatchTypeReturn tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
     auto tensor = py::cast<at::Tensor>(input);
-    if (tensor.is_mkldnn()) {
-      // mkldnn tensor as opaque tensor doesn't have strides, so we can
-      // not create a CompleteTensorType
-      return MatchTypeReturn(ProfiledTensorType::create(tensor));
-    }
-
-    // TODO: maybe unshape this type if this is used for script instead of
-    // tracing
-    return MatchTypeReturn(CompleteTensorType::create(tensor));
+    return MatchTypeReturn(TensorType::create(tensor));
   }
 
   if (input.is(py::none())) {
@@ -122,6 +115,8 @@ inline MatchTypeReturn tryToInferType(py::handle input) {
   } else if (THPDevice_Check(input.ptr())) {
     return MatchTypeReturn(DeviceObjType::get());
   } else if (THPDtype_Check(input.ptr())) {
+    return MatchTypeReturn(IntType::get());
+  } else if (THPQScheme_Check(input.ptr())) {
     return MatchTypeReturn(IntType::get());
   }
 
@@ -318,11 +313,7 @@ inline IValue toIValue(
     const TypePtr& type,
     c10::optional<int32_t> N) {
   switch (type->kind()) {
-    case TypeKind::TensorType:
-    case TypeKind::AutogradZeroTensorType:
-    case TypeKind::ProfiledTensorType:
-    case TypeKind::DimensionedTensorType:
-    case TypeKind::CompleteTensorType: {
+    case TypeKind::TensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
         AT_WARN(
@@ -339,6 +330,10 @@ inline IValue toIValue(
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
         return static_cast<int64_t>(dtype->scalar_type);
+      }
+      if (THPQScheme_Check(obj.ptr())) {
+        auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+        return static_cast<uint8_t>(qscheme->qscheme);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
@@ -402,7 +397,6 @@ inline IValue toIValue(
             }
             return repeated;
           }
-        case TypeKind::ProfiledTensorType:
         case TypeKind::TensorType:
           return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:
@@ -446,6 +440,10 @@ inline IValue toIValue(
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
         return static_cast<int64_t>(dtype->scalar_type);
       }
+      if (THPQScheme_Check(obj.ptr())) {
+        auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+        return static_cast<uint8_t>(qscheme->qscheme);
+      }
       if (py::isinstance<py::int_>(obj)) {
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
@@ -455,6 +453,7 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
+    case TypeKind::InterfaceType:
       break;
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");

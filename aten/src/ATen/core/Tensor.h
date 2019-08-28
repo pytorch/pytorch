@@ -173,8 +173,13 @@ class CAFFE2_API Tensor {
     return impl_->strides();
   }
 #ifdef BUILD_NAMEDTENSOR
-  optional<DimnameList> names() const {
-    return impl::internal_get_names(unsafeGetTensorImpl());
+  // See impl::get_opt_names in ATen/NamedTensor.h for docs.
+  optional<DimnameList> opt_names() const {
+    return impl::get_opt_names(unsafeGetTensorImpl());
+  }
+  // See impl::get_names in ATen/NamedTensor.h for docs.
+  DimnameList names() const {
+    return impl::get_names(unsafeGetTensorImpl());
   }
 #endif
   int64_t ndimension() const {
@@ -284,8 +289,14 @@ class CAFFE2_API Tensor {
     return this->unsafeGetTensorImpl()->data();
   }
 
+  template <typename T>
+  T * data_ptr() const;
+
   template<typename T>
-  T * data() const;
+  C10_DEPRECATED_MESSAGE("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.")
+  T * data() const {
+    return data_ptr<T>();
+  }
 
   template <typename T>
   T item() const;
@@ -297,9 +308,9 @@ class CAFFE2_API Tensor {
   // dimension.
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() const& {
-    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
+    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
-    return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
+    return TensorAccessor<T,N>(data_ptr<T>(),sizes().data(),strides().data());
   }
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
@@ -311,9 +322,9 @@ class CAFFE2_API Tensor {
   // as an argument.
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
-    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
+    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
-    return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
+    return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
   }
   template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N> packed_accessor() && = delete;
@@ -400,6 +411,10 @@ class CAFFE2_API Tensor {
   Tensor bincount(const Tensor & weights={}, int64_t minlength=0) const;
   Tensor bitwise_not() const;
   Tensor & bitwise_not_() const;
+  Tensor logical_not() const;
+  Tensor & logical_not_() const;
+  Tensor logical_xor(const Tensor & other) const;
+  Tensor & logical_xor_(const Tensor & other) const;
   Tensor bmm(const Tensor & mat2) const;
   Tensor ceil() const;
   Tensor & ceil_() const;
@@ -475,6 +490,9 @@ class CAFFE2_API Tensor {
   Tensor & log2_() const;
   Tensor logdet() const;
   Tensor log_softmax(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor log_softmax(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   Tensor logsumexp(IntArrayRef dim, bool keepdim=false) const;
   Tensor matmul(const Tensor & other) const;
   Tensor matrix_power(int64_t n) const;
@@ -540,6 +558,9 @@ class CAFFE2_API Tensor {
   std::tuple<Tensor,Tensor> slogdet() const;
   Tensor smm(const Tensor & mat2) const;
   Tensor softmax(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor softmax(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   std::vector<Tensor> split(int64_t split_size, int64_t dim=0) const;
   std::vector<Tensor> split_with_sizes(IntArrayRef split_sizes, int64_t dim=0) const;
   Tensor squeeze() const;
@@ -574,6 +595,9 @@ class CAFFE2_API Tensor {
   Tensor tanh() const;
   Tensor & tanh_() const;
   Tensor transpose(int64_t dim0, int64_t dim1) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor transpose(Dimname dim0, Dimname dim1) const;
+  #endif
   Tensor & transpose_(int64_t dim0, int64_t dim1) const;
   Tensor flip(IntArrayRef dims) const;
   Tensor roll(IntArrayRef shifts, IntArrayRef dims={}) const;
@@ -625,6 +649,8 @@ class CAFFE2_API Tensor {
   Tensor dequantize() const;
   double q_scale() const;
   int64_t q_zero_point() const;
+  Tensor q_per_channel_scales() const;
+  Tensor q_per_channel_zero_points() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
@@ -696,13 +722,11 @@ class CAFFE2_API Tensor {
   Tensor & triu_(int64_t diagonal=0) const;
   Tensor & digamma_() const;
   Tensor & polygamma_(int64_t n) const;
-  Tensor & erfinv_() const;
   Tensor & renorm_(Scalar p, int64_t dim, Scalar maxnorm) const;
   Tensor & pow_(Scalar exponent) const;
   Tensor & pow_(const Tensor & exponent) const;
   Tensor & lerp_(const Tensor & end, Scalar weight) const;
   Tensor & lerp_(const Tensor & end, const Tensor & weight) const;
-  Tensor & sign_() const;
   Tensor & fmod_(Scalar other) const;
   Tensor & fmod_(const Tensor & other) const;
   Tensor & remainder_(Scalar other) const;
@@ -764,12 +788,14 @@ class CAFFE2_API Tensor {
   Tensor digamma() const;
   Tensor polygamma(int64_t n) const;
   Tensor erfinv() const;
+  Tensor & erfinv_() const;
+  Tensor sign() const;
+  Tensor & sign_() const;
   Tensor dist(const Tensor & other, Scalar p=2) const;
   Tensor atan2(const Tensor & other) const;
   Tensor lerp(const Tensor & end, Scalar weight) const;
   Tensor lerp(const Tensor & end, const Tensor & weight) const;
   Tensor histc(int64_t bins=100, Scalar min=0, Scalar max=0) const;
-  Tensor sign() const;
   Tensor fmod(Scalar other) const;
   Tensor fmod(const Tensor & other) const;
   Tensor remainder(Scalar other) const;
@@ -821,6 +847,24 @@ namespace detail {
 template <typename T, typename... Args>
 Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
+}
+
+inline Backend infer_backend(const Tensor & t) {
+  TORCH_CHECK(t.defined(), "undefined Tensor");
+  return tensorTypeIdToBackend(t.type_id());
+}
+inline Backend infer_backend(const TensorList & tl) {
+  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+  return tensorTypeIdToBackend(tl[0].type_id());
+}
+
+inline bool infer_is_variable(const Tensor & t) {
+  TORCH_CHECK(t.defined(), "undefined Tensor");
+  return t.is_variable();
+}
+inline bool infer_is_variable(const TensorList & tl) {
+  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+  return tl[0].is_variable();
 }
 } // namespace detail
 

@@ -29,7 +29,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 
     // TODO: contiguous is called for further jit optimizations.
     auto input_contig = input.contiguous();
-    const auto* input_ptr = input_contig.data<float>();
+    const auto* input_ptr = input_contig.data_ptr<float>();
 
     TORCH_CHECK(
         input.dim() >= 2,
@@ -121,7 +121,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
           "bias should have N elements: " + std::to_string(N));
       // TODO: contiguous is called for further jit optimizations.
       auto bias_contig = bias_vec.contiguous();
-      bias_ptr = bias_contig.data<float>();
+      bias_ptr = bias_contig.data_ptr<float>();
     }
 
     // After the uint8 * int8 matrix multiplication is performed, this operation
@@ -140,16 +140,22 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
         /*bias=*/bias_ptr,
         /*nCol=*/N);
 
+    // The resulting matrix here is 2-D, let's view it with the original
+    // left hand dimensions of the input. Here are two examples:
+    // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
+    // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
+    std::vector<int64_t> out_sizes = input.sizes().vec();
+    out_sizes.back() = N;
     // Allocate output Tensor and a buffer for fbgemmPacked to use
-    auto output = at::zeros({M, N}, input.options().dtype(at::kFloat));
+    auto output = at::zeros(out_sizes, input.options().dtype(at::kFloat));
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
     // Do the GEMM
     fbgemm::fbgemmPacked(
         /*packA=*/packA,
         /*packB=*/*packB,
-        /*C=*/output.data<float>(),
-        /*C_buffer=*/buffer.data<int32_t>(),
+        /*C=*/output.data_ptr<float>(),
+        /*C_buffer=*/buffer.data_ptr<int32_t>(),
         /*ldc=*/N,
         /*outProcess=*/outputProcObj,
         /*thread_id=*/0,

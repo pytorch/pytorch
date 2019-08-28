@@ -157,7 +157,6 @@ struct PythonResolver : public Resolver {
             tt->python_str());
             return type;
       }
-
       get_python_cu()->register_type(tt);
       return tt;
     }
@@ -279,26 +278,19 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
   const py::object& pyModule_;
 };
 
-static TypePtr getTensorType(const at::Tensor& t, const TypeKind type_kind) {
-  switch (type_kind) {
-    case TypeKind::ProfiledTensorType:
-      return ProfiledTensorType::create(t);
-    case TypeKind::CompleteTensorType: {
-      auto scalar_type = t.scalar_type();
-      auto sizes = t.sizes();
-      return CompleteTensorType::create(scalar_type, at::kCPU, sizes);
-    }
-    default:
-      throw std::runtime_error(
-          "Attempted to call getTensorType for type kind other than ProfiledTensorType or CompleteTensorType.");
+static TypePtr getTensorType(const at::Tensor& t, bool complete) {
+  auto r = TensorType::create(t);
+  if (!complete) {
+    r = r->dimensionedOnly();
   }
+  return r;
 }
 
 static TupleTypePtr getTupleTensorType(
     const Stack::const_iterator& s_iter,
     const Stack::const_iterator& s_iter_end,
     const TypePtr& tupleType,
-    const TypeKind type_kind) {
+    bool complete) {
   AT_ASSERT(tupleType->kind() == TupleType::Kind);
   AT_ASSERT(s_iter != s_iter_end);
 
@@ -306,27 +298,24 @@ static TupleTypePtr getTupleTensorType(
   for (const auto& subType : tupleType->containedTypes()) {
     if (subType->kind() == TupleType::Kind) {
       types.push_back(
-          getTupleTensorType(s_iter + 1, s_iter_end, subType, type_kind));
+          getTupleTensorType(s_iter + 1, s_iter_end, subType, complete));
     } else {
-      types.push_back(getTensorType(s_iter->toTensor(), type_kind));
+      types.push_back(getTensorType(s_iter->toTensor(), complete));
     }
   }
   return TupleType::create(types);
 }
 
-static void setInputTensorTypes(
-    Graph& g,
-    const Stack& stack,
-    const TypeKind type_kind = TypeKind::ProfiledTensorType) {
+static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
   at::ArrayRef<Value*> input_values = g.inputs();
   auto s_iter = stack.begin();
   for (auto v : input_values) {
     AT_ASSERT(s_iter != stack.end());
     if (v->type()->kind() == TupleType::Kind) {
       AT_ASSERT(v->node()->kind() == prim::Param);
-      v->setType(getTupleTensorType(s_iter, stack.end(), v->type(), type_kind));
+      v->setType(getTupleTensorType(s_iter, stack.end(), v->type(), complete));
     } else {
-      v->setType(getTensorType(s_iter->toTensor(), type_kind));
+      v->setType(getTensorType(s_iter->toTensor(), complete));
       s_iter++;
     }
   }
@@ -338,7 +327,7 @@ static std::shared_ptr<Graph> _propagate_shapes(
     bool with_grad = false) {
   Stack stack(inputs.begin(), inputs.end());
   auto retval = graph.copy();
-  setInputTensorTypes(*retval, stack);
+  setInputTensorTypes(*retval, stack, /*complete=*/false);
   PropagateInputShapes(retval);
   return retval;
 }
@@ -349,13 +338,10 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
     bool with_grad = false,
     bool propagate = true) {
   auto retval = graph.copy();
+  setInputTensorTypes(*retval, fmap<IValue>(inputs), /*complete=*/true);
   if (propagate) {
-    setInputTensorTypes(*retval, fmap<IValue>(inputs), TypeKind::ProfiledTensorType);
     PropagateInputShapes(retval);
   }
-  setInputTensorTypes(
-      *retval, fmap<IValue>(inputs), TypeKind::CompleteTensorType);
-
   return retval;
 }
 
@@ -368,7 +354,7 @@ static std::shared_ptr<Graph> _assign_output_shapes(
     auto scalar_type = outputs[i].scalar_type();
     auto sizes = outputs[i].sizes();
     auto type =
-        torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
+        torch::jit::TensorType::createContiguous(scalar_type, at::kCPU, sizes);
     retval->outputs()[i]->setType(type);
   }
   return retval;
@@ -414,6 +400,12 @@ void initJitScriptBindings(PyObject* module) {
           },
           py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
+      .def(
+          "_dump",
+          &Module::dump,
+          py::arg("omit_method_bodies") = true,
+          py::arg("omit_attr_values") = true,
+          py::arg("omit_param_values") = true)
       .def(
           "_define",
           [](Module& m,
@@ -750,7 +742,14 @@ void initJitScriptBindings(PyObject* module) {
         auto new_def = implementation_def.withDecl(overload_decl);
         return script_compile_function(name, new_def, defaults, std::move(rcb));
       });
-
+  m.def(
+      "_replace_overloaded_method_decl",
+      [](const Decl& overload_decl,
+         const Def& implementation_def,
+         const std::string& new_name) {
+        checkOverloadDecl(overload_decl, implementation_def.decl());
+        return implementation_def.withDecl(overload_decl).withName(new_name);
+      });
   m.def(
       "_create_function_from_trace",
       [](std::string qualname,
@@ -799,6 +798,14 @@ void initJitScriptBindings(PyObject* module) {
         }
         const auto self = SimpleSelf(classType);
         cu->define(classname, methodDefs, rcbs, &self);
+      });
+  m.def(
+      "_jit_script_interface_compile",
+      [](const std::string& qualifiedName,
+         const ClassDef& classDef,
+         ResolutionCallback rcb) {
+        get_python_cu()->define_interface(
+            c10::QualifiedName(qualifiedName), classDef, pythonResolver(rcb));
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {
