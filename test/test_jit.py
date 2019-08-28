@@ -2043,10 +2043,11 @@ graph(%Ra, %Rb):
 
     def test_index_put(self):
         ten = torch.zeros(3, 3)
-        mask = torch.Tensor([[True, True, True],
+        mask = torch.tensor([[True, True, True],
                              [True, False, False],
-                             [True, True, False]]).byte()
+                             [True, True, False]])
 
+        print(mask)
         def test_fn(ten, mask):
             ten[mask] = torch.ones(6)
             return ten

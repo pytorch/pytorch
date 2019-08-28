@@ -964,7 +964,7 @@ class TestAutograd(TestCase):
         check_index(x, y, (1, slice(2, None)))
         check_index(x, y, (slice(None, None), slice(2, None)))
         check_index(x, y, torch.LongTensor([0, 2]))
-        check_index(x, y, torch.rand(4, 4).bernoulli().byte())
+        check_index(x, y, torch.rand(4, 4).bernoulli().bool())
         check_index(x, y, (Ellipsis, slice(2, None)))
         check_index(x, y, ([0], [0]))
         check_index(x, y, ([1, 2, 3], [0]))
@@ -1504,7 +1504,7 @@ class TestAutograd(TestCase):
                                               3]), requires_grad=False), [2, 4], slice(None)])
 
     def test_setitem_mask(self):
-        mask = torch.ByteTensor(5, 5).bernoulli_()
+        mask = torch.BoolTensor(5, 5).bernoulli_()
         self._test_setitem((5, 5), Variable(mask))
         self._test_setitem((5,), Variable(mask[0]))
         self._test_setitem((1,), Variable(mask[0, 0:1]))
