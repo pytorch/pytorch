@@ -202,6 +202,10 @@ std::string AliasDb::toString() const {
   std::stringstream ss{};
   std::unordered_map<size_t, Element*> indexToElementMap;
 
+  for (const auto &ent : wildcardIndex_) {
+    indexToElementMap[ent.second->index] = ent.second;
+  }
+
   ss << "\n===1. GRAPH===\n";
   ss << graph_->toString();
 
@@ -232,7 +236,7 @@ std::string AliasDb::toString() const {
     ss << *node;
     ss << "  ";
     for (const auto value : values) {
-      ss << indexToElementMap[value]->value->debugName() << ", ";
+      ss << getElementName(indexToElementMap[value]) << ", ";
     }
     ss << "\n";
   }
