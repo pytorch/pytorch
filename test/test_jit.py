@@ -2302,7 +2302,7 @@ graph(%Ra, %Rb):
         # testing that 1 // 0 error is not thrownn
         self.run_pass('constant_propagation', constant_prop.graph)
 
-    def test_constant_prop_excption(self):
+    def test_constant_prop_exception(self):
         # checking y = a[4] does not error in constant propagation
         def bad_index(x):
             # type: (bool)
@@ -17215,14 +17215,14 @@ class TestList(JitTestCase):
             a = [1, 2, 3]
             return a[4]
 
-        self.checkScriptRaisesRegex(bad_index, (), IndexError,
+        self.checkScriptRaisesRegex(bad_index, (), Exception,
                                     "list index out of range")
 
         def bad_negative_index():
             a = [1, 2, 3]
             return a[-5]
 
-        self.checkScriptRaisesRegex(bad_negative_index, (), IndexError,
+        self.checkScriptRaisesRegex(bad_negative_index, (), Exception,
                                     "list index out of range")
 
     def test_list_len(self):
