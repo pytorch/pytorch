@@ -88,26 +88,6 @@ void THCTensor_(cbitxor)(THCState* state, THCTensor *self_, THCTensor *src1, THC
 #endif
 }
 
-void THCTensor_(sign)(THCState* state, THCTensor* self_, THCTensor* src) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  if (self_ == src) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorSignOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src, TensorSignOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(self_, src);
-#endif
-}
-
 void THCTensor_(cmax)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self, src1, src2));
