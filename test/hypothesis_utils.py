@@ -174,6 +174,9 @@ def tensor(draw, shapes=None, elements=None, qparams=None):
     X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
     # Recompute the scale and zero_points according to the X statistics.
     scale, zp = _calculate_dynamic_qparams(X, qparams[2])
+    enforced_zp = _ENFORCED_ZERO_POINT.get(qparams[2], None)
+    if enforced_zp is not None:
+        zp = enforced_zp
     return X, (scale, zp, qparams[2])
 
 """Strategy for generating test cases for tensors used in Conv2D.
