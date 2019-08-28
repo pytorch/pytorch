@@ -1020,9 +1020,10 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         def get_forward(m):
             return m._c._get_method("forward")
 
-        class testModule1(torch.nn.Module):
+        # Test trivial case
+        class TestModule1(torch.nn.Module):
             def __init__(self):
-                super(testModule1, self).__init__()
+                super(TestModule1, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
                 self.bn = torch.nn.BatchNorm2d(num_features=20)
 
@@ -1031,18 +1032,17 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
                 x = self.bn(x)
                 return x
 
-        m = testModule1()
+        m = TestModule1()
         s1 = torch.jit.script(m)
-        print(str(get_forward(s1).graph))
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
             .run(str(get_forward(s1).graph))
 
         torch._C._jit_pass_fold_convbn(s1._c)
-        print(str(get_forward(s1).graph))
 
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
             .run(str(get_forward(s1).graph))
 
+        # Test that we find Conv-BN patterns in submodules
         class SubModule(torch.nn.Module):
             def __init__(self):
                 super(SubModule, self).__init__()
@@ -1054,16 +1054,16 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
                 x = self.bn(x)
                 return x
 
-        class testModule2(torch.nn.Module):
+        class TestModule2(torch.nn.Module):
             def __init__(self):
-                super(testModule2, self).__init__()
+                super(TestModule2, self).__init__()
                 self.sub = SubModule()
 
             def forward(self, x):
                 x = self.sub(x)
                 return x
 
-        s2 = torch.jit.script(testModule2())
+        s2 = torch.jit.script(TestModule2())
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
             .run(str(get_forward(s2.sub).graph))
 
