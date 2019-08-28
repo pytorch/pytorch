@@ -32,7 +32,6 @@ TEST(TestUndefined, UndefinedTest) {
   ASSERT_ANY_THROW(und.copy_(ft));
   ASSERT_ANY_THROW(ft.copy_(und));
 
-  und.toBackend(Backend::Undefined);
   ASSERT_ANY_THROW(und.toBackend(Backend::CPU));
   ASSERT_ANY_THROW(ft.toBackend(Backend::Undefined));
 

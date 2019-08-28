@@ -117,6 +117,31 @@ Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   return _clamp_out_cpu(self, self, min, max);
 }
 
+//used internally and not exposed by API
+Tensor& trigamma_out(Tensor& result, const Tensor& self) {
+  checkBackend("trigamma", result, Backend::CPU);
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_mem_overlap=*/true);
+  trigamma_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor polygamma(int64_t n, const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  at::polygamma_out(result, n, self);
+  return result;
+}
+Tensor& polygamma_(Tensor& self, int64_t n) {
+  return at::polygamma_out(self, n, self);
+}
+Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
+  checkBackend("polygamma", result, Backend::CPU);
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_mem_overlap=*/true);
+  polygamma_stub(iter.device_type(), iter, n);
+  return result;
+}
+
 Tensor& _clamp_out_cpu(
     Tensor& result,
     const Tensor& self,
@@ -213,22 +238,37 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
-#define IMPLEMENT_UNARY_OP_VEC(op)                              \
-  Tensor op(const Tensor& self) {                               \
-    Tensor result = at::empty({0}, self.options());             \
-    at::op##_out(result, self);                                 \
-    return result;                                              \
-  }                                                             \
-  Tensor& _##op##__cpu(Tensor& self) {                          \
-    return at::op##_out(self, self);                            \
-  }                                                             \
-  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
-    checkBackend(#op, result, Backend::CPU);                    \
-    auto iter = TensorIterator::unary_op(result, self,          \
-      /*check_mem_overlap=*/true);                              \
-    op##_stub(iter.device_type(), iter);                        \
-    return result;                                              \
+#define IMPLEMENT_UNARY_OP_CORE(op)                                    \
+  Tensor op(const Tensor& self) {                                      \
+    Tensor result = at::empty({0}, self.options());                    \
+    at::op##_out(result, self);                                        \
+    return result;                                                     \
   }
+
+#define IMPLEMENT_UNARY_OP_OUT_INPLACE(op, prefix, device)             \
+  Tensor& _##op##__##prefix(Tensor& self) {                            \
+    return at::op##_out(self, self);                                   \
+  }                                                                    \
+  Tensor& _##op##_out_##prefix(Tensor& result, const Tensor& self) {   \
+    checkBackend(#op, result, Backend::device);                        \
+    auto iter = TensorIterator::unary_op(result, self,                 \
+      /*check_mem_overlap=*/true);                                     \
+    op##_stub(iter.device_type(), iter);                               \
+    return result;                                                     \
+  }
+
+#define IMPLEMENT_UNARY_OP_VEC(op)                                     \
+  IMPLEMENT_UNARY_OP_CORE(op)                                          \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)
+
+#define IMPLEMENT_UNARY_OP_VEC_CUDA(op)                                \
+  IMPLEMENT_UNARY_OP_CORE(op)                                          \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
+
+#define IMPLEMENT_UNARY_OP(op)                                         \
+  IMPLEMENT_UNARY_OP_CORE(op)                                          \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)                       \
 
 IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
@@ -237,9 +277,9 @@ IMPLEMENT_UNARY_OP_VEC(atan)
 IMPLEMENT_UNARY_OP_VEC(ceil)
 IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
+IMPLEMENT_UNARY_OP_VEC(digamma)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
-IMPLEMENT_UNARY_OP_VEC(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(expm1)
 IMPLEMENT_UNARY_OP_VEC(floor)
@@ -259,6 +299,8 @@ IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
 
+IMPLEMENT_UNARY_OP(erfinv)
+
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);
 DEFINE_DISPATCH(asin_stub);
@@ -267,6 +309,7 @@ DEFINE_DISPATCH(bitwise_not_stub);
 DEFINE_DISPATCH(ceil_stub);
 DEFINE_DISPATCH(cos_stub);
 DEFINE_DISPATCH(cosh_stub);
+DEFINE_DISPATCH(digamma_stub);
 DEFINE_DISPATCH(erf_stub);
 DEFINE_DISPATCH(erfc_stub);
 DEFINE_DISPATCH(erfinv_stub);
@@ -280,6 +323,7 @@ DEFINE_DISPATCH(log1p_stub);
 DEFINE_DISPATCH(log2_stub);
 DEFINE_DISPATCH(logical_not_stub);
 DEFINE_DISPATCH(neg_stub);
+DEFINE_DISPATCH(polygamma_stub);
 DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
 DEFINE_DISPATCH(rsqrt_stub);
@@ -290,6 +334,7 @@ DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
+DEFINE_DISPATCH(trigamma_stub);
 DEFINE_DISPATCH(trunc_stub);
 }
 } // namespace at
