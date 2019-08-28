@@ -899,9 +899,9 @@ graph(%x : Tensor,
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
 
-        def get_forward(m):
-            return m._get_method("forward")
-        torch._C._jit_pass_constant_propagation(get_forward(m._c).graph)
+        def get_forward_graph(m):
+            return m._get_method("forward").graph
+        torch._C._jit_pass_constant_propagation(get_forward_graph(m._c))
         qconfig_dict = {
             '':
             QConfig(
@@ -918,10 +918,10 @@ graph(%x : Tensor,
                    .check_next('Tensor = prim::CallMethod[name="forward"]') \
                    .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                    .check_next('prim::CallMethod[name="forward"](%observer_for_') \
-                   .run(str(get_forward(m._c).graph))
+                   .run(str(get_forward_graph(m._c)))
         assert len([x for x, _ in m._c._get_module('conv')._get_modules()
                     if x.startswith('observer_for_')]) == 3, \
-                       'Expected to have 3 observer submodules'
+            'Expected to have 3 observer submodules'
         FileCheck().check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                    .check_next('prim::CallMethod[name="forward"](%observer_for_') \
                    .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
@@ -929,7 +929,7 @@ graph(%x : Tensor,
                    .check_next('Tensor = prim::CallMethod[name="conv2d_forward"](%self') \
                    .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                    .check_next('prim::CallMethod[name="forward"](%observer_for_') \
-                   .run(str(get_forward(m._c._get_module("conv")).graph))
+                   .run(str(get_forward_graph(m._c._get_module("conv"))))
 
 
     @_tmp_donotuse_dont_inline_everything
@@ -1049,7 +1049,7 @@ graph(%x : Tensor,
             torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict)
             assert len([x for x, _ in m._c._get_modules()
                         if x.startswith('observer_for_')]) == 2, \
-                           'Expected to have 2 observer submodules'
+                'Expected to have 2 observer submodules'
             FileCheck().check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                        .check_next('prim::CallMethod[name="forward"](%observer_for_') \
                        .check('ClassType<Conv2d> = prim::GetAttr[name="conv"]') \
