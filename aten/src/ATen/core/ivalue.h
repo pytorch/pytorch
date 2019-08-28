@@ -106,6 +106,15 @@ struct CAFFE2_API IValue final {
     // Other types can be compared by their ptr value
     return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
   }
+
+  size_t use_count() const noexcept {
+    if (!is_intrusive_ptr) {
+      return 1;
+    }
+
+    return c10::raw::intrusive_ptr::use_count(payload.as_intrusive_ptr);
+  }
+
   void swap(IValue & rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
