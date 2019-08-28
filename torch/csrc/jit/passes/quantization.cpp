@@ -474,7 +474,7 @@ struct ConvBNParameters {
  * The function is basically copied from torch/nn/utils/fusion.py
  */
 static std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
-    ConvBNParameters p) {
+    const ConvBNParameters& p) {
   at::Tensor bn_var_rsqrt = at::rsqrt(p.bn_rv + p.bn_eps);
   at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape({-1, 1, 1, 1});
   at::Tensor new_b = (p.conv_b - p.bn_rm) * bn_var_rsqrt * p.bn_w + p.bn_b;

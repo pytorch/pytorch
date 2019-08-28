@@ -1053,6 +1053,7 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
                 x = self.conv(x)
                 x = self.bn(x)
                 return x
+
         class testModule2(torch.nn.Module):
             def __init__(self):
                 super(testModule2, self).__init__()
