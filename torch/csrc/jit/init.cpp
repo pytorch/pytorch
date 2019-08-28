@@ -138,79 +138,24 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_propagate_qinfo",
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
-          "_jit_pass_insert_observers",
-          [](const script::Module& moduleObj,
-             const std::string& methodName,
-             py::function pyObserverFunction) {
-            // Create a new node that would be used in the insert observer pass:
-            // all observer nodes will be cloned from this one.
-            Graph g;
-            Node* new_node = g.createPythonOp(
-                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(moduleObj, methodName, new_node);
-            // We don't need this node anymore, don't forget to remove it.
-            new_node->destroy();
-          })
-      .def(
-          "_jit_pass_insert_observers",
-          [](const StrongFunctionPtr& function_var,
-             py::function pyObserverFunction) {
-            // Overloaded jit pass for pure functions instead of modules.
-            // Create a new node that would be used in the insert observer pass:
-            // all observer nodes will be cloned from this one.
-            Graph g;
-            Node* new_node = g.createPythonOp(
-                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(function_var.function_, new_node);
-            // We don't need this node anymore, don't forget to remove it.
-            new_node->destroy();
-          })
-      .def(
-          "_jit_pass_insert_quantdequant",
-          [](const script::Module& moduleObj,
-             const std::string& methodName,
-             py::dict& pyQParamDict) {
-            if (!pyQParamDict.size()) {
-              return;
-            }
-
-            auto qparam_dict = py::cast<std::unordered_map<
-                std::string,
-                std::tuple<std::string, float, int>>>(pyQParamDict);
-            return InsertQuantDequantNodes(moduleObj, methodName, qparam_dict);
-          })
-      .def(
-          "_jit_pass_insert_quantdequant_for_weight_bias",
-          [](const script::Module& moduleObj,
+          // TODO: rename to insert_observers after we remove old code
+          "_jit_pass_prepare_quant",
+          [](script::Module& module,
              const std::string& method_name,
-             const std::string& param_name,
-             py::function pyGetQParamFunc) {
-            // For different static params we pass different getQParamFunc via
-            // same interface exposed by the quantizer.
-            if (param_name == std::string("weight")) {
-              auto getQParamFunc =
-                  py::cast<std::function<std::tuple<std::string, float, int>(
-                      at::Tensor)>>(pyGetQParamFunc);
-              InsertQuantDequantNodesForParam(
-                  moduleObj,
-                  method_name,
-                  param_name,
-                  getQParamFunc,
-                  at::ScalarType::QInt8);
-            } else if (param_name == std::string("bias")) {
-              auto getQParamFunc =
-                  py::cast<std::function<std::tuple<std::string, float, int>(
-                      float, float)>>(pyGetQParamFunc);
-              InsertQuantDequantNodesForParam(
-                  moduleObj,
-                  method_name,
-                  param_name,
-                  getQParamFunc,
-                  at::ScalarType::QInt32);
-            } else {
-              TORCH_CHECK(false, "Invalid Param Name");
-            }
+             const script::Module& observer_module,
+             const script::Module& weight_observer_module) {
+            return InsertObservers(module, method_name, observer_module, weight_observer_module);
           })
+      .def(
+          "_jit_pass_insert_quant_dequant",
+          [](script::Module& module,
+             const std::string& method_name) {
+            return InsertQuantDeQuant(module, method_name);
+          }
+      )
+      .def(
+          "_jit_pass_quant_fusion",
+          [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })

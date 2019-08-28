@@ -16,6 +16,7 @@
 #include <ATen/native/UnaryOps.h>
 
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/Math.h>
 
 
 #if AT_MKL_ENABLED()
@@ -116,6 +117,29 @@ static void neg_kernel(TensorIterator& iter) {
   });
 }
 
+static void sign_kernel(TensorIterator& iter){
+  if(iter.dtype() == ScalarType::Bool){
+      cpu_kernel(iter, [=](bool x) -> bool { return x; });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
+        auto zero_vec = Vec256<scalar_t>((scalar_t)(0));
+        auto one_vec = Vec256<scalar_t>((scalar_t)(1));
+
+        cpu_kernel_vec(
+            iter,
+            [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
+            [=](Vec256<scalar_t> self_vec){
+
+                // Comparision operators returns bitmask.
+                auto left = Vec256<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
+                auto right = Vec256<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
+
+                return left - right;
+            });
+    });
+  }
+}
+
 static void sinh_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel(
@@ -130,6 +154,38 @@ static void cosh_kernel(TensorIterator& iter) {
         iter,
         [=](scalar_t a) -> scalar_t { return std::cosh(a); });
   });
+}
+
+static void erfinv_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "erfinv_cpu", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return calc_erfinv(a); });
+  });
+}
+
+static void digamma_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "digamma", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return calc_digamma(a); });
+  });
+}
+
+static void trigamma_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "trigamma", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return trigamma(a); });
+  });
+}
+
+static void polygamma_kernel(TensorIterator& iter, int64_t n) {
+  switch (n) {
+    case 0: digamma_kernel(iter); break;
+    case 1: trigamma_kernel(iter); break;
+    default: AT_ERROR("polygamma(n,x) is not implemented for n>=2");
+  }
 }
 
 #if !AT_MKL_ENABLED()
@@ -158,8 +214,8 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
       tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
     }
 
-    scalar_t *self_ptr = self.data<scalar_t>();
-    int *sample_int_ptr = tmp_int_tensor.data<int>();
+    scalar_t *self_ptr = self.data_ptr<scalar_t>();
+    int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
 
     auto sample = [&](int64_t begin, int64_t end) {
       int64_t len = end - begin;
@@ -237,8 +293,8 @@ static void rsqrt_kernel(TensorIterator& iter) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
-REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel)
+REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
+REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
@@ -246,8 +302,13 @@ REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
+REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
+REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel);
+REGISTER_DISPATCH(digamma_stub, &digamma_kernel);
+REGISTER_DISPATCH(trigamma_stub, &trigamma_kernel);
+REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)
