@@ -173,7 +173,12 @@ class CAFFE2_API Tensor {
     return impl_->strides();
   }
 #ifdef BUILD_NAMEDTENSOR
-  optional<DimnameList> names() const {
+  // See impl::get_opt_names in ATen/NamedTensor.h for docs.
+  optional<DimnameList> opt_names() const {
+    return impl::get_opt_names(unsafeGetTensorImpl());
+  }
+  // See impl::get_names in ATen/NamedTensor.h for docs.
+  DimnameList names() const {
     return impl::get_names(unsafeGetTensorImpl());
   }
 #endif
@@ -289,7 +294,7 @@ class CAFFE2_API Tensor {
 
   template<typename T>
   T * data() const {
-    TORCH_WARN("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.");
+    TORCH_WARN_ONCE("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.");
     return data_ptr<T>();
   }
 
