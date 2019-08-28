@@ -1579,6 +1579,26 @@ graph(%Ra, %Rb):
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
 
+    def do_trace_arange(self, requires_grad):
+        def fn(x):
+            return torch.arange(x.shape[0])
+
+        x = torch.randn(5, 3, 2, requires_grad=requires_grad)
+        y = torch.randn(8, 2, 4, requires_grad=requires_grad)
+
+        # Check that it behaves as expected
+        traced_fn = torch.jit.trace(fn, x)
+        self.assertEqual(traced_fn(y), fn(y))
+        self.assertEqual(traced_fn(x), fn(x))
+
+    def test_trace_arange(self):
+        self.do_trace_arange(False)
+
+    # test the different graph_executor path that happens when
+    # gradients are required and sizes are involved
+    def test_trace_arange_with_grad(self):
+        self.do_trace_arange(True)
+
     def test_trace_casts(self):
         casts = [
             lambda x: x.byte(),
@@ -11779,13 +11799,6 @@ a")
         torch.onnx.export_to_pretty_string(
             FooMod(), (torch.rand(3, 4),), f,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
-
-    def test_trace_checker_arange_as_constant(self):
-        with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
-            @_trace(torch.rand(3, 4), check_inputs=[(torch.rand(4, 5),)])
-            def foo(x):
-                y = torch.arange(0, x.shape[0]).double()
-                return x + y.unsqueeze(1)
 
     @suppress_warnings
     def test_trace_checker_dot_data(self):
