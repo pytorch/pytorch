@@ -30,13 +30,13 @@ namespace {
 //
 // This means that we allocate a [1,0] size indices tensor and a [0] size
 // values tensor for such an empty tensor.
-SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type)
-  :   SparseTensorImpl(type_id, data_type
+SparseTensorImpl::SparseTensorImpl(at::TensorTypeSet type_set, const caffe2::TypeMeta& data_type)
+  :   SparseTensorImpl(type_set, data_type
       , at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(ScalarType::Long))
       , at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(data_type))) {}
 
-SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
-    : TensorImpl(type_id, data_type, values.device())
+SparseTensorImpl::SparseTensorImpl(at::TensorTypeSet type_set, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
+    : TensorImpl(type_set, data_type, values.device())
     , sparse_dim_(1)
     , dense_dim_(0)
     , indices_(std::move(indices))

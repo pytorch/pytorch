@@ -46,6 +46,13 @@ static_assert(
 C10_API const char* toString(TensorTypeId);
 C10_API std::ostream& operator<<(std::ostream&, TensorTypeId);
 
+// For backwards compatibility with XLA repository
+// (I don't want to fix this in XLA right now because there might be
+// more renaming coming in the future.)
+static inline TensorTypeId XLATensorId() {
+  return TensorTypeId::XLATensorId;
+}
+
 } // namespace c10
 
 // NB: You really shouldn't use this instance; this enum is guaranteed

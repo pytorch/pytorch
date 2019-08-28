@@ -2,6 +2,7 @@
 
 #include <c10/core/TensorTypeId.h>
 #include <c10/util/llvmMathExtras.h>
+#include <ostream>
 
 namespace c10 {
 
@@ -41,6 +42,12 @@ public:
   C10_NODISCARD TensorTypeSet add(TensorTypeId t) const {
     return *this | TensorTypeSet(t);
   }
+  // Remove a TensorTypeId from the TensorTypeId set.  This is
+  // generally not an operation you should be doing (it's
+  // used to implement operator<<)
+  C10_NODISCARD TensorTypeSet remove(TensorTypeId t) const {
+    return TensorTypeSet(repr_ & ~TensorTypeSet(t).repr_);
+  }
   // Is the set empty?  (AKA undefined tensor)
   bool empty() const {
     return repr_ == 0;
@@ -58,5 +65,8 @@ private:
   TensorTypeSet(uint64_t repr) : repr_(repr) {}
   uint64_t repr_ = 0;
 };
+
+std::string toString(TensorTypeSet);
+std::ostream& operator<<(std::ostream&, TensorTypeSet);
 
 }

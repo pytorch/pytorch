@@ -79,3 +79,7 @@ void expectListEquals(c10::ArrayRef<T> expected, std::vector<T> actual) {
     EXPECT_EQ(expected[i], actual[i]);
   }
 }
+
+bool is_cpu (const Tensor& t) { return t.type_set() == TensorTypeSet(TensorTypeId::CPUTensorId); }
+bool is_cuda(const Tensor& t) { return t.type_set() == TensorTypeSet(TensorTypeId::CUDATensorId); }
+bool is_hip (const Tensor& t) { return t.type_set() == TensorTypeSet(TensorTypeId::HIPTensorId); }

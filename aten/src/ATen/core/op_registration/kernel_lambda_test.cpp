@@ -136,11 +136,11 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorOutput_whe
 
   auto result = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(TensorTypeId::CPUTensorId, result[0].toTensor().type_id());
+  EXPECT_EQ(TensorTypeSet(TensorTypeId::CPUTensorId), result[0].toTensor().type_set());
 
   result = callOp(*op, dummyTensor(TensorTypeId::CUDATensorId));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(TensorTypeId::CUDATensorId, result[0].toTensor().type_id());
+  EXPECT_EQ(TensorTypeSet(TensorTypeId::CUDATensorId_, result[0].toTensor().type_set());
 }
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorListOutput_whenRegistered_thenCanBeCalled) {
@@ -154,9 +154,9 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorListOutput
   auto result = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), dummyTensor(TensorTypeId::CPUTensorId));
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(3, result[0].toTensorListRef().size());
-  EXPECT_EQ(TensorTypeId::CPUTensorId, result[0].toTensorListRef()[0].type_id());
-  EXPECT_EQ(TensorTypeId::CUDATensorId, result[0].toTensorListRef()[1].type_id());
-  EXPECT_EQ(TensorTypeId::CPUTensorId, result[0].toTensorListRef()[2].type_id());
+  EXPECT_EQ(TensorTypeSet(TensorTypeId::CPUTensorId), result[0].toTensorListRef()[0].type_set());
+  EXPECT_EQ(TensorTypeSet(TensorTypeId::CUDATensorId), result[0].toTensorListRef()[1].type_set());
+  EXPECT_EQ(TensorTypeSet(TensorTypeId::CPUTensorId), result[0].toTensorListRef()[2].type_sest());
 }
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListOutput_whenRegistered_thenCanBeCalled) {
@@ -196,7 +196,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithMultipleOutputs_
 
   auto result = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId));
   EXPECT_EQ(5, result.size());
-  EXPECT_EQ(TensorTypeId::CUDATensorId, result[0].toTensor().type_id());
+  EXPECT_EQ(TensorTypeSet(TensorTypeId::CUDATensorId, result[0].toTensor().type_set());
   EXPECT_EQ(5, result[1].toInt());
   EXPECT_EQ(2, result[2].toTensorListRef().size());
   EXPECT_EQ(TensorTypeId::CPUTensorId, result[2].toTensorListRef()[0].type_id());
@@ -547,7 +547,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithOptionalInputs_w
 
   auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), c10::IValue(), std::string("text"));
   EXPECT_EQ(3, outputs.size());
-  EXPECT_EQ(TensorTypeId::CUDATensorId, outputs[0].toTensor().type_id());
+  EXPECT_EQ(c10::TensorTypeSet(TensorTypeId::CUDATensorId), outputs[0].toTensor().type_set());
   EXPECT_TRUE(outputs[1].isNone());
   EXPECT_EQ("text", outputs[2].toString()->string());
 

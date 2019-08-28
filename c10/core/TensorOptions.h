@@ -5,6 +5,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Device.h>
+#include <c10/core/TensorTypeSet.h>
 
 #include <c10/util/Optional.h>
 #include <c10/util/C++17.h>
@@ -348,8 +349,15 @@ struct C10_API TensorOptions {
   }
 
   // Resolves the ATen backend specified by the current construction axes.
+  // TODO: Deprecate this
   Backend backend() const noexcept {
     return at::tensorTypeIdToBackend(computeTensorTypeId());
+  }
+
+  // Resolves the tensor type set specified by the current construction axes.
+  TensorTypeSet type_set() const noexcept {
+    // TODO: This should also contain variable eventually
+    return TensorTypeSet(computeTensorTypeId());
   }
 
   inline TensorTypeId computeTensorTypeId() const {

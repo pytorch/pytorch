@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Backend.h>
+#include <c10/core/TensorTypeSet.h>
 #include <unordered_map>
 #include <c10/util/C++17.h>
 #include <memory>
@@ -15,6 +16,26 @@
 
 namespace at {
 
+namespace impl {
+
+// Take a TensorTypeSet for a Tensor, and combine it with the current thread
+// local set of inclusions and exclusions (not yet implemented, coming soon!)
+// to determine what the actual dispatch TensorTypeId should be.  Unlike
+// Tensor::type_set(), the value of this on a tensor can change depending
+// on TLS.
+//
+// NB: I didn't make this take a Tensor to avoid header include shenanigans.
+//
+// TODO: I'm not sure if this should live in this header or not; the operant
+// question is whether or not we have access to all the relevant TLS at this
+// point.
+TensorTypeId dispatchTypeId(TensorTypeSet ts) {
+  // TODO: Account for TLS!
+  return ts.firstTypeId();
+}
+
+}
+
 // ATenOpTable stores the implementations for each backend, in addition to
 // an implementation for variables.
 class CAFFE2_API ATenOpTable {
@@ -23,11 +44,11 @@ class CAFFE2_API ATenOpTable {
     : schema_(std::move(schema)) {}
 
   template<class FuncType>
-  FuncType* getOp(Backend backend, bool is_variable) const {
+  FuncType* getOp(TensorTypeSet ts, bool is_variable) const {
     if (is_variable) {
       return reinterpret_cast<FuncType*>(getVariableOp());
     }
-    return reinterpret_cast<FuncType*>(getBaseOp(backend));
+    return reinterpret_cast<FuncType*>(getBaseOp(tensorTypeIdToBackend(impl::dispatchTypeId(ts))));
   }
  private:
   void registerOp(Backend backend, void* fn) {

@@ -218,7 +218,10 @@ class CAFFE2_API Tensor {
 
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        tensorTypeIdToBackend(type_id()),
+        // TODO: When we build in Variable here, we need to change the
+        // signature of getDeprecatedTypeProperties to collapse backend
+        // and is_variable into TensorTypeSet
+        tensorTypeIdToBackend(type_set().firstTypeId()),
         scalar_type(),
         is_variable());
   }
@@ -293,8 +296,8 @@ class CAFFE2_API Tensor {
   T * data_ptr() const;
 
   template<typename T>
+  C10_DEPRECATED_MESSAGE("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.")
   T * data() const {
-    TORCH_WARN_ONCE("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.");
     return data_ptr<T>();
   }
 
@@ -849,14 +852,13 @@ Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
 }
 
-inline TensorTypeSet infer_type_set(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return tensorTypeIdToBackend(t.type_set());
+inline TensorTypeSet infer_tensor_type_set(const Tensor & tl) {
+  return tl.type_set();
 }
-// TODO: do a union over all the tensors in the TensorList
-inline TensorTypeSet infer_type_set(const TensorList & tl) {
+
+inline TensorTypeSet infer_tensor_type_set(TensorList tl) {
   TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tensorTypeIdToBackend(tl[0].type_set());
+  return tl[0].type_set();
 }
 
 inline bool infer_is_variable(const Tensor & t) {
