@@ -168,7 +168,8 @@ static Value* tryMatchArgument(
         if (v->getElementType()->isSubtypeOf(TensorType::get())) {
           ostream << "Empty lists default to List[Tensor]. Add a variable "
                      "annotation to the assignment to create an empty list "
-                     "of another type (torch.jit.annotate() for Python 2)\n";
+                     "of another type (torch.jit.annotate(List[T, []]) where T "
+                     "is the type of elements in the list for Python 2)\n";
         }
       }
 
