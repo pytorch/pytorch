@@ -146,7 +146,7 @@ static void check_unify(
     DimnameList other_names,
     DimnameList expected) {
   const auto result = at::unify_from_right(names, other_names);
-  ASSERT_TRUE(dimnames_equal(result.value(), expected));
+  ASSERT_TRUE(dimnames_equal(result, expected));
 }
 
 static void check_unify_error(DimnameList names, DimnameList other_names) {
@@ -161,9 +161,6 @@ TEST(NamedTensorTest, unifyFromRight) {
   auto None = dimnameFromString("*");
   
   std::vector<Dimname> names = { N, C };
-  ASSERT_TRUE(dimnames_equal(*at::unify_from_right(at::nullopt, names), names));
-  ASSERT_TRUE(dimnames_equal(*at::unify_from_right(names, at::nullopt), names));
-  ASSERT_FALSE(at::unify_from_right(at::nullopt, at::nullopt).has_value());
 
   check_unify({ N, C, H, W }, { N, C, H, W }, { N, C, H, W });
   check_unify({ W }, { C, H, W }, { C, H, W });

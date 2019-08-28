@@ -31,7 +31,8 @@ namespace jit {
   _(WAIT, "") /* wait for a future to be complete */                        \
   _(CALL, "F") /* call function X */                                        \
   _(GUARD, "T") /* check guard against type_table, true if passes */        \
-  _(TAIL_CALL, "F") /* replace current frame with function F */
+  _(TAIL_CALL, "F") /* replace current frame with function F */             \
+  _(INTERFACE_CALL, "CI") /* call method X on the first argument (of N) */
 
 enum OpCode : uint8_t {
 #define DEFINE_OP(op, _) op,
