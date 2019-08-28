@@ -799,6 +799,15 @@ class TestNamedTensor(TestCase):
     def test_as_strided_cuda(self):
         self._test_as_strided('cuda')
 
+    def test_no_jit_support(self):
+        @torch.jit.script
+        def foo(x):
+            return x + 1
+
+        named_tensor = torch.randn(2, 3, names=('N', 'C'))
+        with self.assertRaisesRegex(RuntimeError, 'NYI'):
+            foo(named_tensor)
+
     def test_align_to(self):
         def _test(tensor_namedshape, align_names, expected_sizes, expected_error):
             tensor_names, tensor_sizes = tensor_namedshape
