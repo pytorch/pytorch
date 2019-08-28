@@ -709,7 +709,6 @@ smoke_mac_test: &smoke_mac_test
 ##############################################################################
 # Job specifications job specs
 ##############################################################################
-version: 2
 jobs:
   pytorch_linux_xenial_py2_7_9_build:
     environment:
