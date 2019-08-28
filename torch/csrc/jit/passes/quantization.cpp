@@ -444,8 +444,8 @@ graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale,
         %in_param : int[] = prim::ListConstruct(%0, %2, %3, %1)
         %a_perm : Tensor = aten::permute(%a_quant, %in_param)
         %w_perm : Tensor = aten::permute(%w_quant, %in_param)
-        %w_packed = quantized::fbgemm_conv_prepack(%w_perm, %stride, %padding, %dilation, %groups)
-        %r = quantized::fbgemm_conv2d(%a_perm, %w_packed, %b_quant, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
+        %w_packed = quantized::quantized_conv_prepack(%w_perm, %stride, %padding, %dilation, %groups)
+        %r = quantized::quantized_conv2d(%a_perm, %w_packed, %b_quant, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
         %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
         %r_perm = aten::permute(%r, %out_param)
         return (%r_perm))";

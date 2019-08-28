@@ -48,7 +48,7 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    "quantized::fbgemm_linear_unpack(Tensor W_prepack) -> Tensor W_origin",
+    "quantized::quantized_linear_unpack(Tensor W_prepack) -> Tensor W_origin",
     c10::RegisterOperators::options().kernel<QLinearUnpackWeightInt8>(
         CPUTensorId()));
 

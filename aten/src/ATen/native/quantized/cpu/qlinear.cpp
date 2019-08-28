@@ -166,10 +166,10 @@ class QLinearInt8 final : public torch::OperatorKernel {
 
 static auto registry =
     torch::RegisterOperators()
-        .op("quantized::fbgemm_linear(Tensor X, Tensor W_prepack, Tensor? b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+        .op("quantized::quantized_linear(Tensor X, Tensor W_prepack, Tensor? b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
                 QuantizedCPUTensorId()))
-        .op("quantized::fbgemm_linear_relu(Tensor X, Tensor W_prepack, Tensor? b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+        .op("quantized::quantized_linear_relu(Tensor X, Tensor W_prepack, Tensor? b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<true>>(
                 QuantizedCPUTensorId()));
 } // namespace

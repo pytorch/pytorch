@@ -998,8 +998,8 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %b_intrepr = aten::int_repr(%b_quant)
         # CHECK-NOT: aten::_dequantize_linear
         %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
-        # CHECK: quantized::fbgemm_conv_prepack
-        # CHECK: quantized::fbgemm_conv2d
+        # CHECK: quantized::quantized_conv_prepack
+        # CHECK: quantized::quantized_conv2d
         # CHECK-NOT: aten::conv2d
         %r = aten::conv2d(%a_dequant, %w_dequant, %b_dequant, %c, %d, %e, %f)
         # CHECK-NOT: aten::quantize_linear
@@ -14274,11 +14274,11 @@ a")
                     [out_features, in_features], scale=1, zero_point=0,
                     dtype=torch.qint8)
                 self.register_buffer('_packed_weight',
-                                     torch.ops.quantized.fbgemm_linear_prepack(qweight))
+                                     torch.ops.quantized.quantized_linear_prepack(qweight))
 
             @torch.jit.export
             def __getstate__(self):
-                return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+                return torch.ops.quantized.quantized_linear_unpack(self._packed_weight)
 
             def forward(self):
                 return self._packed_weight
@@ -14286,15 +14286,15 @@ a")
             @torch.jit.export
             def __setstate__(self, state):
                 self._packed_weight.set_(
-                    torch.ops.quantized.fbgemm_linear_prepack(state))
+                    torch.ops.quantized.quantized_linear_prepack(state))
 
             @property
             def weight(self):
-                return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+                return torch.ops.quantized.quantized_linear_unpack(self._packed_weight)
 
             @weight.setter
             def weight(self, w):
-                self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
+                self._packed_weight = torch.ops.quantized.quantized_linear_prepack(w)
 
         with torch.jit._disable_emit_hooks():
             x = torch.jit.script(Linear(10, 10))
@@ -18475,7 +18475,7 @@ class TestClassType(JitTestCase):
 
             def two(self, x):
                 # type: (int) -> int
-                pass            
+                pass
 
         @torch.jit.script
         class NotMember(object):
