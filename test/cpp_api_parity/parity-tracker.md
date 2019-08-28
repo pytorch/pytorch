@@ -2,7 +2,7 @@
 
 ## torch.nn
 
-Module | Implementation Parity | Doc Parity
+API | Implementation Parity | Doc Parity
 ------------- | ------------- | -------------
 torch.nn.Sequential|No|No
 torch.nn.ModuleList|No|No
