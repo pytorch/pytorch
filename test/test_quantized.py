@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import numpy as np
 import unittest
 
@@ -1263,9 +1261,9 @@ class TestQNNPackOps(TestCase):
 class TestComparatorOps(TestCase):
     """Tests the element-wise equality ops."""
     @given(A=hu.tensor(shapes=((3, 4, 5),),
-                       qparams=hu.qparams(dtypes=torch.quint8)),
+                       qparams=hu.qparams()),
            B=hu.tensor(shapes=((5,), (1, 5), (1, 1, 5), (4, 5), (3, 4, 5)),
-                       qparams=hu.qparams(dtypes=torch.quint8)))
+                       qparams=hu.qparams()))
     def test_compare_tensor_tensor(self, A, B):
         A, (scale_a, zero_point_a, dtype_a) = A
         B, (scale_b, zero_point_b, dtype_b) = B
@@ -1294,7 +1292,7 @@ class TestComparatorOps(TestCase):
                              "'tensor.{}(tensor)'' failed".format(op))
 
     @given(A=hu.tensor(shapes=((3, 4, 5),),
-                       qparams=hu.qparams(dtypes=torch.quint8)),
+                       qparams=hu.qparams()),
            b=st.floats(allow_infinity=False, allow_nan=False, width=32))
     def test_compare_tensor_scalar(self, A, b):
         A, (scale_a, zero_point_a, dtype_a) = A
