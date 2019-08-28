@@ -9,6 +9,7 @@ from datetime import timedelta
 from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
 from . import (
     AllreduceOptions,
+    AllreduceCoalescedOptions,
     BroadcastOptions,
     GatherOptions,
     ReduceOptions,
