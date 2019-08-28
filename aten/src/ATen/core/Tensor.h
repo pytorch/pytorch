@@ -222,8 +222,8 @@ class CAFFE2_API Tensor {
         scalar_type(),
         is_variable());
   }
-  TensorTypeId type_id() const {
-    return impl_->type_id();
+  TensorTypeSet type_set() const {
+    return impl_->type_set();
   }
   ScalarType scalar_type() const {
     return typeMetaToScalarType(impl_->dtype());
@@ -849,13 +849,14 @@ Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
 }
 
-inline Backend infer_backend(const Tensor & t) {
+inline TensorTypeSet infer_type_set(const Tensor & t) {
   TORCH_CHECK(t.defined(), "undefined Tensor");
-  return tensorTypeIdToBackend(t.type_id());
+  return tensorTypeIdToBackend(t.type_set());
 }
-inline Backend infer_backend(const TensorList & tl) {
+// TODO: do a union over all the tensors in the TensorList
+inline TensorTypeSet infer_type_set(const TensorList & tl) {
   TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tensorTypeIdToBackend(tl[0].type_id());
+  return tensorTypeIdToBackend(tl[0].type_set());
 }
 
 inline bool infer_is_variable(const Tensor & t) {
