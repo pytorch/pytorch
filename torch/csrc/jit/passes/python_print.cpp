@@ -1193,7 +1193,9 @@ struct PythonPrintPass {
   }
 
  public:
-  void printFunction(const Function& func) {
+  void printFunction(
+      const Function& func,
+      bool print_first_argument_type = true) {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
@@ -1209,7 +1211,7 @@ struct PythonPrintPass {
         // the first argument may omit its type when it is implied by context
         // the flag is_method_ determines when to do this
         body_ << arg_name;
-        if (!is_method_) {
+        if (print_first_argument_type) {
           body_ << ": " << arg.type()->python_str();
         }
       } else {
@@ -1223,6 +1225,10 @@ struct PythonPrintPass {
 
     body_ << ") -> " << resultType(graph)->python_str() << ":\n";
     printBody(graph.block());
+  }
+
+  void printMethod(const Function& func) {
+    printFunction(func, /*print_first_argument_type=*/false);
   }
 
   std::string getImports() {
@@ -1243,13 +1249,11 @@ struct PythonPrintPass {
       std::vector<at::Tensor>& tensor_table,
       std::vector<c10::NamedTypePtr>& deps_table,
       bool enforce_importable,
-      bool is_method,
       bool legacy_module_printing)
       : body_(&source_range_stack_),
         tensor_table_(tensor_table),
         deps_table_(deps_table),
         enforce_importable_(enforce_importable),
-        is_method_(is_method),
         legacy_module_printing_(legacy_module_printing) {
     TORCH_INTERNAL_ASSERT(deps_table.empty());
   }
@@ -1309,8 +1313,10 @@ struct PythonPrintPass {
     }
   }
 
-  void printClass(const c10::NamedTypePtr& type) {
-    if (auto classType = type->cast<ClassType>()) {
+  void printNamedType(const c10::NamedTypePtr& type) {
+    if (auto functionType = type->cast<FunctionType>()) {
+      printFunction(*functionType->function());
+    } else if (auto classType = type->cast<ClassType>()) {
       bool is_module = classType->is_module();
       if (legacy_module_printing_) {
         is_module = false;
@@ -1346,7 +1352,7 @@ struct PythonPrintPass {
         }
       }
     } else {
-      TORCH_INTERNAL_ASSERT(false);
+      TORCH_INTERNAL_ASSERT(false, "Unhandled NamedType");
     }
     // remove `classType` from the list of deps
     deps_table_.erase(
@@ -1362,7 +1368,7 @@ struct PythonPrintPass {
 
   void LEGACY_printModuleMethods(const script::Module& module) {
     for (const auto method : module.type()->methods()) {
-      printFunction(*method);
+      printMethod(*method);
     }
   }
 };
@@ -1379,9 +1385,12 @@ void PythonPrint(
       tensor_table,
       deps_table,
       enforce_importable,
-      is_method,
       /*legacy_module_printing=*/false);
-  pp.printFunction(func);
+  if (is_method) {
+    pp.printMethod(func);
+  } else {
+    pp.printFunction(func);
+  }
   pp.print(out, source_ranges_out);
 }
 
@@ -1392,20 +1401,12 @@ void PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable) {
-  bool is_class_type = type->cast<TupleType>() || type->cast<ClassType>();
   PythonPrintPass pp(
       tensor_table,
       deps_table,
       enforce_importable,
-      /*is_method=*/is_class_type,
       /*legacy_module_printing=*/false);
-  if (is_class_type) {
-    pp.printClass(type);
-  } else {
-    auto f = type->cast<FunctionType>();
-    TORCH_INTERNAL_ASSERT(f);
-    pp.printFunction(*f->function());
-  }
+  pp.printNamedType(type);
   pp.print(out, source_ranges_out);
 }
 
@@ -1416,20 +1417,12 @@ void LEGACY_PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable) {
-  bool is_class_type = type->cast<TupleType>() || type->cast<ClassType>();
   PythonPrintPass pp(
       tensor_table,
       deps_table,
       enforce_importable,
-      /*is_method=*/is_class_type,
       /*legacy_module_printing=*/true);
-  if (is_class_type) {
-    pp.printClass(type);
-  } else {
-    auto f = type->cast<FunctionType>();
-    TORCH_INTERNAL_ASSERT(f);
-    pp.printFunction(*f->function());
-  }
+  pp.printNamedType(type);
   pp.print(out, source_ranges_out);
 }
 
@@ -1444,7 +1437,6 @@ void LEGACY_PythonPrint(
       tensor_table,
       deps_table,
       enforce_importable,
-      /*is_method=*/true,
       /*legacy_module_printing=*/true);
   pp.LEGACY_printModuleMethods(module);
   pp.print(out, source_ranges_out);
