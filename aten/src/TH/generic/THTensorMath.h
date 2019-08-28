@@ -81,8 +81,6 @@ TH_API void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src);
 TH_API void THTensor_(bitxor)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(cbitxor)(THTensor *r_, THTensor *t, THTensor *src);
 
-TH_API void THTensor_(sign)(THTensor *r_, THTensor *t);
-
 void THTensor_(preserveReduceDimSemantics)(THTensor *r_, int in_dims, int reduce_dimension, int keepdim);
 
 TH_API void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
@@ -151,7 +149,6 @@ TH_API accreal THTensor_(trace)(THTensor *t);
 TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);
 
 TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder);
-TH_API void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, int dim, int dir, int sorted);
 TH_API void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k);
 
 TH_API void THTensor_(pow)(THTensor *r_, THTensor *t, scalar_t value);

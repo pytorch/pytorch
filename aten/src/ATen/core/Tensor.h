@@ -173,7 +173,12 @@ class CAFFE2_API Tensor {
     return impl_->strides();
   }
 #ifdef BUILD_NAMEDTENSOR
-  optional<DimnameList> names() const {
+  // See impl::get_opt_names in ATen/NamedTensor.h for docs.
+  optional<DimnameList> opt_names() const {
+    return impl::get_opt_names(unsafeGetTensorImpl());
+  }
+  // See impl::get_names in ATen/NamedTensor.h for docs.
+  DimnameList names() const {
     return impl::get_names(unsafeGetTensorImpl());
   }
 #endif
@@ -289,7 +294,7 @@ class CAFFE2_API Tensor {
 
   template<typename T>
   T * data() const {
-    TORCH_WARN("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.");
+    TORCH_WARN_ONCE("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.");
     return data_ptr<T>();
   }
 
@@ -590,6 +595,9 @@ class CAFFE2_API Tensor {
   Tensor tanh() const;
   Tensor & tanh_() const;
   Tensor transpose(int64_t dim0, int64_t dim1) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor transpose(Dimname dim0, Dimname dim1) const;
+  #endif
   Tensor & transpose_(int64_t dim0, int64_t dim1) const;
   Tensor flip(IntArrayRef dims) const;
   Tensor roll(IntArrayRef shifts, IntArrayRef dims={}) const;
@@ -641,6 +649,8 @@ class CAFFE2_API Tensor {
   Tensor dequantize() const;
   double q_scale() const;
   int64_t q_zero_point() const;
+  Tensor q_per_channel_scales() const;
+  Tensor q_per_channel_zero_points() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
@@ -717,7 +727,6 @@ class CAFFE2_API Tensor {
   Tensor & pow_(const Tensor & exponent) const;
   Tensor & lerp_(const Tensor & end, Scalar weight) const;
   Tensor & lerp_(const Tensor & end, const Tensor & weight) const;
-  Tensor & sign_() const;
   Tensor & fmod_(Scalar other) const;
   Tensor & fmod_(const Tensor & other) const;
   Tensor & remainder_(Scalar other) const;
@@ -780,12 +789,13 @@ class CAFFE2_API Tensor {
   Tensor polygamma(int64_t n) const;
   Tensor erfinv() const;
   Tensor & erfinv_() const;
+  Tensor sign() const;
+  Tensor & sign_() const;
   Tensor dist(const Tensor & other, Scalar p=2) const;
   Tensor atan2(const Tensor & other) const;
   Tensor lerp(const Tensor & end, Scalar weight) const;
   Tensor lerp(const Tensor & end, const Tensor & weight) const;
   Tensor histc(int64_t bins=100, Scalar min=0, Scalar max=0) const;
-  Tensor sign() const;
   Tensor fmod(Scalar other) const;
   Tensor fmod(const Tensor & other) const;
   Tensor remainder(Scalar other) const;

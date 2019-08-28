@@ -1123,6 +1123,8 @@
 [[
   name: _th_topk
   cname: topk
+  backends:
+    - CUDA
   variants:
     - function
   return: argument 0,1
@@ -1912,28 +1914,6 @@
     - THTensor* self
     - arg: long dim
       wrap_dim: self
-]]
-[[
-  name: _th_sign
-  cname: sign
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_sign_
-  cname: sign
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
 ]]
 [[
   name: _th_trace
