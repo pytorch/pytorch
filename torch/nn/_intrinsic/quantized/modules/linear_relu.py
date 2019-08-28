@@ -26,9 +26,13 @@ class LinearReLU(nnq.Linear):
         super(LinearReLU, self).__init__(in_features, out_features, bias)
 
     def forward(self, input):
+        bias = self.bias
+        if bias is not None:
+            bias = torch.quantize_linear(bias.dequantize(), float(self.weight_scale) * input.q_scale(), 0, torch.qint32)
+
         Y_q = torch.ops.quantized.fbgemm_linear_relu(
             input, self._packed_weight,
-            self.bias,
+            bias,
             float(self.scale),
             int(self.zero_point))
         return Y_q

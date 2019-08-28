@@ -430,5 +430,3 @@ from .ConstantArguments import ConstantArguments  # noqa: F401
 from .ReturnArguments import ReturnArguments  # noqa: F401
 from .GILRelease import GILRelease  # noqa: F401
 from .AutoGPU import AutoGPU  # noqa: F401
-from .CuDNNPlugin import CuDNNPlugin  # noqa: F401
-from .WrapDim import WrapDim  # noqa: F401
