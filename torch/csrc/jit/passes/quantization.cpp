@@ -500,9 +500,9 @@ static bool tryExtractingConvBNParameters(
 
   r.bn_rm = bn.get_attribute("running_mean").toTensor();
   r.bn_rv = bn.get_attribute("running_var").toTensor();
-  r.bn_eps = 1e-5; // TODO: allow access to the actual value. Now we cannot
-                   // do it because we inline all fields that are in
-                   // __constants__ and lose all tracks of them.
+  r.bn_eps = 1e-5; // TODO: allow access to the actual value. NOLINT
+                   // Now we cannot do it because we inline all fields that are
+                   // in __constants__ and lose all tracks of them.
   r.bn_w = bn.get_parameter("weight");
   r.bn_b = bn.get_parameter("bias");
   return true;
