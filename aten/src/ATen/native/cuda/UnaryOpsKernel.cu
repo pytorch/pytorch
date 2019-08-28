@@ -40,7 +40,6 @@ void neg_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-
 void sign_kernel_cuda(TensorIterator& iter){
     if (iter.dtype() == ScalarType::Bool) {
       gpu_kernel(iter, []GPU_LAMBDA(bool a){
@@ -56,8 +55,17 @@ void sign_kernel_cuda(TensorIterator& iter){
     }
 }
 
+void erfinv_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "erfinv_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return erfinvf(a);
+    });
+  });
+}
+
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda);
 REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);
+REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 }}
