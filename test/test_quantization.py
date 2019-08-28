@@ -17,7 +17,7 @@ from common_utils import run_tests, tempfile
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
     SkipQuantModel, QuantStubModel, \
     ModelForFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
-    ModelForWrapping, \
+    ModForWrapping, \
     test_only_eval_fn, test_only_train_fn, \
     prepare_dynamic, convert_dynamic, SingleLayerLinearDynamicModel, \
     TwoLayerLinearModel, NestedModel, ResNetBase
@@ -500,16 +500,13 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
 
 class ScriptabilityTest(QuantizationTestCase):
     def setUp(self):
-        from torch.quantization import default_eval_fn, QuantWrapper
-
-        super(ScriptabilityTest, self).setUp()
-        self.model_under_test = ModelForWrapping().float()
-        self.qmodel_under_test = ModelForWrapping().float()
-        self.qmodel_under_test = quantize(
-            QuantWrapper(self.qmodel_under_test.float()),
-            default_eval_fn,
-            self.calib_data)
-        self.x = torch.rand(10).float()
+        self.model_under_test = ModForWrapping(quantized=False)
+        self.qmodel_under_test = ModForWrapping(quantized=True)
+        self.qmodel_under_test = self.qmodel_under_test.from_float(
+            self.model_under_test)
+        self.x = torch.rand(10)
+        self.qx = torch.quantize_linear(self.x.to(torch.float), scale=1.0,
+                                        zero_point=0, dtype=torch.qint32)
 
     def test_scriptability_serialization(self):
         # test serialization of quantized functional modules
@@ -519,29 +516,13 @@ class ScriptabilityTest(QuantizationTestCase):
             loaded = torch.load(f)
         self.assertEqual(self.qmodel_under_test.myadd.zero_point, loaded.myadd.zero_point)
         state_dict = self.qmodel_under_test.state_dict()
-        assert('myadd.zero_point' in state_dict.keys())
+        self.assertTrue('myadd.zero_point' in state_dict.keys(),
+                        'zero point not in state dict for functional modules')
 
         x = torch.rand(10, 1, dtype=torch.float)
         xq = torch.quantize_linear(x, 1.0, 0, torch.qint8)
         self.checkScriptable(self.qmodel_under_test, [(xq, xq)], check_save_load=True)
-        self.checkScriptable(self.model_under_test, [(xq, xq)], check_save_load=True)
-
-    def test_quantized(self):
-        qtraced_model = torch.jit.trace(self.qmodel_under_test, self.x,
-                                        check_trace=False)
-        self.assertEqual(qtraced_model(self.x), self.qmodel_under_test(self.x))
-
-        qscripted_model = torch.jit.script(self.qmodel_under_test)
-        self.assertEqual(qscripted_model(self.x), self.qmodel_under_test(self.x))
-
-    def test_float(self):
-        traced_model = torch.jit.trace(self.model_under_test, self.x,
-                                       check_trace=False)
-        self.assertEqual(traced_model(self.x), self.model_under_test(self.x))
-
-        scripted_model = torch.jit.script(self.model_under_test)
-        self.assertEqual(scripted_model(self.x), self.model_under_test(self.x))
-
+        self.checkScriptable(self.model_under_test, [(xq.dequantize(), xq.dequantize())], check_save_load=True)
 
 @unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
                  'Quantization requires FBGEMM. FBGEMM does not play'

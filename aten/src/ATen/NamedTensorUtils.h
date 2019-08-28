@@ -61,6 +61,16 @@ void propagate_names_for_addmm(
     /*const*/TensorImpl* m2,
     /*const*/TensorImpl* bias);
 
+void propagate_names_for_addmv(
+    TensorImpl* result,
+    TensorImpl* mat,
+    TensorImpl* vec,
+    TensorImpl* bias);
+
+void check_names_for_dot(TensorImpl* vec1, TensorImpl* vec2);
+
+void propagate_names_for_expand(Tensor& result, const Tensor& self);
+
 } // namespace namedinference
 
 } // namespace at
