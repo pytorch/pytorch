@@ -285,6 +285,15 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #define TORCH_WARN(...) \
   ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__))
 
+// Report a warning to the user only once.  Accepts an arbitrary number of extra
+// arguments which are concatenated into the warning message using operator<<
+//
+#define TORCH_WARN_ONCE(...) \
+  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [] { \
+    ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__)); \
+    return true; \
+  }()
+
 
 // ----------------------------------------------------------------------------
 // Deprecated macros

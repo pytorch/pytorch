@@ -15,7 +15,7 @@ static std::unordered_map<std::string, int> op_to_key = {
 
 namespace caffe2 {
 
-using at::Half; // for AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, ...)
+using at::Half; // for AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ...)
 
 template <class Context>
 class ATenOp : public Operator<Context> {
@@ -47,7 +47,7 @@ private:
       case at::k##aten_name: \
         return TypeMeta::Make<ctype>();
     switch(st) {
-      AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, DEFINE_CASE)
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CASE)
     default:
       CAFFE_THROW("Unknown ATen Type");
     }
@@ -139,7 +139,7 @@ private:
           auto value = extract<ctype>(scalar); \
           assignToValue<ctype>(dst, at::convert<ctype,decltype(value)>(value)); \
         } break;
-      AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, DEFINE_CASE)
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CASE)
 #undef DEFINE_CASE
       default:
         CAFFE_THROW("Unknown ATen Type");
