@@ -731,6 +731,8 @@ class TestCase(expecttest.TestCase):
                 if diff.is_signed():
                     diff = diff.abs()
                 diff[nan_mask] = 0
+                # Use `item()` to work around:
+                # https://github.com/pytorch/pytorch/issues/22301
                 max_err = diff.max().item()
                 self.assertGreaterEqual(max_err, prec, message)
         elif type(x) == str and type(y) == str:
