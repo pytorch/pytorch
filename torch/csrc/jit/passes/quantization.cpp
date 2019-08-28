@@ -461,7 +461,7 @@ struct ConvBNParameters {
   at::Tensor conv_b;
   at::Tensor bn_rm;
   at::Tensor bn_rv;
-  double bn_eps;
+  double bn_eps = 0.0;
   at::Tensor bn_w;
   at::Tensor bn_b;
 };
