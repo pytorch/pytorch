@@ -757,6 +757,8 @@ struct PythonPrintPass {
       if (tupleType->name()) {
         registerDependency(tupleType);
       }
+    } else if (const auto interfaceType = type->cast<InterfaceType>()) {
+      registerDependency(interfaceType);
     }
     for (const auto& containedType : type->containedTypes()) {
       registerClassDependencies(containedType);
@@ -947,6 +949,20 @@ struct PythonPrintPass {
     }
   }
 
+  static bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
+    if (elem_type->kind() == OptionalType::Kind) {
+      // it is possible that we are constructing an optional list, but all
+      // elements are present
+      return false;
+    }
+    if (elem_type->kind() == InterfaceType::Kind) {
+      // since classes can be members of multiple interfaces, we cannot
+      // construct which interface the list holds from the members alone
+      return false;
+    }
+    return true;
+  }
+
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
   void printRHS(TaggedStringStream& stmt, Node* node) {
     switch (node->kind()) {
@@ -1037,9 +1053,7 @@ struct PythonPrintPass {
           if (node->inputs().size() == 0) {
             stmt << "annotate(" << node->output()->type()->python_str()
                  << ", [])";
-          } else if (elem_type->cast<OptionalType>()) {
-            // if the element type is a optional type, we annotate the list so
-            // that we could correctly infer the type on import
+          } else if (!elementTypeCanBeInferredFromMembers(elem_type)) {
             stmt << "annotate(" << node->output()->type()->python_str() << ",";
             printValueList(stmt, node->inputs(), "[", "]");
             stmt << ")";
@@ -1089,21 +1103,27 @@ struct PythonPrintPass {
       } break;
       case prim::CallMethod: {
         const auto& self = node->inputs().at(0);
-        const auto& selfType = self->type()->expect<ClassType>();
         const auto& methodName = node->s(attr::name);
-        const auto method = selfType->getMethod(node->s(attr::name));
-        registerDependency(selfType);
-
-        TORCH_INTERNAL_ASSERT(
-            method->qualname() ==
-            QualifiedName(selfType->name()->qualifiedName(), methodName));
-
         stmt << "(" << useOf(self) << ")"
              << "." << methodName << "(";
         for (size_t i = 1; i < node->inputs().size(); i++) {
           stmt << useOf(node->inputs()[i]) << ", ";
         }
         stmt << ")";
+
+        if (auto selfClass = self->type()->cast<ClassType>()) {
+          registerDependency(selfClass);
+          const auto method = selfClass->getMethod(node->s(attr::name));
+          TORCH_INTERNAL_ASSERT(
+              method->qualname() ==
+              QualifiedName(selfClass->name()->qualifiedName(), methodName));
+        } else if (auto selfInterface = self->type()->cast<InterfaceType>()) {
+          registerDependency(selfInterface);
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              false, "method call to unhandled type in serialization");
+        }
+
       } break;
       default: {
         Symbol kind = node->kind();
@@ -1349,6 +1369,30 @@ struct PythonPrintPass {
           TORCH_INTERNAL_ASSERT(attr.type());
           indent();
           body_ << attr.name() << " : " << attr.type()->python_str() << "\n";
+        }
+      }
+    } else if (auto interfaceType = type->cast<InterfaceType>()) {
+      body_ << "class " << interfaceType->name()->name();
+      body_ << "(Interface):\n";
+      {
+        auto guard = WithIndented();
+        for (const FunctionSchema& method : interfaceType->methods()) {
+          indent();
+          body_ << "def " << method.name() << "(self";
+          TORCH_INTERNAL_ASSERT(
+              method.arguments().size() > 0 &&
+              method.arguments().at(0).name() == "self");
+          for (const Argument& arg :
+               at::ArrayRef<Argument>(method.arguments()).slice(1)) {
+            auto type = arg.type();
+            registerClassDependencies(type);
+            body_ << ", " << arg.name() << ": " << type->python_str();
+          }
+          auto return_type = method.returns().at(0).type();
+          registerClassDependencies(return_type);
+          body_ << ") -> " << return_type->python_str() << ":\n";
+          indent();
+          body_ << "  pass\n";
         }
       }
     } else {

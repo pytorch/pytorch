@@ -3294,7 +3294,7 @@ void lambdaLiftFork(Node* fork_node) {
 }
 
 void CompilationUnit::define_interface(
-    const std::string& qualifiedName,
+    const c10::QualifiedName& qualifiedName,
     const ClassDef& classDef,
     ResolverPtr rcb) {
   ScriptTypeParser typeParser(rcb);
