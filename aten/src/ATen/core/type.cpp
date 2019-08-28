@@ -319,17 +319,17 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
 
 MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
   if(!formal->hasFreeVariables()) {
-    return formal;
+    return MatchTypeReturn::Success();
   }
 
   if(auto vt = formal->cast<VarType>()) {
     auto it = type_env.find(vt->name());
     if(it == type_env.end()) {
       type_env[vt->name()] = actual;
-      return actual;
+      return MatchTypeReturn::Success();
     } else if(auto unified = unifyTypes(it->second, actual)) {
       type_env[vt->name()] = *unified;
-      return *unified;
+      return MatchTypeReturn::Success();
     }
     std::stringstream ss;
     ss << "Type variable '" << vt->name() << "' previously matched to type " <<
@@ -337,15 +337,15 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
     return ss.str();
   } else if(auto lt_formal = formal->cast<ListType>()) {
     if(auto lt_actual = actual->cast<ListType>()) {
-      const auto innerType = matchTypeVariables(
+      const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(),
           lt_actual->getElementType(),
           type_env);
-      if (!innerType.type) {
+      if (!innerMatch.success()) {
         // propagate the errMsg onward
-        return innerType;
+        return innerMatch;
       }
-      return MatchTypeReturn(ListType::create(*innerType.type));
+      return MatchTypeReturn::Success();
     } else {
       std::stringstream ss;
       ss << "Cannot match " << lt_formal->python_str() << " to "
@@ -357,18 +357,16 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       if(tp_formal->elements().size() != tp_actual->elements().size()) {
         return MatchTypeReturn("Cannot match tuples of mismatched size");
       }
-      std::vector<TypePtr> elements;
       for(size_t i = 0; i < tp_formal->elements().size(); ++i) {
         const auto result = matchTypeVariables(
             tp_formal->elements()[i],
             tp_actual->elements()[i],
             type_env);
-        if (!result.type) {
+        if (!result.success()) {
           return result;
         }
-        elements.push_back(*result.type);
       }
-      return MatchTypeReturn(TupleType::create(std::move(elements)));
+      return MatchTypeReturn::Success();
     } else {
       std::stringstream ss;
       ss << "Cannot match a tuple to " << actual->python_str();
@@ -376,12 +374,12 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
     }
   } else if (auto lt_formal = formal->cast<FutureType>()) {
     if (auto lt_actual = actual->cast<FutureType>()) {
-      const auto innerType = matchTypeVariables(
+      const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
-      if (!innerType.type) {
-        return innerType;
+      if (!innerMatch.success()) {
+        return innerMatch;
       }
-      return MatchTypeReturn(FutureType::create(*innerType.type));
+      return MatchTypeReturn::Success();
     } else {
       std::stringstream ss;
       ss << "Cannot match a future to " << actual->python_str();
@@ -389,43 +387,42 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
     }
   } else if (auto opt_formal = formal->cast<OptionalType>()) {
     if (auto opt_actual = actual->cast<OptionalType>()) {
-      const auto optionedType = matchTypeVariables(
+      const auto optionedMatch = matchTypeVariables(
           opt_formal->getElementType(), opt_actual->getElementType(), type_env);
-      if (!optionedType.type) {
-        return optionedType;
+      if (!optionedMatch.success()) {
+        return optionedMatch;
       }
-      return MatchTypeReturn(OptionalType::create(*optionedType.type));
     } else if (!actual->isSubtypeOf(NoneType::get())) {
       // If the actual type is a non-optional, allow matching to the formal if
       // its element type matches the actual.
       // Don't match None because it is already an optional (but one of
       // unknown type).
       return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
-    } else {
-      return MatchTypeReturn(
-          "Cannot match an Optional[T] to None, because there is no "
-          "way to determine T from None");
     }
+    // note: if actual was non here we potentially did not fill in the type variables
+    // contained in the formal. It is still a valid match because None matches Optional[T]
+    // later error checking on tryEvalTypeVariables will report the problem if we never match
+    // variables in type T
+    return MatchTypeReturn::Success();
   } else if (auto dict_formal = formal->cast<DictType>()) {
     if (auto dict_actual = actual->cast<DictType>()) {
-      auto key_type = matchTypeVariables(
+      auto key_match = matchTypeVariables(
         dict_formal->getKeyType(),
         dict_actual->getKeyType(),
         type_env
       );
-      if (!key_type.type) {
-        return key_type;
+      if (!key_match.success()) {
+        return key_match;
       }
-      auto value_type = matchTypeVariables(
+      auto value_match = matchTypeVariables(
         dict_formal->getValueType(),
         dict_actual->getValueType(),
         type_env
       );
-      if (!value_type.type) {
-        return value_type;
+      if (!value_match.success()) {
+        return value_match;
       }
-      return MatchTypeReturn(
-          DictType::create(*key_type.type, *value_type.type));
+      return MatchTypeReturn::Success();
     } else {
       std::stringstream ss;
       ss << "Cannot match a dict to " << actual->python_str();
@@ -437,23 +434,27 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
 }
 
 // change return types like List[List[t]] into List[List[int]]
-CAFFE2_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env) {
+CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env) {
   if (!type->hasFreeVariables()) {
     return type;
   }
 
   if (auto vt = type->cast<VarType>()) {
     auto it = type_env.find(vt->name());
-    AT_ASSERTM(
-        it != type_env.end(),
-        "schema has unbound type variable '",
-        vt->name(),
-        "' in its return type");
+    if (it == type_env.end()) {
+      return nullptr;
+    }
     return it->second;
   } else {
-    auto new_contained = fmap(type->containedTypes(), [&](TypePtr t) {
-      return evalTypeVariables(t, type_env);
-    });
+    std::vector<TypePtr> new_contained;
+    new_contained.reserve(type->containedTypes().size());
+    for (const TypePtr& t : type->containedTypes()) {
+      TypePtr r = tryEvalTypeVariables(t, type_env);
+      if (!r) {
+        return nullptr;
+      }
+      new_contained.push_back(r);
+    }
     return type->withContained(std::move(new_contained));
   }
 }

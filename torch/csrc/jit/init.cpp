@@ -294,8 +294,8 @@ void initJITBindings(PyObject* module) {
           "_jit_try_infer_type",
           [](py::object obj) -> TypePtr {
             auto match = tryToInferType(obj);
-            if (match.type) {
-              return *match.type;
+            if (match.success()) {
+              return match.type();
             }
             return nullptr;
           })
