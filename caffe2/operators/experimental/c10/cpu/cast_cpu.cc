@@ -80,7 +80,7 @@ void cast_op_cpu(
     int64_t to) {
   switch (input.scalar_type()) {
 #define CASE(ctype,name) case ScalarType:: name : return cast_op_cpu_impl<ctype>(input, output, to);
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, CASE)
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CASE)
 #undef CASE
     default: throw std::runtime_error(string() + "Unsupported scalar type " + toString(input.scalar_type()));
   }

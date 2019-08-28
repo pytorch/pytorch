@@ -2525,7 +2525,7 @@
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_pow_out
+    CPU: pow_out
     CUDA: legacy::cuda::_th_pow_out
     SparseCPU: pow_out_sparse_scalar
     SparseCUDA: pow_out_sparse_scalar
@@ -2533,7 +2533,7 @@
 - func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_pow
+    CPU: pow
     CUDA: legacy::cuda::_th_pow
     SparseCPU: pow_sparse_scalar
     SparseCUDA: pow_sparse_scalar
@@ -3472,14 +3472,14 @@
   named_guard: False
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_digamma_
+    CPU: _digamma__cpu
     CUDA: legacy::cuda::_th_digamma_
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   named_guard: False
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_polygamma_
+    CPU: polygamma_
     CUDA: legacy::cuda::_th_polygamma_
 
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
@@ -3491,13 +3491,13 @@
 - func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_pow_
+    CPU: pow_
     CUDA: legacy::cuda::_th_pow_
 
 - func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_pow_
+    CPU: pow_
     CUDA: legacy::cuda::_th_pow_
 
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
@@ -4069,48 +4069,45 @@
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_digamma_out
+    CPU: _digamma_out_cpu
     CUDA: legacy::cuda::_th_digamma_out
 
 - func: digamma(Tensor self) -> Tensor
   named_guard: False
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_digamma
+    CPU: digamma
     CUDA: legacy::cuda::_th_digamma
 
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_polygamma_out
+    CPU: polygamma_out
     CUDA: legacy::cuda::_th_polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
   named_guard: False
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_polygamma
+    CPU: polygamma
     CUDA: legacy::cuda::_th_polygamma
 
 - func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
     CPU: _erfinv_out_cpu
-    CUDA: legacy::cuda::_th_erfinv_out
+    CUDA: _erfinv_out_cuda
 
 - func: erfinv(Tensor self) -> Tensor
   named_guard: False
   variants: method, function
-  dispatch:
-    CPU: erfinv
-    CUDA: legacy::cuda::_th_erfinv
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
   variants: method
   dispatch:
     CPU: _erfinv__cpu
-    CUDA: legacy::cuda::_th_erfinv_
+    CUDA: _erfinv__cuda
 
 - func: sign(Tensor self) -> Tensor
   variants: function, method
@@ -4309,23 +4306,23 @@
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_pow_out
+    CPU: pow_out
     CUDA: legacy::cuda::_th_pow_out
 
 - func: pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_pow
+    CPU: pow
     CUDA: legacy::cuda::_th_pow
 
 - func: pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_pow_out
+    CPU: pow_out
     CUDA: legacy::cuda::_th_pow_out
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
   dispatch:
-    CPU: legacy::cpu::_th_pow
+    CPU: pow
     CUDA: legacy::cuda::_th_pow
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
