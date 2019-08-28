@@ -1068,6 +1068,14 @@ class TestNamedTensor(TestCase):
                 args=(create('N:3'), create('N:3,C:2'), create('H:2')),
                 expected_names=('N',))
 
+    def test_dot(self):
+        for device in torch.testing.get_all_device_types():
+            # torch.dot ignores the names of both tensors
+            self._test_name_inference(
+                torch.dot, device=device,
+                args=(create('C:2'), create('W:2')),
+                expected_names=[])
+
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
     if attr.startswith('test_'):
