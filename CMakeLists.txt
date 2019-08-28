@@ -216,6 +216,7 @@ if (MSVC)
     if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
       string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
     endif()
+    string(APPEND ${flag_var} " /ignore:4049")
   endforeach(flag_var)
 
   # Turning off USE_DISTRIBUTED on default
