@@ -245,21 +245,22 @@ struct Vec256<c10::qint32> {
     using float_vec_return_type = std::array<Vec256<float>, 1>;
     using value_type = int32_t;
 
-    union {
-        __m256i as_vec;
-        value_type as_ints[8];
-    } vals __attribute__((aligned(64)));
+    __m256i vals;
 
     // Broadcast constructor
     Vec256(const c10::qint32& val) {
         value_type uw = val.val_;
         for (int i = 0; i < 8; ++i) {
-            vals.as_ints[i] = uw;
+          ((int32_t*)&vals)[i] = uw;
         }
     }
 
     void store(void* ptr, int count = size()) const {
-        memcpy(ptr, &vals.as_ints, count * sizeof(value_type));
+      if (count != size()) {
+        memcpy(ptr, &vals, count * sizeof(value_type));
+      } else {
+        _mm256_storeu_si256((__m256i*)ptr, vals);
+      }
     }
 
     static Vec256<c10::qint32> loadu(const void* ptr) {
@@ -267,20 +268,25 @@ struct Vec256<c10::qint32> {
     }
 
     float_vec_return_type dequantize(Vec256<float> scale, Vec256<float> zero_point) const {
-        __m256 float_vals = _mm256_cvtepi32_ps(vals.as_vec);
-        return {scale * (Vec256<float>(float_vals) - zero_point)};
+      __m256 float_vals = _mm256_cvtepi32_ps(vals);
+      return {scale * (Vec256<float>(float_vals) - zero_point)};
     }
 
     static Vec256<c10::qint32> quantize(const float_vec_return_type& rhs, float scale, int32_t zero_point) {
         Vec256<c10::qint32> retval;
         auto rhs_data = (__m256)rhs[0];
-        at::quantize_vec<c10::qint32, /*precision=*/32>(scale, zero_point, (float*)&rhs_data, (c10::qint32*)retval.vals.as_ints, 8);
+        at::quantize_vec<c10::qint32, /*precision=*/32>(
+            scale,
+            zero_point,
+            (float*)&rhs_data,
+            (c10::qint32*)&retval.vals,
+            8);
         return retval;
     }
 
     void dump() const {
         for (size_t i = 0; i < 8; ++i) {
-            std::cout << (int)vals.as_ints[i] << " ";
+          std::cout << ((int32_t*)&vals)[i] << " ";
         }
         std::cout << std::endl;
     }
@@ -289,7 +295,7 @@ struct Vec256<c10::qint32> {
 
     // Load from memory constructor
     Vec256(const void* ptr) {
-        memcpy(&vals.as_ints, ptr, size() * sizeof(value_type));
+      vals = _mm256_loadu_si256((const __m256i*)ptr);
     }
 };
 
@@ -303,101 +309,163 @@ struct Vec256<c10::qint32> {
 // If in the future we relax this requirement (AVX2+), we should probably
 // revisit these implementations
 
-template <typename T>
+template <typename T, typename float_vec_return_type_, int size_>
 struct Vec256QuantizedConverter {
-    static constexpr int size() {
-        return 8;
-    }
+  static constexpr int size() {
+    return size_;
+  }
 
-    using value_type = typename T::underlying;
-    value_type vals[size()];
+  static constexpr int float_num_vecs() {
+    return size() / 8;
+  }
 
-    Vec256QuantizedConverter(T val) {
-        for (size_t i = 0; i < size(); ++i) {
-            vals[i] = val.val_;
-        }
-    }
+  using float_vec_return_type = float_vec_return_type_;
 
-    Vec256QuantizedConverter(const void* ptr) {
-        memcpy(vals, ptr, sizeof(value_type) * size());
-    }
+  using value_type = typename T::underlying;
+  value_type vals[size()];
 
-    void store(void* ptr, int count = size()) const {
-        memcpy(ptr, vals, count * sizeof(value_type));
+  Vec256QuantizedConverter(T val) {
+    for (size_t i = 0; i < size(); ++i) {
+      vals[i] = val.val_;
     }
+  }
 
-    Vec256<float> dequantize(Vec256<float> scale, Vec256<float> zero_point) const {
-        float float_vals[size()];
-        for (int i = 0; i < size(); ++i) {
-            float_vals[i] = at::dequantize_val<T>(scale[i], zero_point[i], T(vals[i]));
-        }
-        return Vec256<float>::loadu(float_vals);
+  Vec256QuantizedConverter(const void* ptr) {
+    memcpy(vals, ptr, sizeof(value_type) * size());
+  }
+
+  void store(void* ptr, int count = size()) const {
+    memcpy(ptr, vals, count * sizeof(value_type));
+  }
+
+  float_vec_return_type dequantize(
+      Vec256<float> scale,
+      Vec256<float> zero_point) const {
+    float_vec_return_type rv;
+    for (int i = 0; i < float_num_vecs(); ++i) {
+      float float_vals[size()];
+      for (int i = 0; i < size(); ++i) {
+        float_vals[i] =
+            at::dequantize_val<T>(scale[i], zero_point[i], T(vals[i]));
+      }
+      rv[i] = Vec256<float>::loadu(float_vals);
     }
+    return rv;
+  }
 };
 
-template<>
-struct Vec256<c10::qint8> : public Vec256QuantizedConverter<c10::qint8> {
-    Vec256(c10::qint8 val) : Vec256QuantizedConverter<c10::qint8>(val) {}
-    Vec256(const void* ptr) : Vec256QuantizedConverter<c10::qint8>(ptr) {}
+template <>
+struct Vec256<c10::qint8> : public Vec256QuantizedConverter<
+                                c10::qint8,
+                                std::array<Vec256<float>, 4>,
+                                32> {
+  Vec256(c10::qint8 val)
+      : Vec256QuantizedConverter<c10::qint8, std::array<Vec256<float>, 4>, 32>(
+            val) {}
+  Vec256(const void* ptr)
+      : Vec256QuantizedConverter<c10::qint8, std::array<Vec256<float>, 4>, 32>(
+            ptr) {}
 
+  static Vec256<c10::qint8> loadu(const void* ptr) {
+    return Vec256<c10::qint8>(ptr);
+  }
 
-    static Vec256<c10::qint8> loadu(const void* ptr) {
-        return Vec256<c10::qint8>(ptr);
+  static Vec256<c10::qint8> quantize(
+      const float_vec_return_type& rhs,
+      float scale,
+      int32_t zero_point) {
+    value_type qvals[size()];
+    float float_vals[float_num_vecs() * 8];
+
+    for (int i = 0; i < float_num_vecs(); ++i) {
+      rhs[i].store(float_vals + i * 8, 8);
     }
 
-    static Vec256<c10::qint8> quantize(const Vec256<float>& rhs, float scale, int32_t zero_point) {
-        value_type qvals[size()];
-        float float_vals[8];
+    at::quantize_vec<c10::qint8>(
+        scale,
+        zero_point,
+        float_vals,
+        (c10::qint8*)qvals,
+        8 * float_num_vecs());
 
-        rhs.store(float_vals, 8);
-
-        at::quantize_vec<c10::qint8>(scale, zero_point, float_vals, (c10::qint8*)qvals, 8);
-
-        return Vec256<c10::qint8>::loadu(qvals);
-    }
+    return Vec256<c10::qint8>::loadu(qvals);
+  }
 };
 
-template<>
-struct Vec256<c10::quint8> : public Vec256QuantizedConverter<c10::quint8> {
-    Vec256(c10::quint8 val) : Vec256QuantizedConverter<c10::quint8>(val) {}
-    Vec256(const void* ptr) : Vec256QuantizedConverter<c10::quint8>(ptr) {}
+template <>
+struct Vec256<c10::quint8> : public Vec256QuantizedConverter<
+                                 c10::quint8,
+                                 std::array<Vec256<float>, 4>,
+                                 32> {
+  Vec256(c10::quint8 val)
+      : Vec256QuantizedConverter<c10::quint8, std::array<Vec256<float>, 4>, 32>(
+            val) {}
+  Vec256(const void* ptr)
+      : Vec256QuantizedConverter<c10::quint8, std::array<Vec256<float>, 4>, 32>(
+            ptr) {}
 
-    static Vec256<c10::quint8> loadu(const void* ptr) {
-        return Vec256<c10::quint8>(ptr);
+  static Vec256<c10::quint8> loadu(const void* ptr) {
+    return Vec256<c10::quint8>(ptr);
+  }
+
+  static Vec256<c10::quint8> quantize(
+      const float_vec_return_type& rhs,
+      float scale,
+      int32_t zero_point) {
+    value_type qvals[size()];
+    float float_vals[float_num_vecs() * 8];
+
+    for (int i = 0; i < float_num_vecs(); ++i) {
+      rhs[i].store(float_vals + i * 8, 8);
     }
 
-    static Vec256<c10::quint8> quantize(const Vec256<float>& rhs, float scale, int32_t zero_point) {
-        value_type qvals[size()];
-        float float_vals[8];
+    at::quantize_vec<c10::quint8>(
+        scale,
+        zero_point,
+        float_vals,
+        (c10::quint8*)qvals,
+        8 * float_num_vecs());
 
-        rhs.store(float_vals, 8);
-
-        at::quantize_vec<c10::quint8>(scale, zero_point, float_vals, (c10::quint8*)qvals, 8);
-
-        return Vec256<c10::quint8>::loadu(qvals);
-    }
-
+    return Vec256<c10::quint8>::loadu(qvals);
+  }
 };
 
-template<>
-struct Vec256<c10::qint32> : public Vec256QuantizedConverter<c10::qint32> {
-    Vec256(c10::qint32 val) : Vec256QuantizedConverter<c10::qint32>(val) {}
-    Vec256(const void* ptr) : Vec256QuantizedConverter<c10::qint32>(ptr) {}
+template <>
+struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
+                                 c10::qint32,
+                                 std::array<Vec256<float>, 1>,
+                                 8> {
+  Vec256(c10::qint32 val)
+      : Vec256QuantizedConverter<c10::qint32, std::array<Vec256<float>, 1>, 8>(
+            val) {}
+  Vec256(const void* ptr)
+      : Vec256QuantizedConverter<c10::qint32, std::array<Vec256<float>, 1>, 8>(
+            ptr) {}
 
-    static Vec256<c10::qint32> loadu(const void* ptr) {
-        return Vec256<c10::qint32>(ptr);
+  static Vec256<c10::qint32> loadu(const void* ptr) {
+    return Vec256<c10::qint32>(ptr);
+  }
+
+  static Vec256<c10::qint32> quantize(
+      const float_vec_return_type& rhs,
+      float scale,
+      int32_t zero_point) {
+    value_type qvals[size()];
+    float float_vals[float_num_vecs() * 8];
+
+    for (int i = 0; i < float_num_vecs(); ++i) {
+      rhs[i].store(float_vals + i * 8, 8);
     }
 
-    static Vec256<c10::qint32> quantize(const Vec256<float>& rhs, float scale, int32_t zero_point) {
-        value_type qvals[size()];
-        float float_vals[8];
+    at::quantize_vec<c10::qint32>(
+        scale,
+        zero_point,
+        float_vals,
+        (c10::qint32*)qvals,
+        8 * float_num_vecs());
 
-        rhs.store(float_vals, 8);
-
-        at::quantize_vec<c10::qint32, /*precision=*/32>(scale, zero_point, float_vals, (c10::qint32*)qvals, 8);
-
-        return Vec256<c10::qint32>::loadu(qvals);
-    }
+    return Vec256<c10::qint32>::loadu(qvals);
+  }
 };
 
 #endif // defined(__AVX__) && !defined(_MSC_VER)
