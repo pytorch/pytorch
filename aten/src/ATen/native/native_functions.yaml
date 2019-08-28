@@ -4111,9 +4111,11 @@
 
 - func: sign(Tensor self) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
   variants: method
+  named_guard: False
 
 - func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
