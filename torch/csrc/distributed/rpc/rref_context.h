@@ -15,16 +15,17 @@ namespace rpc {
 // Manages RRef lifetime and keeps track of RRef forks.
 class RRefContext {
  public:
-  static std::unique_ptr<RRefContext>& getInstance(
-      std::shared_ptr<RpcAgent> = nullptr);
+  static void initInstance(std::shared_ptr<RpcAgent>);
+  static std::unique_ptr<RRefContext>& getInstance();
 
   RRefContext(const RRefContext &) = delete;
   void operator=(const RRefContext &) = delete;
 
   worker_id_t getWorkerId() const;
   RRefId genRRefId();
-  const std::shared_ptr<RpcAgent> agent() const;
+  const std::shared_ptr<RpcAgent>& agent() const;
 
+  // create a new RRef
   template <typename T>
   std::shared_ptr<RRef> createRRef(worker_id_t ownerId) {
     if (ownerId == getWorkerId()) {
@@ -34,6 +35,8 @@ class RRefContext {
     }
   }
 
+  // get an existing RRef or create a new one from a serialized
+  // ``RRefForkData``.
   template <typename T>
   std::shared_ptr<RRef> getOrCreateRRef(const at::IValue&& value) {
     auto rfd = RRefForkData::fromIValue(std::move(value));
@@ -56,7 +59,7 @@ class RRefContext {
     TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
     // RRefContext does not track user RRefs, it will be destructed when there is
     // no shared_ptrs pointing to it.
-    return std::make_shared<RRefImpl<T>>(RRefImpl<T>(ownerId, rrefId, forkId));
+    return std::make_shared<RRefImpl<T>>(ownerId, rrefId, forkId);
   }
 
   template <typename T>
@@ -68,8 +71,7 @@ class RRefContext {
       // Scenario (1) the first time this owner knows about this RRef
       // Scenario (2) This owner is also the creator.
       // Creating an RRef
-      auto rref = std::make_shared<RRefImpl<T>>(
-          RRefImpl<T>(getWorkerId(), rrefId, rrefId));
+      auto rref = std::make_shared<RRefImpl<T>>(getWorkerId(), rrefId, rrefId);
       rrefs_[rref->id()] = rref;
       return rref;
 

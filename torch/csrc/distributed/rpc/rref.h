@@ -16,13 +16,14 @@ class RRefContext;
 class RRef;
 
 // Represents fork of an RRef to be sent over the wire.
+//
 // In order to preserve correctness of reference counting, each RRefForkData
-// **MUST** be deserialized into a RRef.
-// This means that if RRefForkData is to be transferred across the network,
-// we need the guarantee that the message will *eventually* get to the peer,
-// and that the peer will create a RRef out of it. Therefore, no constructor
-// of RRefForkData is exposed, and applications should never directly use
-// RRefForkData.
+// **MUST** be deserialized into a RRef. This means that if RRefForkData is to
+// be transferred across the network, we need the guarantee that the message
+// will *eventually* get to the peer,  and that the peer will create a RRef out
+// of it. Therefore, no constructor of RRefForkData is exposed, and
+// applications should never directly use RRefForkData. All construction are
+// done within ``RRef`` and ``RRefContext``.
 struct RRefForkData {
   at::IValue toIValue() const;
  private:
@@ -38,12 +39,14 @@ struct RRefForkData {
   const ForkId forkId_;
 };
 
-template <typename T>
-class RRefImpl;
-
 // TODO: make RRef an IValue, and edit createStackForSchema accordingly
 class RRef {
  public:
+
+  // RRef is made NOT copyable NOT movable to prevent messing up reference
+  // counting
+  RRef(const RRef& other) = delete;
+  RRef(RRef&& other) = delete;
 
   ~RRef();
 
@@ -59,10 +62,7 @@ class RRef {
 
   // TODO: add setValue(py::object) and getPyObj() for Python UDF
 
- private:
-  template <typename T>
-  friend class RRefImpl;
-
+ protected:
   friend class RRefContext;
 
   RRef(worker_id_t ownerId, RRefId rrefId, ForkId forkId);
@@ -74,6 +74,8 @@ class RRef {
   c10::optional<std::unordered_set<ForkId, ForkId::Hash>> children_fork_ids;
 };
 
+// Keep the template only on the derived class because ``RRefContext`` needs to
+// erase the type on ``RRef`` and keep them in one map.
 template <typename T>
 class RRefImpl final: public RRef {
  public:
@@ -87,7 +89,7 @@ class RRefImpl final: public RRef {
   void setValue(IValue&& value) override {
     if(std::is_same<T, IValue>::value) {
       {
-        std::unique_lock<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(mutex_);
         value_ = std::move(value);
       }
       valueCV_.notify_all();

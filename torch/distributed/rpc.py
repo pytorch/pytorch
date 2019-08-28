@@ -96,6 +96,24 @@ def get_worker_id(worker_name=None):
         return _agent.get_worker_id()
 
 def remote(to, func, args=None, kwargs=None):
+    r"""
+    Make a ``remote`` call to run ``func`` on worker ``to``, and returns an
+    ``RRef`` to the result value immediately. Worker ``to`` will be the owner
+    of the return ``RRef``, and this worker is a user. The owner manages the
+    global reference count of its ``RRef``s, and the owner ``RRef`` is only
+    destructed when globally there is no living references to it.
+
+    Arguments:
+        to (int or str): id or name of the destination worker.
+        func (callable): builtin functions (like ``torch.add``).
+        args (tuple): the argument tuple for the ``func`` invocation.
+        kwargs (dict): is a dictionary of keyword arguments for the ``func``
+                       invocation.
+
+    Returns:
+        A user ``RRef`` instance to the result value. Use the blocking API
+        ``RRef.to_here()`` to retrieve the result value locally.
+    """
     qualified_name = torch.jit._find_builtin(func)
 
     args = args if args else ()

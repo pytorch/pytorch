@@ -9,6 +9,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+// Temporary solution of RRef operations.
 // TODO: Remove all these messages and use rpc + registered functions instead.
 class TORCH_API ScriptRRefBase {
  public:

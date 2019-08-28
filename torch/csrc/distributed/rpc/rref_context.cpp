@@ -7,17 +7,17 @@ namespace rpc {
 
 std::unique_ptr<RRefContext> RRefContext::context_;
 
-std::unique_ptr<RRefContext>& RRefContext::getInstance(
-    std::shared_ptr<RpcAgent> agent) {
+void RRefContext::initInstance(std::shared_ptr<RpcAgent> agent) {
+  TORCH_CHECK(!RRefContext::context_, "Can only initialize RRefContext once.");
+  TORCH_CHECK(agent, "RRefContext requires a non-null RpcAgent shared_ptr.");
 
-  if (!RRefContext::context_) {
-    TORCH_CHECK(agent != nullptr,
-        "Cannot retrieve RRefContext instance before initialization.")
+  RRefContext::context_ =
+      std::unique_ptr<RRefContext>(new RRefContext(std::move(agent)));
+}
 
-    RRefContext::context_ = std::unique_ptr<RRefContext>(
-        new RRefContext(std::move(agent)));
-  }
-
+std::unique_ptr<RRefContext>& RRefContext::getInstance() {
+  TORCH_CHECK(RRefContext::context_,
+      "Have to initialize RRefContext before use.");
   return RRefContext::context_;
 }
 
@@ -33,7 +33,7 @@ RRefId RRefContext::genRRefId() {
   return std::move(RRefId(getWorkerId(), nextLocalId_++));
 }
 
-const std::shared_ptr<RpcAgent> RRefContext::agent() const {
+const std::shared_ptr<RpcAgent>& RRefContext::agent() const {
   return agent_;
 }
 

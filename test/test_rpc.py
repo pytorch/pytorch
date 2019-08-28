@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
 import sys
+import threading
 import unittest
 
 import torch
 import torch.distributed as dist
-from common_distributed import MultiProcessTestCase
+from common_distributed import MultiProcessTestCase, get_timeout
 from common_utils import load_tests, run_tests
 
 
@@ -349,7 +350,7 @@ class RpcTest(MultiProcessTestCase):
 
     @_wrap_with_rpc
     def test_multi_builtin_remote_ret(self):
-        m = 5
+        m = 20
         n = self.rank + 1
         dst_rank = n % self.world_size
         rrefs = []
@@ -363,8 +364,19 @@ class RpcTest(MultiProcessTestCase):
             ))
             expected.append(torch.ones(n, n) * 2)
 
+        def all_to_here(rrefs, values):
+            for i in range(m):
+                values.append(rrefs[i].to_here())
+
+        values = []
+        t = threading.Thread(target=all_to_here, args=(rrefs, values))
+        t.start()
+        t.join(int(get_timeout(self.id()) / 2))
+
+        self.assertEqual(m, len(values))
+
         for i in range(m):
-            self.assertEqual(rrefs[i].to_here(), expected[i])
+            self.assertEqual(values[i], expected[i])
 
 
 if __name__ == '__main__':

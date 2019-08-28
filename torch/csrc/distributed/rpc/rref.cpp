@@ -83,7 +83,7 @@ RRef::~RRef() {
         ScriptRRefDel(
             RRefForkData(ownerId_, rrefId_, forkId_).toIValue()
         ).toMessage());
-    }
+  }
 }
 
 worker_id_t RRef::owner() const {
