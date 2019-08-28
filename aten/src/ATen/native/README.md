@@ -49,7 +49,7 @@ signature.
   and may be omitted by passing an undefined tensor.  When a function takes multiple
   `Tensor` arguments, these tensors are assumed to be the same type (e.g.,
   if one argument is a `FloatTensor`, all other arguments are checked
-  to be `FloatTensor`s).  
+  to be `FloatTensor`s).
   `Tensor` or `Tensor?` must sometimes be annotated to indicate aliasing and mutability.
   In general annotations can be defined via the following four situations:
   - `Tensor(a)` - `a` is a set of Tensors that may alias to the same data.
@@ -198,8 +198,8 @@ to indicate whether an argument of a function is going to be mutated and returne
 ### `annotations`
 
 There are two typical situations in which we mutate the memory of an argument in the Python
-frontend:  
-a) For an inplace operations such as `self.abs_()`  
+frontend:
+a) For an inplace operations such as `self.abs_()`
 b) for a function with an output keyword argument such as `torch.abs(input, out=None)`.
 
 In order to provide implementations for these Python functions the legacy schema
@@ -327,6 +327,15 @@ However, in some situations, you can write a function in ATen and it
 will be automatically differentiated! This can be the case if the function implementation
 only calls other operations which are themselves differentiable.  In this
 case, you don't have to write an entry in `tools/autograd/derivatives.yaml`.
+
+### Will this function be exposed to python? What are the namespaces?
+
+We don't generate python bindings for all functions. There're certain patterns in function
+name that we skip in python binding generation, e.g. `*_backward`. Check
+`tools/autograd/gen_python_functions.py` for the latest rules.
+
+The generated bindings are either exposed as methods on python_variable or functions on
+torch._C._nn object(marked with `python_module: nn`).
 
 ### Can it handle being passed Variables?
 
