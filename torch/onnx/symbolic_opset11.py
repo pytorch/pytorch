@@ -28,11 +28,15 @@ def pixel_shuffle(g, self, upscale_factor):
 
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, dim, index, sparse_grad, operator_s="gather")
     return g.op("GatherElements", self, index, axis_i=dim)
 
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter(g, self, dim, index, src):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, dim, index, src, operator_s="scatter")
     return g.op("ScatterElements", self, index, src, axis_i=dim)
 
 
@@ -44,4 +48,3 @@ def cumsum(g, self, dim, dtype=None):
         parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
         csum = g.op("Cast", csum, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
     return csum
-
