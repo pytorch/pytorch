@@ -109,6 +109,9 @@ option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
+cmake_dependent_option(
+    USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
+    "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
@@ -234,6 +237,7 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(USE_DISTRIBUTED OFF)
   set(FEATURE_TORCH_MOBILE ON)
   set(NO_API ON)
+  set(USE_FBGEMM OFF)
 endif()
 
 if (BUILD_ATEN_ONLY)
