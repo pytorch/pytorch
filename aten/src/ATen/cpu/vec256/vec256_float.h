@@ -194,7 +194,7 @@ public:
     return _mm256_div_ps(_mm256_set1_ps(1), values);
   }
   Vec256<float> rsqrt() const {
-    return _mm256_div_ps(_mm256_set1_ps(1), _mm256_sqrt_ps(values));
+    return _mm256_rsqrt_ps(values);
   }
   Vec256<float> pow(const Vec256<float> &b) const {
     return Vec256<float>(Sleef_powf8_u10(values, b));

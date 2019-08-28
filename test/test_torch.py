@@ -304,7 +304,7 @@ class _TestTorchMixin(object):
             non_contig = torch.empty(shape + (2,), dtype=dtype)[..., 0]
             non_contig.copy_(contig)
             self.assertFalse(non_contig.is_contiguous())
-            self.assertEqual(torchfn(contig), torchfn(non_contig), 'non-contiguous')
+            torch.testing.assert_allclose(torchfn(contig), torchfn(non_contig), rtol=rtol, atol=atol)
 
         # compare application against contiguous vs. non-contiguous
         check_non_contiguous((5, 7), torch.double)
@@ -580,7 +580,7 @@ class _TestTorchMixin(object):
                 return nan
             return 1.0 / math.sqrt(x)
 
-        self._test_math(torch.rsqrt, rsqrt)
+        self._test_math(torch.rsqrt, rsqrt, rtol=1.5 * 2**-12, atol=0)
 
     def test_frac(self):
         self._test_math(torch.frac, lambda x: math.fmod(x, 1))
@@ -14147,7 +14147,6 @@ tensor_op_tests = [
     ('rot90', 'k1_d12', _small_3d, lambda t, d: [1, [1, 2]], 1e-5, 1e-5, _types, False),
     ('rot90', 'k1_neg_d', _small_3d, lambda t, d: [1, [1, -1]], 1e-5, 1e-5, _types, False),
     ('rot90', 'default', _small_3d, lambda t, d: [], 1e-5, 1e-5, _types, False),
-    ('rsqrt', '', lambda t, d: _small_3d(t, d) + 1, lambda t, d: [], 1e-2, 1e-4, _float_types_no_half),
     ('sinh', '', lambda t, d: _small_3d(t, d).clamp(-1, 1), lambda t, d: [], 1e-3, 1e-5, _float_types),
     ('tan', '', lambda t, d: _small_3d(t, d).clamp(-1, 1), lambda t, d: [], 1e-3, 1e-5, _float_types),
     ('__lshift__', '',

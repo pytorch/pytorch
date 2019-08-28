@@ -66,7 +66,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
           [](scalar_t base) -> scalar_t {
             return 1.0 / std::sqrt(base);
           },
-          [](Vec base) -> Vec { return base.rsqrt(); }
+          [](Vec base) -> Vec { return Vec(static_cast<scalar_t>(1)) / base.sqrt(); }
         );
       } else if (exp == -1) {
         cpu_kernel_vec(iter,
@@ -93,7 +93,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
     });
   } else if (isComplexType(iter.dtype())) {
     const auto exp = exp_scalar.to<std::complex<double>>();
-    // Floating types allow AVX2 vector optimizations for pow/sqrt/rsqrt:
+    // Floating types allow AVX2 vector optimizations for pow/sqrt:
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow", [&]() {
       using Vec = Vec256<scalar_t>;
       if (exp == 0.5) {
@@ -122,7 +122,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
           [](scalar_t base) -> scalar_t {
             return scalar_t(1.0) / std::sqrt(base);
           },
-          [](Vec base) -> Vec { return base.rsqrt(); }
+          [](Vec base) -> Vec { return Vec(static_cast<scalar_t>(1)) / base.sqrt(); }
         );
       } else if (exp == -1.0) {
         cpu_kernel_vec(iter,

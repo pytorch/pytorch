@@ -4644,10 +4644,17 @@ add_docstr(torch.rsqrt,
 rsqrt(input, out=None) -> Tensor
 
 Returns a new tensor with the reciprocal of the square-root of each of
-the elements of :attr:`input`.
+the elements of ``input``.
 
 .. math::
     \text{out}_{i} = \frac{1}{\sqrt{\text{input}_{i}}}
+
+.. note: This function, whenever possible, attempts to use an algorithm that is
+         faster but does not guarantee as much accuracy as
+         ``1/torch.sqrt(input)`` does. The relative error can be as large as
+         :math:`1.5 \times 2^{-12}` (e.g., see the `document of
+         __m256_rsqrt_ps`_ ). If accuracy is critical to your purpose, please
+         use ``1/torch.sqrt(input)`` instead.
 """ + r"""
 Args:
     {input}
@@ -4660,6 +4667,9 @@ Example::
     tensor([-0.0370,  0.2970,  1.5420, -0.9105])
     >>> torch.rsqrt(a)
     tensor([    nan,  1.8351,  0.8053,     nan])
+
+.. _document of __mm256_rsqrt_ps:
+    https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm256_rsqrt_ps&expand=4804
 """.format(**common_args))
 
 add_docstr(torch.set_flush_denormal,
