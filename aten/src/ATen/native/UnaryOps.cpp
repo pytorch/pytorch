@@ -200,10 +200,6 @@ Tensor& sign_out(Tensor& result, const Tensor& self) {
     auto iter = TensorIterator::unary_op(result, self,
       /*check_internal_overlap=*/true);
     sign_stub(iter.device_type(), iter);
-
-#ifdef BUILD_NAMEDTENSOR
-    at::namedinference::propagate_names(result, self);
-#endif
     return result;
 }
 
