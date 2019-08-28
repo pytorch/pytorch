@@ -4096,21 +4096,18 @@
   named_guard: False
   dispatch:
     CPU: _erfinv_out_cpu
-    CUDA: legacy::cuda::_th_erfinv_out
+    CUDA: _erfinv_out_cuda
 
 - func: erfinv(Tensor self) -> Tensor
   named_guard: False
   variants: method, function
-  dispatch:
-    CPU: erfinv
-    CUDA: legacy::cuda::_th_erfinv
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
   variants: method
   dispatch:
     CPU: _erfinv__cpu
-    CUDA: legacy::cuda::_th_erfinv_
+    CUDA: _erfinv__cuda
 
 - func: sign(Tensor self) -> Tensor
   variants: function, method
