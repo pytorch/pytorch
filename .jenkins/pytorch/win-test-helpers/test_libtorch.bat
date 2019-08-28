@@ -15,8 +15,13 @@ for /r "." %%a in (*.exe) do (
         if "%%~na" == "module_test" (
             echo Skipping "%%~fa" because it is broken
         ) else (
-            call "%%~fa"
-            if errorlevel 1 exit /b 1
+            rem See https://github.com/pytorch/pytorch/issues/25304
+            if "%%~na" == "cuda_distributions_test" (
+                echo Skipping "%%~fa" because it is broken
+            ) else (
+                call "%%~fa"
+                if errorlevel 1 exit /b 1
+            )
         )
     )
 )
