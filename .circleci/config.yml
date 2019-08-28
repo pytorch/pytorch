@@ -11,6 +11,8 @@
 # * verbatim-sources/job-specs-custom.yml
 #   (grep for DOCKER_IMAGE)
 
+version: 2.1
+
 docker_config_defaults: &docker_config_defaults
   user: jenkins
   aws_auth:
@@ -188,7 +190,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
       no_output_timeout: "1h"
       command: |
         set -e
-        cat >/home/circleci/project/ci_build_script.sh <<EOL
+        cat >/home/circleci/project/ci_build_script.sh \<<EOL
         # =================== The following code will be executed inside Docker container ===================
         set -ex
         export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
@@ -252,7 +254,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
       command: |
         set -e
         # TODO: merge this into Caffe2 test.sh
-        cat >/home/circleci/project/ci_test_script.sh <<EOL
+        cat >/home/circleci/project/ci_test_script.sh \<<EOL
         # =================== The following code will be executed inside Docker container ===================
         set -ex
 
@@ -667,7 +669,7 @@ smoke_linux_test: &smoke_linux_test
       no_output_timeout: "1h"
       command: |
         set -ex
-        cat >/home/circleci/project/ci_test_script.sh <<EOL
+        cat >/home/circleci/project/ci_test_script.sh \<<EOL
         # The following code will be executed inside Docker container
         set -eux -o pipefail
         /builder/smoke_test.sh
@@ -3205,7 +3207,6 @@ jobs:
 
 # PR jobs pr builds
 workflows:
-  version: 2
   build:
     jobs:
       - setup
