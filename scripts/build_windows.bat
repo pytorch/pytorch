@@ -58,8 +58,6 @@ if NOT DEFINED CMAKE_GENERATOR (
   set CMAKE_GENERATOR=Visual Studio 15 2017
 )
 
-set NOWARN=1
-
 :: Install pyyaml for Aten codegen
 pip install pyyaml
 
