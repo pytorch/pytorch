@@ -31,7 +31,7 @@ void findValuesInPattern(
   }
 }
 
-std::unordered_set<Value*> valuesNeedToSkipObserver(
+std::unordered_set<Value*> valuesToSkipObserver(
     const script::Module& module,
     const std::string& method_name) {
   script::Method method = module.get_method(method_name);
@@ -215,7 +215,7 @@ void InsertObserversImpl(
     }
   }
 
-  auto values_to_skip = valuesNeedToSkipObserver(module, method_name);
+  auto values_to_skip = valuesToSkipObserver(module, method_name);
 
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {

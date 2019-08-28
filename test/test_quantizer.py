@@ -116,22 +116,26 @@ class QuantizerTestCase(TestCase):
         eager_module = AnnotatedNestedModel()
         eager_module.fc3.qconfig = qconfig
         eager_module.sub2.fc1.qconfig = qconfig
-        script_module = torch.jit.script(NestedModel())
         # Assign weights
         eager_module.sub1.fc.weight.data.fill_(1.0)
         eager_module.sub2.fc1.module.weight.data.fill_(1.0)
         eager_module.sub2.fc2.weight.data.fill_(1.0)
         eager_module.fc3.module.weight.data.fill_(1.0)
+
+        script_module = torch.jit.script(NestedModel())
+        # Copy weights for eager_module
         script_module.sub1.fc.weight = eager_module.sub1.fc.weight
         script_module.sub2.fc1.weight = eager_module.sub2.fc1.module.weight
         script_module.sub2.fc2.weight = eager_module.sub2.fc2.weight
         script_module.fc3.weight = eager_module.fc3.module.weight
 
+        # Quantize eager module
         quantized_eager_module = quantize(eager_module, default_eval_fn, data)
 
         def get_forward(m):
             return m._c._get_method('forward')
-        # Script mode
+
+        # Quantize script_module
         torch._C._jit_pass_constant_propagation(get_forward(script_module).graph)
 
         ScriptedObserver = torch.jit.script(Observer())
@@ -147,7 +151,7 @@ class QuantizerTestCase(TestCase):
                                             "forward",
                                             qconfig_dict)
 
-        # Run ScriptM Model and Collect statistics
+        # Run script_module and Collect statistics
         get_forward(script_module)(data[0][0])
 
         # Insert quantize and dequantize calls
