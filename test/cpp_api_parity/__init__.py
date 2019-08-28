@@ -57,13 +57,13 @@ def parse_parity_tracker_table(file_path):
         all_text = f.read()
         packages = all_text.split('##')
         for package in packages[1:]:
-            lines = [line for line in package.split('\n') if line.strip() != '']
-            package_name = lines[0].strip(' ')
+            lines = [line.strip() for line in package.split('\n') if line.strip() != '']
+            package_name = lines[0]
             if package_name in parity_tracker_dict:
                 raise RuntimeError("Duplicated package name `{}` found in {}".format(package_name, file_path))
             else:
                 parity_tracker_dict[package_name] = {}
-            for api_status in lines[4:]:
+            for api_status in lines[3:]:
                 api_name, has_impl_parity_str, has_doc_parity_str = api_status.split('|')
                 parity_tracker_dict[package_name][api_name] = ParityStatus(
                     has_impl_parity=(has_impl_parity_str == 'Yes'),
