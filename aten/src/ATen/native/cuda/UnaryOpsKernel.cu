@@ -60,11 +60,11 @@ void round_kernel_cuda(TensorIterator& iter) {
 // overloading rsqrt and rsqrtf
 template <typename scalar_t>
 __host__ __device__ static inline scalar_t rsqrt_wrapper(scalar_t a) {
-  return static_cast<scalar_t>(rsqrtf(static_cast<float>(a)));
+  return static_cast<scalar_t>(::rsqrtf(static_cast<float>(a)));
 }
 
 __host__ __device__ static inline double rsqrt_wrapper(double a) {
-  return rsqrt(a);
+  return ::rsqrt(a);
 }
 
 void rsqrt_kernel_cuda(TensorIterator& iter) {
