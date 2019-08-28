@@ -33,14 +33,20 @@ class ConvReLU2d(nnq.Conv2d):
                                                                       self.padding,
                                                                       self.dilation,
                                                                       self.groups)
+        self.weight_scale = w.q_scale()
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
+        # Temporary work around for bias
+        # see Issue:https://github.com/pytorch/pytorch/issues/23874
+        bias = self.bias
+        if bias is not None:
+            bias = torch.quantize_linear(bias.dequantize(), float(self.weight_scale) * input.q_scale(), 0, torch.qint32)
         output = torch.ops.quantized.fbgemm_conv2d_relu(input.permute([0, 2, 3, 1]),
-                                                        self._packed_weight, self.bias,
+                                                        self._packed_weight, bias,
                                                         self.stride, self.padding,
                                                         self.dilation, self.groups,
                                                         float(self.scale), int(self.zero_point))
