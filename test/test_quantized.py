@@ -14,6 +14,7 @@ import hypothesis_utils as hu
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams
+from common_quantization import no_deadline
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
@@ -65,19 +66,20 @@ def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
     Y_q_ref = _quantize(Prod_XqWq_ref, Y_scale / (X_scale * W_scale), Y_zp)
     return Y_q_ref
 
+"""Computes the output shape given pooling parameters."""
+def pool_output_shape(input_size, kernel_size, padding, stride,
+                      dilation, ceiling_mode=False):
+    if stride is None:
+        stride = kernel_size
+    output_size = (
+        (input_size + 2 * padding - dilation * (kernel_size - 1) - 1
+         + (stride - 1 if ceiling_mode else 0)) // stride + 1)
+    if (padding > 0 and
+            ((output_size - 1) * stride >= input_size + padding)):
+        output_size += 1
+    return output_size
+
 class TestQuantizedOps(TestCase):
-    """Computes the output shape given pooling parameters."""
-    def _pool_output_shape(self, input_size, kernel_size, padding, stride,
-                           dilation, ceiling_mode=False):
-        if stride is None:
-            stride = kernel_size
-        output_size = (
-            (input_size + 2 * padding - dilation * (kernel_size - 1) - 1
-             + (stride - 1 if ceiling_mode else 0)) // stride + 1)
-        if (padding > 0 and
-                ((output_size - 1) * stride >= input_size + padding)):
-            output_size += 1
-        return output_size
 
     """Tests the correctness of the quantized::relu op."""
     @given(qparams=hu.qparams())
@@ -382,9 +384,9 @@ class TestQuantizedOps(TestCase):
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
-        oH = self._pool_output_shape(iH, kernel, padding, stride, dilation)
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation)
         assume(oH > 0)
-        oW = self._pool_output_shape(iW, kernel, padding, stride, dilation)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation)
         assume(oW > 0)
 
         a = torch.from_numpy(X)
@@ -416,6 +418,7 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          message="ops.quantized.max_pool2d results are off")
 
+    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams()),
@@ -1151,6 +1154,109 @@ class TestQNNPackOps(TestCase):
 
         # Assert equal
         np.testing.assert_array_almost_equal(Y_q_ref2.dequantize().numpy(), Y_q.dequantize().numpy(), decimal=4)
+
+    """Tests the correctness of the quantized::qnnpack_add op."""
+    @given(A=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams(dtypes=torch.quint8,
+                                          zero_point_min=0,
+                                          zero_point_max=0)),
+           scale_A=st.sampled_from([0.001, 0.057, 0.889, 12.3]),
+           scale_B=st.sampled_from([0.008, 0.0821, 0.67, 7]),
+           scale_C=st.sampled_from([0.003, 0.07821, 0.457, 7.34]),)
+    def test_qnnpack_add(self, A, scale_A, scale_B, scale_C):
+        A_temp = A
+        A, (scale_a, zero_point_A, torch_type) = A_temp
+        B, (scale_b, zero_point_B, torch_type) = A_temp
+        A = torch.from_numpy(A)
+        B = torch.from_numpy(B)
+
+        assume(scale_A // scale_C >= 2**-14)
+        assume(scale_A // scale_C < 2**8)
+        assume(scale_B // scale_C >= 2**-14)
+        assume(scale_B // scale_C < 2**8)
+
+        zero_point_C = 127
+
+        qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point_A,
+                                   dtype=torch.quint8)
+        qB = torch.quantize_linear(B, scale=scale_B, zero_point=zero_point_B,
+                                   dtype=torch.quint8)
+
+        # Add ground truth
+        C = (qA.dequantize() + qB.dequantize()).numpy()
+
+        qC = _quantize(C, scale_C, zero_point_C)
+
+        qC_qnnp = torch.ops.quantized.qnnpack_add(qA, qB, scale_C, zero_point_C)
+
+        np.testing.assert_equal(qC, qC_qnnp.int_repr(),
+                                "Quantized addition failed.")
+
+        A = torch.ones((0, 2), dtype=torch.float32)
+        qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point_A,
+                                   dtype=torch.quint8)
+        qC = torch.ops.quantized.qnnpack_add(qA, qA, scale_C, zero_point_C)
+        np.testing.assert_equal(qC.size(), qA.size(),
+                                "Quantized addition with batch size 0 failed.")
+
+    """Tests the correctness of quantized::qnnpack_maxpool2d op."""
+    @given(A=hu.tensor(shapes=hu.array_shapes(4, 4, 3, 5),
+                       qparams=hu.qparams(dtypes=torch.quint8,
+                                          zero_point_min=0,
+                                          zero_point_max=0)),
+           kernel=st.sampled_from([2, 4]),
+           stride=st.sampled_from([1, 2]),
+           padding=st.sampled_from([1, 2]))
+    def test_qnnpack_maxpool2d(self, A, kernel, stride, padding):
+        import torch.nn.functional as F
+
+        A, (scale, zero_point, torch_type) = A
+        X = torch.from_numpy(A)
+        np_type = np.uint8
+        dilation = 1
+
+        # Check constraints
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+
+        iH, iW = X.shape[-2:]
+
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation)
+        assume(oW > 0)
+
+        k = (kernel, kernel)
+        s = (stride, stride)
+        d = (dilation, dilation)
+        p = (padding, padding)
+
+        q_max_pool = torch.ops.quantized.qnnpack_maxpool2d
+
+        a = scale * (X - zero_point).to(dtype=torch.float)
+        qa = torch.quantize_linear(a, scale=scale, zero_point=zero_point,
+                                   dtype=torch_type)
+
+        qa_nhwc = qa.permute([0, 2, 3, 1]).contiguous()
+        a_ref = qa.dequantize()
+
+        a_pool = F.max_pool2d(a_ref, kernel_size=k, stride=s, padding=p,
+                              dilation=d)
+
+        a_pool_nhwc = a_pool.permute([0, 2, 3, 1])
+
+        qa_pool = q_max_pool(qa_nhwc, k, s, p, d)
+
+        qa_pool_int = qa_pool.dequantize()
+        np.testing.assert_equal(a_pool_nhwc.numpy(), qa_pool_int.numpy())
+
+        A = torch.ones((0, 4, 4, 2), dtype=torch.float32)
+        qa = torch.quantize_linear(A, scale=scale, zero_point=zero_point,
+                                   dtype=torch_type)
+        qc = q_max_pool(qa, k, s, p, d)
+        oH = pool_output_shape(4, kernel, padding, stride, dilation)
+        oW = pool_output_shape(4, kernel, padding, stride, dilation)
+        np.testing.assert_equal(qc.size(), (0, oH, oW, 2),
+                                "Quantized maxpool2d with batch size 0 failed.")
 
 if __name__ == "__main__":
     run_tests()
