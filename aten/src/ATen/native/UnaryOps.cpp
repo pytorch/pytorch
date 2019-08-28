@@ -161,6 +161,27 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   return result;
 }
 
+Tensor sign(const Tensor& self) {
+    Tensor result = at::empty({0}, self.options());
+    return at::sign_out(result, self);
+}
+
+Tensor& sign_(Tensor& self) {
+    return at::sign_out(self, self);
+}
+
+Tensor& sign_out(Tensor& result, const Tensor& self) {
+    checkBackend("sign", result, self.type().backend());
+    auto iter = TensorIterator::unary_op(result, self,
+      /*check_internal_overlap=*/true);
+    sign_stub(iter.device_type(), iter);
+
+#ifdef BUILD_NAMEDTENSOR
+    at::namedinference::propagate_names(result, self);
+#endif
+    return result;
+}
+
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
            "mvlgamma is not implemented for ", self.type());
@@ -263,6 +284,7 @@ DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
 DEFINE_DISPATCH(rsqrt_stub);
 DEFINE_DISPATCH(sigmoid_stub);
+DEFINE_DISPATCH(sign_stub);
 DEFINE_DISPATCH(sin_stub);
 DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);
