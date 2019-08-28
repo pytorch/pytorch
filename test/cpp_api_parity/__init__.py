@@ -40,7 +40,7 @@ API | Implementation Parity | Doc Parity
 API_Name|No|No
 ...
 '''
-def process_parity_tracker_table(file_path):
+def parse_parity_tracker_table(file_path):
     parity_tracker_dict = {}
 
     with open(file_path, 'r') as f:

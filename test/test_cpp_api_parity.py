@@ -12,12 +12,12 @@ import common_utils as common
 import common_nn
 from common_cuda import TEST_CUDA
 import torch.utils.cpp_extension
-from cpp_api_parity import sample_module, torch_nn_modules, TorchNNTestParams, CppArg, process_parity_tracker_table
+from cpp_api_parity import sample_module, torch_nn_modules, TorchNNTestParams, CppArg, parse_parity_tracker_table
 
 
 parity_table_path = os.path.join(os.path.dirname(__file__), 'cpp_api_parity/parity-tracker.md')
 
-parity_table = process_parity_tracker_table(parity_table_path)
+parity_table = parse_parity_tracker_table(parity_table_path)
 
 TORCH_NN_MODULE_COMMON_TEST_HARNESS = """\n
 #include <torch/script.h>
