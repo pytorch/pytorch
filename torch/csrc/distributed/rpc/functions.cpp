@@ -33,7 +33,7 @@ Message processRequestBlocking(Message&& request) {
         response.setId(request.id());
         return response;
       } catch (std::exception& e) {
-        return createException(std::move(request), e);
+        return createException(request, e);
       }
       break;
     }
