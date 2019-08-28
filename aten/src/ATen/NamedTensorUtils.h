@@ -38,8 +38,10 @@ namespace namedinference {
 // 2) If result has names, then `names` must be equal to result.names
 void propagate_names(Tensor& result, optional<DimnameList> names);
 void propagate_names(Tensor& result, std::vector<Dimname>&& names, bool validate_names);
+void propagate_names(Tensor& result, optional<std::vector<Dimname>>&& maybe_names, bool validate_names);
 void propagate_names(TensorImpl* result, optional<DimnameList> names);
 void propagate_names(TensorImpl* result, std::vector<Dimname>&& names, bool validate_names);
+void propagate_names(TensorImpl* result, optional<std::vector<Dimname>>&& maybe_names, bool validate_names);
 
 // Propagates all names from src to result.
 void propagate_names(Tensor& result, const Tensor& src);
@@ -70,6 +72,17 @@ void propagate_names_for_addmv(
 void check_names_for_dot(TensorImpl* vec1, TensorImpl* vec2);
 
 void propagate_names_for_expand(Tensor& result, const Tensor& self);
+
+optional<std::vector<Dimname>> compute_baddbmm_outnames(
+    TensorImpl* result,
+    TensorImpl* self,
+    TensorImpl* other,
+    TensorImpl* bias);
+
+optional<std::vector<Dimname>> compute_bmm_outnames(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& other);
 
 } // namespace namedinference
 

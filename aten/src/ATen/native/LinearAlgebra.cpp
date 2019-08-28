@@ -10,6 +10,9 @@
 #include <numeric>
 #include <vector>
 #include <limits>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 namespace at {
 namespace native {
@@ -289,7 +292,19 @@ Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
 Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
   Scalar beta(0.0);
   Scalar alpha(1.0);
-  return bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
+#ifdef BUILD_NAMEDTENSOR
+  {
+  NoNamesGuard guard;
+#endif
+  bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
+#ifdef BUILD_NAMEDTENSOR
+  }
+  namedinference::propagate_names(
+      result,
+      std::move(namedinference::compute_bmm_outnames(result, batch1, batch2)),
+      /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {

@@ -432,12 +432,14 @@
   dispatch:
     CPU: bmm_cpu
     CUDA: bmm_cuda
+  named_guard: False
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: bmm_out_cpu
     CUDA: bmm_out_cuda
+  named_guard: False
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
   device_guard: False
