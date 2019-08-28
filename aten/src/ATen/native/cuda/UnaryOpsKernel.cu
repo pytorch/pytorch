@@ -57,10 +57,29 @@ void round_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+// overloading rsqrt and rsqrtf
+template <typename scalar_t>
+__host__ __device__ static inline scalar_t rsqrt(scalar_t a) {
+  return static_cast<scalar_t>(::rsqrtf(static_cast<float>(a)));
+}
+
+static inline double rsqrt(double a) {
+  return ::rsqrt(a);
+}
+
+void rsqrt_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "rsqrt_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return native::rsqrt(a);
+    });
+  });
+}
+
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);
 REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda);
 REGISTER_DISPATCH(round_stub, &round_kernel_cuda);
+REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 
 }}

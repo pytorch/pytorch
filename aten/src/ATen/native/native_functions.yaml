@@ -1867,15 +1867,12 @@
 - func: rsqrt_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
   variants: function, method
-  dispatch:
-    CPU: _rsqrt__cpu
-    CUDA: _rsqrt__cuda
 
 - func: rsqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: _rsqrt_out_cpu
-    CUDA: _rsqrt_out_cuda
+    CPU: rsqrt_out
+    CUDA: rsqrt_out
 
 - func: select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
   variants: function, method
