@@ -63,6 +63,10 @@ Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor ceil(const Tensor& self) { return unary_op_impl(self, ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, ceil_out); }
 
+Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erfinv_stub); }
+Tensor erfinv(const Tensor& self) { return unary_op_impl(self, erfinv_out); }
+Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, erfinv_out); }
+
 Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, round_stub); }
 Tensor round(const Tensor& self) { return unary_op_impl(self, round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, round_out); }
@@ -294,8 +298,6 @@ IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
-
-IMPLEMENT_UNARY_OP(erfinv)
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);
