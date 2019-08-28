@@ -1,5 +1,6 @@
 # NOTE: In order to let Python/C++ API parity test pass for any of the modules here,
-# you should update their `cpp_default_constructor_args` and `num_attrs_recursive` values:
+# you should update their `cpp_default_constructor_args` and `num_attrs_recursive` values here,
+# and also change their "Implementation Parity" bit from "No" to "Yes" in parity-tracker.md.
 #
 # `cpp_default_constructor_args`: string that represents the required non-keyword arguments
 # for the C++ module constructor. For example, since `LinearOptions` expects two non-keyword
