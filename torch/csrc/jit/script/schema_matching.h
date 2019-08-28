@@ -66,6 +66,7 @@ TORCH_API Value* tryConvertToType(
     Graph& graph,
     const TypePtr& concrete_type,
     Value* value,
+    TypeEnv& type_env,
     bool allow_conversions);
 } // namespace script
 } // namespace jit

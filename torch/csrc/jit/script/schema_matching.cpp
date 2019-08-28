@@ -53,31 +53,42 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   return false;
 }
 
-c10::optional<TypePtr> resolveListToInputs(
-    at::ArrayRef<TypePtr> inputs,
-    const ListTypePtr& formal_type) {
-  if (!formal_type->getElementType()->cast<VarType>()) {
-    return formal_type;
-  }
+// Because we allow matching of a tuple to a list input, we need to
+// we need to determine the type of t in []t, and see if the tuple is compatible
+c10::optional<TypePtr> tryResolveVarTypeList(const TypePtr& tuple_type, const ListTypePtr& formal_list_type, TypeEnv& type_env) {
+  auto var_type = formal_list_type->getElementType()->expect<VarType>();
+  auto it = type_env.find(var_type->name());
+  if (it != type_env.end()) {
+    auto list_type = ListType::create(it->second);
+    if (convertibleToList(tuple_type, list_type)) {
+      return list_type;
+    } else {
+      return c10::nullopt;
+    }
+  };
 
-  if (inputs.size() == 0) {
+  auto tup_elements = tuple_type->expect<TupleType>()->elements();
+
+  // if there are no types to match against we can't resolve the vartype
+  if (tup_elements.size() == 0) {
     return c10::nullopt;
   }
 
-  auto begin = inputs.begin();
-  auto end = inputs.end();
+  auto begin = tup_elements.begin();
+  auto end = tup_elements.end();
 
-  auto var_type = std::accumulate(
+  auto matched_var_type = std::accumulate(
       begin, end, *begin, [](TypePtr t1, TypePtr t2) -> TypePtr {
-        if (t1 == nullptr || t2 == nullptr) {
+        if (!t1 || !t2) {
           return nullptr;
         }
-        auto new_type = unifyTypes(t1, t2);
-        return new_type ? *new_type : nullptr;
+        auto out_type = unifyTypes(t1, t2);
+        return out_type ? *out_type : nullptr;
       });
 
-  if (var_type) {
-    return ListType::create(var_type);
+  if (matched_var_type) {
+    type_env[var_type->name()] = matched_var_type;
+    return ListType::create(matched_var_type);
   } else {
     return c10::nullopt;
   }
@@ -90,21 +101,29 @@ Value* tryConvertToType(
     Graph& graph,
     const TypePtr& concrete_type,
     Value* value,
+    TypeEnv& type_env,
     bool allow_conversions) {
   if (auto value_tuple = value->type()->cast<TupleType>()) {
-    if (auto concrete_list_type =
-            unwrapOptional(concrete_type)->cast<ListType>()) {
-      auto resolved_concrete_type =
-          resolveListToInputs(value_tuple->elements(), concrete_list_type);
-      // Allow homogeneous tuples to be casted implicitly to lists of
-      // appropriate types
-      if (resolved_concrete_type &&
-          convertibleToList(value->type(), *resolved_concrete_type)) {
+    // Allow homogeneous tuples to be casted implicitly to lists of appropriate
+    // types
+    if (auto concrete_list_type = unwrapOptional(concrete_type)->cast<ListType>()) {
+      // if we're matching against a []t we need to try to resolve the type,
+      // otherwise we need to see if all elements of the tuple subtype the list
+      c10::optional<TypePtr> resolved_list_type;
+      if (concrete_list_type->getElementType()->cast<VarType>()) {
+        resolved_list_type = tryResolveVarTypeList(value_tuple, concrete_list_type, type_env);
+      } else {
+        if (convertibleToList(value->type(), concrete_list_type)) {
+          resolved_list_type = concrete_list_type;
+        } else {
+          resolved_list_type = c10::nullopt;
+        }
+      }
+      if (resolved_list_type) {
         auto unpacked = createTupleUnpack(value);
         auto elem_type =
-            (*resolved_concrete_type)->expect<ListType>()->getElementType();
-        value =
-            graph.insertNode(graph.createList(elem_type, unpacked))->output();
+            (*resolved_list_type)->expect<ListType>()->getElementType();
+        value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
       }
     }
 
@@ -120,6 +139,7 @@ Value* tryConvertToType(
               graph,
               concrete_tuple->elements().at(i),
               unpacked.at(i),
+              type_env,
               allow_conversions));
         }
         value = graph.insertNode(graph.createTuple(converted))->output();
@@ -198,7 +218,7 @@ static Value* tryMatchArgument(
 
   // Check if the value can be matched to the arg through any implicit
   // conversions
-  value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
+  value = tryConvertToType(loc, graph, concrete_type, value, type_env, allow_conversions);
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
     if (failure_messages) {
@@ -330,18 +350,24 @@ c10::optional<MatchedSchema> tryMatchSchema(
         // The actual cannot already be a list
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(actual_type, unwrapOptional(arg.type()))) {
-          auto formal_type = unwrapOptional(arg.type())->expect<ListType>();
-          std::vector<TypePtr> types;
-          for (auto nv : (args).slice(used_args)) {
-            types.push_back(nv.value(graph)->type());
-          }
-          auto matched_formal_type = resolveListToInputs(types, formal_type);
-          if (!matched_formal_type) {
-            return c10::nullopt;
+          auto formal_type =
+              unwrapOptional(arg.type())->expect<ListType>();
+
+          // if we're matching against a []t we need to resolve t
+          if (formal_type->getElementType()->cast<VarType>()) {
+            std::vector<TypePtr> types;
+            for (auto nv: (args).slice(used_args)) {
+              types.push_back(nv.value(graph)->type());
+            }
+            auto maybe_matched_type = tryResolveVarTypeList(TupleType::create(types), formal_type, type_env);
+            if (!maybe_matched_type) {
+              return c10::nullopt;
+            }
+            formal_type = (*maybe_matched_type)->expect<ListType>();
           }
 
           Value* list = tryCreateList(
-              (*matched_formal_type)->expect<ListType>()->getElementType(),
+              formal_type->getElementType(),
               graph,
               loc,
               at::ArrayRef<NamedValue>(args).slice(used_args),

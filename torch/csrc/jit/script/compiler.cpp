@@ -801,11 +801,13 @@ struct to_ir {
       // cause a None to be converted to a tensor.
       if (!(result_type->isSubtypeOf(TensorType::get()) &&
             result->type()->isSubtypeOf(NoneType::get()))) {
+        TypeEnv empty_env;
         result = tryConvertToType(
             stmt.range(),
             *graph,
             result_type,
             result,
+            empty_env,
             /*allow_conversions=*/true);
       }
 
@@ -2009,11 +2011,13 @@ struct to_ir {
     } else if (auto annotate_value = dynamic_cast<AnnotateValue*>(sv.get())) {
       checkApplyExpr(apply, loc);
       TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+      TypeEnv empty_env;
       Value* expr = tryConvertToType(
           apply.range(),
           *graph,
           type,
           emitExpr(apply.inputs()[1], type),
+          empty_env,
           /*allow_conversions=*/true);
 
       // This is to ensure even if user forgets to call annotate None with the
