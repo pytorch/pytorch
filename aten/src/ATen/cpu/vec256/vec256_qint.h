@@ -17,14 +17,27 @@
 // the quantized types and Vec256<float>, usually in bandwidth-bound cases
 // where doing the arithmetic in full-precision is acceptable (e.g.
 // elementwise operators).
+//
+//
+// Conversions are as follows:
+//  Vec256<qint8> -> 4x Vec256<float>
+//  Vec256<quint8> -> 4x Vec256<float>
+//  Vec256<qint32> -> 1x Vec256<float>
+//
+// The size of the returned float vector is specified by the special
+// constexpr function float_num_vecs. The type of the value returned
+// from dequantize (and expected as an argument to quantize) is
+// specified by float_vec_return_type.
+//
+// When writing kernels with these vectors, it is expected that floating-
+// point operations will be carried out in a loop over Vec256<T>::float_num_vecs
+// iterations.
 
 namespace at {
 namespace vec256 {
 namespace {
 
 #if defined(__AVX__) && !defined(_MSC_VER)
-
-#include "immintrin.h"
 
 template<>
 struct Vec256<c10::qint8> {
