@@ -90,7 +90,7 @@ def add_observer(module):
             forward_hooks
     """
     for child in module.children():
-        if type(child) in (nnq.FloatFunctional, nni.FloatFunctional):
+        if type(child) == nnq.FloatFunctional:
             if hasattr(child, 'qconfig') and child.qconfig is not None:
                 child.observer = child.qconfig.activation()
         else:
@@ -172,9 +172,6 @@ class QuantStub(nn.Module):
     Args:
         qconfig: quantization configuration for the tensor,
             if qconfig is not provided, we will get qconfig from parent modules
-
-    Return:
-        Quantized model
     """
     def __init__(self, qconfig=None):
         super(QuantStub, self).__init__()
@@ -205,7 +202,6 @@ DEFAULT_MODULE_MAPPING = {
     DeQuantStub: nnq.DeQuantize,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
-    nni.FloatFunctional: nniq.QFunctional,
     # Intrinsic modules:
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.LinearReLU: nniq.LinearReLU,
@@ -264,7 +260,8 @@ DEFAULT_QCONFIG_DICT = {
 
 def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
     r"""Converts a float model to dynamic quantized model.
-    Do dynamic training and output a quantized model.
+
+    Perform dynamic training and output a quantized model.
     """
     model = copy.deepcopy(model)
     model.eval()
@@ -304,13 +301,11 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING):
            module type, can be overwrritten to allow swapping user defined Modules
     """
     reassign = {}
-    # TODO(jerryzh): remove after deciding on the impl of
-    # intrinsic moudles
+    # TODO(jerryzh): remove after deciding on the impl of intrinsic modules
     SWAPPABLE_MODULES = (nni.ConvBn2d,
                          nni.ConvBnReLU2d,
                          nni.LinearReLU,
-                         nni.ConvReLU2d,
-                         nni.FloatFunctional)
+                         nni.ConvReLU2d)
 
     for name, mod in module.named_children():
         if type(mod) not in SWAPPABLE_MODULES:

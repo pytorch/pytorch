@@ -1,8 +1,4 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
+import copy
 import torch
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
@@ -35,6 +31,61 @@ class FunctionalAPITest(QuantizationTestCase):
         qY = torch.relu(qX)
         qY_hat = qF.relu(qX)
         self.assertEqual(qY, qY_hat)
+
+    @no_deadline
+    @unittest.skipIf(
+        not torch.fbgemm_is_cpu_supported(),
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    @given(
+        use_bias=st.booleans(),
+    )
+    def test_conv_api(self, use_bias):
+        """Tests the correctness of the conv module.
+
+        The correctness is defined against the functional implementation.
+        """
+
+        N, iC, H, W = 10, 10, 10, 3
+        oC, g, kH, kW = 16, 1, 3, 3
+        scale, zero_point = 1.0 / 255, 128
+        stride = (1, 1)
+        i_padding = (0, 0)
+        dilation = (1, 1)
+
+        X = torch.randn(N, iC, H, W, dtype=torch.float32)
+        X = X.permute([0, 2, 3, 1]).contiguous()
+        qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
+
+        w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
+
+        qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
+
+        b = torch.randn(oC, dtype=torch.float32) if use_bias else None
+        q_bias = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32) if use_bias else None
+        q_filters_ref = torch.ops.quantized.fbgemm_conv_prepack(qw.permute([0, 2, 3, 1]),
+                                                                stride,
+                                                                i_padding,
+                                                                dilation,
+                                                                g)
+
+
+        requantized_bias = torch.quantize_linear(q_bias.dequantize(), scale * scale, 0 , torch.qint32) if use_bias else None
+        ref_result = torch.ops.quantized.fbgemm_conv2d(qX.permute([0, 2, 3, 1]), q_filters_ref,
+                                                       requantized_bias, stride,
+                                                       i_padding, dilation,
+                                                       g, scale, zero_point).permute([0, 3, 1, 2])
+
+        q_result = torch.nn.quantized.functional.conv2d(qX,
+                                                        qw,
+                                                        bias=q_bias, scale=scale,
+                                                        zero_point=zero_point,
+                                                        stride=stride, padding=i_padding,
+                                                        dilation=dilation, groups=g,
+                                                        dtype=torch.quint8)
+
+        self.assertEqual(ref_result, q_result)
 
 
 class DynamicModuleAPITest(QuantizationTestCase):
@@ -251,12 +302,14 @@ class ModuleAPITest(QuantizationTestCase):
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])), check_save_load=True)
 
-        # Test from_float
+        # Test from_float.
         float_linear = torch.nn.Linear(in_features, out_features).float()
         float_linear.qconfig = torch.quantization.default_qconfig
         torch.quantization.prepare(float_linear)
         float_linear(X.float())
-        quantized_float_linear = torch.quantization.convert(float_linear)
+        # Sequential allows swapping using "convert".
+        quantized_float_linear = torch.nn.Sequential(float_linear)
+        torch.quantization.convert(quantized_float_linear)
 
         # Smoke test to make sure the module actually runs
         quantized_float_linear(X_q)
@@ -443,14 +496,15 @@ class ModuleAPITest(QuantizationTestCase):
         float_conv.qconfig = torch.quantization.default_qconfig
         torch.quantization.prepare(float_conv)
         float_conv(X.float())
-        quantized_float_conv = torch.quantization.convert(float_conv)
+        quantized_float_conv = torch.nn.Sequential(float_conv)
+        torch.quantization.convert(quantized_float_conv)
 
         # Smoke test to make sure the module actually runs
         quantized_float_conv(qX)
         # Check that bias is quantized based on output scale
         if use_bias:
-            qbias = torch.quantize_linear(float_conv.bias, quantized_float_conv.scale / 2**16, 0, torch.qint32)
-            self.assertEqual(quantized_float_conv.bias.dequantize(), qbias.dequantize())
+            qbias = torch.quantize_linear(float_conv.bias, quantized_float_conv[0].scale / 2**16, 0, torch.qint32)
+            self.assertEqual(quantized_float_conv[0].bias.dequantize(), qbias.dequantize())
         # Smoke test extra_repr
         str(quantized_float_conv)
 

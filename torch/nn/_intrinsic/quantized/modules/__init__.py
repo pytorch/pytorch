@@ -1,11 +1,9 @@
 # @lint-ignore-every PYTHON3COMPATIMPORTS
 
-from .conv_relu import ConvReLU2d
 from .linear_relu import LinearReLU
-from .functional_modules import QFunctional
+from .conv_relu import ConvReLU2d
 
 __all__ = [
-    'ConvReLU2d',
     'LinearReLU',
-    'QFunctional',
+    'ConvReLU2d',
 ]
