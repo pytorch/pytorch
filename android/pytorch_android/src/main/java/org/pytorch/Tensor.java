@@ -128,9 +128,31 @@ public abstract class Tensor {
     return result;
   }
 
+  public byte[] getDataAsByteArray() {
+    throw new IllegalStateException(
+        "Tensor of type " + getClass().getSimpleName() + " cannot return data as byte array.");
+  }
+
+  public int[] getDataAsIntArray() {
+    throw new IllegalStateException(
+        "Tensor of type " + getClass().getSimpleName() + " cannot return data as int array.");
+  }
+
   public float[] getDataAsFloatArray() {
     throw new IllegalStateException(
-        "Tensor of type " + getClass().getSimpleName() + " cannot " + "return data as float.");
+        "Tensor of type " + getClass().getSimpleName() + " cannot return data as float array.");
+  }
+
+  public boolean isByteTensor() {
+    return TYPE_CODE_BYTE == getTypeCode();
+  }
+
+  public boolean isIntTensor() {
+    return TYPE_CODE_INT32 == getTypeCode();
+  }
+
+  public boolean isFloatTensor() {
+    return TYPE_CODE_FLOAT32 == getTypeCode();
   }
 
   abstract int getTypeCode();
@@ -200,6 +222,7 @@ public abstract class Tensor {
       return data;
     }
 
+    @Override
     public int[] getDataAsIntArray() {
       data.rewind();
       int[] arr = new int[data.remaining()];
@@ -233,6 +256,7 @@ public abstract class Tensor {
       return data;
     }
 
+    @Override
     public byte[] getDataAsByteArray() {
       data.rewind();
       byte[] arr = new byte[data.remaining()];

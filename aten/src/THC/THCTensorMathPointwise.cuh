@@ -25,32 +25,6 @@ struct TensorSigmoidOp {
 };
 
 template <typename T>
-struct TensorSignOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    T orig = *in;
-    *out = (orig > 0) - (orig < 0);
-  }
-
-  __device__ __forceinline__ void operator()(T* v) {
-    T orig = *v;
-    *v = (orig > 0) - (orig < 0);
-  }
-};
-
-template <>
-struct TensorSignOp<unsigned char> {
-  __device__ __forceinline__ void operator()(unsigned char* out, unsigned char* in) {
-    unsigned char orig = *in;
-    *out = (orig == 0) ? 0 : 1;
-  }
-
-  __device__ __forceinline__ void operator()(unsigned char* v) {
-    unsigned char orig = *v;
-    *v = (orig == 0) ? 0 : 1;
-  }
-};
-
-template <typename T>
 struct TensorCAddOp {
   TensorCAddOp(T v) : val(v) {}
 

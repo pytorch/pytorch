@@ -1440,6 +1440,9 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float16, 'cuda')
         _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float64, 'cuda')
         _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
+        # test that it works with bool tensors
+        _TestTorchMixin._test_bernoulli(self, torch.bool, torch.float16, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
 
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1).cuda()
@@ -2583,9 +2586,6 @@ class TestCuda(TestCase):
 
     def test_rpow(self):
         _TestTorchMixin._test_rpow(self, lambda x: x.cuda())
-
-    def test_int_pow(self):
-        _TestTorchMixin._test_int_pow(self, lambda x: x.cuda())
 
     def test_remainder_overflow(self):
         _TestTorchMixin._test_remainder_overflow(self, dtype=torch.int64, device='cuda')
