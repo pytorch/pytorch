@@ -543,9 +543,8 @@ TupleType::TupleType(
     std::vector<TypePtr> elements,
     c10::optional<c10::QualifiedName> name,
     std::shared_ptr<FunctionSchema> schema)
-    : NamedType(TypeKind::TupleType),
+    : NamedType(TypeKind::TupleType, std::move(name)),
       elements_(std::move(elements)),
-      name_(std::move(name)),
       schema_(std::move(schema)) {
   has_free_variables_ =
       std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
@@ -594,8 +593,8 @@ bool TupleType::operator==(const Type& rhs) const {
 
 std::string TupleType::str() const {
   std::stringstream ss;
-  if (schema_ && name_) {
-    ss << name_->qualifiedName();
+  if (schema_ && name()) {
+    ss << name()->qualifiedName();
   } else {
     ss << "(";
     for(size_t i = 0; i < elements().size(); ++i) {
@@ -609,8 +608,8 @@ std::string TupleType::str() const {
 }
 std::string TupleType::python_str() const {
   std::stringstream ss;
-  if (schema_ && name_) {
-    ss << name_->qualifiedName();
+  if (schema_ && name()) {
+    ss << name()->qualifiedName();
   } else {
     ss << "Tuple[";
     for(size_t i = 0; i < elements().size(); ++i) {
@@ -633,5 +632,41 @@ bool TensorType::isSubtypeOf(const TypePtr rhs) const {
   }
   return Type::isSubtypeOf(rhs);
 }
+
+InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName) {
+  return InterfaceTypePtr(
+      new InterfaceType(std::move(qualifiedName)));
+}
+
+bool InterfaceType::isSubtypeOf(const TypePtr rhs) const {
+  // to improve performance this check can be cached
+  if (auto iface = rhs->cast<InterfaceType>()) {
+    for (const FunctionSchema& schema : *iface->methods_) {
+      auto self_schema = getMethod(schema.name());
+      if (!self_schema || !self_schema->isSubtypeOf(schema, /*is_method=*/true)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return Type::isSubtypeOf(rhs);
+}
+
+const FunctionSchema* InterfaceType::getMethod(const std::string& name) const {
+  for (const FunctionSchema& method : *methods_) {
+    if (method.name() == name) {
+      return &method;
+    }
+  }
+  return nullptr;
+}
+void InterfaceType::addMethod(FunctionSchema schema) {
+  methods_->emplace_back(std::move(schema));
+}
+InterfaceType::InterfaceType(QualifiedName name)
+    : NamedType(InterfaceType::Kind, std::move(name)),
+      methods_(std::make_shared<std::vector<FunctionSchema>>()) {}
+
+InterfaceType::~InterfaceType() = default;
 
 } // namespace c10
