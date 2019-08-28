@@ -26,6 +26,7 @@ TorchNNModuleMetadata.__new__.__defaults__ = (None, None, '')
 '''
 This function expects the parity tracker Markdown file to have the following format:
 
+```
 ## package1_name
 
 API | Implementation Parity | Doc Parity
@@ -39,6 +40,15 @@ API | Implementation Parity | Doc Parity
 ------------- | ------------- | -------------
 API_Name|No|No
 ...
+```
+
+The returned dict has the following format:
+
+```
+Dict[package_name]
+    -> Dict[api_name]
+        -> ParityStatus
+```
 '''
 def parse_parity_tracker_table(file_path):
     parity_tracker_dict = {}
