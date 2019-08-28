@@ -1,4 +1,4 @@
-#include <ATen/Dimname.h>
+#include <ATen/core/Dimname.h>
 #include <c10/util/Exception.h>
 
 #ifdef BUILD_NAMEDTENSOR
