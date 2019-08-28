@@ -1,6 +1,5 @@
 import torch
 from torch.autograd.function import Function
-from torch._thnn import type2backend
 
 from . import _all_functions
 
