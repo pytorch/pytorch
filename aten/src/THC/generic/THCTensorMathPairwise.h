@@ -10,10 +10,6 @@ THC_API void THCTensor_(bitxor)(THCState *state, THCTensor *self, THCTensor *src
 
 #if !defined(THC_REAL_IS_BOOL)
 
-THC_API void THCTensor_(add)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value);
-THC_API void THCTensor_(sub)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value);
-THC_API void THCTensor_(add_scaled)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value, scalar_t alpha);
-THC_API void THCTensor_(sub_scaled)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value, scalar_t alpha);
 THC_API void THCTensor_(mul)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value);
 THC_API void THCTensor_(div)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value);
 THC_API void THCTensor_(lshift)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value);
