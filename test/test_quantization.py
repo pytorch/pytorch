@@ -11,7 +11,7 @@ from torch.quantization import \
     QConfig_dynamic, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
     quantize_dynamic, default_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, Observer, QuantWrapper
+    default_dynamic_qconfig, MinMaxObserver, QuantWrapper
 
 from common_utils import run_tests, tempfile
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
@@ -28,7 +28,6 @@ from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedMod
 from hypothesis import given
 from hypothesis import strategies as st
 import io
-
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
@@ -629,11 +628,12 @@ class FusionTest(QuantizationTestCase):
         model = quantize(model, test_only_eval_fn, self.img_data)
         checkQuantized(model)
 
+
 class ObserverTest(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
-    def test_observer(self, qdtype, qscheme):
-        myobs = Observer(dtype=qdtype, qscheme=qscheme)
+    def test_minmax_observer(self, qdtype, qscheme):
+        myobs = MinMaxObserver(dtype=qdtype, qscheme=qscheme)
         x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
         result = myobs(x)
@@ -666,7 +666,6 @@ class ObserverTest(QuantizationTestCase):
         buf.seek(0)
         loaded = torch.jit.load(buf)
         self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
-
 
 if __name__ == '__main__':
     run_tests()
