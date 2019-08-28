@@ -456,8 +456,7 @@ all_module_tests = sample_module.module_tests + \
 
 for test_params_dict in all_module_tests:
     # We skip all `torch.nn.functional` tests for now
-    print(str(test_params_dict.get('constructor', '')))  # yf225 TODO: debug Python 2.7 issue
-    if 'wrap_functional' in str(test_params_dict.get('constructor', '')):
+    if 'FunctionalModule' in str(test_params_dict.get('constructor', '')):
         continue
 
     fullname = test_params_dict.get('fullname', None)
