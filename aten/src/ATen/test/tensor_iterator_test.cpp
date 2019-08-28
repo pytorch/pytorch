@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
+#include <thread>
 
 #include <ATen/ATen.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 
 using namespace at;
 
@@ -39,5 +41,67 @@ TEST(TensorIteratorTest, MixedDevices) {
   auto x = at::randn({5, 5}, kCUDA);
   auto y = at::ones({5}, kCPU);
   ASSERT_ANY_THROW(TensorIterator::binary_op(out, x, y));
+}
+
+Tensor random_tensor_for_type(at::ScalarType scalar_type) {
+  if (at::isFloatingType(scalar_type)) {
+    return at::randn({5, 5}, kCPU);
+  } else {
+    return at::randint(1, 10, {5, 5}, kCPU);
+  }
+}
+
+#define UNARY_TEST_ITER_FOR_TYPE(ctype,name)                                  \
+TEST(TensorIteratorTest, SerialLoopUnary_##name) {                            \
+  Tensor out;                                                                 \
+  auto in = random_tensor_for_type(k##name);                                  \
+  auto expected = in.add(1);                                                  \
+  auto iter = TensorIterator::unary_op(out, in);                              \
+  at::native::cpu_serial_kernel(iter, [=](ctype a) -> int { return a + 1; }); \
+  ASSERT_ANY_THROW(out.equal(expected));                                      \
+}
+
+#define BINARY_TEST_ITER_FOR_TYPE(ctype,name)                                          \
+TEST(TensorIteratorTest, SerialLoopBinary_##name) {                                    \
+  Tensor out;                                                                          \
+  auto in1 = random_tensor_for_type(k##name);                                          \
+  auto in2 = random_tensor_for_type(k##name);                                          \
+  auto expected = in1.add(in2);                                                        \
+  auto iter = TensorIterator::binary_op(out, in1, in2);                           \
+  at::native::cpu_serial_kernel(iter, [=](ctype a, ctype b) -> int { return a + b; }); \
+  ASSERT_ANY_THROW(out.equal(expected));                                               \
+}
+
+#define POINTWISE_TEST_ITER_FOR_TYPE(ctype,name)                                                    \
+TEST(TensorIteratorTest, SerialLoopPointwise_##name) {                                              \
+  Tensor out;                                                                                       \
+  auto in1 = random_tensor_for_type(k##name);                                                       \
+  auto in2 = random_tensor_for_type(k##name);                                                       \
+  auto in3 = random_tensor_for_type(k##name);                                                       \
+  auto expected = in1.add(in2).add(in3);                                                            \
+  auto iter = at::TensorIterator();                                                                 \
+  iter.add_output(out);                                                                             \
+  iter.add_input(in1);                                                                              \
+  iter.add_input(in2);                                                                              \
+  iter.add_input(in3);                                                                              \
+  iter.build();                                                                                     \
+  at::native::cpu_serial_kernel(iter, [=](ctype a, ctype b, ctype c) -> int { return a + b + c; }); \
+  ASSERT_ANY_THROW(out.equal(expected));                                                            \
+}
+
+AT_FORALL_SCALAR_TYPES(UNARY_TEST_ITER_FOR_TYPE)
+AT_FORALL_SCALAR_TYPES(BINARY_TEST_ITER_FOR_TYPE)
+AT_FORALL_SCALAR_TYPES(POINTWISE_TEST_ITER_FOR_TYPE)
+
+TEST(TensorIteratorTest, SerialLoopSingleThread) {
+  std::thread::id thread_id = std::this_thread::get_id();
+  Tensor out;
+  auto x = at::zeros({50000}, kCPU);
+  auto iter = TensorIterator::unary_op(out, x);
+  at::native::cpu_serial_kernel(iter, [=](int a) -> int {
+    std::thread::id lambda_thread_id = std::this_thread::get_id();
+    EXPECT_TRUE(lambda_thread_id == thread_id);
+    return a + 1;
+  });
 }
 

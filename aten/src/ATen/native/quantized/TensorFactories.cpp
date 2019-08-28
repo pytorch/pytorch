@@ -44,8 +44,8 @@ Tensor empty_per_channel_affine_quantized_cpu(
       scales.numel() == zero_points.numel(),
       "number of elements in scales and zero_points must match");
   TORCH_CHECK(axis.size() == 1, "only axis of size 1 is supported right now");
-  double* scales_data = scales.data<double>();
-  int64_t* zero_points_data = zero_points.data<int64_t>();
+  double* scales_data = scales.data_ptr<double>();
+  int64_t* zero_points_data = zero_points.data_ptr<int64_t>();
   std::vector<double> scale_vals(scales_data, scales_data + scales.numel());
   std::vector<int64_t> zero_point_vals(
       zero_points_data, zero_points_data + zero_points.numel());
