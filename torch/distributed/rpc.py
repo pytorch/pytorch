@@ -4,7 +4,6 @@ from . import invoke_rpc_builtin, invoke_rpc_python_udf
 from . import ProcessGroupAgent
 from .internal_rpc_utils import serialize, PythonUDF
 
-import array
 import sys
 import torch
 
