@@ -94,7 +94,8 @@ ProcessGroupAgent::ProcessGroupAgent(
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
-const WorkerId& ProcessGroupAgent::getWorkerId(const std::string& workerName) const {
+const WorkerId& ProcessGroupAgent::getWorkerId(
+    const std::string& workerName) const {
   const auto idIter = nameMap_.find(workerName);
   TORCH_CHECK(idIter != nameMap_.end(),
       "Unknown destination worker ", workerName);
