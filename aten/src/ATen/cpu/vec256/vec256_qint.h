@@ -457,7 +457,7 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
       rhs[i].store(float_vals + i * 8, 8);
     }
 
-    at::quantize_vec<c10::qint32>(
+    at::quantize_vec<c10::qint32, /*precision=*/32>(
         scale,
         zero_point,
         float_vals,
