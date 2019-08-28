@@ -63,7 +63,7 @@ __host__ __device__ static inline scalar_t rsqrt_wrapper(scalar_t a) {
   return static_cast<scalar_t>(rsqrtf(static_cast<float>(a)));
 }
 
-static inline double rsqrt_wrapper(double a) {
+__host__ __device__ static inline double rsqrt_wrapper(double a) {
   return rsqrt(a);
 }
 
