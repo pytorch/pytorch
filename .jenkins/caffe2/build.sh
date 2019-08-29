@@ -276,9 +276,10 @@ pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   ORIG_COMP=/opt/rocm/hcc/bin/clang-*_original
   if [ -e $ORIG_COMP ]; then
+    shopt -s extglob
     # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
     # note that the wrapping always names the compiler "clang-7.0_original"
-    WRAPPED=/opt/rocm/hcc/bin/clang-[0-99]
+    WRAPPED=/opt/rocm/hcc/bin/clang-?([0-9])?([0-9])[0-9]
     sudo mv $ORIG_COMP $WRAPPED
   fi
 fi
