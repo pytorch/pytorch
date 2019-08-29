@@ -11,6 +11,8 @@
 # * verbatim-sources/job-specs-custom.yml
 #   (grep for DOCKER_IMAGE)
 
+version: 2.1
+
 docker_config_defaults: &docker_config_defaults
   user: jenkins
   aws_auth:

@@ -12,7 +12,7 @@ enum class AliasAnalysisKind : uint8_t {
   CONSERVATIVE, // The most conservative alias analysis type, assumes
                 // side-effects. This is the default analysis.
   FROM_SCHEMA,
-  PURE
+  PURE_FUNCTION
 };
 
 constexpr inline const char* toString(AliasAnalysisKind aliasAnalysisKind) {
@@ -20,8 +20,8 @@ constexpr inline const char* toString(AliasAnalysisKind aliasAnalysisKind) {
       ? "CONSERVATIVE"
       : (aliasAnalysisKind == AliasAnalysisKind::FROM_SCHEMA)
           ? "FROM_SCHEMA"
-          : (aliasAnalysisKind == AliasAnalysisKind::PURE)
-              ? "PURE"
+          : (aliasAnalysisKind == AliasAnalysisKind::PURE_FUNCTION)
+              ? "PURE_FUNCTION"
               : (aliasAnalysisKind == AliasAnalysisKind::INTERNAL_SPECIAL_CASE)
                   ? "INTERNAL_SPECIAL_CASE"
                   : "UNKNOWN";
