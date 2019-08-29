@@ -195,7 +195,7 @@ struct Vec256<c10::quint8> {
     Vec256<float> extract_and_dequantize(Vec256<float> scale, Vec256<float> zero_point) const {
         __m128i int_val;
         int_val[0] = _mm256_extract_epi64(vals, idx);
-        __m256 float_val =  _mm256_cvtepu32_ps(cvtepu8_epi32(int_val));
+        __m256 float_val =  _mm256_cvtepi32_ps(cvtepi8_epi32(int_val));
         // TODO this could probably be an FMA
         return scale * (Vec256<float>(float_val) - zero_point);
     }
