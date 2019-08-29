@@ -553,6 +553,36 @@ Vec256<int16_t> inline clamp(const Vec256<int16_t>& a, const Vec256<int16_t>& mi
   return _mm256_min_epi16(max_val, _mm256_max_epi16(a, min_val));
 }
 
+template <>
+Vec256<int64_t> inline clamp_max(const Vec256<int64_t>& a, const Vec256<int64_t>& max_val) {
+  return emulate(a, max_val, [](int64_t a_point, int64_t max_point) {return std::min(max_point, a_point);});
+}
+
+template <>
+Vec256<int32_t> inline clamp_max(const Vec256<int32_t>& a, const Vec256<int32_t>& max_val) {
+  return _mm256_min_epi32(max_val, a);
+}
+
+template <>
+Vec256<int16_t> inline clamp_max(const Vec256<int16_t>& a, const Vec256<int16_t>& max_val) {
+  return _mm256_min_epi16(max_val, a);
+}
+
+template <>
+Vec256<int64_t> inline clamp_min(const Vec256<int64_t>& a, const Vec256<int64_t>& min_val) {
+  return emulate(a, min_val, [](int64_t a_point, int64_t min_point) {return std::max(min_point, a_point);});
+}
+
+template <>
+Vec256<int32_t> inline clamp_min(const Vec256<int32_t>& a, const Vec256<int32_t>& min_val) {
+  return _mm256_max_epi32(min_val, a);
+}
+
+template <>
+Vec256<int16_t> inline clamp_max(const Vec256<int16_t>& a, const Vec256<int16_t>& min_val) {
+  return _mm256_max_epi16(min_val, a);
+}
+
 template <typename T>
 Vec256<T> inline intdiv_256(const Vec256<T>& a, const Vec256<T>& b) {
   T values_a[Vec256<T>::size()];
