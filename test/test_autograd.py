@@ -3160,6 +3160,58 @@ class TestAutograd(TestCase):
         test()
         self.assertEqual(dealloc[0], 1)
 
+    def test_inplace_view_backward(self):
+        # Issue #10532: Make sure that this does not raise RuntimeError.
+        net = nn.Sequential(
+            nn.InstanceNorm2d(1),
+            nn.ReLU(True)
+        )
+
+        x = torch.tensor([[[[1.0]]]], requires_grad=True)
+        g, = torch.autograd.grad(net(x).pow(2), [x], create_graph=True)
+        torch.autograd.grad(g.sum(), [x])
+        self.assertEqual(x, torch.tensor([[[[1.0]]]]))
+
+        # https://discuss.pytorch.org/t/freeing-buffer-strange-behavior/31955/8
+        inputs = torch.ones((1, 3, 256, 256), requires_grad=True)
+
+        tmp1 = (inputs + 1).view_as(inputs)
+        tmp2 = torch.nn.functional.threshold(tmp1, 0., 0., True)
+        prob_interpolated = torch.sigmoid(tmp2)
+
+        gradients = torch.autograd.grad(outputs=prob_interpolated, inputs=inputs,
+                                        grad_outputs=torch.ones(prob_interpolated.size()),
+                                        create_graph=True, retain_graph=True)[0]
+
+        gradient_penalty = gradients.sum()
+        gradient_penalty.backward()
+
+        fn = gradient_penalty.grad_fn.next_functions[0][0].next_functions[1][0]
+        self.assertEqual(fn.name(), "ThresholdBackwardBackward")
+
+    def test_inplace_view_weak_grad_fn(self):
+        # Issue 23502: Test that b's grad_fn is preserved.
+        a = torch.arange(10.0, requires_grad=True)
+
+        b = a.narrow(0, 0, 2).clone().view(-1)
+        b.relu_()
+
+        c = b.clone()
+        del b
+        gc.collect()
+
+        s = c.sum()
+        s.backward()
+        self.assertEqual(s, torch.tensor(1.0))
+
+        # Issue 23502: Ensure RuntimeError for modification of SavedVariable.
+        a = torch.rand(10, requires_grad=True).narrow(0, 0, 10)
+        b = a.relu_()
+        c = b.add_(100)
+        del b
+        with self.assertRaises(RuntimeError):
+            c.sum().backward(torch.ones(1, requires_grad=True))
+
     def test_mul_out(self):
         a = torch.randn(2, 2, requires_grad=True)
         b = torch.randn(2, 2, requires_grad=True)
