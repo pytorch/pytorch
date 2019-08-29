@@ -14,6 +14,7 @@ namespace jit {
 // P - jump offset relative to beginning of current instruction
 // F - index into function table
 // T - index into the type table, used for guard instructions
+// S - index into object slots
 
 #define FORALL_OPCODES(_)                                                   \
   _(OP, "O") /* invoke operator X */                                        \
@@ -32,7 +33,9 @@ namespace jit {
   _(CALL, "F") /* call function X */                                        \
   _(GUARD, "T") /* check guard against type_table, true if passes */        \
   _(TAIL_CALL, "F") /* replace current frame with function F */             \
-  _(INTERFACE_CALL, "CI") /* call method X on the first argument (of N) */
+  _(INTERFACE_CALL, "CI") /* call method X on the first argument (of N) */  \
+  _(GET_ATTR, "S") /* get attribute from slot X in an Object */             \
+  _(SET_ATTR, "S") /* set attribute to slot X in an Object */
 
 enum OpCode : uint8_t {
 #define DEFINE_OP(op, _) op,

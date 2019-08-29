@@ -586,6 +586,22 @@ struct CodeImpl {
     createBailoutBlock(jf_index);
   }
 
+  void emitGetAttr(Node* node) {
+    emitLoadInputs(node->inputs());
+    const auto type = node->input()->type()->expect<ClassType>();
+    const auto& field = node->s(attr::name);
+    uint64_t slot = type->getAttributeSlot(field);
+    insertInstruction(GET_ATTR, slot);
+  }
+
+  void emitSetAttr(Node* node) {
+    emitLoadInputs(node->inputs());
+    const auto type = node->inputs().at(0)->type()->expect<ClassType>();
+    const auto& field = node->s(attr::name);
+    const auto slot = type->getAttributeSlot(field);
+    insertInstruction(SET_ATTR, slot);
+  }
+
   void insertBailoutBlocks() {
     for(const BailoutBlock& block : bailout_blocks_) {
       TORCH_INTERNAL_ASSERT(instructions_[block.jf_instruction_index].op == JF)
@@ -645,6 +661,12 @@ struct CodeImpl {
         break;
       case prim::BailOut:
         emitBailOut(node);
+        break;
+      case prim::GetAttr:
+        emitGetAttr(node);
+        break;
+      case prim::SetAttr:
+        emitSetAttr(node);
         break;
     }
   }
@@ -833,6 +855,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             stack.emplace_back(af.constants[inst.X]);
             ++af.pc;
             break;
+          case GET_ATTR: {
+            auto userObj = pop(stack).toObject();
+            auto value = userObj->getSlot(inst.X);
+            push(stack, std::move(value));
+            ++af.pc;
+          } break;
+          case SET_ATTR: {
+            auto v = pop(stack);
+            auto userObj = pop(stack).toObject();
+            userObj->setSlot(inst.X, std::move(v));
+            ++af.pc;
+          } break;
           case JF:
             af.pc += (pop(stack).toBool()) ? 1 : inst.X;
             break;
