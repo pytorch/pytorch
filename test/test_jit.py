@@ -20,6 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.optim as optim
+from torch.quantization import QConfig
 
 # Testing utils
 from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
@@ -874,8 +875,8 @@ graph(%x : Tensor,
         self.run_pass('cse', graph)
         FileCheck().run(input_str, graph)
 
-    # TODO: rename after insert_observers is renamed
-    def test_prepare_quant(self):
+    @_tmp_donotuse_dont_inline_everything
+    def test_insert_observers(self):
         class Observer(torch.nn.Module):
             def __init__(self):
                 super(Observer, self).__init__()
@@ -898,23 +899,109 @@ graph(%x : Tensor,
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
 
-        def get_forward(m):
-            return m._c._get_method("forward")
-        torch._C._jit_pass_constant_propagation(get_forward(m).graph)
-        torch._C._jit_pass_prepare_quant(m._c, "forward",
-                                         observer._c,
-                                         observer._c)
+        def get_forward_graph(m):
+            return m._get_method("forward").graph
+        torch._C._jit_pass_constant_propagation(get_forward_graph(m._c))
+        qconfig_dict = {
+            '':
+            QConfig(
+                activation=observer._c,
+                weight=observer._c)
+        }
+        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict)
         assert len([x for x, _ in m._c._get_modules()
+                    if x.startswith('observer_for_')]) == 2, \
+            'Expected to have 2 observer submodules'
+        FileCheck().check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                   .check('ClassType<Conv2d> = prim::GetAttr[name="conv"](%self)') \
+                   .check_next('Tensor = prim::CallMethod[name="forward"]') \
+                   .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                   .run(str(get_forward_graph(m._c)))
+        assert len([x for x, _ in m._c._get_module('conv')._get_modules()
                     if x.startswith('observer_for_')]) == 3, \
             'Expected to have 3 observer submodules'
         FileCheck().check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                    .check_next('prim::CallMethod[name="forward"](%observer_for_') \
                    .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                    .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                   .check_next('Tensor = prim::CallMethod[name="conv2d_forward"](%self') \
                    .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
                    .check_next('prim::CallMethod[name="forward"](%observer_for_') \
-                   .run(str(m._c._get_method("forward").graph))
+                   .run(str(get_forward_graph(m._c._get_module("conv"))))
 
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_insert_observers_child_qconfig(self):
+        class Observer(torch.nn.Module):
+            def __init__(self):
+                super(Observer, self).__init__()
+
+            def forward(self, x):
+                return x
+
+            @torch.jit.export
+            def calculate_qparams(self):
+                return torch.tensor([2.0]), torch.tensor([3])
+
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super(Sub, self).__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 5, 3)
+                self.sub = Sub()
+
+            def forward(self, x):
+                return self.sub(self.conv(x))
+
+        def check_observed(s):
+            FileCheck().check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                       .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                       .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                       .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                       .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                       .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                       .run(str(s))
+
+        def check_not_observed(s):
+            FileCheck().check_not('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                       .check_not('prim::CallMethod[name="forward"](%observer_for_') \
+                       .run(str(s))
+
+        m = torch.jit.script(M())
+        observer = torch.jit.script(Observer())
+
+        def get_forward(c):
+            return c._get_method("forward")
+        torch._C._jit_pass_constant_propagation(get_forward(m._c).graph)
+        qconfig = QConfig(
+            activation=observer._c,
+            weight=observer._c)
+        qconfig_dict = {
+            'conv': qconfig,
+            'sub.linear': qconfig
+        }
+        torch._C._jit_pass_insert_observers(m._c, "forward",
+                                            qconfig_dict)
+        # check m is not observed
+        check_not_observed(get_forward(m._c).graph)
+        # check conv is observed
+        check_observed(get_forward(m._c._get_module('conv')).graph)
+        # check sub is not observed
+        check_not_observed(get_forward(m._c._get_module('sub')).graph)
+        # check forward of sub.linear is observed
+        check_observed(get_forward(m._c._get_module('sub')._get_module('linear')).graph)
+
+    @_tmp_donotuse_dont_inline_everything
+    @unittest.skip("temporary turn off the test")
     def test_insert_quant_dequant(self):
         class Observer(torch.nn.Module):
             def __init__(self):
@@ -935,14 +1022,16 @@ graph(%x : Tensor,
             def forward(self, x):
                 return self.conv(x)
 
-        # re-enable later
-        torch._C._jit_set_inline_everything_mode(True)
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
         torch._C._jit_pass_constant_propagation(m.graph)
-        torch._C._jit_pass_prepare_quant(m._c, "forward",
-                                         observer._c,
-                                         observer._c)
+        qconfig_dict = {
+            '':
+            QConfig(
+                activation=observer._c,
+                weight=observer._c)
+        }
+        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict)
         data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
         def get_forward(m):
@@ -5817,7 +5906,7 @@ a")
             def test():
                 return torch.tensor([None])
 
-        with self.assertRaisesRegex(RuntimeError, "Note: empty lists are constructed as Tensor"):
+        with self.assertRaisesRegex(RuntimeError, r"Empty lists default to List\[Tensor\]"):
             @torch.jit.script
             def tmp():
                 return torch.tensor([])
@@ -18515,7 +18604,7 @@ class TestClassType(JitTestCase):
 
             def two(self, x):
                 # type: (int) -> int
-                pass            
+                pass
 
         @torch.jit.script
         class NotMember(object):

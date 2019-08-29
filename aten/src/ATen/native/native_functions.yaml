@@ -3677,133 +3677,157 @@
   dispatch:
     CPU: ne_scalar_out_cpu
     CUDA: ne_scalar_out_cuda
+    QuantizedCPU: ne_out_quantized_cpu
 
 - func: ne.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_ne
     CUDA: legacy::cuda::_th_ne
+    QuantizedCPU: ne_quantized_cpu
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: ne_out_cpu
     CUDA: ne_out_cuda
+    QuantizedCPU: ne_out_quantized_cpu
 
 - func: ne.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_ne
     CUDA: legacy::cuda::_th_ne
+    QuantizedCPU: ne_quantized_cpu
 
 - func: eq.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: eq_scalar_out_cpu
     CUDA: eq_scalar_out_cuda
+    QuantizedCPU: eq_out_quantized_cpu
 
 - func: eq.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_eq
     CUDA: legacy::cuda::_th_eq
+    QuantizedCPU: eq_quantized_cpu
 
 - func: eq.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: eq_out_cpu
     CUDA: eq_out_cuda
+    QuantizedCPU: eq_out_quantized_cpu
 
 - func: eq.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_eq
     CUDA: legacy::cuda::_th_eq
+    QuantizedCPU: eq_quantized_cpu
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: ge_scalar_out_cpu
     CUDA: ge_scalar_out_cuda
+    QuantizedCPU: ge_out_quantized_cpu
 
 - func: ge.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_ge
     CUDA: legacy::cuda::_th_ge
+    QuantizedCPU: ge_quantized_cpu
 
 - func: ge.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: ge_out_cpu
     CUDA: ge_out_cuda
+    QuantizedCPU: ge_out_quantized_cpu
 
 - func: ge.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_ge
     CUDA: legacy::cuda::_th_ge
+    QuantizedCPU: ge_quantized_cpu
 
 - func: le.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: le_scalar_out_cpu
     CUDA: le_scalar_out_cuda
+    QuantizedCPU: le_out_quantized_cpu
 
 - func: le.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_le
     CUDA: legacy::cuda::_th_le
+    QuantizedCPU: le_quantized_cpu
 
 - func: le.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: le_out_cpu
     CUDA: le_out_cuda
+    QuantizedCPU: le_out_quantized_cpu
 
 - func: le.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_le
     CUDA: legacy::cuda::_th_le
+    QuantizedCPU: le_quantized_cpu
 
 - func: gt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: gt_scalar_out_cpu
     CUDA: gt_scalar_out_cuda
+    QuantizedCPU: gt_out_quantized_cpu
 
 - func: gt.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_gt
     CUDA: legacy::cuda::_th_gt
+    QuantizedCPU: gt_quantized_cpu
 
 - func: gt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: gt_out_cpu
     CUDA: gt_out_cuda
+    QuantizedCPU: gt_out_quantized_cpu
 
 - func: gt.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_gt
     CUDA: legacy::cuda::_th_gt
+    QuantizedCPU: gt_quantized_cpu
 
 - func: lt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: lt_scalar_out_cpu
     CUDA: lt_scalar_out_cuda
+    QuantizedCPU: lt_out_quantized_cpu
 
 - func: lt.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_lt
     CUDA: legacy::cuda::_th_lt
+    QuantizedCPU: lt_quantized_cpu
 
 - func: lt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: lt_out_cpu
     CUDA: lt_out_cuda
+    QuantizedCPU: lt_out_quantized_cpu
 
 - func: lt.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_lt
     CUDA: legacy::cuda::_th_lt
+    QuantizedCPU: lt_quantized_cpu
 
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

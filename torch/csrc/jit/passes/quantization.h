@@ -11,6 +11,10 @@
 namespace torch {
 namespace jit {
 
+using QConfig = std::tuple<script::Module, script::Module>;
+using QConfigDict = std::unordered_map<std::string, QConfig>;
+using ModuleQConfigMap = std::unordered_map<script::ModulePtr, c10::optional<QConfig>>;
+
 /** \brief Propagates QParams through nodes that are not supposed to change it.
  *
  * An example of such node is `Split`: even though the observed distribution
@@ -54,8 +58,8 @@ TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
 TORCH_API void InsertObservers(
     script::Module& module,
     const std::string& method_name,
-    const script::Module& observer_module,
-    const script::Module& weight_observer_module);
+    const std::unordered_map<std::string,
+    std::tuple<script::Module, script::Module>>& qconfig_dict);
 
 /** \brief Insert quantize - int_repr - dequantize calls to the Tensors
  *  that are observed in insert_observers pass
