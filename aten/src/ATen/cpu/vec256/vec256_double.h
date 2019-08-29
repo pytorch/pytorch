@@ -248,8 +248,7 @@ Vec256<double> inline minimum(const Vec256<double>& a, const Vec256<double>& b) 
 
 template <>
 Vec256<double> inline clamp(const Vec256<double>& a, const Vec256<double>& min, const Vec256<double>& max) {
-  Vec256<double> a_or_max = _mm256_min_pd(a, max);
-  return _mm256_max_pd(a_or_max, min);
+  return _mm256_min_pd(max, _mm256_max_pd(min, a));
 }
 
 template <>
