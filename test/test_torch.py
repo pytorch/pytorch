@@ -21,7 +21,7 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes, istuple
 from itertools import product, combinations, combinations_with_replacement, permutations
-from functools import reduce, partial
+from functools import reduce
 from random import randrange
 from torch import multiprocessing as mp
 from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
@@ -2186,21 +2186,11 @@ class _TestTorchMixin(torchtest):
     def test_lu(self):
         self._test_lu(self, lambda t: t, pivot=True)
 
-    def lu_solve_test_helper(self, A_dims, b_dims, cast, pivot):
-        # This function calls random_linalg_solve_processed_inputs
-        # with the appropriate arguments
-        from common_utils import (random_fullrank_matrix_distinct_singular_value as fullrank,
-                                  random_linalg_solve_processed_inputs as helper)
-
-        b, A, (LU_data, LU_pivots, info) = helper(A_dims, b_dims, fullrank,
-                                                  partial(torch.lu, get_infos=True, pivot=pivot), cast)
-        self.assertEqual(info, torch.zeros_like(info))
-        return b, A, LU_data, LU_pivots
-
     @staticmethod
     def _test_lu_solve(self, cast, pivot=True):
+        from common_utils import lu_solve_test_helper
         for k, n in zip([2, 3, 5], [3, 5, 7]):
-            b, A, LU_data, LU_pivots = self.lu_solve_test_helper((n,), (n, k), cast, pivot)
+            b, A, LU_data, LU_pivots = lu_solve_test_helper(self, (n,), (n, k), cast, pivot)
             x = torch.lu_solve(b, LU_data, LU_pivots)
             b_ = torch.matmul(A, x)
             self.assertEqual(b_, b)
@@ -2211,8 +2201,10 @@ class _TestTorchMixin(torchtest):
 
     @staticmethod
     def _test_lu_solve_batched(self, cast, pivot=True):
+        from common_utils import lu_solve_test_helper
+
         def lu_solve_batch_test_helper(A_dims, b_dims, cast, pivot):
-            b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, cast, pivot)
+            b, A, LU_data, LU_pivots = lu_solve_test_helper(self, A_dims, b_dims, cast, pivot)
             x_exp_list = []
             for i in range(b_dims[0]):
                 x_exp_list.append(torch.lu_solve(b[i], LU_data[i], LU_pivots[i]))
@@ -2256,8 +2248,10 @@ class _TestTorchMixin(torchtest):
 
     @staticmethod
     def _test_lu_solve_batched_many_batches(self, cast):
+        from common_utils import lu_solve_test_helper
+
         def run_test(A_dims, b_dims, cast):
-            b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, cast, True)
+            b, A, LU_data, LU_pivots = lu_solve_test_helper(self, A_dims, b_dims, cast, True)
             x = torch.lu_solve(b, LU_data, LU_pivots)
             b_ = torch.matmul(A, x)
             self.assertEqual(b_, b.expand_as(b_))

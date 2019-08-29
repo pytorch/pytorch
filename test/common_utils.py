@@ -22,7 +22,7 @@ import subprocess
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
-from functools import wraps
+from functools import wraps, partial
 from itertools import product
 from copy import deepcopy
 from numbers import Number
@@ -1060,6 +1060,14 @@ def random_linalg_solve_processed_inputs(A_dims, b_dims, gen_fn, transform_fn, c
     LHS = cast_fn(gen_fn(*A_dims))
     transformed_LHS = transform_fn(LHS)
     return RHS, LHS, transformed_LHS
+
+
+def lu_solve_test_helper(self, A_dims, b_dims, cast, pivot):
+    b, A, (LU_data, LU_pivots, info) = random_linalg_solve_processed_inputs(
+        A_dims, b_dims, random_fullrank_matrix_distinct_singular_value,
+        partial(torch.lu, get_infos=True, pivot=pivot), cast)
+    self.assertEqual(info, torch.zeros_like(info))
+    return b, A, LU_data, LU_pivots
 
 
 def brute_pdist(inp, p=2):
