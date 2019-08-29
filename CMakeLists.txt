@@ -8,6 +8,8 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 cmake_policy(SET CMP0010 NEW)
 cmake_policy(SET CMP0025 NEW)
 
+cmake_policy(SET CMP0092 NEW)
+
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
@@ -203,10 +205,9 @@ if (MSVC)
     string(REPLACE "/W3" "" ${flag_var} "${${flag_var}}")
     # Suppress EHs is overridden by EHa warning
     string(REPLACE "/EHsc" "" ${flag_var} "${${flag_var}}")
-    string(REPLACE "/EHs" "" ${flag_var} "${${flag_var}}")
 
-    string(APPEND ${flag_var} " /EHa /w")
-    string(APPEND ${flag_var} " /EHa /w")
+    string(APPEND ${flag_var} " /w")
+    string(APPEND ${flag_var} " /w")
   endforeach(flag_var)
 
   foreach(flag_var
