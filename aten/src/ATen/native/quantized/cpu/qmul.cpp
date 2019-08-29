@@ -54,13 +54,17 @@ Tensor& _mul_scalar_(Tensor& self, Scalar other) {
   if (other_float == 0.0f) {
     // TODO: Replace this when `quantized::zero_` is implemented.
     auto iter = TensorIterator::unary_op(self, self);
-    AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qmul.scalar", [&]() {
+    AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qmul.scalar.zero", [&]() {
       cpu_kernel(iter, [&](scalar_t a) -> scalar_t {
         return static_cast<scalar_t>(self.q_zero_point());
       });
     });
     return self;
   }
+
+  TORCH_CHECK(other_float > 0,
+              "Negative scalar multiplication is not yet implemented");
+
   if (self.qscheme() == kPerTensorAffine) {
     double new_scale = self.q_scale() * other_float;
     self.set_quantizer_(make_per_tensor_affine_quantizer(
@@ -69,7 +73,7 @@ Tensor& _mul_scalar_(Tensor& self, Scalar other) {
     TORCH_CHECK(false, "Only per tensor affine is supported for now!!");
   }
   if (ReLUFused) {
-    self = at::relu_(self);
+    at::relu_(self);
   }
   return self;
 }

@@ -61,8 +61,6 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
     cpu_kernel(iter, [&](scalar_t a) -> scalar_t {
       const auto da = at::dequantize_val(self_scale, self_zero_point, a);
       double c = da + other.toFloat();
-      auto quant_val = at::quantize_val<scalar_t>(scale, zero_point, c);
-      auto dequant_val = at::dequantize_val(scale, zero_point, quant_val);
       if (ReLUFused) {
         c = std::max<float>(c, 0.0);
       }
