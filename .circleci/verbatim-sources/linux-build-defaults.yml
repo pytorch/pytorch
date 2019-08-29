@@ -37,6 +37,11 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
           NAMED_FLAG="export BUILD_NAMEDTENSOR=1"
         fi
 
+        # dispatch aten ops statically for mobile
+        if [[ ${BUILD_ENVIRONMENT} == *"android"* ]]; then
+          NAMED_FLAG="export USE_STATIC_DISPATCH=1"
+        fi
+
         export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -51,6 +56,14 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
             export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
           elif [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
+          elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_64"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-android-x86_64
+          elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v7a"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-android-arm-v7a
+          elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v8a"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-android-arm-v8a
+          elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_32"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-android-x86_32
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
@@ -120,7 +133,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
       no_output_timeout: "1h"
       command: |
         set -e
-        cat >/home/circleci/project/ci_build_script.sh <<EOL
+        cat >/home/circleci/project/ci_build_script.sh \<<EOL
         # =================== The following code will be executed inside Docker container ===================
         set -ex
         export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
@@ -184,7 +197,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
       command: |
         set -e
         # TODO: merge this into Caffe2 test.sh
-        cat >/home/circleci/project/ci_test_script.sh <<EOL
+        cat >/home/circleci/project/ci_test_script.sh \<<EOL
         # =================== The following code will be executed inside Docker container ===================
         set -ex
 
@@ -231,4 +244,3 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
 
         export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-

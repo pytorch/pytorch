@@ -643,7 +643,7 @@ class _DistTestBase(object):
                         tensor = tensor.cuda(rank_to_GPU[rank][0])
                     dist.broadcast(tensor, src, group_id)
                     self.assertEqual(tensor.size(), expected_tensor.size())
-                    self.assertEqual(tensor.ne(expected_tensor).max(), 0)
+                    self.assertEqual(tensor.ne(expected_tensor).max(), torch.tensor(False))
 
         self._barrier()
 
@@ -1004,6 +1004,223 @@ class _DistTestBase(object):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_reduce_helper(
             group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10
+        )
+
+    # ALL REDUCE - COALESCED
+    @staticmethod
+    def _all_reduce_coalesced_sum_test_cases(group_size):
+        return (
+            [2, 3],
+            [10, 11],
+            [2 + 10 * (group_size - 1), 3 + 11 * (group_size - 1)]
+        )
+
+    @staticmethod
+    def _all_reduce_coalesced_product_test_cases(group_size):
+        return (
+            [1, 2],
+            [3, 4],
+            [1 * 3 ** (group_size - 1), 2 * 4 ** (group_size - 1)]
+        )
+
+    @staticmethod
+    def _all_reduce_coalesced_min_test_cases(group_size):
+        return (
+            [1, 4],
+            [2, 3],
+            [1, 3]
+        )
+
+    @staticmethod
+    def _all_reduce_coalesced_max_test_cases(group_size):
+        return (
+            [1, 4],
+            [2, 3],
+            [2, 4]
+        )
+
+    def _test_all_reduce_coalesced_helper(
+        self,
+        group,
+        group_id,
+        rank,
+        op,
+        cuda=False,
+        rank_to_GPU=None,
+    ):
+        test_case_func = {
+            dist.ReduceOp.SUM: self._all_reduce_coalesced_sum_test_cases,
+            dist.ReduceOp.PRODUCT: self._all_reduce_coalesced_product_test_cases,
+            dist.ReduceOp.MIN: self._all_reduce_coalesced_min_test_cases,
+            dist.ReduceOp.MAX: self._all_reduce_coalesced_max_test_cases
+        }[op]
+
+        master_values, worker_values, expected_values = test_case_func(len(group))
+
+        for src in group:
+            tensors = [
+                _build_tensor(src + 1, val)
+                for val in (master_values if rank == src else worker_values)
+            ]
+            if cuda:
+                tensors = list(map(tensors, lambda t: t.cuda(rank_to_GPU[rank][0])))
+            dist.all_reduce_coalesced(tensors, op, group_id)
+            self.assertEqual(
+                tensors,
+                [
+                    _build_tensor(src + 1, expected_value)
+                    for expected_value in expected_values
+                ]
+            )
+
+        self._barrier()
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_sum(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.SUM,
+            cuda=False,
+            rank_to_GPU=None,
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_product(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.PRODUCT,
+            cuda=False,
+            rank_to_GPU=None,
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_min(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.MIN,
+            cuda=False,
+            rank_to_GPU=None,
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_max(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.MAX,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @skip_if_small_worldsize
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_group_sum(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.SUM,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @skip_if_small_worldsize
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_group_product(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.PRODUCT,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @skip_if_small_worldsize
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_group_min(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.MIN,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @skip_if_small_worldsize
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_group_max(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.MAX,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_full_group_sum(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.SUM,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_full_group_product(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.PRODUCT,
+            cuda=False,
+            rank_to_GPU=None
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_full_group_min(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.MIN,
+            cuda=False,
+            rank_to_GPU=None,
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_full_group_max(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_reduce_coalesced_helper(
+            group,
+            group_id,
+            rank,
+            dist.ReduceOp.MAX,
+            cuda=False,
+            rank_to_GPU=None
         )
 
     # SCATTER

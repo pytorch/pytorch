@@ -38,7 +38,7 @@ void unmergeSubgraph(Node* subgraphNode) {
   // Inline the graph, replace uses of node outputs and destroy the node
   auto outerGraph = subgraphNode->owningGraph();
   WithInsertPoint guard(subgraphNode);
-  const auto subgraphOutputs = inlineCallTo(
+  const auto subgraphOutputs = insertGraph(
       *outerGraph, *getSubgraph(subgraphNode), subgraphNode->inputs());
   AT_ASSERT(subgraphOutputs.size() >= subgraphNode->outputs().size());
   for (size_t i = 0; i < subgraphNode->outputs().size(); ++i) {

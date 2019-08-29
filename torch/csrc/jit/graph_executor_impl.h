@@ -87,7 +87,7 @@ struct GraphExecutorImplBase {
     auto local_graph = this->graph->copy();
     for (size_t i = 0; i < input_values.size(); ++i) {
       // propagate tensor types
-      if (input_values.at(i)->type()->cast<TensorType>()) {
+      if (input_values.at(i)->type()->isSubtypeOf(TensorType::get())) {
         local_graph->inputs().at(i)->setType(input_values.at(i)->type());
       }
 
@@ -99,8 +99,7 @@ struct GraphExecutorImplBase {
       }
     }
     PropagateInputShapes(local_graph);
-    auto output_values =
-        inlineCallTo(*state->graph, *local_graph, input_values);
+    auto output_values = insertGraph(*state->graph, *local_graph, input_values);
 
     auto outputs = last(stack, num_outputs);
     for (size_t i = 0; i < outputs.size(); ++i) {

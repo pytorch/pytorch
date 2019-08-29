@@ -50,7 +50,7 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
 }
 
 // Applies implict conversion from value trying to turn it into type
-// concrete_type. It succeeds if `return_value->isSubclassOf(concrete_type)`
+// concrete_type. It succeeds if `return_value->isSubtypeOf(concrete_type)`
 Value* tryConvertToType(
     const SourceRange& loc,
     Graph& graph,
@@ -158,17 +158,19 @@ static Value* tryMatchArgument(
   // Check if the value can be matched to the arg through any implicit
   // conversions
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
-
-  if (!value->type()->isSubtypeOf(concrete_type)) {
+  std::stringstream ss;
+  if (!value->type()->isSubtypeOfExt(
+          concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
     if (failure_messages) {
       auto& ostream = err()
           << arg.formatTypeMismatchMsg(value->type()->python_str());
 
       if (auto v = value->type()->cast<ListType>()) {
         if (v->getElementType()->isSubtypeOf(TensorType::get())) {
-          ostream << "Empty lists default to List[Tensor]. Use torch.jit."
-                     "annotate(List[my_type], []) to create an empty list of"
-                     " another type.\n";
+          ostream << "Empty lists default to List[Tensor]. Add a variable "
+                     "annotation to the assignment to create an empty list "
+                     "of another type (torch.jit.annotate(List[T, []]) where T "
+                     "is the type of elements in the list for Python 2)\n";
         }
       }
 
@@ -177,6 +179,7 @@ static Value* tryMatchArgument(
         ostream << "Use int(tensor) or float(tensor) to retrieve item() from a "
                 << "tensor with the appropriate type.\n";
       }
+      ostream << ss.str();
     }
 
     return nullptr;
@@ -530,7 +533,7 @@ Value* emitBuiltinCall(
               allow_conversions)) {
         // we inline builtin calls because they are normally very small
         // wrappers and are not useful for keeping around to debug
-        return inlineCallTo(graph, *method->graph(), result->inputs).at(0);
+        return insertGraph(graph, *method->graph(), result->inputs).at(0);
       }
     }
   }

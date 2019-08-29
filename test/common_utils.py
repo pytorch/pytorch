@@ -181,6 +181,7 @@ TEST_LIBROSA = _check_module_exists('librosa') and PY3
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1' or sys.version_info[0] == 2
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
+TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 
@@ -205,6 +206,59 @@ def skipIfRocm(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
+
+
+
+def _test_function(fn, device):
+    def run_test_function(self):
+        return fn(self, device)
+    return run_test_function
+
+
+class torchtest():
+    """Allows to generate and run per-device unittests.
+
+    This decorator class allows to generate and run per-device unittest.
+
+    Example:
+
+    class _TestTorchMixin(torchtest):
+
+        @torchtest.for_all_device_types()
+        def test_zeros_like(self, device):
+            expected = torch.zeros((100, 100,), device=device)
+
+    Will execute:
+
+        test_zeros_like (__main__.TestTorch) ... skipped 'Look at test_zeros_like_cpu, test_zeros_like_cuda results.'
+        test_zeros_like_cpu (__main__.TestTorch) ... ok
+        test_zeros_like_cuda (__main__.TestTorch) ... ok
+
+    To work properly, test class should be inherited from `torchtest`.
+    for_all_device_types decorator does not guarantee proper functionality in
+    combination with other decorators.
+
+    Please do not extend this decorator to support other cases (such as dtype,
+    layouts, etc) without consulting with bigger group. Devices is the special
+    case as build flags control additions/removals (see
+    https://github.com/pytorch/pytorch/pull/23824 for the reference).
+    """
+    @classmethod
+    def for_all_device_types(cls):
+        def wrapper(fn):
+            test_names = []
+
+            for device in torch.testing.get_all_device_types():
+                test_name = fn.__name__ + '_' + device
+                assert not hasattr(cls, test_name), "Duplicated test name: " + test_name
+                setattr(cls, test_name, _test_function(fn, device))
+                test_names.append(test_name)
+
+            @wraps(fn)
+            def empty_test(*args, **kwargs):
+                raise unittest.SkipTest("Look at {} results.".format(", ".join(test_names)))
+            return empty_test
+        return wrapper
 
 
 def skipIfNoLapack(fn):
@@ -613,7 +667,8 @@ class TestCase(expecttest.TestCase):
                 self.assertEqual(x.q_zero_point(), y.q_zero_point(),
                                  prec=prec, message=message,
                                  allow_inf=allow_inf)
-                self.assertEqual(x.int_repr(), y.int_repr(), prec=prec,
+                self.assertEqual(x.int_repr().to(torch.int32),
+                                 y.int_repr().to(torch.int32), prec=prec,
                                  message=message, allow_inf=allow_inf)
             else:
                 assertTensorsEqual(x, y)
@@ -948,30 +1003,35 @@ def random_square_matrix_of_rank(l, rank):
 
 def random_symmetric_matrix(l, *batches):
     A = torch.randn(*(batches + (l, l)))
-    for i in range(l):
-        for j in range(i):
-            A[..., i, j] = A[..., j, i]
+    A = (A + A.transpose(-2, -1)).div_(2)
     return A
 
 
-def random_symmetric_psd_matrix(l):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1))
+def random_symmetric_psd_matrix(l, *batches):
+    A = torch.randn(*(batches + (l, l)))
+    return torch.matmul(A, A.transpose(-2, -1))
 
 
 def random_symmetric_pd_matrix(l, *batches):
     A = torch.randn(*(batches + (l, l)))
-    return A.matmul(A.transpose(-2, -1)) + torch.eye(l) * 1e-5
+    return torch.matmul(A, A.transpose(-2, -1)) + torch.eye(l) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     u, s, v = A.svd()
-    s[s < min_singular_value] = min_singular_value
-    A = u.mm(torch.diag(s)).mm(v.t())
-    det = A.det().item()
+    s.clamp_(min=min_singular_value)
+    A = torch.matmul(u, torch.matmul(torch.diag_embed(s), v.transpose(-2, -1)))
+    det = A.det()
     if sign is not None:
-        if (det < 0) ^ (sign < 0):
-            A[0, :].neg_()
+        if A.dim() == 2:
+            det = det.item()
+            if (det < 0) ^ (sign < 0):
+                A[0, :].neg_()
+        else:
+            cond = ((det < 0) ^ (sign < 0)).nonzero()
+            if cond.size(0) > 0:
+                for i in range(cond.size(0)):
+                    A[list(cond[i])][0, :].neg_()
     return A
 
 

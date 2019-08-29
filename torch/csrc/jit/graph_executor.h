@@ -62,6 +62,19 @@ TORCH_API bool& getProfilingMode();
 TORCH_API void setGraphExecutorOptimize(bool o);
 TORCH_API bool getGraphExecutorOptimize();
 
+struct TORCH_API GraphOptimizerEnabledGuard {
+  GraphOptimizerEnabledGuard(bool state)
+      : old_state_(getGraphExecutorOptimize()) {
+    setGraphExecutorOptimize(state);
+  }
+
+  ~GraphOptimizerEnabledGuard() {
+    setGraphExecutorOptimize(old_state_);
+  }
+
+  bool old_state_;
+};
+
 namespace detail {
 
 GraphExecutor* getGradExecutor(Operation& op);
