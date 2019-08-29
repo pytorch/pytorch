@@ -99,7 +99,7 @@ bool TensorImpl::compute_channels_last_contiguous() const {
   if (dim() == 4) {
     int64_t expected = 1;
     for (auto& d : {1, 3, 2, 0}) {
-      if (size(d) != 1) {
+      if (1 || size(d) != 1) {
         if (stride(d) == expected) {
           expected *= size(d);
         } else {

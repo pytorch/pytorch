@@ -460,10 +460,12 @@ at::Tensor conv1d(
 at::Tensor conv2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
-      std::cout << "conv2d in  " << input.suggest_memory_format() << "\n";
-  auto out =  at::convolution(input, weight, bias, stride, padding, dilation,
+      // input.unsafeGetTensorImpl()->
+      // std::cout << "suggest_memory_format is_cont=" << input.unsafeGetTensorImpl()->is_contiguous() << " is_s_cl=" << input.unsafeGetTensorImpl()->is_strides_like_channels_last() << "\n";
+      // std::cout << "conv2d in  " << input.suggest_memory_format() << " " << input.sizes() << " " << input.strides() << "\n";
+      auto out =  at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0}}, groups);
-      std::cout << "conv2d out " << out.suggest_memory_format() << "\n";
+      // std::cout << "conv2d out " << out.suggest_memory_format() << " " << out.sizes() << " " << out.strides() << "\n";
       return out;
 }
 

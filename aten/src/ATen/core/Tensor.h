@@ -15,7 +15,6 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
-#include <iostream>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #endif
@@ -191,8 +190,10 @@ class CAFFE2_API Tensor {
   }
 
   at::MemoryFormat suggest_memory_format() const {
-    std::cout << get_memory_format_propagation() << " " << !impl_->is_contiguous() << "/n";
-    if (get_memory_format_propagation() && !impl_->is_contiguous() && impl_->is_strides_like_channels_last()) {
+    // std::cout << "suggest_memory_format " << get_memory_format_propagation() << " " << !impl_->is_contiguous() << " " << impl_->is_strides_like_channels_last() << "\n";
+    if (
+      // get_memory_format_propagation() &&
+    !impl_->is_contiguous() && impl_->is_strides_like_channels_last()) {
       return at::MemoryFormat::ChannelsLast;
     }
     return at::MemoryFormat::Contiguous;

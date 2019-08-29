@@ -156,6 +156,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& save_mean_t, const Tensor& save_var_t,
     double epsilon)
 {
+  std::cout << "Starting backward cudnn_batch_norm_backward\n";
   // TODO: Is it worth it to have a contiguous call or maybe we should go with
   // whatever format is given here.
   TensorArg input{ input_t, "input", 1 },
@@ -212,6 +213,11 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
 
+  std::cout << "idesc.desc() " << idesc.desc() << " " << input->strides()<< "\n";
+  std::cout << "odesc.desc() " << odesc.desc() << " " << grad_output->strides() << "\n";
+  std::cout << "idesc.desc() " << idesc.desc() << " " << grad_input_t.strides()<< "\n";
+  std::cout << "wdesc.desc() " << wdesc.desc() << " " << weight->strides()<< "\n";
+
   AT_CUDNN_CHECK(cudnnBatchNormalizationBackward(
     handle, mode, &one, &zero, &one, &zero,
     idesc.desc(), input->data_ptr(),
@@ -224,6 +230,12 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     save_mean->data_ptr(),
     save_var->data_ptr()));
 
+  // std::cout << grad_input_t << "\n";
+
+  AT_CUDA_CHECK(cudaDeviceSynchronize());
+
+
+  std::cout << "Finishing backward cudnn_batch_norm_backward\n";
   return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
 }
 
