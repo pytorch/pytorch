@@ -4,6 +4,7 @@ import os
 import threading
 import errno
 import multiprocessing
+from multiprocessing.util import register_after_fork
 from multiprocessing.reduction import ForkingPickler
 import sys
 try:
@@ -43,6 +44,13 @@ class SharedCache(dict):
         # free_dead_references() is called if the len exceeds the current
         # limit. The limit scales with the number of remaining live objects.
         self.limit = 128
+        # `fork` inherits lock state, so in case we fork when the lock is held,
+        # we register a function to reset the lock to a new object to avoid
+        # possible deadlocks, following python multiprocessing library design.
+        self._after_fork()
+        register_after_fork(self, SharedCache._after_fork)
+
+    def _after_fork(self):
         self.lock = threading.Lock()
 
     def __setitem__(self, key, storage_ref):

@@ -388,6 +388,30 @@ if TEST_TENSORBOARD:
                               'nasdaq': ['Margin', ['nasdaq/aaa', 'nasdaq/bbb', 'nasdaq/ccc']]}}
             summary.custom_scalars(layout)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
 
+        def test_hparams_smoke(self):
+            hp = {'lr': 0.1, 'bsize': 4}
+            mt = {'accuracy': 0.1, 'loss': 10}
+            summary.hparams(hp, mt)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
+
+            hp = {'use_magic': True, 'init_string': "42"}
+            mt = {'accuracy': 0.1, 'loss': 10}
+            summary.hparams(hp, mt)
+
+            mt = {'accuracy': torch.zeros(1), 'loss': torch.zeros(1)}
+            summary.hparams(hp, mt)
+
+        def test_hparams_wrong_parameter(self):
+            with self.assertRaises(TypeError):
+                summary.hparams([], {})
+            with self.assertRaises(TypeError):
+                summary.hparams({}, [])
+            with self.assertRaises(ValueError):
+                res = summary.hparams({'pytorch': [1, 2]}, {'accuracy': 2.0})
+            # metric data is used in writer.py so the code path is different, which leads to different exception type.
+            with self.assertRaises(NotImplementedError):
+                with SummaryWriter() as writer:
+                    writer.add_hparams({'pytorch': 1.0}, {'accuracy': [1, 2]})
+
         def test_mesh(self):
             v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)
             c = np.array([[[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 0, 255]]], dtype=int)
