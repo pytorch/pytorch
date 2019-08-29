@@ -6,6 +6,7 @@ test_api.exe --gtest_filter="-IntegrationTest.MNIST*"
 
 if errorlevel 1 exit /b 1
 
+cd %TMP_DIR_WIN%\build\torch\test
 for /r "." %%a in (*.exe) do (
     call :libtorch_check "%%~na" "%%~fa"
 )
