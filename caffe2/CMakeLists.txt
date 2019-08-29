@@ -735,7 +735,6 @@ ENDIF()
     add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
   endif()
 
-
   # XXX This ABI check cannot be run with arm-linux-androideabi-g++
   if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     if (DEFINED GLIBCXX_USE_CXX11_ABI)
