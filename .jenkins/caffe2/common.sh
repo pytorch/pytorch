@@ -12,6 +12,11 @@ if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
   PYTHON=$(which "python${BASH_REMATCH[1]}")
 fi
 
+# enable extended glob regex on ROCm
+if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
+  shopt -s extglob
+fi
+
 # /usr/local/caffe2 is where the cpp bits are installed to in in cmake-only
 # builds. In +python builds the cpp tests are copied to /usr/local/caffe2 so
 # that the test code in .jenkins/test.sh is the same
