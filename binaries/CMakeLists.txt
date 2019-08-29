@@ -25,6 +25,9 @@ caffe2_binary_target("split_db.cc")
 
 caffe2_binary_target("db_throughput.cc")
 
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
+  caffe2_binary_target("speed_benchmark_torch.cc")
+endif()
 
 if (BUILD_TEST AND NOT ANDROID)
   # Core overhead benchmark
