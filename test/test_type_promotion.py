@@ -23,8 +23,7 @@ class TestTypePromotion(TestCase):
 
         self.assertRaisesRegex(RuntimeError, "can't be cast to", lambda: int_tensor.add_(1.5))
 
-        expected = torch.ones([4, 4, 4], device=self.device)
-        expected = expected.to(torch.int32)
+        expected = torch.ones([4, 4, 4], dtype=torch.int32, device=self.device)
 
         long_tensor = torch.ones([4, 4, 4], dtype=torch.int64, device=self.device)
         int_tensor.add_(long_tensor)
@@ -126,7 +125,7 @@ class TestTypePromotion(TestCase):
 
     def test_mixed_type_backward(self):
         f = torch.ones([3, 3], dtype=torch.float, requires_grad=True, device=self.device)
-        ten = torch.tensor([10], dtype=torch.double, device=self.device)
+        ten = torch.tensor([10.], dtype=torch.double, device=self.device)
         tens = f * ten
         s = (tens + 2).sum()
         s.backward()
@@ -137,7 +136,7 @@ class TestTypePromotion(TestCase):
         # RuntimeError: Function SubBackward0 returned an invalid gradient at index 0 - expected type \
         # torch.FloatTensor but got torch.DoubleTensor
         f_dtypes = [torch.float, torch.double]
-        f_dtypes = f_dtypes if self.device != 'cuda' else f_dtypes + [torch.half]
+        f_dtypes = f_dtypes if self.device == 'cpu' else f_dtypes + [torch.half]
         i_dtypes = [torch.int, torch.long]
         for f in ['add', 'sub', 'rsub', 'mul', 'div']:
             for dtype1 in f_dtypes:
@@ -186,6 +185,9 @@ class TestTypePromotion(TestCase):
         err = 'alpha must not be'
         self.assertRaisesRegex(RuntimeError, err,
                                lambda: torch.add(x, x, alpha=1.1))
+        x = x.to(torch.bool)
+        self.assertRaisesRegex(RuntimeError, err,
+                               lambda: torch.add(x, x, alpha=1.1))
 
     def test_booleans(self):
         onedim = torch.tensor([True])
@@ -197,16 +199,16 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.add(False, True), True)
 
     def test_create_bool_tensors(self):
-        self.assertEqual(torch.arange(False, True), torch.tensor([0], dtype=torch.int64))
-        self.assertEqual(torch.arange(True), torch.tensor([0], dtype=torch.int64))
-        self.assertEqual(torch.arange(False, True, 0.5), torch.tensor([0, 0.5], dtype=torch.get_default_dtype()))
-        self.assertEqual(torch.arange(False, False), torch.ones(0, dtype=torch.int64))
+        self.assertEqual(torch.arange(False, True, device=self.device), torch.tensor([0], dtype=torch.int64, device=self.device))
+        self.assertEqual(torch.arange(True, device=self.device), torch.tensor([0], dtype=torch.int64, device=self.device))
+        self.assertEqual(torch.arange(False, True, 0.5, device=self.device), torch.tensor([0, 0.5], dtype=torch.get_default_dtype(), device=self.device))
+        self.assertEqual(torch.arange(False, False, device=self.device), torch.ones(0, dtype=torch.int64, device=self.device))
 
-        self.assertEqual(torch.linspace(False, True), torch.linspace(0, 1))
-        self.assertEqual(torch.logspace(False, True), torch.logspace(0, 1))
+        self.assertEqual(torch.linspace(False, True, device=self.device), torch.linspace(0, 1, device=self.device))
+        self.assertEqual(torch.logspace(False, True, device=self.device), torch.logspace(0, 1, device=self.device))
 
         # this seems like odd behavior but ints also create float tensors, numpy doesn't have this function.
-        self.assertEqual(torch.scalar_tensor(False), torch.tensor(0.))
+        self.assertEqual(torch.scalar_tensor(False, device=self.device), torch.tensor(0., device=self.device))
 
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):

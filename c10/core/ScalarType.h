@@ -341,7 +341,7 @@ static inline bool canCast(const ScalarType from, const ScalarType to) {
   // `bool_tensor + 5 -> int64_tensor` behavior. We don't, because:
   // * We don't want the performance hit of checking the runtime sign of Scalars.
   // * `uint8_tensor + 5 -> int64_tensor` would be undesirable.
-  if (ScalarType::Bool != from && ScalarType::Bool == to) {
+  if (from != ScalarType::Bool && to == ScalarType::Bool) {
     return false;
   }
   return true;

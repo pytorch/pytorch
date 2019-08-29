@@ -20,7 +20,7 @@ Tensor& pow_out(Tensor& result, const Tensor& base, const Tensor& exp) {
 Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
   // Numpy compatibility check:
   TORCH_CHECK(!(isIntegralType(base.scalar_type()) &&
-              exp.isIntegral() && exp.toLong() < 0),
+              exp.isIntegral(false) && exp.toLong() < 0),
               "Integers to negative integer powers are not allowed.");
   if (exp.toDouble() == 0.0) {
     result.resize_as_(base).fill_(1);
