@@ -181,13 +181,6 @@ cmake_dependent_option(
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 
 if (MSVC)
-  # Turn on verbose makefile on Windows.  The reasoning for this is that
-  # on Windows, errors will often not come with any file location
-  # information of the originating file, just the header that actually
-  # triggered it. Being able to see the compile command is essential
-  # for actually telling where the error came from.
-  set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON")
-
   foreach(flag_var
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
       CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)

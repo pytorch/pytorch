@@ -5,6 +5,7 @@ if "%DEBUG%" == "1" (
 )
 
 set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;%PATH%
+set CMAKE_VERBOSE_MAKEFILE=1
 
 
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
