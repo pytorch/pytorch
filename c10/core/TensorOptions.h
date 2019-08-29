@@ -609,6 +609,10 @@ inline DeviceType computeDeviceType(TensorTypeId tid) {
     return DeviceType::HIP;
   } else if (tid == MkldnnCPUTensorId()) {
     return DeviceType::CPU;
+  } else if (tid == ComplexCPUTensorId()) {
+    return DeviceType::CPU;
+  } else if (tid == ComplexCUDATensorId()) {
+    return DeviceType::CUDA;
   } else {
     AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
   }
