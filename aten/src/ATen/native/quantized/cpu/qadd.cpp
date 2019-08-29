@@ -54,7 +54,7 @@ Tensor _add_scalar_(Tensor& self, Scalar other) {
   TORCH_CHECK(self.qscheme() == kPerTensorAffine,
               "Only per tensor affine is supported for now!!");
   float other_val = other.toFloat();
-  if (other_val <= std::numeric_limits<float>::epsilon()) {
+  if (std::abs(other_val) <= std::numeric_limits<float>::epsilon()) {
     return self;
   }
   double s = self.q_scale();
@@ -72,31 +72,42 @@ Tensor _add_scalar_(Tensor& self, Scalar other) {
 
   int64_t new_z = z;
   double new_s = s;
+  bool fallback = false;
+
+  int64_t qother = std::nearbyint(other_val / s);
 
   if (other_val > 0) {  // Addition
-    if (other_val < (z - qmin) * s) {
-      new_z = new_z - std::nearbyint(other_val / s);
+    if (xmin + other_val < 0) {
+      new_z = new_z - qother;
+      fallback = true;
     } else {
-      new_z = qmin;
-      new_s = (xmax + other_val) / (qmax - qmin);
+      fallback = true;
+      // new_z = qmin;
+      // new_s = (xmax + other_val) / (qmax - qmin);
     }
   } else {  // Subtraction
-    if (-other_val < (qmax - z) * s) {
-      new_z = new_z - std::nearbyint(other_val / s);
+    if (xmax - other_val > 0) {
+      new_z = new_z - qother;
+      fallback = true;
     } else {
-      new_z = qmax;
-      new_s = -(xmin + other_val) / (qmax - qmin);
+      fallback = true;
+      // new_z = qmax;
+      // new_s = -(xmin + other_val) / (qmax - qmin);
     }
   }
-  // double xmin = (double(qmin) - self.q_zero_point()) * self.q_scale();
-  // double new_s = s * ((std::max<int64_t>(qmax - z, 0) - std::min<int64_t>(qmin - z, 0))
-  //                / (qmax - qmin));
-  // int64_t new_z = qmin - std::min<int64_t>(xmin + other_int, 0) / new_s;
-  // new_z = std::min(qmax, new_z);
-  // new_z = std::max(qmin, new_z);
-  self.set_quantizer_(make_per_tensor_affine_quantizer(new_s, new_z,
-                                                       self.scalar_type()));
-
+  if (fallback) {
+    auto iter = TensorIterator::unary_op(self, self);
+    AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qadd.Scalar", [&]() {
+      cpu_kernel(iter, [&](scalar_t a) -> scalar_t {
+        const auto da = at::dequantize_val(s, z, a);
+        float c = da + other_val;
+        return at::quantize_val<scalar_t>(s, z, c);
+      });
+    });
+  } else {
+    self.set_quantizer_(make_per_tensor_affine_quantizer(new_s, new_z,
+                                                         self.scalar_type()));
+  }
   if (ReLUFused) {
     return at::relu_(self);
   }
@@ -132,8 +143,7 @@ class QAddOut final : public c10::OperatorKernel {
 template <bool ReLUFused = false>
 class QAddScalar final : public c10::OperatorKernel {
  public:
-  Tensor operator()(Tensor qa, Scalar b,
-                    double scale, int64_t zero_point) {
+  Tensor operator()(Tensor qa, Scalar b) {
   TORCH_CHECK(qa.qscheme() == kPerTensorAffine,
               "Only per tensor quantization is suuported in Add.");
     auto out = qa.clone();
@@ -168,12 +178,10 @@ static auto registry = c10::RegisterOperators()
      "-> Tensor out",
     c10::RegisterOperators::options()
       .kernel<QAddOut</*ReLUFused=*/true>>(QuantizedCPUTensorId()))
-.op("quantized::add_scalar(Tensor qa, Scalar b, float scale, int zero_point)"
-     "-> Tensor qc",
+.op("quantized::add_scalar(Tensor qa, Scalar b) -> Tensor qc",
     c10::RegisterOperators::options()
       .kernel<QAddScalar</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
-.op("quantized::add_scalar_relu(Tensor qa, Scalar b, float scale,"
-     "int zero_point) -> Tensor qc",
+.op("quantized::add_scalar_relu(Tensor qa, Scalar b) -> Tensor qc",
     c10::RegisterOperators::options()
       .kernel<QAddScalar</*ReLUFused=*/true>>(QuantizedCPUTensorId()))
 .op("quantized::add_scalar_out(Tensor qa, Scalar b, Tensor out)"
