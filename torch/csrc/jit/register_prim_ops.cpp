@@ -588,8 +588,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            at::Tensor a;
            pop(stack, a);
-           autograd::Variable var = autograd::as_variable_ref(a);
-           push(stack, var.variable_data());
+           push(stack, autograd::Variable(a).variable_data());
            return 0;
          },
          aliasAnalysisFromSchema()),
