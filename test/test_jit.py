@@ -2205,6 +2205,18 @@ graph(%Ra, %Rb):
         # testing that 1 // 0 error is not thrownn
         self.run_pass('constant_propagation', constant_prop.graph)
 
+    def test_constant_prop_exception(self):
+        # checking y = a[4] does not error in constant propagation
+        def bad_index(x):
+            # type: (bool)
+            y = 0
+            if x:
+                a = [1, 2, 3]
+                y = a[4]
+            return y
+
+        self.checkScript(bad_index, (False,))
+
     def test_short_circuit_optimization(self):
         @torch.jit.script
         def const_expressions(x):
@@ -2862,6 +2874,32 @@ graph(%Ra, %Rb):
         buffer.seek(0)
         model_loaded = torch.jit.load(buffer)
         self.assertEqual(model_loaded(), model())
+
+
+class TestFrontend(JitTestCase):
+
+    def test_instancing_error(self):
+        @torch.jit.ignore
+        class MyScriptClass(object):
+            def unscriptable(self):
+                return "a" + 200
+
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, x):
+                return MyScriptClass()
+
+        with self.assertRaises(torch.jit.frontend.FrontendError) as cm:
+            torch.jit.script(TestModule())
+
+        checker = FileCheck()
+        checker.check("Cannot instantiate class")
+        checker.check("def forward")
+        checker.run(str(cm.exception))
+
 
 class TestScript(JitTestCase):
     def test_sequence_parsing(self):
@@ -5684,10 +5722,12 @@ a")
         self.checkScript(div_float_future, ())
 
         if PY2:
-            with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
+            with self.assertRaisesRegex(torch.jit.frontend.FrontendError, 'from __future__ import division') as cm:
                 torch.jit.script(div_int_nofuture)
-            with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
+            FileCheck().check("div_int_nofuture").run(str(cm.exception))
+            with self.assertRaisesRegex(torch.jit.frontend.FrontendError, 'from __future__ import division') as cm:
                 torch.jit.script(div_float_nofuture)
+            FileCheck().check("div_float_nofuture").run(str(cm.exception))
         else:
             self.checkScript(div_int_nofuture, ())
             self.checkScript(div_float_nofuture, ())
@@ -14436,7 +14476,7 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, x):
                 return MyScriptClass()
 
-        with self.assertRaisesRegex(RuntimeError, "cannot instantiate class object"):
+        with self.assertRaisesRegex(torch.jit.frontend.FrontendError, "Cannot instantiate class"):
             t = torch.jit.script(TestModule())
 
     def test_method_call(self):
@@ -17107,14 +17147,14 @@ class TestList(JitTestCase):
             a = [1, 2, 3]
             return a[4]
 
-        self.checkScriptRaisesRegex(bad_index, (), IndexError,
+        self.checkScriptRaisesRegex(bad_index, (), Exception,
                                     "list index out of range")
 
         def bad_negative_index():
             a = [1, 2, 3]
             return a[-5]
 
-        self.checkScriptRaisesRegex(bad_negative_index, (), IndexError,
+        self.checkScriptRaisesRegex(bad_negative_index, (), Exception,
                                     "list index out of range")
 
     def test_list_len(self):

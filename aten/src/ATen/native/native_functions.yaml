@@ -432,12 +432,14 @@
   dispatch:
     CPU: bmm_cpu
     CUDA: bmm_cuda
+  named_guard: False
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: bmm_out_cpu
     CUDA: bmm_out_cuda
+  named_guard: False
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
   device_guard: False
@@ -1315,8 +1317,10 @@
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  named_guard: false
 
 - func: matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: false
 
 - func: matrix_rank.tol(Tensor self, float tol, bool symmetric=False) -> Tensor
 
@@ -4111,9 +4115,11 @@
 
 - func: sign(Tensor self) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
   variants: method
+  named_guard: False
 
 - func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
