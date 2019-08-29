@@ -103,6 +103,7 @@ YAML_SOURCES = [
     File("workflows.yml"),
     Listgen(pytorch_build_definitions.get_workflow_list, 3),
     File("workflows-pytorch-macos-builds.yml"),
+    File("workflows-pytorch-android-gradle-build.yml"),
     Listgen(caffe2_build_definitions.get_caffe2_workflows, 3),
     File("workflows-binary-builds-smoke-subset.yml"),
     Header("Daily smoke test trigger"),
