@@ -1,7 +1,8 @@
-#include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/peephole.h>
 
 namespace torch {
 namespace jit {
@@ -219,6 +220,16 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
             " (x.NumToTensor().ImplicitTensorToNum() == x.NumToTensor()) is replaced with ",
             node->input()->debugName());
         node->output()->replaceAllUsesWith(input_node->input());
+      }
+    } else if (getProfilingMode() &&
+               node->matches("aten::size(Tensor self) -> int[]")) {
+      if (auto ptt = node->input()->type()->cast<TensorType>()) {
+        if (auto sizes = ptt->sizes().concrete_sizes()) {
+          WithInsertPoint guard(node);
+          IValue ival(sizes);
+          auto const_sizes_val = node->owningGraph()->insertConstant(ival);
+          node->output()->replaceAllUsesWith(const_sizes_val);
+        }
       }
     } else if (
         node->matches(
