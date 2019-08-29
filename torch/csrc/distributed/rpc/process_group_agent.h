@@ -55,6 +55,8 @@ class ProcessGroupAgent : public RpcAgent {
 
   void sync() override;
 
+  int16_t getWorkerId() override;
+
  private:
   // put SendWork into a queue and notify the worker thread
   void enqueueSend(SendWork work);
@@ -70,7 +72,6 @@ class ProcessGroupAgent : public RpcAgent {
   // worker name -> rank
   const std::unordered_map<std::string, int> nameMap_;
   std::vector<WorkerId> workerIds_;
-  bool stop_;
   std::shared_ptr<c10d::ProcessGroup> pg_;
   std::atomic<int64_t> nextId_;
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe

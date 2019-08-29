@@ -25,7 +25,7 @@ smoke_linux_test: &smoke_linux_test
       no_output_timeout: "1h"
       command: |
         set -ex
-        cat >/home/circleci/project/ci_test_script.sh <<EOL
+        cat >/home/circleci/project/ci_test_script.sh \<<EOL
         # The following code will be executed inside Docker container
         set -eux -o pipefail
         /builder/smoke_test.sh

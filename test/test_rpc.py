@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import sys
 import unittest
@@ -69,10 +70,9 @@ if not dist.is_available():
 def _wrap_with_rpc(func):
     def wrapper(self):
         store = dist.FileStore(self.file.name, self.world_size)
-        dist.init_process_group(
-            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
-        )
-        dist.init_rpc("worker{}".format(self.rank))
+        dist.init_process_group(backend='gloo', rank=self.rank,
+                                world_size=self.world_size, store=store)
+        dist.init_model_parallel('worker%d' % self.rank)
         func(self)
         dist.join_rpc()
 
@@ -97,6 +97,24 @@ class RpcTest(MultiProcessTestCase):
 
         self.assertEqual(self_worker_id.name, 'worker{}'.format(self.rank))
         self.assertEqual(peer_worker_id.name, 'worker{}'.format(peer_rank))
+
+        with self.assertRaisesRegex(RuntimeError, "Unknown destination worker"):
+            unknown_worker_id = dist.get_worker_id("WorkerUnknown")
+
+    @_wrap_with_rpc
+    def test_self_add(self):
+        self_worker_id = dist.get_worker_id()
+        self_worker_name = 'worker{}'.format(self.rank)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "does not support making RPC calls to self"
+        ):
+            dist.rpc(self_worker_id, torch.add, args=(torch.ones(2, 2), 1))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "does not support making RPC calls to self"
+        ):
+            dist.rpc(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
 
     @_wrap_with_rpc
     def test_add(self):

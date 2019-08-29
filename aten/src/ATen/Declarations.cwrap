@@ -1496,34 +1496,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_erfinv_
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  cname: erfinv
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: _th_erfinv
-  cname: erfinv
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_sqrt
   cname: sqrt
   types:
@@ -1540,20 +1512,6 @@
 [[
   name: _th_rsqrt
   cname: rsqrt
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_ceil
-  cname: ceil
   types:
     - floating_point
   backends:
@@ -1790,6 +1748,8 @@
 ]]
 [[
   name: _th_pow
+  backends:
+    - CUDA
   cname: pow
   variants:
     - function
@@ -1804,6 +1764,8 @@
 ]]
 [[
   name: _th_pow
+  backends:
+    - CUDA
   variants:
     - function
   return: argument 0
@@ -1818,6 +1780,8 @@
 ]]
 [[
   name: _th_pow
+  backends:
+    - CUDA
   variants:
     - function
   return: argument 0
@@ -1831,6 +1795,8 @@
 ]]
 [[
   name: _th_pow_
+  backends:
+    - CUDA
   return: argument 0
   cname: pow
   variants: function
