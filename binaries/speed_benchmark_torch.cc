@@ -17,10 +17,11 @@
 #include <string>
 #include <vector>
 
+#include "ATen/ATen.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/utils/string_utils.h"
-#include "torch/script.h"
 #include "torch/csrc/autograd/grad_mode.h"
+#include "torch/csrc/jit/import.h"
 
 C10_DEFINE_string(model, "", "The given torch script model to benchmark.");
 C10_DEFINE_string(
@@ -64,7 +65,7 @@ int main(int argc, char** argv) {
       input_type_list.size(),
       "Input dims and type should have the same number of items.");
 
-  std::vector<torch::IValue> inputs;
+  std::vector<c10::IValue> inputs;
   for (size_t i = 0; i < input_dims_list.size(); ++i) {
     auto input_dims_str = caffe2::split(',', input_dims_list[i]);
     std::vector<int64_t> input_dims;
@@ -72,9 +73,9 @@ int main(int argc, char** argv) {
       input_dims.push_back(c10::stoi(s));
     }
     if (input_type_list[i] == "float") {
-      inputs.push_back(torch::ones(input_dims, at::ScalarType::Float));
+      inputs.push_back(at::ones(input_dims, at::ScalarType::Float));
     } else if (input_type_list[i] == "uint8_t") {
-      inputs.push_back(torch::ones(input_dims, at::ScalarType::Byte));
+      inputs.push_back(at::ones(input_dims, at::ScalarType::Byte));
     } else {
       CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
     }

@@ -533,7 +533,7 @@ Example (``torch.jit.annotate`` for Python 2):
             # This annotates the list to be a `List[Tuple[int, float]]`
             my_list = torch.jit.annotate(List[Tuple[int, float]], [])
             for i in range(10):
-                my_list.append((i, x.item()))
+                my_list.append((i, float(x.item())))
 
             my_dict = torch.jit.annotate(Dict[str, int], {})
             return my_list, my_dict
