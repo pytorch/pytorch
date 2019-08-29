@@ -193,7 +193,7 @@ struct SourceImporter {
       switch (kind) {
         case TK_CLASS_DEF: {
           auto parsed_treeref = p_.parseClass();
-          importClass(qualifier, ClassDef(parsed_treeref));
+          importNamedType(qualifier, ClassDef(parsed_treeref));
         } break;
         case TK_DEF: {
           auto parsed_treeref = p_.parseFunction(/*is_method=*/false);
@@ -229,24 +229,34 @@ struct SourceImporter {
     cu_->define(qualifier, definitions, resolvers, nullptr);
   }
 
-  void importClass(const std::string& qualifier, const ClassDef& class_def) {
-    bool is_module = false;
-    if (class_def.superclass().present()) {
-      const auto& superclass_name =
-          Var(class_def.superclass().get()).name().name();
-      if (superclass_name == "Module") {
-        is_module = true;
-      } else if (superclass_name == "NamedTuple") {
-        // NamedTuples have special rules (since they are TupleTypes and not ClassTypes)
-        return importNamedTuple(qualifier, class_def);
-      } else {
-        throw ErrorReport(class_def.range())
-            << "Torchscript does not support class inheritance.";
-      }
-    }
-
-    const auto qualified_classname =
+  void importNamedType(
+      const std::string& qualifier,
+      const ClassDef& class_def) {
+    const auto qualified_name =
         QualifiedName(QualifiedName(qualifier), class_def.name().name());
+    if (!class_def.superclass().present()) {
+      return importClass(qualified_name, class_def, /*is_module=*/false);
+    }
+    const auto& superclass_name =
+        Var(class_def.superclass().get()).name().name();
+    if (superclass_name == "Module") {
+      importClass(qualified_name, class_def, /*is_module=*/true);
+    } else if (superclass_name == "NamedTuple") {
+      // NamedTuples have special rules (since they are TupleTypes and not
+      // ClassTypes)
+      return importNamedTuple(qualified_name, class_def);
+    } else if (superclass_name == "Interface") {
+      cu_->define_interface(qualified_name, class_def, resolver_);
+    } else {
+      throw ErrorReport(class_def.range())
+          << "Torchscript does not support class inheritance.";
+    }
+  }
+
+  void importClass(
+      const QualifiedName& qualified_classname,
+      const ClassDef& class_def,
+      bool is_module) {
     auto class_type = ClassType::create(
         c10::QualifiedName(qualified_classname), cu_, is_module);
 
@@ -352,11 +362,8 @@ struct SourceImporter {
   }
 
   void importNamedTuple(
-      const std::string& qualifier,
+      const QualifiedName& qualified_name,
       const ClassDef& named_tuple_def) {
-    auto qualified_name =
-        c10::QualifiedName(qualifier + "." + named_tuple_def.name().name());
-
     ScriptTypeParser type_parser(resolver_);
     std::vector<std::string> field_names;
     std::vector<TypePtr> field_types;
