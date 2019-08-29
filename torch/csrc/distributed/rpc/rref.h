@@ -30,7 +30,9 @@ struct RRefForkData {
   friend class RRef;
   friend class RRefContext;
 
-  RRefForkData(worker_id_t ownerId, RRefId rrefId_, ForkId forkId_);
+  RRefForkData(worker_id_t ownerId,
+               const RRefId& rrefId_,
+               const ForkId& forkId_);
 
   static RRefForkData fromIValue(const at::IValue&&);
 
@@ -65,7 +67,7 @@ class RRef {
  protected:
   friend class RRefContext;
 
-  RRef(worker_id_t ownerId, RRefId rrefId, ForkId forkId);
+  RRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;
@@ -79,7 +81,7 @@ class RRef {
 template <typename T>
 class RRefImpl final: public RRef {
  public:
-  RRefImpl(worker_id_t ownerId, RRefId rrefId, ForkId forkId)
+  RRefImpl(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId)
       : RRef(ownerId, rrefId, forkId) {}
 
   RRefImpl(RRefImpl<T>&& other) noexcept

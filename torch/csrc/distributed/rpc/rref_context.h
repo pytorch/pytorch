@@ -81,8 +81,8 @@ class RRefContext {
     }
   }
 
-  void addFork(const at::IValue&& value);
-  void delFork(const at::IValue&& value);
+  void addFork(at::IValue&& value);
+  void delFork(at::IValue&& value);
 
  private:
   RRefContext(std::shared_ptr<RpcAgent>);

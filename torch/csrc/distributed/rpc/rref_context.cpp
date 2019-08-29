@@ -37,7 +37,7 @@ const std::shared_ptr<RpcAgent>& RRefContext::agent() const {
   return agent_;
 }
 
-void RRefContext::addFork(const at::IValue&& value) {
+void RRefContext::addFork(at::IValue&& value) {
   auto rfd = RRefForkData::fromIValue(std::move(value));
   AT_ASSERT(rfd.ownerId_ == getWorkerId(),
       "RRef user should never receive fork notification.");
@@ -48,7 +48,7 @@ void RRefContext::addFork(const at::IValue&& value) {
   rrefForks.insert(rfd.forkId_);
 }
 
-void RRefContext::delFork(const at::IValue&& value) {
+void RRefContext::delFork(at::IValue&& value) {
   auto rfd = RRefForkData::fromIValue(std::move(value));
   AT_ASSERT(rfd.ownerId_ == getWorkerId(),
       "RRef user should never receive delete notification.");
