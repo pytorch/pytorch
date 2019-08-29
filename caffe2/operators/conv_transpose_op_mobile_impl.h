@@ -555,6 +555,9 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   auto sizes = ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
   Tensor* Y = Output(0, sizes, at::dtype<T>());
+  if (N == 0) {
+    return true;
+  }
 
   const int outputH = Y->dim32(2);
   const int outputW = Y->dim32(3);

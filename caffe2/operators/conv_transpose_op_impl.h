@@ -360,7 +360,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   }
   math::Set<T, Context>(filter.numel(), T(0), dfilter_data, &context_);
 
-  if (X.numel() == 0) {
+  if (X.numel() == 0 && dbias_data != nullptr) {
     VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
     math::Set<T, Context>(C, T(0), dbias_data, &context_);
     return true;
@@ -523,7 +523,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   }
   math::Set<T, Context>(filter.numel(), T(0), dfilter_data, &context_);
 
-  if (X.numel() == 0) {
+  if (X.numel()  && dbias_data != nullptr) {
     VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
     math::Set<T, Context>(C, T(0), dbias_data, &context_);
     return true;
