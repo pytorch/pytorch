@@ -4,12 +4,23 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
 set(pytorch_android_DIR ${CMAKE_CURRENT_LIST_DIR}/src/main/cpp)
-set(libtorch_include_DIR ${pytorch_android_DIR}/libtorch_include/${ANDROID_ABI})
 
-set(libtorch_SO ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libtorch.so)
-set(libc10_SO ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libc10.so)
+if (ANDROID_ABI)
+  set(libtorch_include_DIR ${pytorch_android_DIR}/libtorch_include/${ANDROID_ABI})
 
-message(STATUS "libtorch dir:${libtorch_DIR}")
+  set(libtorch_SO ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libtorch.so)
+  set(libc10_SO ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libc10.so)
+else()
+  if (NOT LIBTORCH_ROOT)
+    message(FATAL_ERROR
+      "PyTorch requires LIBTORCH_ROOT to be defined for non-Android builds.")
+  endif()
+
+  set(libtorch_include_DIR ${LIBTORCH_ROOT}/include)
+
+  set(libtorch_SO ${LIBTORCH_ROOT}/lib/libtorch.so)
+  set(libc10_SO ${LIBTORCH_ROOT}/lib/libc10.so)
+endif()
 
 add_library(libtorch SHARED IMPORTED)
 set_property(TARGET libtorch PROPERTY IMPORTED_LOCATION ${libtorch_SO})
@@ -32,6 +43,17 @@ target_compile_options(pytorch PRIVATE
 target_include_directories(pytorch PUBLIC
     ${libtorch_include_DIR}
 )
+
+if (NOT ANDROID_ABI)
+  if (NOT JAVA_HOME)
+    message(FATAL_ERROR
+      "PyTorch requires JAVA_HOME to be defined for non-Android builds.")
+  endif()
+  target_include_directories(pytorch PUBLIC ${JAVA_HOME}/include)
+  if (CMAKE_SYSTEM_NAME STREQUAL Linux)
+    target_include_directories(pytorch PUBLIC ${JAVA_HOME}/include/linux)
+  endif()
+endif()
 
 set(BUILD_DIR ${CMAKE_SOURCE_DIR}/build)
 file(MAKE_DIRECTORY ${BUILD_DIR})
