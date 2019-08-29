@@ -224,6 +224,12 @@ if (USE_DISTRIBUTED)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/comm.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp
+
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/RpcAgent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/ProcessGroupAgent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/functions.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
         )
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)

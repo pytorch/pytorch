@@ -14,7 +14,7 @@ from typing import List, Optional
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
-DOCKER_IMAGE_VERSION = 323
+DOCKER_IMAGE_VERSION = 327
 
 
 @dataclass
@@ -222,7 +222,7 @@ def instantiate_configs():
             if compiler_name == "clang":
                 parms_list.append("asan")
 
-        if cuda_version in ["9.2", "10"]:
+        if cuda_version in ["9.2", "10", "10.1"]:
             # TODO The gcc version is orthogonal to CUDA version?
             parms_list.append("gcc7")
 

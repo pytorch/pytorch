@@ -252,6 +252,14 @@ struct ParserImpl {
       if (shared.isRightAssociative(kind))
         binary_prec--;
 
+      if (kind == TK_NOTIN) {
+        // NB: `not in` is just `not( in )`, so we don't introduce new tree view
+        // but just make it a nested call in our tree view structure
+        prefix = create_compound(TK_IN, pos, {prefix, parseExp(binary_prec)});
+        prefix = create_compound(TK_NOT, pos, {prefix});
+        continue;
+      }
+
       // special case for trinary operator
       if (kind == TK_IF) {
         prefix = parseTrinary(prefix, pos, binary_prec);

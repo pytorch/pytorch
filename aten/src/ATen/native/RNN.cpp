@@ -129,11 +129,11 @@ struct QuantizedCellParams {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
   Tensor linear_ih(Tensor input) const {
-    return at::fbgemm_linear_int8_weight(
+    return at::fbgemm_linear_int8_weight_fp32_activation(
         input, w_ih, packed_ih, col_offsets_ih, scale_ih, zero_point_ih, b_ih);
   }
   Tensor linear_hh(Tensor h) const {
-    return at::fbgemm_linear_int8_weight(
+    return at::fbgemm_linear_int8_weight_fp32_activation(
         h, w_hh, packed_hh, col_offsets_hh, scale_hh, zero_point_hh, b_hh);
   }
 };

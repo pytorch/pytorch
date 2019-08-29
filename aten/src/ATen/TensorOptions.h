@@ -1,2 +1,2 @@
 #pragma once
-#include <c10/core/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>

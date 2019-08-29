@@ -54,6 +54,7 @@
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
 #include <torch/csrc/distributed/c10d/c10d.h>
+#include <torch/csrc/distributed/rpc/rpc.h>
 #endif
 #endif
 
@@ -625,6 +626,7 @@ PyObject* initModule() {
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
+  THPUtils_addPyMethodDefs(methods, torch::distributed::rpc::python_functions());
 #endif
 #endif
 

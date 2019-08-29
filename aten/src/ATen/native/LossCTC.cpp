@@ -385,8 +385,8 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef inpu
 
 // Convenience function accepting Tensors
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
-  TORCH_CHECK(isIntegralType(input_lengths.scalar_type()), "input_lenghts must be integral");
-  TORCH_CHECK(isIntegralType(target_lengths.scalar_type()), "target_lenghts must be integral");
+  TORCH_CHECK(isIntegralType(input_lengths.scalar_type(), /*includeBool=*/false), "input_lenghts must be integral");
+  TORCH_CHECK(isIntegralType(target_lengths.scalar_type(), /*includeBool=*/false), "target_lengths must be integral");
 
   Tensor ilc = input_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
   Tensor tlc = target_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();

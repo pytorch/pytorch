@@ -18,7 +18,7 @@ TEST(TestQTensor, QuantDequantAPIs) {
   Tensor r = at::ones({num_elements});
   const double scale = 1.0;
   const int64_t zero_point = 2;
-  Tensor qr = at::quantize_linear(r, scale, zero_point, kQUInt8);
+  const Tensor qr = at::quantize_linear(r, scale, zero_point, kQUInt8);
   ASSERT_EQ(qr.q_scale(), scale);
   ASSERT_EQ(qr.q_zero_point(), zero_point);
   ASSERT_TRUE(qr.is_quantized());
@@ -36,7 +36,8 @@ TEST(TestQTensor, QuantDequantAPIs) {
   auto qr_data = qr.data<quint8>();
   for (auto i = 0; i < num_elements; ++i) {
     ASSERT_EQ(
-        quantize_val<quint8>(scale, zero_point, r_data[i]).val_, qr_data[i].val_);
+      quantize_val<quint8>(scale, zero_point, r_data[i]).val_,
+      qr_data[i].val_);
   }
 
   // Check for correct dequantization
@@ -44,6 +45,24 @@ TEST(TestQTensor, QuantDequantAPIs) {
   auto rqr_data = rqr.data<float>();
   for (auto i = 0; i < num_elements; ++i) {
     ASSERT_EQ(r_data[i], rqr_data[i]);
+  }
+  for (auto i = 0; i < num_elements; ++i) {
+    ASSERT_EQ(r_data[i],
+              dequantize_val(qr.q_scale(), qr.q_zero_point(), qr_data[i]));
+  }
+
+  // Check for correct requantization
+  double new_scale = 2.0;
+  int64_t new_zero_point = 1;
+  Tensor reqr = at::quantize_linear(r, new_scale, new_zero_point, kQInt8);
+  auto reqr_data = reqr.data<qint8>();
+  for (auto i = 0; i < num_elements; ++i) {
+    reqr_data[i].val_ = requantize_val<quint8, qint8>(scale, zero_point,
+                                                      new_scale, new_zero_point,
+                                                      qr_data[i]).val_;
+    const qint8 expected = quantize_val<qint8>(new_scale, new_zero_point,
+                                               rqr_data[i]);
+    ASSERT_EQ(expected.val_, reqr_data[i].val_);
   }
 }
 
@@ -63,7 +82,7 @@ TEST(TestQTensor, RoundingMode) {
   Tensor qx = at::quantize_linear(x, /*scale=*/1.0, zero_point, kQUInt8);
 
   auto qx_data = qx.data<quint8>();
-  for (int idx = 0; idx < x_values.size(); ++idx) {
+  for (size_t idx = 0; idx < x_values.size(); ++idx) {
     ASSERT_EQ(qx_expect[idx], qx_data[idx].val_)
       << "Tie breaking during rounding element " << idx << " failed!";
   }
@@ -82,7 +101,9 @@ TEST(TestQTensor, EmptyQuantized) {
   int zero_point = 10;
   int val = 100;
   int numel = 10;
-  Tensor q = at::_empty_affine_quantized({numel}, at::device(at::kCPU).dtype(kQUInt8), scale, zero_point);
+  Tensor q = at::_empty_affine_quantized({numel},
+                                         at::device(at::kCPU).dtype(kQUInt8),
+                                         scale, zero_point);
   // Assigning to QTensor
   auto* q_data = q.data<quint8>();
   for (int i = 0; i < numel; ++i) {

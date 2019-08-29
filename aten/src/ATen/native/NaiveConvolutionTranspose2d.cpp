@@ -10,7 +10,7 @@ namespace at {
 namespace native {
 namespace {
 
-static inline void conv_transpose2d_shape_check(
+static inline void slow_conv_transpose2d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
@@ -129,7 +129,7 @@ static inline void conv_transpose2d_shape_check(
   }
 }
 
-void conv_transpose2d_out_cpu_template(
+void slow_conv_transpose2d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
     const Tensor& weight_,
@@ -180,7 +180,7 @@ void conv_transpose2d_out_cpu_template(
   int64_t output_padding_height = output_padding[0];
   int64_t output_padding_width = output_padding[1];
 
-  conv_transpose2d_shape_check(
+  slow_conv_transpose2d_shape_check(
       input_,
       Tensor(),
       weight_,
@@ -248,7 +248,7 @@ void conv_transpose2d_out_cpu_template(
   }
 
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
-      input.scalar_type(), "conv_transpose2d_out_cpu", [&] {
+      input.scalar_type(), "slow_conv_transpose2d_out_cpu", [&] {
         // For each elt in batch, do:
         for (int elt = 0; elt < batch_size; elt++) {
           // Helpers
@@ -335,7 +335,7 @@ void conv_transpose2d_out_cpu_template(
       });
 }
 
-static void conv_transpose2d_backward_out_cpu_template(
+static void slow_conv_transpose2d_backward_out_cpu_template(
     const Tensor& input_,
     const Tensor& grad_output_,
     Tensor& grad_input,
@@ -387,7 +387,7 @@ static void conv_transpose2d_backward_out_cpu_template(
 
   Tensor grad_columns = grad_columns_;
 
-  conv_transpose2d_shape_check(
+  slow_conv_transpose2d_shape_check(
       input_,
       grad_output_,
       weight_,
@@ -439,7 +439,7 @@ static void conv_transpose2d_backward_out_cpu_template(
                         input_height * input_width});
 
   AT_DISPATCH_FLOATING_TYPES(
-      grad_output.scalar_type(), "conv_transpose2d_backward_out_cpu", [&] {
+      grad_output.scalar_type(), "slow_conv_transpose2d_backward_out_cpu", [&] {
         // Helpers
         Tensor grad_input_n = Tensor();
         Tensor grad_output_n = Tensor();
@@ -501,7 +501,7 @@ static void conv_transpose2d_backward_out_cpu_template(
       });
 }
 
-void conv_transpose2d_acc_grad_parameters_cpu(
+void slow_conv_transpose2d_acc_grad_parameters_cpu(
     const Tensor& input_,
     const Tensor& grad_output_,
     Tensor& grad_weight,
@@ -553,7 +553,7 @@ void conv_transpose2d_acc_grad_parameters_cpu(
   Tensor columns = columns_;
   Tensor ones = ones_;
 
-  conv_transpose2d_shape_check(
+  slow_conv_transpose2d_shape_check(
       input_,
       grad_output_,
       grad_weight,
@@ -624,7 +624,7 @@ void conv_transpose2d_acc_grad_parameters_cpu(
                    input_height * input_width});
 
   AT_DISPATCH_FLOATING_TYPES(
-      input.scalar_type(), "conv_transpose2d_acc_grad_parameters_cpu", [&] {
+      input.scalar_type(), "slow_conv_transpose2d_acc_grad_parameters_cpu", [&] {
         // Helpers
         Tensor input_n = Tensor();
         Tensor grad_output_n = Tensor();
@@ -717,7 +717,7 @@ void conv_transpose2d_acc_grad_parameters_cpu(
 
 } // namespace
 
-Tensor& conv_transpose2d_out_cpu(
+Tensor& slow_conv_transpose2d_out_cpu(
     Tensor& output,
     const Tensor& input,
     const Tensor& weight,
@@ -730,7 +730,7 @@ Tensor& conv_transpose2d_out_cpu(
   Tensor columns = at::empty_like(input);
   Tensor ones = at::empty_like(input);
 
-  conv_transpose2d_out_cpu_template(
+  slow_conv_transpose2d_out_cpu_template(
       output,
       input,
       weight,
@@ -746,7 +746,7 @@ Tensor& conv_transpose2d_out_cpu(
   return output;
 }
 
-Tensor conv_transpose2d_cpu(
+Tensor slow_conv_transpose2d_cpu(
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -759,7 +759,7 @@ Tensor conv_transpose2d_cpu(
   Tensor columns = at::empty_like(input);
   Tensor ones = at::empty_like(input);
 
-  conv_transpose2d_out_cpu_template(
+  slow_conv_transpose2d_out_cpu_template(
       output,
       input,
       weight,
@@ -775,7 +775,7 @@ Tensor conv_transpose2d_cpu(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> conv_transpose2d_backward_out_cpu(
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(
     Tensor& grad_input,
     Tensor& grad_weight,
     Tensor& grad_bias,
@@ -790,7 +790,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv_transpose2d_backward_out_cpu(
     const Tensor& columns,
     const Tensor& ones) {
   if (grad_input.defined()) {
-    conv_transpose2d_backward_out_cpu_template(
+    slow_conv_transpose2d_backward_out_cpu_template(
         input,
         grad_output,
         grad_input,
@@ -814,7 +814,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv_transpose2d_backward_out_cpu(
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {
-    conv_transpose2d_acc_grad_parameters_cpu(
+    slow_conv_transpose2d_acc_grad_parameters_cpu(
         input,
         grad_output,
         grad_weight,
@@ -833,7 +833,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv_transpose2d_backward_out_cpu(
       grad_input, grad_weight, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor> conv_transpose2d_backward_cpu(
+std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -868,7 +868,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_transpose2d_backward_cpu(
   }
 
   if (grad_input.defined()) {
-    conv_transpose2d_backward_out_cpu_template(
+    slow_conv_transpose2d_backward_out_cpu_template(
         input,
         grad_output,
         grad_input,
@@ -892,7 +892,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_transpose2d_backward_cpu(
   }
 
   if (grad_weight.defined() || grad_bias.defined()) {
-    conv_transpose2d_acc_grad_parameters_cpu(
+    slow_conv_transpose2d_acc_grad_parameters_cpu(
         input,
         grad_output,
         grad_weight,

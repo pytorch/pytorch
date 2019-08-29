@@ -1,10 +1,13 @@
 #include <ATen/core/Dict.h>
+#include <ATen/ATen.h>
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <string>
 
 using std::string;
 using c10::Dict;
+
+#define ASSERT_EQUAL(t1, t2) ASSERT_TRUE(t1.equal(t2));
 
 TEST(DictTest, givenEmptyDict_whenCallingEmpty_thenReturnsTrue) {
     Dict<int64_t, string> dict;
@@ -473,4 +476,23 @@ TEST(DictTest, copyHasSeparateStorage) {
   EXPECT_EQ(1, dict1.size());
   EXPECT_EQ(0, dict2.size());
   EXPECT_EQ(0, dict3.size());
+}
+
+TEST(DictTest, dictTensorAsKey) {
+  Dict<at::Tensor, string> dict;
+  at::Tensor key1 = at::tensor(3);
+  at::Tensor key2 = at::tensor(4);
+  dict.insert(key1, "three");
+  dict.insert(key2, "four");
+
+  EXPECT_EQ(2, dict.size());
+
+  Dict<at::Tensor, string>::iterator found_key1 = dict.find(key1);
+  ASSERT_EQUAL(key1, found_key1->key());
+  EXPECT_EQ("three", found_key1->value());
+
+  Dict<at::Tensor, string>::iterator found_nokey1 = dict.find(at::tensor(3));
+  Dict<at::Tensor, string>::iterator found_nokey2 = dict.find(at::tensor(5));
+  EXPECT_EQ(dict.end(), found_nokey1);
+  EXPECT_EQ(dict.end(), found_nokey2);
 }

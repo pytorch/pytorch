@@ -904,10 +904,12 @@ bool Node::hasSideEffects() const {
         " doesn't have one either. We don't know if this op has side effects.");
     return false;
   }
+
   if (kind_.is_prim() || kind_.is_aten()) {
-    // TODO This assert is only introduced to check that we don't break the
-    // current code base. Remove this later to allow other ops to use
-    // AliasAnalysisKind::FROM_SCHEMA
+    // TODO There is nothing in the system that relies on aten:: and prim::
+    // ops using AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::INTERNAL_SPECIAL_CASE,
+    // but this is the intended behavior for all current ops and a good error check.
+    // We can consider lifting this constraint later if we have a use case for it.
     TORCH_INTERNAL_ASSERT(
         op->aliasAnalysisKind() == AliasAnalysisKind::INTERNAL_SPECIAL_CASE ||
             op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA,
@@ -916,6 +918,7 @@ bool Node::hasSideEffects() const {
         " has ",
         toString(op->aliasAnalysisKind()));
   }
+
   switch (op->aliasAnalysisKind()) {
     case AliasAnalysisKind::PURE:
       return false;

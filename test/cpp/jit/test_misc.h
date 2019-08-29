@@ -383,6 +383,7 @@ void testCustomFusion() {
   auto hits = 0;
   // two multiplications
   for (const auto& n : subgraph->nodes()) {
+    (void)n;
     hits++;
   }
   AT_ASSERT(hits == 2);
@@ -397,7 +398,7 @@ void testCustomFusionNestedBlocks() {
   auto a = SymbolicVariable::asNewInput(*g, type);
   auto b = SymbolicVariable::asNewInput(*g, type);
   auto c = SymbolicVariable::asNewInput(*g, type);
- 
+
   auto r =
       g->appendNode(g->create(prim::If, {c.value()}));
   auto then_block = r->addBlock();
@@ -420,11 +421,11 @@ void testCustomFusionNestedBlocks() {
       g,
       [](Node* n) { return n->kind() == aten::mul; },
       Symbol::fromQualString("prim::FusionGroup"));
-  
+
   // Could be done in more efficient ways, but this is only a test.
   std::function<bool(const Block*, Symbol)> dfs = [&](const Block* b, Symbol s) {
       for (auto node : b->nodes()) {
-          if (node->kind() == s) 
+          if (node->kind() == s)
               return true;
           for (auto nested_b : node->blocks())
               if (dfs(nested_b, s))

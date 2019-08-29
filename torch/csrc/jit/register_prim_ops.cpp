@@ -86,7 +86,7 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
     throw std::runtime_error(
         "Cannot input a tensor of dimension other than 0 as a scalar argument");
   }
-  if (toInt && !isIntegralType(t.scalar_type())) {
+  if (toInt && !isIntegralType(t.scalar_type(), /*includeBool=*/false)) {
     std::stringstream ss;
     ss << "Cannot input a tensor of type " << t.scalar_type()
        << " as an integral argument";
@@ -568,6 +568,19 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::grad(Tensor a) -> Tensor(*)",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.grad());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::data(Tensor(b) a) -> Tensor(b)",
+         noop,
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_cuda(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
@@ -577,11 +590,29 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::is_sparse(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_sparse());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_mkldnn(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_mkldnn());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::is_quantized(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_quantized());
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -2788,6 +2819,7 @@ RegisterOperators reg2({
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("float"),
+    CREATE_DICT_OPS("Tensor"),
 #undef CREATE_DICT_OPS
 
     Operator(

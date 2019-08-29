@@ -195,6 +195,18 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
 
+    def test_arithmetic(self):
+        class ArithmeticModule(torch.nn.Module):
+            def forward(self, x):
+                x = x + 2
+                x = x - 4
+                x = x * 6
+                x = x / 8
+                return x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(ArithmeticModule(), x)
+
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -326,6 +338,33 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.nn.functional.interpolate(x, mode="nearest", scale_factor=[1, 1, 0.5, 0.5])
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_test(MyModel(), x)
+
+    def test_std(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
+    def test_std_along_dims(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
+    def test_std_keepdim(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), unbiased=False, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
 
     @skipIfUnsupportedOpsetVersion([7, 8])
     def test_interpolate_upsample_dynamic_sizes(self):
@@ -688,6 +727,22 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_test(MaskedFillModel2(), x)
+
+    def test_frobenius_norm(self):
+        class NormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.norm(x, p="fro", dim=0, keepdim=False)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(NormModel(), x)
+
+    def test_frobenius_norm_keepdim(self):
+        class NormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.norm(x, p="fro", dim=(0, 1), keepdim=True)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(NormModel(), x)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':

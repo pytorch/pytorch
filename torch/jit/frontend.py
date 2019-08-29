@@ -413,6 +413,7 @@ class ExprBuilder(Builder):
         ast.Is: 'is',
         ast.IsNot: 'is not',
         ast.In: 'in',
+        ast.NotIn: 'not in',
     }
 
     @staticmethod
@@ -533,10 +534,18 @@ class ExprBuilder(Builder):
         for lhs, op_, rhs in zip(operands, expr.ops, operands[1:]):
             op = type(op_)
             op_token = ExprBuilder.cmpop_map.get(op)
+            r = ctx.make_raw_range(lhs.range().end, rhs.range().start)
             if op_token is None:
-                err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
-                raise NotSupportedError(err_range, "unsupported comparison operator: " + op.__name__)
-            cmp_expr = BinOp(op_token, lhs, rhs)
+                raise NotSupportedError(r, "unsupported comparison operator: " + op.__name__)
+
+            if op == ast.NotIn:
+                # NB: `not in` is just `not( in )`, so we don't introduce new tree view
+                # but just make it a nested call in our tree view structure
+                in_expr = BinOp('in', lhs, rhs)
+                cmp_expr = UnaryOp(r, 'not', in_expr)
+            else:
+                cmp_expr = BinOp(op_token, lhs, rhs)
+
             if result is None:
                 result = cmp_expr
             else:

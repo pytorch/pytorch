@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/SmallVector.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/SmallVector.h>
 #include <cmath>
 
 namespace at {
@@ -191,8 +191,10 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       int64_t /* groups */,
       double /* output scale */,
       int64_t /* output_zero_point */) {
-    TORCH_CHECK(false, "This PyTorch installation was not built "
-                       "with FBGEMM operators");
+    TORCH_CHECK(
+        false,
+        "This PyTorch installation was not built "
+        "with FBGEMM operators");
   }
 #endif // USE_FBGEMM
 };

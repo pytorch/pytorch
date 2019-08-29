@@ -66,6 +66,9 @@ Tensor& neg_(Tensor& self) {
 }
 
 Tensor& neg_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(self.scalar_type() != kBool,
+              "Negation, the `-` operator, on a bool tensor is not supported. "
+              "If you are trying to invert a mask, use the `~` or `bitwise_not()` operator instead.");
   auto iter = TensorIterator::unary_op(result, self,
     /*check_internal_overlap=*/true);
   neg_stub(iter.device_type(), iter);

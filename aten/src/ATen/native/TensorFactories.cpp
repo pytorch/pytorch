@@ -13,7 +13,7 @@
 #include <c10/util/Deprecated.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorFactories.h>
-#include <c10/core/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 #include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
@@ -806,7 +806,7 @@ Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
       return tensor_cpu(values, options);                           \
     }                                                               \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+AT_FORALL_SCALAR_TYPES_AND_BOOL(TENSOR)
 #undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {

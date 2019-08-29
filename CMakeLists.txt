@@ -10,6 +10,12 @@ cmake_policy(SET CMP0025 NEW)
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
+if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+  set(LINUX TRUE)
+else()
+  set(LINUX FALSE)
+endif()
+
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
 set(CMAKE_CXX_STANDARD 11)
@@ -121,7 +127,9 @@ cmake_dependent_option(
     "USE_NCCL" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
-option(USE_NUMA "Use NUMA (only available on Linux)" ON)
+cmake_dependent_option(
+    USE_NUMA "Use NUMA. Only available on Linux." ON
+    "LINUX" OFF)
 cmake_dependent_option(
     USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on." OFF
     "USE_CUDA" OFF)

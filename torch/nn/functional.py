@@ -340,7 +340,8 @@ def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
         raise ValueError("fractional_max_pool2d requires specifying either "
                          "an output_size or an output_ratio")
     if output_size is None:
-        _output_ratio = _pair(torch.jit._unwrap_optional(output_ratio))
+        assert output_ratio is not None
+        _output_ratio = _pair(output_ratio)
         output_size = [int(input.size(2) * _output_ratio[0]),
                        int(input.size(3) * _output_ratio[1])]
 
@@ -405,7 +406,8 @@ def fractional_max_pool3d_with_indices(input, kernel_size, output_size=None,
         raise ValueError("fractional_max_pool3d requires specifying either "
                          "an output_size or an output_ratio")
     if output_size is None:
-        _output_ratio = _triple(torch.jit._unwrap_optional(output_ratio))
+        assert output_ratio is not None
+        _output_ratio = _triple(output_ratio)
         output_size = [int(input.size(2) * _output_ratio[0]),
                        int(input.size(3) * _output_ratio[1]),
                        int(input.size(4) * _output_ratio[2])]
@@ -1570,7 +1572,6 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     elif input.dim() == 1:
         if offsets is None:
             raise ValueError("offsets has to be a 1D Tensor but got None")
-        offsets = torch.jit._unwrap_optional(offsets)
         if offsets.dim() != 1:
             raise ValueError("offsets has to be a 1D Tensor")
         if int(offsets[0]) != 0:
@@ -1584,7 +1585,6 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     else:
         raise ValueError("input has to be 1D or 2D Tensor,"
                          " but got Tensor of dimension {}".format(input.dim()))
-    offsets = torch.jit._unwrap_optional(offsets)  # TODO remove when exception control flow logic
     if mode == 'sum':
         mode_enum = 0
     elif mode == 'mean':
@@ -1599,7 +1599,6 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
             raise ValueError("max mode does not support sparse weights")
 
     else:
-        mode_enum = -1  # TODO when exception control flow logic
         raise ValueError("mode has to be one of sum, mean or max")
 
     if max_norm is not None:
@@ -2733,50 +2732,43 @@ def pad(input, pad, mode='constant', value=0):
     assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
     assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
-        ret = _VF.constant_pad_nd(input, pad, value)
+        return _VF.constant_pad_nd(input, pad, value)
     else:
         assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
         if input.dim() == 3:
             assert len(pad) == 2, '3D tensors expect 2 values for padding'
             if mode == 'reflect':
-                ret = torch._C._nn.reflection_pad1d(input, pad)
+                return torch._C._nn.reflection_pad1d(input, pad)
             elif mode == 'replicate':
-                ret = torch._C._nn.replication_pad1d(input, pad)
+                return torch._C._nn.replication_pad1d(input, pad)
             elif mode == 'circular':
-                ret = _pad_circular(input, pad)
+                return _pad_circular(input, pad)
             else:
-                ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
 
         elif input.dim() == 4:
             assert len(pad) == 4, '4D tensors expect 4 values for padding'
             if mode == 'reflect':
-                ret = torch._C._nn.reflection_pad2d(input, pad)
+                return torch._C._nn.reflection_pad2d(input, pad)
             elif mode == 'replicate':
-                ret = torch._C._nn.replication_pad2d(input, pad)
+                return torch._C._nn.replication_pad2d(input, pad)
             elif mode == 'circular':
-                ret = _pad_circular(input, pad)
+                return _pad_circular(input, pad)
             else:
-                ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
 
         elif input.dim() == 5:
             assert len(pad) == 6, '5D tensors expect 6 values for padding'
             if mode == 'reflect':
-                ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
             elif mode == 'replicate':
-                ret = torch._C._nn.replication_pad3d(input, pad)
+                return torch._C._nn.replication_pad3d(input, pad)
             elif mode == 'circular':
-                ret = _pad_circular(input, pad)
+                return _pad_circular(input, pad)
             else:
-                ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
         else:
-            ret = input  # TODO: remove this when jit raise supports control flow
             raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
-
-    return ret
 
 # distance
 
@@ -2924,11 +2916,10 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
     """
     if out is None:
         denom = input.norm(p, dim, True).clamp_min(eps).expand_as(input)
-        ret = input / denom
+        return input / denom
     else:
         denom = input.norm(p, dim, True).clamp_min(eps).expand_as(input)
-        ret = torch.div(input, denom, out=out)
-    return ret
+        return torch.div(input, denom, out=out)
 
 
 def assert_int_or_pair(arg, arg_name, message):
@@ -2961,12 +2952,10 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        ret = torch._C._nn.im2col(input, _pair(kernel_size),
-                                  _pair(dilation), _pair(padding), _pair(stride))
+        return torch._C._nn.im2col(input, _pair(kernel_size),
+                                   _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
-        ret = input  # TODO: remove when jit supports exception control flow
-    return ret
 
 
 def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
@@ -2988,12 +2977,10 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        ret = torch._C._nn.col2im(input, _pair(output_size), _pair(kernel_size),
-                                  _pair(dilation), _pair(padding), _pair(stride))
+        return torch._C._nn.col2im(input, _pair(output_size), _pair(kernel_size),
+                                   _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
-        ret = input  # TODO: remove when jit supports exception control flow
-    return ret
 
 
 def _pad_circular(input, padding):

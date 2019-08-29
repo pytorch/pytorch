@@ -95,6 +95,40 @@ bool TensorImpl::compute_contiguous() const {
   return is_contiguous;
 }
 
+bool TensorImpl::compute_channels_last_contiguous() const {
+  if (dim() == 4) {
+    int64_t expected = 1;
+    for (auto& d : {1, 3, 2, 0}) {
+      if (size(d) != 1) {
+        if (stride(d) == expected) {
+          expected *= size(d);
+        } else {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+bool TensorImpl::compute_strides_like_channels_last() const {
+  if (dim() == 4) {
+    int64_t min = 0;
+    for (auto& d : {1, 3, 2, 0}) {
+      if (size(d) != 1) {
+        if (stride(d) > min) {
+          min = stride(d);
+        } else {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
 void TensorImpl::release_resources() {
   autograd_meta_.reset();
   if (storage_) {
@@ -133,17 +167,7 @@ bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
   AT_ASSERT(compute_contiguous() == is_contiguous_);
 #endif
   if (memory_format == at::MemoryFormat::ChannelsLast) {
-    if (dim() == 4) {
-      auto strides_1 = 1;
-      auto strides_3 = sizes_[1];
-      auto strides_2 = strides_3 * sizes_[3];
-      auto strides_0 = strides_2 * sizes_[2];
-      if (strides_0 == strides_[0] && strides_1 == strides_[1] &&
-          strides_2 == strides_[2] && strides_3 == strides_[3]) {
-        return true;
-      }
-    }
-    return false;
+      return is_channels_last_contiguous_;
   }
   return is_contiguous_;
 }

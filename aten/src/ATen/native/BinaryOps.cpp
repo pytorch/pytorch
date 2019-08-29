@@ -13,6 +13,7 @@ DEFINE_DISPATCH(add_stub);
 DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
+DEFINE_DISPATCH(atan2_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
@@ -149,6 +150,21 @@ Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor rsub(const Tensor& self, const Tensor& other, Scalar alpha) {
   return native::sub(other, self, alpha);
+}
+
+Tensor& atan2_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  atan2_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor atan2(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty_like(self);
+  return native::atan2_out(result, self, other);
+}
+
+Tensor& atan2_(Tensor& self, const Tensor& other) {
+  return native::atan2_out(self, self, other);
 }
 
 // These are still needed because we don't have C++ conversions from number

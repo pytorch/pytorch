@@ -403,13 +403,23 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   std::vector<int64_t> padded_size(num_new_dimensions, 1);
   padded_size.insert(padded_size.end(), self.sizes().begin(), self.sizes().end());
   std::vector<int64_t> target_size(repeats.size());
+  bool zero_tensor = false;
   for(size_t idx = 0; idx < repeats.size(); ++idx) {
+    if (repeats[idx] == 0) {
+      zero_tensor = true;
+    }
     target_size[idx] = padded_size[idx] * repeats[idx];
   }
 
   Tensor xtensor = self.expand(padded_size);
 
   Tensor result = at::empty(target_size, self.options());
+
+  // return an empty tensor if one of the repeat dimensions is zero
+  if (zero_tensor) {
+    return result;
+  }
+
   Tensor urtensor = at::alias(result);
   for (int64_t i = 0; i < xtensor.dim(); ++i) {
     // can't unfold with step 0, so make sure step is at least 1

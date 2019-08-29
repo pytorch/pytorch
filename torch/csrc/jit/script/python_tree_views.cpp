@@ -144,11 +144,13 @@ void initTreeViewBindings(PyObject* module) {
   py::class_<Stmt, TreeView>(m, "Stmt") // NOLINT(bugprone-unused-raii)
       .def(py::init([](const TreeView& thing) { return Stmt(thing.get()); }));
   py::class_<Expr, TreeView>(m, "Expr"); // NOLINT(bugprone-unused-raii)
-  py::class_<Def, TreeView>(m, "Def").def(
-      py::init([](const Ident& name, Decl decl, std::vector<Stmt> body) {
-        const auto& r = name.range();
-        return Def::create(r, name, decl, wrap_list(r, std::move(body)));
-      }));
+  py::class_<Def, TreeView>(m, "Def")
+      .def(py::init(
+          [](const Ident& name, const Decl& decl, std::vector<Stmt> body) {
+            const auto& r = name.range();
+            return Def::create(r, name, decl, wrap_list(r, std::move(body)));
+          }))
+      .def("decl", [](const Def& def) { return def.decl(); });
   py::class_<ClassDef, TreeView>(m, "ClassDef")
       .def(py::init([](const Ident& name, std::vector<Stmt> body) {
         const auto& r = name.range();

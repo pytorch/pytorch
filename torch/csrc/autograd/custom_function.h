@@ -15,15 +15,20 @@ TORCH_API variable_list _wrap_outputs(
   const at::ArrayRef<Variable> raw_outputs,
   const std::shared_ptr<Node> &cdata);
 
+
+// Get the return type of the forward function of the custom Function class X
+template<typename X, typename... Args>
+using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
 // To use custom autograd operations implement a Function subclass with
 // static backward and forward functions
 //
-// forward() can take as many arguments as you want and should return a
-// variable list. Use of any direct Variable arguments will be registered in
-// the graph but no vectors/sets or any other data structures will be traversed.
-// It should take an AutogradContext* as the first argument. Variables can be
-// saved in the ctx using save_for_backward() and other data can be saved in the
-// map ctx.save in the form of <std::string, at::IValue> pairs.
+// forward() can take as many arguments as you want and should return either a
+// variable list or a Variable. Use of any direct Variable arguments will be
+// registered in the graph but no vectors/sets or any other data structures will
+// be traversed. It should take an AutogradContext* as the first argument.
+// Variables can be saved in the ctx using save_for_backward() and other data
+// can be saved in the map ctx.save in the form of <std::string, at::IValue>
+// pairs.
 //
 // backward() should take an AutogradContext* and a variable list containing as
 // many Variables as there were outputs from forward as arguments. It should
@@ -58,8 +63,13 @@ TORCH_API variable_list _wrap_outputs(
 // y[0].sum().backward();
 template <class T>
 struct TORCH_API Function {
-  template<typename... Args>
-  static variable_list apply(Args&&... args);
+  // We need to use a different template parameter than T here because T will
+  // inherit from Function, and when Function<T> is instantiated, T::forward
+  // is not declared yet.
+  // The enable_if check is to ensure that the user doesn't explicitly provide
+  // the parameter X.
+  template<typename X=T, typename... Args>
+  static auto apply(Args&&... args) -> c10::guts::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>>;
 };
 
 // Context to save information during forward that can be accessed in backward
@@ -159,9 +169,15 @@ template <typename... Args>
 void extract_vars(std::vector<bool> &is_var, variable_list& list, Args&& ... args) {
 }
 
+template <typename T>
+typename std::enable_if<std::is_same<T, variable_list>::value, T&>::type to_output_type(variable_list& output_list) { return output_list; }
+
+template <typename T>
+typename std::enable_if<std::is_same<T, Variable>::value, T>::type to_output_type(variable_list& output_list) { return output_list[0]; }
+
 template<class T>
-template<typename... Args>
-variable_list Function<T>::apply(Args&&... args) {
+template<typename X, typename... Args>
+auto Function<T>::apply(Args&&... args) -> c10::guts::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>> {
   std::shared_ptr<CppNode<T>> node(new CppNode<T>(), deleteNode);
   variable_list input_vars;
 
@@ -182,7 +198,8 @@ variable_list Function<T>::apply(Args&&... args) {
       node->input_info_.emplace_back(var);
   }
 
-  variable_list outputs;
+  using forward_return_t = forward_t<X, Args...>;
+  forward_return_t outputs;
   {
     AutoGradMode grad_mode(false);
     outputs = T::forward(&node->ctx_, std::forward<Args>(args)...);
@@ -201,7 +218,9 @@ variable_list Function<T>::apply(Args&&... args) {
     node->save_variables_to_ctx();
   }
 
-  return wrapped_outputs;
+  // wrapped_outputs will be a variable_list so, convert it to the correct
+  // return type. Only Variable and variable_list are accepted as return types.
+ return to_output_type<forward_return_t>(wrapped_outputs);
 }
 
 // The logic here is the same as PyNode::apply, so changes to it should be done

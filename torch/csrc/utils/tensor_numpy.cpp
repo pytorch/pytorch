@@ -1,3 +1,4 @@
+#include <torch/csrc/THP.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/numpy_stub.h>
 

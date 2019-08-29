@@ -42,7 +42,7 @@ jobs:
   - script: pip install flake8
   - script: |
       rm -rf .circleci
-      flake8
+      flake8 1>&2
 
 - job: python_37_lint
   displayName: "Python 3.7 Lint"
@@ -53,7 +53,7 @@ jobs:
     inputs:
       versionSpec: "3.7"
   - script: pip install flake8 flake8-bugbear flake8-mypy flake8-comprehensions flake8-pyi mccabe pycodestyle pyflakes
-  - script: flake8
+  - script: flake8 1>&2
 
 - job: mypy_typecheck
   displayName: "MyPy typecheck"

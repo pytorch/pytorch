@@ -13,14 +13,6 @@ namespace script {
 // Helpers to define modules and classes from source strings. Used in model
 // saving/loading, so it expects the format produced by the model exporter.
 
-// Add the methods defined in `src` to the module `mod`.
-TORCH_API void import_methods(
-    const script::Module& mod,
-    const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& constant_table,
-    // Callback to import any dependencies of this source before compiling
-    const std::function<void(const std::string&)>& import_callback);
-
 // Define the list of classes in `src`.
 TORCH_API void import_libs(
     // The compilation unit that will own the imported libs
@@ -28,6 +20,14 @@ TORCH_API void import_libs(
     // Qualifier for any classes that `src` defines. Looks like a module path,
     // like "foo.bar.baz"
     const std::string& class_qualifier,
+    const std::shared_ptr<Source>& src,
+    const std::vector<at::Tensor>& tensor_table,
+    // Callback to import any dependencies of this source before compiling
+    const std::function<void(const std::string&)>& import_callback);
+
+// Add the methods defined in `src` to the module `mod`.
+TORCH_API void LEGACY_import_methods(
+    const script::Module& mod,
     const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     // Callback to import any dependencies of this source before compiling
@@ -43,7 +43,7 @@ TORCH_API void import_functions(
     // CompilationoUnit to define the functions in.
     std::shared_ptr<CompilationUnit> cu,
     const std::shared_ptr<Source>& src,
-    const std::vector<at::Tensor>& constant_table,
+    const std::vector<at::Tensor>& tensor_table,
     const Self* self = nullptr,
     const std::function<void(const std::string&)>& import_callback = nullptr);
 

@@ -575,28 +575,6 @@ void THTensor_(tpow)(THTensor *r_, scalar_t value, THTensor *t)
   }
 }
 
-void THTensor_(addcdiv)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src1, THTensor *src2)
-{
-  if(r_ != t)
-  {
-    THTensor_(resizeAs)(r_, t);
-    at::Tensor r__wrap = THTensor_wrap(r_);
-    at::Tensor t_wrap = THTensor_wrap(t);
-    at::native::copy_(r__wrap, t_wrap);
-  }
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t src1Size = THTensor_(nElement)(src1);
-  int64_t src2Size = THTensor_(nElement)(src2);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int src1Contig = THTensor_(isContiguous)(src1);
-  int src2Contig = THTensor_(isContiguous)(src2);
-  if( (src1Size == src2Size) && (src1Size == r_Size) ){
-    TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, src1Contig, src2Contig, scalar_t, r_, scalar_t, src1, scalar_t, src2, *r__data += value * *src1_data / *src2_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-  } else {
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, src1, scalar_t, src2, *r__data += value * *src1_data / *src2_data;);
-  }
-}
-
 void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *mat, THTensor *vec)
 {
   if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )

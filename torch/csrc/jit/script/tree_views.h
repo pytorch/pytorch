@@ -398,6 +398,9 @@ struct Def : public TreeView {
     auto new_ident = Ident::create(name().range(), std::move(new_name));
     return create(range(), new_ident, decl(), statements());
   }
+  Def withDecl(Decl decl) const {
+    return create(range(), name(), decl, statements());
+  }
   Ident name() const {
     return Ident(subtree(0));
   }
@@ -658,6 +661,10 @@ struct Raise : public Stmt {
   }
   static Raise create(const SourceRange& range, const Maybe<Expr>& expr) {
     return Raise(Compound::create(TK_RAISE, range, {expr}));
+  }
+  static Raise create(const SourceRange& range) {
+    return Raise(
+        Compound::create(TK_RAISE, range, {Maybe<Expr>::create(range)}));
   }
 };
 

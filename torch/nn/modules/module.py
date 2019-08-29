@@ -69,12 +69,12 @@ class Module(object):
     _version = 1
 
     def __init__(self):
-        self._construct()
+        self.__construct()
         # initialize self.training separately from the rest of the internal
         # state, as it is managed differently by nn.Module and ScriptModule
         self.training = True
 
-    def _construct(self):
+    def __construct(self):
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """

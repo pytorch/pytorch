@@ -3,7 +3,7 @@
 #include <c10/core/Backend.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Layout.h>
-#include <c10/core/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/Generator.h>

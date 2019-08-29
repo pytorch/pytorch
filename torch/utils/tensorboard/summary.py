@@ -460,7 +460,7 @@ def compute_curve(labels, predictions, num_thresholds=None, weights=None):
     return np.stack((tp, fp, tn, fn, precision, recall))
 
 
-def _get_tensor_summary(name, display_name, description, tensor, content_type, json_config):
+def _get_tensor_summary(name, display_name, description, tensor, content_type, components, json_config):
     """Creates a tensor summary with summary metadata.
 
     Args:
@@ -473,6 +473,8 @@ def _get_tensor_summary(name, display_name, description, tensor, content_type, j
         is supported.
       tensor: Tensor to display in summary.
       content_type: Type of content inside the Tensor.
+      components: Bitmask representing present parts (vertices, colors, etc.) that
+        belong to the summary.
       json_config: A string, JSON-serialized dictionary of ThreeJS classes
         configuration.
 
@@ -488,6 +490,7 @@ def _get_tensor_summary(name, display_name, description, tensor, content_type, j
         name,
         display_name,
         content_type,
+        components,
         tensor.shape,
         description,
         json_config=json_config)
@@ -539,6 +542,7 @@ def mesh(tag, vertices, colors, faces, config_dict, display_name=None, descripti
         Merged summary for mesh/point cloud representation.
       """
     from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
+    from tensorboard.plugins.mesh import metadata
 
     json_config = _get_json_config(config_dict)
 
@@ -548,11 +552,13 @@ def mesh(tag, vertices, colors, faces, config_dict, display_name=None, descripti
         (faces, MeshPluginData.FACE),
         (colors, MeshPluginData.COLOR)
     ]
+    tensors = [tensor for tensor in tensors if tensor[0] is not None]
+    components = metadata.get_components_bitmask([
+        content_type for (tensor, content_type) in tensors])
 
     for tensor, content_type in tensors:
-        if tensor is None:
-            continue
         summaries.append(
-            _get_tensor_summary(tag, display_name, description, tensor, content_type, json_config))
+            _get_tensor_summary(tag, display_name, description, tensor,
+                                content_type, components, json_config))
 
     return Summary(value=summaries)

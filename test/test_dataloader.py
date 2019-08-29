@@ -560,7 +560,7 @@ def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
 
     it = iter(loader)
     if use_workers:
-        workers = it.workers
+        workers = it._workers
 
     def kill_pid(pid):
         psutil_p = psutil.Process(pid)
@@ -638,7 +638,7 @@ def _test_get_worker_info():
     data = []
     for d in it:
         data.append(d)
-    worker_pids = [w.pid for w in it.workers]
+    worker_pids = [w.pid for w in it._workers]
     data = torch.cat(data, 0)
     for d in data:
         # each `d` is a [worker_id, worker_pid] pair, which is set in
@@ -735,7 +735,7 @@ class TestDataLoader(TestCase):
 
     def test_invalid_assign_after_init(self):
         dl = DataLoader(self.dataset)
-        for attr in ('batch_size', 'sampler', 'drop_last'):
+        for attr in ('batch_size', 'sampler', 'batch_sampler', 'drop_last', 'dataset'):
             def fn():
                 setattr(dl, attr, {})
 
@@ -919,7 +919,7 @@ class TestDataLoader(TestCase):
             len(dataloader)  # DataLoader with iterable-style dataset should error in __len__
 
         # [no auto-batching] test that workers exit gracefully
-        workers = dataloader_iter.workers
+        workers = dataloader_iter._workers
         del dataloader_iter
         try:
             for w in workers:
@@ -955,7 +955,7 @@ class TestDataLoader(TestCase):
         self.assertEqual(fetched, {tuple(range(4)), tuple(range(7)), tuple(range(7, 14)), tuple(range(14, 20))})
 
         # [auto-batching] test that workers exit gracefully
-        workers = dataloader_iter.workers
+        workers = dataloader_iter._workers
         del dataloader_iter
         try:
             for w in workers:
@@ -991,7 +991,7 @@ class TestDataLoader(TestCase):
         self.assertEqual(fetched, {tuple(range(7)), tuple(range(7, 14))})
 
         # [auto-batching & drop_last] test that workers exit gracefully
-        workers = dataloader_iter.workers
+        workers = dataloader_iter._workers
         del dataloader_iter
         try:
             for w in workers:
@@ -1226,9 +1226,9 @@ class TestDataLoader(TestCase):
 
         for pin_memory in pin_memory_configs:
             loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=pin_memory))
-            workers = loader.workers
+            workers = loader._workers
             if pin_memory:
-                pin_memory_thread = loader.pin_memory_thread
+                pin_memory_thread = loader._pin_memory_thread
             for i, _ in enumerate(loader):
                 if i == 10:
                     break

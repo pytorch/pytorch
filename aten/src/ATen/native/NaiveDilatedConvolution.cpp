@@ -1,23 +1,21 @@
 
 
-#include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/DilatedConvolutionUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <tuple>
 #include "ATen/ATen.h"
-#include "ATen/native/cuda/im2col.cuh"
-#include "ATen/native/cuda/vol2col.cuh"
+#include "ATen/native/im2col.h"
+#include "ATen/native/vol2col.h"
+#include "TH/THBlasUtils.h"
+
+#include <ATen/native/DilatedConvolutionUtils.h>
 
 namespace at {
 namespace native {
 
 namespace {
 
-// hyper-volume to column, CUDA
+// hyper-volume to column, CPU
 template <typename Dtype, int64_t dim>
 void hvol2col(
-    cudaStream_t stream,
     const Dtype* data_hvol,
     const int channels,
     const IntArrayRef input_size,
@@ -29,7 +27,6 @@ void hvol2col(
     Dtype* data_col) {
   if (dim == 3) {
     vol2col<Dtype>(
-        stream,
         data_hvol,
         channels,
         input_size[0],
@@ -54,7 +51,6 @@ void hvol2col(
   }
   if (dim == 2) {
     im2col<Dtype>(
-        stream,
         data_hvol,
         channels,
         input_size[0],
@@ -73,10 +69,9 @@ void hvol2col(
   }
 }
 
-// column to hyper-volume, CUDA
+// column to hyper-volume, CPU
 template <typename Dtype, int64_t dim>
 void col2hvol(
-    cudaStream_t stream,
     const Dtype* data_col,
     const int channels,
     const IntArrayRef input_size,
@@ -87,8 +82,7 @@ void col2hvol(
     const IntArrayRef dilation_size,
     Dtype* data_hvol) {
   if (dim == 3) {
-    col2vol<Dtype, Dtype>(
-        stream,
+    col2vol<Dtype>(
         data_col,
         channels,
         input_size[0],
@@ -112,8 +106,7 @@ void col2hvol(
         data_hvol);
   }
   if (dim == 2) {
-    col2im<Dtype, Dtype>(
-        stream,
+    col2im<Dtype>(
         data_col,
         channels,
         input_size[0],
@@ -135,21 +128,18 @@ void col2hvol(
 /*
    check tensor data locations
 */
-void conv_dilated_location_check(
+void slow_conv_dilated_location_check(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
     const Tensor& grad_output) {
   // checking data locations of user-provided tensor arguments
-  TensorArg input_arg{input, "input", 2}, weight_arg{weight, "weight", 3},
-      bias_arg{bias, "bias", 4}, grad_output_arg{grad_output, "grad_output", 5};
-  checkAllSameGPU("conv_dilated_all_cuda_template", {input_arg, weight_arg});
+  checkBackend("slow_conv_dilated_location_check", {input, weight}, Backend::CPU);
   if (bias.defined()) {
-    checkAllSameGPU("conv_dilated_all_cuda_template", {input_arg, bias_arg});
+    checkBackend("slow_conv_dilated_location_check", {bias}, Backend::CPU);
   }
   if (grad_output.defined()) {
-    checkAllSameGPU(
-        "conv_dilated_all_cuda_template", {input_arg, grad_output_arg});
+    checkBackend("slow_conv_dilated_location_check", {grad_output}, Backend::CPU);
   }
   // we are not checking the data locations of other tensor
   // arguments such as output, grad_input, etc because of these are
@@ -158,14 +148,14 @@ void conv_dilated_location_check(
 }
 
 /*
-  conv_dilated_all_cuda_template
+  slow_conv_dilated_all_cpu_template
 
   Main worker. Computes tensors output, grad_input, grad_weight,
   and/or grad_bias if defined, respectively.
  */
 
 template <int64_t dim>
-void conv_dilated_all_cuda_template(
+void slow_conv_dilated_all_cpu_template(
     Tensor& output,
     const Tensor& input,
     const Tensor& weight,
@@ -178,8 +168,7 @@ void conv_dilated_all_cuda_template(
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
-  conv_dilated_location_check(input, weight, bias, grad_output);
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  slow_conv_dilated_location_check(input, weight, bias, grad_output);
   auto options = input.options();
   // The rear part of input tensor sizes:
   auto input_size = input.sizes().slice(2);
@@ -189,14 +178,14 @@ void conv_dilated_all_cuda_template(
   int64_t batchSize = input.size(0);
   int64_t nInputPlane = weight.size(1);
   int64_t nOutputPlane = weight.size(0);
-  // Temporary buffers:
-  int64_t m = std::accumulate(
-      kernel_size.begin(), kernel_size.end(), 1, std::multiplies<int64_t>());
-  int64_t output_vsize = std::accumulate(
-      output_size.begin(), output_size.end(), 1, std::multiplies<int64_t>());
+  // Temporary buffer:
   Tensor columns = at::empty({0}, options);
   if (output.defined() || grad_weight.defined() || grad_input.defined()) {
-    columns.resize_({nInputPlane * m, output_vsize});
+    int64_t m = std::accumulate(
+        kernel_size.begin(), kernel_size.end(), 1, std::multiplies<int64_t>());
+    int64_t n = std::accumulate(
+        output_size.begin(), output_size.end(), 1, std::multiplies<int64_t>());
+    columns.resize_({nInputPlane * m, n});
   }
   // Initialize
   if (grad_weight.defined()) {
@@ -208,189 +197,242 @@ void conv_dilated_all_cuda_template(
   if (output.defined() && !bias.defined()) {
     output.zero_();
   }
-
-#ifdef __HIP_PLATFORM_HCC__
-  /* When using ROCm, the sum evaluation is inaccurate for double
-     tensors. The reason is currently unknown. Hence, we use gemv for
-     computing `grad_output_n.sum(dims)` until the ROCm-sum issue is
-     resolved. */
-  Tensor ones = at::empty({0}, options);
-  if (grad_bias.defined()) {
-    ones.resize_({output_vsize});
-    ones.fill_(1);
-  }
-  /* MSVC does not like #ifdef-s inside the CPP macro
-     AT_DISPATCH_FLOATING_TYPES_AND_HALF. So, we define the code
-     branching outside the CPP macro: */
-#define CALCULATE_GRAD_BIAS                          \
-  at::cuda::blas::gemv<scalar_t>(                    \
-      stream,                                        \
-      /*trans=*/'t',                                 \
-      /*    m=*/output_vsize,                        \
-      /*    n=*/nOutputPlane,                        \
-      /*alpha=*/ScalarConvert<int, scalar_t>::to(1), \
-      /*    A=*/grad_output_n.data<scalar_t>(),      \
-      /*  lda=*/output_vsize,                        \
-      /*    x=*/ones.data<scalar_t>(),               \
-      /* incx=*/1,                                   \
-      /* beta=*/ScalarConvert<int, scalar_t>::to(1), \
-      /*    y=*/grad_bias.data<scalar_t>(),          \
-      /* incy=*/1)
-#else
-#define CALCULATE_GRAD_BIAS grad_bias += grad_output_n.sum(dims)
-#endif
-
   // Helpers
   Tensor grad_output_n;
   std::vector<int64_t> dims(dim);
   std::iota(dims.begin(), dims.end(), 1);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.scalar_type(), "conv_dilated<>", [&] {
-        // For each elt in batch, do:
-        for (int elt = 0; elt < batchSize; elt++) {
-          // Matrix multiply per output:
-          Tensor input_n = input.select(0, elt);
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(), "slow_conv_dilated<>", [&] {
+    // For each elt in batch, do:
+    for (int elt = 0; elt < batchSize; elt++) {
+      // Matrix multiply per output:
+      Tensor input_n = input.select(0, elt);
 
-          // Output
-          if (output.defined()) {
-            Tensor output_n = output.select(0, elt);
-            if (bias.defined()) {
-              /* For gemm argument derivation, see
-                 conv_dilated_all_cuda_template in
-                 ATen/native/DilatedConvolution.cpp */
-              for (int n = 0; n < nOutputPlane; n++) {
-                output_n.select(0, n).fill_(bias[n]);
-              }
-            }
-            // Extract columns:
-            hvol2col<scalar_t, dim>(
-                stream,
-                input_n.data<scalar_t>(),
-                nInputPlane,
-                input_size,
-                output_size,
-                kernel_size,
-                stride_size,
-                pad_size,
-                dilation_size,
-                columns.data<scalar_t>());
-            /* For gemm argument derivation, see
-               conv_dilated_all_cuda_template in
-               ATen/native/DilatedConvolution.cpp */
-            at::cuda::blas::gemm<scalar_t>(
-                stream,
-                /*transa=*/'n',
-                /*transb=*/'n',
-                /*     m=*/columns.size(1),
-                /*     n=*/nOutputPlane,
-                /*     k=*/columns.size(0),
-                /* alpha=*/ScalarConvert<int, scalar_t>::to(1),
-                /*     A=*/columns.data<scalar_t>(),
-                /*   lda=*/columns.size(1),
-                /*     B=*/weight.data<scalar_t>(),
-                /*   ldb=*/columns.size(0),
-                /*  beta=*/ScalarConvert<int, scalar_t>::to(1),
-                /*     C=*/output_n.data<scalar_t>(),
-                /*   ldc=*/columns.size(1));
+      // Output
+      if (output.defined()) {
+        Tensor output_n = output.select(0, elt);
+        if (bias.defined()) {
+          /*
+            Compute:
 
-          } else {
-            // All gradients
-            grad_output_n = grad_output.select(0, elt);
-          }
+              output_n = bias * ones^T
 
-          // Gradient of input:
-          if (grad_input.defined()) {
-            /* For gemm argument derivation, see
-               conv_dilated_all_cuda_template in
-               ATen/native/DilatedConvolution.cpp */
-            at::cuda::blas::gemm<scalar_t>(
-                stream,
-                /*transa=*/'n',
-                /*transb=*/'t',
-                /*     m=*/columns.size(1),
-                /*     n=*/columns.size(0),
-                /*     k=*/nOutputPlane,
-                /* alpha=*/ScalarConvert<int, scalar_t>::to(1),
-                /*     A=*/grad_output_n.data<scalar_t>(),
-                /*   lda=*/columns.size(1),
-                /*     B=*/weight.data<scalar_t>(),
-                /*   ldb=*/columns.size(0),
-                /*  beta=*/ScalarConvert<int, scalar_t>::to(0),
-                /*     C=*/columns.data<scalar_t>(),
-                /*   ldc=*/columns.size(1));
-            // Unpack columns back into input:
-            Tensor grad_input_n = grad_input.select(0, elt);
+            where
 
-            col2hvol<scalar_t, dim>(
-                stream,
-                columns.data<scalar_t>(),
-                nInputPlane,
-                input_size,
-                output_size,
-                kernel_size,
-                stride_size,
-                pad_size,
-                dilation_size,
-                grad_input_n.data<scalar_t>());
-          }
+              bias is viewed as bias.view(nOutputPlane, 1)
 
-          // Gradient of weight:
-          if (grad_weight.defined()) {
-            // Extract columns:
-            hvol2col<scalar_t, dim>(
-                stream,
-                input_n.data<scalar_t>(),
-                nInputPlane,
-                input_size,
-                output_size,
-                kernel_size,
-                stride_size,
-                pad_size,
-                dilation_size,
-                columns.data<scalar_t>());
-            scalar_t scale = ScalarConvert<int, scalar_t>::to(
-                1); // TODO: expose as argument?
-            /* For gemm argument derivation, see
-               conv_dilated_all_cuda_template in
-               ATen/native/DilatedConvolution.cpp */
-            at::cuda::blas::gemm<scalar_t>(
-                stream,
-                /*transa=*/'t',
-                /*transb=*/'n',
-                /*     m=*/columns.size(0),
-                /*     n=*/nOutputPlane,
-                /*     k=*/columns.size(1),
-                /* alpha=*/scale,
-                /*     A=*/columns.data<scalar_t>(),
-                /*   lda=*/columns.size(1),
-                /*     B=*/grad_output_n.data<scalar_t>(),
-                /*   ldb=*/columns.size(1),
-                /*  beta=*/ScalarConvert<int, scalar_t>::to(1),
-                /*     C=*/grad_weight.data<scalar_t>(),
-                /*   ldc=*/columns.size(0));
-          }
+              ones is viewed as ones.view(outputHeight * outputWidth, 1)
 
-          // Gradient of bias:
-          if (grad_bias.defined()) {
-            /* For gemv argument derivation, see
-               conv_dilated_all_cpu_template in
-               ATen/native/DilatedConvolution.cpp */
-            CALCULATE_GRAD_BIAS; /* MSVC does not like #ifdef-s
-                                    inside the CPP macros, see above. */
-            /*
-              TODO: when scale != 1 is introduced then use:
-                grad_bias += scale * grad_output_n.sum(dims);
-             */
+              output_n is viewed as output_n.view(nOutputPlane, outputHeight
+          * outputWidth)
+
+          gemm assumes column-major matrices:
+
+            output_n^T = ones * bias^T
+            C = alpha * op(A) * op(B)
+            op(A) = 't', op(B) = 'n', alpha=1, beta=0
+          */
+          // The following for-loop is equivalent to the above
+          // gemm setup but avoids allocation of ones tensor:
+          for (int n = 0; n < nOutputPlane; n++) {
+            output_n.select(0, n).fill_(bias[n]);
           }
         }
-      });
+        // Extract columns:
+        hvol2col<scalar_t, dim>(
+            input_n.data<scalar_t>(),
+            nInputPlane,
+            input_size,
+            output_size,
+            kernel_size,
+            stride_size,
+            pad_size,
+            dilation_size,
+            columns.data<scalar_t>());
+        /*
+          Compute:
 
-} // conv_dilated_all_cuda_template
+            output_n = weight * columns + output_n
+
+          where
+
+            weight is viewed as weight.view(nOutputPlane, nInputPlane * kD *
+          kH * kW)
+
+            columns size is (nInputPlane * kH * kW) x (outputHeight *
+          outputWidth)
+
+            output_n is viewed as output_n.view(nOutputPlane, outputHeight *
+          outputWidth)
+
+          gemm assumes column-major matrices:
+
+            output_n^T = columns^T * weight^T + output_n^T
+            C = alpha * op(A) * op(B) + beta * C
+            op(A) = 'n', op(B) = 'n', alpha=1, beta=1
+        */
+        THBlas_gemm<scalar_t>(
+            /*transa=*/'n',
+            /*transb=*/'n',
+            /*     m=*/columns.size(1),
+            /*     n=*/nOutputPlane,
+            /*     k=*/columns.size(0),
+            /* alpha=*/1,
+            /*     A=*/columns.data<scalar_t>(),
+            /*   lda=*/columns.size(1),
+            /*     B=*/weight.data<scalar_t>(),
+            /*   ldb=*/columns.size(0),
+            /*  beta=*/1,
+            /*     C=*/output_n.data<scalar_t>(),
+            /*   ldc=*/columns.size(1));
+
+      } else {
+        // All gradients
+        grad_output_n = grad_output.select(0, elt);
+      }
+
+      // Gradient of input:
+      if (grad_input.defined()) {
+        /*
+          Compute:
+
+            columns = weight^T * grad_output_n
+
+          where
+
+            weight is viewed as weight.view(nOutputPlane, nInputPlane * kH *
+          kW)
+
+            grad_output_n is viewed as grad_output_n.view(nOutputPlane,
+          outputHeight * outputWidth)
+
+            columns size is (nInputPlane * kH * kW) x (outputHeight *
+          outputWidth)
+
+          gemm assumes column-major matrices:
+
+            columns^T = grad_output_n^T * weight
+            C = alpha * op(A) * op(B) + beta * C
+            op(A) = 'n', op(B) = 't', alpha=1, beta=0
+         */
+        THBlas_gemm<scalar_t>(
+            /*transa=*/'n',
+            /*transb=*/'t',
+            /*     m=*/columns.size(1),
+            /*     n=*/columns.size(0),
+            /*     k=*/nOutputPlane,
+            /* alpha=*/1,
+            /*     A=*/grad_output_n.data<scalar_t>(),
+            /*   lda=*/columns.size(1),
+            /*     B=*/weight.data<scalar_t>(),
+            /*   ldb=*/columns.size(0),
+            /*  beta=*/0,
+            /*     C=*/columns.data<scalar_t>(),
+            /*   ldc=*/columns.size(1));
+        // Unpack columns back into input:
+        Tensor grad_input_n = grad_input.select(0, elt);
+
+        col2hvol<scalar_t, dim>(
+            columns.data<scalar_t>(),
+            nInputPlane,
+            input_size,
+            output_size,
+            kernel_size,
+            stride_size,
+            pad_size,
+            dilation_size,
+            grad_input_n.data<scalar_t>());
+      }
+
+      // Gradient of weight:
+      if (grad_weight.defined()) {
+        // Extract columns:
+        hvol2col<scalar_t, dim>(
+            input_n.data<scalar_t>(),
+            nInputPlane,
+            input_size,
+            output_size,
+            kernel_size,
+            stride_size,
+            pad_size,
+            dilation_size,
+            columns.data<scalar_t>());
+        scalar_t scale = 1; // TODO: expose as argument?
+        /*
+          Compute:
+
+            grad_weight = scale * grad_output_n * columns^T + grad_weight
+
+          where
+
+            grad_output_n is viewed as grad_output_n.view(nOutputPlane,
+          outputHeight * outputWidth)
+
+            columns size is (nInputPlane * kD * kH * kW) x (outputHeight *
+          outputWidth)
+
+            grad_weight is viewed as grad_weight.view(nOutputPlane,
+          nInputPlane * kH * kW)
+
+          gemm assumes column-major matrices:
+
+            grad_weight^T = scale * columns * grad_output_n^T +
+          grad_weight^T C = alpha * op(A) * op(B) + beta * C op(A) = 't',
+          op(B) = 'n', alpha=scale, beta=1
+        */
+        THBlas_gemm<scalar_t>(
+            /*transa=*/'t',
+            /*transb=*/'n',
+            /*     m=*/columns.size(0),
+            /*     n=*/nOutputPlane,
+            /*     k=*/columns.size(1),
+            /* alpha=*/scale,
+            /*     A=*/columns.data<scalar_t>(),
+            /*   lda=*/columns.size(1),
+            /*     B=*/grad_output_n.data<scalar_t>(),
+            /*   ldb=*/columns.size(1),
+            /*  beta=*/1,
+            /*     C=*/grad_weight.data<scalar_t>(),
+            /*   ldc=*/columns.size(0));
+      }
+
+      // Gradient of bias:
+      if (grad_bias.defined()) {
+        /*
+          Compute:
+            grad_bias = scale * grad_output_n * ones + grad_bias
+
+          where
+
+            grad_bias is viewed as grad_bias.view(nOutputPlane, 1)
+
+            ones is viewed as ones.view(outputHeight * outputWidth, 1)
+
+            grad_output_n is viewed as grad_output_n.view(nOutputPlane,
+          outputHeight * outputWidth)
+
+          gemm assumes column-major matrices:
+
+            grad_bias^T = scale * grad_output_n * ones + grad_bias^T
+            y = alpha * op(A) * x + beta * y
+            op(A) = 't', alpha=scale, beta=1
+         */
+        // The following expression is equivalent to the above
+        // gemm setup but avoids allocation of ones tensor:
+        grad_bias += grad_output_n.sum(dims);
+        /*
+          TODO: when scale != 1 is introduced then use:
+            grad_bias += scale * grad_output_n.sum(dims);
+         */
+      }
+    }
+  });
+
+} // slow_conv_dilated_all_cpu_template
 
 } // namespace
 
-Tensor conv_dilated2d_cuda(
+Tensor slow_conv_dilated2d_cpu(
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -399,7 +441,7 @@ Tensor conv_dilated2d_cuda(
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
   Tensor undefined;
-  internal::conv_dilated_shape_check<2>(
+  internal::slow_conv_dilated_shape_check<2>(
       input,
       weight,
       bias,
@@ -422,7 +464,7 @@ Tensor conv_dilated2d_cuda(
   Tensor output = at::empty(output_size, options);
   Tensor output_ = (is_batch ? output : output.unsqueeze(0));
 
-  conv_dilated_all_cuda_template<2>(
+  slow_conv_dilated_all_cpu_template<2>(
       output_,
       input_,
       weight_,
@@ -438,7 +480,7 @@ Tensor conv_dilated2d_cuda(
   return output;
 }
 
-std::tuple<Tensor, Tensor, Tensor> conv_dilated2d_backward_cuda(
+std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -448,7 +490,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated2d_backward_cuda(
     IntArrayRef dilation_size,
     const std::array<bool, 3ul> output_mask) {
   Tensor undefined;
-  internal::conv_dilated_shape_check<2>(
+  internal::slow_conv_dilated_shape_check<2>(
       input,
       weight,
       undefined,
@@ -477,7 +519,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated2d_backward_cuda(
   Tensor grad_input_ =
       (output_mask[0] ? (is_batch ? grad_input : grad_input.unsqueeze(0))
                       : undefined);
-  conv_dilated_all_cuda_template<2>(
+  slow_conv_dilated_all_cpu_template<2>(
       undefined,
       input_,
       weight_,
@@ -493,7 +535,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated2d_backward_cuda(
   return std::tie(grad_input, grad_weight, grad_bias);
 }
 
-Tensor conv_dilated3d_cuda(
+Tensor slow_conv_dilated3d_cpu(
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -502,7 +544,7 @@ Tensor conv_dilated3d_cuda(
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
   Tensor undefined;
-  internal::conv_dilated_shape_check<3>(
+  internal::slow_conv_dilated_shape_check<3>(
       input,
       weight,
       bias,
@@ -525,7 +567,7 @@ Tensor conv_dilated3d_cuda(
   Tensor output = at::empty(output_size, options);
   Tensor output_ = (is_batch ? output : output.unsqueeze(0));
 
-  conv_dilated_all_cuda_template<3>(
+  slow_conv_dilated_all_cpu_template<3>(
       output,
       input_,
       weight_,
@@ -541,7 +583,7 @@ Tensor conv_dilated3d_cuda(
   return output;
 }
 
-std::tuple<Tensor, Tensor, Tensor> conv_dilated3d_backward_cuda(
+std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -551,7 +593,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated3d_backward_cuda(
     IntArrayRef dilation_size,
     const std::array<bool, 3ul> output_mask) {
   Tensor undefined;
-  internal::conv_dilated_shape_check<3>(
+  internal::slow_conv_dilated_shape_check<3>(
       input,
       weight,
       undefined,
@@ -580,7 +622,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_dilated3d_backward_cuda(
   Tensor grad_input_ =
       (output_mask[0] ? (is_batch ? grad_input : grad_input.unsqueeze(0))
                       : undefined);
-  conv_dilated_all_cuda_template<3>(
+  slow_conv_dilated_all_cpu_template<3>(
       undefined,
       input_,
       weight_,

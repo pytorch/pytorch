@@ -222,6 +222,11 @@ if TEST_TENSORBOARD:
                                         precision,
                                         recall, n_iter)
 
+                v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)
+                c = np.array([[[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 0, 255]]], dtype=int)
+                f = np.array([[[0, 2, 3], [0, 3, 1], [0, 1, 2], [1, 3, 2]]], dtype=int)
+                writer.add_mesh('my_mesh', vertices=v, colors=c, faces=f)
+
     class TestTensorBoardSummaryWriter(BaseTestCase):
         def test_summary_writer_ctx(self):
             # after using a SummaryWriter as a ctx it should be closed
@@ -378,6 +383,13 @@ if TEST_TENSORBOARD:
                       'USA': {'dow': ['Margin', ['dow/aaa', 'dow/bbb', 'dow/ccc']],
                               'nasdaq': ['Margin', ['nasdaq/aaa', 'nasdaq/bbb', 'nasdaq/ccc']]}}
             summary.custom_scalars(layout)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
+
+        def test_mesh(self):
+            v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)
+            c = np.array([[[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 0, 255]]], dtype=int)
+            f = np.array([[[0, 2, 3], [0, 3, 1], [0, 1, 2], [1, 3, 2]]], dtype=int)
+            mesh = summary.mesh('my_mesh', vertices=v, colors=c, faces=f, config_dict=None)
+            self.assertTrue(compare_proto(mesh, self))
 
     def remove_whitespace(string):
         return string.replace(' ', '').replace('\t', '').replace('\n', '')

@@ -17,8 +17,8 @@
 #   CFLAGS
 #     flags to apply to both C and C++ files to be compiled (a quirk of setup.py
 #     which we have faithfully adhered to in our build system is that CFLAGS
-#     also applies to C++ files, in contrast to the default behavior of autogoo
-#     and cmake build systems.)
+#     also applies to C++ files (unless CXXFLAGS is set), in contrast to the
+#     default behavior of autogoo and cmake build systems.)
 #
 #   CC
 #     the C/C++ compiler to use (NB: the CXX flag has no effect for distutils
@@ -258,7 +258,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '1.2.0a0'
+version = '1.3.0a0'
 sha = 'Unknown'
 
 try:
@@ -867,6 +867,7 @@ if __name__ == '__main__':
         download_url='https://github.com/pytorch/pytorch/tags',
         author='PyTorch Team',
         author_email='packages@pytorch.org',
+        python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*',
         # PyPI package information.
         classifiers=[
             'Development Status :: 5 - Production/Stable',

@@ -15,7 +15,7 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
-#include <c10/core/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
 #include <vector>
@@ -175,7 +175,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
     } else if (THPVariable_Check(obj)) {
       auto& var = THPVariable_Unpack(obj);
       auto scalar_type = var.scalar_type();
-      if (var.dim() == 0 && at::isIntegralType(scalar_type)) {
+      if (var.dim() == 0 && at::isIntegralType(scalar_type, /*includeBool=*/true)) {
         if (scalar_type != at::kByte && scalar_type != at::kBool) {
           result = applySelect(result, dim, THPUtils_unpackLong(obj), i);
         } else {

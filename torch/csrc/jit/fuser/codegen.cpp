@@ -104,7 +104,7 @@ static std::string typeCastedValueName(
     const at::ScalarType outtype,
     const std::string& vn) {
   if (t->kind() == TypeKind::IntType || t->kind() == TypeKind::BoolType) {
-    if (!isIntegralType(outtype)) {
+    if (!isIntegralType(outtype, /*includeBool=*/false)) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
     return vn;

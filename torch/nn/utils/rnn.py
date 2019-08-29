@@ -419,7 +419,3 @@ def pack_sequence(sequences, enforce_sorted=True):
     """
     lengths = [v.size(0) for v in sequences]
     return pack_padded_sequence(pad_sequence(sequences), lengths, enforce_sorted=enforce_sorted)
-
-
-def get_packed_sequence(data, batch_sizes, sorted_indices, unsorted_indices):
-    return PackedSequence(data, batch_sizes, sorted_indices, unsorted_indices)
