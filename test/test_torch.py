@@ -4919,6 +4919,11 @@ class _TestTorchMixin(torchtest):
         self.assertEqual(t.min(), 0)
         self.assertEqual(t.max(), ub - 1)
 
+    def test_not_equal(self):
+        ones = torch.ones(10, dtype=torch.int)
+        self.assertRaisesRegex(AssertionError, "0 not greater than or equal to",
+                               lambda: self.assertNotEqual(ones, ones))
+
     @staticmethod
     def _test_random_neg_values(self, use_cuda=False):
         signed_types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor',
@@ -12998,7 +13003,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             ("bitwise_not", ints, True, True, 'cpu'),
             ("bitwise_not", ints, True, True, 'cuda'),
             ("ceil", doubles, True, True, 'cpu'),
-            ("ceil", doubles, False, True, 'cuda'),
+            ("ceil", doubles, True, True, 'cuda'),
             ("cos", doubles, True, True, 'cpu'),
             ("cos", doubles, False, True, 'cuda'),
             ("cosh", doubles, True, True, 'cpu'),

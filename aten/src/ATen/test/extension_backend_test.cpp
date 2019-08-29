@@ -13,7 +13,7 @@ Tensor empty_override(IntArrayRef size, const TensorOptions & options, c10::opti
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
           caffe2::TypeMeta::Make<float>(), 0, at::DataPtr(nullptr, Device(DeviceType::MSNPU, 1)), nullptr, false),
-      MSNPUTensorId());
+      TensorTypeId::MSNPUTensorId);
   return Tensor(std::move(tensor_impl));
 }
 

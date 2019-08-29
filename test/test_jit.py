@@ -1148,6 +1148,121 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         torch._C._jit_pass_quant_fusion(graph)
         FileCheck().run(input_str, graph)
 
+    @_tmp_donotuse_dont_inline_everything
+    def test_foldbn_trivial(self):
+        def get_forward(m):
+            return m._c._get_method("forward")
+
+        # Test trivial case
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        eager = TestModule()
+        scripted = torch.jit.script(eager)
+        eager.eval()
+        scripted.eval()
+
+        # Check that in the original script module's forward we have two
+        # CallMethod nodes. One of them should be for conv.forward and the other
+        # for bn.forward.
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+            .run(str(get_forward(scripted).graph))
+
+        # Run FoldConvBatchnorm2d pass.
+        torch._C._jit_pass_fold_convbn(scripted._c)
+
+        # Check that after the pass one of the CallMethods is gone (supposedly,
+        # the bn.forward).
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
+            .run(str(get_forward(scripted).graph))
+
+        # Check that the transformation doesn't change numerics
+        x = torch.rand(1, 1, 6, 6)
+        self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_foldbn_trivial_nobias(self):
+        def get_forward(m):
+            return m._c._get_method("forward")
+
+        # Test trivial case
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1, bias=False)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        eager = TestModule()
+        scripted = torch.jit.script(eager)
+        eager.eval()
+        scripted.eval()
+
+        # Check that in the original script module's forward we have two
+        # CallMethod nodes. One of them should be for conv.forward and the other
+        # for bn.forward.
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+            .run(str(get_forward(scripted).graph))
+
+        # Run FoldConvBatchnorm2d pass.
+        torch._C._jit_pass_fold_convbn(scripted._c)
+
+        # Check that after the pass one of the CallMethods is gone (supposedly,
+        # the bn.forward).
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
+            .run(str(get_forward(scripted).graph))
+
+        # Check that the transformation doesn't change numerics
+        x = torch.rand(1, 1, 6, 6)
+        self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_foldbn_in_submodule(self):
+        def get_forward(m):
+            return m._c._get_method("forward")
+
+        # Test that we find Conv-BN patterns in submodules
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                x = self.sub(x)
+                return x
+
+        m = torch.jit.script(TestModule())
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+            .run(str(get_forward(m.sub).graph))
+
+        torch._C._jit_pass_fold_convbn(m._c)
+
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
+            .run(str(get_forward(m.sub).graph))
+
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
         # --> mulmul(mulmul(x,y,z), x, y)
@@ -3007,6 +3122,32 @@ graph(%Ra, %Rb):
         buffer.seek(0)
         model_loaded = torch.jit.load(buffer)
         self.assertEqual(model_loaded(), model())
+
+
+class TestFrontend(JitTestCase):
+
+    def test_instancing_error(self):
+        @torch.jit.ignore
+        class MyScriptClass(object):
+            def unscriptable(self):
+                return "a" + 200
+
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, x):
+                return MyScriptClass()
+
+        with self.assertRaises(torch.jit.frontend.FrontendError) as cm:
+            torch.jit.script(TestModule())
+
+        checker = FileCheck()
+        checker.check("Cannot instantiate class")
+        checker.check("def forward")
+        checker.run(str(cm.exception))
+
 
 class TestScript(JitTestCase):
     def test_sequence_parsing(self):
@@ -5829,10 +5970,12 @@ a")
         self.checkScript(div_float_future, ())
 
         if PY2:
-            with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
+            with self.assertRaisesRegex(torch.jit.frontend.FrontendError, 'from __future__ import division') as cm:
                 torch.jit.script(div_int_nofuture)
-            with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
+            FileCheck().check("div_int_nofuture").run(str(cm.exception))
+            with self.assertRaisesRegex(torch.jit.frontend.FrontendError, 'from __future__ import division') as cm:
                 torch.jit.script(div_float_nofuture)
+            FileCheck().check("div_float_nofuture").run(str(cm.exception))
         else:
             self.checkScript(div_int_nofuture, ())
             self.checkScript(div_float_nofuture, ())
@@ -5922,7 +6065,7 @@ a")
             def test():
                 return torch.tensor([None])
 
-        with self.assertRaisesRegex(RuntimeError, "Note: empty lists are constructed as Tensor"):
+        with self.assertRaisesRegex(RuntimeError, r"Empty lists default to List\[Tensor\]"):
             @torch.jit.script
             def tmp():
                 return torch.tensor([])
@@ -14581,7 +14724,7 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, x):
                 return MyScriptClass()
 
-        with self.assertRaisesRegex(RuntimeError, "cannot instantiate class object"):
+        with self.assertRaisesRegex(torch.jit.frontend.FrontendError, "Cannot instantiate class"):
             t = torch.jit.script(TestModule())
 
     def test_method_call(self):
