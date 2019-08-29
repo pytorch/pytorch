@@ -164,6 +164,30 @@ static void erfinv_kernel(TensorIterator& iter) {
   });
 }
 
+static void digamma_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "digamma", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return calc_digamma(a); });
+  });
+}
+
+static void trigamma_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "trigamma", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return trigamma(a); });
+  });
+}
+
+static void polygamma_kernel(TensorIterator& iter, int64_t n) {
+  switch (n) {
+    case 0: digamma_kernel(iter); break;
+    case 1: trigamma_kernel(iter); break;
+    default: AT_ERROR("polygamma(n,x) is not implemented for n>=2");
+  }
+}
+
 #if !AT_MKL_ENABLED()
 void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
   // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
@@ -182,7 +206,7 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
   int64_t n = self.numel();
   bool contig = self.is_contiguous();
 
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     at::Tensor tmp_int_tensor;
     if (std::is_same<scalar_t, int>::value && contig) {
       tmp_int_tensor = self;
@@ -282,6 +306,9 @@ REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel);
+REGISTER_DISPATCH(digamma_stub, &digamma_kernel);
+REGISTER_DISPATCH(trigamma_stub, &trigamma_kernel);
+REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)

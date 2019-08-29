@@ -255,7 +255,7 @@ static auto registry = torch::RegisterOperators().op(
     "int[] padding, "
     "int[] dilation) -> Tensor",
     torch::RegisterOperators::options().kernel<QMaxPool2D_arr_args>(
-        QuantizedCPUTensorId()));
+        TensorTypeId::QuantizedCPUTensorId));
 
 } // namespace
 } // namespace native

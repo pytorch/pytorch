@@ -44,9 +44,16 @@ class ObserverBase(ABC, nn.Module):
         pass
 
     def _calculate_qparams(self, min_val, max_val):
+        # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
         """
         Given min and max values, this function calculates quantization parameters
         """
+
+        if max_val is None or min_val is None:
+            warnings.warn("must run observer before calling calculate_qparams.\
+                                    Returning default scale and zero point ")
+            return torch.tensor([1.0]), torch.tensor([0])
+
         assert min_val <= max_val, "min {} should be less than max {}".format(
             min_val, max_val
         )
@@ -55,15 +62,7 @@ class ObserverBase(ABC, nn.Module):
             qmin, qmax = -128, 127
         else:
             qmin, qmax = 0, 255
-        # We pull these out so that TorchScript optional type refinement works.
-        # We may be able to remove this in the future if TorchScript supports that
-        # feature on attributes
-        min_val = self.min_val
-        max_val = self.max_val
-        if max_val is None or min_val is None:
-            warnings.warn("must run observer before calling calculate_qparams.\
-                                    Returning default scale and zero point ")
-            return torch.tensor([1.0]), torch.tensor([0])
+
         max_val, min_val = float(max_val), float(min_val)
         min_val = min(0.0, min_val)
         max_val = max(0.0, max_val)
@@ -117,14 +116,7 @@ class MinMaxObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        # We pull these out so that TorchScript optional type refinement works.
-        # We may be able to remove this in the future if TorchScript supports that
-        # feature on attributes
-        min_val = self.min_val
-        max_val = self.max_val
-        if max_val is None or min_val is None:
-            raise Exception('must run observer before calling calculate_qparams!')
-        return self._calculate_qparams(min_val, max_val)
+        return self._calculate_qparams(self.min_val, self.max_val)
 
     @torch.jit.export
     def extra_repr(self):
