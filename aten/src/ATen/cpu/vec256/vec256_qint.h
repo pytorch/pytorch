@@ -361,6 +361,13 @@ struct Vec256QuantizedConverter {
     }
     return rv;
   }
+
+  void dump() const {
+      for (int i = 0; i < size(); ++i) {
+          std::cout << vals[i] << " ";
+      }
+      std::cout << std::endl;
+  }
 };
 
 template <>
