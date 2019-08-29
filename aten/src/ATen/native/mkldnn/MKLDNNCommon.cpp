@@ -46,7 +46,7 @@ Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options)
   auto dims = it.get_dims();
   IDeepTensorWrapperPtr handle = c10::make_intrusive<IDeepTensorWrapper>(std::move(it));
   return detail::make_tensor<MKLDNNTensorImpl>(
-    MkldnnCPUTensorId(), options.dtype(), options.device(), handle,
+    TensorTypeId::MkldnnCPUTensorId, options.dtype(), options.device(), handle,
     std::vector<int64_t>(dims.begin(), dims.end()));
 }
 
@@ -60,7 +60,7 @@ ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
 
 ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
   AT_ASSERTM(
-      tensor.type_id() == CPUTensorId(),
+      tensor.type_id() == TensorTypeId::CPUTensorId,
       "itensor_view_from_dense expects dense CPU tensor input");
   AT_ASSERTM(tensor.scalar_type() == ScalarType::Float,
              "itensor_view_from_dense expects float tensor input");
