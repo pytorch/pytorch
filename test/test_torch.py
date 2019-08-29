@@ -16,6 +16,7 @@ import pickle
 import gzip
 import types
 import textwrap
+import zipfile
 from torch._utils_internal import get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
@@ -10510,6 +10511,27 @@ class _TestTorchMixin(torchtest):
             f.seek(0)
             c = torch.load(f)
         self._test_serialization_assert(b, c)
+
+    def test_serialization_fake_zip(self):
+        data = [
+            ord('P'),
+            ord('K'),
+            5,
+            6
+        ]
+        for i in range(0, 100):
+            data.append(0)
+        t = torch.tensor(data, dtype=torch.uint8)
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(t, f.name)
+
+            # If this check is False for all Python versions (i.e. the fix
+            # has been backported), this test and torch.serialization._is_zipfile
+            # can be deleted
+            self.assertTrue(zipfile.is_zipfile(f))
+            self.assertFalse(torch.serialization._is_zipfile(f))
+            self.assertEqual(torch.load(f.name), t)
 
     def test_serialization_gzip(self):
         # Test serialization with gzip file
