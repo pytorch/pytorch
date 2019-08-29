@@ -85,13 +85,17 @@ struct Vec256<c10::qint8> {
 #ifdef __AVX2__
         return _mm256_cvtepi8_epi32(epi8_vals);
 #else  // __AVX2__
-        int8_t buf[16];
-        _mm_store_si128((__m128i*)&buf, epi8_vals);
-        int32_t int32_buf[8];
-        for (int i = 0; i < 8; ++i) {
-            int32_buf[i] = buf[i];
-        }
-        return _mm256_loadu_si256((__m256i*)&int32_buf);
+        __m128i result_data[2];
+        __m128i unpacked1 = _mm_unpacklo_epi8(epi8_vals, epi8_vals);
+        __m128i unpacked2 = _mm_unpacklo_epi16(unpacked1, unpacked1);
+        __m128i shifted1 = _mm_srli_si128(epi8_vals, 4);
+        __m128i shifted2 = _mm_srai_epi32(unpacked2, 24);
+        result_data[0] = shifted2;
+        __m128i unpacked3 = _mm_unpacklo_epi8(shifted1, shifted1);
+        __m128i unpacked4 = _mm_unpacklo_epi16(unpacked3, unpacked3);
+        __m128i shifted3 = _mm_srai_epi32(unpacked4, 24);
+        result_data[1] = shifted3;
+        return _mm256_loadu_si256(reinterpret_cast<__m256i*>(&result_data));
 #endif
     }
 
@@ -183,13 +187,16 @@ struct Vec256<c10::quint8> {
 #ifdef __AVX2__
         return _mm256_cvtepu8_epi32(epu8_vals);
 #else  // __AVX2__
-        uint8_t buf[16];
-        _mm_store_si128((__m128i*)&buf, epu8_vals);
-        int32_t int32_buf[8];
-        for (int i = 0; i < 8; ++i) {
-            int32_buf[i] = buf[i];
-        }
-        return _mm256_loadu_si256((__m256i*)&int32_buf);
+        __m128i result_data[2];
+        __m128i zeros = _mm_setzero_si128();
+        __m128i unpacked1 = _mm_unpacklo_epi8(epu8_vals, zeros);
+        __m128i unpacked2 = _mm_unpacklo_epi16(unpacked1, zeros);
+        result_data[0] = unpacked2;
+        __m128i shifted = _mm_srli_si128(epu8_vals, 4);
+        __m128i unpacked3 = _mm_unpacklo_epi8(shifted, zeros);
+        __m128i unpacked4 = _mm_unpacklo_epi16(unpacked3, zeros);
+        result_data[1] = unpacked4;
+        return _mm256_loadu_si256(reinterpret_cast<__m256i*>(&result_data));
 #endif
     }
 
