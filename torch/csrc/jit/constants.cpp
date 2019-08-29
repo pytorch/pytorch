@@ -19,10 +19,9 @@ c10::OperatorOptions aliasAnalysisInternalSpecialCase() {
 Value* insertConstant(
     Graph& g,
     const IValue& val,
-    const c10::TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
-  auto value = tryInsertConstant(g, val, result_type, loc, scope);
+  auto value = tryInsertConstant(g, val, loc, scope);
   if (value) {
     return *value;
   }
@@ -34,7 +33,6 @@ Value* insertConstant(
 c10::optional<Value*> tryInsertConstant(
     Graph& g,
     const IValue& val,
-    const c10::TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   Node* n = g.create(prim::Constant);

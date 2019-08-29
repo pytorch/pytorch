@@ -501,7 +501,7 @@ static Value* materializeConstant(
   }
 
   WithInsertPoint guard(graph.block()->nodes().front());
-  auto new_constant = graph.insertConstant(val, nullptr, r);
+  auto new_constant = graph.insertConstant(val, r);
   map[val] = new_constant;
 
   return new_constant;
@@ -1019,11 +1019,11 @@ struct to_ir {
     // if it's an OR the first expr is emitted in the true branch
     // and the second expr in the false branch, if it's an AND the opposite
     if (is_or) {
-      first_value_returned = graph->insertConstant(true, nullptr, loc);
+      first_value_returned = graph->insertConstant(true, loc);
       first_expr_refinements = &first_bool_info.true_refinements_;
       second_expr_refinements = &first_bool_info.false_refinements_;
     } else {
-      first_value_returned = graph->insertConstant(false, nullptr, loc);
+      first_value_returned = graph->insertConstant(false, loc);
       first_expr_refinements = &first_bool_info.false_refinements_;
       second_expr_refinements = &first_bool_info.true_refinements_;
     }
@@ -1382,7 +1382,7 @@ struct to_ir {
         out = emitCond(cond.value());
       } else {
         WithInsertPoint insert(n);
-        out = graph->insertConstant(true, nullptr, range);
+        out = graph->insertConstant(true, range);
       }
       condition_block->registerOutput(out);
       popFrame();
@@ -1482,7 +1482,7 @@ struct to_ir {
   // We ignore the expression following raise
   void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, nullptr, loc);
+    auto string_input = insertConstant(*graph, exception, loc);
     graph->insert(prim::RaiseException, {string_input}, {}, loc);
     exit_blocks.insert(environment_stack->block());
   }
@@ -2244,7 +2244,7 @@ struct to_ir {
       bool is_instance_val =
           isInstanceCheck(apply.inputs()[0], apply.inputs()[1]);
       return std::make_shared<SimpleValue>(
-          graph->insertConstant(is_instance_val, nullptr, loc));
+          graph->insertConstant(is_instance_val, loc));
     } else if (auto classNew = dynamic_cast<ClassNewMethod*>(sv.get())) {
       if (apply.inputs().size() != 1) {
         throw ErrorReport(loc) << "Only one argument to __new__ allowed";
@@ -2391,7 +2391,7 @@ struct to_ir {
     stack.push_back(*maybe_constant_input);
     op(stack);
     AT_ASSERT(stack.size() == 1);
-    return graph->insertConstant(stack[0], nullptr, tree->range());
+    return graph->insertConstant(stack[0], tree->range());
   }
 
   // We construct the iterable tree here using the IterableTree SugaredValue,
@@ -2576,21 +2576,13 @@ struct to_ir {
         return emitConst(Const(tree));
       } break;
       case TK_TRUE: {
-        return graph->insertConstant(true, nullptr, tree->range());
+        return graph->insertConstant(true, tree->range());
       } break;
       case TK_FALSE: {
-        return graph->insertConstant(false, nullptr, tree->range());
+        return graph->insertConstant(false, tree->range());
       } break;
       case TK_NONE: {
-        // A None can be inserted even if the type_hint is not an Optional or
-        // None (e.g. `torch.jit.annotate(Tensor, None)`)
-        TypePtr hint = type_hint;
-        if (hint != nullptr && !hint->isSubtypeOf(NoneType::get()) &&
-            hint->kind() != TypeKind::OptionalType) {
-          // Implicitly wrap in an Optional if necessary
-          hint = OptionalType::create(hint);
-        }
-        return graph->insertConstant(IValue(), hint, tree->range());
+        return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree));
@@ -2693,7 +2685,7 @@ struct to_ir {
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
-    return insertConstant(*graph, c.text(), nullptr, c.range());
+    return insertConstant(*graph, c.text(), c.range());
   }
 
   // Desugars select indexing: tensor[i] -> tensor.select(dim, i)
@@ -2799,7 +2791,7 @@ struct to_ir {
     std::vector<Value*> tensor_indices;
 
     auto insert_value_for_dim = [&](int64_t dim) {
-      return graph->insertConstant(dim, nullptr, loc);
+      return graph->insertConstant(dim, loc);
     };
     std::vector<int64_t> dims(subscript_exprs.size());
     std::vector<c10::optional<Value*>> exprs(
@@ -2958,7 +2950,7 @@ struct to_ir {
     Value* maybe_dim = nullptr;
     if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
-      maybe_dim = graph->insertConstant(0, nullptr, loc);
+      maybe_dim = graph->insertConstant(0, loc);
     }
     return emitSlice(loc, sliceable, maybe_dim, slice_exp);
   }
