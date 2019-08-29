@@ -73,7 +73,6 @@ class ProcessGroupAgent : public RpcAgent {
   // worker name -> rank
   std::unordered_map<std::string, int> nameMap_;
   std::vector<WorkerId> workerIds_;
-  bool stop_;
   std::atomic<int64_t> nextId_;
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.

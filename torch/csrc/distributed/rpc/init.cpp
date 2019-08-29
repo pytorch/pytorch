@@ -31,10 +31,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto module = py::handle(dist_module).cast<py::module>();
 
-  // not exposing WorkerId::id as it should an internal field specified for
-  // RpcAgent implementations.
   auto workerId = shared_ptr_class_<WorkerId>(module, "WorkerId")
-      .def_readonly("name", &WorkerId::name_);
+      .def_readonly("name", &WorkerId::name_)
+      .def_readonly("id", &WorkerId::id_);
 
   auto rref = shared_ptr_class_<RRef>(module, "RRef")
       .def("owner",
@@ -61,14 +60,16 @@ PyObject* rpc_init(PyObject* /* unused */) {
           },
           py::call_guard<py::gil_scoped_release>());
 
-  auto processGroupAgent = shared_ptr_class_<ProcessGroupAgent>(
+  shared_ptr_class_<ProcessGroupAgent>(
       module, "ProcessGroupAgent", rpcAgent)
-      .def(py::init<std::string,
-                    std::shared_ptr<::c10d::ProcessGroup>,
-                    int>(),
-           py::arg("name"),
-           py::arg("process_group"),
-           py::arg("num_send_recv_threads") = 4)
+      .def(
+          py::init<
+              std::string,
+              std::shared_ptr<::c10d::ProcessGroup>,
+              int>(),
+          py::arg("name"),
+          py::arg("process_group"),
+          py::arg("num_send_recv_threads") = 4)
       .def("get_worker_id",
            (const WorkerId& (ProcessGroupAgent::*)(void) const)
            &RpcAgent::getWorkerId,

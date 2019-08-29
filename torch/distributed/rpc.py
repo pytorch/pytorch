@@ -7,6 +7,7 @@ from .internal_rpc_utils import serialize, PythonUDF
 
 import sys
 import torch
+from enum import Enum
 
 
 _agent = None
@@ -42,27 +43,15 @@ def sync_rpc():
     level, if multiple threads are spawned, only one of them should call this
     method at a time.
     """
+
     _agent.sync()
 
+class RpcBackend(Enum):
+    PROCESS_GROUP = 1
 
-# TODO: add a context manager to wrap init_rpc and join_rpc
-def init_rpc(name, backend='pg'):
-    r"""
-    Initialize the local RPC agent which immediately makes the current process
-    ready to send and receive RPCs. The caller needs to make sure the specified
-    backend is properly intialized before calling this method. For example, to
-    use ``pg`` (ProcessGroup) backend, ``init_process_group`` must be invoked
-    prior to this method.
 
-    Arguments:
-        name (str): a globally unique name of the local RPC agent. (e.g.,
-                    ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
-                    Name can only contain number, alphabet, underscore, and/or
-                    dash, and must be shorter than 128 characters.
-        backend (str): type of RPC backend implementation. Currently,
-                       process group backend ``"pg"`` is the only available
-                       backend implementation. (default: ``"pg"``).
-    """
+# TODO: add a context manager to wrap _init_rpc and join_rpc
+def _init_rpc(name, backend=RpcBackend.PROCESS_GROUP):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
 
@@ -71,7 +60,7 @@ def init_rpc(name, backend='pg'):
     if _agent:
         raise RuntimeError("RPC is already initialized")
 
-    if backend == 'pg':
+    if backend == RpcBackend.PROCESS_GROUP:
         from .distributed_c10d import _get_default_group
         group = _get_default_group()
         _agent = ProcessGroupAgent(name, group)
@@ -179,14 +168,14 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         On worker 0:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> dist.init_rpc("worker0")
+        >>> dist.init_model_parallel("worker0")
         >>> ret = dist.rpc("worker1", torch.add, args=(torch.ones(2), 3))
         >>> dist.join_rpc()
 
         One worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_rpc("worker1")
+        >>> dist.init_model_parallel("worker1")
         >>> dist.join_rpc()
 
         Asynchronous example:
@@ -194,7 +183,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         On worker 0:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> dist.init_rpc("worker0")
+        >>> dist.init_model_parallel("worker0")
         >>> worker1 = dist.get_worker_id("worker1")
         >>> fut1 = dist.rpc(worker1, torch.add, args=(torch.ones(2), 3), async_call=True)
         >>> fut2 = dist.rpc(worker1, min, args=(1, 2), async_call=True)
@@ -204,7 +193,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         One worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_rpc("worker1")
+        >>> dist.init_model_parallel("worker1")
         >>> dist.join_rpc()
     """
     if not callable(func):

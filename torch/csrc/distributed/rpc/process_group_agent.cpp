@@ -96,7 +96,6 @@ ProcessGroupAgent::ProcessGroupAgent(
           processRequestBlocking
       ),
       pg_(std::move(pg)),
-      stop_(false),
       nextId_(0),
       sendMutexes_(pg_->getSize()),
       threadPool_(numSendRecvThreads) {
