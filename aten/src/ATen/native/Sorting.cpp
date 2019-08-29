@@ -232,6 +232,7 @@ std::tuple<Tensor&, Tensor&> median_out(
     const Tensor& self,
     Dimname dim,
     bool keepdim) {
+  TORCH_CHECK(false, "NYI: median with names");
   return at::median_out(values, indices, self, dimname_to_position(self, dim), keepdim);
 }
 
@@ -239,6 +240,7 @@ std::tuple<Tensor, Tensor> median(
     const Tensor& self,
     Dimname dim,
     bool keepdim) {
+  TORCH_CHECK(false, "NYI: median with names");
   return at::median(self, dimname_to_position(self, dim), keepdim);
 }
 #endif
