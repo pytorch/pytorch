@@ -79,6 +79,8 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         >>> inputs = torch.randn(20, 16, 50)
         >>> F.conv1d(inputs, filters)
     """
+    dilation = _single(dilation)
+    stride = _single(stride)
     if isinstance(padding, str):
         if padding != "same":
             raise ValueError("padding does not accept str values other than 'same'")
@@ -137,6 +139,8 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         >>> inputs = torch.randn(1,4,5,5)
         >>> F.conv2d(inputs, filters, padding=1)
     """
+    dilation = _pair(dilation)
+    stride = _pair(stride)
     if isinstance(padding, str):
         if padding != "same":
             raise ValueError("padding does not accept str values other than 'same'")
@@ -193,6 +197,8 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, 
         >>> inputs = torch.randn(20, 16, 50, 10, 20)
         >>> F.conv3d(inputs, filters)
     """
+    dilation = _triple(dilation)
+    stride = _triple(stride)
     if isinstance(padding, str):
         if padding != "same":
             raise ValueError("padding does not accept str values other than 'same'")
