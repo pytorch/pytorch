@@ -7486,6 +7486,16 @@ class TestNN(NNTestCase):
             self.assertAlmostEqual(cudnn_input_grad, thnn_input_grad, delta=1e-3)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_batchnorm_nonaffine_cuda_half_input(self):
+        input = torch.randn(16, 3, 24, 24, dtype=torch.half, device="cuda")
+        m = nn.BatchNorm2d(3, affine=False).cuda().float()  # keep running stats in FP32
+        output = m(input)
+        self.assertEqual(output.type(), input.type())
+        m.eval()
+        output = m(input)
+        self.assertEqual(output.type(), input.type())
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types([torch.float, torch.half])
     def test_batchnorm_large_batch(self, dtype=torch.float):
         bn = nn.BatchNorm1d(1).to('cuda', dtype)
