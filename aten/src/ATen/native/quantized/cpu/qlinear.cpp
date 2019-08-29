@@ -174,10 +174,10 @@ static auto registry =
     torch::RegisterOperators()
         .op("quantized::quantized_linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
-                QuantizedCPUTensorId()))
+                TensorTypeId::QuantizedCPUTensorId))
         .op("quantized::quantized_linear_relu(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<true>>(
-                QuantizedCPUTensorId()));
+                TensorTypeId::QuantizedCPUTensorId));
 } // namespace
 } // namespace native
 } // namespace at

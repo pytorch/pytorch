@@ -43,10 +43,12 @@ if not TEST_CUDA:
 
 TEST_MAGMA = TEST_CUDA
 TEST_LARGE_TENSOR = TEST_CUDA
+TEST_MEDIUM_TENSOR = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
     TEST_MAGMA = torch.cuda.has_magma
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
+    TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
 
 floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
                 torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
@@ -1439,6 +1441,9 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float64, 'cuda')
         _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float16, 'cuda')
         _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float64, 'cuda')
+        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
+        # test that it works with bool tensors
+        _TestTorchMixin._test_bernoulli(self, torch.bool, torch.float16, 'cuda')
         _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
 
     def test_cat_bad_input_sizes(self):
@@ -2903,6 +2908,30 @@ class TestCuda(TestCase):
             torch.DoubleTensor(a).cuda().round().cpu(),
             torch.DoubleTensor(res).cpu())
 
+    @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
+    def test_cuda_kernel_loop_overflow(self):
+        # Issue #24309: In extreme cases, the loop variable could overflow and continue
+        # the kernel loop with a negative index, causing a RuntimeError (invalid write):
+        x = torch.randn(1, 1, 1, 2**30 + 1, dtype=torch.float16, device="cuda")
+        expected = x[0, 0, 0, 2**30]
+        y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
+        torch.cuda.synchronize()
+        self.assertEqual(y[0, 0, 0, 2**30], expected)
+
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_cuda_kernel_loop_overflow_large(self):
+        # Make sure input.numel() > INT_MAX is handled:
+        x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
+        with self.assertRaisesRegex(RuntimeError, "integer out of range"):
+            y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
+
+        # Issue #24309: In extreme cases, the loop variable could overflow and continue
+        # the kernel loop with a negative index, causing a RuntimeError (invalid write):
+        x = torch.randn(1, 1, 1, 2**31 - 1, dtype=torch.float16, device="cuda")
+        expected = x[0, 0, 0, 2**31 - 2]
+        y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
+        torch.cuda.synchronize()
+        self.assertEqual(y[0, 0, 0, 2**31 - 2], expected)
 
 def load_ignore_file():
     from os.path import join, dirname
