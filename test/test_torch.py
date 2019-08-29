@@ -8499,6 +8499,20 @@ class _TestTorchMixin(torchtest):
                     idx[tuple(ii)] = torch.randperm(dim_size)[0:elems_per_row]
 
     def test_flatten(self):
+        # Test that flatten returns 1-dim tensor when given a 0-dim tensor
+        zero_dim_tensor = torch.tensor(123)
+        flat0 = zero_dim_tensor.flatten()
+        one_dim_tensor = torch.tensor([123])
+        flat1 = zero_dim_tensor.flatten()
+
+        self.assertEqual(zero_dim_tensor.shape, torch.Size([]))
+        self.assertEqual(flat0.shape, torch.Size([1]))
+        self.assertEqual(one_dim_tensor.shape, torch.Size([1]))
+        self.assertEqual(flat1.shape, torch.Size([1]))
+        self.assertEqual(flat0, one_dim_tensor)
+        self.assertEqual(flat0, flat1)
+        self.assertEqual(flat0.shape, flat1.shape)
+
         # Test both float tensor and quantized tensor
         tensors = [torch.randn(5, 5, 5, 5),
                    torch._empty_affine_quantized([5, 5, 5, 5],
