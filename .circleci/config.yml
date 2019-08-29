@@ -3213,14 +3213,14 @@ parameters:
 
 # PR jobs pr builds
 workflows:
-  triggers:
-    - schedule:
-        cron: "15 16 * * *"
-        filters:
-          branches:
-            only:
-              - master
   other:
+    triggers:
+      - schedule:
+          cron: "15 16 * * *"
+          filters:
+            branches:
+              only:
+                - master
     when: << pipeline.parameters.run_other >>
     jobs:
       - setup
