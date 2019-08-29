@@ -1,4 +1,5 @@
 from functools import update_wrapper
+import math
 from numbers import Number
 import torch
 import torch.nn.functional as F
@@ -84,6 +85,35 @@ def probs_to_logits(probs, is_binary=False):
         return torch.log(ps_clamped) - torch.log1p(-ps_clamped)
     return torch.log(ps_clamped)
 
+
+def contfractbeta(a, b, x, niters=200, tol=3.0e-6):
+    """ contfractbeta() evaluates the continued fraction form of the incomplete Beta function; incompbeta().  
+    (Code translated from: Numerical Recipes in C.)"""
+    bm = az = am = 1.0
+    qab = a+b
+    qap = a+1.0
+    qam = a-1.0
+    bz = 1.0-qab*x/qap
+
+    for i in range(niters+1):
+        em = float(i+1)
+        tem = em + em
+        d = em*(b-em)*x/((qam+tem)*(a+tem))
+        ap = az + d*am
+        bp = bz+d*bm
+        d = -(a+em)*(qab+em)*x/((qap+tem)*(a+tem))
+        app = ap+d*az
+        bpp = bp+d*bz
+        aold = az
+        am = ap/bpp
+        bm = bp/bpp
+        az = app/bpp
+        bz = 1.0
+        if (abs(az-aold)<(tol*abs(az))):
+            return az
+
+def cont_frac():
+    pass
 
 class lazy_property(object):
     r"""
