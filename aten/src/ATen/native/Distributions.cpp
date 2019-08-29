@@ -303,7 +303,6 @@ Tensor multinomial_cpu(const Tensor& self, int64_t n_sample, bool with_replaceme
 }
 
 Tensor& multinomial_out_cpu(Tensor& result, const Tensor& self, int64_t n_sample, bool with_replacement, Generator *gen) {
-  TORCH_CHECK(self.dim() >= 1, "multinomial only supports at least 1D tensor, got: ", self.dim(), "D");
   TORCH_CHECK(at::isFloatingType(self.scalar_type()), "multinomial only supports floating-point dtypes for input, got: ", self.scalar_type());
   TORCH_CHECK(result.scalar_type() == ScalarType::Long, "multinomial expects Long tensor out, got: ", result.scalar_type());
   TORCH_CHECK(n_sample > 0, "cannot sample n_sample <= 0 samples");
