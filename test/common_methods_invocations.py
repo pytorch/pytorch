@@ -41,7 +41,7 @@ def gather_variable(shape, index_dim, max_indices, duplicate=False):
 
 
 def bernoulli_scalar():
-    return torch.tensor(0, dtype=torch.uint8).bernoulli_()
+    return torch.tensor(0, dtype=torch.bool).bernoulli_()
 
 
 def mask_not_all_zeros(shape):
@@ -810,22 +810,22 @@ def method_tests():
         ('masked_select', (M,), (mask_not_all_zeros((M, M)),), 'broadcast_lhs'),
         ('masked_select', (M, 1, M), (mask_not_all_zeros((M, M)),),
          'broadcast_all'),
-        ('masked_select', (), (torch.tensor(1, dtype=torch.uint8),), 'scalar'),
-        ('masked_select', (M, M), (torch.tensor(1, dtype=torch.uint8),), 'scalar_broadcast_rhs'),
+        ('masked_select', (), (torch.tensor(1, dtype=torch.bool),), 'scalar'),
+        ('masked_select', (M, M), (torch.tensor(1, dtype=torch.bool),), 'scalar_broadcast_rhs'),
         ('masked_select', (), (mask_not_all_zeros((M, M)),), 'scalar_broadcast_lhs'),
-        ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), 10)),
-        ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), ()), 'tensor'),
-        ('masked_fill', (M,), (torch.ByteTensor(M, M).bernoulli_(), 10), 'broadcast_lhs'),
-        ('masked_fill', (M, M), (torch.ByteTensor(M,).bernoulli_(), 10), 'broadcast_rhs'),
-        ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8).bernoulli_(), 10), 'scalar'),
-        ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8).bernoulli_(), ()),
+        ('masked_fill', (M, M), (torch.BoolTensor(M, M).bernoulli_(), 10)),
+        ('masked_fill', (M, M), (torch.BoolTensor(M, M).bernoulli_(), ()), 'tensor'),
+        ('masked_fill', (M,), (torch.BoolTensor(M, M).bernoulli_(), 10), 'broadcast_lhs'),
+        ('masked_fill', (M, M), (torch.BoolTensor(M,).bernoulli_(), 10), 'broadcast_rhs'),
+        ('masked_fill', (), (torch.tensor(0, dtype=torch.bool).bernoulli_(), 10), 'scalar'),
+        ('masked_fill', (), (torch.tensor(0, dtype=torch.bool).bernoulli_(), ()),
          'scalar_variable'),
-        ('masked_fill', (M, M), (torch.tensor(0, dtype=torch.uint8).bernoulli_(), 10),
+        ('masked_fill', (M, M), (torch.tensor(0, dtype=torch.bool).bernoulli_(), 10),
          'scalar_broadcast_rhs'),
-        ('masked_scatter', (M, M), (torch.ByteTensor(M, M).bernoulli_(), (M, M))),
-        ('masked_scatter', (M,), (torch.ByteTensor(M, M).bernoulli_(), (M, M)),
+        ('masked_scatter', (M, M), (torch.BoolTensor(M, M).bernoulli_(), (M, M))),
+        ('masked_scatter', (M,), (torch.BoolTensor(M, M).bernoulli_(), (M, M)),
          'broadcast_lhs'),
-        ('masked_scatter', (M, M), (torch.ByteTensor(M,).bernoulli_(), (M, M)),
+        ('masked_scatter', (M, M), (torch.BoolTensor(M,).bernoulli_(), (M, M)),
          'broadcast_rhs'),
         ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)), 'scalar'),
         ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)),
