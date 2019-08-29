@@ -69,7 +69,6 @@ def get_num_params(fn, loc):
     if source is None:
         return None
     py_ast = ast.parse(source)
-    print(fn, len(py_ast.body), py_ast.body)
     if len(py_ast.body) == 1 and isinstance(py_ast.body[0], ast.ClassDef):
         raise torch.jit.frontend.FrontendError(
             loc, "Cannot instantiate class '{}' in a script function".format(py_ast.body[0].name))
