@@ -338,7 +338,7 @@ class TestNamedTensor(TestCase):
     def test_tensor_from_tensor(self):
         x = torch.randn(1, 1)
         names = ('N', 'C')
-        tensor = torch.tensor([[1]], names=names)
+        tensor = torch.tensor(x, names=names)
         self.assertEqual(tensor.names, names)
 
     def test_tensor_from_named_tensor(self):
