@@ -229,29 +229,6 @@ void InsertObserversImpl(
   }
 }
 
-} // namespace
-
-// PyBind APIs
-void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
-  throw std::runtime_error("Pass not implemented yet!");
-}
-
-void QuantLinting(std::shared_ptr<Graph>& graph) {
-  throw std::runtime_error("Pass not implemented yet!");
-}
-
-void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
-  throw std::runtime_error("Pass not implemented yet!");
-}
-
-TORCH_API void InsertObservers(
-    script::Module& module,
-    const std::string& method_name,
-    const QConfigDict& qconfig_dict) {
-  auto module_qconfig_map = getQConfigMap(module, qconfig_dict);
-  InsertObserversImpl(module, method_name, module_qconfig_map);
-}
-
 Node* insertQuantDeQuantCall(Value* v, const IValue& qparams, at::ScalarType t, bool insert_after=true) {
   Graph* g = v->node()->owningGraph();
   Node* quant = createQuantNode(v, g);
@@ -319,6 +296,7 @@ class QuantizeHelper {
  public:
   QuantizeHelper(const script::Module& m) : module_(m) {}
   IValue getQParams(Value* v);
+  c10::optional<script::Module> findChildModuleToQuantize(Value* v);
   void quantizeBias(Value* v);
   void quantizeTensor(Value* v, bool insert_after=true);
   void removeObserver(Value* v, const std::string& observer_name);
@@ -425,10 +403,23 @@ void QuantizeHelper::quantizeTensor(Value* v,
   q->replaceInputWith(dequant->output(), v);
 }
 
-script::Module InsertQuantDeQuant(
-    script::Module& input_module,
+c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(Value* v) {
+  if (v->node()->kind() == prim::CallMethod && v->node()->s(attr::name) == "forward") {
+    auto child_instance = v->node()->inputs()[0];
+    TORCH_INTERNAL_ASSERT(child_instance->node()->kind() == prim::GetAttr, "Child instance should come from GetAttr.");
+    auto child_module_name = child_instance->node()->s(attr::name);
+    if (child_module_name.find("observer_for_") == std::string::npos) {
+      auto child_module = module_.find_module(child_module_name);
+      TORCH_INTERNAL_ASSERT(child_module, "InsertQuantDeQuant - Child module " + child_module_name + " does not exist");
+      return child_module;
+    }
+  }
+  return c10::nullopt;
+}
+
+void InsertQuantDeQuantImpl(
+    script::Module& module,
     const std::string& method_name) {
-  script::Module module = input_module.clone();
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   std::vector<Value*> values_to_quantize;
@@ -476,6 +467,10 @@ script::Module InsertQuantDeQuant(
 
   for (Value* v : values_to_quantize) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
+      auto child_module = qh.findChildModuleToQuantize(v);
+      if (child_module) {
+        InsertQuantDeQuantImpl(child_module.value(), "forward");
+      }
       if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
         qh.quantizeBias(v);
       } else {
@@ -491,11 +486,41 @@ script::Module InsertQuantDeQuant(
   }
 
   qh.destroyNodes();
+}
+
+} // namespace
+
+TORCH_API void InsertObservers(
+    script::Module& module,
+    const std::string& method_name,
+    const QConfigDict& qconfig_dict) {
+  auto module_qconfig_map = getQConfigMap(module, qconfig_dict);
+  InsertObserversImpl(module, method_name, module_qconfig_map);
+}
+
+script::Module InsertQuantDeQuant(
+    script::Module& input_module,
+    const std::string& method_name) {
+  script::Module module = input_module.clone();
+  InsertQuantDeQuantImpl(module, method_name);
 
   // NOTE: Remove observer module does not work right now, we'll return
   // the module with observer modules as a temporary workaround
   // TODO: remove observer modules after we have a remove_module API
   return module;
+}
+
+// PyBind APIs
+void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
+  throw std::runtime_error("Pass not implemented yet!");
+}
+
+void QuantLinting(std::shared_ptr<Graph>& graph) {
+  throw std::runtime_error("Pass not implemented yet!");
+}
+
+void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
+  throw std::runtime_error("Pass not implemented yet!");
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {
