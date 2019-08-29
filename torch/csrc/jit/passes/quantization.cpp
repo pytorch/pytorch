@@ -477,19 +477,11 @@ void InsertQuantDeQuantImpl(
     const std::string& method_name) {
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
-  std::vector<Value*> values_to_quantize;
-  std::vector<Value*> input_values;
-
-  // For traversing all blocks in the graph including subblocks.
-  std::stack<Block*> blocks_to_visit;
-
-  // Add observer for external input nodes excluding parameters
-  // These are treated as activation as they vary across batches
-  // and need to be observed.
 
   // prim::Param nodes do not belong to the graph. Hence the Insert
   // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
+  std::vector<Value*> input_values;
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get())) {
@@ -497,19 +489,17 @@ void InsertQuantDeQuantImpl(
     }
   }
 
+  std::vector<Value*> values_to_quantize;
+  std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      // Skip nodes that we don't need to observe, e.g. 'prim::Constant' or
-      // observer nodes
-      if (!outputsNeedToBeObserved(n)) {
-        continue;
-      }
-
       for (Value* v : n->outputs()) {
-        values_to_quantize.push_back(v);
+        if (v->type()->isSubtypeOf(TensorType::get())) {
+          values_to_quantize.push_back(v);
+        }
       }
 
       // Schedule subblocks (if any) for visiting.
@@ -521,23 +511,19 @@ void InsertQuantDeQuantImpl(
   QuantizeHelper qh(module);
 
   for (Value* v : values_to_quantize) {
-    if (v->type()->isSubtypeOf(TensorType::get())) {
-      auto child_module = qh.findChildModuleToQuantize(v);
-      if (child_module) {
-        InsertQuantDeQuantImpl(child_module.value(), "forward");
-      }
-      if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
-        qh.quantizeBias(v);
-      } else {
-        qh.quantizeTensor(v);
-      }
+    auto child_module = qh.findChildModuleToQuantize(v);
+    if (child_module) {
+      InsertQuantDeQuantImpl(child_module.value(), "forward");
+    }
+    if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
+      qh.quantizeBias(v);
+    } else {
+      qh.quantizeTensor(v);
     }
   }
 
   for (Value* v : input_values) {
-    if (v->type()->isSubtypeOf(TensorType::get())) {
-      qh.quantizeTensor(v, false);
-    }
+    qh.quantizeTensor(v, false);
   }
 
   qh.destroyNodes();
