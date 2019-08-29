@@ -54,7 +54,8 @@ class Conf(object):
         if not self.smoke:
             parts.append(build_or_test)
 
-        return "_".join(parts)
+        joined = "_".join(parts)
+        return joined.replace(".", "_")
 
     def gen_yaml_tree(self, build_or_test):
 
