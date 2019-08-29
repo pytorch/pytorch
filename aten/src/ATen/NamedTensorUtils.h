@@ -36,7 +36,7 @@ namespace namedinference {
 // Names get propagated via the following rules:
 // 1) If result does not have names, then `names` get propagated.
 // 2) If result has names, then `names` must be equal to result.names
-void propagate_names(Tensor& result, optional<DimnameList> names);
+CAFFE2_API void propagate_names(Tensor& result, optional<DimnameList> names);
 void propagate_names(Tensor& result, std::vector<Dimname>&& names, bool validate_names);
 void propagate_names(Tensor& result, optional<std::vector<Dimname>>&& maybe_names, bool validate_names);
 void propagate_names(TensorImpl* result, optional<DimnameList> names);

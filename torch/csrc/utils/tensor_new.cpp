@@ -17,6 +17,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
+#include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
@@ -229,7 +230,11 @@ Tensor internal_new_from_data(
     bool copy_variables,
     bool copy_numpy,
     bool type_inference,
-    bool pin_memory = false) {
+    bool pin_memory = false
+#ifdef BUILD_NAMEDTENSOR
+    , optional<DimnameList> names = at::nullopt
+#endif
+    ) {
 
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
@@ -241,6 +246,11 @@ Tensor internal_new_from_data(
     if (copy_variables) {
       var = var.detach();
     }
+#ifdef BUILD_NAMEDTENSOR
+    if (names) {
+      at::namedinference::propagate_names(var, names);
+    }
+#endif
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
     const auto& inferred_scalar_type = type_inference ? var.scalar_type() : scalar_type;
@@ -258,6 +268,9 @@ Tensor internal_new_from_data(
     auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
+#ifdef BUILD_NAMEDTENSOR
+    at::namedinference::propagate_names(tensor, names);
+#endif
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
   }
 
@@ -268,6 +281,9 @@ Tensor internal_new_from_data(
     auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
+#ifdef BUILD_NAMEDTENSOR
+    at::namedinference::propagate_names(tensor, names);
+#endif
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
   }
 #endif
@@ -281,6 +297,9 @@ Tensor internal_new_from_data(
   auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
   AutoNoGIL no_gil;
   maybe_initialize_cuda(device);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(tensor, names);
+#endif
   return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
 }
 
@@ -556,10 +575,18 @@ Tensor sparse_coo_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_t
 
 Tensor tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
+#ifdef BUILD_NAMEDTENSOR
+    "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",
+#else
     "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+#endif
   });
 
+#ifdef BUILD_NAMEDTENSOR
+  ParsedArgs<6> parsed_args;
+#else
   ParsedArgs<5> parsed_args;
+#endif
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
@@ -572,6 +599,20 @@ Tensor tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObje
     bool type_inference = r.isNone(1);
     bool pin_memory = r.toBool(3);
     bool args_requires_grad = r.toBool(4);
+#ifdef BUILD_NAMEDTENSOR
+    auto __names = r.toDimnameListOptional(5);
+    c10::optional<DimnameList> names = __names ? c10::make_optional(DimnameList(__names.value())) : c10::nullopt;
+    auto new_tensor = internal_new_from_data(
+               typeIdWithDefault(r, 2, type_id),
+               r.scalartypeWithDefault(1, scalar_type),
+               r.deviceOptional(2),
+               data,
+               true,
+               true,
+               type_inference,
+               pin_memory,
+               names);
+#else
     auto new_tensor = internal_new_from_data(
                typeIdWithDefault(r, 2, type_id),
                r.scalartypeWithDefault(1, scalar_type),
@@ -581,6 +622,7 @@ Tensor tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObje
                true,
                type_inference,
                pin_memory);
+#endif
     new_tensor.detach_(); // ensure new_tensor a leaf node
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
