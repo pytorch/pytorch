@@ -155,7 +155,8 @@ The shapes of :attr:`input` and :attr:`other` must be
 .. math::
     \text{{out}} = \text{{input}} + \text{{alpha}} \times \text{{other}}
 
-If :attr:`other` has an integral dtype, :attr:`alpha` should also be an integer.
+If the result of adding :attr:`self` and :attr:`other` would not have a
+floating-point type, :attr:`alpha` must be an integer.
 
 Args:
     input (Tensor): the first input tensor
@@ -176,7 +177,7 @@ Example::
             [-1.7724],
             [-0.5811],
             [-0.8017]])
-    >>> torch.add(a, b, alpha=10.0)
+    >>> torch.add(a, b, alpha=10.0)  # type: ignore
     tensor([[  2.7695,   3.3930,   4.3672,   4.1450],
             [-18.6971, -18.0736, -17.0994, -17.3216],
             [ -6.7845,  -6.1610,  -5.1868,  -5.4090],
@@ -2542,15 +2543,15 @@ logical_xor(input, other, out=None) -> Tensor
 Computes the element-wise logical XOR of the given input tensors. Both input tensors must have the bool dtype.
 
 Args:
-    input (Tensor): the input tensor
+    {input}
     other (Tensor): the tensor to compute XOR with
-    out (Tensor, optional): the output tensor
+    {out}
 
-Example:
+Example::
 
     >>> torch.logical_xor(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
     tensor([ False, False,  True])
-""")
+""".format(**common_args))
 
 add_docstr(torch.logspace,
            r"""
@@ -4873,7 +4874,8 @@ The shapes of :attr:`input` and :attr:`other` must be
 .. math::
     \text{{out}} = \text{{input}} - \text{{alpha}} \times \text{{other}}
 
-If :attr:`other` has an integral dtype, :attr:`alpha` should also be an integer.
+If the result of subtracting :attr:`other` from :attr:`self` would not have a
+floating-point type, :attr:`alpha` must be an integer.
 
 Args:
     input (Tensor): the first input tensor
@@ -4894,7 +4896,7 @@ Example::
             [ 0.2565],
             [ 0.6692],
             [ 0.2509]])
-    >>> torch.sub(a, b, alpha=10.0)
+    >>> torch.sub(a, b, alpha=10.0)  # type: ignore
     tensor([[12.6663, 15.1754, 13.4498, 12.6835],
             [-3.3577, -0.8486, -2.5742, -3.3405],
             [-7.4847, -4.9756, -6.7012, -7.4675],

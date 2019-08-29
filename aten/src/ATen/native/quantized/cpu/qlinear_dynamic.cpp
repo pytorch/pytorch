@@ -181,10 +181,10 @@ static auto registry =
     torch::RegisterOperators()
         .op("quantized::fbgemm_linear_dynamic(Tensor X, Tensor W_prepack, Tensor? b) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<false>>(CPUTensorId()))
+                .kernel<QLinearDynamicInt8<false>>(TensorTypeId::CPUTensorId))
         .op("quantized::fbgemm_linear_relu_dynamic(Tensor X, Tensor W_prepack, Tensor? b) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<true>>(CPUTensorId()));
+                .kernel<QLinearDynamicInt8<true>>(TensorTypeId::CPUTensorId));
 } // namespace
 } // namespace native
 } // namespace at
