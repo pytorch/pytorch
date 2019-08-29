@@ -111,8 +111,8 @@ struct ConstantPropagator {
     std::vector<IValue> outputs;
     try {
       outputs = runNode(n);
-    } catch (const c10::Error& e) {
-      // catch AT_ASSERT errors. This op may not be run reached,
+    } catch (...) {
+      // Catch exceptions. This op may not be run,
       // so catch the error here & leave the op in the graph
       return;
     }

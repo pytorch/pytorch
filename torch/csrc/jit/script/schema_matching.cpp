@@ -158,8 +158,9 @@ static Value* tryMatchArgument(
   // Check if the value can be matched to the arg through any implicit
   // conversions
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
-
-  if (!value->type()->isSubtypeOf(concrete_type)) {
+  std::stringstream ss;
+  if (!value->type()->isSubtypeOfExt(
+          concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
     if (failure_messages) {
       auto& ostream = err()
           << arg.formatTypeMismatchMsg(value->type()->python_str());
@@ -177,6 +178,7 @@ static Value* tryMatchArgument(
         ostream << "Use int(tensor) or float(tensor) to retrieve item() from a "
                 << "tensor with the appropriate type.\n";
       }
+      ostream << ss.str();
     }
 
     return nullptr;
