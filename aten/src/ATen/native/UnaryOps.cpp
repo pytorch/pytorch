@@ -98,6 +98,22 @@ Tensor& neg_out(Tensor& result, const Tensor& self) {
   return result;
 }
 
+Tensor ceil(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::ceil_out(result, self);
+}
+
+Tensor& ceil_(Tensor& self) {
+  return at::ceil_out(self, self);
+}
+
+Tensor& ceil_out(Tensor& result, const Tensor& self) {
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_internal_overlap=*/true);
+  ceil_stub(iter.device_type(), iter);
+  return result;
+}
+
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
@@ -270,7 +286,6 @@ IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
-IMPLEMENT_UNARY_OP_VEC(ceil)
 IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(digamma)
