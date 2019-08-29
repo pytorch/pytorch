@@ -799,7 +799,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 "Mismatch in interation {}".format(i)
             )
 
-    @unittest.skip("Test is flaky")
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25427")
     def test_allreduce_coalesced_stress(self):
         inputs = [2 * [torch.Tensor([i + self.rank])] for i in range(1000)]
         self._test_allreduce_coalesced_stress(inputs)
