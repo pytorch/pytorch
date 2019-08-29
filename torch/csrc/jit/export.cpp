@@ -640,6 +640,7 @@ class ScriptModuleSerializer2 {
         constant_table_.begin(), constant_table_.end());
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format_) {
+
       auto compUnit = module.class_compilation_unit();
       auto funcList = compUnit->get_functions();
 

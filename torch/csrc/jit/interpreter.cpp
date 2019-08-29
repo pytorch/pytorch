@@ -331,6 +331,7 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
+  // opname_table_ has the same order as operator_table_.
   std::vector<c10::OperatorName> opname_table_;
   std::vector<Function*> function_table_;
   std::vector<TypePtr> type_table_;
@@ -475,9 +476,6 @@ struct CodeImpl {
     emitLoadInputs(node->inputs());
     insertInstruction(OP, operator_table_.size());
     operator_table_.emplace_back(getOperation(node));
-    // Looks like all overload_names are empty? TODO: If the name is not unique,
-    // use inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
-    // as a backup.
     opname_table_.emplace_back(node->schema().operator_name());
   }
 

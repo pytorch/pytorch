@@ -308,13 +308,19 @@ struct TORCH_API Module {
 
   void save(
       std::ostream& out,
-      const ExtraFilesMap& extra_files = ExtraFilesMap(),
-      bool bytecode_format = false) const;
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
   void save(
       const std::string& filename,
-      const ExtraFilesMap& extra_files = ExtraFilesMap(),
-      bool bytecode_format = false) const;
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+
+  void save_for_mobile(
+      std::ostream& out,
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+
+  void save_for_mobile(
+      const std::string& filename,
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
   // Create a deep copy of this module.
   Module clone() const;
