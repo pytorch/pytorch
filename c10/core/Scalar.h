@@ -18,20 +18,16 @@ namespace c10 {
  * Scalar (which is why, for example, we provide both add(Tensor) and
  * add(Scalar) overloads for many operations). It may also be used in
  * circumstances where you statically know a tensor is 0-dim and single size,
- * but don't know it's type.
+ * but don't know its type.
  */
 class C10_API Scalar {
  public:
   Scalar() : Scalar(int64_t(0)) {}
 
-#define DEFINE_IMPLICIT_CTOR(type, name, member)      \
-  Scalar(type vv) : tag(Tag::HAS_##member) {          \
-    v.member = convert<decltype(v.member), type>(vv); \
-  }
-  // We can't set v in the initializer list using the
-  // syntax v{ .member = ... } because it doesn't work on MSVC
+#define DEFINE_IMPLICIT_CTOR(type, name)      \
+  Scalar(type vv) : Scalar(vv, true) { }
 
-  AT_FORALL_SCALAR_TYPES(DEFINE_IMPLICIT_CTOR)
+  AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, DEFINE_IMPLICIT_CTOR)
 
 #undef DEFINE_IMPLICIT_CTOR
 
@@ -58,7 +54,7 @@ class C10_API Scalar {
 
 #undef DEFINE_IMPLICIT_COMPLEX_CTOR
 
-#define DEFINE_ACCESSOR(type, name, member)               \
+#define DEFINE_ACCESSOR(type, name)                       \
   type to##name() const {                                 \
     if (Tag::HAS_d == tag) {                              \
       return checked_convert<type, double>(v.d, #type);   \
@@ -92,6 +88,23 @@ class C10_API Scalar {
   Scalar operator-() const;
 
  private:
+    template<typename T,
+             typename std::enable_if<std::numeric_limits<T>::is_integer, bool>::type* =
+                 nullptr>
+    Scalar(T vv, bool) : tag(Tag::HAS_i) {
+      v.i = convert<decltype(v.i), T>(vv);
+    }
+
+    template<typename T,
+             typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type* =
+                 nullptr>
+    Scalar(T vv, bool) : tag(Tag::HAS_d) {
+      v.d = convert<decltype(v.d), T>(vv);
+    }
+
+  // We can't set v in the initializer list using the
+  // syntax v{ .member = ... } because it doesn't work on MSVC
+
   enum class Tag { HAS_d, HAS_i, HAS_z };
   Tag tag;
   union {
@@ -110,7 +123,7 @@ inline T Scalar::to() {
   throw std::runtime_error("to() cast to unexpected type.");
 }
 
-#define DEFINE_TO(T, name, _) \
+#define DEFINE_TO(T, name)    \
   template <>                 \
   inline T Scalar::to<T>() {  \
     return to##name();        \

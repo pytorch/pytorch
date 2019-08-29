@@ -17,7 +17,7 @@ from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
 from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, PY3,
                           IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
-                          load_tests)
+                          load_tests, TEST_WITH_TSAN)
 
 try:
     import psutil
@@ -88,6 +88,10 @@ if torch.multiprocessing._supports_context:
     supported_multiprocessing_contexts += list(torch.multiprocessing.get_all_start_methods())
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDatasetRandomSplit(TestCase):
     def test_lengths_must_equal_dataset_size(self):
         with self.assertRaises(ValueError):
@@ -169,6 +173,10 @@ class CountingIterableDataset(IterableDataset):
         return self.n
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestTensorDataset(TestCase):
 
     def test_len(self):
@@ -212,6 +220,10 @@ class TestTensorDataset(TestCase):
             self.assertEqual(t3[i], source[i][3])
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestConcatDataset(TestCase):
 
     def test_concat_two_singletons(self):
@@ -560,7 +572,7 @@ def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
 
     it = iter(loader)
     if use_workers:
-        workers = it.workers
+        workers = it._workers
 
     def kill_pid(pid):
         psutil_p = psutil.Process(pid)
@@ -638,7 +650,7 @@ def _test_get_worker_info():
     data = []
     for d in it:
         data.append(d)
-    worker_pids = [w.pid for w in it.workers]
+    worker_pids = [w.pid for w in it._workers]
     data = torch.cat(data, 0)
     for d in data:
         # each `d` is a [worker_id, worker_pid] pair, which is set in
@@ -671,6 +683,10 @@ def error_worker_init_fn(_):
     raise RuntimeError("Error in worker_init_fn")
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDataLoader(TestCase):
 
     def setUp(self):
@@ -735,7 +751,7 @@ class TestDataLoader(TestCase):
 
     def test_invalid_assign_after_init(self):
         dl = DataLoader(self.dataset)
-        for attr in ('batch_size', 'sampler', 'drop_last'):
+        for attr in ('batch_size', 'sampler', 'batch_sampler', 'drop_last', 'dataset'):
             def fn():
                 setattr(dl, attr, {})
 
@@ -919,7 +935,7 @@ class TestDataLoader(TestCase):
             len(dataloader)  # DataLoader with iterable-style dataset should error in __len__
 
         # [no auto-batching] test that workers exit gracefully
-        workers = dataloader_iter.workers
+        workers = dataloader_iter._workers
         del dataloader_iter
         try:
             for w in workers:
@@ -955,7 +971,7 @@ class TestDataLoader(TestCase):
         self.assertEqual(fetched, {tuple(range(4)), tuple(range(7)), tuple(range(7, 14)), tuple(range(14, 20))})
 
         # [auto-batching] test that workers exit gracefully
-        workers = dataloader_iter.workers
+        workers = dataloader_iter._workers
         del dataloader_iter
         try:
             for w in workers:
@@ -991,7 +1007,7 @@ class TestDataLoader(TestCase):
         self.assertEqual(fetched, {tuple(range(7)), tuple(range(7, 14))})
 
         # [auto-batching & drop_last] test that workers exit gracefully
-        workers = dataloader_iter.workers
+        workers = dataloader_iter._workers
         del dataloader_iter
         try:
             for w in workers:
@@ -1226,9 +1242,9 @@ class TestDataLoader(TestCase):
 
         for pin_memory in pin_memory_configs:
             loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=pin_memory))
-            workers = loader.workers
+            workers = loader._workers
             if pin_memory:
-                pin_memory_thread = loader.pin_memory_thread
+                pin_memory_thread = loader._pin_memory_thread
             for i, _ in enumerate(loader):
                 if i == 10:
                     break
@@ -1522,6 +1538,10 @@ class StringDataset(Dataset):
         return (self.s[ndx], ndx)
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestStringDataLoader(TestCase):
     def setUp(self):
         super(TestStringDataLoader, self).setUp()
@@ -1548,6 +1568,10 @@ class DictDataset(Dataset):
         }
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDictDataLoader(TestCase):
     def setUp(self):
         super(TestDictDataLoader, self).setUp()
@@ -1592,6 +1616,10 @@ class NamedTupleDataset(Dataset):
                           label=str(ndx))
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestNamedTupleDataLoader(TestCase):
     def setUp(self):
         super(TestNamedTupleDataLoader, self).setUp()
@@ -1638,6 +1666,10 @@ def collate_into_packed_sequence_batch_first(batch):
     return torch.nn.utils.rnn.pack_padded_sequence(data, lengths, batch_first=True, enforce_sorted=False)
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestCustomPinFn(TestCase):
     def setUp(self):
         super(TestCustomPinFn, self).setUp()
@@ -1691,6 +1723,10 @@ class TestWorkerQueueDataset(Dataset):
         return len(self.data)
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
         super(TestIndividualWorkerQueue, self).setUp()

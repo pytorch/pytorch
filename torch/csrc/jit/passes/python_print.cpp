@@ -86,34 +86,6 @@ static bool isValidIdentifier(const std::string& name) {
   return true;
 }
 
-static void emitQualifiedName(std::ostream& out, const QualifiedName& name) {
-  const auto& name_ = name.name();
-  const auto& prefix_ = name.prefix();
-  if (isValidIdentifier(name_)) {
-    if (!prefix_.empty()) {
-      emitQualifiedName(out, QualifiedName(prefix_));
-      out << ".";
-    }
-    out << name_;
-  } else {
-    AT_ASSERT(!prefix_.empty());
-    out << "getattr(";
-    emitQualifiedName(out, QualifiedName(prefix_));
-    out << ", ";
-    printQuotedString(out, name_);
-    out << ")";
-  }
-}
-
-// Get a stringified version of the qualified name.
-// if a field is not a valid Python identifier, then it will print as, e.g.
-// getattr(self, "0").b
-static std::string getValidQualifiedName(const QualifiedName& name) {
-  std::stringstream ss;
-  emitQualifiedName(ss, name);
-  return ss.str();
-}
-
 // some names are valid identifiers but off limits because
 // they are keywords or namespaces used in the output
 const static std::unordered_set<std::string> reserved_names = {
@@ -270,27 +242,31 @@ struct PythonPrintPass {
   // where N is the index into this table.
   std::vector<at::Tensor>& tensor_table_;
 
-  // Any classes used are written to this table, to be later written out as
-  // dependencies.
-  std::vector<c10::NamedTypePtr>& class_table_;
-  std::vector<c10::NamedTypePtr> class_deps_;
+  // Any NamedTypes (classes, functions, NamedTuples) used are written to this
+  // table.
+  std::vector<c10::NamedTypePtr>& deps_table_;
   // Helper to avoid duplicating class types
-  void addToClassTable(const c10::NamedTypePtr& type) {
-    // we serialize module classes separately.
-    // Including them in the class table as well will cause the code
-    // to get imported twice.
-    if (auto classType = type->cast<ClassType>()) {
-      if (classType->is_module()) {
-        return;
+  void registerDependency(const c10::NamedTypePtr& type) {
+    if (legacy_module_printing_) {
+      // we serialize module classes separately.
+      // Including them in the class table as well will cause the code
+      // to get imported twice.
+      if (auto classType = type->cast<ClassType>()) {
+        if (classType->is_module()) {
+          return;
+        }
       }
     }
-    if (std::find(class_table_.cbegin(), class_table_.cend(), type) ==
-        class_table_.cend()) {
-      class_table_.push_back(type);
-    }
-    if (std::find(class_deps_.cbegin(), class_deps_.cend(), type) ==
-        class_deps_.cend()) {
-      class_deps_.push_back(type);
+    // Need to do actual equality comparison, not a pointer equality. This is
+    // because for some types (e.g. FunctionType), we may have multiple
+    // TypePtr's that represent the same underlying thing.
+    auto it = std::find_if(
+        deps_table_.cbegin(),
+        deps_table_.cend(),
+        [&](const c10::NamedTypePtr& dep) { return *dep == *type; });
+
+    if (it == deps_table_.cend()) {
+      deps_table_.push_back(type);
     }
   }
 
@@ -315,6 +291,8 @@ struct PythonPrintPass {
 
   // used method names
   std::unordered_set<std::string> used_method_names_;
+
+  bool legacy_module_printing_;
 
   // scanValue, scanNode, scanBlock:
   // decide if it is safe to omit the output of a temporary variable,
@@ -614,12 +592,30 @@ struct PythonPrintPass {
   }
 
   void printAssignment(at::ArrayRef<Value*> lhs, at::ArrayRef<Value*> rhs) {
-    if (lhs.size() > 0) {
+    if (lhs.size() == 0) {
+      return;
+    }
+    indent();
+    printValueList(body_, lhs);
+    body_ << " = ";
+    printValueList(body_, rhs);
+    body_ << "\n";
+  }
+
+  bool requiresAnnotation(Value* lhs, Value* rhs) {
+    return *lhs->type() != *rhs->type();
+  }
+
+  void printAnnotatedAssignment(
+      at::ArrayRef<Value*> lhs,
+      at::ArrayRef<Value*> rhs) {
+    for (size_t i = 0; i < lhs.size(); ++i) {
       indent();
-      printValueList(body_, lhs);
-      body_ << " = ";
-      printValueList(body_, rhs);
-      body_ << "\n";
+      body_ << useOf(lhs[i]);
+      if (requiresAnnotation(lhs[i], rhs[i])) {
+        body_ << ": " << lhs[i]->type()->python_str();
+      }
+      body_ << " = " << useOf(rhs[i]) << "\n";
     }
   }
 
@@ -665,7 +661,7 @@ struct PythonPrintPass {
         });
 
     // Print initial assignments of loop node outputs = loop node inputs
-    printAssignment(stmt.carriedOutputs(), stmt.carriedInputs());
+    printAnnotatedAssignment(stmt.carriedOutputs(), stmt.carriedInputs());
 
     assignValuesToTheirUniqueNames(stmt.currentTripCount());
     // Loop header
@@ -756,11 +752,13 @@ struct PythonPrintPass {
   // Recursively check contained types for any class dependencies
   void registerClassDependencies(const TypePtr& type) {
     if (const auto classType = type->cast<ClassType>()) {
-      addToClassTable(classType);
+      registerDependency(classType);
     } else if (const auto tupleType = type->cast<TupleType>()) {
-      if (tupleType->qualified_name_obj()) {
-        addToClassTable(tupleType);
+      if (tupleType->name()) {
+        registerDependency(tupleType);
       }
+    } else if (const auto interfaceType = type->cast<InterfaceType>()) {
+      registerDependency(interfaceType);
     }
     for (const auto& containedType : type->containedTypes()) {
       registerClassDependencies(containedType);
@@ -951,6 +949,20 @@ struct PythonPrintPass {
     }
   }
 
+  static bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
+    if (elem_type->kind() == OptionalType::Kind) {
+      // it is possible that we are constructing an optional list, but all
+      // elements are present
+      return false;
+    }
+    if (elem_type->kind() == InterfaceType::Kind) {
+      // since classes can be members of multiple interfaces, we cannot
+      // construct which interface the list holds from the members alone
+      return false;
+    }
+    return true;
+  }
+
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
   void printRHS(TaggedStringStream& stmt, Node* node) {
     switch (node->kind()) {
@@ -978,7 +990,12 @@ struct PythonPrintPass {
         stmt << "uninitialized(" << node->output()->type()->python_str() << ")";
       } break;
       case prim::Constant: {
-        if (node->kind() == prim::Constant && !node->mustBeNone()) {
+        if (node->outputs().size() == 1 &&
+            node->output()->type()->kind() == TypeKind::FunctionType) {
+          auto fn = node->output()->type()->expect<FunctionType>();
+          registerDependency(fn);
+          stmt << fn->name()->qualifiedName();
+        } else if (!node->mustBeNone()) {
           IValue v = toIValue(node->output()).value();
           printConstant(stmt, v);
         } else {
@@ -1011,10 +1028,8 @@ struct PythonPrintPass {
         printValueList(stmt, node->inputs(), "sorted(", ")");
       } break;
       case prim::TupleConstruct: {
-        if (auto qualname = node->output()
-                                ->type()
-                                ->expect<TupleType>()
-                                ->qualified_name_obj()) {
+        if (auto qualname =
+                node->output()->type()->expect<TupleType>()->name()) {
           stmt << qualname->qualifiedName();
         }
         printValueList(
@@ -1029,13 +1044,22 @@ struct PythonPrintPass {
              << node->i(attr::end) << "]";
       } break;
       case prim::ListConstruct: {
-        // when the list is empty and is not a list of tensors,
-        // we need to annotate it, otherwise it won't be possible
-        // to infer the type on import
-        if (node->inputs().size() == 0 &&
-            !node->output()->type()->isSubtypeOf(TensorType::get())) {
-          stmt << "annotate(" << node->output()->type()->python_str()
-               << ", [])";
+        ListTypePtr list_type = node->output()->type()->expect<ListType>();
+        TypePtr elem_type = list_type->getElementType();
+        if (!elem_type->isSubtypeOf(TensorType::get())) {
+          // when the list is empty and is not a list of tensors,
+          // we need to annotate it, otherwise it won't be possible
+          // to infer the type on import
+          if (node->inputs().size() == 0) {
+            stmt << "annotate(" << node->output()->type()->python_str()
+                 << ", [])";
+          } else if (!elementTypeCanBeInferredFromMembers(elem_type)) {
+            stmt << "annotate(" << node->output()->type()->python_str() << ",";
+            printValueList(stmt, node->inputs(), "[", "]");
+            stmt << ")";
+          } else {
+            printValueList(stmt, node->inputs(), "[", "]");
+          }
         } else {
           printValueList(stmt, node->inputs(), "[", "]");
         }
@@ -1069,6 +1093,37 @@ struct PythonPrintPass {
           printQuotedString(field_stream, field);
           stmt << field_stream.str() << ")";
         }
+      } break;
+      case prim::CallFunction: {
+        stmt << useOf(node->inputs().at(0)) << "(";
+        for (size_t i = 1; i < node->inputs().size(); i++) {
+          stmt << useOf(node->inputs()[i]) << ", ";
+        }
+        stmt << ")";
+      } break;
+      case prim::CallMethod: {
+        const auto& self = node->inputs().at(0);
+        const auto& methodName = node->s(attr::name);
+        stmt << "(" << useOf(self) << ")"
+             << "." << methodName << "(";
+        for (size_t i = 1; i < node->inputs().size(); i++) {
+          stmt << useOf(node->inputs()[i]) << ", ";
+        }
+        stmt << ")";
+
+        if (auto selfClass = self->type()->cast<ClassType>()) {
+          registerDependency(selfClass);
+          const auto method = selfClass->getMethod(node->s(attr::name));
+          TORCH_INTERNAL_ASSERT(
+              method->qualname() ==
+              QualifiedName(selfClass->name()->qualifiedName(), methodName));
+        } else if (auto selfInterface = self->type()->cast<InterfaceType>()) {
+          registerDependency(selfInterface);
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              false, "method call to unhandled type in serialization");
+        }
+
       } break;
       default: {
         Symbol kind = node->kind();
@@ -1158,7 +1213,9 @@ struct PythonPrintPass {
   }
 
  public:
-  void printFunction(const Function& func) {
+  void printFunction(
+      const Function& func,
+      bool print_first_argument_type = true) {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
@@ -1174,7 +1231,7 @@ struct PythonPrintPass {
         // the first argument may omit its type when it is implied by context
         // the flag is_method_ determines when to do this
         body_ << arg_name;
-        if (!is_method_) {
+        if (print_first_argument_type) {
           body_ << ": " << arg.type()->python_str();
         }
       } else {
@@ -1190,29 +1247,36 @@ struct PythonPrintPass {
     printBody(graph.block());
   }
 
+  void printMethod(const Function& func) {
+    printFunction(func, /*print_first_argument_type=*/false);
+  }
+
   std::string getImports() {
     std::ostringstream ret;
     std::unordered_set<std::string> already_printed;
-    for (const auto& c : class_deps_) {
-      if (already_printed.count(c->qualifier())) {
+    for (const auto& c : deps_table_) {
+      if (already_printed.count(c->name()->prefix())) {
         continue;
       }
-      ret << "import " << c->qualifier() << "\n";
-      already_printed.insert(c->qualifier());
+      // TODO we try to print a def for TestLinear in TestLinear.forward
+      ret << "import " << c->name()->prefix() << "\n";
+      already_printed.insert(c->name()->prefix());
     }
     return ret.str();
   }
 
   PythonPrintPass(
       std::vector<at::Tensor>& tensor_table,
-      std::vector<c10::NamedTypePtr>& class_table,
+      std::vector<c10::NamedTypePtr>& deps_table,
       bool enforce_importable,
-      bool is_method)
+      bool legacy_module_printing)
       : body_(&source_range_stack_),
         tensor_table_(tensor_table),
-        class_table_(class_table),
+        deps_table_(deps_table),
         enforce_importable_(enforce_importable),
-        is_method_(is_method) {}
+        legacy_module_printing_(legacy_module_printing) {
+    TORCH_INTERNAL_ASSERT(deps_table.empty());
+  }
 
   // TODO: we should consider forcing functions to return a single value
   // instead of handling this tuple logic both in the compiler and the printer
@@ -1225,17 +1289,71 @@ struct PythonPrintPass {
     }
   }
 
-  void printModuleMethods(const script::Module& module) {
-    for (const auto method : module.type()->methods()) {
-      printFunction(*method);
+  void printModuleMetadata(const ClassTypePtr& moduleType) {
+    std::vector<std::string> params;
+    size_t numAttrs = moduleType->numAttributes();
+    // Populate the __parameters__ field. This tells the importer which
+    // attributes are parameters.
+    for (size_t i = 0; i < numAttrs; i++) {
+      if (moduleType->is_parameter(i)) {
+        params.push_back(moduleType->getAttributeName(i));
+      }
+    }
+    indent();
+    body_ << "__parameters__ = [";
+    for (const auto& param : params) {
+      body_ << "\"" << param << "\", ";
+    }
+    body_ << "]\n";
+
+    for (size_t i = 0; i < numAttrs; i++) {
+      const auto& name = moduleType->getAttributeName(i);
+      const auto& type = moduleType->getAttribute(name);
+      registerClassDependencies(type);
+
+      indent();
+
+      // Handling for when the attribute name is not a valid Python identifier.
+      // This happens for, e.g. ModuleList.
+      if (!isValidIdentifier(name)) {
+        if (i == 0) {
+          // Initialize the annotations dict if necessary.
+          body_ << "__annotations__ = []\n";
+          indent();
+        }
+        // Print out a direct manipulation of the annotations dict, like:
+        //   __annotations__["0"] = SomeType
+        body_ << "__annotations__["
+              << "\"" << name << "\"] = " << type->python_str() << "\n";
+      } else {
+        // Otherwise: just emit a python 3 attribute annotation, like:
+        //   foo : SomeType
+        body_ << name << " : " << type->python_str() << "\n";
+      }
     }
   }
 
-  void printClass(const c10::NamedTypePtr& type) {
-    if (auto classType = type->cast<ClassType>()) {
-      body_ << "class " << classType->basename() << ":\n";
+  void printNamedType(const c10::NamedTypePtr& type) {
+    if (auto functionType = type->cast<FunctionType>()) {
+      printFunction(*functionType->function());
+    } else if (auto classType = type->cast<ClassType>()) {
+      bool is_module = classType->is_module();
+      if (legacy_module_printing_) {
+        is_module = false;
+      }
+      body_ << "class " << classType->name()->name();
+      if (is_module) {
+        body_ << "(Module)";
+      }
+
+      body_ << ":\n";
       {
         const auto guard = WithIndented();
+        // For modules, we need to print special information about the module's
+        // attributes and parameters.
+        if (is_module) {
+          printModuleMetadata(classType);
+        }
         // TODO fields
         for (auto& method : classType->methods()) {
           printFunction(*method);
@@ -1243,7 +1361,7 @@ struct PythonPrintPass {
       }
     } else if (auto tupleType = type->cast<TupleType>()) {
       TORCH_INTERNAL_ASSERT(tupleType->schema());
-      body_ << "class " << tupleType->basename();
+      body_ << "class " << tupleType->name()->name();
       body_ << "(NamedTuple):\n";
       {
         const auto guard = WithIndented();
@@ -1253,19 +1371,49 @@ struct PythonPrintPass {
           body_ << attr.name() << " : " << attr.type()->python_str() << "\n";
         }
       }
+    } else if (auto interfaceType = type->cast<InterfaceType>()) {
+      body_ << "class " << interfaceType->name()->name();
+      body_ << "(Interface):\n";
+      {
+        auto guard = WithIndented();
+        for (const FunctionSchema& method : interfaceType->methods()) {
+          indent();
+          body_ << "def " << method.name() << "(self";
+          TORCH_INTERNAL_ASSERT(
+              method.arguments().size() > 0 &&
+              method.arguments().at(0).name() == "self");
+          for (const Argument& arg :
+               at::ArrayRef<Argument>(method.arguments()).slice(1)) {
+            auto type = arg.type();
+            registerClassDependencies(type);
+            body_ << ", " << arg.name() << ": " << type->python_str();
+          }
+          auto return_type = method.returns().at(0).type();
+          registerClassDependencies(return_type);
+          body_ << ") -> " << return_type->python_str() << ":\n";
+          indent();
+          body_ << "  pass\n";
+        }
+      }
     } else {
-      TORCH_INTERNAL_ASSERT(false);
+      TORCH_INTERNAL_ASSERT(false, "Unhandled NamedType");
     }
     // remove `classType` from the list of deps
-    class_deps_.erase(
-        std::remove(class_deps_.begin(), class_deps_.end(), type),
-        class_deps_.end());
+    deps_table_.erase(
+        std::remove(deps_table_.begin(), deps_table_.end(), type),
+        deps_table_.end());
   }
 
   void print(std::ostream& out, SourceRangeRecords& source_ranges_out) {
     out << getImports();
     int64_t source_offset = out.tellp();
     body_.print(out, &source_ranges_out, source_offset);
+  }
+
+  void LEGACY_printModuleMethods(const script::Module& module) {
+    for (const auto method : module.type()->methods()) {
+      printMethod(*method);
+    }
   }
 };
 
@@ -1275,35 +1423,66 @@ void PythonPrint(
     const Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  pp.printFunction(func);
+  PythonPrintPass pp(
+      tensor_table,
+      deps_table,
+      enforce_importable,
+      /*legacy_module_printing=*/false);
+  if (is_method) {
+    pp.printMethod(func);
+  } else {
+    pp.printFunction(func);
+  }
   pp.print(out, source_ranges_out);
 }
 
 void PythonPrint(
+    std::ostream& out,
+    SourceRangeRecords& source_ranges_out,
+    const c10::NamedTypePtr& type,
+    std::vector<at::Tensor>& tensor_table,
+    std::vector<c10::NamedTypePtr>& deps_table,
+    bool enforce_importable) {
+  PythonPrintPass pp(
+      tensor_table,
+      deps_table,
+      enforce_importable,
+      /*legacy_module_printing=*/false);
+  pp.printNamedType(type);
+  pp.print(out, source_ranges_out);
+}
+
+void LEGACY_PythonPrint(
+    std::ostream& out,
+    SourceRangeRecords& source_ranges_out,
+    const c10::NamedTypePtr& type,
+    std::vector<at::Tensor>& tensor_table,
+    std::vector<c10::NamedTypePtr>& deps_table,
+    bool enforce_importable) {
+  PythonPrintPass pp(
+      tensor_table,
+      deps_table,
+      enforce_importable,
+      /*legacy_module_printing=*/true);
+  pp.printNamedType(type);
+  pp.print(out, source_ranges_out);
+}
+
+void LEGACY_PythonPrint(
     std::ostream& out,
     SourceRangeRecords& source_ranges_out,
     const script::Module& module,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& deps_table,
     bool enforce_importable) {
   PythonPrintPass pp(
-      tensor_table, class_table, enforce_importable, /*isMethod=*/true);
-  pp.printModuleMethods(module);
-  pp.print(out, source_ranges_out);
-}
-
-void PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const c10::NamedTypePtr& classType,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& class_table,
-    bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, class_table, enforce_importable, true);
-  pp.printClass(classType);
+      tensor_table,
+      deps_table,
+      enforce_importable,
+      /*legacy_module_printing=*/true);
+  pp.LEGACY_printModuleMethods(module);
   pp.print(out, source_ranges_out);
 }
 
@@ -1331,6 +1510,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::CreateObject,
       prim::GetAttr,
       prim::SetAttr,
+      prim::CallFunction,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your

@@ -5,6 +5,9 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/SoftmaxKernel.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 namespace at {
 namespace native {
@@ -21,8 +24,8 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
     inner_size *= input.size(i);
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
-  scalar_t* input_data_base = input.data<scalar_t>();
-  scalar_t* output_data_base = output.data<scalar_t>();
+  scalar_t* input_data_base = input.data_ptr<scalar_t>();
+  scalar_t* output_data_base = output.data_ptr<scalar_t>();
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for(
       0, outer_size * inner_size, grain_size,
@@ -78,9 +81,9 @@ void host_softmax_backward(
     inner_size *= grad.size(i);
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
-  scalar_t* gradInput_data_base = gI.data<scalar_t>();
-  scalar_t* output_data_base = output.data<scalar_t>();
-  scalar_t* gradOutput_data_base = grad.data<scalar_t>();
+  scalar_t* gradInput_data_base = gI.data_ptr<scalar_t>();
+  scalar_t* output_data_base = output.data_ptr<scalar_t>();
+  scalar_t* gradOutput_data_base = grad.data_ptr<scalar_t>();
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
@@ -258,6 +261,16 @@ DEFINE_DISPATCH(softmax_lastdim_kernel);
 DEFINE_DISPATCH(log_softmax_lastdim_kernel);
 DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
 DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
+
+#ifdef BUILD_NAMEDTENSOR
+Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+  return at::softmax(self, dimname_to_position(self, dim), dtype);
+}
+
+Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+  return at::log_softmax(self, dimname_to_position(self, dim), dtype);
+}
+#endif
 
 }
 }

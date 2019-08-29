@@ -8,7 +8,7 @@ C10_DEFINE_bool(
 
 C10_DEFINE_int32(
     caffe2_tvm_min_ops,
-    1,
+    8,
     "Minimal number of supported ops for the subgraph to be lowered to TVM");
 
 namespace caffe2 {
@@ -216,7 +216,8 @@ NetDef TvmTransformer::applyTvmTransform(
         "MatMul",     "BatchGather",
         "DotProduct", "Transpose",
         "Mul",        "Tanh",
-        "Logit",      "Cast"};
+        "Logit",      "Cast",
+        "Copy"};
 
     try {
       // If the op position is black listed, return false

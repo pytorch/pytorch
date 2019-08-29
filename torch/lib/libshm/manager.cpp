@@ -120,6 +120,7 @@ int main(int argc, char *argv[]) {
         // some process died
         DEBUG("detaching process");
         auto &session = client_sessions.at(pfd.fd);
+        (void) session;
         DEBUG("%d has died", session.pid);
         to_remove.push_back(pfd.fd);
       } else if (pfd.revents & POLLIN) {

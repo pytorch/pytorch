@@ -2,7 +2,7 @@ from common_utils import TestCase, run_tests
 import torch
 from torch import tensor
 import unittest
-
+import warnings
 
 class TestIndexing(TestCase):
     def test_single_int(self):
@@ -44,9 +44,11 @@ class TestIndexing(TestCase):
         v = torch.tensor([True, False, True], dtype=torch.bool)
         boolIndices = torch.tensor([True, False, False], dtype=torch.bool)
         uint8Indices = torch.tensor([1, 0, 0], dtype=torch.uint8)
-        self.assertEqual(v[boolIndices].shape, v[uint8Indices].shape)
-        self.assertEqual(v[boolIndices], v[uint8Indices])
-        self.assertEqual(v[boolIndices], tensor([True], dtype=torch.bool))
+        with warnings.catch_warnings(record=True) as w:
+            self.assertEqual(v[boolIndices].shape, v[uint8Indices].shape)
+            self.assertEqual(v[boolIndices], v[uint8Indices])
+            self.assertEqual(v[boolIndices], tensor([True], dtype=torch.bool))
+            self.assertEquals(len(w), 2)
 
     def test_bool_indices_accumulate(self):
         mask = torch.zeros(size=(10, ), dtype=torch.bool)
@@ -64,8 +66,10 @@ class TestIndexing(TestCase):
     def test_byte_mask(self):
         v = torch.randn(5, 7, 3)
         mask = torch.ByteTensor([1, 0, 1, 1, 0])
-        self.assertEqual(v[mask].shape, (3, 7, 3))
-        self.assertEqual(v[mask], torch.stack([v[0], v[2], v[3]]))
+        with warnings.catch_warnings(record=True) as w:
+            self.assertEqual(v[mask].shape, (3, 7, 3))
+            self.assertEqual(v[mask], torch.stack([v[0], v[2], v[3]]))
+            self.assertEquals(len(w), 2)
 
         v = torch.tensor([1.])
         self.assertEqual(v[v == 0], torch.tensor([]))
@@ -73,15 +77,19 @@ class TestIndexing(TestCase):
     def test_byte_mask_accumulate(self):
         mask = torch.zeros(size=(10, ), dtype=torch.uint8)
         y = torch.ones(size=(10, 10))
-        y.index_put_((mask, ), y[mask], accumulate=True)
-        self.assertEqual(y, torch.ones(size=(10, 10)))
+        with warnings.catch_warnings(record=True) as w:
+            y.index_put_((mask, ), y[mask], accumulate=True)
+            self.assertEqual(y, torch.ones(size=(10, 10)))
+            self.assertEquals(len(w), 2)
 
     def test_multiple_byte_mask(self):
         v = torch.randn(5, 7, 3)
         # note: these broadcast together and are transposed to the first dim
         mask1 = torch.ByteTensor([1, 0, 1, 1, 0])
         mask2 = torch.ByteTensor([1, 1, 1])
-        self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
+        with warnings.catch_warnings(record=True) as w:
+            self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
+            self.assertEquals(len(w), 2)
 
     def test_byte_mask2d(self):
         v = torch.randn(5, 7, 3)
@@ -121,7 +129,7 @@ class TestIndexing(TestCase):
         y[idx] = -1
         self.assertEqual(x, y)
 
-        mask = torch.zeros(4, 3).byte()
+        mask = torch.zeros(4, 3).bool()
         y[mask] = -1
         self.assertEqual(x, y)
 
@@ -299,7 +307,11 @@ class TestIndexing(TestCase):
         x = torch.arange(0., 16).view(4, 4)
         b = torch.ByteTensor([True, False, True, False])
         value = torch.tensor([3., 4., 5., 6.])
-        x[b] = value
+
+        with warnings.catch_warnings(record=True) as w:
+            x[b] = value
+            self.assertEquals(len(w), 1)
+
         self.assertEqual(x[0], value)
         self.assertEqual(x[1], torch.arange(4, 8))
         self.assertEqual(x[2], value)
@@ -377,7 +389,6 @@ class TestIndexing(TestCase):
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 
 class NumpyTests(TestCase):
     def test_index_no_floats(self):
@@ -484,10 +495,11 @@ class NumpyTests(TestCase):
         index = tensor([False] * 6)
         self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
 
-        index = torch.ByteTensor(4, 4).zero_()
-        self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
-
-        self.assertRaisesRegex(IndexError, 'mask', lambda: arr[(slice(None), index)])
+        with warnings.catch_warnings(record=True) as w:
+            index = torch.ByteTensor(4, 4).zero_()
+            self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
+            self.assertRaisesRegex(IndexError, 'mask', lambda: arr[(slice(None), index)])
+            self.assertEquals(len(w), 2)
 
     def test_boolean_indexing_onedim(self):
         # Indexing a 2-dimensional array with
@@ -605,7 +617,6 @@ class NumpyTests(TestCase):
         a[b] = v
         expected = b.double().unsqueeze(1).expand(100, 100)
         self.assertEqual(a, expected)
-
 
 if __name__ == '__main__':
     run_tests()

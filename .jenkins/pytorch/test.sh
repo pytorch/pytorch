@@ -56,6 +56,10 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   pip_install --user mypy || true
 fi
 
+if [[ $PYTHON_VERSION == "2" ]]; then
+  pip_install --user requests
+fi
+
 # faulthandler become built-in since 3.3
 if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
   pip_install --user faulthandler
@@ -104,7 +108,7 @@ test_python_nn() {
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude nn --verbose
+  time python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
   assert_git_not_dirty
 }
 
@@ -162,6 +166,7 @@ test_custom_script_ops() {
     cp -a "$CUSTOM_OP_BUILD" build
     # Run tests Python-side and export a script module.
     python test_custom_ops.py -v
+    python test_custom_classes.py -v
     python model.py --export-script-module=model.pt
     # Run tests C++-side and load the exported script module.
     build/test_custom_ops ./model.pt

@@ -65,7 +65,6 @@ def unused(g):
     n.setType(OptionalType.ofTensor())
     return n
 
-
 def _shape_as_tensor(g, input):
     return g.op('Shape', input)
 
@@ -331,7 +330,7 @@ def transpose(g, self, dim0, dim1):
         return self
 
     # NB: Transpose in ONNX is actually a Permute
-    if self.type().kind() == "CompleteTensorType":
+    if self.isCompleteTensor():
         axes = list(range(self.type().dim()))
         axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
         return g.op("Transpose", self, perm_i=axes)
@@ -419,14 +418,15 @@ def squeeze(g, self, dim=None):
         # Handle negative dims
         for i, dim in enumerate(dims):
             if dim < 0:
-                if sym_help._is_complete_or_dimensioned_tensor_type(self):
+                rank = self.type().dim()
+                if rank:
                     warnings.warn("ONNX export squeeze with negative axis " + str(dim) +
                                   " might cause the onnx model to be incorrect. " +
                                   "Negative axis is not supported in ONNX. " +
-                                  "Axis is converted to " + str(dim + self.type().dim()) +
+                                  "Axis is converted to " + str(dim + rank) +
                                   " based on input shape at export time. " +
                                   "Passing an tensor of different rank in execution will be incorrect.")
-                    dims[i] += self.type().dim()
+                    dims[i] += rank
                 else:
                     return _unimplemented('squeeze', 'negative axis with unknown input rank')
 
@@ -498,15 +498,17 @@ def softmax(g, input, dim, dtype=None):
     # their semantics are equivalent.
     # So use softmax when dim and axis both equal to ndim - 1
     # otherwise compute softmax using a subgraph with other operators
-    if sym_help._is_complete_or_dimensioned_tensor_type(input):
+    input_dim = input.type().dim()
+    if input_dim:
         if dim < 0:
-            dim = input.type().dim() + dim
-        if input.type().dim() == dim + 1:
+            dim = input_dim + dim
+        if input_dim == dim + 1:
             softmax = g.op('Softmax', input, axis_i=dim)
             if dtype and dtype.node().kind() != 'prim::Constant':
                 parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
                 softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
             return softmax
+
     exp = g.op('Exp', input)
     sum = g.op('ReduceSum', exp, axes_i=[dim])
     softmax = g.op('Div', exp, sum)
@@ -514,7 +516,6 @@ def softmax(g, input, dim, dtype=None):
         parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
         softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
     return softmax
-
 
 @parse_args('v', 't', 'v')
 def softplus(g, self, beta, threshold):
@@ -549,7 +550,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 def _max_pool(name, tuple_fn, ndims, return_indices):
     @parse_args('v', 'is', 'is', 'is', 'is', 'i')
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-        if ceil_mode and input.type().kind() != "CompleteTensorType":
+        if ceil_mode and not input.isCompleteTensor():
             return _unimplemented(name, "input size not accessible")
         if set(tuple_fn(dilation)) != {1}:
             return _unimplemented(name, "dilation")
@@ -607,7 +608,7 @@ max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, retur
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
-        if ceil_mode and input.type().kind() != "CompleteTensorType":
+        if ceil_mode and not input.isCompleteTensor():
             return _unimplemented(name, "input size not accessible")
         if divisor_override and divisor_override.node().kind() != 'prim::Constant':
             return _unimplemented(name, "divisor_override")
@@ -649,11 +650,11 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         # the same dimension, which makes it possible to export it to ONNX.
         # for MaxPool, GlobalMaxPool does not return indices,
         # so we try using max_poolxd_with_indices, and if it is not possible
-        # (input is not CompleteTensorType or output size not factor of input size)
+        # (input is not a complete tensor or output size not factor of input size)
         # then we call GlobalAveragePool and return None for the indices
         if output_size == [1] * len(output_size) and type == "AveragePool":
             return g.op("GlobalAveragePool", input)
-        if input.type().kind() != "CompleteTensorType":
+        if not input.isCompleteTensor():
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
             return _unimplemented(name, 'input size not accessible')
@@ -975,15 +976,17 @@ def selu(g, input):
 
 @parse_args('v', 'i', 'v')
 def index_select(g, self, dim, index):
-    # In case of a scaler index, index_select returns a tensor with the same rank as the input.
-    # To match this bahavior in ONNX, we make index a 1D tensor so that the following gather
-    # also produces a tensor with the same rank as the input. 
+    # In case of a scalar index, index_select returns a tensor with the same rank as the input.
+    # To match this behavior in ONNX, we make index a 1D tensor so that the following gather
+    # also produces a tensor with the same rank as the input.
+
     index_const = sym_help._maybe_get_scalar(index)
+    index_dim = index.type().dim()
     if not sym_help._is_value(index_const):
         # Index is a constant scalar. Make it a size 1 constant tensor.
         index = g.op("Constant", value_t=torch.LongTensor([index_const]))
-    elif sym_help._is_complete_or_dimensioned_tensor_type(index):
-        if index.type().dim() == 0:
+    elif index_dim is not None:
+        if index_dim == 0:
             # Index is a scalar. Reshape it to a size 1 tensor. 
             index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
     return g.op("Gather", self, index, axis_i=dim)
@@ -1156,6 +1159,16 @@ for k, v in sym_help.cast_pytorch_to_onnx.items():
     globals()[name] = parse_args('v', 'i')(partial(sym_help._cast_func_template, v))
 
 
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
+    return zeros(g, sizes, dtype, layout, device, pin_memory)
+
+
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+    return zeros_like(g, input, dtype, layout, device, pin_memory)
+
+
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
@@ -1231,14 +1244,15 @@ def alias(g, self):
 def unsqueeze(g, self, dim):
     # Handle negative dim
     if dim < 0:
-        if sym_help._is_complete_or_dimensioned_tensor_type(self):
+        rank = self.type().dim()
+        if rank:
             warnings.warn("ONNX export unsqueeze with negative axis " + str(dim) +
                           " might cause the onnx model to be incorrect. " +
                           "Negative axis is not supported in ONNX. " +
-                          "Axis is converted to " + str(dim + self.type().dim() + 1) +
+                          "Axis is converted to " + str(dim + rank + 1) +
                           " based on input shape at export time. " +
                           "Passing an tensor of different rank in execution will be incorrect.")
-            dim = dim + self.type().dim() + 1
+            dim = dim + rank + 1
         else:
             return _unimplemented('unsqueeze', 'negative axis with unknown input rank')
 
@@ -1248,7 +1262,7 @@ def unsqueeze(g, self, dim):
 def sort(g, self, dim, decending, out=None):
     if out is not None:
         _unimplemented("Sort", "Out parameter is not supported for sort")
-    if self.type().kind() != "CompleteTensorType":
+    if not self.isCompleteTensor():
         return _unimplemented("Sort", "input size not accessible")
 
     return g.op("TopK", self, k_i=self.type().sizes()[dim], axis_i=dim, outputs=2)
@@ -1406,9 +1420,14 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
 
         extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
         if variant == 'RNN':
+            if bidirectional:
+                activation = [nonlinearity, nonlinearity]
+            else:
+                activation = [nonlinearity]
+
             prev_output, h_out = g.op('RNN', *inputs, outputs=2,
                                       hidden_size_i=hidden_size,
-                                      activations_s=[nonlinearity],
+                                      activations_s=activation,
                                       **extra_kwargs)
         elif variant == 'GRU':
             prev_output, h_out = g.op('GRU', *inputs, outputs=2,
@@ -1590,7 +1609,7 @@ def flatten(g, input, start_dim, end_dim):
     if start_dim == 0 and end_dim == dim - 2 :
         return g.op("Flatten", input, axis_i=end_dim + 1)
     # use Reshape for cases where the output shape is not 2D
-    if input.type().kind() != "CompleteTensorType":
+    if not input.isCompleteTensor():
         return _unimplemented("flatten", "input size not accessible")
     input_dims = input.type().sizes()
     output_dims = []
@@ -1647,7 +1666,7 @@ def scatter(g, self, dim, index, src):
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter_add(g, self, dim, index, src):
-    if self.type().kind() != "CompleteTensorType":
+    if not self.isCompleteTensor():
         return _unimplemented("scatter_add", "input size not accessible")
     dtype = self.type().scalarType()
     dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
@@ -1677,6 +1696,42 @@ def gather(g, self, dim, index, sparse_grad=False):
     index = g.op("Cast", g.op("OneHot", index, depth, values, axis_i=dim), to_i=sym_help.cast_pytorch_to_onnx[dtype])
     mul = g.op("Mul", g.op("Unsqueeze", self, axes_i=[dim + 1]), index)
     return g.op("ReduceSum", mul, axes_i=[dim], keepdims_i=0)
+
+
+@parse_args('v', 'is', 'b', 'i')
+def _std(g, input, dim, unbiased, keepdim):
+    if input.isCompleteTensor():
+        sqrd = g.op("Mul", input, input)
+        if dim is None:
+            sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
+            mean = g.op("ReduceMean", input, keepdims_i=0)
+            redudced_dims = input.type().sizes()
+        else:
+            sqrdmean = g.op("ReduceMean", sqrd, axes_i=dim, keepdims_i=keepdim)
+            mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
+            redudced_dims = [input.type().sizes()[i] for i in dim]
+        meansqrd = g.op("Mul", mean, mean)
+        var = g.op("Abs", g.op("Sub", sqrdmean, meansqrd))
+        # This is to correct bias in calculating variance, by dividing it over (N - 1) instead on N
+        if unbiased:
+            count = numpy.prod(redudced_dims)
+            mul = g.op("Mul", var, g.op("Constant", value_t=torch.tensor(count, dtype=torch.float)))
+            var = g.op("Div", mul, g.op("Constant", value_t=torch.tensor(count - 1, dtype=torch.float)))
+        std = g.op("Sqrt", var)
+        return std
+    else:
+        _unimplemented("std", "Unknown input rank. Cannot compute std along dimensions.")
+
+
+# Since position of optional arguments can change for std, this is a hack to find if first argument
+# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
+# torch.std(input, unbiased=True)
+# torch.std(input, dim, keepdim=False, unbiased=True)
+def std(g, input, *args):
+    if args[0].type().isSubtypeOf(ListType.ofInts()):
+        return _std(g, input, *args)
+    else:
+        return _std(g, input, None, args[0], None)
 
 
 @parse_args('v', 'is', 'i')
@@ -1774,7 +1829,8 @@ def index(g, self, index):
         elif len(adv_idx_indices) == 1:
             return index_select(g, self, adv_idx_indices[0], indices[adv_idx_indices[0]])
         else:
-            if self.type().kind() != "CompleteTensorType" and self.type().kind() != "DimensionedTensorType":
+            rank = self.type().dim()
+            if rank is None:
                 raise NotImplementedError("Unsupported aten::index operator of advanced indexing on tensor of unknown rank, " +
                                           "try turning on shape and type propagate during export: " +
                                           "torch.onnx._export(..., propagate=True).")
@@ -1835,3 +1891,23 @@ def index(g, self, index):
                     axis_i=0)
 
             return g.op("Reshape", self, final_shape)
+
+
+@parse_args('v', 'is', 'i')
+def frobenius_norm(g, self, dim=None, keepdim=False):
+    sqrt = g.op('Mul', self, self)
+    sumsqrt = g.op('ReduceSum', sqrt, axes_i=dim, keepdims_i=keepdim)
+    return g.op('Sqrt', sumsqrt)
+
+
+@parse_args('v', 'i', 'b', 'v')
+def multinomial(g, input, num_samples, replacement=False, generator=None):
+    if generator is not None and not generator.node().mustBeNone():
+        _unimplemented("Multinomial", "generator is not supported for multinomial")
+    if not replacement and num_samples > 1:
+        _unimplemented("Multinomial", "replacement=False when num_samples > 1 is not supported for multinomial")
+
+    log_input = log(g, input)
+    return g.op("Multinomial", log_input,
+                dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
+                sample_size_i=num_samples)

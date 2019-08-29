@@ -34,7 +34,7 @@ DEFINE_DISPATCH(max_values_stub);
 
 static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.scalar_type();
-  ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType) ? ScalarType::Long : scalarType);
+  ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType, /*includeBool=*/true) ? ScalarType::Long : scalarType);
   return self.toType(upcast_scalarType);
 }
 
@@ -194,7 +194,7 @@ static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarT
     return result.scalar_type();
   }
   ScalarType src_type = self.scalar_type();
-  if (promote_integers && at::isIntegralType(src_type)) {
+  if (promote_integers && at::isIntegralType(src_type, /*includeBool=*/true)) {
     return kLong;
   }
   return src_type;

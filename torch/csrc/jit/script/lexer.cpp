@@ -17,6 +17,7 @@ static const std::unordered_map<int, int> binary_prec = {
     {TK_OR, 2},
     // reserve a level for unary not
     {TK_IN, 4},
+    {TK_NOTIN, 4},
     {'<', 4},
     {'>', 4},
     {TK_IS, 4},

@@ -5,6 +5,7 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/either.h>
+#include <c10/core/TensorTypeId.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/dispatch/KernelFunction.h>
 
@@ -35,8 +36,9 @@ using KernelCacheCreatorFunction = std::function<std::unique_ptr<c10::KernelCach
  * this same cache instance.
  */
 struct DispatchTableEntry final {
-  /*not-nullable*/ KernelFunction* kernel_func;
+  KernelFunction* kernel_func;  // can be nullptr, not all kernels have this
   /*not-nullable*/ KernelCacheCreatorFunction cache_creator_func;
+  void* unboxed_kernel_func; // can be nullptr, not all kernels have this
 };
 
 namespace detail {
@@ -112,7 +114,7 @@ class DispatchTable final {
   void setKernel(
       TensorTypeId dispatch_key,
       const DispatchTableEntry& kernel) {
-    TORCH_INTERNAL_ASSERT(dispatch_key != TensorTypeIds::undefined());
+    TORCH_INTERNAL_ASSERT(dispatch_key != TensorTypeId::UndefinedTensorId);
     TORCH_CHECK(dispatch_strategy_.is_valid_, "Tried to register a kernel with dispatch key ", toString(dispatch_key), " for operator ", operator_name_, " that doesn't have tensor arguments.");
     TORCH_CHECK(kernels_.is_left(), "Tried to register a kernel with dispatch key ", toString(dispatch_key)," for operator ", operator_name_, ", which already has a catch-all kernel registered. An operator can only have either a catch-all kernel or kernels with dispatch keys.");
     kernels_.left().set(dispatch_key, kernel, operator_name_);
@@ -159,26 +161,14 @@ class DispatchTable final {
    * @return Kernel function pointing to the right kernel for the given arguments.
    */
    const DispatchTableEntry& lookup(const Stack* stack) const {
-     return kernels_.map<const DispatchTableEntry&>(
-       [&] (const detail::KernelTable_& table) -> const DispatchTableEntry& {
-         // We have a dispatch table. Find the correct kernel for the inputs and return it.
+     return lookup_([=] {
+       TORCH_INTERNAL_ASSERT(dispatch_strategy_.is_valid_, "Operator ", operator_name_, " has an invalid dispatch key but kernels registered.");
+       return dispatch_strategy_.get_dispatch_key(stack, operator_name_);
+     });
+   }
 
-         TORCH_INTERNAL_ASSERT(dispatch_strategy_.is_valid_, "Operator ", operator_name_, " has an invalid dispatch key but kernels registered.");
-
-         TensorTypeId dispatch_key = dispatch_strategy_.get_dispatch_key(stack, operator_name_);
-         auto found = table.lookup(dispatch_key);
-
-         TORCH_CHECK(nullptr != found, "Didn't find kernel to dispatch to for operator '", operator_name_,
-                  "'. Tried to look up kernel for dispatch key '", toString(dispatch_key),
-                  "'. Registered dispatch keys are: ", listAllDispatchKeys());
-
-         return *found;
-       },
-       [] (const DispatchTableEntry& entry) -> const DispatchTableEntry& {
-         // We have a catch-all kernel. Just return it.
-         return entry;
-       }
-     );
+   const DispatchTableEntry& lookup(TensorTypeId dispatchKey) const {
+     return lookup_([=] {return dispatchKey;});
    }
 
    bool isEmpty() const {
@@ -245,6 +235,27 @@ private:
     // The function schema doesn't have tensor arguments.
     // Return an invalid dispatch strategy.
     return {0, false, false};
+  }
+
+  template<class GetDispatchKeyFunc>
+  const DispatchTableEntry& lookup_(const GetDispatchKeyFunc& getDispatchKey) const {
+    return kernels_.map<const DispatchTableEntry&>(
+      [&] (const detail::KernelTable_& table) -> const DispatchTableEntry& {
+        // We have a dispatch table. Find the correct kernel for the inputs and return it.
+        TensorTypeId dispatch_key = getDispatchKey();
+        auto found = table.lookup(dispatch_key);
+
+        TORCH_CHECK(nullptr != found, "Didn't find kernel to dispatch to for operator '", operator_name_,
+                 "'. Tried to look up kernel for dispatch key '", toString(dispatch_key),
+                 "'. Registered dispatch keys are: ", listAllDispatchKeys());
+
+        return *found;
+      },
+      [] (const DispatchTableEntry& entry) -> const DispatchTableEntry& {
+        // We have a catch-all kernel. Just return it.
+        return entry;
+      }
+    );
   }
 
   // kernels_ either contains a dispatch table or

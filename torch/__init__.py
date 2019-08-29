@@ -24,9 +24,9 @@ __all__ = [
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
-    'ShortStorage', 'CharStorage', 'ByteStorage',
+    'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-    'ShortTensor', 'CharTensor', 'ByteTensor', 'Tensor',
+    'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
 ]
 
 ################################################################################
@@ -336,6 +336,7 @@ def compiled_with_cxx11_abi():
 
 # Import the ops "namespace"
 from torch._ops import ops  # noqa: F401
+from torch._classes import classes  # noqa: F401
 
 # Import the quasi random sampler
 import torch.quasirandom

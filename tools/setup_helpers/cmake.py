@@ -11,7 +11,7 @@ import distutils
 import distutils.sysconfig
 from distutils.version import LooseVersion
 
-from . import escape_path, which
+from . import which
 from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag)
 from .cuda import USE_CUDA
 from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
@@ -71,11 +71,21 @@ def get_cmake_cache_variables_from_file(cmake_cache_file):
             # Blank or comment line, skip
             continue
 
-        # Space can also be part of variable name and value
-        matched = re.match(r'(\S.*):\s*([a-zA-Z_-][a-zA-Z0-9_-]*)\s*=\s*(.*)', line)
+        # Almost any character can be part of variable name and value. As a practical matter, we assume the type must be
+        # valid if it were a C variable name. It should match the following kinds of strings:
+        #
+        #   USE_CUDA:BOOL=ON
+        #   "USE_CUDA":BOOL=ON
+        #   USE_CUDA=ON
+        #   USE_CUDA:=ON
+        #   Intel(R) MKL-DNN_SOURCE_DIR:STATIC=/path/to/pytorch/third_party/ideep/mkl-dnn
+        #   "OpenMP_COMPILE_RESULT_CXX_openmp:experimental":INTERNAL=FALSE
+        matched = re.match(r'("?)(.+?)\1(?::\s*([a-zA-Z_-][a-zA-Z0-9_-]*)?)?\s*=\s*(.*)', line)
         if matched is None:  # Illegal line
             raise ValueError('Unexpected line {} in {}: {}'.format(i, repr(cmake_cache_file), line))
-        variable, type_, value = matched.groups()
+        _, variable, type_, value = matched.groups()
+        if type_ is None:
+            type_ = ''
         if type_.upper() in ('INTERNAL', 'STATIC'):
             # CMake internal variable, do not touch
             continue
@@ -187,9 +197,6 @@ class CMake:
                 toolset_expr = ','.join(["{}={}".format(k, v) for k, v in toolset_dict.items()])
                 args.append('-T' + toolset_expr)
 
-        cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
-        ldflags = os.getenv('LDFLAGS', "")
-
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))))
         install_dir = os.path.join(base_dir, "torch")
@@ -218,7 +225,9 @@ class CMake:
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
+             'CUDA_NVCC_EXECUTABLE',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
+             'INSTALL_TEST',
              'MKL_THREADING',
              'MKLDNN_THREADING',
              'MSVC_Z7_OVERRIDE',
@@ -253,16 +262,11 @@ class CMake:
             'USE_CUDA': USE_CUDA,
             'USE_DISTRIBUTED': USE_DISTRIBUTED,
             'USE_NUMPY': USE_NUMPY,
-            'USE_SYSTEM_EIGEN_INSTALL': 'OFF'
         })
 
         # Options starting with CMAKE_
         cmake__options = {
             'CMAKE_INSTALL_PREFIX': install_dir,
-            'CMAKE_C_FLAGS': cflags,
-            'CMAKE_CXX_FLAGS': cflags,
-            'CMAKE_EXE_LINKER_FLAGS': ldflags,
-            'CMAKE_SHARED_LINKER_FLAGS': ldflags,
         }
 
         # We set some CMAKE_* options in our Python build code instead of relying on the user's direct settings. Emit an
@@ -275,13 +279,11 @@ class CMake:
         build_options.update(cmake__options)
 
         CMake.defines(args,
-                      PYTHON_EXECUTABLE=escape_path(sys.executable),
-                      PYTHON_LIBRARY=escape_path(cmake_python_library),
-                      PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
+                      PYTHON_EXECUTABLE=sys.executable,
+                      PYTHON_LIBRARY=cmake_python_library,
+                      PYTHON_INCLUDE_DIR=distutils.sysconfig.get_python_inc(),
                       TORCH_BUILD_VERSION=version,
-                      INSTALL_TEST=build_test,
-                      NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
-                      CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
+                      NUMPY_INCLUDE_DIR=NUMPY_INCLUDE_DIR,
                       **build_options)
 
         if USE_GLOO_IBVERBS:
