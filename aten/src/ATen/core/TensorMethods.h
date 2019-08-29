@@ -908,13 +908,7 @@ inline Tensor Tensor::floor() const {
 }
 inline Tensor & Tensor::floor_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::floor_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("floor_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::floor_(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::floor_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));

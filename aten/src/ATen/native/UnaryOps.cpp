@@ -67,6 +67,10 @@ Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_ou
 Tensor erfinv(const Tensor& self) { return unary_op_impl(self, erfinv_out); }
 Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, erfinv_out); }
 
+Tensor& floor_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, floor_stub); }
+Tensor floor(const Tensor& self) { return unary_op_impl(self, floor_out); }
+Tensor& floor_(Tensor& self) { return unary_op_impl_(self, floor_out); }
+
 Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, round_stub); }
 Tensor round(const Tensor& self) { return unary_op_impl(self, round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, round_out); }
@@ -282,7 +286,6 @@ IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(expm1)
-IMPLEMENT_UNARY_OP_VEC(floor)
 IMPLEMENT_UNARY_OP_VEC(frac)
 IMPLEMENT_UNARY_OP_VEC(log)
 IMPLEMENT_UNARY_OP_VEC(log10)

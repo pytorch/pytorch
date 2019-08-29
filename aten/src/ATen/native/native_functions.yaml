@@ -940,15 +940,12 @@
 - func: floor_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
   variants: function, method
-  dispatch:
-    CPU: _floor__cpu
-    CUDA: _floor__cuda
 
 - func: floor.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: _floor_out_cpu
-    CUDA: _floor_out_cuda
+    CPU: floor_out
+    CUDA: floor_out
 
 - func: frac(Tensor self) -> Tensor
   named_guard: False
