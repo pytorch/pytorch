@@ -23,7 +23,7 @@ void findValuesInPattern(
   script::parseIR(pattern, &pattern_graph, vmap);
 
   auto matches = findPatternMatches(pattern_graph, graph);
-  for (auto match: matches) {
+  for (auto match : matches) {
     auto output_value = vmap.at("output");
     TORCH_INTERNAL_ASSERT(
         match.values_map.find(output_value) != match.values_map.end(),
@@ -57,7 +57,7 @@ graph(%self, %input):
   std::vector<std::string> patterns = {conv_functional_relu, conv_relu_module};
 
   std::unordered_set<Value*> values;
-  for (const auto& pattern: patterns) {
+  for (const auto& pattern : patterns) {
     findValuesInPattern(*graph, pattern, values);
   }
 
@@ -114,11 +114,14 @@ Node* createIntReprNode(Value* v, Graph* g) {
 
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
-Node* insertObserver(Value* v, Graph* g,
-                     script::Module& module,
-                     const QConfig& qconfig) {
+Node* insertObserver(
+    Value* v,
+    Graph* g,
+    script::Module& module,
+    const QConfig& qconfig) {
   script::Module observer_module;
-  if (v->node()->kind() == prim::GetAttr && v->node()->s(attr::name) == "weight") {
+  if (v->node()->kind() == prim::GetAttr &&
+      v->node()->s(attr::name) == "weight") {
     observer_module = std::get<1>(qconfig);
   } else {
     observer_module = std::get<0>(qconfig);
@@ -147,7 +150,10 @@ Node* insertObserver(Value* v, Graph* g,
   return call;
 }
 
-c10::optional<QConfig> getQConfig(const std::string& key, const c10::optional<QConfig>& parent_qconfig, const QConfigDict& qconfig_dict) {
+c10::optional<QConfig> getQConfig(
+    const std::string& key,
+    const c10::optional<QConfig>& parent_qconfig,
+    const QConfigDict& qconfig_dict) {
   if (qconfig_dict.find(key) != qconfig_dict.end()) {
     return qconfig_dict.at(key);
   }
@@ -162,7 +168,7 @@ void getQConfigMapHelper(
     ModuleQConfigMap& map) {
   auto qconfig = getQConfig(key, parent_qconfig, qconfig_dict);
   map[module.module_object()] = qconfig;
-  for (script::Slot s: module.get_module_slots()) {
+  for (script::Slot s : module.get_module_slots()) {
     std::string child_key;
     if (key == "") {
       child_key = s.name();
@@ -174,7 +180,8 @@ void getQConfigMapHelper(
 }
 
 ModuleQConfigMap getQConfigMap(
-    const script::Module& module, const QConfigDict& qconfig_dict) {
+    const script::Module& module,
+    const QConfigDict& qconfig_dict) {
   ModuleQConfigMap map;
   getQConfigMapHelper(module, qconfig_dict, "", c10::nullopt, map);
   return map;
@@ -208,7 +215,8 @@ void InsertObserversImpl(
     if (v->type()->isSubtypeOf(TensorType::get())) {
       auto qconfig = module_qconfig_map.at(module.module_object());
       if (qconfig) {
-        auto observer_node = insertObserver(v, v->owningGraph(), module, qconfig.value());
+        auto observer_node =
+            insertObserver(v, v->owningGraph(), module, qconfig.value());
         if (observer_node) {
           observer_for_input.emplace(observer_node);
         }
@@ -267,13 +275,14 @@ void InsertObserversImpl(
       // Another note is that right now we only insert observer for "forward"
       // function, but we may need to extend to all functions.
       auto child_instance = v->node()->inputs()[0];
-      TORCH_INTERNAL_ASSERT(child_instance->node()->kind() == prim::GetAttr,
-                            "Child instance should come from GetAttr.");
+      TORCH_INTERNAL_ASSERT(
+          child_instance->node()->kind() == prim::GetAttr,
+          "Child instance should come from GetAttr.");
       auto child_module_name = child_instance->node()->s(attr::name);
       auto child_module = module.find_module(child_module_name);
-      TORCH_INTERNAL_ASSERT(child_module,
-                            "Child module " + child_module_name +       \
-                            " does not exist");
+      TORCH_INTERNAL_ASSERT(
+          child_module,
+          "Child module " + child_module_name + " does not exist");
       // Recursively insert observer for the forward function of child module
       InsertObserversImpl(child_module.value(), "forward", module_qconfig_map);
     }
@@ -285,7 +294,11 @@ void InsertObserversImpl(
   }
 }
 
-Node* insertQuantDeQuantCall(Value* v, const IValue& qparams, at::ScalarType t, bool insert_after=true) {
+Node* insertQuantDeQuantCall(
+    Value* v,
+    const IValue& qparams,
+    at::ScalarType t,
+    bool insert_after = true) {
   Graph* g = v->node()->owningGraph();
   Node* quant = createQuantNode(v, g);
   Node* intrepr = createIntReprNode(v, g);
@@ -333,14 +346,16 @@ Node* insertQuantDeQuantCall(Value* v, const IValue& qparams, at::ScalarType t, 
 
 // find the observer for Value `v` and return the name of the observer
 c10::optional<std::string> findObserverName(Value* v) {
-  for (const Use& u: v->uses()) {
+  for (const Use& u : v->uses()) {
     // Note that here we just check for the name of observer, but the ideally
     // we should be comparing the type of observer, this is a temporary
     // work around until data only clone of module.clone is supported.
-    if (u.user->kind() == prim::CallMethod && u.user->s(attr::name) == "forward") {
+    if (u.user->kind() == prim::CallMethod &&
+        u.user->s(attr::name) == "forward") {
       auto module_instance = u.user->inputs().at(0);
       if (module_instance->node()->kind() == prim::GetAttr &&
-          module_instance->node()->s(attr::name).find("observer_for_") != std::string::npos) {
+          module_instance->node()->s(attr::name).find("observer_for_") !=
+              std::string::npos) {
         return module_instance->node()->s(attr::name);
       }
     }
@@ -354,11 +369,11 @@ class QuantizeHelper {
   IValue getQParams(Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(Value* v);
   void quantizeBias(Value* v);
-  void quantizeTensor(Value* v, bool insert_after=true);
+  void quantizeTensor(Value* v, bool insert_after = true);
   void removeObserver(Value* v, const std::string& observer_name);
   void destroyNodes() {
     // Destroy observer forward calls
-    for (auto& n: nodes_to_destroy_) {
+    for (auto& n : nodes_to_destroy_) {
       n->destroy();
     }
   }
@@ -369,14 +384,15 @@ class QuantizeHelper {
   std::vector<Node*> nodes_to_destroy_;
 };
 
-void QuantizeHelper::removeObserver(Value* v, const std::string& observer_name) {
+void QuantizeHelper::removeObserver(
+    Value* v,
+    const std::string& observer_name) {
   // remove observer_module
   observer_modules_to_remove_.push_back(observer_name);
   // remove observer forward call
-  for (const Use& u: v->uses()) {
+  for (const Use& u : v->uses()) {
     Node* user = u.user;
-    if (user->kind() == prim::CallMethod &&
-        user->s(attr::name) == "forward" &&
+    if (user->kind() == prim::CallMethod && user->s(attr::name) == "forward" &&
         user->inputs()[0]->node()->kind() == prim::GetAttr &&
         user->inputs()[0]->node()->s(attr::name) == observer_name) {
       // Observer forward call node
@@ -388,20 +404,23 @@ void QuantizeHelper::removeObserver(Value* v, const std::string& observer_name) 
 }
 
 IValue QuantizeHelper::getQParams(Value* v) {
-    TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
-    auto observer_name = findObserverName(v);
-    TORCH_INTERNAL_ASSERT(observer_name,
-                          "getQParams expects the corresponding observer for ",
-                          v->debugName(),
-                          " exists.");
-    auto observer_module = module_.find_module(observer_name.value());
-    TORCH_INTERNAL_ASSERT(observer_module,
-                          "getQParams expects the corresponding observer for ",
-                          v->debugName(),
-                          " exists.");
-    auto calculate_qparams = observer_module.value().get_method("calculate_qparams");
-    IValue qparams = calculate_qparams(std::vector<IValue>());
-    return qparams;
+  TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
+  auto observer_name = findObserverName(v);
+  TORCH_INTERNAL_ASSERT(
+      observer_name,
+      "getQParams expects the corresponding observer for ",
+      v->debugName(),
+      " exists.");
+  auto observer_module = module_.find_module(observer_name.value());
+  TORCH_INTERNAL_ASSERT(
+      observer_module,
+      "getQParams expects the corresponding observer for ",
+      v->debugName(),
+      " exists.");
+  auto calculate_qparams =
+      observer_module.value().get_method("calculate_qparams");
+  IValue qparams = calculate_qparams(std::vector<IValue>());
+  return qparams;
 }
 
 double getScale(const IValue& qparam) {
@@ -410,26 +429,27 @@ double getScale(const IValue& qparam) {
 
 void QuantizeHelper::quantizeBias(Value* v) {
   // Traverse to the place where this is used
-  std::vector<Symbol> ops_with_bias = {Symbol::aten("conv2d"), Symbol::aten("_convolution")};
-  for (const auto& use: v->uses()) {
-    if (std::find(ops_with_bias.begin(), ops_with_bias.end(),
-                  use.user->kind()) != ops_with_bias.end()) {
+  std::vector<Symbol> ops_with_bias = {Symbol::aten("conv2d"),
+                                       Symbol::aten("_convolution")};
+  for (const auto& use : v->uses()) {
+    if (std::find(
+            ops_with_bias.begin(), ops_with_bias.end(), use.user->kind()) !=
+        ops_with_bias.end()) {
       // Make sure there is no observer module for bias
       auto observer_name = findObserverName(v);
-      TORCH_INTERNAL_ASSERT(!observer_name,
-                            "bias should not be observed!");
+      TORCH_INTERNAL_ASSERT(!observer_name, "bias should not be observed!");
       Value* activation = use.user->inputs()[0];
       Value* weight = use.user->inputs()[1];
       // Get qparam from activation
       IValue act_qparam = getQParams(activation);
       // Get qparam from weight
       IValue weight_qparam = getQParams(weight);
-      IValue bias_scale =  at::scalar_tensor(
+      IValue bias_scale = at::scalar_tensor(
           c10::Scalar(getScale(act_qparam) * getScale(weight_qparam)),
           at::kDouble);
       IValue bias_qparam = c10::ivalue::Tuple::create(
-          std::vector<IValue>({bias_scale,
-                               at::scalar_tensor(c10::Scalar(0))}), act_qparam.toTuple()->type);
+          std::vector<IValue>({bias_scale, at::scalar_tensor(c10::Scalar(0))}),
+          act_qparam.toTuple()->type);
       Node* dequant = insertQuantDeQuantCall(v, bias_qparam, at::kQInt32);
       v->replaceAllUsesWith(dequant->output());
       Node* q = traverseToQuantNode(dequant);
@@ -439,8 +459,7 @@ void QuantizeHelper::quantizeBias(Value* v) {
   }
 }
 
-void QuantizeHelper::quantizeTensor(Value* v,
-                                    bool insert_after) {
+void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
   auto observer_name = findObserverName(v);
   if (!observer_name) {
     return;
@@ -448,7 +467,8 @@ void QuantizeHelper::quantizeTensor(Value* v,
   IValue qparams = getQParams(v);
   removeObserver(v, observer_name.value());
   Node* dequant;
-  if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "weight") {
+  if (v->node()->kind() == prim::GetAttr &&
+      v->node()->s(c10::attr::name) == "weight") {
     dequant = insertQuantDeQuantCall(v, qparams, at::kQInt8);
   } else {
     dequant = insertQuantDeQuantCall(v, qparams, at::kQUInt8, insert_after);
@@ -459,14 +479,21 @@ void QuantizeHelper::quantizeTensor(Value* v,
   q->replaceInputWith(dequant->output(), v);
 }
 
-c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(Value* v) {
-  if (v->node()->kind() == prim::CallMethod && v->node()->s(attr::name) == "forward") {
+c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
+    Value* v) {
+  if (v->node()->kind() == prim::CallMethod &&
+      v->node()->s(attr::name) == "forward") {
     auto child_instance = v->node()->inputs()[0];
-    TORCH_INTERNAL_ASSERT(child_instance->node()->kind() == prim::GetAttr, "Child instance should come from GetAttr.");
+    TORCH_INTERNAL_ASSERT(
+        child_instance->node()->kind() == prim::GetAttr,
+        "Child instance should come from GetAttr.");
     auto child_module_name = child_instance->node()->s(attr::name);
     if (child_module_name.find("observer_for_") == std::string::npos) {
       auto child_module = module_.find_module(child_module_name);
-      TORCH_INTERNAL_ASSERT(child_module, "InsertQuantDeQuant - Child module " + child_module_name + " does not exist");
+      TORCH_INTERNAL_ASSERT(
+          child_module,
+          "InsertQuantDeQuant - Child module " + child_module_name +
+              " does not exist");
       return child_module;
     }
   }
@@ -516,7 +543,8 @@ void InsertQuantDeQuantImpl(
     if (child_module) {
       InsertQuantDeQuantImpl(child_module.value(), "forward");
     }
-    if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
+    if (v->node()->kind() == prim::GetAttr &&
+        v->node()->s(c10::attr::name) == "bias") {
       qh.quantizeBias(v);
     } else {
       qh.quantizeTensor(v);
