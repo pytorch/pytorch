@@ -29,6 +29,7 @@ inline std::unique_ptr<int8::Int8TensorCPU> q(
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<uint8_t> dis;
+  r->t.mutable_data<uint8_t>(); // Force dtype to be set even for empty tensors.
   for (auto i = 0; i < r->t.numel(); ++i) {
     r->t.mutable_data<uint8_t>()[i] = dis(gen);
   }
@@ -55,6 +56,7 @@ inline std::unique_ptr<int8::Int8TensorCPU> biasq(
 inline std::unique_ptr<TensorCPU> dq(const int8::Int8TensorCPU& XQ) {
   auto r = caffe2::make_unique<Tensor>(CPU);
   r->Resize(XQ.t.sizes());
+  r->mutable_data<float>(); // Force dtype to be set even for empty tensors.
   for (auto i = 0; i < r->numel(); ++i) {
     r->mutable_data<float>()[i] =
         (static_cast<int32_t>(XQ.t.data<uint8_t>()[i]) - XQ.zero_point) *
@@ -111,6 +113,30 @@ inline int randomInt(int a, int b) {
   static std::random_device rd;
   static std::mt19937 gen(rd());
   return std::uniform_int_distribution<int>(a, b)(gen);
+}
+
+inline void simpleZeroBatchTest(
+    Workspace* ws,
+    OperatorDef* op,
+    std::initializer_list<int64_t> in_size,
+    std::initializer_list<int64_t> out_size) {
+  ws->CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>()->t.Resize(at::IntArrayRef(in_size));
+  ws->RunOperatorOnce(*op);
+  const auto& zero_batch_output = ws->GetBlob("YQ")->Get<int8::Int8TensorCPU>();
+  EXPECT_EQ(zero_batch_output.t.sizes(), at::IntArrayRef(out_size));
+}
+
+inline void binaryZeroBatchTest(
+    Workspace* ws,
+    OperatorDef* op,
+    std::initializer_list<int64_t> in0_size,
+    std::initializer_list<int64_t> in1_size,
+    std::initializer_list<int64_t> out_size) {
+  ws->CreateBlob("XQ0")->GetMutable<int8::Int8TensorCPU>()->t.Resize(at::IntArrayRef(in0_size));
+  ws->CreateBlob("XQ1")->GetMutable<int8::Int8TensorCPU>()->t.Resize(at::IntArrayRef(in1_size));
+  ws->RunOperatorOnce(*op);
+  const auto& zero_batch_output = ws->GetBlob("YQ")->Get<int8::Int8TensorCPU>();
+  EXPECT_EQ(zero_batch_output.t.sizes(), at::IntArrayRef(out_size));
 }
 
 } // namespace caffe2

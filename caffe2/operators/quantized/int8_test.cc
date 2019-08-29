@@ -38,6 +38,8 @@ TEST(Int8, ReLU) {
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TENSOR_EQ(*YA, YE);
+
+  simpleZeroBatchTest(&ws, &op, {0, 224, 224, 3}, {0, 224, 224, 3});
 }
 
 // LeakyReLU isn't build in xplat, so this fails buck test
@@ -65,6 +67,8 @@ TEST(Int8, DISABLED_LeakyReLU) {
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(YQ.scale));
+
+  simpleZeroBatchTest(&ws, &op, {0, 224, 224, 3}, {0, 224, 224, 3});
 }
 
 TEST(Int8, Softmax) {
@@ -87,9 +91,13 @@ TEST(Int8, Softmax) {
   EXPECT_EQ(YQ.scale, 1.0 / 256);
   EXPECT_EQ(YQ.zero_point, 0);
 
+  EXPECT_EQ(YQ.t.sizes(), at::IntArrayRef({1, 2, 1, 3}));
+
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(YQ.scale));
+
+  simpleZeroBatchTest(&ws, &op, {0, 2, 1, 3}, {0, 2, 1, 3});
 }
 
 TEST(Int8, Sigmoid) {
@@ -115,6 +123,8 @@ TEST(Int8, Sigmoid) {
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(YQ.scale));
+
+  simpleZeroBatchTest(&ws, &op, {0, 2, 1, 3}, {0, 2, 1, 3});
 }
 
 TEST(Int8, MaxPool) {
@@ -125,13 +135,16 @@ TEST(Int8, MaxPool) {
       "",
       {"X"},
       {"Y"},
-      {MakeArgument<int>("kernel", 2), MakeArgument<string>("order", "NHWC")});
+      {MakeArgument<int>("kernel", 2),
+       MakeArgument<int>("stride", 2),
+       MakeArgument<string>("order", "NHWC")});
   auto op = CreateOperatorDef(
       "Int8MaxPool",
       "",
       {"XQ"},
       {"YQ"},
       {MakeArgument<int>("kernel", 2),
+       MakeArgument<int>("stride", 2),
        MakeArgument<string>("order", "NHWC"),
        MakeArgument<int>("Y_zero_point", XQ->zero_point),
        MakeArgument<float>("Y_scale", XQ->scale)});
@@ -144,6 +157,8 @@ TEST(Int8, MaxPool) {
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TENSOR_EQ(*YA, YE);
+
+  simpleZeroBatchTest(&ws, &op, {0, 8, 8, 3}, {0, 4, 4, 3});
 }
 
 TEST(Int8, AveragePool) {
@@ -154,13 +169,16 @@ TEST(Int8, AveragePool) {
       "",
       {"X"},
       {"Y"},
-      {MakeArgument<int>("kernel", 2), MakeArgument<string>("order", "NHWC")});
+      {MakeArgument<int>("kernel", 2),
+       MakeArgument<int>("stride", 2),
+       MakeArgument<string>("order", "NHWC")});
   auto op = CreateOperatorDef(
       "Int8AveragePool",
       "",
       {"XQ"},
       {"YQ"},
       {MakeArgument<int>("kernel", 2),
+       MakeArgument<int>("stride", 2),
        MakeArgument<string>("order", "NHWC"),
        MakeArgument<int>("Y_zero_point", XQ->zero_point),
        MakeArgument<float>("Y_scale", XQ->scale)});
@@ -173,6 +191,8 @@ TEST(Int8, AveragePool) {
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(XQ->scale));
+
+  simpleZeroBatchTest(&ws, &op, {0, 8, 8, 3}, {0, 4, 4, 3});
 }
 
 TEST(Int8, ResizeNearest) {
@@ -205,6 +225,8 @@ TEST(Int8, ResizeNearest) {
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TENSOR_EQ(*YA, YE);
+
+  simpleZeroBatchTest(&ws, &op, {0, 8, 8, 3}, {0, 16, 16, 3});
 }
 
 TEST(Int8, ChannelShuffle) {
@@ -243,6 +265,8 @@ TEST(Int8, ChannelShuffle) {
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TENSOR_EQ(*YA, YE);
+
+  simpleZeroBatchTest(&ws, &op, {0, 25, 25, 32}, {0, 25, 25, 32});
 }
 
 TEST(Int8, Concat) {
@@ -282,6 +306,8 @@ TEST(Int8, Concat) {
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TENSOR_EQ(*YA, YE);
+
+  binaryZeroBatchTest(&ws, &op, {0, 25, 25, 16}, {0, 25, 25, 24}, {0, 25, 25, 40});
 }
 
 TEST(Int8, Add) {
@@ -309,6 +335,8 @@ TEST(Int8, Add) {
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(Y_scale));
+
+  binaryZeroBatchTest(&ws, &op, {0, 10, 10, 20}, {0, 10, 10, 20}, {0, 10, 10, 20});
 }
 
 TEST(Int8, SumRelu) {
@@ -338,6 +366,8 @@ TEST(Int8, SumRelu) {
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(Y_scale));
+
+  binaryZeroBatchTest(&ws, &op, {0, 10, 10, 20}, {0, 10, 10, 20}, {0, 10, 10, 20});
 }
 
 void setq(int8::Int8TensorCPU* dst, const std::vector<float>& vs) {
@@ -364,6 +394,28 @@ void biassetq(int8::Int8TensorCPU* dst, const std::vector<float>& vs) {
                 static_cast<float>(dst->zero_point + (vs[i] / dst->scale))))));
     dst->t.mutable_data<int32_t>()[i] = vq;
   }
+}
+
+TEST(Int8, Batch0Conv) {
+  auto XQ = q({0, 96, 96, 4});
+  auto WQ = q({6, 3, 3, 4});
+  auto BQ = biasq({6}, XQ->scale * WQ->scale);
+  auto op = CreateOperatorDef(
+      "Int8Conv",
+      "",
+      {"XQ", "WQ", "BQ"},
+      {"YQ"},
+      {MakeArgument<int>("kernel", 3),
+       MakeArgument<string>("order", "NHWC"),
+       MakeArgument<int>("Y_zero_point", 127),
+       MakeArgument<float>("Y_scale", 1.0)});
+  Workspace ws;
+  int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
+  int8Copy(ws.CreateBlob("WQ")->GetMutable<int8::Int8TensorCPU>(), *WQ);
+  int8Copy(ws.CreateBlob("BQ")->GetMutable<int8::Int8TensorCPU>(), *BQ);
+  ws.RunOperatorOnce(op);
+  const auto& YQ = ws.GetBlob("YQ")->Get<int8::Int8TensorCPU>();
+  EXPECT_EQ(YQ.t.sizes(), at::IntArrayRef({0, 94, 94, 6}));
 }
 
 // Use TFLite test vectors to ensure compatibility.
@@ -739,6 +791,28 @@ TEST(Int8, DepthwiseConv5x5) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, 1.0e-5);
 }
 
+TEST(Int8, Batch0ConvTranspose) {
+  auto XQ = q({0, 3, 3, 2});
+  auto WQ = q({2, 2, 2, 8});
+  auto BQ = biasq({8}, XQ->scale * WQ->scale);
+  auto op = CreateOperatorDef(
+      "Int8ConvTranspose",
+      "",
+      {"XQ", "WQ", "BQ"},
+      {"YQ"},
+      {MakeArgument<int>("kernel", 2),
+       MakeArgument<string>("order", "NHWC"),
+       MakeArgument<int>("Y_zero_point", 127),
+       MakeArgument<float>("Y_scale", 1.0)});
+  Workspace ws;
+  int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
+  int8Copy(ws.CreateBlob("WQ")->GetMutable<int8::Int8TensorCPU>(), *WQ);
+  int8Copy(ws.CreateBlob("BQ")->GetMutable<int8::Int8TensorCPU>(), *BQ);
+  ws.RunOperatorOnce(op);
+  const auto& YQ = ws.GetBlob("YQ")->Get<int8::Int8TensorCPU>();
+  EXPECT_EQ(YQ.t.sizes(), at::IntArrayRef({0, 4, 4, 8}));
+}
+
 TEST(Int8, ConvTranspose) {
   auto XQ = q({1, 3, 6, 1});
   XQ->scale = 0.5;
@@ -789,6 +863,26 @@ TEST(Int8, ConvTranspose) {
   auto YA = dq(YQ);
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, 1.0e-5);
+}
+
+TEST(Int8, Batch0FC) {
+  auto XQ = q({0, 100});
+  auto WQ = q({20, 100});
+  auto BQ = biasq({20}, XQ->scale * WQ->scale);
+  auto op = CreateOperatorDef(
+      "Int8FC",
+      "",
+      {"XQ", "WQ", "BQ"},
+      {"YQ"},
+      {MakeArgument<int>("Y_zero_point", 127),
+       MakeArgument<float>("Y_scale", 1.0)});
+  Workspace ws;
+  int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
+  int8Copy(ws.CreateBlob("WQ")->GetMutable<int8::Int8TensorCPU>(), *WQ);
+  int8Copy(ws.CreateBlob("BQ")->GetMutable<int8::Int8TensorCPU>(), *BQ);
+  ws.RunOperatorOnce(op);
+  const auto& YQ = ws.GetBlob("YQ")->Get<int8::Int8TensorCPU>();
+  EXPECT_EQ(YQ.t.sizes(), at::IntArrayRef({0, 20}));
 }
 
 TEST(Int8, FC) {
@@ -911,23 +1005,27 @@ TEST(Int8, GivenIntTensorFill) {
 }
 
 TEST(Int8, QuantDeQuant) {
-  vector<int64_t> shape = {1, 25, 25, 16};
-  auto XQ = q(shape);
-  auto X = dq(*XQ);
-  auto xop = CreateOperatorDef(
-      "Int8Quantize",
-      "",
-      {"X"},
-      {"XQ"},
-      {MakeArgument<float>("Y_scale", XQ->scale),
-       MakeArgument<int32_t>("Y_zero_point", XQ->zero_point)});
-  auto op = CreateOperatorDef("Int8Dequantize", "", {"XQ"}, {"X_x"});
-  Workspace ws;
-  BlobGetMutableTensor(ws.CreateBlob("X"), CPU)->CopyFrom(*X);
-  ws.RunOperatorOnce(xop);
-  ws.RunOperatorOnce(op);
-  const auto& X_x = ws.GetBlob("X_x")->Get<TensorCPU>();
-  EXPECT_TENSOR_APPROX_EQ(*X, X_x, XQ->scale);
+  for (const auto& shape : {
+        vector<int64_t>{1, 25, 25, 16},
+        vector<int64_t>{0, 25, 25, 16},
+      }) {
+    auto XQ = q(shape);
+    auto X = dq(*XQ);
+    auto xop = CreateOperatorDef(
+        "Int8Quantize",
+        "",
+        {"X"},
+        {"XQ"},
+        {MakeArgument<float>("Y_scale", XQ->scale),
+         MakeArgument<int32_t>("Y_zero_point", XQ->zero_point)});
+    auto op = CreateOperatorDef("Int8Dequantize", "", {"XQ"}, {"X_x"});
+    Workspace ws;
+    BlobGetMutableTensor(ws.CreateBlob("X"), CPU)->CopyFrom(*X);
+    ws.RunOperatorOnce(xop);
+    ws.RunOperatorOnce(op);
+    const auto& X_x = ws.GetBlob("X_x")->Get<TensorCPU>();
+    EXPECT_TENSOR_APPROX_EQ(*X, X_x, XQ->scale);
+  }
 }
 
 TEST(Int8, Reshape) {
@@ -969,56 +1067,60 @@ TEST(Int8, Flatten) {
 }
 
 TEST(Int8, Slice) {
-  auto XQ = q({1, 25, 25, 16});
-  auto X = dq(*XQ);
-  vector<int> starts = {0, 3, 0, 0};
-  vector<int> ends = {-1, 5, -1, -1};
-  auto xop = CreateOperatorDef(
-      "Slice",
-      "",
-      {"X"},
-      {"Y"},
-      {MakeArgument<vector<int>>("starts", starts),
-       MakeArgument<vector<int>>("ends", ends)});
-  auto op = CreateOperatorDef(
-      "Int8Slice",
-      "",
-      {"XQ"},
-      {"YQ"},
-      {MakeArgument<vector<int>>("starts", starts),
-       MakeArgument<vector<int>>("ends", ends),
-       MakeArgument<int>("Y_zero_point", XQ->zero_point),
-       MakeArgument<float>("Y_scale", XQ->scale)});
-  Workspace ws;
-  int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
-  BlobGetMutableTensor(ws.CreateBlob("X"), CPU)->CopyFrom(*X);
-  ws.RunOperatorOnce(op);
-  ws.RunOperatorOnce(xop);
-  const auto& YQ = ws.GetBlob("YQ")->Get<int8::Int8TensorCPU>();
-  auto YA = dq(YQ);
-  const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
-  EXPECT_TENSOR_EQ(*YA, YE);
-  EXPECT_EQ(YQ.t.sizes(), (vector<int64_t>{1, 2, 25, 16}));
-  EXPECT_EQ(YQ.scale, XQ->scale);
-  EXPECT_EQ(YQ.zero_point, XQ->zero_point);
+  for (int64_t batch : {0, 1, 2}) {
+    auto XQ = q({batch, 25, 25, 16});
+    auto X = dq(*XQ);
+    vector<int> starts = {0, 3, 0, 0};
+    vector<int> ends = {-1, 5, -1, -1};
+    auto xop = CreateOperatorDef(
+        "Slice",
+        "",
+        {"X"},
+        {"Y"},
+        {MakeArgument<vector<int>>("starts", starts),
+         MakeArgument<vector<int>>("ends", ends)});
+    auto op = CreateOperatorDef(
+        "Int8Slice",
+        "",
+        {"XQ"},
+        {"YQ"},
+        {MakeArgument<vector<int>>("starts", starts),
+         MakeArgument<vector<int>>("ends", ends),
+         MakeArgument<int>("Y_zero_point", XQ->zero_point),
+         MakeArgument<float>("Y_scale", XQ->scale)});
+    Workspace ws;
+    int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
+    BlobGetMutableTensor(ws.CreateBlob("X"), CPU)->CopyFrom(*X);
+    ws.RunOperatorOnce(op);
+    ws.RunOperatorOnce(xop);
+    const auto& YQ = ws.GetBlob("YQ")->Get<int8::Int8TensorCPU>();
+    auto YA = dq(YQ);
+    const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
+    EXPECT_TENSOR_EQ(*YA, YE);
+    EXPECT_EQ(YQ.t.sizes(), (vector<int64_t>{batch, 2, 25, 16}));
+    EXPECT_EQ(YQ.scale, XQ->scale);
+    EXPECT_EQ(YQ.zero_point, XQ->zero_point);
+  }
 }
 
 TEST(Int8, Transpose) {
-  auto XQ = q({1, 50, 25, 16});
-  auto xop = CreateOperatorDef(
-      "Int8Transpose",
-      "",
-      {"XQ"},
-      {"YQ"},
-      {MakeArgument("axes", vector<int64_t>{0, 3, 1, 2}),
-       MakeArgument<float>("Y_scale", XQ->scale),
-       MakeArgument<int32_t>("Y_zero_point", XQ->zero_point)});
-  Workspace ws;
-  int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
-  ws.RunOperatorOnce(xop);
-  const auto& YQ = ws.GetBlob("YQ")->Get<int8::Int8TensorCPU>();
-  EXPECT_EQ(YQ.t.sizes(), (vector<int64_t>{1, 16, 50, 25}));
-  EXPECT_EQ(YQ.scale, XQ->scale);
-  EXPECT_EQ(YQ.zero_point, XQ->zero_point);
+  for (int64_t batch : {0, 1, 2}) {
+    auto XQ = q({batch, 50, 25, 16});
+    auto xop = CreateOperatorDef(
+        "Int8Transpose",
+        "",
+        {"XQ"},
+        {"YQ"},
+        {MakeArgument("axes", vector<int64_t>{0, 3, 1, 2}),
+         MakeArgument<float>("Y_scale", XQ->scale),
+         MakeArgument<int32_t>("Y_zero_point", XQ->zero_point)});
+    Workspace ws;
+    int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
+    ws.RunOperatorOnce(xop);
+    const auto& YQ = ws.GetBlob("YQ")->Get<int8::Int8TensorCPU>();
+    EXPECT_EQ(YQ.t.sizes(), (vector<int64_t>{batch, 16, 50, 25}));
+    EXPECT_EQ(YQ.scale, XQ->scale);
+    EXPECT_EQ(YQ.zero_point, XQ->zero_point);
+  }
 }
 } // namespace caffe2

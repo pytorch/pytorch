@@ -49,9 +49,11 @@ class Int8SoftmaxOp final : public Operator<CPUContext> {
 
     initQNNPACK();
 
+    size_t channels = X.t.size_from_dim(1);
+
     if (this->qnnpackOperator_ == nullptr) {
       const qnnp_status createStatus = qnnp_create_softargmax_nc_q8(
-        X.t.numel() / X.t.size(0) /* channels */,
+        channels,
         X_scale,
         static_cast<uint8_t>(Y_zero_point), Y_scale,
         0 /* flags */,
@@ -66,9 +68,9 @@ class Int8SoftmaxOp final : public Operator<CPUContext> {
         this->qnnpackOperator_,
         X.t.size(0) /* batch size */,
         X.t.template data<uint8_t>(),
-        X.t.numel() / X.t.size(0) /* X stride */,
+        channels /* X stride */,
         Y->t.template mutable_data<uint8_t>(),
-        X.t.numel() / X.t.size(0) /* Y stride */);
+        channels /* Y stride */);
     CAFFE_ENFORCE(
         setupStatus == qnnp_status_success,
         "failed to setup QNNPACK SoftArgMax operator");
