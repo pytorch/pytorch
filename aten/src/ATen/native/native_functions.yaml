@@ -2284,15 +2284,12 @@
 - func: trunc_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
   variants: function, method
-  dispatch:
-    CPU: _trunc__cpu
-    CUDA: _trunc__cuda
 
 - func: trunc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: _trunc_out_cpu
-    CUDA: _trunc_out_cuda
+    CPU: trunc_out
+    CUDA: trunc_out
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
