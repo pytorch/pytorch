@@ -42,13 +42,11 @@ def _calculate_dynamic_qparams(X, dtype):
     according to the min and max element of the tensor"""
     if isinstance(X, torch.Tensor):
         X = X.numpy()
-    if isinstance(dtype, torch.dtype):
-        qmin = torch.iinfo(dtype).min
-        qmax = torch.iinfo(dtype).max
-    else:
-        qmin = np.iinfo(dtype).min
-        qmax = np.iinfo(dtype).max
-    n_levels = 1.0 * (qmax - qmin)
+    if dtype == torch.qint8:
+        qmin, qmax = -128, 127
+    else:  # dtype == torch.quint8
+        qmin, qmax = 0, 255
+    n_levels = 255.0
     min_val = X.min()
     max_val = X.max()
     if min_val == max_val:
@@ -62,4 +60,4 @@ def _calculate_dynamic_qparams(X, dtype):
         zero_point = qmin - round(min_val / scale)
         zero_point = max(qmin, zero_point)
         zero_point = min(qmax, zero_point)
-    return float(scale), int(zero_point)
+    return [float(scale), int(zero_point)]

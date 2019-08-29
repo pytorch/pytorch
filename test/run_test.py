@@ -16,7 +16,7 @@ import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
-from torch._six import PY2
+PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'autograd',
@@ -45,7 +45,6 @@ TESTS = [
     'optim',
     'qat',
     'quantization',
-    'quantized_conv',
     'quantized',
     'quantized_tensor',
     'quantized_nn_mods',
@@ -62,7 +61,9 @@ TESTS = [
     'namedtensor',
     'jit_disabled',
 ]
-if not PY2:
+
+# skip < 3.6 b/c fstrings added in 3.6
+if PY36:
     TESTS.append('jit_py3')
 
 WINDOWS_BLACKLIST = [
