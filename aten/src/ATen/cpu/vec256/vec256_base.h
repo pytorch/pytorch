@@ -382,6 +382,13 @@ inline T minimum(const T& a, const T& b) {
   return c;
 }
 
+template <class T> Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = a[i] < min_vec[i] ? min_vec[i] : (a[i] > max_vec[i] ? max_vec[i] : a[i]);
+  }
+  return c;
+}
 
 #define DEFINE_BITWISE_OP(op)                                               \
 template <class T>                                                          \

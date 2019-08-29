@@ -149,7 +149,7 @@ static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_sca
     auto max_vec = Vec256<scalar_t>(max);
     cpu_kernel_vec(iter,
      [=](scalar_t a) -> scalar_t { return a < min ? min : (a > max ? max : a); },
-     [=](Vec256<scalar_t> a) { return vec256::minimum(max_vec, vec256::maximum(min_vec, a)); });
+     [=](Vec256<scalar_t> a) { return vec256::clamp(a, min_vec, max_vec); });
   });
 }
 
