@@ -32,7 +32,10 @@ c10::optional<StrongFunctionPtr> as_function(const py::object& obj);
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(py::object the_self) : self(std::move(the_self)) {}
 
-  FunctionSchema getSchema(const size_t n_args, const size_t n_binders);
+  FunctionSchema getSchema(
+      const size_t n_args,
+      const size_t n_binders,
+      const SourceRange& loc);
 
   // call it like a function, e.g. `outputs = this(inputs)`
   std::shared_ptr<SugaredValue> call(
