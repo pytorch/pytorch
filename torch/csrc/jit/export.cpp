@@ -640,39 +640,7 @@ class ScriptModuleSerializer2 {
         constant_table_.begin(), constant_table_.end());
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format_) {
-
-      auto compUnit = module.class_compilation_unit();
-      auto funcList = compUnit->get_functions();
-
-      for (auto func : funcList) {
-        torch::jit::Code code(func->graph());
-        std::string foldername = "bytecode/" + func->name();
-
-        // constants
-        auto constants = c10::ivalue::Tuple::create(code.constant_table());
-        writeArchive(foldername + "/constants", constants);
-
-        // instructions and operators
-        std::vector<IValue> inss;
-        for (const auto& ins : code.instructions()) {
-          std::stringstream ss;
-          ss << ins.op;
-          std::vector<IValue> insv{ss.str(), ins.N, ins.X};
-          inss.emplace_back(c10::ivalue::Tuple::create(std::move(insv)));
-        }
-        auto instructions = c10::ivalue::Tuple::create(std::move(inss));
-
-        std::vector<IValue> opss;
-        for (const auto& opname : code.opname_table()) {
-          opss.emplace_back(c10::ivalue::Tuple::create({opname.name, opname.overload_name}));
-        }
-        auto operators = c10::ivalue::Tuple::create(std::move(opss));
-
-        auto elements = c10::ivalue::Tuple::create({instructions, operators});
-        std::vector<at::Tensor> temp_table;
-        auto bdata = pickle(elements, &temp_table);
-        writer_.writeRecord(foldername + "/instructions.pkl", bdata.data(), bdata.size());
-      }
+      writeByteCode(module);
     }
     // finally we serialize the model
     writeArchive("data", module.module_object());
@@ -782,6 +750,42 @@ class ScriptModuleSerializer2 {
           /*compress=*/true);
     }
   }
+
+  void writeByteCode(const script::Module& module) {
+    auto methods = module.get_methods();
+    for (const auto& method : methods) {
+      const auto& func = method.function();
+      torch::jit::Code code(func.graph());
+
+      // instructions
+      std::vector<IValue> inss;
+      for (const auto& ins : code.instructions()) {
+        std::stringstream ss;
+        ss << ins.op;
+        std::vector<IValue> insv{ss.str(), ins.N, ins.X};
+        inss.emplace_back(c10::ivalue::Tuple::create(std::move(insv)));
+      }
+      auto instructions = c10::ivalue::Tuple::create(std::move(inss));
+      auto named_ins = c10::ivalue::Tuple::create({"instructions", instructions});
+
+      // operators
+      std::vector<IValue> opss;
+      for (const auto& opname : code.opname_table()) {
+        opss.emplace_back(c10::ivalue::Tuple::create({opname.name, opname.overload_name}));
+      }
+      auto operators = c10::ivalue::Tuple::create(std::move(opss));
+      auto named_ops = c10::ivalue::Tuple::create({"operators", operators});
+
+      // constants
+      auto constants = c10::ivalue::Tuple::create(code.constant_table());
+      auto named_consts = c10::ivalue::Tuple::create({"constants", constants});
+
+      auto elements = c10::ivalue::Tuple::create({named_ins, named_ops, named_consts});
+      auto named_elements = c10::ivalue::Tuple::create({func.name(), elements});
+      writeArchive("bytecode", named_elements);
+    }
+  }
+
   void convertNamedType(const c10::NamedTypePtr& class_type) {
     if (converted_types_.contains(class_type)) {
       return;
