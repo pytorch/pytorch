@@ -345,12 +345,8 @@ struct GraphFuser {
         } else if ((input->type()->isSubtypeOf(FloatType::get()) &&
                     input->node()->kind() != prim::Constant) ||
                    (n->kind() == aten::_grad_sum_to_size &&
-
-                    (input->type()->isSubtypeOf(ListType::ofInts()) ||
-                     input->type()->isSubtypeOf(
-                         OptionalType::create(ListType::ofInts())))
-
-                        )) {
+                    input->type()->isSubtypeOf(
+                        OptionalType::create(ListType::ofInts())))) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;

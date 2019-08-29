@@ -22,6 +22,19 @@ def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
     return [n for n in nodes if n.kind() not in profiling_opcodes]
 
+def warmup_backward(f, *args):
+    profiling_count = 2
+    print(f)
+    results = []
+    for i in range(profiling_count):
+        if len(args) > 0:
+            r = torch.autograd.grad(f, *args)
+            results.append(r)
+        else:
+            f.backward()
+    
+    return results
+
 class TestFuser(JitTestCase):
     def assertAllFused(self, graph, except_for=()):
 
@@ -30,7 +43,7 @@ class TestFuser(JitTestCase):
             self.assertEqual(len(diff_graphs), 1)
             graph = diff_graphs[0].g('Subgraph')
 
-        allowed_nodes = {'prim::Constant', 'prim::FusionGroup', 'prim::BailoutTemplate', 'prim::BailOut'} | set(except_for)
+        allowed_nodes = {'prim::Constant', 'prim::FusionGroup', 'prim::BailoutTemplate', 'prim::BailOut', 'prim::TupleConstruct'} | set(except_for)
         self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
                         'got {}'.format(graph))
         self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)
@@ -283,12 +296,12 @@ class TestFuser(JitTestCase):
         funcs = (func2, funcInf, funcOptMin, funcOptMax)
         for f, inputs in product(funcs, [[a, b], [a, nan]]):
             inp1, inp2 = inputs
-            s = self.checkScript(f, (inp1, inp2))
+            profile = True if f in [func2, funcInf] else False
+            s = self.checkScript(f, (inp1, inp2), profiling=profile)
             self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
             c = s(inp1, inp2)
-            with enable_profiling_mode(True):
-                c.sum().backward()
-                c.sum().backward()
+            with enable_profiling_mode(profile):
+                warmup_backward(c.sum())
             graph = backward_graph(s)
             self.assertAllFused(graph, except_for={'aten::Float'})
 
@@ -547,9 +560,8 @@ class TestFuser(JitTestCase):
         self.assertAllFused(s.graph_for(a, b), except_for={'aten::size', 'aten::_size_if_not_equal', 'prim::BroadcastSizes'})
 
         c = s(a, b)
-        # in a profiling run, ga and gb aren't deduplicated
-        ga, gb = torch.autograd.grad(c.sum(), [a, b])
-        ga2, gb2 = torch.autograd.grad(c.sum(), [a, b])
+        results = warmup_backward(c.sum(), [a, b])
+        ga2, gb2 = results.pop()
         graph = backward_graph(s)
         self.assertAllFused(graph)
         # check that a, b share storage, i.e. were generated as a single output in the fuser
@@ -594,8 +606,7 @@ class TestFuser(JitTestCase):
 
         with enable_profiling_mode(True):
             c = s(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2)
-            torch.autograd.grad(c.sum(), [b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2])
-            torch.autograd.grad(c.sum(), [b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2])
+            warmup_backward(c.sum(), [b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2])
             graph = backward_graph(s)
             self.assertAllFused(graph, except_for={'aten::size', 'prim::BroadcastSizes', 'aten::_size_if_not_equal'})
 
@@ -679,9 +690,7 @@ class TestFuser(JitTestCase):
 
         with enable_profiling_mode(True):
             hy, cy = module(*inputs)
-            summ = (hy + cy).sum()
-            summ.backward()
-            summ.backward()
+            warmup_backward((hy + cy).sum())
             backward = backward_graph(module)
         self.assertAllFused(backward, except_for=("aten::t", "aten::mm",
                                                   "aten::_grad_sum_to_size"))
@@ -757,8 +766,7 @@ class TestFuser(JitTestCase):
         FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
             .check_next("return").check("FusionGroup").run(str(forward_graph))
         hy, cy = module(*inputs)
-        (hy + cy).sum().backward()
-        (hy + cy).sum().backward()
+        warmup_backward((hy + cy).sum())
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
@@ -920,8 +928,7 @@ class TestFuser(JitTestCase):
             # and as of now we don't have python API to get BailOut's graph executors
             fwd = module(s1, s1, s1)
             args = [a.detach_().requires_grad_() for a in [s1, s1, s1]]
-            torch.autograd.grad(fwd.sum(), args)
-            torch.autograd.grad(fwd.sum(), args)
+            warmup_backward(fwd.sum(), args)
 
             old_plans = set()
             for i in range(3):
@@ -944,8 +951,8 @@ class TestFuser(JitTestCase):
                 # for now we only check the very first case where all inputs have  the same shapes, so no _grad_sum_to_size
                 # when we add an ability to collect bailout executors we should be able to check all the graphs
                 if i < 1:
-                    self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "aten::_grad_sum_to_size"]), i)
-                    self.assertEqual(len([1 for o in backward.outputs() if o.node().inputsAt(1).node().kind() == "prim::Param"]), 3 - i)
+                    self.assertEqual(len([1 for o in next(backward.outputs()).node().inputs() if o.node().kind() == "aten::_grad_sum_to_size"]), i)
+                    self.assertEqual(len([1 for o in next(backward.outputs()).node().inputs() if o.node().inputsAt(1).node().kind() == "prim::Param"]), 3 - i)
 
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -980,8 +987,10 @@ class TestFuser(JitTestCase):
                     assert backward is None
                     backward = g
                     old_plans.add(str(backward))
-            self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "aten::_grad_sum_to_size"]), i)
-            self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "prim::Param"]), 3 - i)
+            print(backward)
+            # 
+            self.assertEqual(len([1 for o in next(backward.outputs()).node().inputs() if o.node().kind() == "aten::_grad_sum_to_size"]), i)
+            self.assertEqual(len([1 for o in next(backward.outputs()).node().inputs() if o.node().kind() == "prim::Param"]), 3 - i)
 
 if __name__ == '__main__':
     run_tests()

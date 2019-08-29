@@ -1016,10 +1016,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case TAIL_CALL: {
-            // multiple outputs should be okay, especially for backward graphs
-            af.functions[inst.X]->ensure_defined(/*multiple_output=*/true);
+            af.functions[inst.X]->ensure_defined();
             const Code &code =
-                af.functions[inst.X]->get_executor(true).getPlanFor(stack).code;
+                af.functions[inst.X]->get_executor().getPlanFor(stack).code;
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);

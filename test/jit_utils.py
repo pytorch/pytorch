@@ -305,26 +305,24 @@ class JitTestCase(TestCase):
         with self.assertRaisesRegex(exception, regex):
             script(*inputs)
         # string frontend
-        # profiling run
-        with self.assertRaisesRegex(exception, regex):
-            source = textwrap.dedent(inspect.getsource(script))
-            cu = torch.jit.CompilationUnit(source)
-            ge = getattr(cu, script.__name__)
-            ge(*inputs)
-        with self.assertRaisesRegex(exception, regex):
-            with enable_profiling_mode(profiling):
+        with enable_profiling_mode(profiling):
+            with self.assertRaisesRegex(exception, regex):
+                source = textwrap.dedent(inspect.getsource(script))
                 cu = torch.jit.CompilationUnit(source)
-            ge = getattr(cu, script.__name__)
-            ge(*inputs)
-        # python AST frontend
-        # profiling run
-        with self.assertRaisesRegex(exception, regex):
-            ge = torch.jit.script(script)
-            ge(*inputs)
-        with self.assertRaisesRegex(exception, regex):
-            with enable_profiling_mode(profiling):
+                ge = getattr(cu, script.__name__)
+                # profiling run
+                with self.assertRaisesRegex(exception, regex):
+                    ge(*inputs)
+                # optimized run
+                ge(*inputs)
+            # python AST frontend
+            with self.assertRaisesRegex(exception, regex):
                 ge = torch.jit.script(script)
-            ge(*inputs)
+                # profiling run
+                with self.assertRaisesRegex(exception, regex):
+                    ge(*inputs)
+                # optimized run
+                ge(*inputs)
 
     def checkScript(self,
                     script,

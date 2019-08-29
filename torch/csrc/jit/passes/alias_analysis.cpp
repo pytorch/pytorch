@@ -1339,7 +1339,6 @@ void AliasDb::setWildcard(const Value* v) {
     eltDebugName = e->value->debugName();
   }
 
-  GRAPH_DEBUG("Mapping ", v->debugName(), " to ", eltDebugName);
   memoryDAG_->makePointerTo(getOrCreateElement(v), e);
 }
 

@@ -17,10 +17,9 @@
 namespace torch {
 namespace jit {
 
-static bool profiling_mode = false;
-bool& getProfilingMode() {
-  return profiling_mode;
-}
+static std::atomic<bool> profiling_mode{false};
+
+std::atomic<bool> &getProfilingMode() { return profiling_mode; }
 
 std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
     const std::shared_ptr<Graph>& graph,

@@ -26,13 +26,7 @@ void specializeAutogradZero(Graph &g) {
     } else if (
         tp->isSubtypeOf(TensorType::get()) ||
         tp->isSubtypeOf(ListType::ofTensors())) {
-      // the way this works with profiling is as follows:
-      // * In a profiling run, we truly have no information
-      //   if some tensors are defined or not
-      // * In a profiled run, we initially mark everything unknown
-      //   and then use profiling information on `BailOut` nodes
-      //   to set the states correctly
-      state[input] = getProfilingMode() ? State::Unknown : State::Nonzero;
+      state[input] = State::Nonzero;
     } else {
       state[input] = State::Unknown;
     }
@@ -116,7 +110,8 @@ void specializeAutogradZero(Graph &g) {
         // it's a counter to keep track how many times
         // a graph was profiled
         if (n->inputs().size() > 0) {
-          state[n->output()] = state[n->input()];
+          state[n->output()] = State::Unknown;
+          // state[n->input()];
         }
         break;
       }
@@ -129,7 +124,6 @@ void specializeAutogradZero(Graph &g) {
       case prim::Guard: {
         auto ptt = n->output()->type()->expect<TensorType>();
         state[n->output()] = ptt->autogradZero() ? State::Zero : State::Nonzero;
-
       } break;
       default:
         for (auto o : n->outputs()) {

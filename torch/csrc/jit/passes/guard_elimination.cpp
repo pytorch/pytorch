@@ -147,12 +147,14 @@ struct GuardElimination {
     for (auto input : n->inputs()) {
       if (input->node()->kind() == prim::Guard ||
           input->node()->kind() == prim::Constant ||
-          input->type()->cast<NumberType>() || except.count(i) != 0) {
+          input->type()->isSubtypeOf(NumberType::get()) ||
+          except.count(i) != 0) {
         AT_ASSERT(
             input->node()->kind() != prim::Guard ||
             input->type()->expect<TensorType>());
       } else {
-        GRAPH_DEBUG("input ", input->debugName(), " isn't guarded");
+        GRAPH_DEBUG("input ", input->debugName(), " isn't guarded, type ",
+                    *input->type());
         all_inputs_guarded = false;
         break;
       }
@@ -162,6 +164,10 @@ struct GuardElimination {
   }
 
 private:
+  // `removableGuard` checks if it is valid to remove the `prim::Guard`
+  // guarding the output of some operation.
+  // For a large number of operations, the test is to simply check
+  // that all inputs to the operation are also guarded.
   bool removableGuard(Node *n) {
 
     const static auto no_exceptions = std::unordered_set<size_t>{};

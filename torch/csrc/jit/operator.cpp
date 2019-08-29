@@ -233,11 +233,18 @@ bool Operator::matches(const Node* node) const {
 }
 
 std::shared_ptr<Operator> findOperatorFor(const Node* node) {
+
   const auto& candidates = getAllOperatorsFor(node->kind());
   for (const auto& candidate : candidates) {
     if (candidate->matches(node)) {
       return candidate;
     }
+  }
+  if (node->kind() == aten::_grad_sum_to_size) {
+    std::cout << "findOperatorFor = " << *node << std::endl;
+    std::cout << "input0 = " << *node->input(0)->node() << std::endl;
+    std::cout << "input1 = " << *node->input(1)->node() << std::endl;
+    std::cout << "false\n";
   }
   return nullptr;
 }

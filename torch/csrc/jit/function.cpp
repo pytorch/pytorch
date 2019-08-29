@@ -9,7 +9,7 @@ void placeholderCreator(Function&) {
   throw RecursiveMethodCallError();
 }
 
-void Function::ensure_defined(bool multiple_output) {
+void Function::ensure_defined() {
   try {
     if (function_creator_) {
       auto creator = function_creator_;
@@ -25,9 +25,7 @@ void Function::ensure_defined(bool multiple_output) {
         << "Recursive calls are not supported";
   }
 
-  if (!multiple_output) {
-    check_single_output();
-  }
+  check_single_output();
 }
 
 } // namespace jit

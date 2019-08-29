@@ -21,7 +21,7 @@ ProfileOp* ProfilingRecord::createProfileNode(
 static void unprofileGraphInputs(const std::shared_ptr<Graph> &graph) {
   for (auto i : graph->inputs()) {
     if (i->type()->isSubtypeOf(TensorType::get())) {
-      i->setType(TensorType::get());
+      i->setType(unshapedType(i->type()));
     }
   }
 }
@@ -31,7 +31,7 @@ static void unprofileBlock(Block *block) {
     auto n = *it;
     for (auto o : n->outputs()) {
       if (o->type()->isSubtypeOf(TensorType::get())) {
-        o->setType(TensorType::get());
+        o->setType(unshapedType(o->type()));
       }
     }
 

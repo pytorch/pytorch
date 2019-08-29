@@ -11,8 +11,9 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/symbolic_script.h>
 #include <torch/csrc/jit/symbolic_variable.h>
-
 #include <c10/util/Exception.h>
+
+#include <c10/util/StringUtil.h>
 
 #include <algorithm>
 #include <memory>
@@ -199,37 +200,6 @@ class GradientHelper {
 
  private:
   Node* node;
-
-  SymbolicVariable gradSumToSizeOf(SymbolicVariable v, Symbol input_name,
-                                   SymbolicVariable fw_output) {
-    Value *size;
-    {
-      // We insert after the current node because we want to use
-      // its output.
-      WithInsertPoint insert_guard{node->next()};
-      auto ptt_input = node->namedInput(input_name)->type()->cast<TensorType>();
-      auto ptt_output = fw_output.value()->type()->cast<TensorType>();
-      auto dynamic_size = c10::optional<std::vector<int64_t>>{};
-      auto input_size =
-          ptt_input ? ptt_input->sizes().concrete_sizes() : dynamic_size;
-      auto output_size =
-          ptt_output ? ptt_output->sizes().concrete_sizes() : dynamic_size;
-
-      if (input_size && output_size) {
-        IValue ival{};
-        if (input_size != output_size) {
-          size = node->owningGraph()->insertConstant(IValue(input_size),
-                                                     ListType::ofInts());
-        } else {
-          size = node->owningGraph()->insertConstant(IValue(), NoneType::get());
-        }
-      } else {
-        size = SymbolicVariable(node->namedInput(input_name))
-                   .size_if_not_equal(fw_output);
-      }
-    }
-    return v.gradSumToSize(size);
-  };
 
   std::vector<SymbolicVariable> buildSymbolicGradient(const std::vector<SymbolicVariable>& grads) {
     auto inputs = fmap<SymbolicVariable>(node->inputs());
@@ -531,18 +501,11 @@ static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
   }
 }
 
-// Any temporary value from the primal graphs needs to be captured for later use
-// in the reverse graph, to avoid costly recomputations. However, a lot of the
-// nodes we have in our graphs are simply constants, which are cheap to execute
-// and replicate, and so it's better to just copy them into the reverse graph,
-// without polluting the output lists unnecessarily.
-static void constantsizeSizes(Gradient &grad_desc, ReverseDetails &rev_info) {
-
-  static const auto err = [](Value *) -> Value * {
-    throw std::runtime_error("unexpected input");
-  };
-  auto &graph = *grad_desc.f;
-  Block *reverse_block = rev_info.reverse_block;
+// we need to fold aten::_size_if_not_equal at the differentiation time
+// while we know the shapes of aten::_size_if_not_equal's arguments
+// Otherwise, they will become inputs to a reverse Graph, and we will
+// lose this information and we don't profile Scalars, or Lists yet.
+static void foldSizeIfNotEqual(Block *reverse_block) {
 
   for (Node *top_node : reverse_block->nodes()) {
     AT_ASSERT(top_node->kind() == prim::GradOf ||
@@ -570,9 +533,10 @@ static void constantsizeSizes(Gradient &grad_desc, ReverseDetails &rev_info) {
                               ->input()
                               ->type()
                               ->cast<TensorType>();
-        if (!ptt_input || !ptt_output) {
-          continue;
-        }
+
+        TORCH_INTERNAL_ASSERT(ptt_input && ptt_output,
+                              "prim::GradOf, prim::AutogradAdd,"
+                              "prim::AutogradZero take tensors");
         auto input_size = ptt_input->sizes().concrete_sizes();
         auto output_size = ptt_output->sizes().concrete_sizes();
 
@@ -584,10 +548,15 @@ static void constantsizeSizes(Gradient &grad_desc, ReverseDetails &rev_info) {
         IValue ival{};
         Value *size;
         if (input_size != output_size) {
-          size = node->owningGraph()->insertConstant(IValue(input_size),
+          std::cout << "input_size = " << (c10::Join(":", *input_size))
+                    << std::endl;
+          std::cout << "output_size = " << (c10::Join(":", *output_size))
+                    << std::endl;
+          size = node->owningGraph()->insertConstant(*input_size,
                                                      ListType::ofInts());
         } else {
-          size = node->owningGraph()->insertConstant(IValue(), NoneType::get());
+          size = node->owningGraph()->insertConstant(
+              IValue(), OptionalType::create(ListType::ofInts()));
         }
         node->replaceInputWith(input, size);
       }
@@ -664,7 +633,7 @@ static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
 
   // TODO: see if this pass can be replaced with peephole pass
 
-  constantsizeSizes(grad_desc, rev_info);
+  foldSizeIfNotEqual(rev_info.reverse_block);
   liftConstants(grad_desc, rev_info);
   // We generally add a lot of aten::size calls (for derivatives of broadcasting
   // operators), and they often end up duplicated, and would get captured
@@ -820,6 +789,14 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   reverse_block->owningNode()->destroy();
 }
 
+void packReturnValuesIntoTuple(const std::shared_ptr<Graph> &graph) {
+  auto returnNode = graph->block()->return_node();
+  WithInsertPoint wip(returnNode);
+  auto tuple = graph->insertNode(graph->createTuple(returnNode->inputs()));
+  returnNode->removeAllInputs();
+  returnNode->addInput(tuple->output());
+}
+
 Gradient differentiate(std::shared_ptr<Graph>& graph) {
   Gradient grad_desc;
   // Take ownership of the graph
@@ -845,6 +822,7 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // It's possible the we've cloned the same constants many times, so
   // de-duplicate them
   ConstantPooling(grad_desc.df);
+  packReturnValuesIntoTuple(grad_desc.df);
   return grad_desc;
 }
 } // namespace jit
