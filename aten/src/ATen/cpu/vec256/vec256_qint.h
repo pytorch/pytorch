@@ -50,16 +50,16 @@ struct Vec256<c10::qint8> {
     }
 
     using float_vec_return_type = std::array<Vec256<float>, 4>;
-    using value_type = int8_t;
+    using value_type = typename c10::qint8::underlying;
 
+ private:
     __m256i vals __attribute__((aligned(64)));
+ public:
 
     // Broadcast constructor
     Vec256(const c10::qint8& val) {
         value_type uw = val.val_;
-        for (int i = 0; i < size(); ++i) {
-            ((value_type*)&vals)[i] = uw;
-        }
+        vals = _mm256_set1_epi8(uw);
     }
 
     // This is needed because the compiler emits awful code for the default
@@ -150,16 +150,16 @@ struct Vec256<c10::quint8> {
     }
 
     using float_vec_return_type = std::array<Vec256<float>, 4>;
-    using value_type = uint8_t;
+    using value_type = typename c10::quint8::underlying;
 
-    __m256i vals;
-
+ private:
+    __m256i vals __attribute__((aligned(64)));
+ 
+ public:
     // Broadcast constructor
     Vec256(const c10::quint8& val) {
         value_type uw = val.val_;
-        for (int i = 0; i < size(); ++i) {
-            ((value_type*)&vals)[i] = uw;
-        }
+        vals = _mm256_set1_epi8(uw);
     }
 
     Vec256(const Vec256<c10::quint8>& other) {
@@ -247,16 +247,16 @@ struct Vec256<c10::qint32> {
     }
 
     using float_vec_return_type = std::array<Vec256<float>, 1>;
-    using value_type = int32_t;
+    using value_type = c10::qint32::underlying;
 
-    __m256i vals;
+ private:
+    __m256i vals __attribute__((aligned(64)));
+ public:
 
     // Broadcast constructor
     Vec256(const c10::qint32& val) {
         value_type uw = val.val_;
-        for (int i = 0; i < 8; ++i) {
-          ((int32_t*)&vals)[i] = uw;
-        }
+        vals = _mm256_set1_epi32(uw);
     }
 
     void store(void* ptr, int count = size()) const {
