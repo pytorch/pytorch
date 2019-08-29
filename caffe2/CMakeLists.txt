@@ -375,6 +375,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/import.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pickle.cpp
     ${TORCH_SRC_DIR}/csrc/jit/import_export_helpers.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/instruction.cpp
     ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
     ${TORCH_SRC_DIR}/csrc/jit/node_hashing.cpp
@@ -733,7 +734,6 @@ ENDIF()
   if (BUILD_TEST AND NOT NO_API)
     add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
   endif()
-
 
   # XXX This ABI check cannot be run with arm-linux-androideabi-g++
   if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")

@@ -98,6 +98,10 @@ void ProcessGroupAgent::join() {
   listenerThread_.join();
 }
 
+int16_t ProcessGroupAgent::getWorkerId() {
+  return pg_->getRank();
+}
+
 void ProcessGroupAgent::sync() {
   // Block until all processes wants to sync. This is necessary before acquiring
   // the lock below, because other processes might not enter sync() until it
