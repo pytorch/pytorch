@@ -516,6 +516,11 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
              "equal number of batches expected");
   THArgCheck(THCTensor_(size)(state, t, 0) == THCTensor_(size)(state, batch2, 0), 7,
              "equal number of batches expected");
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = at::namedinference::compute_baddbmm_outnames(result, batch1, batch2, t);
+  {
+    at::NoNamesGuard guard;
+#endif
   THArgCheck(THCTensor_(size)(state, t, 1) == THCTensor_(size)(state, batch1, 1), 6,
              "wrong matrix size");
   THArgCheck(THCTensor_(size)(state, t, 2) == THCTensor_(size)(state, batch2, 2), 7,
@@ -769,6 +774,10 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
   if (result_ != result) {
     THCTensor_(freeCopyTo)(state, result_, result);
   }
+#ifdef BUILD_NAMEDTENSOR
+  }
+  at::namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
 
 #else
   ERROR_ONLY_FP_TYPES("baddbmm");
