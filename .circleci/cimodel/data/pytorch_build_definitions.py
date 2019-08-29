@@ -14,13 +14,14 @@ from typing import List, Optional
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
-DOCKER_IMAGE_VERSION = 327
+DOCKER_IMAGE_VERSION = 336
 
 
 @dataclass
 class Conf:
     distro: str
     parms: List[str]
+    parms_list_ignored_for_docker_image: Optional[List[str]] = None
     pyver: Optional[str] = None
     cuda_version: Optional[str] = None
     # TODO expand this to cover all the USE_* that we want to test for
@@ -51,7 +52,10 @@ class Conf:
         cuda_parms = []
         if self.cuda_version:
             cuda_parms.extend(["cuda" + self.cuda_version, "cudnn7"])
-        return leading + ["linux", self.distro] + cuda_parms + self.parms
+        result = leading + ["linux", self.distro] + cuda_parms + self.parms
+        if (not for_docker and self.parms_list_ignored_for_docker_image is not None):
+            result = result + self.parms_list_ignored_for_docker_image
+        return result
 
     def gen_docker_image_path(self):
 
@@ -133,7 +137,6 @@ class HiddenConf(object):
         self.parent_build = parent_build
 
     def gen_workflow_yaml_item(self, phase):
-
         return {self.gen_build_name(phase): {"requires": [self.parent_build.gen_build_name("build")]}}
 
     def gen_build_name(self, _):
@@ -193,15 +196,16 @@ def instantiate_configs():
     for fc in found_configs:
 
         distro_name = fc.find_prop("distro_name")
+        compiler_name = fc.find_prop("compiler_name")
+        is_xla = fc.find_prop("is_xla") or False
+        parms_list_ignored_for_docker_image = []
 
         python_version = None
-        if distro_name == "xenial":
+        if compiler_name == "cuda" or compiler_name == "android":
             python_version = fc.find_prop("pyver")
             parms_list = [fc.find_prop("abbreviated_pyver")]
         else:
             parms_list = ["py" + fc.find_prop("pyver")]
-
-        compiler_name = fc.find_prop("compiler_name")
 
         cuda_version = None
         if compiler_name == "cuda":
@@ -212,6 +216,8 @@ def instantiate_configs():
             # TODO: do we need clang to compile host binaries like protoc?
             parms_list.append("clang5")
             parms_list.append("android-ndk-" + android_ndk_version)
+            android_abi = fc.find_prop("android_abi")
+            parms_list_ignored_for_docker_image.append(android_abi)
             restrict_phases = ["build"]
 
         elif compiler_name:
@@ -219,14 +225,15 @@ def instantiate_configs():
             parms_list.append(gcc_version)
 
             # TODO: This is a nasty special case
-            if compiler_name == "clang":
+            if compiler_name == "clang" and not is_xla:
                 parms_list.append("asan")
+                python_version = fc.find_prop("pyver")
+                parms_list[0] = fc.find_prop("abbreviated_pyver")
 
         if cuda_version in ["9.2", "10", "10.1"]:
             # TODO The gcc version is orthogonal to CUDA version?
             parms_list.append("gcc7")
 
-        is_xla = fc.find_prop("is_xla") or False
         is_namedtensor = fc.find_prop("is_namedtensor") or False
         is_important = fc.find_prop("is_important") or False
 
@@ -237,6 +244,7 @@ def instantiate_configs():
         c = Conf(
             distro_name,
             parms_list,
+            parms_list_ignored_for_docker_image,
             python_version,
             cuda_version,
             is_xla,

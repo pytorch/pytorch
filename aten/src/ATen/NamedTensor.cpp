@@ -1,7 +1,7 @@
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensor.h>
 #include <ATen/core/Tensor.h>
-#include <torch/csrc/utils/memory.h>
+#include <c10/util/C++17.h>
 
 namespace at {
 
@@ -10,6 +10,16 @@ bool NamedTensorMeta::has_names() const {
       names_.begin(), names_.end(), [](const Dimname& n) {
         return n.type() == NameType::WILDCARD;
       });
+}
+
+thread_local bool NamesMode_enabled = true;
+
+bool NamesMode::is_enabled() {
+  return NamesMode_enabled;
+}
+
+void NamesMode::set_enabled(bool enabled) {
+   NamesMode_enabled = enabled;
 }
 
 Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
@@ -22,8 +32,12 @@ Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names,
   return tensor;
 }
 
-std::vector<Dimname> FIXME_default_names(size_t len) {
-  return { len, Dimname::wildcard() };
+DimnameList default_names(size_t len) {
+  static std::vector<Dimname> all_unnamed(kMaxNamedTensorDim, Dimname::wildcard());
+    TORCH_INTERNAL_ASSERT(
+        len <= kMaxNamedTensorDim,
+        "Only tensors with up to ", kMaxNamedTensorDim, " are supported.");
+  return DimnameList(&all_unnamed.front(), len);
 }
 
 namespace impl {
@@ -63,15 +77,29 @@ static void check_unique_names(DimnameList names) {
 }
 
 static NamedTensorMeta* get_named_tensor_meta(TensorImpl* impl) {
+  if (!NamesMode::is_enabled()) {
+    return nullptr;
+  }
   return static_cast<NamedTensorMeta*>(impl->named_tensor_meta());
+}
+
+static const NamedTensorMeta* get_named_tensor_meta(const TensorImpl* impl) {
+  if (!NamesMode::is_enabled()) {
+    return nullptr;
+  }
+  return static_cast<const NamedTensorMeta*>(impl->named_tensor_meta());
 }
 
 void check_valid_names(TensorImpl* impl, DimnameList names) {
   auto ndim = impl->dim();
+  TORCH_CHECK(
+      ndim <= kMaxNamedTensorDim,
+      "Named tensors only support up to ", kMaxNamedTensorDim, " dims: "
+      "Attempted to create a tensor with dim ", ndim, " with names ", names);
   TORCH_CHECK(ndim == names.size(),
       "Number of names (", names.size(), ") and "
       "number of dimensions in tensor (", ndim, ") ",
-      "do not match.");
+      "do not match. Attempted to create a tensor with names ", names);
   check_unique_names(names);
 }
 
@@ -83,9 +111,9 @@ void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names) {
   check_valid_names(impl, *names);
   auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
-    impl->set_named_tensor_meta(torch::make_unique<NamedTensorMeta>(*names));
+    impl->set_named_tensor_meta(c10::guts::make_unique<NamedTensorMeta>(*names));
   } else {
-    meta->set_names_(*names);
+    meta->set_names(*names);
   }
 }
 
@@ -95,13 +123,13 @@ void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, 
   }
   auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
-    impl->set_named_tensor_meta(torch::make_unique<NamedTensorMeta>(names));
+    impl->set_named_tensor_meta(c10::guts::make_unique<NamedTensorMeta>(names));
   } else {
-    meta->set_names_(names);
+    meta->set_names(names);
   }
 }
 
-optional<DimnameList> get_names(TensorImpl* impl) {
+optional<DimnameList> get_opt_names(const TensorImpl* impl) {
   const auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
     return nullopt;
@@ -110,7 +138,15 @@ optional<DimnameList> get_names(TensorImpl* impl) {
   }
 }
 
-bool has_names(TensorImpl* impl) {
+DimnameList get_names(const TensorImpl* impl) {
+  auto maybe_names = get_opt_names(impl);
+  if (maybe_names) {
+    return *maybe_names;
+  }
+  return default_names(impl->dim());
+}
+
+bool has_names(const TensorImpl* impl) {
   const auto* named_tensor_meta = get_named_tensor_meta(impl);
   return named_tensor_meta != nullptr && named_tensor_meta->has_names();
 }
