@@ -59,7 +59,8 @@ class RRefContext {
     TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
     // RRefContext does not track user RRefs, it will be destructed when there is
     // no shared_ptrs pointing to it.
-    return std::make_shared<RRefImpl<T>>(ownerId, rrefId, forkId);
+    // NB: cannot use make_shared here as the constructor of UserRRef is private
+    return std::shared_ptr<UserRRef>(new UserRRef(ownerId, rrefId, forkId));
   }
 
   template <typename T>
@@ -71,7 +72,11 @@ class RRefContext {
       // Scenario (1) the first time this owner knows about this RRef
       // Scenario (2) This owner is also the creator.
       // Creating an RRef
-      auto rref = std::make_shared<RRefImpl<T>>(getWorkerId(), rrefId, rrefId);
+      OwnerRRef<T> ownerRRef(getWorkerId(), rrefId, rrefId);
+      // NB: cannot use make_shared here as the constructor of OwnerRRef is
+      // private.
+      auto rref = std::shared_ptr<OwnerRRef<T>>(
+          new OwnerRRef<T>(getWorkerId(), rrefId, rrefId));
       rrefs_[rref->id()] = rref;
       return rref;
 

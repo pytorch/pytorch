@@ -12,8 +12,9 @@ namespace distributed {
 namespace rpc {
 
 
-class RRefContext;
 class RRef;
+class RRefContext;
+class UserRRef;
 
 // Represents fork of an RRef to be sent over the wire.
 //
@@ -29,6 +30,7 @@ struct RRefForkData {
  private:
   friend class RRef;
   friend class RRefContext;
+  friend class UserRRef;
 
   RRefForkData(worker_id_t ownerId,
                const RRefId& rrefId_,
@@ -44,49 +46,65 @@ struct RRefForkData {
 // TODO: make RRef an IValue, and edit createStackForSchema accordingly
 class RRef {
  public:
-
   // RRef is made NOT copyable NOT movable to prevent messing up reference
   // counting
   RRef(const RRef& other) = delete;
   RRef(RRef&& other) = delete;
 
-  ~RRef();
+  virtual ~RRef() = default;
 
   worker_id_t owner() const;
   const RRefId& id() const;
   const ForkId& forkId() const;
-  bool isOwner() const;
-  IValue toHere();
   IValue fork() const;
 
+  virtual bool isOwner() const = 0;
   virtual void setValue(IValue&& value) = 0;
-  virtual IValue getValue() = 0;
-
-  // TODO: add setValue(py::object) and getPyObj() for Python UDF
+  virtual IValue getValue() const = 0;
+  virtual IValue toHere() = 0;
 
  protected:
-  friend class RRefContext;
-
   RRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;
   // If this is the owner, forkId_ == rrefId_.
   const ForkId forkId_;
-  c10::optional<std::unordered_set<ForkId, ForkId::Hash>> children_fork_ids;
+};
+
+class UserRRef final: public RRef {
+ public:
+  bool isOwner() const override;
+  IValue getValue() const override;
+  void setValue(IValue&& value) override;
+  IValue toHere() override;
+
+  ~UserRRef() override;
+ private:
+  friend class RRefContext;
+
+  UserRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
 };
 
 // Keep the template only on the derived class because ``RRefContext`` needs to
 // erase the type on ``RRef`` and keep them in one map.
 template <typename T>
-class RRefImpl final: public RRef {
+class OwnerRRef final: public RRef {
  public:
-  RRefImpl(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId)
-      : RRef(ownerId, rrefId, forkId) {}
+  bool isOwner() const override {
+    return true;
+  }
 
-  RRefImpl(RRefImpl<T>&& other) noexcept
-      : RRef(other.owner(), other.id(), other.forkId()),
-        value_(other.value_) {}
+  IValue getValue() const override {
+    if(std::is_same<T, IValue>::value) {
+      // TODO: use callback to make this non-blocking
+      std::unique_lock<std::mutex> lock(mutex_);
+      valueCV_.wait(lock, [this]{return value_.has_value();});
+      return value_.value();
+    } else {
+      AT_ERROR("Trying to store an IValue in incompatible RRef[T].");
+    }
+  }
 
   void setValue(IValue&& value) override {
     if(std::is_same<T, IValue>::value) {
@@ -100,21 +118,39 @@ class RRefImpl final: public RRef {
     }
   }
 
-  IValue getValue() override {
-    if(std::is_same<T, IValue>::value) {
-      // TODO: use callback to make this non-blocking
-      std::unique_lock<std::mutex> lock(mutex_);
-      valueCV_.wait(lock, [this]{return value_.has_value();});
-      return value_.value();
-    } else {
-      AT_ERROR("Trying to store an IValue in incompatible RRef[T].");
-    }
+  IValue toHere() override {
+    AT_ERROR("OwnerRRef does not support toHere(), use getValue() instead.");
   }
 
+  // TODO: add setValue(py::object) and getPyObj() for Python UDF
+
  private:
+  friend class RRefContext;
+
+  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId)
+      : OwnerRRef(ownerId, rrefId, forkId, {}) {}
+
+  OwnerRRef(OwnerRRef<T>&& other) noexcept
+      : OwnerRRef(other.owner(),
+                  other.id(),
+                  other.forkId(),
+                  std::move(other.value_)) {}
+
+  OwnerRRef(
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      const ForkId& forkId,
+      c10::optional<T> value)
+      : RRef(ownerId, rrefId, forkId) {
+    AT_ASSERT(forkId_ == rrefId_,
+        "Owner RRef's fork ID should be the same as its rref Id");
+
+    value_ = std::move(value);
+  }
+
   c10::optional<T> value_;
-  std::mutex mutex_;
-  std::condition_variable valueCV_;
+  mutable std::mutex mutex_;
+  mutable std::condition_variable valueCV_;
 };
 
 

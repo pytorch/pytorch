@@ -44,43 +44,7 @@ RRefForkData RRefForkData::fromIValue(const at::IValue&& ivalue) {
 //////////////////////////////  RRef  /////////////////////////////////////
 
 RRef::RRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId)
-    : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId) {
-  auto& ctx = RRefContext::getInstance();
-
-  if (ownerId == ctx->getWorkerId()) {
-    // This is the owner RRef
-    AT_ASSERT(forkId_ == rrefId_,
-        "Owner RRef's fork ID should be the same as its rref Id");
-    // only owner RRef keeps track of forks
-    children_fork_ids = std::unordered_set<ForkId, ForkId::Hash>();
-  } else {
-    // This is the user RRef
-    AT_ASSERT(!(forkId_ == rrefId_),
-        "User RRef's fork ID should not be the same as its rref Id");
-    if (RRefContext::getInstance()->getWorkerId() == rrefId_.createdOn_) {
-      // creator user, notify owner.
-      auto& agent = RRefContext::getInstance()->agent();
-      agent->send(
-          agent->getWorkerId(ownerId_),
-          ScriptRRefAdd(
-              RRefForkData(ownerId_, rrefId_, forkId_).toIValue()
-          ).toMessage());
-    } else {
-      AT_ERROR("Does not support sharing RRefs between users yet");
-    }
-  }
-}
-
-RRef::~RRef() {
-  auto& ctx = RRefContext::getInstance();
-  if (ctx->getWorkerId() != ownerId_) {
-    ctx->agent()->send(
-        ctx->agent()->getWorkerId(ownerId_),
-        ScriptRRefDel(
-            RRefForkData(ownerId_, rrefId_, forkId_).toIValue()
-        ).toMessage());
-  }
-}
+    : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId) {}
 
 worker_id_t RRef::owner() const {
   return ownerId_;
@@ -94,26 +58,6 @@ const ForkId& RRef::forkId() const {
   return forkId_;
 }
 
-bool RRef::isOwner() const {
-  return RRefContext::getInstance()->getWorkerId() == ownerId_;
-}
-
-IValue RRef::toHere() {
-  auto& ctx = RRefContext::getInstance();
-  if (owner() == ctx->getWorkerId()) {
-    return getValue();
-  } else {
-    auto& agent = ctx->agent();
-    std::shared_ptr<FutureMessage> fm =
-        agent->send(
-            agent->getWorkerId(ownerId_),
-            ScriptRRefFetch(id().toIValue()).toMessage()
-        );
-    auto srv = ScriptRRefValue::fromMessage(fm->wait());
-    return srv.value();
-  }
-}
-
 at::IValue RRef::fork() const {
   return RRefForkData(
       ownerId_, rrefId_, RRefContext::getInstance()->genRRefId()
@@ -122,7 +66,60 @@ at::IValue RRef::fork() const {
   // TODO: notify the owner
 }
 
-//////////////////////////  RRefImpl  /////////////////////////////////////
+//////////////////////////  UserRRef  /////////////////////////////////////
+
+
+UserRRef::UserRRef(
+    worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId)
+    : RRef(ownerId, rrefId, forkId) {
+  AT_ASSERT(!(forkId_ == rrefId_),
+      "User RRef's fork ID should not be the same as its rref Id");
+  if (RRefContext::getInstance()->getWorkerId() == rrefId_.createdOn_) {
+    // creator user, notify owner.
+    auto& agent = RRefContext::getInstance()->agent();
+    agent->send(
+        agent->getWorkerId(ownerId_),
+        ScriptRRefAdd(
+            RRefForkData(ownerId_, rrefId_, forkId_).toIValue()
+        ).toMessage());
+  } else {
+    AT_ERROR("Does not support sharing RRefs between users yet");
+  }
+}
+
+UserRRef::~UserRRef() {
+  auto& ctx = RRefContext::getInstance();
+  if (ctx->getWorkerId() != ownerId_) {
+    ctx->agent()->send(
+        ctx->agent()->getWorkerId(ownerId_),
+        ScriptRRefDel(
+            RRefForkData(ownerId_, rrefId_, forkId_).toIValue()
+        ).toMessage());
+  }
+}
+
+bool UserRRef::isOwner() const {
+  return false;
+}
+
+IValue UserRRef::getValue() const {
+  AT_ERROR("UserRRef does not support getValue(), use toHere() instead.");
+}
+
+void UserRRef::setValue(IValue&& value) {
+  AT_ERROR("UserRRef does not support setValue.");
+}
+
+IValue UserRRef::toHere() {
+  auto& agent = RRefContext::getInstance()->agent();
+  std::shared_ptr<FutureMessage> fm =
+      agent->send(
+          agent->getWorkerId(ownerId_),
+          ScriptRRefFetch(id().toIValue()).toMessage()
+      );
+  auto srv = ScriptRRefValue::fromMessage(fm->wait());
+  return srv.value();
+}
 
 } // namespace rpc
 } // namespace distributed
