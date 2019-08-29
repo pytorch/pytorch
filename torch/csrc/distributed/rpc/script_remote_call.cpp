@@ -13,7 +13,7 @@ ScriptRemoteCall::ScriptRemoteCall(
     : ScriptCall(std::move(op), std::move(args)),
       ret_(std::move(ret)) {}
 
-const at::IValue& ScriptRemoteCall::ret() {
+at::IValue ScriptRemoteCall::ret() {
   return ret_;
 }
 

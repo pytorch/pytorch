@@ -12,7 +12,9 @@ std::atomic<local_id_t> RRefContext::nextLocalId_ {0};
 //////////////////////////  RRefForkData  /////////////////////////////////
 
 RRefForkData::RRefForkData(worker_id_t ownerId, RRefId rrefId, ForkId forkId)
-    : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId) {}
+    : ownerId_(ownerId),
+      rrefId_(std::move(rrefId)),
+      forkId_(std::move(forkId)) {}
 
 at::IValue RRefForkData::toIValue() const {
   std::vector<at::IValue> ivalues = {
@@ -44,8 +46,8 @@ RRefForkData RRefForkData::fromIValue(const at::IValue&& ivalue) {
 
 RRef::RRef(worker_id_t ownerId, RRefId rrefId, ForkId forkId)
     : ownerId_(ownerId),
-      rrefId_(rrefId),
-      forkId_(forkId) {
+      rrefId_(std::move(rrefId)),
+      forkId_(std::move(forkId)) {
   auto& ctx = RRefContext::getInstance();
 
   if (ownerId == ctx->getWorkerId()) {

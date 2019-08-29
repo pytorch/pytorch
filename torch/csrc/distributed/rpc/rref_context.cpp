@@ -30,7 +30,7 @@ worker_id_t RRefContext::getWorkerId() const {
 }
 
 RRefId RRefContext::genRRefId() {
-  return std::move(RRefId(getWorkerId(), nextLocalId_++));
+  return RRefId(getWorkerId(), nextLocalId_++);
 }
 
 const std::shared_ptr<RpcAgent>& RRefContext::agent() const {

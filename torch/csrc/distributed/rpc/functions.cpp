@@ -68,9 +68,8 @@ Message processRequestBlocking(Message&& request) {
           "TorchScript function should be a single IValue, got a vector of "
           "size ", stack.size());
 
-      auto rrefForkIValue = src.ret();
       RRefContext::getInstance()
-          ->getOrCreateRRef<IValue>(std::move(rrefForkIValue))
+          ->getOrCreateRRef<IValue>(src.ret())
           ->setValue(std::move(stack.front()));
 
       return Message();
@@ -80,7 +79,7 @@ Message processRequestBlocking(Message&& request) {
       // TODO: make this asynchronous
       std::shared_ptr<RRef> rref =
           RRefContext::getInstance()->getOrCreateOwnerRRef<IValue>(
-              RRefId::fromIValue(std::move(srf.value()))
+              RRefId::fromIValue(srf.value())
           );
       auto response = ScriptRRefValue(rref->getValue()).toMessage();
       response.setId(request.id());
@@ -88,12 +87,12 @@ Message processRequestBlocking(Message&& request) {
     }
     case MessageType::RREF_ADD_FORK: {
       ScriptRRefAdd sra = ScriptRRefAdd::fromMessage(request);
-      RRefContext::getInstance()->addFork(std::move(sra.value()));
+      RRefContext::getInstance()->addFork(sra.value());
       return Message();
     }
     case MessageType::RREF_DEL_FORK: {
       ScriptRRefDel srd = ScriptRRefDel::fromMessage(request);
-      RRefContext::getInstance()->delFork(std::move(srd.value()));
+      RRefContext::getInstance()->delFork(srd.value());
       return Message();
     }
     default: {

@@ -20,7 +20,7 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
                    std::vector<at::IValue>&& args,
                    at::IValue ret);
 
-  const at::IValue& ret();
+  at::IValue ret();
 
   Message toMessage() const;
   static ScriptRemoteCall fromMessage(const Message& message);

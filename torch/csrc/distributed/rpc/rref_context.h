@@ -38,7 +38,7 @@ class RRefContext {
   // get an existing RRef or create a new one from a serialized
   // ``RRefForkData``.
   template <typename T>
-  std::shared_ptr<RRef> getOrCreateRRef(const at::IValue&& value) {
+  std::shared_ptr<RRef> getOrCreateRRef(at::IValue&& value) {
     auto rfd = RRefForkData::fromIValue(std::move(value));
     return getOrCreateRRef<T>(rfd.ownerId_, rfd.rrefId_, rfd.forkId_);
   }

@@ -93,7 +93,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
            py::call_guard<py::gil_scoped_release>());
 
   module.def("init_rref_context", [](std::shared_ptr<RpcAgent> agent){
-    RRefContext::initInstance(agent);
+    RRefContext::initInstance(std::move(agent));
   });
 
   module.def("invoke_rpc_builtin", [](

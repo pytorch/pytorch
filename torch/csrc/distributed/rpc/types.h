@@ -10,27 +10,31 @@ namespace rpc {
 using worker_id_t = int16_t;
 using local_id_t = uint64_t;
 
-struct RRefId final {
-  RRefId(worker_id_t createdOn, local_id_t localId);
-  RRefId(const RRefId& other);
-  bool operator==(const RRefId& other) const;
+struct GloballyUniqueId final {
+  GloballyUniqueId(worker_id_t createdOn, local_id_t localId);
+  GloballyUniqueId(const GloballyUniqueId& other) = default;
+
+  bool operator==(const GloballyUniqueId& other) const;
 
   at::IValue toIValue() const;
-  static RRefId fromIValue(const at::IValue&&);
+  static GloballyUniqueId fromIValue(at::IValue&&);
 
   struct Hash {
-    size_t operator()(const RRefId& rrefId) const {
-      return (uint64_t(rrefId.createdOn_) << 48) | rrefId.localId_;
+    size_t operator()(const GloballyUniqueId& key) const {
+      return (uint64_t(key.createdOn_) << kLocalIdBits) | key.localId_;
     }
   };
+
+  static constexpr int kLocalIdBits = 48;
 
   const worker_id_t createdOn_;
   const local_id_t localId_;
 };
 
-std::ostream &operator<<(std::ostream &os, const RRefId &m);
+std::ostream &operator<<(std::ostream &os, const GloballyUniqueId &globalId);
 
-using ForkId = RRefId;
+using RRefId = GloballyUniqueId;
+using ForkId = GloballyUniqueId;
 
 } // namespace rpc
 } // namespace distributed
