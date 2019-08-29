@@ -42,6 +42,10 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
     return DistAutogradContainer::getInstance().retrieveContext(context_id);
   });
 
+  module.def("_init", [](int64_t worker_id) {
+    DistAutogradContainer::init(worker_id);
+  });
+
   Py_RETURN_TRUE;
 }
 } // namespace
