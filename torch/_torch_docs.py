@@ -176,7 +176,7 @@ Example::
             [-1.7724],
             [-0.5811],
             [-0.8017]])
-    >>> torch.add(a, b, alpha=10)
+    >>> torch.add(a, b, alpha=10.0)
     tensor([[  2.7695,   3.3930,   4.3672,   4.1450],
             [-18.6971, -18.0736, -17.0994, -17.3216],
             [ -6.7845,  -6.1610,  -5.1868,  -5.4090],
@@ -2539,29 +2539,18 @@ add_docstr(torch.logical_xor,
            r"""
 logical_xor(input, other, out=None) -> Tensor
 
-Computes the element-wise logical XOR of the given input tensors. Zeros are treated as ``False`` and nonzeros are
-treated as ``True``.
+Computes the element-wise logical XOR of the given input tensors. Both input tensors must have the bool dtype.
 
 Args:
-    {input}
+    input (Tensor): the input tensor
     other (Tensor): the tensor to compute XOR with
-    {out}
+    out (Tensor, optional): the output tensor
 
-Example::
+Example:
 
     >>> torch.logical_xor(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
     tensor([ False, False,  True])
-    >>> a = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
-    >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
-    >>> torch.logical_xor(a, b)
-    tensor([ True,  True, False, False])
-    >>> torch.logical_xor(a.double(), b.double())
-    tensor([ True,  True, False, False])
-    >>> torch.logical_xor(a.double(), b)
-    tensor([ True,  True, False, False])
-    >>> torch.logical_xor(a, b, out=torch.empty(4, dtype=torch.int8))
-    tensor([1, 1, 0, 0], dtype=torch.int8)
-""".format(**common_args))
+""")
 
 add_docstr(torch.logspace,
            r"""
@@ -4905,7 +4894,7 @@ Example::
             [ 0.2565],
             [ 0.6692],
             [ 0.2509]])
-    >>> torch.sub(a, b, alpha=10)
+    >>> torch.sub(a, b, alpha=10.0)
     tensor([[12.6663, 15.1754, 13.4498, 12.6835],
             [-3.3577, -0.8486, -2.5742, -3.3405],
             [-7.4847, -4.9756, -6.7012, -7.4675],
