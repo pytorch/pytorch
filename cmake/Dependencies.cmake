@@ -48,6 +48,8 @@ endif()
 if (MSVC)
   if(MSVC_Z7_OVERRIDE)
     foreach(flag_var
+        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+        CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
         CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
         CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
       if(${flag_var} MATCHES "/Z[iI]")
@@ -1264,11 +1266,14 @@ if (NOT INTERN_BUILD_MOBILE)
     SET(AT_CUDA_ENABLED 1)
   endif()
 
-  IF (NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)
-    MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
+  IF (NOT USE_CUDNN)
+    MESSAGE(STATUS "USE_CUDNN is set to 0. Compiling without cuDNN support")
+    set(AT_CUDNN_ENABLED 0)
+  ELSEIF (NOT CUDNN_FOUND)
+    MESSAGE(WARNING "CuDNN not found. Compiling without CuDNN support")
     set(AT_CUDNN_ENABLED 0)
   ELSE()
-    include_directories(SYSTEM ${CUDNN_INCLUDE_DIRS})
+    include_directories(SYSTEM ${CUDNN_INCLUDE_PATH})
     set(AT_CUDNN_ENABLED 1)
   ENDIF()
 

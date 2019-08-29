@@ -35,6 +35,7 @@ SKIP_PYTHON_BINDINGS = [
     'nonzero(_(out|numpy))?',
     'set_quantizer_',
     'set_data',
+    '.*_overrideable',  # overrideable functions for backend extension
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -553,7 +554,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['call_dispatch_out'] = emit_single_dispatch(dictionary['out'], out_idx, base_env)
             env['call_dispatch'] = emit_single_dispatch(dictionary['base'], out_idx, base_env)
 
-            has_dtype_bind = 'dtype' in [d['name'] for d in dictionary['out'].get('python_binding_arguments', [])]
+            has_dtype_bind = 'dtype' in (d['name'] for d in dictionary['out'].get('python_binding_arguments', []))
             if has_dtype_bind:
                 body = PY_VARIABLE_OUT_CHECK_TYPE.substitute(env, out_idx=out_idx, type_idx=out_idx + 1,
                                                              layout_idx=out_idx + 2, device_idx=out_idx + 3).split('\n')

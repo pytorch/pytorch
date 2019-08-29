@@ -12,6 +12,9 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <type_traits>
 #include <functional>
@@ -121,11 +124,15 @@ Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
   // result.resize_as_(self) requires self to have same dtype as result, so we
   // use resize_ instead.
   // TODO: Fix resize_as_. See pytorch/pytorch#11665.
-  return result.resize_(self.sizes()).bernoulli_(self, gen);
+  result.resize_(self.sizes()).bernoulli_(self, gen);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, self);
+#endif
+  return result;
 }
 
 Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -145,7 +152,7 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
           self, p, [generator](self_t& ret_val, p_t& p_val) {
             at::bernoulli_distribution<float> bernoulli(p_val);
             ret_val = static_cast<self_t>(bernoulli(generator));
-          });
+        });
       });
     }
   });
@@ -162,7 +169,7 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
     return self;
   }
 #endif
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);

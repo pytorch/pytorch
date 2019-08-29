@@ -28,7 +28,8 @@ c10::optional<StrongFunctionPtr> as_function(const py::object& obj) {
 
 FunctionSchema PythonValue::getSchema(
     const size_t n_args,
-    const size_t n_binders) {
+    const size_t n_binders,
+    const SourceRange& loc) {
   auto annotations = py::module::import("torch.jit.annotations");
   auto signature = annotations.attr("get_signature")(self);
   std::vector<Argument> args, rets;
@@ -52,7 +53,7 @@ FunctionSchema PythonValue::getSchema(
 
     // First see if we can introspect the number of function parameters
     // irrespective of the presence of explicit type annotations
-    auto num_params = annotations.attr("get_num_params")(self);
+    auto num_params = annotations.attr("get_num_params")(self, loc);
     if (!num_params.is_none()) {
       // Return a signature with the correct number of params according to the
       // Python function. The error handling in call() will catch any mismatch
@@ -92,7 +93,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
   auto inputs = toValues(*m.graph(), inputs_);
-  auto schema = getSchema(inputs.size(), n_binders);
+  auto schema = getSchema(inputs.size(), n_binders, loc);
 
   std::stringstream failure_messages;
   c10::optional<MatchedSchema> matched_schema = tryMatchSchema(
@@ -218,25 +219,29 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
   std::vector<NamedValue> new_inputs = inputs.vec();
   new_inputs.insert(new_inputs.begin(), module_);
 
-  for (const std::string& method_name : method_names_) {
-    auto cls = module_->type()->expect<ClassType>();
-    const auto fn = cls->getMethod(method_name);
-    auto match = tryMatchSchema(
-        fn->getSchema(),
-        loc,
-        *caller.graph().get(),
-        c10::nullopt,
-        new_inputs,
-        attributes,
-        &err,
-        true);
-    if (match) {
-      return MethodValue(module_, method_name)
-          .call(loc, caller, inputs, attributes, n_binders);
+  std::stringstream failure_messages;
+  for (bool allow_conversions : {false, true}) {
+    // clear previous error messages
+    failure_messages.str("");
+    for (const std::string& method_name : method_names_) {
+      auto cls = module_->type()->expect<ClassType>();
+      const auto fn = cls->getMethod(method_name);
+      auto match = tryMatchSchema(
+          fn->getSchema(),
+          loc,
+          *caller.graph().get(),
+          c10::nullopt,
+          new_inputs,
+          attributes,
+          &err,
+          allow_conversions);
+      if (match) {
+        return MethodValue(module_, method_name)
+            .call(loc, caller, inputs, attributes, n_binders);
+      }
     }
   }
-  throw ErrorReport(loc) << "Could not find any matching overloads\n"
-                         << err.str();
+  throw ErrorReport(loc) << failure_messages.str();
 }
 
 std::shared_ptr<SugaredValue> OverloadedFunctionValue::call(
@@ -340,13 +345,13 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     // ScriptModule and add it as a submodule to the script::Module. This
     // enables lazy strong-ification of modules.
     auto result =
-        py::module::import("torch.jit")
-            .attr("_make_strong_submodule")(field, attr, py_module_);
+        py::module::import("torch.jit._recursive")
+            .attr("make_strong_submodule")(field, attr, py_module_);
     if (!result.is_none()) {
       auto submodule = as_module(result);
       TORCH_CHECK(
           submodule,
-          "Result of torch.jit._make_strong_submodule "
+          "Result of torch.torch.jit._recursive.make_strong_submodule "
           "was not a ScriptModule");
       // The module was a submodule of the nn.Module, so register it here
       // and return the submodule.
@@ -356,8 +361,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
           m.graph()->insertGetAttr(self_, field), *v, result);
     }
   } else if (py::isinstance<py::function>(attr)) {
-    auto stub = py::module::import("torch.jit")
-                    .attr("_create_method_from_fn")(py_module_, attr);
+    auto stub = py::module::import("torch.jit._recursive")
+                    .attr("create_method_from_fn")(py_module_, attr);
     if (!stub.is_none()) {
       return SimpleValue(self_).attr(loc, m, field);
     }
@@ -493,6 +498,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
       return toSimple(g.insertConstant(v, nullptr, loc));
+    } else if (THPQScheme_Check(obj.ptr())) {
+      auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+      const auto v = static_cast<uint8_t>(qscheme->qscheme);
+      return toSimple(g.insertConstant(v, nullptr, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       return std::make_shared<ConstantPythonTupleValue>(obj);
     }
@@ -552,16 +561,15 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         auto rcb = py::module::import("torch._jit_internal")
                        .attr("createResolutionCallbackForClassMethods")(obj);
 
-        // We're starting a new compilation, so update the error call stack in
-        // case it fails
-        ErrorReport::CallStack::push_function(qualname.name());
-        ErrorReport::CallStack::update_pending_range(loc);
+        {
+          // We're starting a new compilation, so update the error call stack in
+          // case it fails
+          ErrorReport::CallStack stack(qualname.name());
+          ErrorReport::CallStack::update_pending_range(loc);
 
-        py::module::import("torch.jit")
-            .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
-
-        // Compilation was successful, so pop this entry off the stack
-        ErrorReport::CallStack::pop_function();
+          py::module::import("torch.jit")
+              .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
+        }
 
         // Return class
         auto newClassType = pyCu->get_class(qualname);
@@ -585,7 +593,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
 
     auto compiled_fn =
-        py::module::import("torch.jit").attr("_try_compile_fn")(obj, loc);
+        py::module::import("torch.jit._recursive").attr("try_compile_fn")(obj, loc);
     if (auto callee = as_function(compiled_fn)) {
       return std::make_shared<FunctionValue>(*callee);
     }

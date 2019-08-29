@@ -35,8 +35,19 @@
 - func: set_data(Tensor(a!) self, Tensor new_data) -> void
   variants: method
 
-- func: set_names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
+- func: names_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
+  named_guard: False
+
+- func: view_names(Tensor(a) self, Dimname[]? names) -> Tensor(a)
+  variants: method
+  named_guard: False
+
+- func: align_to(Tensor self, DimnameList names) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: align_tensors(Tensor[] tensors) -> Tensor[]
   named_guard: False
 
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
@@ -66,6 +77,7 @@
   variants: function
   dispatch:
      CUDA: fused_dropout_cuda
+  named_guard: False
 
 - func: _masked_scale(Tensor self, Tensor mask, float scale) -> Tensor
   variants: function
@@ -85,8 +97,10 @@
 - func: _shape_as_tensor(Tensor self) -> Tensor
 
 - func: dropout(Tensor input, float p, bool train) -> Tensor
+  named_guard: False
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+  named_guard: False
 
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
 
@@ -184,17 +198,20 @@
   dispatch:
     CPU: legacy::cpu::_th_addmv
     CUDA: legacy::cuda::_th_addmv
+  named_guard: False
 
 - func: addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: function, method
   dispatch:
     CPU: legacy::cpu::_th_addmv_
     CUDA: legacy::cuda::_th_addmv_
+  named_guard: False
 
 - func: addmv.out(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_addmv_out
     CUDA: legacy::cuda::_th_addmv_out
+  named_guard: False
 
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -204,10 +221,10 @@
 
 - func: addr.out(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
 
-- func: affine_grid_generator(Tensor theta, int[] size) -> Tensor
+- func: affine_grid_generator(Tensor theta, int[] size, bool align_corners) -> Tensor
   variants: function
 
-- func: affine_grid_generator_backward(Tensor grad, int[] size) -> Tensor
+- func: affine_grid_generator_backward(Tensor grad, int[] size, bool align_corners) -> Tensor
   variants: function
 
 - func: all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
@@ -330,21 +347,25 @@
 # Sample bernoulli with values in `self` as probability.
 - func: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: bernoulli.out(Tensor self, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   variants: function
+  named_guard: False
 
 - func: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: bernoulli_tensor_cpu_
     CUDA: bernoulli_tensor_cuda_
+  named_guard: False
 
 - func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: bernoulli_scalar_cpu_
     CUDA: bernoulli_scalar_cuda_
+  named_guard: False
 
 # This out-of-place version isn't used explicitly, but needed by jit.
 # There is no default valid on `p` here because it would introduce ambiguity
@@ -377,6 +398,31 @@
     CPU: bitwise_not_out
     CUDA: bitwise_not_out
 
+- func: logical_not(Tensor self) -> Tensor
+  variants: function, method
+
+- func: logical_not_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
+
+- func: logical_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: logical_not_out
+    CUDA: logical_not_out
+
+- func: logical_xor(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: logical_xor_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  named_guard: False
+
+- func: logical_xor.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: logical_xor_out
+    CUDA: logical_xor_out
+  named_guard: False
+
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: blackman_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -386,12 +432,14 @@
   dispatch:
     CPU: bmm_cpu
     CUDA: bmm_cuda
+  named_guard: False
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: bmm_out_cpu
     CUDA: bmm_out_cuda
+  named_guard: False
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
   device_guard: False
@@ -407,15 +455,12 @@
 - func: ceil_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
   variants: function, method
-  dispatch:
-    CPU: _ceil__cpu
-    CUDA: _ceil__cuda
 
 - func: ceil.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: _ceil_out_cpu
-    CUDA: _ceil_out_cuda
+    CPU: ceil_out
+    CUDA: ceil_out
 
 - func: chain_matmul(Tensor[] matrices) -> Tensor
   variants: function
@@ -484,8 +529,13 @@
 
 - func: contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor
   variants: method
+  named_guard: False
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
+
+- func: convolution_overrideable(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
+
+- func: convolution_backward_overrideable(Tensor grad_output, Tensor input, Tensor weight, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
 
 - func: _convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor
 
@@ -688,8 +738,10 @@
   dispatch:
     CPU: legacy::cpu::_th_dot
     CUDA: legacy::cuda::_th_dot
+  named_guard: False
 
 - func: dot.out(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: einsum(str equation, Tensor[] tensors) -> Tensor
 
@@ -739,7 +791,8 @@
     CPU: _embedding_bag_per_sample_weights_backward_cpu
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
-- func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  device_guard: False
 
 - func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
@@ -753,6 +806,10 @@
   dispatch:
     QuantizedCPU: empty_affine_quantized_cpu
 
+- func: _empty_per_channel_affine_quantized_like(Tensor self, Tensor zero_points, int[] size, int[] axis, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor
+  dispatch:
+    QuantizedCPU: empty_per_channel_affine_quantized_cpu
+
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   variants: method
   device_guard: False
@@ -765,9 +822,11 @@
 
 - func: empty_like(Tensor self) -> Tensor
   device_guard: False
+  named_guard: False
 
 - func: empty_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=contiguous_format) -> Tensor
   device_guard: False
+  named_guard: False
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -845,6 +904,7 @@
 - func: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_guard: False
+  named_guard: False
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -909,6 +969,9 @@
     CPU: _frac_out_cpu
     CUDA: _frac_out_cuda
 
+- func: full.names(int[] size, Scalar fill_value, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  device_guard: False
+
 - func: full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
@@ -930,24 +993,26 @@
 # Additionally, arguments `padding_mode` and `interpolation_mode` are cast to
 # enums defined in `native/GridSampler.h`. `cudnn_grid_sampler` doesn't take in
 # `interpolation_mode` because it only supports Bilinear interpolation mode.
-- func: grid_sampler(Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> Tensor
+# Nor does it take in `align_corners` because it only supports the mode
+# `align_corners = True`.
+- func: grid_sampler(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
 
-- func: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> Tensor
+- func: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   dispatch:
     CPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
 
-- func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> (Tensor, Tensor)
+- func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)
   dispatch:
     CPU: grid_sampler_2d_backward_cpu
     CUDA: grid_sampler_2d_backward_cuda
 
-- func: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> Tensor
+- func: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   dispatch:
     CPU: grid_sampler_3d_cpu
     CUDA: grid_sampler_3d_cuda
 
-- func: grid_sampler_3d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> (Tensor, Tensor)
+- func: grid_sampler_3d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)
   dispatch:
     CPU: grid_sampler_3d_backward_cpu
     CUDA: grid_sampler_3d_backward_cuda
@@ -1223,11 +1288,17 @@
 # log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
+
+- func: log_softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  named_guard: False
 
 - func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   dispatch:
     CPU: log_softmax_cpu
     CUDA: log_softmax_cuda
+  named_guard: False
 
 - func: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   dispatch:
@@ -1243,8 +1314,10 @@
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  named_guard: false
 
 - func: matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: false
 
 - func: matrix_rank.tol(Tensor self, float tol, bool symmetric=False) -> Tensor
 
@@ -1386,6 +1459,7 @@
     CUDA: legacy::cuda::_th_mm
     SparseCPU: _sparse_mm
     SparseCUDA: _sparse_mm
+  named_guard: False
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1393,6 +1467,7 @@
     CUDA: legacy::cuda::_th_mm_out
     SparseCPU: _sparse_mm_out
     SparseCUDA: _sparse_mm_out
+  named_guard: False
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
 
@@ -1443,11 +1518,13 @@
   dispatch:
     CPU: legacy::cpu::_th_mv
     CUDA: legacy::cuda::_th_mv
+  named_guard: False
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_mv_out
     CUDA: legacy::cuda::_th_mv_out
+  named_guard: False
 
 - func: mvlgamma(Tensor self, int p) -> Tensor
   variants: function, method
@@ -1523,6 +1600,9 @@
 - func: _nnpack_spatial_convolution_backward_weight(Tensor input, int[] weightsize, Tensor grad_output, int[2] padding) -> Tensor
   variants: function
 
+- func: ones.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  device_guard: False
+
 - func: ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: ones.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
@@ -1576,6 +1656,12 @@
 
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
+- func: rand.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  device_guard: False
+
+- func: rand.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  device_guard: False
+
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: rand.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1615,6 +1701,12 @@
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: randn.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+
+- func: randn.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  device_guard: False
+
+- func: randn.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  device_guard: False
 
 - func: randn.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -1741,6 +1833,7 @@
     CPU: relu_
     CUDA: relu_
     MkldnnCPU: mkldnn_relu_
+    QuantizedCPU: quantized_relu_
 
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
@@ -1885,7 +1978,7 @@
   device_guard: False
   named_guard: False
 
-- func: slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
+- func: slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
   variants: function, method
   device_guard: False
   named_guard: False
@@ -1899,12 +1992,18 @@
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: False
+
+- func: softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+  named_guard: False
 
 - func: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   dispatch:
     CPU: softmax_cpu
     CUDA: softmax_cuda
     MkldnnCPU: mkldnn_softmax
+  named_guard: False
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   dispatch:
@@ -1946,7 +2045,7 @@
     SparseCPU: mul_out_sparse_scalar
     SparseCUDA: mul_out_sparse_scalar
 
-- func: split(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
+- func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_guard: False
   named_guard: False
@@ -2078,6 +2177,7 @@
 - func: t(Tensor(a) self) -> Tensor(a)
   device_guard: False
   variants: function, method
+  named_guard: False
 
 - func: t_(Tensor(a!) self) -> Tensor(a!)
   device_guard: False
@@ -2135,6 +2235,12 @@
 - func: transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   variants: function, method
   device_guard: False
+  named_guard: False
+
+- func: transpose(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
+  variants: function, method
+  device_guard: False
+  named_guard: False
 
 - func: _mkldnn_transpose(Tensor self, int dim0, int dim1) -> Tensor
   device_guard: False
@@ -2301,6 +2407,9 @@
 - func: _weight_norm_differentiable_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
   variants: function
 
+- func: zeros.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  device_guard: False
+
 - func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
@@ -2405,6 +2514,7 @@
     SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
     QuantizedCPU: quantized_clone
+  named_guard: False
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   variants: function, method
@@ -2416,7 +2526,7 @@
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_pow_out
+    CPU: pow_out
     CUDA: legacy::cuda::_th_pow_out
     SparseCPU: pow_out_sparse_scalar
     SparseCUDA: pow_out_sparse_scalar
@@ -2424,7 +2534,7 @@
 - func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_pow
+    CPU: pow
     CUDA: legacy::cuda::_th_pow
     SparseCPU: pow_sparse_scalar
     SparseCUDA: pow_sparse_scalar
@@ -2486,12 +2596,15 @@
 - func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  named_guard: False
 
 
 # NOTE [ Sparse: autograd and API ]
@@ -2676,7 +2789,9 @@
 # legacy method
 - func: _dimI(Tensor self) -> int
   variants: method
-  dispatch: sparse_dim_sparse
+  dispatch:
+    SparseCPU: sparse_dim_sparse
+    SparseCUDA: sparse_dim_sparse
   requires_tensor: True
   device_guard: False
 
@@ -2692,7 +2807,9 @@
 # legacy method
 - func: _dimV(Tensor self) -> int
   variants: method
-  dispatch: dense_dim_sparse
+  dispatch:
+    SparseCPU: dense_dim_sparse
+    SparseCUDA: dense_dim_sparse
   requires_tensor: True
   device_guard: False
 
@@ -2850,6 +2967,16 @@
   dispatch:
     QuantizedCPU: q_zero_point_quant
 
+- func: q_per_channel_scales(Tensor self) -> Tensor
+  variants: function, method
+  dispatch:
+    QuantizedCPU: q_per_channel_scales_quant
+
+- func: q_per_channel_zero_points(Tensor self) -> Tensor
+  variants: function, method
+  dispatch:
+    QuantizedCPU: q_per_channel_zero_points_quant
+
 - func: int_repr(Tensor self) -> Tensor
   variants: function, method
   dispatch:
@@ -2858,6 +2985,10 @@
 - func: _per_tensor_affine_qtensor(Tensor self, float scale, int zero_point) -> Tensor
   dispatch:
     CPU: per_tensor_affine_qtensor_cpu
+
+- func: _per_channel_affine_qtensor(Tensor self, Tensor scale, Tensor zero_point, int[] axis) -> Tensor
+  dispatch:
+    CPU: per_channel_affine_qtensor_cpu
 
 - func: qscheme(Tensor self) -> QScheme
   variants: method
@@ -3342,22 +3473,15 @@
   named_guard: False
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_digamma_
+    CPU: _digamma__cpu
     CUDA: legacy::cuda::_th_digamma_
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   named_guard: False
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_polygamma_
+    CPU: polygamma_
     CUDA: legacy::cuda::_th_polygamma_
-
-- func: erfinv_(Tensor(a!) self) -> Tensor(a!)
-  named_guard: False
-  variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_erfinv_
-    CUDA: legacy::cuda::_th_erfinv_
 
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
   variants: method
@@ -3368,13 +3492,13 @@
 - func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_pow_
+    CPU: pow_
     CUDA: legacy::cuda::_th_pow_
 
 - func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_pow_
+    CPU: pow_
     CUDA: legacy::cuda::_th_pow_
 
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
@@ -3388,13 +3512,6 @@
   dispatch:
     CPU: lerp_cpu_tensor_
     CUDA: lerp_cuda_tensor_
-
-- func: sign_(Tensor(a!) self) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_sign_
-    CUDA: legacy::cuda::_th_sign_
-  named_guard: False
 
 - func: fmod_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
@@ -3557,133 +3674,157 @@
   dispatch:
     CPU: ne_scalar_out_cpu
     CUDA: ne_scalar_out_cuda
+    QuantizedCPU: ne_out_quantized_cpu
 
 - func: ne.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_ne
     CUDA: legacy::cuda::_th_ne
+    QuantizedCPU: ne_quantized_cpu
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: ne_out_cpu
     CUDA: ne_out_cuda
+    QuantizedCPU: ne_out_quantized_cpu
 
 - func: ne.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_ne
     CUDA: legacy::cuda::_th_ne
+    QuantizedCPU: ne_quantized_cpu
 
 - func: eq.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: eq_scalar_out_cpu
     CUDA: eq_scalar_out_cuda
+    QuantizedCPU: eq_out_quantized_cpu
 
 - func: eq.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_eq
     CUDA: legacy::cuda::_th_eq
+    QuantizedCPU: eq_quantized_cpu
 
 - func: eq.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: eq_out_cpu
     CUDA: eq_out_cuda
+    QuantizedCPU: eq_out_quantized_cpu
 
 - func: eq.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_eq
     CUDA: legacy::cuda::_th_eq
+    QuantizedCPU: eq_quantized_cpu
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: ge_scalar_out_cpu
     CUDA: ge_scalar_out_cuda
+    QuantizedCPU: ge_out_quantized_cpu
 
 - func: ge.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_ge
     CUDA: legacy::cuda::_th_ge
+    QuantizedCPU: ge_quantized_cpu
 
 - func: ge.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: ge_out_cpu
     CUDA: ge_out_cuda
+    QuantizedCPU: ge_out_quantized_cpu
 
 - func: ge.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_ge
     CUDA: legacy::cuda::_th_ge
+    QuantizedCPU: ge_quantized_cpu
 
 - func: le.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: le_scalar_out_cpu
     CUDA: le_scalar_out_cuda
+    QuantizedCPU: le_out_quantized_cpu
 
 - func: le.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_le
     CUDA: legacy::cuda::_th_le
+    QuantizedCPU: le_quantized_cpu
 
 - func: le.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: le_out_cpu
     CUDA: le_out_cuda
+    QuantizedCPU: le_out_quantized_cpu
 
 - func: le.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_le
     CUDA: legacy::cuda::_th_le
+    QuantizedCPU: le_quantized_cpu
 
 - func: gt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: gt_scalar_out_cpu
     CUDA: gt_scalar_out_cuda
+    QuantizedCPU: gt_out_quantized_cpu
 
 - func: gt.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_gt
     CUDA: legacy::cuda::_th_gt
+    QuantizedCPU: gt_quantized_cpu
 
 - func: gt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: gt_out_cpu
     CUDA: gt_out_cuda
+    QuantizedCPU: gt_out_quantized_cpu
 
 - func: gt.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_gt
     CUDA: legacy::cuda::_th_gt
+    QuantizedCPU: gt_quantized_cpu
 
 - func: lt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: lt_scalar_out_cpu
     CUDA: lt_scalar_out_cuda
+    QuantizedCPU: lt_out_quantized_cpu
 
 - func: lt.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_lt
     CUDA: legacy::cuda::_th_lt
+    QuantizedCPU: lt_quantized_cpu
 
 - func: lt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: lt_out_cpu
     CUDA: lt_out_cuda
+    QuantizedCPU: lt_out_quantized_cpu
 
 - func: lt.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_lt
     CUDA: legacy::cuda::_th_lt
+    QuantizedCPU: lt_quantized_cpu
 
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3953,41 +4094,59 @@
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_digamma_out
+    CPU: _digamma_out_cpu
     CUDA: legacy::cuda::_th_digamma_out
 
 - func: digamma(Tensor self) -> Tensor
   named_guard: False
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_digamma
+    CPU: digamma
     CUDA: legacy::cuda::_th_digamma
 
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_polygamma_out
+    CPU: polygamma_out
     CUDA: legacy::cuda::_th_polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
   named_guard: False
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_polygamma
+    CPU: polygamma
     CUDA: legacy::cuda::_th_polygamma
 
 - func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_erfinv_out
-    CUDA: legacy::cuda::_th_erfinv_out
+    CPU: _erfinv_out_cpu
+    CUDA: _erfinv_out_cuda
 
 - func: erfinv(Tensor self) -> Tensor
   named_guard: False
   variants: method, function
+
+- func: erfinv_(Tensor(a!) self) -> Tensor(a!)
+  named_guard: False
+  variants: method
   dispatch:
-    CPU: legacy::cpu::_th_erfinv
-    CUDA: legacy::cuda::_th_erfinv
+    CPU: _erfinv__cpu
+    CUDA: _erfinv__cuda
+
+- func: sign(Tensor self) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: sign_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
+  named_guard: False
+
+- func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  dispatch:
+    CPU: sign_out
+    CUDA: sign_out
 
 - func: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
   variants: method, function
@@ -4032,19 +4191,6 @@
   dispatch:
     CPU: legacy::cpu::_th_histc
     CUDA: _histc_cuda
-
-- func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_sign_out
-    CUDA: legacy::cuda::_th_sign_out
-  named_guard: False
-
-- func: sign(Tensor self) -> Tensor
-  variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_sign
-    CUDA: legacy::cuda::_th_sign
-  named_guard: False
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -4183,26 +4329,27 @@
   dispatch:
     CPU: legacy::cpu::_th_equal
     CUDA: legacy::cuda::_th_equal
+    QuantizedCPU: quantized_equal
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_pow_out
+    CPU: pow_out
     CUDA: legacy::cuda::_th_pow_out
 
 - func: pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_pow
+    CPU: pow
     CUDA: legacy::cuda::_th_pow
 
 - func: pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_pow_out
+    CPU: pow_out
     CUDA: legacy::cuda::_th_pow_out
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
   dispatch:
-    CPU: legacy::cpu::_th_pow
+    CPU: pow
     CUDA: legacy::cuda::_th_pow
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
@@ -4241,6 +4388,7 @@
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
+  named_guard: False
 
 - func: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   dispatch:
@@ -4296,16 +4444,19 @@
   dispatch:
     CPU: legacy::cpu::_th_addmm_out
     CUDA: legacy::cuda::_th_addmm_out
+  named_guard: False
 
 - func: _addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   dispatch:
     CPU: legacy::cpu::_th_addmm
     CUDA: legacy::cuda::_th_addmm
+  named_guard: False
 
 - func: _addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_addmm_
     CUDA: legacy::cuda::_th_addmm_
+  named_guard: False
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:

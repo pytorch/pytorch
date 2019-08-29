@@ -70,8 +70,6 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
   return result;
 }
 
-static int aten_to_numpy_dtype(const ScalarType scalar_type);
-
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   if (tensor.is_cuda()) {
     throw TypeError(
@@ -178,7 +176,7 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   );
 }
 
-static int aten_to_numpy_dtype(const ScalarType scalar_type) {
+int aten_to_numpy_dtype(const ScalarType scalar_type) {
   switch (scalar_type) {
     case kDouble: return NPY_DOUBLE;
     case kFloat: return NPY_FLOAT;
@@ -199,14 +197,22 @@ ScalarType numpy_dtype_to_aten(int dtype) {
     case NPY_DOUBLE: return kDouble;
     case NPY_FLOAT: return kFloat;
     case NPY_HALF: return kHalf;
-    case NPY_INT32: return kInt;
     case NPY_INT16: return kShort;
     case NPY_INT8: return kChar;
     case NPY_UINT8: return kByte;
     case NPY_BOOL: return kBool;
     default:
       // Workaround: MSVC does not support two switch cases that have the same value
-      if (dtype == NPY_LONGLONG || dtype == NPY_INT64) {
+      if (dtype == NPY_INT || dtype == NPY_INT32) {
+        // To cover all cases we must use NPY_INT because
+        // NPY_INT32 is an alias which maybe equal to:
+        // - NPY_INT, when sizeof(int) = 4 and sizeof(long) = 8
+        // - NPY_LONG, when sizeof(int) = 4 and sizeof(long) = 4
+        return kInt;
+      } else if (dtype == NPY_LONGLONG || dtype == NPY_INT64) {
+        // NPY_INT64 is an alias which maybe equal to:
+        // - NPY_LONG, when sizeof(long) = 8 and sizeof(long long) = 8
+        // - NPY_LONGLONG, when sizeof(long) = 4 and sizeof(long long) = 8
         return kLong;
       } else {
         break;  // break as if this is one of the cases above because this is only a workaround

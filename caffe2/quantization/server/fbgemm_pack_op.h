@@ -109,12 +109,12 @@ constexpr uint64_t kONNXIFI_DATATYPE_UINT8 = 2;
 constexpr uint64_t kONNXIFI_DATATYPE_INT32 = 6;
 constexpr uint64_t kONNXIFI_DATATYPE_INT8 = 3;
 
-class Int8DNNLowpPackedWeightBlobShapeFunctions
+class Int8ConvDNNLowpPackedWeightBlobShapeFunctions
     : public ExternalTensorFunctionsBase {
  public:
-  explicit Int8DNNLowpPackedWeightBlobShapeFunctions()
+  explicit Int8ConvDNNLowpPackedWeightBlobShapeFunctions()
       : ExternalTensorFunctionsBase() {}
-  ~Int8DNNLowpPackedWeightBlobShapeFunctions() override {}
+  ~Int8ConvDNNLowpPackedWeightBlobShapeFunctions() override {}
   bool isQuantized() const override {
     return true;
   }
@@ -130,7 +130,36 @@ class Int8DNNLowpPackedWeightBlobShapeFunctions
       std::vector<float>* scale,
       std::vector<float>* offset,
       uint32_t* axis) override;
-  TypeIdentifier GetTypeMetaId(const string& name) override;
+  TypeIdentifier GetTypeMetaId() override;
+  TypeMeta GetExternalTensorType(const void* c) override;
+  vector<int64_t> GetExternalTensorInfo(
+      const void* c,
+      size_t* capacity,
+      DeviceOption* device) override;
+};
+
+class Int8FCDNNLowpPackedWeightBlobShapeFunctions
+    : public ExternalTensorFunctionsBase {
+ public:
+  explicit Int8FCDNNLowpPackedWeightBlobShapeFunctions()
+      : ExternalTensorFunctionsBase() {}
+  ~Int8FCDNNLowpPackedWeightBlobShapeFunctions() override {}
+  bool isQuantized() const override {
+    return true;
+  }
+  bool IsSameMetaType(TypeIdentifier id) override;
+  void SetupExternalTensorDescriptor(
+      const Blob* blob,
+      std::vector<std::vector<uint64_t>>* shapes,
+      std::vector<std::vector<float>>* all_scales,
+      std::vector<std::vector<int32_t>>* all_offsets,
+      ExternalTensorDescriptor* desc) override;
+  void LoadInfoOfBlob(
+      const Blob* blob,
+      std::vector<float>* scale,
+      std::vector<float>* offset,
+      uint32_t* axis) override;
+  TypeIdentifier GetTypeMetaId() override;
   TypeMeta GetExternalTensorType(const void* c) override;
   vector<int64_t> GetExternalTensorInfo(
       const void* c,

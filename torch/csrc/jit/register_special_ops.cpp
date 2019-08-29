@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/ir.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
@@ -38,10 +39,10 @@ void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
       auto input = node->inputs().at(0);
       if (input->node()->kind() == prim::ListConstruct &&
           input->node()->inputs().size() == 0) {
-        error << "\n(Note: empty lists are constructed as Tensor[]; \n"
-              << "if you want an empty list of a different type, \n"
-              << "use `torch.jit.annotate(List[T], [])`, \n"
-              << "where `T` is the type of elements in the list)";
+        error << "\nEmpty lists default to List[Tensor]. Add a variable "
+                 "annotation to the assignment to create an empty list "
+                 "of another type (torch.jit.annotate(List[T, []]) where T "
+                 "is the type of elements in the list for Python 2)";
       }
     }
     throw error;
