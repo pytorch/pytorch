@@ -116,10 +116,6 @@ TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
 TH_API void THTensor_(neg)(THTensor *self, THTensor *src);
 TH_API void THTensor_(cinv)(THTensor *self, THTensor *src);
 
-TH_API void THTensor_(add)(THTensor *r_, THTensor *t, scalar_t value);
-TH_API void THTensor_(sub)(THTensor *r_, THTensor *t, scalar_t value);
-TH_API void THTensor_(add_scaled)(THTensor *r_, THTensor *t, scalar_t value, scalar_t alpha);
-TH_API void THTensor_(sub_scaled)(THTensor *r_, THTensor *t, scalar_t value, scalar_t alpha);
 TH_API void THTensor_(lshift)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(rshift)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(fmod)(THTensor *r_, THTensor *t, scalar_t value);

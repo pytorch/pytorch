@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import numpy as np
 import unittest
 
@@ -560,19 +558,32 @@ class TestQuantizedOps(TestCase):
             qX2 = torch.quantize_linear(X2, scale=scale2, zero_point=zero_point2,
                                         dtype=torch_type2)
 
-        def equal_ref(X, params, X_scheme, X2, params2, X2_scheme):
-            if X_scheme != X2_scheme:
+        def equal_ref(qX, qX2):
+            if qX.qscheme() != qX2.qscheme():
                 return False
-            if params != params2:
+            if qX.shape != qX2.shape:
                 return False
-            if X.shape != X2.shape:
-                return False
-            if (X != X2).any():
+            if qX.qscheme() == torch.per_tensor_affine:
+                if qX.q_scale() != qX2.q_scale():
+                    return False
+                if qX.q_zero_point() != qX2.q_zero_point():
+                    return False
+            elif qX.qscheme() == torch.per_channel_affine:
+                if (qX.q_per_channel_scales() !=
+                   qX2.q_per_channel_scales()).any():
+                    return False
+                if (qX.q_per_channel_zero_points() !=
+                   qX2.q_per_channel_zero_points()).any():
+                    return False
+            else:
+                raise NotImplementedError("Don't know what to do with",
+                                          qX.qscheme())
+            if (qX.int_repr().to(float) != qX2.int_repr().to(float)).any():
                 return False
             return True
 
-        self.assertEqual(qX.equal(qX), equal_ref(X, X_params, X_scheme, X, X_params, X_scheme))
-        self.assertEqual(qX.equal(qX2), equal_ref(X, X_params, X_scheme, X2, X2_params, X2_scheme))
+        self.assertEqual(qX.equal(qX), equal_ref(qX, qX))
+        self.assertEqual(qX.equal(qX2), equal_ref(qX, qX2))
 
 
 @unittest.skipIf(
@@ -1257,6 +1268,75 @@ class TestQNNPackOps(TestCase):
         oW = pool_output_shape(4, kernel, padding, stride, dilation)
         np.testing.assert_equal(qc.size(), (0, oH, oW, 2),
                                 "Quantized maxpool2d with batch size 0 failed.")
+
+
+"""Tests the correctness of the tensor comparators."""
+class TestComparatorOps(TestCase):
+    """Tests the element-wise equality ops."""
+    @given(A=hu.tensor(shapes=((3, 4, 5),),
+                       qparams=hu.qparams()),
+           B=hu.tensor(shapes=((5,), (1, 5), (1, 1, 5), (4, 5), (3, 4, 5)),
+                       qparams=hu.qparams()))
+    def test_compare_tensor_tensor(self, A, B):
+        A, (scale_a, zero_point_a, dtype_a) = A
+        B, (scale_b, zero_point_b, dtype_b) = B
+        tA = torch.from_numpy(A)
+        tB = torch.from_numpy(B)
+
+        qA = torch.quantize_linear(tA, scale=scale_a, zero_point=zero_point_a,
+                                   dtype=dtype_a)
+        qB = torch.quantize_linear(tB, scale=scale_b, zero_point=zero_point_b,
+                                   dtype=dtype_b)
+        dqA = qA.dequantize()
+        dqB = qB.dequantize()
+
+        ops_under_test = ('__eq__', '__ne__', '__ge__', '__le__', '__gt__',
+                          '__lt__', 'eq', 'ne', 'ge', 'le', 'gt', 'lt')
+
+        for op in ops_under_test:
+            result_ref = getattr(dqA, op)(dqB)
+            result = getattr(qA, op)(qB)
+            self.assertEqual(result_ref, result,
+                             "'tensor.{}(tensor)'' failed".format(op))
+            # Reversed broadcasting.
+            result_ref = getattr(dqB, op)(dqA)
+            result = getattr(qB, op)(qA)
+            self.assertEqual(result_ref, result,
+                             "'tensor.{}(tensor)'' failed".format(op))
+
+    @unittest.skip("FIXME: Failing due to overflow error without width option")
+    @given(A=hu.tensor(shapes=((3, 4, 5),),
+                       qparams=hu.qparams()),
+           b=st.floats(allow_infinity=False, allow_nan=False))
+    def test_compare_tensor_scalar(self, A, b):
+        A, (scale_a, zero_point_a, dtype_a) = A
+        tA = torch.from_numpy(A)
+
+        qA = torch.quantize_linear(tA, scale=scale_a, zero_point=zero_point_a,
+                                   dtype=dtype_a)
+        dqA = qA.dequantize()
+
+        ops_under_test_reversible = ('__eq__', '__ne__', '__ge__', '__le__',
+                                     '__gt__', '__lt__')
+        ops_under_test_nonreversible = ('eq', 'ne', 'ge', 'le', 'gt', 'lt')
+
+        for op in ops_under_test_reversible:
+            result_ref = getattr(dqA, op)(b)
+            result = getattr(qA, op)(b)
+            self.assertEqual(result_ref, result,
+                             "'tensor.{}(scalar)'' failed".format(op))
+            # Reversed broadcasting.
+            result_ref = getattr(b, op)(dqA)
+            result = getattr(b, op)(qA)
+            self.assertEqual(result_ref, result,
+                             "'scalar.{}(tensor)'' failed".format(op))
+
+        for op in ops_under_test_nonreversible:
+            result_ref = getattr(dqA, op)(b)
+            result = getattr(qA, op)(b)
+            self.assertEqual(result_ref, result,
+                             "'tensor.{}(scalar)'' failed".format(op))
+
 
 if __name__ == "__main__":
     run_tests()
