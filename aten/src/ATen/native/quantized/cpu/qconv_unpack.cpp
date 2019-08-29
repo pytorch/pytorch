@@ -83,7 +83,7 @@ static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_conv_unpack(Tensor packed_weights)"
     " -> Tensor unpacked_weights",
     c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8>(
-        CPUTensorId()));
+        TensorTypeId::CPUTensorId));
 
 } // namespace
 } // namespace native

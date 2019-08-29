@@ -53,6 +53,8 @@ class ProcessGroupAgent : public RpcAgent {
 
   void sync() override;
 
+  int16_t getWorkerId() override;
+
  private:
   // put SendWork into a queue and notify the worker thread
   void enqueueSend(SendWork work);
@@ -67,7 +69,6 @@ class ProcessGroupAgent : public RpcAgent {
 
   // worker name -> rank
   std::unordered_map<std::string, int> nameMap_;
-  bool stop_;
   std::shared_ptr<c10d::ProcessGroup> pg_;
   std::atomic<int64_t> nextId_;
   // names_[rank] stores the name of the corresponding worker, use this vector
