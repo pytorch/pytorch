@@ -308,6 +308,14 @@ inline IValue createGenericDict(
   return IValue(std::move(elems));
 }
 
+template <class T>
+inline void guardAgainstNamedTensor(const T& var) {
+#ifdef BUILD_NAMEDTENSOR
+  TORCH_CHECK(!var.has_names(),
+      "NYI: Named tensors are currently unsupported in TorchScript.");
+#endif
+}
+
 inline IValue toIValue(
     py::handle obj,
     const TypePtr& type,
@@ -322,6 +330,7 @@ inline IValue toIValue(
             "include the fact that the network is running sparse tensors in any bug "
             "reports submitted.");
       }
+      guardAgainstNamedTensor<autograd::Variable>(var);
       return var;
     }
     case TypeKind::FloatType:
@@ -544,6 +553,7 @@ inline py::object toPyObject(IValue&& ivalue) {
           "include the fact that the network is running sparse tensors in any bug "
           "reports submitted.");
     }
+    guardAgainstNamedTensor<at::Tensor>(tensor);
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
