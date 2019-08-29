@@ -382,6 +382,7 @@ inline T minimum(const T& a, const T& b) {
   return c;
 }
 
+// To save BC, it will not propagate NaN based on IEEE 754 201X
 template <class T> Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
