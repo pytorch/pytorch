@@ -96,7 +96,6 @@ ProcessGroupAgent::ProcessGroupAgent(
           processRequestBlocking
       ),
       pg_(std::move(pg)),
-      stop_(false),
       nextId_(0),
       sendMutexes_(pg_->getSize()),
       threadPool_(numSendRecvThreads) {
@@ -147,6 +146,10 @@ void ProcessGroupAgent::join() {
       SendWork(workerIds_[dst], Message({}, {}, MessageType::SHUTDOWN)));
   threadPool_.waitWorkComplete();
   listenerThread_.join();
+}
+
+int16_t ProcessGroupAgent::getWorkerId() {
+  return pg_->getRank();
 }
 
 void ProcessGroupAgent::sync() {

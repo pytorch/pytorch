@@ -130,6 +130,11 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout);
 
+  py::class_<::c10d::AllreduceCoalescedOptions>(module, "AllreduceCoalescedOptions")
+      .def(py::init<>())
+      .def_readwrite("reduceOp", &::c10d::AllreduceCoalescedOptions::reduceOp)
+      .def_readwrite("timeout", &::c10d::AllreduceCoalescedOptions::timeout);
+
   py::class_<::c10d::ReduceOptions>(module, "ReduceOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::ReduceOptions::reduceOp)
@@ -268,6 +273,17 @@ They are used in specifying strategies for reduction collectives, e.g.,
               },
               py::arg("tensor"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "allreduce_coalesced",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& xs,
+                 ::c10d::AllreduceCoalescedOptions opts) {
+                return pg.allreduce_coalesced(xs, opts);
+              },
+              py::arg("tensors"),
+              py::arg("opts") = ::c10d::AllreduceCoalescedOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
