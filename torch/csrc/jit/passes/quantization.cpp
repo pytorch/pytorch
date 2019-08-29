@@ -2,8 +2,11 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/subgraph_matcher.h>
 
 #include <stack>
 
@@ -229,29 +232,6 @@ void InsertObserversImpl(
   }
 }
 
-} // namespace
-
-// PyBind APIs
-void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
-  throw std::runtime_error("Pass not implemented yet!");
-}
-
-void QuantLinting(std::shared_ptr<Graph>& graph) {
-  throw std::runtime_error("Pass not implemented yet!");
-}
-
-void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
-  throw std::runtime_error("Pass not implemented yet!");
-}
-
-TORCH_API void InsertObservers(
-    script::Module& module,
-    const std::string& method_name,
-    const QConfigDict& qconfig_dict) {
-  auto module_qconfig_map = getQConfigMap(module, qconfig_dict);
-  InsertObserversImpl(module, method_name, module_qconfig_map);
-}
-
 Node* insertQuantDeQuantCall(Value* v, const IValue& qparams, at::ScalarType t, bool insert_after=true) {
   Graph* g = v->node()->owningGraph();
   Node* quant = createQuantNode(v, g);
@@ -319,6 +299,7 @@ class QuantizeHelper {
  public:
   QuantizeHelper(const script::Module& m) : module_(m) {}
   IValue getQParams(Value* v);
+  c10::optional<script::Module> findChildModuleToQuantize(Value* v);
   void quantizeBias(Value* v);
   void quantizeTensor(Value* v, bool insert_after=true);
   void removeObserver(Value* v, const std::string& observer_name);
@@ -425,10 +406,23 @@ void QuantizeHelper::quantizeTensor(Value* v,
   q->replaceInputWith(dequant->output(), v);
 }
 
-script::Module InsertQuantDeQuant(
-    script::Module& input_module,
+c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(Value* v) {
+  if (v->node()->kind() == prim::CallMethod && v->node()->s(attr::name) == "forward") {
+    auto child_instance = v->node()->inputs()[0];
+    TORCH_INTERNAL_ASSERT(child_instance->node()->kind() == prim::GetAttr, "Child instance should come from GetAttr.");
+    auto child_module_name = child_instance->node()->s(attr::name);
+    if (child_module_name.find("observer_for_") == std::string::npos) {
+      auto child_module = module_.find_module(child_module_name);
+      TORCH_INTERNAL_ASSERT(child_module, "InsertQuantDeQuant - Child module " + child_module_name + " does not exist");
+      return child_module;
+    }
+  }
+  return c10::nullopt;
+}
+
+void InsertQuantDeQuantImpl(
+    script::Module& module,
     const std::string& method_name) {
-  script::Module module = input_module.clone();
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   std::vector<Value*> values_to_quantize;
@@ -476,6 +470,10 @@ script::Module InsertQuantDeQuant(
 
   for (Value* v : values_to_quantize) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
+      auto child_module = qh.findChildModuleToQuantize(v);
+      if (child_module) {
+        InsertQuantDeQuantImpl(child_module.value(), "forward");
+      }
       if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
         qh.quantizeBias(v);
       } else {
@@ -491,11 +489,41 @@ script::Module InsertQuantDeQuant(
   }
 
   qh.destroyNodes();
+}
+
+} // namespace
+
+TORCH_API void InsertObservers(
+    script::Module& module,
+    const std::string& method_name,
+    const QConfigDict& qconfig_dict) {
+  auto module_qconfig_map = getQConfigMap(module, qconfig_dict);
+  InsertObserversImpl(module, method_name, module_qconfig_map);
+}
+
+script::Module InsertQuantDeQuant(
+    script::Module& input_module,
+    const std::string& method_name) {
+  script::Module module = input_module.clone();
+  InsertQuantDeQuantImpl(module, method_name);
 
   // NOTE: Remove observer module does not work right now, we'll return
   // the module with observer modules as a temporary workaround
   // TODO: remove observer modules after we have a remove_module API
   return module;
+}
+
+// PyBind APIs
+void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
+  throw std::runtime_error("Pass not implemented yet!");
+}
+
+void QuantLinting(std::shared_ptr<Graph>& graph) {
+  throw std::runtime_error("Pass not implemented yet!");
+}
+
+void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
+  throw std::runtime_error("Pass not implemented yet!");
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {
@@ -528,6 +556,166 @@ graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale,
         return (%r_perm))";
   rewriter.RegisterRewritePattern(pattern, replacement);
   rewriter.runOnGraph(graph);
+}
+
+struct ConvBNParameters {
+  at::Tensor conv_w;
+  at::Tensor conv_b;
+  at::Tensor bn_rm;
+  at::Tensor bn_rv;
+  double bn_eps = 0.0;
+  at::Tensor bn_w;
+  at::Tensor bn_b;
+};
+
+/**
+ * Given the current weight and bias tensors of a Conv2d module and parameters
+ * of the BatchNorm2d module we're folding with, compute the updated values for
+ * the weight and bias.
+ *
+ * The function is basically copied from torch/nn/utils/fusion.py
+ */
+static std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
+    const ConvBNParameters& p) {
+  at::Tensor bn_var_rsqrt = at::rsqrt(p.bn_rv + p.bn_eps);
+  at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape({-1, 1, 1, 1});
+  at::Tensor new_b = (p.conv_b - p.bn_rm) * bn_var_rsqrt * p.bn_w + p.bn_b;
+  return std::make_tuple(new_w, new_b);
+}
+
+static bool tryExtractingConvBNParameters(
+    script::Module& conv,
+    script::Module& bn,
+    ConvBNParameters& r) {
+  if (!conv.find_parameter("weight") || !bn.find_parameter("weight") ||
+      !bn.find_parameter("bias")) {
+    return false;
+  }
+  if (!bn.find_attribute("running_mean") || !bn.find_attribute("running_var") ||
+      !bn.get_attribute("running_mean").isTensor() ||
+      !bn.get_attribute("running_var").isTensor()) {
+    return false;
+  }
+
+  r.bn_rm = bn.get_attribute("running_mean").toTensor();
+  r.bn_rv = bn.get_attribute("running_var").toTensor();
+  r.bn_eps = 1e-5; // TODO: allow access to the actual value. NOLINT
+                   // Now we cannot do it because we inline all fields that are
+                   // in __constants__ and lose all tracks of them.
+  r.bn_w = bn.get_parameter("weight");
+  r.bn_b = bn.get_parameter("bias");
+
+  r.conv_w = conv.get_parameter("weight");
+  if (conv.find_parameter("bias")) {
+    r.conv_b = conv.get_parameter("bias");
+  } else {
+    r.conv_b = at::zeros_like(r.bn_rm);
+  }
+
+  return true;
+}
+
+void FoldConvBatchNorm2d(const script::Module& module) {
+  std::string pattern = R"IR(
+graph(%self, %x):
+    %conv_submodule = match::module[name="Conv2d"](%self)
+    %conv_out = prim::CallMethod[name="forward"](%conv_submodule, %x)
+    %bn_submodule = match::module[name="BatchNorm2d"](%self)
+    %bn_out = prim::CallMethod[name="forward"](%bn_submodule, %conv_out)
+    return (%bn_out))IR";
+
+  Graph pattern_graph;
+  std::unordered_map<std::string, Value*> vmap;
+  script::parseIR(pattern, &pattern_graph, vmap);
+  Value* pattern_conv_out = vmap["conv_out"];
+  Value* pattern_bn_out = vmap["bn_out"];
+  Value* pattern_conv_submodule = vmap["conv_submodule"];
+  Value* pattern_bn_submodule = vmap["bn_submodule"];
+  Node* pattern_conv = pattern_conv_out->node();
+  Node* pattern_bn = pattern_bn_out->node();
+
+  // We will put submodules into this worklist and keep processing items from it
+  // one by one. We start by just putting the top module there.
+  std::stack<script::Module> worklist({module});
+  while (!worklist.empty()) {
+    script::Module current = worklist.top();
+    worklist.pop();
+
+    // Queue submodules for processing
+    for (const script::Module& submodule : current.get_modules()) {
+      worklist.push(submodule);
+    }
+
+    // Process forward method of the current module
+    std::unordered_map<Value*, Value*> rewrite_map;
+    std::vector<Value*> values_to_rewrite;
+    std::unordered_set<Node*> nodes_to_delete;
+
+    script::Method method = current.get_method("forward");
+    GRAPH_DUMP(
+        current.name().name() + "::forward() before Conv2d-BatchNorm2d folding",
+        method.graph());
+    const auto& matches = findPatternMatches(pattern_graph, *method.graph());
+
+    for (const Match& match : matches) {
+      GRAPH_DEBUG("Checking next match...");
+      Node* matched_conv = match.nodes_map.at(pattern_conv);
+      Node* matched_bn = match.nodes_map.at(pattern_bn);
+      Node* matched_conv_submodule =
+          match.values_map.at(pattern_conv_submodule)->node();
+      Node* matched_bn_submodule =
+          match.values_map.at(pattern_bn_submodule)->node();
+
+      TORCH_INTERNAL_ASSERT(matched_conv_submodule->kind() == prim::GetAttr);
+      TORCH_INTERNAL_ASSERT(matched_bn_submodule->kind() == prim::GetAttr);
+
+      script::Module conv_submodule =
+          current.get_module(matched_conv_submodule->s(Symbol::attr("name")));
+      script::Module bn_submodule =
+          current.get_module(matched_bn_submodule->s(Symbol::attr("name")));
+
+      ConvBNParameters params;
+      if (!tryExtractingConvBNParameters(
+              conv_submodule, bn_submodule, params)) {
+        GRAPH_DEBUG(
+            "Conv and BN modules didn't have all required parameters or attributes...");
+        continue;
+      }
+
+      // We are using a separate vector for saving Values we want to rewrite to
+      // make sure that the order in which we perform these transformations is
+      // deterministic. Iterating through keys of rewrite_map would result in
+      // non-determinism that might not manifest as a bug now, but can bite us
+      // later.
+      values_to_rewrite.push_back(matched_bn->output());
+      rewrite_map[matched_bn->output()] = matched_conv->output();
+      GRAPH_UPDATE(
+          "Rewriting %",
+          matched_bn->output()->debugName(),
+          " with %",
+          matched_conv->output()->debugName());
+
+      nodes_to_delete.insert(matched_bn);
+      GRAPH_UPDATE("Deleting ", *matched_bn);
+
+      auto new_w_b = computeUpdatedConvWeightAndBias(params);
+      params.conv_w.set_data(std::get<0>(new_w_b));
+      params.conv_b.set_data(std::get<1>(new_w_b));
+    }
+
+    // Perform planned rewritings
+    for (auto v : values_to_rewrite) {
+      v->replaceAllUsesWith(rewrite_map.at(v));
+    }
+
+    // Perform planned deletions
+    for (auto n : nodes_to_delete) {
+      n->removeAllInputs();
+    }
+    for (auto n : nodes_to_delete) {
+      n->destroy();
+    }
+  }
 }
 
 } // namespace jit
