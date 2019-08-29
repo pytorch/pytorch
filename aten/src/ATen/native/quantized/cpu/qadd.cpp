@@ -82,7 +82,8 @@ class QAdd final : public c10::OperatorKernel {
         qa.sizes(),
         at::device(kCPU).dtype(qa.scalar_type()),
         scale,
-        zero_point);
+        zero_point,
+        qa.suggest_memory_format());
     return _add_out<ReLUFused>(qc, qa, qb);
   }
 };
@@ -107,7 +108,11 @@ class QAddScalar final : public c10::OperatorKernel {
               qa.qscheme() == kPerTensorSymmetric,
               "Only per tensor quantization is suuported in Add.");
     auto qc = at::_empty_affine_quantized(qa.sizes(),
-      at::device(kCPU).dtype(qa.scalar_type()), scale, zero_point);
+      at::device(kCPU).dtype(
+        qa.scalar_type()),
+        scale,
+        zero_point,
+        qa.suggest_memory_format());
     return _add_scalar_out<ReLUFused>(qc, qa, b);
   }
 };

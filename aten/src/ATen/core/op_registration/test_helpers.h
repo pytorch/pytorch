@@ -80,6 +80,8 @@ void expectListEquals(c10::ArrayRef<T> expected, std::vector<T> actual) {
   }
 }
 
-bool is_cpu (const Tensor& t) { return t.type_set() == TensorTypeSet(TensorTypeId::CPUTensorId); }
-bool is_cuda(const Tensor& t) { return t.type_set() == TensorTypeSet(TensorTypeId::CUDATensorId); }
-bool is_hip (const Tensor& t) { return t.type_set() == TensorTypeSet(TensorTypeId::HIPTensorId); }
+// NB: This is not really sound, but all of the type sets constructed here
+// are singletons so it's fine
+static inline TensorTypeId extractTypeId(const Tensor& t) {
+  return t.type_set().firstTypeId();
+}
