@@ -12,7 +12,7 @@ namespace at { namespace native {
 namespace {
 
 using namespace vec256;
-
+ 
 void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
   if (iter.dtype() == ScalarType::Bool) {
     auto alpha = alpha_scalar.to<bool>();
