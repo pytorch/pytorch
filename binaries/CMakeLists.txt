@@ -1,7 +1,7 @@
-caffe2_binary_target("convert_caffe_image_db.cc")
-caffe2_binary_target("convert_db.cc")
-caffe2_binary_target("make_cifar_db.cc")
 if (NOT ANDROID)
+  caffe2_binary_target("convert_caffe_image_db.cc")
+  caffe2_binary_target("convert_db.cc")
+  caffe2_binary_target("make_cifar_db.cc")
   caffe2_binary_target("make_mnist_db.cc")
   caffe2_binary_target("parallel_info.cc")
   target_include_directories(parallel_info PUBLIC
