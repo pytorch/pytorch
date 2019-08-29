@@ -39,6 +39,82 @@ std::string stringSlice(std::string string, int64_t start, int64_t end, int64_t 
   return result;
 }
 
+c10::List<std::string> stringSplit(
+    std::string string,
+    c10::optional<std::string> separator_,
+    int64_t max,
+    bool reverse) {
+  std::string::size_type prev_pos = 0;
+  std::string::size_type pos = 0;
+  c10::List<std::string> splits;
+  auto count = 0;
+
+  // Python split has two modes of operating:
+  // 1: Separator not specified
+  //    - Match all whitespace characters
+  //    - Greedily match, never emiting '' in the result
+  // 2: Separator specified
+  //    - Only match a single separator
+  //    - Allow '' in the resultant list
+  std::vector<std::string> separators;
+  if (!separator_.has_value()) {
+    separators = {"\n", "\t", " "};
+  } else {
+    TORCH_CHECK(separator_.value() != "", "empty separator");
+    if (reverse) {
+      std::reverse(separator_->begin(), separator_->end());
+      std::reverse(string.begin(), string.end());
+    }
+    separators = {separator_.value()};
+  }
+
+  do {
+    auto min_pos = std::string::npos;
+    std::string separator;
+    for (const auto& sep : separators) {
+      auto candidate_pos = string.find(sep, pos);
+      if (candidate_pos < min_pos) {
+        min_pos = candidate_pos;
+        separator = sep;
+      }
+    }
+    pos = min_pos;
+    if (pos != std::string::npos) {
+      count++;
+      if (max >= 0 && count > max) {
+        break;
+      } else {
+        // First check is mode 2, second is mode 1
+        if (separators.size() == 1 || pos - prev_pos > 0) {
+          auto substr = string.substr(prev_pos, pos - prev_pos);
+          if (reverse) {
+            std::reverse(substr.begin(), substr.end());
+            splits.emplace(splits.begin(), substr);
+          } else {
+            splits.emplace_back(substr);
+          }
+        }
+      }
+      pos += separator.size();
+      prev_pos = pos;
+    } else {
+      break;
+    }
+  } while (true);
+
+  // First check is mode 2, second is mode 1
+  if (separators.size() == 1 || string.size() - prev_pos > 0) {
+    auto substr = string.substr(prev_pos, string.size() - prev_pos);
+    if (reverse) {
+      std::reverse(substr.begin(), substr.end());
+      splits.emplace(splits.begin(), substr);
+    } else {
+      splits.emplace_back(substr);
+    }
+  }
+  return splits;
+}
+
 int64_t stringFindImpl(
     std::string string,
     std::string substr,
@@ -649,62 +725,20 @@ auto reg_str_ops_2 =
                       pre_partition, separator, post_partition);
                 }))
 
-        .op("aten::split.str(str self, str separator=' ', int max=-1) -> str[]",
+        .op("aten::split.str(str self, str? separator=None, int max=-1) -> str[]",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
                 .catchAllKernel(
-                    [](std::string string, std::string separator, int64_t max) {
-                      std::string::size_type prev_pos = 0;
-                      std::string::size_type pos = 0;
-                      c10::List<std::string> splits;
-                      auto count = 0;
-                      while ((pos = string.find(separator, pos)) !=
-                             std::string::npos) {
-                        count++;
-                        if (max >= 0 && count > max) {
-                          break;
-                        } else {
-                          splits.emplace_back(
-                              string.substr(prev_pos, pos - prev_pos));
-                        }
-                        pos += separator.size();
-                        prev_pos = pos;
-                      }
-                      splits.emplace_back(
-                          string.substr(prev_pos, string.size() - prev_pos));
-                      return splits;
+                    [](std::string string, c10::optional<std::string> separator, int64_t max) {
+                      return stringSplit(string, separator, max, false);
                     }))
 
-        .op("aten::rsplit(str self, str separator=' ', int max=-1) -> str[]",
+        .op("aten::rsplit(str self, str? separator=None, int max=-1) -> str[]",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
                 .catchAllKernel(
-                    [](std::string string, std::string separator, int64_t max) {
-                      std::reverse(separator.begin(), separator.end());
-                      std::reverse(string.begin(), string.end());
-
-                      std::string::size_type prev_pos = 0;
-                      std::string::size_type pos = 0;
-                      c10::List<std::string> splits;
-                      auto count = 0;
-                      while ((pos = string.find(separator, pos)) !=
-                             std::string::npos) {
-                        count++;
-                        if (max >= 0 && count > max) {
-                          break;
-                        } else {
-                          auto substr = string.substr(prev_pos, pos - prev_pos);
-                          std::reverse(substr.begin(), substr.end());
-                          splits.emplace(splits.begin(), substr);
-                        }
-                        pos += separator.size();
-                        prev_pos = pos;
-                      }
-                      auto substr =
-                          string.substr(prev_pos, string.size() - prev_pos);
-                      std::reverse(substr.begin(), substr.end());
-                      splits.emplace(splits.begin(), substr);
-                      return splits;
+                    [](std::string string, c10::optional<std::string> separator, int64_t max) {
+                      return stringSplit(string, separator, max, true);
                     }));
 } // namespace
 } // namespace jit
