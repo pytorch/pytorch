@@ -1001,7 +1001,6 @@ graph(%x : Tensor,
         check_observed(get_forward(m._c._get_module('sub')._get_module('linear')).graph)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("temporary turn off the test")
     def test_insert_quant_dequant(self):
         class Observer(torch.nn.Module):
             def __init__(self):
@@ -1045,28 +1044,12 @@ graph(%x : Tensor,
         FileCheck().check("aten::quantize_linear") \
                    .check_next("aten::int_repr") \
                    .check_next("aten::_dequantize_linear") \
-                   .check("aten::quantize_linear") \
-                   .check_next("aten::int_repr") \
-                   .check_next("aten::_dequantize_linear") \
-                   .check("aten::quantize_linear") \
-                   .check_next("aten::int_repr") \
-                   .check_next("aten::_dequantize_linear") \
-                   .check("aten::conv2d") \
+                   .check("prim::CallMethod[name=\"forward\"]") \
                    .check("aten::quantize_linear") \
                    .check_next("aten::int_repr") \
                    .check_next("aten::_dequantize_linear") \
                    .check("return") \
-                   .run(str(m._c._get_method('forward').graph))
-        # Test for inline
-        # FileCheck().check("aten::quantize_linear") \
-        #            .check_next("aten::int_repr") \
-        #            .check_next("aten::_dequantize_linear") \
-        #            .check("prim::CallMethod[name=\"forward\"]") \
-        #            .check("aten::quantize_linear") \
-        #            .check_next("aten::int_repr") \
-        #            .check_next("aten::_dequantize_linear") \
-        #            .check("return") \
-        #            .run(str(get_forward(m).graph))
+                   .run(str(get_forward(m).graph))
 
     def test_quant_fusion(self):
         input_str = """
@@ -1103,6 +1086,121 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         graph = parse_ir(input_str)
         torch._C._jit_pass_quant_fusion(graph)
         FileCheck().run(input_str, graph)
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_foldbn_trivial(self):
+        def get_forward(m):
+            return m._c._get_method("forward")
+
+        # Test trivial case
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        eager = TestModule()
+        scripted = torch.jit.script(eager)
+        eager.eval()
+        scripted.eval()
+
+        # Check that in the original script module's forward we have two
+        # CallMethod nodes. One of them should be for conv.forward and the other
+        # for bn.forward.
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+            .run(str(get_forward(scripted).graph))
+
+        # Run FoldConvBatchnorm2d pass.
+        torch._C._jit_pass_fold_convbn(scripted._c)
+
+        # Check that after the pass one of the CallMethods is gone (supposedly,
+        # the bn.forward).
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
+            .run(str(get_forward(scripted).graph))
+
+        # Check that the transformation doesn't change numerics
+        x = torch.rand(1, 1, 6, 6)
+        self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_foldbn_trivial_nobias(self):
+        def get_forward(m):
+            return m._c._get_method("forward")
+
+        # Test trivial case
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1, bias=False)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        eager = TestModule()
+        scripted = torch.jit.script(eager)
+        eager.eval()
+        scripted.eval()
+
+        # Check that in the original script module's forward we have two
+        # CallMethod nodes. One of them should be for conv.forward and the other
+        # for bn.forward.
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+            .run(str(get_forward(scripted).graph))
+
+        # Run FoldConvBatchnorm2d pass.
+        torch._C._jit_pass_fold_convbn(scripted._c)
+
+        # Check that after the pass one of the CallMethods is gone (supposedly,
+        # the bn.forward).
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
+            .run(str(get_forward(scripted).graph))
+
+        # Check that the transformation doesn't change numerics
+        x = torch.rand(1, 1, 6, 6)
+        self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_foldbn_in_submodule(self):
+        def get_forward(m):
+            return m._c._get_method("forward")
+
+        # Test that we find Conv-BN patterns in submodules
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                x = self.sub(x)
+                return x
+
+        m = torch.jit.script(TestModule())
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+            .run(str(get_forward(m.sub).graph))
+
+        torch._C._jit_pass_fold_convbn(m._c)
+
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
+            .run(str(get_forward(m.sub).graph))
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
