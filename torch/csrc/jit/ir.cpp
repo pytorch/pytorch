@@ -936,7 +936,7 @@ bool Node::hasSideEffects() const {
   }
 
   switch (op->aliasAnalysisKind()) {
-    case AliasAnalysisKind::PURE:
+    case AliasAnalysisKind::PURE_FUNCTION:
       return false;
     case AliasAnalysisKind::FROM_SCHEMA:
       return false;

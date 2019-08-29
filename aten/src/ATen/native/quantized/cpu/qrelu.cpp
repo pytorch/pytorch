@@ -17,7 +17,8 @@ Tensor quantized_relu(const Tensor& qx) {
         qx.sizes(),
         at::device(kCPU).dtype(SCALAR_TYPE),
         qx.q_scale(),
-        qx.q_zero_point());
+        qx.q_zero_point(),
+        qx.suggest_memory_format());
     auto iter = TensorIterator::unary_op(qy, qx);
     cpu_kernel(iter, [&](scalar_t value) -> scalar_t {
       return scalar_t(std::max<underlying_t>(value.val_, zero_point));
@@ -46,7 +47,8 @@ Tensor quantized_relu6(const Tensor& qx) {
         qx.sizes(),
         at::device(kCPU).dtype(SCALAR_TYPE),
         qx.q_scale(),
-        qx.q_zero_point());
+        qx.q_zero_point(),
+        qx.suggest_memory_format());
     auto iter = TensorIterator::unary_op(qy, qx);
     scalar_t six = at::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(),
                                               6.0);
@@ -68,7 +70,7 @@ class QRelu6 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators()
 .op("quantized::relu6(Tensor qx) -> Tensor",
-    c10::RegisterOperators::options().kernel<QRelu6>(QuantizedCPUTensorId()));
+    c10::RegisterOperators::options().kernel<QRelu6>(TensorTypeId::QuantizedCPUTensorId));
 } // namespace
 
 }}  // namespace at::native
