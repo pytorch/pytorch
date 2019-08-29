@@ -24,7 +24,6 @@ def strip_profiling_nodes(nodes):
 
 def warmup_backward(f, *args):
     profiling_count = 2
-    print(f)
     results = []
     for i in range(profiling_count):
         if len(args) > 0:
@@ -32,7 +31,7 @@ def warmup_backward(f, *args):
             results.append(r)
         else:
             f.backward()
-    
+
     return results
 
 class TestFuser(JitTestCase):
@@ -987,8 +986,6 @@ class TestFuser(JitTestCase):
                     assert backward is None
                     backward = g
                     old_plans.add(str(backward))
-            print(backward)
-            # 
             self.assertEqual(len([1 for o in next(backward.outputs()).node().inputs() if o.node().kind() == "aten::_grad_sum_to_size"]), i)
             self.assertEqual(len([1 for o in next(backward.outputs()).node().inputs() if o.node().kind() == "prim::Param"]), 3 - i)
 

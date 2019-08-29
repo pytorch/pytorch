@@ -240,12 +240,6 @@ std::shared_ptr<Operator> findOperatorFor(const Node* node) {
       return candidate;
     }
   }
-  if (node->kind() == aten::_grad_sum_to_size) {
-    std::cout << "findOperatorFor = " << *node << std::endl;
-    std::cout << "input0 = " << *node->input(0)->node() << std::endl;
-    std::cout << "input1 = " << *node->input(1)->node() << std::endl;
-    std::cout << "false\n";
-  }
   return nullptr;
 }
 

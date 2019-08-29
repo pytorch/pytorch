@@ -548,10 +548,6 @@ static void foldSizeIfNotEqual(Block *reverse_block) {
         IValue ival{};
         Value *size;
         if (input_size != output_size) {
-          std::cout << "input_size = " << (c10::Join(":", *input_size))
-                    << std::endl;
-          std::cout << "output_size = " << (c10::Join(":", *output_size))
-                    << std::endl;
           size = node->owningGraph()->insertConstant(*input_size,
                                                      ListType::ofInts());
         } else {

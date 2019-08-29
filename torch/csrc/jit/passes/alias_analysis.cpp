@@ -233,11 +233,6 @@ std::string AliasDb::toString() const {
     ss << *node;
     ss << "  ";
     for (const auto value : values) {
-
-      if (indexToElementMap.count(value) == 0) {
-        ss << "undef " << value << ", ";
-        continue;
-      }
       ss << indexToElementMap[value]->value->debugName() << ", ";
     }
     ss << "\n";
