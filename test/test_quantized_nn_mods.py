@@ -1,4 +1,3 @@
-import copy
 import torch
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
