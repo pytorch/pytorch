@@ -5,6 +5,7 @@ import sys
 import tempfile
 import time
 import unittest
+import logging
 
 from collections import namedtuple
 from functools import wraps
@@ -107,7 +108,9 @@ class MultiProcessTestCase(TestCase):
             else:
                 try:
                     fn(self)
-                except Exception:
+                except Exception as e:
+                    logging.error('Caught exception: {}, exiting process with exit code: {}'
+                                  .format(e, MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
                     sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
         return wrapper
 

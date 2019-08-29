@@ -614,6 +614,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     (i * self.world_size) + (i % self.world_size)
                 ]),
                 inputs[i],
+                None,
                 "Mismatch in iteration %d" % i,
             )
 
@@ -696,6 +697,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     (self.world_size * (self.world_size - 1) / 2)
                 ]),
                 inputs[i],
+                None,
                 "Mismatch in iteration %d" % i,
             )
 
@@ -880,6 +882,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 torch.Tensor([iter + root]),
                 outputs[iter][root],
+                None,
                 "Mismatch in iteration %d for rank %d" % (iter, root)
             )
 
@@ -1026,6 +1029,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(
                     expected_outputs[iter],
                     outputs[iter],
+                    None,
                     "Mismatch in iteration %d for root %d" % (iter, root)
                 )
 
@@ -1126,6 +1130,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 expected_outputs[i],
                 outputs[i],
+                None,
                 "Mismatch in iteration %d" % i
             )
 
@@ -1214,6 +1219,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                         (self.world_size * (self.world_size - 1) / 2)
                     ]),
                     outputs[i],
+                    None,
                     "Mismatch in iteration %d with root rank %d" % (iter, root),
                 )
 
