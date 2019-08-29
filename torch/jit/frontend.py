@@ -492,8 +492,8 @@ class ExprBuilder(Builder):
         if op == ast.Div and not ctx.uses_true_division:
             err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
             raise FrontendError(err_range, 'Division of ints in TorchScript uses Python 3 true '
-                               'division semantics. Please put `from __future__ '
-                               'import division` at the top of your file')
+                                'division semantics. Please put `from __future__ '
+                                'import division` at the top of your file')
         op_token = ExprBuilder.binop_map.get(op)
         if op_token is None:
             err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
