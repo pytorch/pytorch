@@ -40,6 +40,15 @@ C10_DEFINE_int(warmup, 0, "The number of iterations to warm up.");
 C10_DEFINE_int(iter, 10, "The number of iterations to run.");
 
 int main(int argc, char** argv) {
+  c10::SetUsageMessage(
+    "Run speed benchmark for pytorch model.\n"
+    "Example usage:\n"
+    "./speed_benchmark_torch"
+    " --model=<model_file>"
+    " --input_dims=\"1,3,224,224\""
+    " --input_type=float"
+    " --warmup=5"
+    " --iter=20");
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
     std::cerr << "Failed to parse command line flags!" << std::endl;
     return 1;
