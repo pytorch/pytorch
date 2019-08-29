@@ -2029,7 +2029,7 @@ requires_grad_(requires_grad=True) -> Tensor
 Change if autograd should record operations on this tensor: sets this tensor's
 :attr:`requires_grad` attribute in-place. Returns this tensor.
 
-:func:`require_grad_`'s main use case is to tell autograd to begin recording
+:func:`requires_grad_`'s main use case is to tell autograd to begin recording
 operations on a Tensor ``tensor``. If ``tensor`` has ``requires_grad=False``
 (because it was obtained through a DataLoader, or required preprocessing or
 initialization), ``tensor.requires_grad_()`` makes it so that autograd will

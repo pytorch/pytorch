@@ -293,8 +293,8 @@ class CAFFE2_API Tensor {
   T * data_ptr() const;
 
   template<typename T>
+  C10_DEPRECATED_MESSAGE("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.")
   T * data() const {
-    TORCH_WARN_ONCE("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.");
     return data_ptr<T>();
   }
 

@@ -420,10 +420,10 @@ class TestQuantizedOps(TestCase):
 
     @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
-                                              min_side=1, max_side=5),
+                                              min_side=1, max_side=10),
                        qparams=hu.qparams()),
-           output_size_h=st.integers(1, 5),
-           output_size_w=st.integers(1, 5))
+           output_size_h=st.integers(1, 10),
+           output_size_w=st.integers(1, 10))
     def test_adaptive_avg_pool2d(self, X, output_size_h, output_size_w):
         X, (scale, zero_point, torch_type) = X
 
@@ -560,19 +560,32 @@ class TestQuantizedOps(TestCase):
             qX2 = torch.quantize_linear(X2, scale=scale2, zero_point=zero_point2,
                                         dtype=torch_type2)
 
-        def equal_ref(X, params, X_scheme, X2, params2, X2_scheme):
-            if X_scheme != X2_scheme:
+        def equal_ref(qX, qX2):
+            if qX.qscheme() != qX2.qscheme():
                 return False
-            if params != params2:
+            if qX.shape != qX2.shape:
                 return False
-            if X.shape != X2.shape:
-                return False
-            if (X != X2).any():
+            if qX.qscheme() == torch.per_tensor_affine:
+                if qX.q_scale() != qX2.q_scale():
+                    return False
+                if qX.q_zero_point() != qX2.q_zero_point():
+                    return False
+            elif qX.qscheme() == torch.per_channel_affine:
+                if (qX.q_per_channel_scales() !=
+                   qX2.q_per_channel_scales()).any():
+                    return False
+                if (qX.q_per_channel_zero_points() !=
+                   qX2.q_per_channel_zero_points()).any():
+                    return False
+            else:
+                raise NotImplementedError("Don't know what to do with",
+                                          qX.qscheme())
+            if (qX.int_repr().to(float) != qX2.int_repr().to(float)).any():
                 return False
             return True
 
-        self.assertEqual(qX.equal(qX), equal_ref(X, X_params, X_scheme, X, X_params, X_scheme))
-        self.assertEqual(qX.equal(qX2), equal_ref(X, X_params, X_scheme, X2, X2_params, X2_scheme))
+        self.assertEqual(qX.equal(qX), equal_ref(qX, qX))
+        self.assertEqual(qX.equal(qX2), equal_ref(qX, qX2))
 
 
 @unittest.skipIf(
