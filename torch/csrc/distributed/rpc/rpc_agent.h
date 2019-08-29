@@ -49,6 +49,9 @@ class RpcAgent {
   virtual std::shared_ptr<FutureMessage> send(
       const std::string& to, Message&& message) = 0;
 
+  // Retrieves the worker_id for this node.
+  virtual int16_t getWorkerId() = 0;
+
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
   virtual void join() = 0;
