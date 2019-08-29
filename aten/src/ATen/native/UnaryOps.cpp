@@ -267,11 +267,6 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
   IMPLEMENT_UNARY_OP_CORE(op)                                          \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
-#define IMPLEMENT_UNARY_OP(op)                                         \
-  IMPLEMENT_UNARY_OP_CORE(op)                                          \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)                       \
-
 IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
