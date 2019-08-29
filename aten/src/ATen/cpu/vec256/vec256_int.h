@@ -579,7 +579,7 @@ Vec256<int32_t> inline clamp_min(const Vec256<int32_t>& a, const Vec256<int32_t>
 }
 
 template <>
-Vec256<int16_t> inline clamp_max(const Vec256<int16_t>& a, const Vec256<int16_t>& min_val) {
+Vec256<int16_t> inline clamp_min(const Vec256<int16_t>& a, const Vec256<int16_t>& min_val) {
   return _mm256_max_epi16(min_val, a);
 }
 
