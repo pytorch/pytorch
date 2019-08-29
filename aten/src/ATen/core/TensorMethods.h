@@ -9,7 +9,7 @@
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
 #ifdef BUILD_NAMEDTENSOR
-#include <ATen/NamedTensor.h>
+#include <ATen/core/NamedTensor.h>
 #endif
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
