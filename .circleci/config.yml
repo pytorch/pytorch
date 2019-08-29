@@ -3207,9 +3207,27 @@ parameters:
   run_builds:
     type: boolean
     default: false
+  run_other:
+    type: boolean
+    default: false
 
 # PR jobs pr builds
 workflows:
+  triggers:
+    - schedule:
+        cron: "15 16 * * *"
+        filters:
+          branches:
+            only:
+              - master
+  other:
+    when: << pipeline.parameters.run_other >>
+    jobs:
+      - setup
+      - pytorch_linux_xenial_py2_7_9_build:
+          requires:
+            - setup
+
   build:
     when: << pipeline.parameters.run_builds >>
     jobs:
