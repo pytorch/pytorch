@@ -287,7 +287,6 @@ def add_build_env_defs(jobs_dict):
                     mydict[x.gen_build_name(phase)] = d
 
     # this is the circleci api version and probably never changes
-    jobs_dict["version"] = 2
     jobs_dict["jobs"] = mydict
 
     graph = visualization.generate_graph(get_root())
