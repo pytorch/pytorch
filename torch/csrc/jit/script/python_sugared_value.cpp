@@ -107,18 +107,28 @@ std::shared_ptr<SugaredValue> PythonValue::call(
   if (!matched_schema)
     throw ErrorReport(loc) << failure_messages.str();
 
+  // If if a function is marked as dropped,
+  // we throw an exception if it is invoked.
+  if (py::cast<bool>(py::module::import("torch._jit_internal")
+                         .attr("should_drop_on_export")(self))) {
+    auto g = m.graph();
+    auto err_msg = insertConstant(
+        *g,
+        IValue(
+            "This Python function is annotated to be ignored and cannot be run"));
+    g->insert(prim::RaiseException, {err_msg}, {}, loc);
+    return std::make_shared<SimpleValue>(
+        g->insertNode(
+             g->createUninitialized(matched_schema->return_types.at(0)))
+            ->output());
+  }
+
   // Release the function object so we can wrap it in a PythonOp
   py::object func = self;
   std::string cconv(inputs.size(), 'd');
   Node* new_node = m.graph()->insertNode(
       m.graph()->createPythonOp(THPObjectPtr(func.release().ptr()), cconv, {}));
 
-  // Mark if function is ignored on export
-  if (py::cast<bool>(py::module::import("torch._jit_internal")
-                         .attr("should_drop_on_export")(self))) {
-    auto python_op = static_cast<PythonOp*>(new_node);
-    python_op->ignore_on_export = true;
-  }
   new_node->setSourceRange(loc);
   for (auto& i : matched_schema->inputs)
     new_node->addInput(i);
