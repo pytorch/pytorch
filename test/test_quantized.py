@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import numpy as np
 import unittest
 
@@ -180,8 +178,11 @@ class TestQuantizedOps(TestCase):
             add_out = torch.ops.quantized.add_out
             add_relu_out = torch.ops.quantized.add_relu_out
 
-            A = torch.arange(-25, 25, dtype=torch.float)
-            B = torch.arange(-25, 25, dtype=torch.float)
+            # NB: This is a strange size so that we exercise both the vectorized
+            # implementation (64-element chunks at at time) as well as the scalar
+            # implementation
+            A = torch.arange(-128, 130, dtype=torch.float)
+            B = torch.arange(-128, 130, dtype=torch.float)
             scale = 2.0
             zero_point = 127
             qA = torch.quantize_linear(A, scale=scale, zero_point=zero_point,
@@ -1286,6 +1287,74 @@ class TestQNNPackOps(TestCase):
         oW = pool_output_shape(4, kernel, padding, stride, dilation)
         np.testing.assert_equal(qc.size(), (0, oH, oW, 2),
                                 "Quantized maxpool2d with batch size 0 failed.")
+
+
+"""Tests the correctness of the tensor comparators."""
+class TestComparatorOps(TestCase):
+    """Tests the element-wise equality ops."""
+    @given(A=hu.tensor(shapes=((3, 4, 5),),
+                       qparams=hu.qparams()),
+           B=hu.tensor(shapes=((5,), (1, 5), (1, 1, 5), (4, 5), (3, 4, 5)),
+                       qparams=hu.qparams()))
+    def test_compare_tensor_tensor(self, A, B):
+        A, (scale_a, zero_point_a, dtype_a) = A
+        B, (scale_b, zero_point_b, dtype_b) = B
+        tA = torch.from_numpy(A)
+        tB = torch.from_numpy(B)
+
+        qA = torch.quantize_linear(tA, scale=scale_a, zero_point=zero_point_a,
+                                   dtype=dtype_a)
+        qB = torch.quantize_linear(tB, scale=scale_b, zero_point=zero_point_b,
+                                   dtype=dtype_b)
+        dqA = qA.dequantize()
+        dqB = qB.dequantize()
+
+        ops_under_test = ('__eq__', '__ne__', '__ge__', '__le__', '__gt__',
+                          '__lt__', 'eq', 'ne', 'ge', 'le', 'gt', 'lt')
+
+        for op in ops_under_test:
+            result_ref = getattr(dqA, op)(dqB)
+            result = getattr(qA, op)(qB)
+            self.assertEqual(result_ref, result,
+                             "'tensor.{}(tensor)'' failed".format(op))
+            # Reversed broadcasting.
+            result_ref = getattr(dqB, op)(dqA)
+            result = getattr(qB, op)(qA)
+            self.assertEqual(result_ref, result,
+                             "'tensor.{}(tensor)'' failed".format(op))
+
+    @given(A=hu.tensor(shapes=((3, 4, 5),),
+                       qparams=hu.qparams()),
+           b=st.floats(allow_infinity=False, allow_nan=False, width=32))
+    def test_compare_tensor_scalar(self, A, b):
+        A, (scale_a, zero_point_a, dtype_a) = A
+        tA = torch.from_numpy(A)
+
+        qA = torch.quantize_linear(tA, scale=scale_a, zero_point=zero_point_a,
+                                   dtype=dtype_a)
+        dqA = qA.dequantize()
+
+        ops_under_test_reversible = ('__eq__', '__ne__', '__ge__', '__le__',
+                                     '__gt__', '__lt__')
+        ops_under_test_nonreversible = ('eq', 'ne', 'ge', 'le', 'gt', 'lt')
+
+        for op in ops_under_test_reversible:
+            result_ref = getattr(dqA, op)(b)
+            result = getattr(qA, op)(b)
+            self.assertEqual(result_ref, result,
+                             "'tensor.{}(scalar)'' failed".format(op))
+            # Reversed broadcasting.
+            result_ref = getattr(b, op)(dqA)
+            result = getattr(b, op)(qA)
+            self.assertEqual(result_ref, result,
+                             "'scalar.{}(tensor)'' failed".format(op))
+
+        for op in ops_under_test_nonreversible:
+            result_ref = getattr(dqA, op)(b)
+            result = getattr(qA, op)(b)
+            self.assertEqual(result_ref, result,
+                             "'tensor.{}(scalar)'' failed".format(op))
+
 
 if __name__ == "__main__":
     run_tests()
