@@ -10512,6 +10512,7 @@ class _TestTorchMixin(torchtest):
             c = torch.load(f)
         self._test_serialization_assert(b, c)
 
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_serialization_fake_zip(self):
         data = [
             ord('P'),
