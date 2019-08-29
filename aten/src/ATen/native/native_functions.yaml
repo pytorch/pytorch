@@ -1367,16 +1367,21 @@
 
 - func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: false
 
 - func: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: false
 
 - func: mean.out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: false
 
 - func: mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  named_guard: false
 
 - func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  named_guard: false
 
 - func: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -2173,25 +2178,33 @@
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: std.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   variants: function
+  named_guard: False
 
 - func: std_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   variants: function
+  named_guard: False
 
 - func: std_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   variants: function
+  named_guard: False
 
 - func: std.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: std.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: std.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
@@ -2393,25 +2406,33 @@
 
 - func: var(Tensor self, bool unbiased=True) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: var.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: var.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: var.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   variants: function
+  named_guard: false
 
 - func: var_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   variants: function
+  named_guard: False
 
 - func: var_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   variants: function
+  named_guard: False
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
   variants: method
@@ -4467,11 +4488,13 @@
   dispatch:
     CPU: legacy::cpu::_th_var
     CUDA: legacy::cuda::_th_var
+  named_guard: False
 
 - func: _std(Tensor self, bool unbiased=True) -> Tensor
   dispatch:
     CPU: legacy::cpu::_th_std
     CUDA: legacy::cuda::_th_std
+  named_guard: False
 
 - func: _addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
