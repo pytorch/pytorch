@@ -55,11 +55,6 @@ class ObserverBase(ABC, nn.Module):
             qmin, qmax = -128, 127
         else:
             qmin, qmax = 0, 255
-        # We pull these out so that TorchScript optional type refinement works.
-        # We may be able to remove this in the future if TorchScript supports that
-        # feature on attributes
-        min_val = self.min_val
-        max_val = self.max_val
         if max_val is None or min_val is None:
             warnings.warn("must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point ")
@@ -123,8 +118,11 @@ class MinMaxObserver(ObserverBase):
         min_val = self.min_val
         max_val = self.max_val
         if max_val is None or min_val is None:
-            raise Exception('must run observer before calling calculate_qparams!')
-        return self._calculate_qparams(min_val, max_val)
+            warnings.warn("must run observer before calling calculate_qparams.\
+                                    Returning default scale and zero point ")
+            return torch.tensor([1.0]), torch.tensor([0])
+        else:
+            return self._calculate_qparams(min_val, max_val)
 
     @torch.jit.export
     def extra_repr(self):
