@@ -491,6 +491,8 @@ void InsertQuantDeQuantImpl(
   }
 
   std::vector<Value*> values_to_quantize;
+  std::unordered_map<script::ModulePtr, script::Module> child_modules_to_quantize;
+  QuantizeHelper qh(module);
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
@@ -499,6 +501,10 @@ void InsertQuantDeQuantImpl(
     for (Node* n : b->nodes()) {
       for (Value* v : n->outputs()) {
         if (v->type()->isSubtypeOf(TensorType::get())) {
+          auto child_module = qh.findChildModuleToQuantize(v);
+          if (child_module) {
+            child_modules_to_quantize[child_module.value().module_object()] = child_module.value();
+          }
           values_to_quantize.push_back(v);
         }
       }
@@ -509,14 +515,10 @@ void InsertQuantDeQuantImpl(
       }
     }
   }
-  QuantizeHelper qh(module);
 
   for (Value* v : values_to_quantize) {
-    auto child_module = qh.findChildModuleToQuantize(v);
-    if (child_module) {
-      InsertQuantDeQuantImpl(child_module.value(), "forward");
-    }
-    if (v->node()->kind() == prim::GetAttr && v->node()->s(c10::attr::name) == "bias") {
+    if (v->node()->kind() == prim::GetAttr &&
+        v->node()->s(c10::attr::name) == "bias") {
       qh.quantizeBias(v);
     } else {
       qh.quantizeTensor(v);
@@ -525,6 +527,10 @@ void InsertQuantDeQuantImpl(
 
   for (Value* v : input_values) {
     qh.quantizeTensor(v, false);
+  }
+
+  for (auto item: child_modules_to_quantize) {
+    InsertQuantDeQuantImpl(item.second, "forward");
   }
 
   qh.destroyNodes();
