@@ -86,5 +86,13 @@ TORCH_API script::Module InsertQuantDeQuant(
  */
 TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
 
+/** \brief Fold Conv2d-BatchNorm2d into Conv2d in forward method of this module
+ * and all its submodules.
+ *
+ * The weight and bias of the Conv2d are correspondingly updated. Should only be
+ * used on modules in eval mode.
+ */
+TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
+
 } // namespace jit
 } // namespace torch
