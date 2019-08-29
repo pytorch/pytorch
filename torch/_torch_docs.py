@@ -2539,6 +2539,46 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.logical_not,
+           r"""
+logical_not(input, out=None) -> Tensor
+
+Computes the element-wise logical NOT of the given input tensor. If not specified, the output tensor will have the bool
+dtype. If the input tensor is not a bool tensor, zeros are treated as ``False`` and non-zeros are treated as ``True``.
+
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.logical_not(torch.tensor([True, False]))
+    tensor([ False,  True])
+    >>> torch.logical_not(torch.tensor([0, 1, -10], dtype=torch.int8))
+    tensor([ True, False, False])
+    >>> torch.logical_not(torch.tensor([0., 1.5, -10.], dtype=torch.double))
+    tensor([ True, False, False])
+    >>> torch.logical_not(torch.tensor([0., 1., -10.], dtype=torch.double), out=torch.empty(3, dtype=torch.int16))
+    tensor([1, 0, 0], dtype=torch.int16)
+""".format(**common_args))
+
+add_docstr(torch.logical_xor,
+           r"""
+logical_xor(input, other, out=None) -> Tensor
+
+Computes the element-wise logical XOR of the given input tensors. Both input tensors must have the bool dtype.
+
+Args:
+    input (Tensor): the input tensor
+    other (Tensor): the tensor to compute XOR with
+    out (Tensor, optional): the output tensor
+
+Example:
+
+    >>> torch.logical_xor(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
+    tensor([ False, False,  True])
+""")
+
 add_docstr(torch.logspace,
            r"""
 logspace(start, end, steps=100, base=10.0, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -4632,8 +4672,7 @@ Args:
         Default: if None, uses the current device for the default tensor type
         (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
         for CPU tensor types and the current CUDA device for CUDA tensor types.
-    requires_grad (bool, optional): If autograd should record operations on the
-        returned tensor. Default: ``False``.
+    {requires_grad}
 
 
 Example::
@@ -4682,7 +4721,7 @@ Example::
            size=(1, 2), nnz=0, layout=torch.sparse_coo)
 
 .. _torch.sparse: https://pytorch.org/docs/stable/sparse.html
-""")
+""".format(**factory_common_args))
 
 add_docstr(torch.sqrt,
            r"""

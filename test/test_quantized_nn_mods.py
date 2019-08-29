@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import torch
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
@@ -12,7 +7,7 @@ from torch.nn.quantized.modules import Conv2d
 from torch.nn._intrinsic.quantized import ConvReLU2d
 import torch.quantization
 from common_utils import run_tests, tempfile
-from common_quantization import QuantizationTestCase, no_deadline
+from common_quantization import QuantizationTestCase, no_deadline, prepare_dynamic
 from common_quantized import _calculate_dynamic_qparams
 from hypothesis import given
 from hypothesis import strategies as st
@@ -32,9 +27,64 @@ class FunctionalAPITest(QuantizationTestCase):
         scale = 2.0
         zero_point = 1
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
-        qY = torch.ops.quantized.relu(qX)
+        qY = torch.relu(qX)
         qY_hat = qF.relu(qX)
         self.assertEqual(qY, qY_hat)
+
+    @no_deadline
+    @unittest.skipIf(
+        not torch.fbgemm_is_cpu_supported(),
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    @given(
+        use_bias=st.booleans(),
+    )
+    def test_conv_api(self, use_bias):
+        """Tests the correctness of the conv module.
+
+        The correctness is defined against the functional implementation.
+        """
+
+        N, iC, H, W = 10, 10, 10, 3
+        oC, g, kH, kW = 16, 1, 3, 3
+        scale, zero_point = 1.0 / 255, 128
+        stride = (1, 1)
+        i_padding = (0, 0)
+        dilation = (1, 1)
+
+        X = torch.randn(N, iC, H, W, dtype=torch.float32)
+        X = X.permute([0, 2, 3, 1]).contiguous()
+        qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
+
+        w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
+
+        qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
+
+        b = torch.randn(oC, dtype=torch.float32) if use_bias else None
+        q_bias = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32) if use_bias else None
+        q_filters_ref = torch.ops.quantized.fbgemm_conv_prepack(qw.permute([0, 2, 3, 1]),
+                                                                stride,
+                                                                i_padding,
+                                                                dilation,
+                                                                g)
+
+
+        requantized_bias = torch.quantize_linear(q_bias.dequantize(), scale * scale, 0 , torch.qint32) if use_bias else None
+        ref_result = torch.ops.quantized.fbgemm_conv2d(qX.permute([0, 2, 3, 1]), q_filters_ref,
+                                                       requantized_bias, stride,
+                                                       i_padding, dilation,
+                                                       g, scale, zero_point).permute([0, 3, 1, 2])
+
+        q_result = torch.nn.quantized.functional.conv2d(qX,
+                                                        qw,
+                                                        bias=q_bias, scale=scale,
+                                                        zero_point=zero_point,
+                                                        stride=stride, padding=i_padding,
+                                                        dilation=dilation, groups=g,
+                                                        dtype=torch.quint8)
+
+        self.assertEqual(ref_result, q_result)
 
 
 class DynamicModuleAPITest(QuantizationTestCase):
@@ -49,8 +99,9 @@ class DynamicModuleAPITest(QuantizationTestCase):
         in_features=st.integers(16, 32),
         out_features=st.integers(4, 8),
         use_bias=st.booleans(),
+        use_default_observer=st.booleans(),
     )
-    def test_linear_api(self, batch_size, in_features, out_features, use_bias):
+    def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_default_observer):
         """test API functionality for nn.quantized.dynamic.Linear"""
         W = torch.rand(out_features, in_features).float()
         W_scale, W_zp = _calculate_dynamic_qparams(W, torch.qint8)
@@ -58,14 +109,17 @@ class DynamicModuleAPITest(QuantizationTestCase):
         X = torch.rand(batch_size, in_features).float()
         B = torch.rand(out_features).float() if use_bias else None
         qlinear = nnqd.Linear(in_features, out_features)
+        # Run module with default-initialized parameters.
+        # This tests that the constructor is correct.
+        qlinear(X)
         qlinear.set_weight(W_q)
+
         # Simple round-trip test to ensure weight()/set_weight() API
         self.assertEqual(qlinear.weight(), W_q)
         W_pack = qlinear._packed_weight
-        qlinear._packed_weight = W_pack
-
         qlinear.bias = B if use_bias else None
         Z_dq = qlinear(X)
+
         # Check if the module implementation matches calling the
         # ops directly
         Z_ref = torch.ops.quantized.fbgemm_linear_dynamic(X, W_pack, B)
@@ -112,10 +166,42 @@ class DynamicModuleAPITest(QuantizationTestCase):
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
-        self.checkScriptable(qlinear, zip([X], [Z_ref]), check_save_load=True)
+        self.checkScriptable(qlinear, list(zip([X], [Z_ref])), check_save_load=True)
+
+        # Test from_float
+        float_linear = torch.nn.Linear(in_features, out_features).float()
+        if use_default_observer:
+            float_linear.qconfig = torch.quantization.default_dynamic_qconfig
+        prepare_dynamic(float_linear)
+        float_linear(X.float())
+        quantized_float_linear = nnqd.Linear.from_float(float_linear)
+
+        # Smoke test to make sure the module actually runs
+        quantized_float_linear(X)
+
+        # Smoke test extra_repr
+        str(quantized_float_linear)
 
 
 class ModuleAPITest(QuantizationTestCase):
+    def test_relu(self):
+        relu_module = nnq.ReLU()
+        relu6_module = nnq.ReLU6()
+
+        x = torch.arange(-10, 10, dtype=torch.float)
+        y_ref = torch.relu(x)
+        y6_ref = torch.nn.modules.ReLU6()(x)
+
+        qx = torch.quantize_linear(x, 1.0, 0, dtype=torch.qint32)
+        qy = relu_module(qx)
+        qy6 = relu6_module(qx)
+
+        self.assertEqual(y_ref, qy.dequantize(),
+                         message="ReLU module API failed")
+        self.assertEqual(y6_ref, qy6.dequantize(),
+                         message="ReLU6 module API failed")
+
+
     @no_deadline
     @unittest.skipIf(
         not torch.fbgemm_is_cpu_supported(),
@@ -143,6 +229,11 @@ class ModuleAPITest(QuantizationTestCase):
             qlinear = nnq_fused.LinearReLU(in_features, out_features)
         else:
             qlinear = nnq.Linear(in_features, out_features)
+
+        # Run module with default-initialized parameters.
+        # This tests that the constructor is correct.
+        qlinear(X_q)
+
         qlinear.set_weight(W_q)
         # Simple round-trip test to ensure weight()/set_weight() API
         self.assertEqual(qlinear.weight(), W_q)
@@ -208,7 +299,20 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
-        self.checkScriptable(qlinear, zip([X_q], [Z_ref]), check_save_load=True)
+        self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])), check_save_load=True)
+
+        # Test from_float
+        float_linear = torch.nn.Linear(in_features, out_features).float()
+        float_linear.qconfig = torch.quantization.default_qconfig
+        torch.quantization.prepare(float_linear)
+        float_linear(X.float())
+        quantized_float_linear = torch.quantization.convert(float_linear)
+
+        # Smoke test to make sure the module actually runs
+        quantized_float_linear(X_q)
+
+        # Smoke test extra_repr
+        str(quantized_float_linear)
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
@@ -374,7 +478,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(conv_under_test.zero_point, loaded_conv.zero_point)
 
         # JIT testing
-        self.checkScriptable(conv_under_test, zip([qX], [result_reference]), check_save_load=True)
+        self.checkScriptable(conv_under_test, list(zip([qX], [result_reference])), check_save_load=True)
 
         # Test from_float
         float_conv = torch.nn.Conv2d(in_channels=iC,
@@ -393,6 +497,12 @@ class ModuleAPITest(QuantizationTestCase):
 
         # Smoke test to make sure the module actually runs
         quantized_float_conv(qX)
+        # Check that bias is quantized based on output scale
+        if use_bias:
+            qbias = torch.quantize_linear(float_conv.bias, quantized_float_conv.scale / 2**16, 0, torch.qint32)
+            self.assertEqual(quantized_float_conv.bias.dequantize(), qbias.dequantize())
+        # Smoke test extra_repr
+        str(quantized_float_conv)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.
@@ -419,7 +529,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(qX_expect, qX_hat)
 
         # JIT Testing
-        self.checkScriptable(pool_under_test, zip([X], [qX_expect]))
+        self.checkScriptable(pool_under_test, list(zip([X], [qX_expect])))
 
 if __name__ == '__main__':
     run_tests()

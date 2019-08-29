@@ -181,6 +181,7 @@ TEST_LIBROSA = _check_module_exists('librosa') and PY3
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1' or sys.version_info[0] == 2
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
+TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 
@@ -223,7 +224,7 @@ class torchtest():
 
     class _TestTorchMixin(torchtest):
 
-        @torchtest.test_all_device_types()
+        @torchtest.for_all_device_types()
         def test_zeros_like(self, device):
             expected = torch.zeros((100, 100,), device=device)
 
@@ -234,7 +235,7 @@ class torchtest():
         test_zeros_like_cuda (__main__.TestTorch) ... ok
 
     To work properly, test class should be inherited from `torchtest`.
-    test_all_device_types decorator does not guarantee proper functionality in
+    for_all_device_types decorator does not guarantee proper functionality in
     combination with other decorators.
 
     Please do not extend this decorator to support other cases (such as dtype,
@@ -243,7 +244,7 @@ class torchtest():
     https://github.com/pytorch/pytorch/pull/23824 for the reference).
     """
     @classmethod
-    def test_all_device_types(cls):
+    def for_all_device_types(cls):
         def wrapper(fn):
             test_names = []
 
@@ -730,7 +731,9 @@ class TestCase(expecttest.TestCase):
                 if diff.is_signed():
                     diff = diff.abs()
                 diff[nan_mask] = 0
-                max_err = diff.max()
+                # Use `item()` to work around:
+                # https://github.com/pytorch/pytorch/issues/22301
+                max_err = diff.max().item()
                 self.assertGreaterEqual(max_err, prec, message)
         elif type(x) == str and type(y) == str:
             super(TestCase, self).assertNotEqual(x, y)

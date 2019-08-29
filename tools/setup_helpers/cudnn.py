@@ -18,6 +18,7 @@ if USE_CUDA and not check_negative_env_flag('USE_CUDNN'):
         '/usr/lib/x86_64-linux-gnu/',
         '/usr/lib/powerpc64le-linux-gnu/',
         '/usr/lib/aarch64-linux-gnu/',
+        '/usr/lib/',
     ] + gather_paths([
         'LIBRARY_PATH',
     ]) + gather_paths([
