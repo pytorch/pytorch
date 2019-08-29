@@ -81,13 +81,13 @@ struct Vec256<c10::qint8> {
     }
 
  private:
-    __m256i cvtepi8_epi32(__m128i val) const {
+    __m256i cvtepi8_epi32(__m128i epi8_vals) const {
 #ifdef __AVX2__
-        return _mm256_cvtepi8_epi32(val);
+        return _mm256_cvtepi8_epi32(epi8_vals);
 #else  // __AVX2__
         __m256i int32_vals;
         for (int i = 0; i < 8; ++i) {
-            ((int32_t*)&int32_vals)[i] = vals[i];
+            ((int32_t*)&int32_vals)[i] = ((int8_t*)&epi8_vals)[i];
         }
         return int32_vals;
 #endif
@@ -177,13 +177,13 @@ struct Vec256<c10::quint8> {
     }
 
  private:
-    __m256i cvtepu8_epi32(__m128i val) const {
+    __m256i cvtepu8_epi32(__m128i epu8_vals) const {
 #ifdef __AVX2__
-        return _mm256_cvtepu8_epi32(val);
+        return _mm256_cvtepu8_epi32(epu8_vals);
 #else  // __AVX2__
         __m256i int32_vals;
         for (int i = 0; i < 8; ++i) {
-            ((uint32_t*)&int32_vals)[i] = vals[i];
+            ((uint32_t*)&int32_vals)[i] = ((uint8_t*)&epu8_vals)[i];
         }
         return int32_vals;
 #endif
