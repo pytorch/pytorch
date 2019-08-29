@@ -1055,8 +1055,7 @@ struct Graph {
       ArrayRef<Value*> inputs,
       size_t num_outputs = 1);
 
-  TORCH_API Node* createNone(
-      TypePtr typ); // value of None with type Optional[typ]
+  TORCH_API Node* createNone();
   TORCH_API Node* createAutogradZero();
   TORCH_API Node* createUninitialized(TypePtr typ);
   TORCH_API Node* createWithSubgraph(Symbol kind);

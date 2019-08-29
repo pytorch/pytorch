@@ -1336,9 +1336,9 @@ Node* Graph::createAutogradZero() {
   return create(prim::AutogradZero);
 }
 
-Node* Graph::createNone(TypePtr typ) {
+Node* Graph::createNone() {
   Node* n = create(prim::Constant);
-  n->output()->setType(OptionalType::create(std::move(typ)));
+  n->output()->setType(NoneType::get());
   return n;
 }
 

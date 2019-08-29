@@ -1596,7 +1596,7 @@ graph(%Ra, %Rb):
         torch._C._jit_run_cpp_tests(run_cuda=False)
         tests_setup.shutdown()
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(True or IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @skipIfRocm
     def test_cpp_cuda(self):
@@ -3267,11 +3267,7 @@ def foo(x):
         def annotate_none():
             return torch.jit.annotate(Optional[torch.Tensor], None)
 
-        def annotate_none_no_optional():
-            return torch.jit.annotate(torch.Tensor, None)
-
         self.checkScript(annotate_none, ())
-        self.checkScript(annotate_none_no_optional, ())
 
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function

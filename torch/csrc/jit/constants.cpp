@@ -42,7 +42,7 @@ c10::optional<Value*> tryInsertConstant(
     at::Tensor ref = val.toTensor();
     if (!ref.defined()) {
       n->destroy();
-      return g.insertNode(g.createNone(TensorType::get()))->output();
+      return g.insertNode(g.createNone())->output();
     }
     // TODO: fix all cases where we are not passing in a variable,
     // and then change this to an AT_ASSERT
@@ -97,24 +97,6 @@ c10::optional<Value*> tryInsertConstant(
     n->setSourceRange(*loc);
   if (scope)
     n->setScope(*scope);
-  if (result_type) {
-    auto inferred_type = n->output()->type();
-
-    if (inferred_type->isSubtypeOf(NoneType::get()) &&
-        !inferred_type->isSubtypeOf(result_type)) {
-      // None doesn't subtype Optional, but an Optional can be None, so handle
-      // that here
-      TORCH_CHECK(
-          result_type->kind() == TypeKind::OptionalType,
-          "Expected OptionalType or NoneType, got ",
-          result_type->python_str());
-      n->output()->setType(result_type);
-    } else if (!(inferred_type->isSubtypeOf(TensorType::get()) &&
-                 result_type->isSubtypeOf(inferred_type))) {
-      // Retain more type information in case of tensor constant
-      n->output()->setType(result_type);
-    }
-  }
   return g.insertNode(n)->output();
 }
 

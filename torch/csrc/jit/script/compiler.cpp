@@ -2160,23 +2160,26 @@ struct to_ir {
           emitExpr(apply.inputs()[1], type),
           /*allow_conversions=*/true);
 
-      // This is to ensure even if user forgets to call annotate None with the
-      // Optional wrapper type, we still generate the correct value with the
-      // Optional type. e.g. it makes annoate(Tensor, None) to behave the same
-      // with annotate(Optional[Tensor], None). It also maintains the backward
-      // compatibility of exported model on Optional undefined tensor/None
-      auto opt_type = expr->type()->cast<OptionalType>();
-      bool forget_opt_annotate =
-          opt_type && *opt_type->getElementType() == *type;
-
       std::stringstream why_not;
-      if (!forget_opt_annotate &&
-          !expr->type()->isSubtypeOfExt(type, &why_not)) {
+      if (!expr->type()->isSubtypeOfExt(type, &why_not)) {
         throw ErrorReport(apply.inputs())
             << "expected an expression of type " << type->python_str()
             << " but found " << expr->type()->python_str() << "\n"
             << why_not.str();
       }
+
+      // None is a subtype of Optional[T], but we want to remember what T is,
+      // after annotation so that variables assigned to this None will still
+      // get the right type. To do this, we make a None constant that
+      // has the type Optional[T]
+      if (type->kind() == OptionalType::Kind &&
+          expr->type()->isSubtypeOf(NoneType::get())) {
+        Node* none = graph->createNone();
+        none->output()->setType(type);
+        graph->insertNode(none);
+        expr = none->output();
+      }
+
       return std::make_shared<SimpleValue>(expr);
     } else if (auto getattr = dynamic_cast<GetAttrValue*>(sv.get())) {
       checkApplyExpr(apply, loc);
@@ -2897,8 +2900,7 @@ struct to_ir {
     // create None node with optional tensor output type and pass to at::index.
     for (auto& index : tensor_indices) {
       if (index == nullptr) {
-        index =
-            graph->insertNode(graph->createNone(TensorType::get()))->output();
+        index = graph->insertNode(graph->createNone())->output();
       }
     }
     return std::make_pair(sliceable, tensor_indices);
