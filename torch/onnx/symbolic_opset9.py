@@ -321,7 +321,7 @@ def embedding_bag(g,
 
 def size(g, self, dim):
     full_shape = g.op("Shape", self)
-    return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
+    return select(g, full_shape, 0, dim)
 
 
 @parse_args('v', 'i', 'i')
@@ -393,20 +393,17 @@ def split_with_sizes(g, self, split_sizes, dim):
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=1)
 
 
-@parse_args('v', 'i', 'v')
+@parse_args('v', 'i', 'i')
 def select(g, self, dim, index):
-    if dim > 1:
-        # TODO: this is a temporary hack because of the implementation details
-        # of Gather in caffe2. We need to change this as soon as possible.
-        index_val = _parse_arg(index, 'i')
-        if index_val == -1:
+    if index < 0:
+        if index == -1:
             end_index = 9223372036854775807
         else:
-            end_index = index_val + 1
-        slice_node = sym_help._slice_helper(g, self, axes=[dim], starts=[index_val], ends=[end_index])
+            end_index = index + 1
+        slice_node = sym_help._slice_helper(g, self, axes=[dim], starts=[index], ends=[end_index])
         return g.op("Squeeze", slice_node, axes_i=[dim])
     else:
-        return g.op("Gather", self, index, axis_i=dim)
+        return g.op("Gather", self, g.op("Constant", value_t=torch.tensor(index)), axis_i=dim)
 
 
 def squeeze(g, self, dim=None):

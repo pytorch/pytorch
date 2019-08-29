@@ -229,7 +229,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_slice_neg_large(self):
         class NegSlice(torch.nn.Module):
             def forward(self, x):
-                return x[:, :, :, :, -3]
+                return x[:, :, -3:-1, :, -1]
 
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_test(NegSlice(), x)

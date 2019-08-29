@@ -16,12 +16,16 @@ graph {
     }
   }
   node {
+    input: "0"
     output: "3"
+    op_type: "Shape"
+  }
+  node {
+    output: "4"
     op_type: "Constant"
     attribute {
       name: "value"
       t {
-        dims: 1
         data_type: 7
         raw_data: "\001\000\000\000\000\000\000\000"
       }
@@ -29,13 +33,8 @@ graph {
     }
   }
   node {
-    input: "0"
-    output: "4"
-    op_type: "Shape"
-  }
-  node {
-    input: "4"
     input: "3"
+    input: "4"
     output: "5"
     op_type: "Gather"
     attribute {
