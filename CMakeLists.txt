@@ -207,11 +207,38 @@ if (MSVC)
     # Turn off warnings on Windows.  In an ideal world we'd be warning
     # clean on Windows too, but this is too much work for our
     # non-Windows developers.
+    #
+    # NB: Technically, this is not necessary if CMP0092 was applied
+    # properly, but only cmake >= 3.15 has this policy, so we nail
+    # it one more time just be safe.
+    #
+    # NB2: This is NOT enough to prevent warnings from nvcc on MSVC.  At the
+    # moment only CMP0092 is enough to prevent those warnings too.
     string(REPLACE "/W3" "" ${flag_var} "${${flag_var}}")
     # Suppress EHs is overridden by EHa warning
     string(REPLACE "/EHsc" "" ${flag_var} "${${flag_var}}")
 
+    # Turn off warnings (Windows build is currently is extremely warning
+    # unclean and the warnings aren't telling us anything useful.)
+    #
+    # Turn on EHa; I'm not altogether clear why we use the asynchronous
+    # exception handling model, but someone added it at some point, so
+    # keep using it.
     string(APPEND ${flag_var} " /w /EHa")
+
+    if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
+      if(${flag_var} MATCHES "/MD")
+        string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
+      endif(${flag_var} MATCHES "/MD")
+    else()
+      if(${flag_var} MATCHES "/MT")
+        string(REGEX REPLACE "/MT" "/MD" ${flag_var} "${${flag_var}}")
+      endif()
+    endif()
+
+    # /bigobj increases number of sections in .obj file, which is needed to link
+    # against libaries in Python 2.7 under Windows
+    set(${flag_var} "${${flag_var}} /MP /bigobj")
   endforeach(flag_var)
 
   foreach(flag_var
@@ -431,30 +458,6 @@ if(NOT MSVC)
   set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-math-errno")
   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-trapping-math")
-else()
-  foreach(flag_var
-      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO
-      CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
-      CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO)
-    if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-      if(${flag_var} MATCHES "/MD")
-        string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
-      endif(${flag_var} MATCHES "/MD")
-    else()
-      if(${flag_var} MATCHES "/MT")
-        string(REGEX REPLACE "/MT" "/MD" ${flag_var} "${${flag_var}}")
-      endif()
-    endif()
-    # /bigobj increases number of sections in .obj file, which is needed to link
-    # against libaries in Python 2.7 under Windows
-    set(${flag_var} "${${flag_var}} /MP /bigobj")
-    # Turn off warnings on Windows
-    string(REPLACE "/W3" "/w" ${flag_var} "${${flag_var}}")
-    # Suppress EHs is overridden by EHa warning
-    string(REPLACE "/EHsc" "" ${flag_var} "${${flag_var}}")
-    string(REPLACE "/EHs" "" ${flag_var} "${${flag_var}}")
-  endforeach(flag_var)
 endif()
 
 if (USE_ASAN)

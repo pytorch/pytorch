@@ -304,8 +304,6 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
       /wd4273 # (1): inconsistent dll linkage. This is related to the
               #      caffe2 FLAGS_* definition using dllimport in header and
               #      dllexport in cc file. The strategy is copied from gflags.
-      # just turn off warnings
-      /w
   )
 
   # Make sure windef.h does not define max/min macros.

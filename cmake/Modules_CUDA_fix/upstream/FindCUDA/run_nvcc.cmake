@@ -149,6 +149,7 @@ macro(cuda_execute_process status command)
   if(NOT "x${_command}" STREQUAL "xCOMMAND")
     message(FATAL_ERROR "Malformed call to cuda_execute_process.  Missing COMMAND as second argument. (command = ${command})")
   endif()
+  if(verbose)
     execute_process(COMMAND "${CMAKE_COMMAND}" -E echo -- ${status})
     # Now we need to build up our command string.  We are accounting for quotes
     # and spaces, anything else is left up to the user to fix if they want to
@@ -166,6 +167,7 @@ macro(cuda_execute_process status command)
     endforeach()
     # Echo the command
     execute_process(COMMAND ${CMAKE_COMMAND} -E echo ${cuda_execute_process_string})
+  endif()
   # Run the command
   execute_process(COMMAND ${ARGN} RESULT_VARIABLE CUDA_result )
 endmacro()
