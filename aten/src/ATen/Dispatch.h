@@ -123,7 +123,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                        \
   }()
 
- #define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(TYPE, NAME, ...)                                                  \
+ #define AT_DISPATCH_FLOATING_TYPES_AND_COMPLEX(TYPE, NAME, ...)                                                  \
   [&] {                                                                                                          \
     const auto& the_type = TYPE;                                                                                 \
     /* don't use TYPE again in case it is an expensive or side-effect op */                                      \
@@ -131,14 +131,29 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     switch (_st) {                                                                                               \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)                                          \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)                                            \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::Half, at::Half, __VA_ARGS__)                                          \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexDouble, std::complex<double>, __VA_ARGS__)                     \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexFloat, std::complex<float>, __VA_ARGS__)                       \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexHalf, std::complex<at::Half>, __VA_ARGS__)                     \
       default:                                                                                                   \
         AT_ERROR(#NAME, " not implemented for '", toString(_st), "'");                                           \
     }                                                                                                            \
   }()
+
+#define AT_DISPATCH_FLOATING_TYPES_AND_COMPLEX_AND_HALF(TYPE, NAME, ...)                                                  \
+ [&] {                                                                                                          \
+   const auto& the_type = TYPE;                                                                                 \
+   /* don't use TYPE again in case it is an expensive or side-effect op */                                      \
+   at::ScalarType _st = ::detail::scalar_type(the_type);                                                        \
+   switch (_st) {                                                                                               \
+     AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)                                          \
+     AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)                                            \
+     AT_PRIVATE_CASE_TYPE(at::ScalarType::Half, at::Half, __VA_ARGS__)                                          \
+     AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexDouble, std::complex<double>, __VA_ARGS__)                     \
+     AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexFloat, std::complex<float>, __VA_ARGS__)                       \
+     AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexHalf, std::complex<at::Half>, __VA_ARGS__)                     \
+     default:                                                                                                   \
+       AT_ERROR(#NAME, " not implemented for '", toString(_st), "'");                                           \
+   }                                                                                                            \
+ }()
 
 #define AT_DISPATCH_FLOATING_TYPES_AND(SCALARTYPE, TYPE, NAME, ...)                                       \
   [&] {                                                                                                   \
