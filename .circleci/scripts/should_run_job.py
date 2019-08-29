@@ -93,6 +93,9 @@ for m in markers:
         print("Unrecognized marker: {}".format(m.group(0)))
         continue
     spec = m.group(1) or m.group(2)
+    if spec is None:
+        print("Unrecognized marker: {}".format(m.group(0)))
+        continue
     if spec in args.build_environment or spec == 'all':
         print("Accepting {} due to commit marker {}".format(args.build_environment, m.group(0)))
         sys.exit(0)
