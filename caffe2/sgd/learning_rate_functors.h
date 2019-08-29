@@ -250,6 +250,24 @@ class CompositeLearningRate : public LearningRateFunctor<T> {
   std::map<int64_t, std::unique_ptr<LearningRateFunctor<T>>> sub_policies_;
 };
 
+// Cyclical: return a learning rate with period 2 * stepsize and
+// lower bound base_lr, upper bound max_lr.
+// See https://arxiv.org/pdf/1506.01186.pdf
+template <typename T>
+class CyclicalLearningRate : public LearningRateFunctor<T> {
+ public:
+  CyclicalLearningRate(const T base_lr, const T max_lr, const int stepsize)
+      : base_lr_(base_lr), max_lr_(max_lr), stepsize_(stepsize) {}
+  T operator()(const int64_t iter) const override {
+    int cycle = static_cast<int>((iter / (2 * stepsize_)) + 1);
+    T x = abs(static_cast<T>(iter) / stepsize_ - 2 * cycle + 1);
+    return (1 + (T(max_lr_) / T(base_lr_) - 1) * std::max(T(0.0), (1 - x)));
+  }
+  T base_lr_;
+  T max_lr_;
+  int stepsize_;
+};
+
 } // namespace caffe2
 
 #endif // CAFFE2_SGD_LEARNING_RATE_FUNCTORS_H_
