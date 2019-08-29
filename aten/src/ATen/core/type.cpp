@@ -327,9 +327,12 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
     if(it == type_env.end()) {
       type_env[vt->name()] = actual;
       return actual;
-    } else if(auto unified = unifyTypes(it->second, actual)) {
-      type_env[vt->name()] = *unified;
-      return *unified;
+    }
+    // invariant match required, but strip refinements
+    auto unshaped_formal = unshapedType(it->second);
+    auto unshaped_actual = unshapedType(actual);
+    if(*unshaped_actual == *unshaped_formal) {
+      return actual;
     }
     std::stringstream ss;
     ss << "Type variable '" << vt->name() << "' previously matched to type " <<
@@ -467,12 +470,12 @@ const char * typeKindToString(TypeKind kind) {
   return "";
 }
 
-bool Type::isSubtypeOf(const TypePtr rhs) const {
+bool Type::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   if (*this == *rhs) {
     return true;
   }
   if(auto rhs_ = rhs->cast<OptionalType>()) {
-    return this->isSubtypeOf(rhs_->getElementType());
+    return this->isSubtypeOfExt(rhs_->getElementType(), why_not);
   }
   return false;
 }
@@ -543,9 +546,8 @@ TupleType::TupleType(
     std::vector<TypePtr> elements,
     c10::optional<c10::QualifiedName> name,
     std::shared_ptr<FunctionSchema> schema)
-    : NamedType(TypeKind::TupleType),
+    : NamedType(TypeKind::TupleType, std::move(name)),
       elements_(std::move(elements)),
-      name_(std::move(name)),
       schema_(std::move(schema)) {
   has_free_variables_ =
       std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
@@ -553,8 +555,8 @@ TupleType::TupleType(
       });
 }
 
-bool TupleType::isSubtypeOf(const TypePtr rhs_) const {
-  if (Type::isSubtypeOf(rhs_))
+bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+  if (Type::isSubtypeOfExt(rhs_, why_not))
     return true;
   auto rhs = rhs_->cast<TupleType>();
   if (!rhs)
@@ -563,7 +565,7 @@ bool TupleType::isSubtypeOf(const TypePtr rhs_) const {
   if (!schema() && rhs->schema())
     return false;
   // namedtuple may be a subtype of unnamed tuple
-  auto test_names_match = [](const std::shared_ptr<FunctionSchema>& lhs, const std::shared_ptr<FunctionSchema>& rhs) {
+  auto test_names_match = [&](const std::shared_ptr<FunctionSchema>& lhs, const std::shared_ptr<FunctionSchema>& rhs) {
     const auto& args_lhs = lhs->arguments();
     const auto& args_rhs = rhs->arguments();
     if (args_lhs.size() != args_rhs.size()) {
@@ -579,8 +581,8 @@ bool TupleType::isSubtypeOf(const TypePtr rhs_) const {
   };
   bool names_match = !rhs->schema() || test_names_match(schema(), rhs->schema());
   // co-variant rules for tuples
-  return names_match && compare(*rhs, [](const TypePtr a, const TypePtr b) {
-    return a->isSubtypeOf(b);
+  return names_match && compare(*rhs, [&](const TypePtr a, const TypePtr b) {
+    return a->isSubtypeOfExt(b, why_not);
   });
 }
 
@@ -594,8 +596,8 @@ bool TupleType::operator==(const Type& rhs) const {
 
 std::string TupleType::str() const {
   std::stringstream ss;
-  if (schema_ && name_) {
-    ss << name_->qualifiedName();
+  if (schema_ && name()) {
+    ss << name()->qualifiedName();
   } else {
     ss << "(";
     for(size_t i = 0; i < elements().size(); ++i) {
@@ -609,8 +611,8 @@ std::string TupleType::str() const {
 }
 std::string TupleType::python_str() const {
   std::stringstream ss;
-  if (schema_ && name_) {
-    ss << name_->qualifiedName();
+  if (schema_ && name()) {
+    ss << name()->qualifiedName();
   } else {
     ss << "Tuple[";
     for(size_t i = 0; i < elements().size(); ++i) {
@@ -623,7 +625,7 @@ std::string TupleType::python_str() const {
   return ss.str();
 }
 
-bool TensorType::isSubtypeOf(const TypePtr rhs) const {
+bool TensorType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   if (auto rhs_p = rhs->cast<TensorType>()) {
     // if we have the same pointer, avoid computing the merge
     if (this == rhs_p.get()) {
@@ -631,7 +633,59 @@ bool TensorType::isSubtypeOf(const TypePtr rhs) const {
     }
     return *merge(rhs_p) == *rhs_p;
   }
-  return Type::isSubtypeOf(rhs);
+  return Type::isSubtypeOfExt(rhs, why_not);
 }
+
+InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName) {
+  return InterfaceTypePtr(
+      new InterfaceType(std::move(qualifiedName)));
+}
+
+bool InterfaceType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+  // to improve performance this check can be cached
+  if (auto iface = rhs->cast<InterfaceType>()) {
+    for (const FunctionSchema& schema : *iface->methods_) {
+      auto self_schema = getMethod(schema.name());
+      if (!self_schema) {
+        if (why_not) {
+          *why_not << "Interface '" << python_str()
+                   << "' does not have method '" << schema.name() << "' but interface '"
+                   << rhs->python_str() << "' does.\n";
+        }
+        return false;
+      }
+      if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, why_not)) {
+        if (why_not) {
+          *why_not << "Method on interface '" << python_str()
+                   << "' (1) is not compatible with interface '"
+                   << rhs->python_str() << "' (2)\n"
+                   << "  (1) " << *self_schema << "\n"
+                   << "  (2) " << schema << "\n";
+          return false;
+        }
+        return false;
+      }
+    }
+    return true;
+  }
+  return Type::isSubtypeOfExt(rhs, why_not);
+}
+
+const FunctionSchema* InterfaceType::getMethod(const std::string& name) const {
+  for (const FunctionSchema& method : *methods_) {
+    if (method.name() == name) {
+      return &method;
+    }
+  }
+  return nullptr;
+}
+void InterfaceType::addMethod(FunctionSchema schema) {
+  methods_->emplace_back(std::move(schema));
+}
+InterfaceType::InterfaceType(QualifiedName name)
+    : NamedType(InterfaceType::Kind, std::move(name)),
+      methods_(std::make_shared<std::vector<FunctionSchema>>()) {}
+
+InterfaceType::~InterfaceType() = default;
 
 } // namespace c10
