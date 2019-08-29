@@ -75,6 +75,6 @@ class Linear(nnq.Linear):
         wt_scale, wt_zp = weight_observer.calculate_qparams()
         qweight = torch.quantize_linear(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
         qlinear = Linear(mod.in_features, mod.out_features)
-        qlinear.set_weight(qweight)
+        qlinear.set_weight_bias(qweight, mod.bias)
         qlinear.bias = mod.bias
         return qlinear
