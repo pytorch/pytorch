@@ -321,7 +321,7 @@ def embedding_bag(g,
 
 def size(g, self, dim):
     full_shape = g.op("Shape", self)
-    return select(g, full_shape, 0, dim)
+    return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
 
 
 @parse_args('v', 'i', 'i')
@@ -393,9 +393,10 @@ def split_with_sizes(g, self, split_sizes, dim):
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=1)
 
 
-@parse_args('v', 'i', 'i')
+@parse_args('v', 'i', 'v')
 def select(g, self, dim, index):
-    if index < 0:
+    index = sym_help._maybe_get_scalar(index)
+    if (not sym_help._is_value(index)) and (index < 0):
         if index == -1:
             end_index = 9223372036854775807
         else:
@@ -403,7 +404,7 @@ def select(g, self, dim, index):
         slice_node = sym_help._slice_helper(g, self, axes=[dim], starts=[index], ends=[end_index])
         return g.op("Squeeze", slice_node, axes_i=[dim])
     else:
-        return g.op("Gather", self, g.op("Constant", value_t=torch.tensor(index)), axis_i=dim)
+        return g.op("Gather", self, index, axis_i=dim)
 
 
 def squeeze(g, self, dim=None):
