@@ -147,7 +147,7 @@ class QNNPACKMaxPool2D final : public torch::OperatorKernel {
 static auto registry = torch::RegisterOperators().op(
     "quantized::qnnpack_maxpool2d",
     torch::RegisterOperators::options().kernel<QNNPACKMaxPool2D>(
-        QuantizedCPUTensorId()));
+        TensorTypeId::QuantizedCPUTensorId));
 } // namespace
 } // namespace native
 } // namespace at

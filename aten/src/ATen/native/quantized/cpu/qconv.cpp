@@ -243,10 +243,10 @@ static auto registry =
     c10::RegisterOperators()
         .op("quantized::fbgemm_conv2d",
             c10::RegisterOperators::options().kernel<QConv2dInt8<false>>(
-                QuantizedCPUTensorId()))
+                TensorTypeId::QuantizedCPUTensorId))
         .op("quantized::fbgemm_conv2d_relu",
             c10::RegisterOperators::options().kernel<QConv2dInt8<true>>(
-                QuantizedCPUTensorId()));
+                TensorTypeId::QuantizedCPUTensorId));
 
 } // namespace
 } // namespace native

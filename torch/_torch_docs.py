@@ -2569,15 +2569,15 @@ logical_xor(input, other, out=None) -> Tensor
 Computes the element-wise logical XOR of the given input tensors. Both input tensors must have the bool dtype.
 
 Args:
-    input (Tensor): the input tensor
+    {input}
     other (Tensor): the tensor to compute XOR with
-    out (Tensor, optional): the output tensor
+    {out}
 
-Example:
+Example::
 
     >>> torch.logical_xor(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
     tensor([ False, False,  True])
-""")
+""".format(**common_args))
 
 add_docstr(torch.logspace,
            r"""
