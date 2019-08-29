@@ -118,36 +118,36 @@ static auto registry = c10::RegisterOperators()
 .op("quantized::mul(Tensor qa, Tensor qb, float scale, int zero_point)"
      "-> Tensor qc",
     c10::RegisterOperators::options()
-      .kernel<QMul</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
+      .kernel<QMul</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
 .op("quantized::mul_relu(Tensor qa, Tensor qb, float scale, int zero_point)"
      "-> Tensor qc",
     c10::RegisterOperators::options()
-      .kernel<QMul</*ReLUFused=*/true>>(QuantizedCPUTensorId()))
+      .kernel<QMul</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId))
 .op("quantized::mul_out(Tensor qa, Tensor qb, Tensor out)"
      "-> Tensor out",
     c10::RegisterOperators::options()
-      .kernel<QMulOut</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
+      .kernel<QMulOut</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
 .op("quantized::mul_relu_out(Tensor qa, Tensor qb, Tensor out)"
      "-> Tensor out",
     c10::RegisterOperators::options()
-      .kernel<QMulOut</*ReLUFused=*/true>>(QuantizedCPUTensorId()))
+      .kernel<QMulOut</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId))
 
 .op("quantized::mul_scalar(Tensor qa, Scalar b, float scale, int zero_point)"
      "-> Tensor qc",
     c10::RegisterOperators::options()
-      .kernel<QMulScalar</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
+      .kernel<QMulScalar</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
 .op("quantized::mul_scalar_relu(Tensor qa, Scalar b, float scale, int zero_point)"
      "-> Tensor qc",
     c10::RegisterOperators::options()
-      .kernel<QMulScalar</*ReLUFused=*/true>>(QuantizedCPUTensorId()))
+      .kernel<QMulScalar</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId))
 .op("quantized::mul_scalar_out(Tensor qa, Scalar b, Tensor out)"
      "-> Tensor out",
     c10::RegisterOperators::options()
-      .kernel<QMulScalarOut</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
+      .kernel<QMulScalarOut</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
 .op("quantized::mul_scalar_relu_out(Tensor qa, Scalar b, Tensor out)"
      "-> Tensor out",
     c10::RegisterOperators::options()
-      .kernel<QMulScalarOut</*ReLUFused=*/true>>(QuantizedCPUTensorId()))
+      .kernel<QMulScalarOut</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId))
 ;
 }  // namespace
 }}  // namespace at::native

@@ -266,7 +266,7 @@ void AliasDb::analyze(Node* node) {
 bool AliasDb::tryRegisteredAnalysis(Node* node) {
   const Operator& op = node->getOperator();
   auto analysis = op.aliasAnalysisKind();
-  if (AliasAnalysisKind::PURE == analysis) {
+  if (AliasAnalysisKind::PURE_FUNCTION == analysis) {
     analyzeCreator(node);
     return true;
   }
@@ -416,7 +416,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
   TORCH_INTERNAL_ASSERT(
       analysis == AliasAnalysisKind::FROM_SCHEMA,
-      "AliasAnalysisKind::CONSERVATIVE/PURE/INTERNAL_SPECIAL_CASE should already have been handled above");
+      "AliasAnalysisKind::CONSERVATIVE/PURE_FUNCTION/INTERNAL_SPECIAL_CASE should already have been handled above");
   const auto& schema = node->schema();
 
   // Bind the schema's "formal" alias annotation to the actual values those

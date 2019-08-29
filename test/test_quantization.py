@@ -651,8 +651,8 @@ class ObserverTest(QuantizationTestCase):
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
 
-    def test_observer_scriptable(self):
-        obs = torch.quantization.default_observer()()
+    @given(obs=st.sampled_from((torch.quantization.default_observer()(), HistogramObserver(bins=10))))
+    def test_observer_scriptable(self, obs):
         scripted = torch.jit.script(obs)
 
         x = torch.rand(3, 4)
@@ -667,8 +667,10 @@ class ObserverTest(QuantizationTestCase):
         loaded = torch.jit.load(buf)
         self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
-    def test_histogram_observer(self):
-        myobs = HistogramObserver(bins=10)
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
+    def test_histogram_observer(self, qdtype, qscheme):
+        myobs = HistogramObserver(bins=10, dtype=qdtype, qscheme=qscheme)
         x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
         myobs(x)
@@ -677,8 +679,14 @@ class ObserverTest(QuantizationTestCase):
         self.assertEqual(myobs.max_val, 8.5)
         self.assertEqual(myobs.histogram, [0., 0., 1., 2., 1., 2., 3., 2., 1., 1.])
         qparams = myobs.calculate_qparams()
-        self.assertAlmostEqual(qparams[0].item(), 0.0333333, delta=1e-5)
-        self.assertEqual(qparams[1].item(), 0.0)
+        if qscheme == torch.per_tensor_symmetric:
+            ref_scale = 0.066666
+            ref_zero_point = 0 if qdtype is torch.qint8 else 128
+        else:
+            ref_scale = 0.0333333
+            ref_zero_point = -128 if qdtype is torch.qint8 else 0
+        self.assertEqual(qparams[1].item(), ref_zero_point)
+        self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
 
 if __name__ == '__main__':
     run_tests()
