@@ -698,6 +698,16 @@ Tensor& var_out(Tensor& result, const Tensor& self, DimnameList dim, bool unbias
   return at::std_out(result, self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
+std::tuple<Tensor,Tensor> var_mean(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
+  TORCH_CHECK(false, "NYI: var_mean with names");
+  return at::var_mean(self, dimnames_to_positions(self, dim), unbiased, keepdim);
+}
+
+std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
+  TORCH_CHECK(false, "NYI: std_mean with names");
+  return at::std_mean(self, dimnames_to_positions(self, dim), unbiased, keepdim);
+}
+
 Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) {
   TORCH_CHECK(false, "NYI: norm with names");
   return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim, dtype);
