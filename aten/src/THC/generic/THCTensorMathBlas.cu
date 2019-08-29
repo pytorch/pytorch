@@ -44,6 +44,9 @@ accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 
   THCTensor_(free)(state, src);
   THCTensor_(free)(state, self);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::check_names_for_dot(self, src);
+#endif
   return result;
 
 #else
@@ -76,6 +79,9 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   if(r_ != t)
   {
+#ifdef BUILD_NAMEDTENSOR
+    at::NoNamesGuard guard;
+#endif
     THCTensor_(resizeAs)(state, r_, t);
     THCTensor_(copy)(state, r_, t);
   }
@@ -156,6 +162,9 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 #endif
 #else
   ERROR_ONLY_FP_TYPES("addmv");
+#endif
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
 #endif
 }
 
