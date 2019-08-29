@@ -11,28 +11,28 @@ namespace native {
 namespace {
 
 template<typename scalar_t>
-void multinomial_apply(Tensor& self, const Tensor& prob_dist, const int64_t n_sample, const bool with_replacement, Generator* generator) {
+void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sample, const bool with_replacement, Generator* generator) {
   auto gen = get_generator_or_default<CPUGenerator>(generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 
-  int64_t n_categories = prob_dist.size(-1);
-  int64_t n_dist = prob_dist.dim() > 1 ? prob_dist.size(-2) : 1;
+  int64_t n_categories = self.size(-1);
+  int64_t n_dist = self.dim() > 1 ? self.size(-2) : 1;
 
   /* cumulative probability distribution vector */
-  Tensor cum_dist = at::empty({n_categories}, prob_dist.options());
+  Tensor cum_dist = at::empty({n_categories}, self.options());
 
-  const scalar_t * const prod_dist_ptr = prob_dist.data_ptr<scalar_t>();
+  const scalar_t * const self_ptr = self.data_ptr<scalar_t>();
   scalar_t * const cum_dist_ptr = cum_dist.data_ptr<scalar_t>();
-  int64_t * const self_ptr = self.data_ptr<int64_t>();
+  int64_t * const result_ptr = result.data_ptr<int64_t>();
 
-  auto prod_dist_stride_0 = prob_dist.dim() > 1 ? prob_dist.stride(-2) : 0;
-  auto prod_dist_stride_1 = prob_dist.stride(-1);
+  auto self_stride_0 = self.dim() > 1 ? self.stride(-2) : 0;
+  auto self_stride_1 = self.stride(-1);
 
   auto cum_dist_stride_0 = cum_dist.stride(0);
 
-  auto self_dist_stride_0 = self.dim() > 1 ? self.stride(-2) : 0;
-  auto self_dist_stride_1 = self.stride(-1);
+  auto result_dist_stride_0 = result.dim() > 1 ? result.stride(-2) : 0;
+  auto result_dist_stride_1 = result.stride(-1);
 
   for (int64_t i = 0; i < n_dist; i++) {
     /* Get normalized cumulative distribution from prob distribution */
@@ -40,7 +40,7 @@ void multinomial_apply(Tensor& self, const Tensor& prob_dist, const int64_t n_sa
     scalar_t val;
     int n_zeros = 0;
     for (int64_t j = 0; j < n_categories; j++) {
-      val = prod_dist_ptr[i * prod_dist_stride_0 + j * prod_dist_stride_1];
+      val = self_ptr[i * self_stride_0 + j * self_stride_1];
       TORCH_CHECK(val >= 0, "invalid multinomial distribution (encountering probability entry < 0)");
       TORCH_CHECK(std::isfinite(val), "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
 
@@ -56,7 +56,7 @@ void multinomial_apply(Tensor& self, const Tensor& prob_dist, const int64_t n_sa
         "invalid multinomial distribution (with replacement=False, not enough non-negative category to sample)");
 
     /* normalize cumulative probability distribution so that last val is 1
-    i.e. doesn't assume original prob_dist row sums to one */
+    i.e. doesn't assume original self row sums to one */
     if ((sum > 0) || ((sum < 1.00001) && (sum > 0.99999))) {
       for (int64_t j = 0; j < n_categories; j++) {
         cum_dist_ptr[j * cum_dist_stride_0] /= sum;
@@ -90,7 +90,7 @@ void multinomial_apply(Tensor& self, const Tensor& prob_dist, const int64_t n_sa
       sample_idx = left_pointer;
 
       /* store in result tensor (will be incremented for lua compat by wrapper) */
-      self_ptr[i * self_dist_stride_0 + j * self_dist_stride_1] = sample_idx;
+      result_ptr[i * result_dist_stride_0 + j * result_dist_stride_1] = sample_idx;
 
       /* Once a sample is drawn, it cannot be drawn again. ie sample without replacement */
       if (!with_replacement && j < n_sample - 1) {
