@@ -95,29 +95,6 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
   return equal;
 }
 
-void THTensor_(sign)(THTensor *r_, THTensor *t)
-{
-  THTensor_(resizeAs)(r_, t);
-
-#if defined (TH_REAL_IS_BYTE)
-  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-    if (*t_data > 0) *r__data = 1;
-    else *r__data = 0;);
-#elif defined (TH_REAL_IS_BOOL)
-TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-  if (*t_data == true) *r__data = false;
-  else *r__data = true;);
-#else
-  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-    if (*t_data > 0) *r__data = 1;
-    else if (*t_data < 0) *r__data = -1;
-    else *r__data = 0;);
-#endif
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(r_, t);
-#endif
-}
-
 // Helper function to be used in a reduction operation.
 // Due to resize semantics of outputs, if the specified output tensor r_ has
 // same size as the output of the reduction operation, then any noncontiguities
@@ -1076,8 +1053,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
 #endif
 
 LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
@@ -1089,17 +1064,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,TH_MATH_NAME(sqrt),HYPER_TH_OMP_OVERHEAD_THRES
 LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
 LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-
-void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
-  switch (n) {
-    case 0: THTensor_(digamma)(r_, t); break;
-    case 1: THTensor_(trigamma)(r_, t); break;
-    default: THError("polygamma(n,x) is not implemented for n>=2");
-  }
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(r_, t);
-#endif
-}
 
 void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
 {

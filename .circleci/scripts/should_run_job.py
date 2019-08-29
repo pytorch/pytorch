@@ -43,7 +43,7 @@ default_set = set([
     # PyTorch OSX
     'pytorch-macos-10.13-cuda9.2-cudnn7-py3',
     # PyTorch Android
-    'pytorch-linux-xenial-py3-clang5-android-ndk-r19c',
+    'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build',
 
     # XLA
     'pytorch-xla-linux-xenial-py3.6-clang7',
@@ -93,6 +93,9 @@ for m in markers:
         print("Unrecognized marker: {}".format(m.group(0)))
         continue
     spec = m.group(1) or m.group(2)
+    if spec is None:
+        print("Unrecognized marker: {}".format(m.group(0)))
+        continue
     if spec in args.build_environment or spec == 'all':
         print("Accepting {} due to commit marker {}".format(args.build_environment, m.group(0)))
         sys.exit(0)
