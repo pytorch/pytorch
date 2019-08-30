@@ -164,9 +164,6 @@ class Linear(torch.nn.Module):
         self.set_weight_bias(state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
         state_dict.pop(prefix + 'weight')
 
-        self.bias = state_dict[prefix + 'bias']
-        state_dict.pop(prefix + 'bias')
-
         self.scale = float(state_dict[prefix + 'scale'])
         state_dict.pop(prefix + 'scale')
 
@@ -181,7 +178,6 @@ class Linear(torch.nn.Module):
         # type: (Tuple[int, int, Optional[torch.Tensor], torch.Tensor, float, int]) -> None
         self.in_features = state[0]
         self.out_features = state[1]
-        self.bias = state[2]
         self.set_weight_bias(state[3], state[2])
         self.scale = state[4]
         self.zero_point = state[5]
@@ -194,6 +190,7 @@ class Linear(torch.nn.Module):
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         self._packed_weight = torch.ops.quantized.linear_prepack(w, b)
+        self.bias = b
         self.weight_scale = w.q_scale()
 
     @classmethod

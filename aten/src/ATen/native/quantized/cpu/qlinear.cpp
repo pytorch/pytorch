@@ -103,6 +103,11 @@ class QLinearInt8 final : public torch::OperatorKernel {
         qbias = at::quantize_linear(
             bias, weight_scale_float * input_scale_float, 0, kQInt32);
       }
+      // FIXME Adding this causes ASAN issues in unit tests.
+      //else {
+      //  qbias = at::quantize_linear(
+      //      at::dequantize(bias), weight_scale_float * input_scale_float, 0, kQInt32);
+      //}
       TORCH_CHECK(qbias.dim() == 1, "bias should be a vector (1D Tensor)");
       TORCH_CHECK(
           qbias.size(0) == N,

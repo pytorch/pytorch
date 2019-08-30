@@ -670,7 +670,7 @@ class TestDynamicQuantizedLinear(TestCase):
         X_q = torch.quantize_linear(X_fp32, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
 
         # Weight prepacking operator for dynamic quantized Linear
-        W_prepack = qlinear_prepack(W_q, None)
+        W_prepack = qlinear_prepack(W_q)
         # Dynamic quantized Linear operator with prepacked weight
         Y_fp32 = qlinear_dynamic(X_q.dequantize(), W_prepack, b_fp32)
         # Y_fp32 = qlinear_dynamic(X_fp32, W_prepack, b_fp32)
@@ -807,7 +807,7 @@ class TestQuantizedLinear(unittest.TestCase):
                                     dtype=torch_type)
 
         # Weight prepacking operator for quantized Linear
-        W_prepack = qlinear_prepack(W_q, None)
+        W_prepack = qlinear_prepack(W_q)
         # Weight unpack operator for quantized Linear (Used for serialization)
         W_q_origin = qlinear_unpack(W_prepack)
 
