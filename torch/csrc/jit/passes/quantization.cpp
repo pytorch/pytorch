@@ -491,7 +491,8 @@ void InsertQuantDeQuantImpl(
   }
 
   std::vector<Value*> values_to_quantize;
-  std::unordered_map<script::ModulePtr, script::Module> child_modules_to_quantize;
+  std::unordered_map<script::ModulePtr, script::Module>
+      child_modules_to_quantize;
   QuantizeHelper qh(module);
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
@@ -503,7 +504,8 @@ void InsertQuantDeQuantImpl(
         if (v->type()->isSubtypeOf(TensorType::get())) {
           auto child_module = qh.findChildModuleToQuantize(v);
           if (child_module) {
-            child_modules_to_quantize[child_module.value().module_object()] = child_module.value();
+            child_modules_to_quantize[child_module.value().module_object()] =
+                child_module.value();
           }
           values_to_quantize.push_back(v);
         }
@@ -529,7 +531,7 @@ void InsertQuantDeQuantImpl(
     qh.quantizeTensor(v, false);
   }
 
-  for (auto item: child_modules_to_quantize) {
+  for (auto& item : child_modules_to_quantize) {
     InsertQuantDeQuantImpl(item.second, "forward");
   }
 
