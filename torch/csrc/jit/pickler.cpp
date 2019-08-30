@@ -629,7 +629,6 @@ static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
         }
         auto elem_type = w.static_type->cast<ListType>()->getElementType();
         auto lst = w.value.toGenericList();
-        // TODO: set elem type tag:
         lst.unsafeSetElementType(elem_type);
         for (const IValue& item : lst) {
           Work elem = {elem_type, item};
@@ -639,7 +638,6 @@ static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
       case DictType::Kind: {
         auto dt = w.static_type->cast<DictType>();
         auto d = w.value.toGenericDict();
-        // TODO: set type tags
         d.unsafeSetKeyType(dt->getKeyType());
         d.unsafeSetValueType(dt->getValueType());
         for (const auto& item : d) {
@@ -672,6 +670,7 @@ IValue Unpickler::parse_ivalue() {
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
   restoreAccurateTypeTagsIfPossible(stack_[0]);
+
   return stack_[0];
 }
 

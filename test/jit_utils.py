@@ -158,6 +158,9 @@ class JitTestCase(TestCase):
             for a, b in zip(code_files, code_files_2):
                 self.assertMultiLineEqual(a, b)
 
+            if isinstance(m, torch._C.ScriptModule):
+                self.assertTrue(torch._C._ivalue_tags_match(m, imported._c))
+
 
     def emitFunctionHook(self, func):
         # func has invalid names for export, skip the jitter check
