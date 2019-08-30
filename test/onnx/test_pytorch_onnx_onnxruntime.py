@@ -759,6 +759,28 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    # TODO: enable opset 11 test once ORT support for unique is in
+    @skipIfUnsupportedOpsetVersion([11])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_unique(self):
+        class UniqueModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.unique(x, sorted=True, return_inverse=False, return_counts=True)
+
+        x = torch.tensor([1, 3, 2, 3], dtype=torch.long)
+        self.run_test(UniqueModel(), x)
+
+    # TODO: enable opset 11 test once ORT support for unique is in
+    @skipIfUnsupportedOpsetVersion([11])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_unique_along_dim(self):
+        class UniqueModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.unique(x, dim=0, sorted=True, return_inverse=True, return_counts=False)
+
+        x = torch.tensor([1, 3, 2, 3], dtype=torch.long)
+        self.run_test(UniqueModel(), x)
+
     # TODO: enable opset 11 test once ORT support for cumsum is in
     @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
