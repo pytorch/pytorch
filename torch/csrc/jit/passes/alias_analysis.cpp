@@ -200,11 +200,6 @@ void AliasDb::dump() const {
 
 std::string AliasDb::toString() const {
   std::stringstream ss{};
-  std::unordered_map<size_t, Element*> indexToElementMap;
-
-  for (const auto &ent : wildcardIndex_) {
-    indexToElementMap[ent.second->index] = ent.second;
-  }
 
   ss << "\n===1. GRAPH===\n";
   ss << graph_->toString();
@@ -212,7 +207,6 @@ std::string AliasDb::toString() const {
   ss << "\n===2. ALIAS DB===\n";
   for (const auto& ptrPair : elementMap_) {
     const auto element = ptrPair.second;
-    indexToElementMap[element->index] = element;
     if (!element->pointsTo.empty()) {
       ss << getElementName(element) << " points to: ";
       for (const auto pointedTo : element->pointsTo) {
@@ -236,7 +230,7 @@ std::string AliasDb::toString() const {
     ss << *node;
     ss << "  ";
     for (const auto value : values) {
-      ss << getElementName(indexToElementMap[value]) << ", ";
+      ss << getElementName(memoryDAG_->fromIndex(value)) << ", ";
     }
     ss << "\n";
   }
@@ -1310,9 +1304,28 @@ void AliasDb::setWildcard(const Value* v) {
   if (!shouldAnnotate(v)) {
     return;
   }
-  auto e = getOrCreateWildcard(v->type());
-  TORCH_INTERNAL_ASSERT(e != nullptr);
-  memoryDAG_->makePointerTo(getOrCreateElement(v), e);
+  auto wildcardElement = getOrCreateWildcard(v->type());
+  TORCH_INTERNAL_ASSERT(wildcardElement != nullptr);
+
+  // Making a value a wildcard means that all its potential memory locations
+  // may alias the wildcard set.
+  const MemoryLocations pointeeSet = getOrCreateElement(v)->getMemoryLocations();
+  for (const auto& pointee : pointeeSet) {
+    auto from = memoryDAG_->fromIndex(pointee);
+    // avoid cycles where the wildcard points to itself
+    if (from != wildcardElement) {
+      memoryDAG_->makePointerTo(from, wildcardElement);
+    }
+  }
+
+  // We also need to update the write index with new writes to the wildcard set.
+  for (auto& pr : writeIndex_) {
+    auto& writtenTo = pr.second;
+    if (writtenTo.intersects(pointeeSet)) {
+      writtenTo.set(wildcardElement->index);
+    }
+  }
+  isWriteCacheStale_ = true;
 }
 
 void AliasDb::rebuildWriteCache() const {
