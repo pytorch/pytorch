@@ -267,9 +267,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
     )
 
-  set(GENERATED_THNN_CXX_CUDA ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp)
-  set(GENERATED_THNN_CXX ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp)
-
   set(GENERATED_CXX_PYTHON
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
@@ -285,14 +282,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
     )
 
-  set(GENERATED_THNN_SOURCES
-    ${GENERATED_THNN_CXX}
-    ${GENERATED_THNN_CXX_CUDA}
-    )
-
   set(TORCH_GENERATED_CODE
     ${GENERATED_CXX_TORCH}
-    ${GENERATED_THNN_SOURCES}
     ${GENERATED_H_TORCH}
     ${GENERATED_CXX_PYTHON}
     ${GENERATED_H_PYTHON}
