@@ -9,7 +9,7 @@
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
 #ifdef BUILD_NAMEDTENSOR
-#include <ATen/NamedTensor.h>
+#include <ATen/core/NamedTensor.h>
 #endif
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
@@ -26,33 +26,26 @@ struct Quantizer;
 // to frontend
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
-inline Tensor Tensor::toType(const DeprecatedTypeProperties & t, bool non_blocking) const {
-  if(type() == t)
-    return *this;
-  return to(
-      at::device(t.device_type()).layout(t.layout()).dtype(t.scalarType()),
-      non_blocking,
-      /*copy=*/ true);
-}
-
 inline Tensor Tensor::cpu() const {
-  return toType(type().cpu());
+  return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
 }
 
+// TODO: The Python version also accepts arguments
 inline Tensor Tensor::cuda() const {
-  return toType(type().cuda());
+  return to(options().device(DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline Tensor Tensor::hip() const {
-  return toType(type().hip());
+  return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
-  return toType(type().toScalarType(t));
+  return to(options().dtype(t), /*non_blocking*/ false, /*copy*/ false);
 }
 
+// TODO: Deprecate me
 inline Tensor Tensor::toBackend(Backend b) const {
-  return toType(type().toBackend(b));
+  return to(options().device(backendToDeviceType(b)).layout(layout_from_backend(b)), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline TensorOptions Tensor::options() const {
@@ -514,13 +507,7 @@ inline Tensor Tensor::ceil() const {
 }
 inline Tensor & Tensor::ceil_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::ceil_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("ceil_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::ceil_(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::ceil_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
@@ -3990,6 +3977,9 @@ inline Tensor Tensor::ne(Scalar other) const {
         case Backend::CPU:
             return CPUType::ne(const_cast<Tensor&>(*this), other);
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::ne(const_cast<Tensor&>(*this), other);
+            break;
         default:
             AT_ERROR("ne not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
     }
@@ -4003,6 +3993,9 @@ inline Tensor Tensor::ne(const Tensor & other) const {
     switch(tensorTypeIdToBackend(type_id())) {
         case Backend::CPU:
             return CPUType::ne(const_cast<Tensor&>(*this), other);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::ne(const_cast<Tensor&>(*this), other);
             break;
         default:
             AT_ERROR("ne not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
@@ -4018,6 +4011,9 @@ inline Tensor Tensor::eq(Scalar other) const {
         case Backend::CPU:
             return CPUType::eq(const_cast<Tensor&>(*this), other);
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::eq(const_cast<Tensor&>(*this), other);
+            break;
         default:
             AT_ERROR("eq not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
     }
@@ -4031,6 +4027,9 @@ inline Tensor Tensor::eq(const Tensor & other) const {
     switch(tensorTypeIdToBackend(type_id())) {
         case Backend::CPU:
             return CPUType::eq(const_cast<Tensor&>(*this), other);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::eq(const_cast<Tensor&>(*this), other);
             break;
         default:
             AT_ERROR("eq not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
@@ -4046,6 +4045,9 @@ inline Tensor Tensor::ge(Scalar other) const {
         case Backend::CPU:
             return CPUType::ge(const_cast<Tensor&>(*this), other);
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::ge(const_cast<Tensor&>(*this), other);
+            break;
         default:
             AT_ERROR("ge not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
     }
@@ -4059,6 +4061,9 @@ inline Tensor Tensor::ge(const Tensor & other) const {
     switch(tensorTypeIdToBackend(type_id())) {
         case Backend::CPU:
             return CPUType::ge(const_cast<Tensor&>(*this), other);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::ge(const_cast<Tensor&>(*this), other);
             break;
         default:
             AT_ERROR("ge not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
@@ -4074,6 +4079,9 @@ inline Tensor Tensor::le(Scalar other) const {
         case Backend::CPU:
             return CPUType::le(const_cast<Tensor&>(*this), other);
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::le(const_cast<Tensor&>(*this), other);
+            break;
         default:
             AT_ERROR("le not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
     }
@@ -4087,6 +4095,9 @@ inline Tensor Tensor::le(const Tensor & other) const {
     switch(tensorTypeIdToBackend(type_id())) {
         case Backend::CPU:
             return CPUType::le(const_cast<Tensor&>(*this), other);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::le(const_cast<Tensor&>(*this), other);
             break;
         default:
             AT_ERROR("le not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
@@ -4102,6 +4113,9 @@ inline Tensor Tensor::gt(Scalar other) const {
         case Backend::CPU:
             return CPUType::gt(const_cast<Tensor&>(*this), other);
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::gt(const_cast<Tensor&>(*this), other);
+            break;
         default:
             AT_ERROR("gt not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
     }
@@ -4115,6 +4129,9 @@ inline Tensor Tensor::gt(const Tensor & other) const {
     switch(tensorTypeIdToBackend(type_id())) {
         case Backend::CPU:
             return CPUType::gt(const_cast<Tensor&>(*this), other);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::gt(const_cast<Tensor&>(*this), other);
             break;
         default:
             AT_ERROR("gt not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
@@ -4130,6 +4147,9 @@ inline Tensor Tensor::lt(Scalar other) const {
         case Backend::CPU:
             return CPUType::lt(const_cast<Tensor&>(*this), other);
             break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::lt(const_cast<Tensor&>(*this), other);
+            break;
         default:
             AT_ERROR("lt not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
     }
@@ -4143,6 +4163,9 @@ inline Tensor Tensor::lt(const Tensor & other) const {
     switch(tensorTypeIdToBackend(type_id())) {
         case Backend::CPU:
             return CPUType::lt(const_cast<Tensor&>(*this), other);
+            break;
+        case Backend::QuantizedCPU:
+            return QuantizedCPUType::lt(const_cast<Tensor&>(*this), other);
             break;
         default:
             AT_ERROR("lt not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
@@ -4460,13 +4483,7 @@ inline Tensor Tensor::polygamma(int64_t n) const {
 }
 inline Tensor Tensor::erfinv() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::erfinv(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("erfinv not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::erfinv(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::erfinv(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
