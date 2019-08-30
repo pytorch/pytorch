@@ -313,10 +313,6 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
   # Required by ATen among others.
   add_definitions("/DNOMINMAX")
 
-  # Exception handing for compiler warining C4530, see
-  # https://msdn.microsoft.com/en-us/library/2axwkyt4.aspx
-  add_definitions("/EHsc")
-
   set(CMAKE_SHARED_LINKER_FLAGS
       "${CMAKE_SHARED_LINKER_FLAGS} /ignore:4049 /ignore:4217")
   set(CMAKE_EXE_LINKER_FLAGS
