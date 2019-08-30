@@ -135,19 +135,16 @@ struct Future;
 
 struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
  private:
-  std::vector<IValue> elements_;
-  mutable std::shared_ptr<TupleType> type_; // lazily computed for unnamed tuples
+   std::vector<IValue> elements_;
 
  public:
-  // named tuples have additional type information, so we
-  // direclty create them tagged
-  static c10::intrusive_ptr<Tuple> createNamed(
-      std::vector<IValue> elements_,
-      std::shared_ptr<TupleType> type_) {
+  static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_, std::shared_ptr<TupleType> type_) {
+    TORCH_INTERNAL_ASSERT(nullptr != type_.get(), "Type cannot be nullptr");
     return c10::make_intrusive<Tuple>(std::move(elements_), type_);
   }
+  C10_DEPRECATED_MESSAGE("Creating tuples without type information is deprecated. Please use Tuple::create(elements, type) instead.")
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
-    return c10::make_intrusive<Tuple>(std::move(elements_));
+    return c10::make_intrusive<Tuple>(std::move(elements_), nullptr);
   }
 
  const std::vector<IValue>& elements() const & {
@@ -167,11 +164,11 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
   std::vector<IValue>&& elements() && {
     return std::move(elements_);
   }
-  std::shared_ptr<TupleType> type() const;
 
+  std::shared_ptr<TupleType> type;
  private:
-  Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
-    : elements_(std::move(elements)), type_(std::move(type)) {}
+  Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type)
+    : elements_(std::move(elements)), type(std::move(type)) {}
 
   friend class c10::intrusive_ptr<Tuple>;
 };
