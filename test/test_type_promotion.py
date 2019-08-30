@@ -185,11 +185,10 @@ class TestTypePromotion(TestCase):
         err = 'alpha must not be'
         self.assertRaisesRegex(RuntimeError, err,
                                lambda: torch.add(x, x, alpha=1.1))
-        self.assertRaisesRegex(RuntimeError, 'Boolean value',
-                               lambda: torch.add(x, x, alpha=True))
         x = x.to(torch.bool)
         self.assertRaisesRegex(RuntimeError, err,
                                lambda: torch.add(x, x, alpha=1.1))
+        self.assertEqual(x + x, torch.add(x, x, alpha=True))
 
     def test_booleans(self):
         onedim = torch.tensor([True])
