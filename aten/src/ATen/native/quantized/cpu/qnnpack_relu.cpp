@@ -91,7 +91,7 @@ class QNNPACKRelu final : public torch::OperatorKernel {
 static auto registry = torch::RegisterOperators().op(
     "quantized::qnnpack_relu(Tensor input) -> Tensor",
     torch::RegisterOperators::options().kernel<QNNPACKRelu>(
-        QuantizedCPUTensorId()));
+        TensorTypeId::QuantizedCPUTensorId));
 } // namespace
 } // namespace native
 } // namespace at

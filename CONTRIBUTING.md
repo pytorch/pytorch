@@ -524,6 +524,11 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
   This causes preprocessor tokens inside the literal like an`#endif`  to be incorrectly
   treated as preprocessor directives. See https://godbolt.org/z/eVTIJq as an example.
 
+* Either MSVC or the Windows headers have a PURE macro defined and will replace
+  any occurrences of the PURE token in code with an empty string. This is why
+  we have AliasAnalysisKind::PURE_FUNCTION and not AliasAnalysisKind::PURE.
+  The same is likely true for other identifiers that we just didn't try to use yet.
+
 ### Running Clang-Tidy
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++

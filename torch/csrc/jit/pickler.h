@@ -15,7 +15,7 @@ using ClassResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
 // See Python's pickletools.py for a detailed description of each of these codes
-enum class OpCode : char {
+enum class PickleOpCode : char {
   MARK = '(',
   STOP = '.',
   POP = '0',
@@ -133,7 +133,7 @@ class Pickler {
   // Push protocol onto the stack
   void protocol();
 
-  // Push STOP OpCode onto the stack
+  // Push STOP PickleOpCode onto the stack
   void stop();
 
   void pushIValue(const IValue& ivalue);
@@ -229,8 +229,8 @@ class Pickler {
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
 };
 
-// [unpickler refactor] there is some cruft around OpCode::BUILD,
-// OpCode::NEWOBJ, and the last_opcode_ member below that should be deleted at
+// [unpickler refactor] there is some cruft around PickleOpCode::BUILD,
+// PickleOpCode::NEWOBJ, and the last_opcode_ member below that should be deleted at
 // some point, the Pickler doesn't produce it and it's only around to support
 // models saved before 1.1
 class Unpickler {
@@ -276,8 +276,8 @@ class Unpickler {
   std::string readBytes(size_t num_bytes);
 
   double readFloat();
-  OpCode readInstruction();
-  OpCode readOpCode();
+  PickleOpCode readInstruction();
+  PickleOpCode readOpCode();
   std::string readString();
   void readList();
   void setInput(size_t memo_id);
