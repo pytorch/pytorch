@@ -3578,6 +3578,25 @@ def foo(x):
         a = (torch.rand(3), torch.rand(3))
         self.checkScript(stuff, (a,))
 
+    def test_tuple_keyword(self):
+        def bar():
+            f = tuple((1, 2))  # noqa: C409
+            return f
+
+        self.checkScript(bar, ())
+
+        def foo():
+            return tuple(1, 2)
+
+        self.checkScriptRaisesRegex(foo, (), Exception,
+                                    "1 argument")
+
+        def cant_infer_size():
+            return tuple([1, 2, 3])  # noqa: C409
+
+        with self.assertRaisesRegex(Exception, "cannot statically infer the expected"):
+            torch.jit.script(cant_infer_size)
+
     def test_tuple_create_return(self):
         def stuff2(x):
             # type: (int) -> Tuple[Tensor, Tensor]
