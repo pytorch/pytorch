@@ -223,10 +223,12 @@ if (USE_DISTRIBUTED)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if (NOT MSVC AND NOT APPLE)
       list(APPEND TORCH_PYTHON_SRCS
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/comm.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp
-
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp

@@ -28,7 +28,8 @@ c10::optional<StrongFunctionPtr> as_function(const py::object& obj) {
 
 FunctionSchema PythonValue::getSchema(
     const size_t n_args,
-    const size_t n_binders) {
+    const size_t n_binders,
+    const SourceRange& loc) {
   auto annotations = py::module::import("torch.jit.annotations");
   auto signature = annotations.attr("get_signature")(self);
   std::vector<Argument> args, rets;
@@ -52,7 +53,7 @@ FunctionSchema PythonValue::getSchema(
 
     // First see if we can introspect the number of function parameters
     // irrespective of the presence of explicit type annotations
-    auto num_params = annotations.attr("get_num_params")(self);
+    auto num_params = annotations.attr("get_num_params")(self, loc);
     if (!num_params.is_none()) {
       // Return a signature with the correct number of params according to the
       // Python function. The error handling in call() will catch any mismatch
@@ -92,7 +93,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
   auto inputs = toValues(*m.graph(), inputs_);
-  auto schema = getSchema(inputs.size(), n_binders);
+  auto schema = getSchema(inputs.size(), n_binders, loc);
 
   std::stringstream failure_messages;
   c10::optional<MatchedSchema> matched_schema = tryMatchSchema(
