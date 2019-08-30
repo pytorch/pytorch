@@ -107,10 +107,33 @@ class Conf:
 
         return d
 
+    def gen_workflow_params(self, phase):
+        parameters = OrderedDict()
+        build_job_name_pieces = self.get_build_job_name_pieces(phase)
+
+        build_env_name = "-".join(map(str, build_job_name_pieces))
+        parameters["build_environment"] = miniutils.quote(build_env_name)
+        parameters["docker_image"] = self.gen_docker_image_path()
+        if self.pyver:
+            parameters["python_version"] = miniutils.quote(self.pyver)
+        if phase == "test" and self.gpu_resource:
+            parameters["use_cuda_docker_runtime"] = miniutils.quote("1")
+        if phase == "test":
+            resource_class = "large"
+            if self.gpu_resource:
+                resource_class = "gpu." + self.gpu_resource
+
+                if self.gpu_resource == "large":
+                    parameters["multi_gpu"] = miniutils.quote("1")
+            parameters["resource_class"] = resource_class
+        return parameters
+
     def gen_workflow_yaml_item(self, phase):
 
         # All jobs require the setup job
-        parameters = OrderedDict({"requires": ["setup"]})
+        parameters = OrderedDict()
+        parameters["name"] = self.gen_build_name(phase)
+        parameters["requires"] = ["setup"]
 
         if phase == "test":
 
@@ -121,13 +144,18 @@ class Conf:
 
             dependency_build = self.parent_build or self
             parameters["requires"].append(dependency_build.gen_build_name("build"))
+            job_name = "pytorch_linux_test"
+        else:
+            job_name = "pytorch_linux_build"
+
 
         if not self.is_important:
             # If you update this, update
             # caffe2_build_definitions.py too
             parameters["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+        parameters.update(self.gen_workflow_params(phase))
 
-        return {self.gen_build_name(phase): parameters}
+        return {job_name : parameters}
 
 
 # TODO This is a hack to special case some configs just for the workflow list
@@ -286,7 +314,6 @@ def add_build_env_defs(jobs_dict):
                     d = x.gen_yaml_tree(phase)
                     mydict[x.gen_build_name(phase)] = d
 
-    # this is the circleci api version and probably never changes
     jobs_dict["jobs"] = mydict
 
     graph = visualization.generate_graph(get_root())

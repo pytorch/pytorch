@@ -81,7 +81,7 @@ YAML_SOURCES = [
     File("macos-binary-build-defaults.yml"),
     File("nightly-build-smoke-tests-defaults.yml"),
     Header("Job specifications job specs"),
-    Treegen(pytorch_build_definitions.add_build_env_defs, 0),
+    File("pytorch-build-params.yml"),
     File("job-specs-setup.yml"),
     File("job-specs-custom.yml"),
     Treegen(caffe2_build_definitions.add_caffe2_builds, 1),
