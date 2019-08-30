@@ -35,13 +35,33 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def_readonly("name", &WorkerId::name_)
       .def_readonly("id", &WorkerId::id_);
 
-  auto rref = shared_ptr_class_<RRef>(module, "RRef")
+  struct PyRRef {
+    PyRRef() : rref(nullptr) {}
+
+    std::shared_ptr<RRef> rref;
+  };
+
+  auto pyRRef = shared_ptr_class_<PyRRef>(module, "RRef")
       .def("owner",
-           &RRef::owner,
+           [&](PyRRef& pyRRef) {
+             return pyRRef.rref->owner();
+           },
            py::call_guard<py::gil_scoped_release>())
       .def("to_here",
-           [&](RRef& rref) {
-             return torch::jit::toPyObject(rref.toHere());
+           [&](PyRRef& pyRRef) {
+             return torch::jit::toPyObject(pyRRef.rref->toHere());
+           },
+           py::call_guard<py::gil_scoped_release>())
+      .def("__getstate__",
+           [](const PyRRef& pyRRef) {
+             return py::make_tuple(torch::jit::toPyObject(pyRRef.rref->fork()));
+           },
+           py::call_guard<py::gil_scoped_release>())
+      .def("__setstate__",
+           [](PyRRef& pyRRef, py::tuple t) {
+             new (&pyRRef) PyRRef();
+             auto& ctx = RRefContext::getInstance();
+             pyRRef.rref = ctx->getOrCreateRRef<IValue>(t[0].cast<IValue>());
            },
            py::call_guard<py::gil_scoped_release>());
 
