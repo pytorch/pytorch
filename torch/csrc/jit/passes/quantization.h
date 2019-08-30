@@ -11,6 +11,11 @@
 namespace torch {
 namespace jit {
 
+using QConfig = std::tuple<script::Module, script::Module>;
+using QConfigDict = std::unordered_map<std::string, QConfig>;
+using ModuleQConfigMap =
+    std::unordered_map<script::ModulePtr, c10::optional<QConfig>>;
+
 /** \brief Propagates QParams through nodes that are not supposed to change it.
  *
  * An example of such node is `Split`: even though the observed distribution
@@ -54,16 +59,17 @@ TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
 TORCH_API void InsertObservers(
     script::Module& module,
     const std::string& method_name,
-    const script::Module& observer_module,
-    const script::Module& weight_observer_module);
+    const std::unordered_map<
+        std::string,
+        std::tuple<script::Module, script::Module>>& qconfig_dict);
 
 /** \brief Insert quantize - int_repr - dequantize calls to the Tensors
  *  that are observed in insert_observers pass
  *
  * For each Tensor that is observed, get the observer module and call
  * calculate_qparam on the observer module to get quantization parameters
- * and add quantize - int_repr - dequantize function calls using these parameters
- * we also have special handling for quantizing "bias" right now.
+ * and add quantize - int_repr - dequantize function calls using these
+ * parameters we also have special handling for quantizing "bias" right now.
  *
  * \param module the input module
  * \param method_name the method we want to insert quantization calls for
@@ -81,6 +87,14 @@ TORCH_API script::Module InsertQuantDeQuant(
  * \param graph the graph we want to apply fusion
  */
 TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
+
+/** \brief Fold Conv2d-BatchNorm2d into Conv2d in forward method of this module
+ * and all its submodules.
+ *
+ * The weight and bias of the Conv2d are correspondingly updated. Should only be
+ * used on modules in eval mode.
+ */
+TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
 
 } // namespace jit
 } // namespace torch

@@ -16,7 +16,7 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #ifdef BUILD_NAMEDTENSOR
-#include <ATen/NamedTensor.h>
+#include <ATen/core/NamedTensor.h>
 #endif
 
 namespace caffe2 {
@@ -237,7 +237,6 @@ class CAFFE2_API Tensor {
   bool is_alias_of(const at::Tensor& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
-  Tensor toType(const DeprecatedTypeProperties & t, bool non_blocking=false) const;
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
@@ -293,8 +292,8 @@ class CAFFE2_API Tensor {
   T * data_ptr() const;
 
   template<typename T>
+  C10_DEPRECATED_MESSAGE("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.")
   T * data() const {
-    TORCH_WARN("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.");
     return data_ptr<T>();
   }
 
@@ -727,7 +726,6 @@ class CAFFE2_API Tensor {
   Tensor & pow_(const Tensor & exponent) const;
   Tensor & lerp_(const Tensor & end, Scalar weight) const;
   Tensor & lerp_(const Tensor & end, const Tensor & weight) const;
-  Tensor & sign_() const;
   Tensor & fmod_(Scalar other) const;
   Tensor & fmod_(const Tensor & other) const;
   Tensor & remainder_(Scalar other) const;
@@ -790,12 +788,13 @@ class CAFFE2_API Tensor {
   Tensor polygamma(int64_t n) const;
   Tensor erfinv() const;
   Tensor & erfinv_() const;
+  Tensor sign() const;
+  Tensor & sign_() const;
   Tensor dist(const Tensor & other, Scalar p=2) const;
   Tensor atan2(const Tensor & other) const;
   Tensor lerp(const Tensor & end, Scalar weight) const;
   Tensor lerp(const Tensor & end, const Tensor & weight) const;
   Tensor histc(int64_t bins=100, Scalar min=0, Scalar max=0) const;
-  Tensor sign() const;
   Tensor fmod(Scalar other) const;
   Tensor fmod(const Tensor & other) const;
   Tensor remainder(Scalar other) const;
