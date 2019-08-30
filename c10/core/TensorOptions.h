@@ -352,6 +352,32 @@ struct C10_API TensorOptions {
     return at::tensorTypeIdToBackend(computeTensorTypeId());
   }
 
+  /// Return the right-biased merge of two TensorOptions.  This has the
+  /// effect of overwriting settings from self with specified options
+  /// of options.
+  ///
+  /// This merging operation respects device merges as specified by
+  /// Device::merge_in, which means it is suitable for implementing
+  /// APIs like new_empty.
+  ///
+  TensorOptions merge_in(TensorOptions options) const noexcept {
+    TensorOptions r = options;
+    if (!r.has_device()) {
+      r.set_device(device());
+    } else if (has_device()) {
+      // Both of these optionals are provably non-null and the compiler
+      // will optimize away the tests, but if I cocked up I want that exception
+      r.device_ = r.device_opt()->merge_in(*device_opt());
+    }
+    if (!r.has_dtype()) r.set_dtype(dtype());
+    if (!r.has_layout()) r.set_layout(layout());
+    // NB: requires grad is right biased; not a logical AND/OR!
+    if (!r.has_requires_grad()) r.set_requires_grad(requires_grad());
+    if (!r.has_is_variable()) r.set_is_variable(is_variable());
+    if (!r.has_pinned_memory()) r.set_pinned_memory(pinned_memory());
+    return r;
+  }
+
   inline TensorTypeId computeTensorTypeId() const {
     switch (layout()) {
       case Layout::Strided:

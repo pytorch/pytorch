@@ -591,7 +591,10 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 # produce a compile-time error that is obvious
                 has_tensor_return = True
 
-        is_like_function = name.endswith('_like')
+        # The distinguishing characteristic of "like" functions is that they take
+        # a tensor and use it to compute some parameters of the new tensor,
+        # but they are still fundamentally factory functions
+        is_like_function = name.endswith('_like') or name.startswith('new_')
         is_like_function_with_options = is_like_function and has_options_arg
         is_factory_function = has_tensor_return and not has_tensor_input_arg
         is_factory_or_like_function = has_tensor_return and (not has_tensor_input_arg or is_like_function)
