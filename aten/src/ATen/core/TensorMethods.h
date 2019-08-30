@@ -4195,6 +4195,9 @@ inline Tensor Tensor::index_select(int64_t dim, const Tensor & index) const {
         case Backend::CPU:
             return CPUType::index_select(const_cast<Tensor&>(*this), dim, index);
             break;
+        case Backend::SparseCPU:
+            return SparseCPUType::index_select(const_cast<Tensor&>(*this), dim, index);
+            break;
         default:
             AT_ERROR("index_select not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
     }
