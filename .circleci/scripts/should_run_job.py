@@ -43,7 +43,7 @@ default_set = set([
     # PyTorch OSX
     'pytorch-macos-10.13-cuda9.2-cudnn7-py3',
     # PyTorch Android
-    'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build',
+    'pytorch-linux-xenial-py3-clang5-android-ndk-r19c',
 
     # XLA
     'pytorch-xla-linux-xenial-py3.6-clang7',
