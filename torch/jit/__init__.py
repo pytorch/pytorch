@@ -565,6 +565,8 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
                     break  # Graphs have already diverged
 
                 if n_mod.kind() == 'prim::Constant' and not (n_mod.mustBeNone() or n_check.mustBeNone()):
+                    if not n_mod.hasAttribute('value'):
+                        continue
                     if n_mod.kindOf('value') != 't' or n_check.kindOf('value') != 't':
                         continue
 
