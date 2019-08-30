@@ -173,8 +173,6 @@ class TestQuantizedTensor(TestCase):
         self.assertTrue(np.array_equal(qr1.dequantize().numpy(), qr2.dequantize().numpy()))
         # compare permuted + dequantized result with original transposed result
         self.assertTrue(np.allclose(qr2.dequantize().numpy(), r.numpy().T, atol=2 / scale))
-        # make permuted result contiguous
-        self.assertTrue(torch.equal(qr2.contiguous().int_repr(), qr2.int_repr()))
 
     def test_qtensor_load_save(self):
         scale = 2.0
