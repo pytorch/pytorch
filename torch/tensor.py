@@ -1,7 +1,7 @@
 import sys
 import torch
 import torch._C as _C
-from torch.namedtensor import _update_names
+from torch.namedtensor import _update_names, _check_serializing_named_tensor
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -37,6 +37,7 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
+        _check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         if self.is_quantized:
@@ -474,11 +475,11 @@ class Tensor(torch._C._TensorBase):
 
         itemsize = self.storage().element_size()
 
-        shape = self.shape
+        shape = tuple(self.shape)
         strides = tuple(s * itemsize for s in self.stride())
         data = (self.data_ptr(), False)  # read-only is false
 
-        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=0)
+        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
 
     def names_(self, *names, **rename_map):
         # Note [names_ / view_names API]

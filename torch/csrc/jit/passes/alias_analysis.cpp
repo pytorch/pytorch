@@ -200,7 +200,6 @@ void AliasDb::dump() const {
 
 std::string AliasDb::toString() const {
   std::stringstream ss{};
-  std::unordered_map<size_t, Element*> indexToElementMap;
 
   ss << "\n===1. GRAPH===\n";
   ss << graph_->toString();
@@ -208,7 +207,6 @@ std::string AliasDb::toString() const {
   ss << "\n===2. ALIAS DB===\n";
   for (const auto& ptrPair : elementMap_) {
     const auto element = ptrPair.second;
-    indexToElementMap[element->index] = element;
     if (!element->pointsTo.empty()) {
       ss << getElementName(element) << " points to: ";
       for (const auto pointedTo : element->pointsTo) {
@@ -232,7 +230,7 @@ std::string AliasDb::toString() const {
     ss << *node;
     ss << "  ";
     for (const auto value : values) {
-      ss << indexToElementMap[value]->value->debugName() << ", ";
+      ss << getElementName(memoryDAG_->fromIndex(value)) << ", ";
     }
     ss << "\n";
   }
@@ -262,7 +260,7 @@ void AliasDb::analyze(Node* node) {
 bool AliasDb::tryRegisteredAnalysis(Node* node) {
   const Operator& op = node->getOperator();
   auto analysis = op.aliasAnalysisKind();
-  if (AliasAnalysisKind::PURE == analysis) {
+  if (AliasAnalysisKind::PURE_FUNCTION == analysis) {
     analyzeCreator(node);
     return true;
   }
@@ -384,20 +382,16 @@ void AliasDb::analyzeImpl(Node* node) {
     // but this is the intended behavior for all current ops and a good error check.
     // We can consider lifting this constraint later if we have a use case for it.
     TORCH_INTERNAL_ASSERT(
-        analysis == AliasAnalysisKind::FROM_SCHEMA,
-        "aten:: and prim:: operators should use AliasAnalysisKind::FROM_SCHEMA but ",
+        analysis == AliasAnalysisKind::FROM_SCHEMA ||
+            analysis == AliasAnalysisKind::CONSERVATIVE,
+        "aten:: and prim:: operators should use AliasAnalysisKind::FROM_SCHEMA or "
+        "AliasAnalysisKind::CONSERVATIVE(if really necessary), but ",
         node->kind().toDisplayString(),
         " doesn't. Note: Ideally, prim:: operators actually shouldn't have a schema ",
         "and then use AliasAnalysisKind::INTERNAL_SPECIAL_CASE instead.");
   }
 
   if (analysis == AliasAnalysisKind::CONSERVATIVE) {
-    TORCH_INTERNAL_ASSERT(
-        !node->kind().is_aten() && !node->kind().is_prim(),
-        "aten:: and prim:: operators should not use AliasAnalysisKind::CONSERVATIVE but ",
-        node->kind().toDisplayString(),
-        " does.");
-
     // TODO A previous implementation of alias analysis always accessed
     // node->schema , which cause the schema caches in the Node class to be
     // filled for the full graph. Unfortunately, our JIT passes started relying
@@ -416,7 +410,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
   TORCH_INTERNAL_ASSERT(
       analysis == AliasAnalysisKind::FROM_SCHEMA,
-      "AliasAnalysisKind::CONSERVATIVE/PURE/INTERNAL_SPECIAL_CASE should already have been handled above");
+      "AliasAnalysisKind::CONSERVATIVE/PURE_FUNCTION/INTERNAL_SPECIAL_CASE should already have been handled above");
   const auto& schema = node->schema();
 
   // Bind the schema's "formal" alias annotation to the actual values those
@@ -1310,9 +1304,28 @@ void AliasDb::setWildcard(const Value* v) {
   if (!shouldAnnotate(v)) {
     return;
   }
-  auto e = getOrCreateWildcard(v->type());
-  TORCH_INTERNAL_ASSERT(e != nullptr);
-  memoryDAG_->makePointerTo(getOrCreateElement(v), e);
+  auto wildcardElement = getOrCreateWildcard(v->type());
+  TORCH_INTERNAL_ASSERT(wildcardElement != nullptr);
+
+  // Making a value a wildcard means that all its potential memory locations
+  // may alias the wildcard set.
+  const MemoryLocations pointeeSet = getOrCreateElement(v)->getMemoryLocations();
+  for (const auto& pointee : pointeeSet) {
+    auto from = memoryDAG_->fromIndex(pointee);
+    // avoid cycles where the wildcard points to itself
+    if (from != wildcardElement) {
+      memoryDAG_->makePointerTo(from, wildcardElement);
+    }
+  }
+
+  // We also need to update the write index with new writes to the wildcard set.
+  for (auto& pr : writeIndex_) {
+    auto& writtenTo = pr.second;
+    if (writtenTo.intersects(pointeeSet)) {
+      writtenTo.set(wildcardElement->index);
+    }
+  }
+  isWriteCacheStale_ = true;
 }
 
 void AliasDb::rebuildWriteCache() const {

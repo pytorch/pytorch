@@ -95,29 +95,6 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
   return equal;
 }
 
-void THTensor_(sign)(THTensor *r_, THTensor *t)
-{
-  THTensor_(resizeAs)(r_, t);
-
-#if defined (TH_REAL_IS_BYTE)
-  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-    if (*t_data > 0) *r__data = 1;
-    else *r__data = 0;);
-#elif defined (TH_REAL_IS_BOOL)
-TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-  if (*t_data == true) *r__data = false;
-  else *r__data = true;);
-#else
-  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-    if (*t_data > 0) *r__data = 1;
-    else if (*t_data < 0) *r__data = -1;
-    else *r__data = 0;);
-#endif
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(r_, t);
-#endif
-}
-
 // Helper function to be used in a reduction operation.
 // Due to resize semantics of outputs, if the specified output tensor r_ has
 // same size as the output of the reduction operation, then any noncontiguities
@@ -312,18 +289,6 @@ void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src) {
   THTensor_(resizeAs)(r, t);
   TH_TENSOR_APPLY3(scalar_t, r, scalar_t, t, scalar_t, src,
                    *r_data = *t_data < *src_data ? *t_data : *src_data;);
-}
-
-void THTensor_(cmaxValue)(THTensor *r, THTensor *t, scalar_t value) {
-  THTensor_(resizeAs)(r, t);
-  TH_TENSOR_APPLY2(scalar_t, r, scalar_t, t,
-                   *r_data = *t_data < value ? value : *t_data;);  // this order propagates NaN
-}
-
-void THTensor_(cminValue)(THTensor *r, THTensor *t, scalar_t value) {
-  THTensor_(resizeAs)(r, t);
-  TH_TENSOR_APPLY2(scalar_t, r, scalar_t, t,
-                   *r_data = *t_data > value ? value : *t_data;);  // this order propagates NaN
 }
 
 void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
@@ -955,74 +920,6 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
   }
 }
 
-void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, int dim, int dir, int sorted)
-{
-  int numDims = THTensor_(nDimensionLegacyNoScalars)(t);
-  THArgCheck(dim >= 0 && dim < numDims, 3, "dim not in range");
-
-  int64_t sliceSize = THTensor_sizeLegacyNoScalars(t, dim);
-  THArgCheck(k >= 0 && k <= sliceSize, 2, "k not in range for dimension");
-
-  THTensor *tmpResults = THTensor_(new)();
-  THTensor_(resize1d)(tmpResults, sliceSize);
-  scalar_t *tmp__data = tmpResults->data<scalar_t>();
-
-  THLongTensor *tmpIndices = THLongTensor_new();
-  THLongTensor_resize1d(tmpIndices, sliceSize);
-  int64_t *tmpi__data = THLongTensor_data(tmpIndices);
-
-  std::vector<int64_t> topKSize = t->sizes().vec();
-  if (topKSize.size() > 0) { // handle 0-dim vs 1-dim differences.
-    topKSize[dim] = k;
-  }
-  THTensor_(resize)(rt_, topKSize, {});
-  THLongTensor_resize(ri_, topKSize, {});
-
-  if (dir) {
-    /* k largest elements, descending order (optional: see sorted) */
-    int64_t K = sliceSize - k;
-    TH_TENSOR_DIM_APPLY3(scalar_t, t, scalar_t, rt_, int64_t, ri_, dim,
-                         TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
-                         int64_t i;
-                         for(i = 0; i < sliceSize; i++)
-                         {
-                           tmp__data[i] = t_data[i*t_stride];
-                           tmpi__data[i] = i;
-                         }
-                         if (K > 0)
-                           THTensor_(quickselect)(tmp__data, tmpi__data, K - 1, sliceSize, 1);
-                         if (sorted)
-                           THTensor_(quicksortdescend)(tmp__data + K, tmpi__data + K, k, 1);
-                         for(i = 0; i < k; i++)
-                         {
-                           rt__data[i*rt__stride] = tmp__data[i + K];
-                           ri__data[i*ri__stride] = tmpi__data[i + K];
-                         })
-  }
-  else {
-    /* k smallest elements, ascending order (optional: see sorted) */
-    TH_TENSOR_DIM_APPLY3(scalar_t, t, scalar_t, rt_, int64_t, ri_, dim,
-                         TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
-                         int64_t i;
-                         for(i = 0; i < sliceSize; i++)
-                         {
-                           tmp__data[i] = t_data[i*t_stride];
-                           tmpi__data[i] = i;
-                         }
-                         THTensor_(quickselect)(tmp__data, tmpi__data, k - 1, sliceSize, 1);
-                         if (sorted)
-                           THTensor_(quicksortascend)(tmp__data, tmpi__data, k - 1, 1);
-                         for(i = 0; i < k; i++)
-                         {
-                           rt__data[i*rt__stride] = tmp__data[i];
-                           ri__data[i*ri__stride] = tmpi__data[i];
-                         })
-  }
-
-  c10::raw::intrusive_ptr::decref(tmpResults);
-  THLongTensor_free(tmpIndices);
-}
-
 void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
 {
   int64_t t_size_0, t_size_1;
@@ -1144,9 +1041,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
 #endif
 
 LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
@@ -1158,17 +1052,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,TH_MATH_NAME(sqrt),HYPER_TH_OMP_OVERHEAD_THRES
 LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
 LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-
-void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
-  switch (n) {
-    case 0: THTensor_(digamma)(r_, t); break;
-    case 1: THTensor_(trigamma)(r_, t); break;
-    default: THError("polygamma(n,x) is not implemented for n>=2");
-  }
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(r_, t);
-#endif
-}
 
 void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
 {

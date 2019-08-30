@@ -66,7 +66,7 @@ def get_signature(fn):
 # This is essentially a weaker form of get_signature(), where we don't care if
 # we have the types, we just care that we can figure out how many parameters
 # a function takes.
-def get_num_params(fn):
+def get_num_params(fn, loc):
     try:
         source = dedent(inspect.getsource(fn))
     except (TypeError, IOError):
@@ -75,9 +75,10 @@ def get_num_params(fn):
         return None
     py_ast = ast.parse(source)
     if len(py_ast.body) == 1 and isinstance(py_ast.body[0], ast.ClassDef):
-        raise RuntimeError("cannot instantiate class object ({}) inside jit.script".format(py_ast.body[0].name))
+        raise torch.jit.frontend.FrontendError(
+            loc, "Cannot instantiate class '{}' in a script function".format(py_ast.body[0].name))
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError("expected a single top-level function")
+        raise torch.jit.frontend.FrontendError(loc, "Expected a single top-level function")
     py_def = py_ast.body[0]
     if py_def.args.vararg is not None:
         return None

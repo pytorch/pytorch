@@ -99,22 +99,18 @@ DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
 
 def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     r"""
-        Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.save>`
+        Load a ``ScriptModule`` previously saved with :func:`torch.jit.save <torch.jit.save>`
 
         All previously saved modules, no matter their device, are first loaded onto CPU,
         and then are moved to the devices they were saved from. If this fails (e.g. because
         the run time system doesn't have certain devices), an exception is raised.
-        However, storages can be dynamically remapped to an alternative set of devices
-        using the `map_location` argument. Comparing to :func:`torch.load`, `map_location`
-        in this function is simplified, which only accepts a string (e.g., 'cpu', 'cuda:0'),
-        or torch.device (e.g., torch.device('cpu'))
 
         Arguments:
             f: a file-like object (has to implement read, readline, tell, and seek),
                 or a string containing a file name
-            map_location: can a string (e.g., 'cpu', 'cuda:0'), a device (e.g.,
-                torch.device('cpu'))
-            _extra_files: map from filename to content. The extra
+            map_location (string or torch.device): A simplified version of ``map_location`` in
+                ``torch.save`` used to dynamically remap storages to an alternative set of devices.
+            _extra_files (dictionary of filename to content): The extra
                 filenames given in the map would be loaded and their content
                 would be stored in the provided map.
 
@@ -123,6 +119,9 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             A ``ScriptModule`` object.
 
         Example: ::
+
+            import torch
+            import io
 
             torch.jit.load('scriptmodule.pt')
 
@@ -142,7 +141,7 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             # Load with extra files.
             files = {'metadata.json' : ''}
             torch.jit.load('scriptmodule.pt', _extra_files = files)
-            print (files['metadata.json'])
+            print(files['metadata.json'])
     """
     if isinstance(f, string_classes):
         if not os.path.exists(f):
@@ -172,7 +171,7 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         Save an offline version of this module for use in a separate process. The saved
         module serializes all of the methods, submodules, parameters, and attributes of this
         module. It can be loaded into the C++ API using ``torch::jit::load(filename)`` or into the Python
-        API with :func:`load <torch.jit.load>`.
+        API with :func:`torch.jit.load <torch.jit.load>`.
 
         To be able to save a module, it must not make any calls to native Python functions.
         This means that all submodules must be subclasses of ``torch.jit.ScriptModule`` as well.
@@ -188,7 +187,7 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             _extra_files: Map from filename to contents which will be stored as part of 'f'
 
         .. warning::
-            If you are using Python 2, ``torch.save`` does NOT support ``StringIO.StringIO``
+            If you are using Python 2, ``torch.jit.save`` does NOT support ``StringIO.StringIO``
             as a valid file-like object. This is because the write method should return
             the number of bytes written; ``StringIO.write()`` does not do this.
 
@@ -198,7 +197,6 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
 
             import torch
             import io
-
 
             class MyModule(torch.nn.Module):
                 def forward(self, x):
@@ -567,6 +565,8 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
                     break  # Graphs have already diverged
 
                 if n_mod.kind() == 'prim::Constant' and not (n_mod.mustBeNone() or n_check.mustBeNone()):
+                    if not n_mod.hasAttribute('value'):
+                        continue
                     if n_mod.kindOf('value') != 't' or n_check.kindOf('value') != 't':
                         continue
 
@@ -770,6 +770,7 @@ def trace(func,
     Example (tracing a function)::
 
         import torch
+
         def foo(x, y):
             return 2 * x + y
 
@@ -870,7 +871,7 @@ def trace_module(mod,
     the ``forward`` method is run and traced. With ``trace_module``, you can specify a dictionary of
     method names to example inputs to trace (see the ``example_inputs``) argument below.
 
-    See :func:`torch.jit.trace <torch.jit.trace>` for more information on tracing
+    See :func:`torch.jit.trace <torch.jit.trace>` for more information on tracing.
 
     Arguments:
         mod (torch.nn.Module):           a ``torch.nn.Module`` containing methods whose names are
@@ -1034,7 +1035,6 @@ def whichmodule(obj):
             pass
     return '__main__'
 
-
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
     _jit_script_class_compile(qualified_name, ast, rcb)
@@ -1059,6 +1059,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         Example (scripting a function)::
 
             import torch
+
             @torch.jit.script
             def foo(x, y):
                 if x.max() > y.max():
@@ -1118,7 +1119,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             scripted_module = torch.jit.script(MyModule())
 
         To compile a method other than ``forward`` (and recursively compile anything it calls), add
-        the ``@torch.jit.export`` decorator to the method. To opt out of compilation use ``@torch.jit.ignore``.
+        the :func:`@torch.jit.export <torch.jit.export>` decorator to the method. To opt out of compilation
+        use :func:`@torch.jit.ignore <torch.jit.ignore>`.
 
         Example (an exported and ignored method in a module)::
 
@@ -1200,6 +1202,18 @@ def _gen_rcb(obj, _frames_up):
         return stack_rcb(name)
 
     return _rcb
+
+
+def interface(obj):
+    if not inspect.isclass(obj):
+        raise RuntimeError("interface must be applied to a class")
+    if not _is_new_style_class(obj):
+        raise RuntimeError("TorchScript interfaces must inherit from 'object'")
+    qualified_name = _qualified_name(obj)
+    ast = get_jit_class_def(obj, obj.__name__)
+    rcb = _jit_internal.createResolutionCallback(1)
+    torch._C._jit_script_interface_compile(qualified_name, ast, rcb)
+    return obj
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
@@ -1797,6 +1811,8 @@ _builtin_ops = [
     (math.degrees, "aten::degrees"),
     (math.radians, "aten::radians"),
     (math.ldexp, "aten::ldexp"),
+    (torch.autograd.grad, "aten::grad"),
+    (torch.autograd.backward, "aten::backward"),
     (torch._C._infer_size, "aten::_infer_size"),
     (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
     (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
