@@ -173,7 +173,7 @@ T quantize_val(double scale, int64_t zero_point, float value) {
 
 template <typename T, int precision>
 void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, size_t count) {
-  for (int64_t i = 0; i < 8; ++i) {
+  for (int64_t i = 0; i < count; ++i) {
     dst[i] = quantize_val<T>(scale, zero_point, src[i]);
   }
 }
