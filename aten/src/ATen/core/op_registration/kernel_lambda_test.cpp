@@ -519,7 +519,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithOptionalInputs_w
 
   EXPECT_TRUE(called);
   EXPECT_TRUE(called_arg2.has_value());
-  EXPECT_EQ(extract_type_id(*called_arg2), TensorTypeId::CUDATensorId);
+  EXPECT_EQ(extractTypeId(*called_arg2), TensorTypeId::CUDATensorId);
   EXPECT_FALSE(called_arg3.has_value());
   EXPECT_TRUE(called_arg4.has_value());
   EXPECT_EQ(*called_arg4, "text");

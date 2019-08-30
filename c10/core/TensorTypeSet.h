@@ -69,4 +69,14 @@ private:
 std::string toString(TensorTypeSet);
 std::ostream& operator<<(std::ostream&, TensorTypeSet);
 
+// Historically, every tensor only had a single TensorTypeId, and it was
+// always something like CPUTensorId and not something weird like VariableId.
+// For the forseeable future, it will still be possible to extract /that/
+// TensorTypeId, and that's what this function does.
+//
+// TODO: this will need to change when Variable drops.
+static inline TensorTypeId legacyExtractTypeId(TensorTypeSet s) {
+  return s.firstTypeId();
+}
+
 }

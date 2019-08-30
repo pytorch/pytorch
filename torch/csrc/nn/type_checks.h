@@ -9,10 +9,10 @@
 
 namespace torch { namespace nn {
 
-inline bool check_type(PyObject* obj, at::TensorTypeId id, at::ScalarType dtype) {
+inline bool check_dense_type(PyObject* obj, at::DeviceType device_type, at::ScalarType dtype) {
   if (THPVariable_Check(obj)) {
     auto& tensor = ((THPVariable*)obj)->cdata;
-    return tensor.type_id() == id && tensor.dtype() == dtype;
+    return tensor.device().type() == device_type && tensor.dtype() == dtype;
   }
   return false;
 }
@@ -38,19 +38,19 @@ static inline int get_device(PyObject* args) {
 }
 
 static inline bool THNN_FloatTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::TensorTypeId::CPUTensorId, at::kFloat);
+  return torch::nn::check_dense_type(obj, at::DeviceType::CPU, at::kFloat);
 }
 
 static inline bool THNN_DoubleTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::TensorTypeId::CPUTensorId, at::kDouble);
+  return torch::nn::check_dense_type(obj, at::DeviceType::CPU, at::kDouble);
 }
 
 static inline bool THNN_LongTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::TensorTypeId::CPUTensorId, at::kLong);
+  return torch::nn::check_dense_type(obj, at::DeviceType::CPU, at::kLong);
 }
 
 static inline bool THNN_IntTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::TensorTypeId::CPUTensorId, at::kInt);
+  return torch::nn::check_dense_type(obj, at::DeviceType::CPU, at::kInt);
 }
 
 static inline THFloatTensor* THNN_FloatTensor_Unpack(PyObject* obj) {
@@ -72,19 +72,19 @@ static inline THIntTensor* THNN_IntTensor_Unpack(PyObject* obj) {
 #ifdef USE_CUDA
 
 static inline bool THNN_CudaHalfTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::TensorTypeId::CUDATensorId, at::kHalf);
+  return torch::nn::check_dense_type(obj, at::DeviceType::CUDA, at::kHalf);
 }
 
 static inline bool THNN_CudaFloatTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::TensorTypeId::CUDATensorId, at::kFloat);
+  return torch::nn::check_dense_type(obj, at::DeviceType::CUDA, at::kFloat);
 }
 
 static inline bool THNN_CudaDoubleTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::TensorTypeId::CUDATensorId, at::kDouble);
+  return torch::nn::check_dense_type(obj, at::DeviceType::CUDA, at::kDouble);
 }
 
 static inline bool THNN_CudaLongTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::TensorTypeId::CUDATensorId, at::kLong);
+  return torch::nn::check_dense_type(obj, at::DeviceType::CUDA, at::kLong);
 }
 
 static inline THCudaHalfTensor* THNN_CudaHalfTensor_Unpack(PyObject* obj) {

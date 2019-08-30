@@ -25,6 +25,8 @@ void py_set_default_tensor_type(PyObject* type_obj);
 void py_set_default_dtype(PyObject* dtype_obj);
 
 // Gets the TensorTypeId for the default tensor type.
+//
+// TODO: This is nuts!  Should probably be a TensorOptions.
 c10::TensorTypeId get_default_tensor_type_id();
 
 // Gets the ScalarType for the default tensor type.

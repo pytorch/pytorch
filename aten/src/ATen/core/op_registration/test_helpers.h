@@ -82,6 +82,6 @@ void expectListEquals(c10::ArrayRef<T> expected, std::vector<T> actual) {
 
 // NB: This is not really sound, but all of the type sets constructed here
 // are singletons so it's fine
-static inline TensorTypeId extractTypeId(const Tensor& t) {
-  return t.type_set().firstTypeId();
+static inline c10::TensorTypeId extractTypeId(const at::Tensor& t) {
+  return legacyExtractTypeId(t.type_set());
 }

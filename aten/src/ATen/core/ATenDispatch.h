@@ -29,7 +29,7 @@ namespace impl {
 // TODO: I'm not sure if this should live in this header or not; the operant
 // question is whether or not we have access to all the relevant TLS at this
 // point.
-TensorTypeId dispatchTypeId(TensorTypeSet ts) {
+static inline TensorTypeId dispatchTypeId(TensorTypeSet ts) {
   // TODO: Account for TLS!
   return ts.firstTypeId();
 }

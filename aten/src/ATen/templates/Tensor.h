@@ -425,6 +425,10 @@ inline bool infer_is_variable(const TensorList & tl) {
 }
 } // namespace detail
 
+static inline TensorTypeId legacyExtractTypeId(const Tensor& t) {
+  return legacyExtractTypeId(t.type_set());
+}
+
 } // namespace at
 
 #include <ATen/core/TensorMethods.h>
