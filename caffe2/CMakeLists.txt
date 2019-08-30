@@ -267,9 +267,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
     )
 
-  set(GENERATED_THNN_CXX_CUDA ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp)
-  set(GENERATED_THNN_CXX ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp)
-
   set(GENERATED_CXX_PYTHON
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
@@ -285,14 +282,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
     )
 
-  set(GENERATED_THNN_SOURCES
-    ${GENERATED_THNN_CXX}
-    ${GENERATED_THNN_CXX_CUDA}
-    )
-
   set(TORCH_GENERATED_CODE
     ${GENERATED_CXX_TORCH}
-    ${GENERATED_THNN_SOURCES}
     ${GENERATED_H_TORCH}
     ${GENERATED_CXX_PYTHON}
     ${GENERATED_H_PYTHON}
@@ -1174,7 +1165,9 @@ if (BUILD_PYTHON)
 
   # ---[ Python.
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
-  set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
+  if (NOT MSVC)
+    set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
+  endif()
   set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "" DEBUG_POSTFIX "")
   set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
   set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
@@ -1201,7 +1194,9 @@ if (BUILD_PYTHON)
 
   if(USE_CUDA)
     add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
-    set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
+    if (NOT MSVC)
+      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
+    endif()
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "" DEBUG_POSTFIX "")
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
@@ -1226,7 +1221,9 @@ if (BUILD_PYTHON)
 
   if(USE_ROCM)
     add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
-    target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
+    if (NOT MSVC)
+      target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
+    endif()
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")

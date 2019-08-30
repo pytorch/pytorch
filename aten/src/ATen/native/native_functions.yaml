@@ -455,15 +455,12 @@
 - func: ceil_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
   variants: function, method
-  dispatch:
-    CPU: _ceil__cpu
-    CUDA: _ceil__cuda
 
 - func: ceil.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
   dispatch:
-    CPU: _ceil_out_cpu
-    CUDA: _ceil_out_cuda
+    CPU: ceil_out
+    CUDA: ceil_out
 
 - func: chain_matmul(Tensor[] matrices) -> Tensor
   variants: function
@@ -1576,7 +1573,7 @@
     CPU: batch_norm_backward_cpu
     CUDA: batch_norm_backward_cuda
 
-- func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
+- func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CUDA: batch_norm_backward_reduce_cuda
 
