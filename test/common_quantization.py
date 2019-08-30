@@ -67,7 +67,6 @@ def convert_dynamic(module):
 
 def prepare_dynamic(model, qconfig_dict=None):
     propagate_qconfig(model, qconfig_dict)
-    return model
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
