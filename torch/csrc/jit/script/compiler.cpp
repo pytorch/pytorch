@@ -2178,8 +2178,9 @@ struct to_ir {
       checkApplyExpr(apply, loc, /*expected_inputs*/ 1);
       auto arg = emitSugaredExpr(apply.inputs()[0], 1);
       auto inputs = arg->asTuple(apply.range(), method);
-      auto inp_values = fmap(
-          inputs, [&](SugaredValuePtr sv) { return sv->asValue(loc, method); });
+      auto inp_values = fmap(inputs, [&](const SugaredValuePtr& sv) {
+        return sv->asValue(loc, method);
+      });
       return std::make_shared<SimpleValue>(
           graph->insertNode(graph->createTuple(inp_values))->output());
     } else if (auto isinstance = dynamic_cast<IsInstanceValue*>(sv.get())) {
