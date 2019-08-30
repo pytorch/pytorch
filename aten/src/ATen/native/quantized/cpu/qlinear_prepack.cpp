@@ -29,14 +29,19 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
       int K,
       int N,
       const int8_t* Bint8,
-      int32_t B_zero_point,
-      int32_t* col_offsets) {
+      int32_t* B_zero_point,
+      int32_t* col_offsets,
+      c10::QScheme qtype) {
     for (size_t i = 0; i < N; ++i) {
       int32_t sum = 0;
       for (size_t j = 0; j < K; ++j) {
         sum += Bint8[i * K + j];
       }
-      col_offsets[i] = sum - B_zero_point * K;
+      if (qtype == kPerTensorAffine) {
+        col_offsets[i] = sum - B_zero_point[0] * K;
+      } else {
+        col_offsets[i] = sum - B_zero_point[i] * K;
+      }
     }
   }
 
@@ -48,10 +53,28 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     auto N = weight.size(0);
     auto K = weight.size(1);
 
-    int32_t weight_zero_point_int32 = weight.q_zero_point();
-
     // TODO: contiguous is called for further JIT optimizations.
     auto weight_contig = weight.contiguous();
+    const auto qtype = weight.qscheme();
+    std::vector<int32_t> weight_zero_points_int32(1, 0);
+    if (qtype == kPerTensorAffine) {
+      weight_zero_points_int32[0] = weight.q_zero_point();
+    } else if (qtype == kPerChannelAffine) {
+      weight_zero_points_int32.resize(N, 0);
+      for (int i = 0; i < N; ++i) {
+        weight_zero_points_int32[i] =
+            weight.q_per_channel_zero_points()[i].item<int32_t>();
+      }
+    }
+    std::vector<float> weight_scales_float(1, 0.0);
+    if (qtype == kPerTensorAffine) {
+      weight_scales_float[0] = weight.q_scale();
+    } else if (qtype == kPerChannelAffine) {
+      weight_scales_float.resize(N, 0.0);
+      for (int i = 0; i < N; ++i) {
+        weight_scales_float[i] = weight.q_per_channel_scales()[i].item<float>();
+      }
+    }
 
     int8_t* weight_ptr_int8 =
         reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
@@ -61,8 +84,9 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
         /*K=*/K,
         /*N=*/N,
         /*Bint8=*/weight_ptr_int8,
-        /*B_zero_point=*/weight_zero_point_int32,
-        /*col_offsets=*/col_offsets.data());
+        /*B_zero_point=*/weight_zero_points_int32.data(),
+        /*col_offsets=*/col_offsets.data(),
+        /*qtype=*/qtype);
 
     auto ret_ptr = guts::make_unique<PackedLinearWeight>(PackedLinearWeight{
         guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
@@ -74,8 +98,9 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
             /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
             /*groups=*/1),
         col_offsets,
-        weight.q_scale(),
-        weight_zero_point_int32});
+        weight_scales_float,
+        weight_zero_points_int32,
+        qtype});
 
     // TODO: we will need to replace this with torchscript classes at a later
     // point.
