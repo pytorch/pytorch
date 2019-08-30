@@ -159,3 +159,7 @@
   CPU:
     forward_scalar_types: ['Float', 'Double', 'Long']
     backward_scalar_types: ['Float', 'Double']
+
+- name: _thnn_conv3d_channelwise3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0, IntArrayRef[3] dilation=1)
+  cname: VolumetricChannelwiseConvolution
+  buffers: []

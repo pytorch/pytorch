@@ -68,4 +68,12 @@ Tensor thnn_conv3d(const Tensor & self, const Tensor & weight, IntArrayRef kerne
   return std::get<0>(at::thnn_conv3d_forward(self, weight, kernel_size, bias, stride, padding));
 }
 
+Tensor & thnn_conv3d_channelwise3d_out(Tensor & output, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
+  return at::thnn_conv3d_channelwise3d_forward_out(output, self, weight, kernel_size, bias, stride, padding, dilation);
+}
+
+Tensor thnn_conv3d_channelwise3d(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
+  return at::thnn_conv3d_channelwise3d_forward(self, weight, kernel_size, bias, stride, padding, dilation);
+}
+
 }} // namespace at::native

@@ -503,6 +503,38 @@ THC_API void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
                   int padW, int padH,
                   int dilationW, int dilationH);
 
+THC_API void THNN_(VolumetricChannelwiseConvolution_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCTensor *weight,
+                  THCTensor *bias,              // [OPTIONAL]
+                  int kW, int kH, int kT,
+                  int dW, int dH, int dT,
+                  int padW, int padH, int padT,
+                  int dilationW, int dilationH, int dilationT);
+
+THC_API void THNN_(VolumetricChannelwiseConvolution_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCTensor *weight,
+                  int kW, int kH, int kT,
+                  int dW, int dH, int dT,
+                  int padW, int padH, int padT,
+                  int dilationW, int dilationH, int dilationT);
+
+THC_API void THNN_(VolumetricChannelwiseConvolution_accGradParameters)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradWeight,
+                  int kW, int kH, int kT,
+                  int dW, int dH, int dT,
+                  int padW, int padH, int padT,
+                  int dilationW, int dilationH, int dilationT);
+
 THC_API void THNN_(SpatialCrossMapLRN_updateOutput)(
                   THCState *state,
                   THCTensor *input,

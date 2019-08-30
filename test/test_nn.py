@@ -5439,6 +5439,43 @@ class TestNN(NNTestCase):
                                         m2.weight.grad.data], 0),
                              prec=dtype2prec[dtype])
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_Conv3d_channelwise_naive_groups_cuda(self, dtype=torch.float):
+        m = nn.Conv3d(2, 2, kernel_size=3, groups=2).to("cuda", dtype)
+        i = torch.randn(2, 2, 6, 6, 6, device="cuda", dtype=dtype).div_(2).requires_grad_()
+        output = m(i)
+        grad_output = torch.randn(2, 2, 4, 4, 4, device="cuda", dtype=dtype) / 2
+        output.backward(grad_output)
+
+        m1 = nn.Conv3d(1, 1, kernel_size=3).to("cuda", dtype)
+        m1.weight.data = m.weight.data[:1].clone()
+        m1.bias.data = m.bias.data[:1].clone()
+        i1 = i.detach()[:, :1].clone().requires_grad_()
+        output1 = m1(i1)
+        output1.backward(grad_output[:, :1].contiguous())
+
+        m2 = nn.Conv3d(1, 1, kernel_size=3).to("cuda", dtype)
+        m2.weight.data.copy_(m.weight.data[1:])
+        m2.bias.data.copy_(m.bias.data[1:])
+        i2 = i.detach()[:, 1:].clone().requires_grad_()
+        output2 = m2(i2)
+        output2.backward(grad_output[:, 1:].contiguous())
+
+        self.assertEqual(output, torch.cat([output1, output2], 1),
+                         prec=dtype2prec[dtype])
+        self.assertEqual(i.grad.data,
+                         torch.cat([i1.grad.data, i2.grad.data], 1),
+                         prec=dtype2prec[dtype])
+        self.assertEqual(m.bias.grad.data,
+                         torch.cat([m1.bias.grad.data,
+                                    m2.bias.grad.data], 0),
+                         prec=dtype2prec[dtype])
+        self.assertEqual(m.weight.grad.data,
+                         torch.cat([m1.weight.grad.data,
+                                    m2.weight.grad.data], 0),
+                         prec=dtype2prec[dtype])
+
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
         mu = nn.MaxUnpool2d(3, stride=2)

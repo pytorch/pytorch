@@ -467,6 +467,11 @@ at::Tensor conv2d(
 at::Tensor conv3d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+  if (input.is_cuda() && input.size(1) == groups && groups > 1) {
+    auto kernel_size = weight.sizes().slice(2);
+    return at::thnn_conv3d_channelwise3d(
+      input, weight, kernel_size, bias, stride, padding, dilation);
+  }
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0, 0}}, groups);
 }
