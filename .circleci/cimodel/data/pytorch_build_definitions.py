@@ -73,40 +73,6 @@ class Conf:
     def get_dependents(self):
         return self.dependent_tests or []
 
-    def gen_yaml_tree(self, build_or_test):
-
-        build_job_name_pieces = self.get_build_job_name_pieces(build_or_test)
-
-        build_env_name = "-".join(map(str, build_job_name_pieces))
-
-        env_dict = OrderedDict([
-            ("BUILD_ENVIRONMENT", build_env_name),
-            ("DOCKER_IMAGE", self.gen_docker_image_path()),
-        ])
-
-        if self.pyver:
-            env_dict["PYTHON_VERSION"] = miniutils.quote(self.pyver)
-
-        if build_or_test == "test" and self.gpu_resource:
-            env_dict["USE_CUDA_DOCKER_RUNTIME"] = miniutils.quote("1")
-
-        d = {
-            "environment": env_dict,
-            "<<": "*" + "_".join(["pytorch", "linux", build_or_test, "defaults"]),
-        }
-
-        if build_or_test == "test":
-            resource_class = "large"
-            if self.gpu_resource:
-                resource_class = "gpu." + self.gpu_resource
-
-                if self.gpu_resource == "large":
-                    env_dict["MULTI_GPU"] = miniutils.quote("1")
-
-            d["resource_class"] = resource_class
-
-        return d
-
     def gen_workflow_params(self, phase):
         parameters = OrderedDict()
         build_job_name_pieces = self.get_build_job_name_pieces(phase)
@@ -288,36 +254,6 @@ def instantiate_configs():
         config_list.append(c)
 
     return config_list
-
-
-def add_build_env_defs(jobs_dict):
-
-    mydict = OrderedDict()
-
-    config_list = instantiate_configs()
-    for c in config_list:
-
-        phases = c.restrict_phases or dimensions.PHASES
-
-        for phase in phases:
-
-            # TODO why does this not have a test?
-            if phase == "test" and c.cuda_version == "10":
-                continue
-
-            d = c.gen_yaml_tree(phase)
-            mydict[c.gen_build_name(phase)] = d
-
-            if phase == "test":
-                for x in filter(lambda x: type(x) is not HiddenConf, c.get_dependents()):
-
-                    d = x.gen_yaml_tree(phase)
-                    mydict[x.gen_build_name(phase)] = d
-
-    jobs_dict["jobs"] = mydict
-
-    graph = visualization.generate_graph(get_root())
-    graph.draw("pytorch-config-dimensions.png", prog="twopi")
 
 
 def get_workflow_list():

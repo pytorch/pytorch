@@ -57,36 +57,35 @@ class Conf(object):
         joined = "_".join(parts)
         return joined.replace(".", "_")
 
-    def gen_yaml_tree(self, build_or_test):
-
-        env_tuples = [("BUILD_ENVIRONMENT", miniutils.quote(" ".join(self.gen_build_env_parms())))]
-
+    def gen_workflow_yaml_item(self, phase, upload_phase_dependency=None):
+        parameters = OrderedDict()
+        parameters["name"] = self.gen_build_name(phase)
+        parameters["build_environment"] = miniutils.quote(" ".join(self.gen_build_env_parms()))
+        parameters["requires"] = ["setup"]
         if self.libtorch_variant:
-            env_tuples.append(("LIBTORCH_VARIANT", miniutils.quote(self.libtorch_variant)))
+            parameters["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
+        if phase == "test":
+            if not self.smoke:
+                parameters["requires"].append(self.gen_build_name("build"))
+            if not (self.smoke and self.os == "macos"):
+                parameters["docker_image"] = self.gen_docker_image()
+
+            if self.cuda_version:
+                parameters["use_cuda_docker_runtime"] = miniutils.quote("1")
+        else:
+            if self.os == "linux" and phase != "upload":
+                parameters["docker_image"] = self.gen_docker_image()
+
+        if phase == "test":
+            if self.cuda_version:
+                parameters["resource_class"] = "gpu.medium"
+        if phase == "upload":
+            parameters["context"] = "org-member"
+            parameters["requires"] = ["setup", self.gen_build_name(upload_phase_dependency)]
 
         os_name = miniutils.override(self.os, {"macos": "mac"})
-        d = {"<<": "*" + "_".join([self.get_name_prefix(), os_name, build_or_test])}
-
-        if build_or_test == "test":
-
-            if not (self.smoke and self.os == "macos"):
-                env_tuples.append(("DOCKER_IMAGE", self.gen_docker_image()))
-
-            if self.cuda_version:
-                env_tuples.append(("USE_CUDA_DOCKER_RUNTIME", miniutils.quote("1")))
-
-        else:
-            if self.os == "linux" and build_or_test != "upload":
-                d["docker"] = [{"image": self.gen_docker_image()}]
-
-        d["environment"] = OrderedDict(env_tuples)
-
-        if build_or_test == "test":
-            if self.cuda_version:
-                d["resource_class"] = "gpu.medium"
-
-        return d
-
+        job_name = "_".join([self.get_name_prefix(), os_name, phase])
+        return {job_name : parameters}
 
 def get_root(smoke, name):
 
@@ -122,57 +121,12 @@ def predicate_exclude_nonlinux_and_libtorch(config):
     return config.os == "linux"
 
 
-def add_build_entries(jobs_dict, phase, smoke, filter_predicate=lambda x: True):
-
-    configs = gen_build_env_list(smoke)
-    for conf_options in filter(filter_predicate, configs):
-        jobs_dict[conf_options.gen_build_name(phase)] = conf_options.gen_yaml_tree(phase)
-
-
-def add_binary_build_specs(jobs_dict):
-    add_build_entries(jobs_dict, "build", False)
-
-
-def add_binary_build_tests(jobs_dict):
-    add_build_entries(jobs_dict, "test", False, predicate_exclude_nonlinux_and_libtorch)
-
-
-def add_binary_build_uploads(jobs_dict):
-    add_build_entries(jobs_dict, "upload", False)
-
-
-def add_smoke_test_specs(jobs_dict):
-    add_build_entries(jobs_dict, "test", True)
-
-
-def get_nightly_tests():
-
-    configs = gen_build_env_list(False)
-    filtered_configs = filter(predicate_exclude_nonlinux_and_libtorch, configs)
-
-    tests = []
-    for conf_options in filtered_configs:
-        params = {"requires": ["setup", conf_options.gen_build_name("build")]}
-        tests.append({conf_options.gen_build_name("test"): params})
-
-    return tests
-
 def get_nightly_uploads():
-
     configs = gen_build_env_list(False)
-
-    def gen_config(conf, phase_dependency):
-        return {
-            conf.gen_build_name("upload"): OrderedDict([
-                ("context", "org-member"),
-                ("requires", ["setup", conf.gen_build_name(phase_dependency)]),
-            ]),
-        }
-
     mylist = []
     for conf in configs:
         phase_dependency = "test" if predicate_exclude_nonlinux_and_libtorch(conf) else "build"
-        mylist.append(gen_config(conf, phase_dependency))
+        mylist.append(conf.gen_workflow_yaml_item("upload", phase_dependency))
 
     return mylist
 
@@ -189,15 +143,27 @@ def gen_schedule_tree(cron_timing):
         },
     }]
 
+def get_nightly_tests():
+
+    configs = gen_build_env_list(False)
+    filtered_configs = filter(predicate_exclude_nonlinux_and_libtorch, configs)
+
+    tests = []
+    for conf_options in filtered_configs:
+        yaml_item = conf_options.gen_workflow_yaml_item("test")
+        tests.append(yaml_item)
+
+    return tests
+
 
 def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
 
     jobs_list = ["setup"]
 
     configs = gen_build_env_list(smoke)
+    phase = "build" if toplevel_key == "binarybuilds" else "test"
     for build_config in configs:
-        build_name = build_config.gen_build_name("build")
-        jobs_list.append({build_name: {"requires": ["setup"]}})
+        jobs_list.append(build_config.gen_workflow_yaml_item(phase))
 
     jobs_dict[toplevel_key] = OrderedDict(
         triggers=gen_schedule_tree(cron_schedule),

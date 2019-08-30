@@ -115,6 +115,57 @@ class Conf:
 
         return d
 
+    def gen_workflow_params(self, phase):
+        parameters = OrderedDict()
+        lang_substitutions = {
+            "onnx_py2": "onnx-py2",
+            "onnx_py3.6": "onnx-py3.6",
+        }
+
+        lang = miniutils.override(self.language, lang_substitutions)
+
+        parts = [
+            "caffe2",
+            lang,
+        ] + self.get_build_name_middle_parts() + [phase]
+
+        build_env_name = "-".join(parts)
+        parameters["build_environment"] = miniutils.quote(build_env_name)
+        if self.compiler.name == "ios":
+            parameters["build_ios"] = miniutils.quote("1")
+        if phase == "test":
+            # TODO cuda should not be considered a compiler
+            if self.compiler.name == "cuda":
+                parameters["use_cuda_docker_runtime"] = miniutils.quote("1")
+
+        if self.distro.name == "macos":
+            parameters["python_version"] = miniutils.quote("2")
+        else:
+            parameters["docker_image"] = self.gen_docker_image()
+            if self.build_only:
+                parameters["build_only"] = miniutils.quote("1")
+        if phase == "test":
+            resource_class = "large" if self.compiler.name != "cuda" else "gpu.medium"
+            parameters["resource_class"] = resource_class
+
+        return parameters
+
+    def gen_workflow_yaml_item(self, phase):
+        parameters = OrderedDict()
+        parameters["name"] = self.construct_phase_name(phase)
+        parameters["requires"] = ["setup"]
+
+        if phase == "test":
+            parameters["requires"].append(self.construct_phase_name("build"))
+            job_name = "caffe2_" + self.get_platform() + "_test"
+        else:
+            job_name = "caffe2_" + self.get_platform() + "_build"
+
+        if not self.is_important:
+            parameters["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+        parameters.update(self.gen_workflow_params(phase))
+        return {job_name : parameters}
+
 
 def get_root():
     return TopLevelNode("Caffe2 Builds", CONFIG_TREE_DATA)
@@ -170,18 +221,6 @@ def get_caffe2_workflows():
             phases = dimensions.PHASES
 
         for phase in phases:
-
-            requires = ["setup"]
-            sub_d = {"requires": requires}
-
-            if phase == "test":
-                requires.append(conf_options.construct_phase_name("build"))
-
-            if not conf_options.is_important:
-                # If you update this, update
-                # pytorch_build_definitions.py too
-                sub_d["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
-
-            x.append({conf_options.construct_phase_name(phase): sub_d})
+            x.append(conf_options.gen_workflow_yaml_item(phase))
 
     return x
