@@ -1273,16 +1273,16 @@ struct MatchTypeReturn {
     return MatchTypeReturn();
   }
   bool success() const {
-    return reason_ == "";
+    return !reason_.has_value();
   }
   const std::string& reason() const {
-    return reason_;
+    return reason_.value();
   }
 
  private:
   MatchTypeReturn() 
-  : reason_("") {}
-  std::string reason_; // is there is no match, this contains the reason
+  : reason_(c10::nullopt) {}
+  c10::optional<std::string> reason_; // is there is no match, this contains the reason
 };
 
 // attempt to match the type variables in formal to actual, adding them to type_env.
