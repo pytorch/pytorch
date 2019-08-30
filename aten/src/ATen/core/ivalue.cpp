@@ -149,8 +149,8 @@ void ivalue::Object::resizeObject(size_t slot) {
   slots_.resize(type()->numAttributes());
 }
 
-static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
-                          const std::pair<IValue, IValue>& bWrap) {
+static bool CompareKeys(const std::pair<IValue, IValue>& aWrap,
+                        const std::pair<IValue, IValue>& bWrap) {
   const auto a = aWrap.first;
   const auto b = bWrap.first;
   if (a.isString() && b.isString()) {
@@ -159,6 +159,10 @@ static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
     return a.toInt() < b.toInt();
   } else if (a.isDouble() && b.isDouble()) {
     return a.toDouble() < b.toDouble();
+  } else if (a.isTensor() && b.isTensor()) {
+    size_t a_hash = std::hash<at::TensorImpl*>()(a.toTensor().unsafeGetTensorImpl());
+    size_t b_hash = std::hash<at::TensorImpl*>()(b.toTensor().unsafeGetTensorImpl());
+    return a_hash < b_hash;
   }
   AT_ERROR("Illegal dict key");
 }
@@ -168,7 +172,7 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IV
   for (auto& element : dict) {
     ordered.emplace_back(element.key(), element.value());
   }
-  std::sort(ordered.begin(), ordered.end(), CompareIValue);
+  std::sort(ordered.begin(), ordered.end(), CompareKeys);
   return ordered;
 }
 
