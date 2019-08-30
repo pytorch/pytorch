@@ -67,54 +67,6 @@ class Conf:
         parts = [lang] + self.get_build_name_middle_parts()
         return miniutils.quote(DOCKER_IMAGE_PATH_BASE + "-".join(parts) + ":" + str(DOCKER_IMAGE_VERSION))
 
-    def gen_yaml_tree(self, phase):
-
-        tuples = []
-
-        lang_substitutions = {
-            "onnx_py2": "onnx-py2",
-            "onnx_py3.6": "onnx-py3.6",
-        }
-
-        lang = miniutils.override(self.language, lang_substitutions)
-
-        parts = [
-            "caffe2",
-            lang,
-        ] + self.get_build_name_middle_parts() + [phase]
-
-        build_env = "-".join(parts)
-        if not self.distro.name == "macos":
-            build_env = miniutils.quote(build_env)
-
-        tuples.append(("BUILD_ENVIRONMENT", build_env))
-
-        if self.compiler.name == "ios":
-            tuples.append(("BUILD_IOS", miniutils.quote("1")))
-
-        if phase == "test":
-            # TODO cuda should not be considered a compiler
-            if self.compiler.name == "cuda":
-                tuples.append(("USE_CUDA_DOCKER_RUNTIME", miniutils.quote("1")))
-
-        if self.distro.name == "macos":
-            tuples.append(("PYTHON_VERSION", miniutils.quote("2")))
-
-        else:
-            tuples.append(("DOCKER_IMAGE", self.gen_docker_image()))
-            if self.build_only:
-                tuples.append(("BUILD_ONLY", miniutils.quote("1")))
-
-        d = OrderedDict({"environment": OrderedDict(tuples)})
-
-        if phase == "test":
-            resource_class = "large" if self.compiler.name != "cuda" else "gpu.medium"
-            d["resource_class"] = resource_class
-
-        d["<<"] = "*" + "_".join(["caffe2", self.get_platform(), phase, "defaults"])
-
-        return d
-
     def gen_workflow_params(self, phase):
         parameters = OrderedDict()
         lang_substitutions = {
@@ -150,21 +102,21 @@ class Conf:
 
         return parameters
 
-    def gen_workflow_yaml_item(self, phase):
-        parameters = OrderedDict()
-        parameters["name"] = self.construct_phase_name(phase)
-        parameters["requires"] = ["setup"]
+    def gen_workflow_job(self, phase):
+        job_def = OrderedDict()
+        job_def["name"] = self.construct_phase_name(phase)
+        job_def["requires"] = ["setup"]
 
         if phase == "test":
-            parameters["requires"].append(self.construct_phase_name("build"))
+            job_def["requires"].append(self.construct_phase_name("build"))
             job_name = "caffe2_" + self.get_platform() + "_test"
         else:
             job_name = "caffe2_" + self.get_platform() + "_build"
 
         if not self.is_important:
-            parameters["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
-        parameters.update(self.gen_workflow_params(phase))
-        return {job_name : parameters}
+            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+        job_def.update(self.gen_workflow_params(phase))
+        return {job_name : job_def}
 
 
 def get_root():
@@ -192,20 +144,7 @@ def instantiate_configs():
     return config_list
 
 
-def add_caffe2_builds(jobs_dict):
-    configs = instantiate_configs()
-    for conf_options in configs:
-        phases = ["build"]
-        if not conf_options.build_only:
-            phases = dimensions.PHASES
-        for phase in phases:
-            jobs_dict[conf_options.construct_phase_name(phase)] = conf_options.gen_yaml_tree(phase)
-
-    graph = visualization.generate_graph(get_root())
-    graph.draw("caffe2-config-dimensions.png", prog="twopi")
-
-
-def get_caffe2_workflows():
+def get_workflow_jobs():
 
     configs = instantiate_configs()
 
@@ -221,6 +160,6 @@ def get_caffe2_workflows():
             phases = dimensions.PHASES
 
         for phase in phases:
-            x.append(conf_options.gen_workflow_yaml_item(phase))
+            x.append(conf_options.gen_workflow_job(phase))
 
     return x

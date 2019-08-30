@@ -57,35 +57,35 @@ class Conf(object):
         joined = "_".join(parts)
         return joined.replace(".", "_")
 
-    def gen_workflow_yaml_item(self, phase, upload_phase_dependency=None):
-        parameters = OrderedDict()
-        parameters["name"] = self.gen_build_name(phase)
-        parameters["build_environment"] = miniutils.quote(" ".join(self.gen_build_env_parms()))
-        parameters["requires"] = ["setup"]
+    def gen_workflow_job(self, phase, upload_phase_dependency=None):
+        job_def = OrderedDict()
+        job_def["name"] = self.gen_build_name(phase)
+        job_def["build_environment"] = miniutils.quote(" ".join(self.gen_build_env_parms()))
+        job_def["requires"] = ["setup"]
         if self.libtorch_variant:
-            parameters["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
+            job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":
             if not self.smoke:
-                parameters["requires"].append(self.gen_build_name("build"))
+                job_def["requires"].append(self.gen_build_name("build"))
             if not (self.smoke and self.os == "macos"):
-                parameters["docker_image"] = self.gen_docker_image()
+                job_def["docker_image"] = self.gen_docker_image()
 
             if self.cuda_version:
-                parameters["use_cuda_docker_runtime"] = miniutils.quote("1")
+                job_def["use_cuda_docker_runtime"] = miniutils.quote("1")
         else:
             if self.os == "linux" and phase != "upload":
-                parameters["docker_image"] = self.gen_docker_image()
+                job_def["docker_image"] = self.gen_docker_image()
 
         if phase == "test":
             if self.cuda_version:
-                parameters["resource_class"] = "gpu.medium"
+                job_def["resource_class"] = "gpu.medium"
         if phase == "upload":
-            parameters["context"] = "org-member"
-            parameters["requires"] = ["setup", self.gen_build_name(upload_phase_dependency)]
+            job_def["context"] = "org-member"
+            job_def["requires"] = ["setup", self.gen_build_name(upload_phase_dependency)]
 
         os_name = miniutils.override(self.os, {"macos": "mac"})
         job_name = "_".join([self.get_name_prefix(), os_name, phase])
-        return {job_name : parameters}
+        return {job_name : job_def}
 
 def get_root(smoke, name):
 
@@ -121,16 +121,6 @@ def predicate_exclude_nonlinux_and_libtorch(config):
     return config.os == "linux"
 
 
-def get_nightly_uploads():
-    configs = gen_build_env_list(False)
-    mylist = []
-    for conf in configs:
-        phase_dependency = "test" if predicate_exclude_nonlinux_and_libtorch(conf) else "build"
-        mylist.append(conf.gen_workflow_yaml_item("upload", phase_dependency))
-
-    return mylist
-
-
 def gen_schedule_tree(cron_timing):
     return [{
         "schedule": {
@@ -143,6 +133,15 @@ def gen_schedule_tree(cron_timing):
         },
     }]
 
+def get_nightly_uploads():
+    configs = gen_build_env_list(False)
+    mylist = []
+    for conf in configs:
+        phase_dependency = "test" if predicate_exclude_nonlinux_and_libtorch(conf) else "build"
+        mylist.append(conf.gen_workflow_job("upload", phase_dependency))
+
+    return mylist
+
 def get_nightly_tests():
 
     configs = gen_build_env_list(False)
@@ -150,7 +149,7 @@ def get_nightly_tests():
 
     tests = []
     for conf_options in filtered_configs:
-        yaml_item = conf_options.gen_workflow_yaml_item("test")
+        yaml_item = conf_options.gen_workflow_job("test")
         tests.append(yaml_item)
 
     return tests
@@ -163,7 +162,7 @@ def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
     configs = gen_build_env_list(smoke)
     phase = "build" if toplevel_key == "binarybuilds" else "test"
     for build_config in configs:
-        jobs_list.append(build_config.gen_workflow_yaml_item(phase))
+        jobs_list.append(build_config.gen_workflow_job(phase))
 
     jobs_dict[toplevel_key] = OrderedDict(
         triggers=gen_schedule_tree(cron_schedule),

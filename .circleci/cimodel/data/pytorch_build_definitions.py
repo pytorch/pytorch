@@ -94,12 +94,11 @@ class Conf:
             parameters["resource_class"] = resource_class
         return parameters
 
-    def gen_workflow_yaml_item(self, phase):
-
+    def gen_workflow_job(self, phase):
         # All jobs require the setup job
-        parameters = OrderedDict()
-        parameters["name"] = self.gen_build_name(phase)
-        parameters["requires"] = ["setup"]
+        job_def = OrderedDict()
+        job_def["name"] = self.gen_build_name(phase)
+        job_def["requires"] = ["setup"]
 
         if phase == "test":
 
@@ -109,7 +108,7 @@ class Conf:
             #  pytorch build job (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259452641)
 
             dependency_build = self.parent_build or self
-            parameters["requires"].append(dependency_build.gen_build_name("build"))
+            job_def["requires"].append(dependency_build.gen_build_name("build"))
             job_name = "pytorch_linux_test"
         else:
             job_name = "pytorch_linux_build"
@@ -118,10 +117,10 @@ class Conf:
         if not self.is_important:
             # If you update this, update
             # caffe2_build_definitions.py too
-            parameters["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
-        parameters.update(self.gen_workflow_params(phase))
+            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+        job_def.update(self.gen_workflow_params(phase))
 
-        return {job_name : parameters}
+        return {job_name : job_def}
 
 
 # TODO This is a hack to special case some configs just for the workflow list
@@ -130,7 +129,7 @@ class HiddenConf(object):
         self.name = name
         self.parent_build = parent_build
 
-    def gen_workflow_yaml_item(self, phase):
+    def gen_workflow_job(self, phase):
         return {self.gen_build_name(phase): {"requires": [self.parent_build.gen_build_name("build")]}}
 
     def gen_build_name(self, _):
@@ -256,7 +255,7 @@ def instantiate_configs():
     return config_list
 
 
-def get_workflow_list():
+def get_workflow_jobs():
 
     config_list = instantiate_configs()
 
@@ -271,10 +270,10 @@ def get_workflow_list():
             if phase == "test" and conf_options.cuda_version == "10":
                 continue
 
-            x.append(conf_options.gen_workflow_yaml_item(phase))
+            x.append(conf_options.gen_workflow_job(phase))
 
         # TODO convert to recursion
         for conf in conf_options.get_dependents():
-            x.append(conf.gen_workflow_yaml_item("test"))
+            x.append(conf.gen_workflow_job("test"))
 
     return x
