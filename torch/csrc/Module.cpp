@@ -53,6 +53,7 @@
 
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
+#include <torch/csrc/distributed/autograd/autograd.h>
 #include <torch/csrc/distributed/c10d/c10d.h>
 #include <torch/csrc/distributed/rpc/rpc.h>
 #endif
@@ -530,17 +531,9 @@ void initModule(PyObject *module);
 }} // namespace torch::cuda
 #endif
 
-namespace torch { namespace nn {
-
-void init__THNN(PyObject*);
-#ifdef USE_CUDA
-void init__THCUNN(PyObject*);
-#endif
-
-}} // namespace torch::nn
-
 bool THDPDoubleStorage_init(PyObject *module);
 bool THDPFloatStorage_init(PyObject *module);
+// TODO: fix
 //bool THDPHalfStorage_init(PyObject *module);
 bool THDPLongStorage_init(PyObject *module);
 bool THDPIntStorage_init(PyObject *module);
@@ -627,6 +620,8 @@ PyObject* initModule() {
 #ifdef USE_C10D
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
   THPUtils_addPyMethodDefs(methods, torch::distributed::rpc::python_functions());
+  THPUtils_addPyMethodDefs(
+      methods, torch::distributed::autograd::python_functions());
 #endif
 #endif
 
@@ -759,11 +754,6 @@ PyObject* initModule() {
 
 #ifdef USE_NUMPY
   if (_import_array() < 0) return nullptr;
-#endif
-
-  torch::nn::init__THNN(module);
-#ifdef USE_CUDA
-  torch::nn::init__THCUNN(module);
 #endif
 
   return module;

@@ -14,7 +14,7 @@ import torch
 # Configs for pointwise unary ops
 unary_ops_configs_short = op_bench.config_list(
     attrs=[
-        [128, 128],
+        [512, 512],
     ],
     attr_names=['M', 'N'],
     tags=['short']
@@ -30,7 +30,7 @@ unary_ops_configs_long = op_bench.config_list(
 )
 
 class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, op_func): 
+    def init(self, M, N, op_func):
         self.input_one = torch.rand(M, N)
         self.op_func = op_func
 
@@ -125,7 +125,7 @@ unary_ops_list = op_bench.op_list(
 )
 
 
-op_bench.generate_pt_tests_from_op_list(unary_ops_list, 
+op_bench.generate_pt_tests_from_op_list(unary_ops_list,
                                         unary_ops_configs_short + unary_ops_configs_long,
                                         UnaryOpBenchmark)
 

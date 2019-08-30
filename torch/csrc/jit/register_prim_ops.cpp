@@ -50,7 +50,7 @@ namespace jit {
 
 namespace {
 
-template<class T>
+template <class T>
 c10::List<T> make_result_list() {
   return c10::List<T>();
 }
@@ -66,6 +66,12 @@ Operation noop(const Node* n) {
 c10::OperatorOptions aliasAnalysisFromSchema() {
   c10::OperatorOptions result;
   result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
+}
+
+c10::OperatorOptions aliasAnalysisConservative() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
   return result;
 }
 
@@ -677,6 +683,47 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     // NB: backward op might write to every input tensors in the graph and it's
+     // much more expensive to analayze the leaves and sometimes it might retain
+     // the whole gradients in every tensor of the Autograd graph with
+     // create_graph=True so we use aliasAnalysisConservative for these two OPs
+     Operator(
+         "aten::backward(Tensor[](a!) tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         [](Stack& stack) {
+           bool create_graph = pop(stack).toBool();
+           auto retain_graph = pop(stack).toOptional<bool>();
+           auto grad_tensors = pop(stack);
+           auto tensors = pop(stack).toTensorList();
+           std::vector<torch::autograd::Variable> output_vars(
+               tensors.begin(), tensors.end());
+           std::vector<torch::autograd::Variable> gradients;
+
+           if (!grad_tensors.isNone()) {
+             for (const IValue& v : grad_tensors.toGenericListRef()) {
+               gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
+             }
+           }
+
+           torch::autograd::backward(
+               output_vars, gradients, retain_graph, create_graph);
+           return 0;
+         },
+         aliasAnalysisConservative()),
+     Operator(
+         "aten::backward(Tensor(a!) self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         [](Stack& stack) {
+           bool create_graph = pop(stack).toBool();
+           auto retain_graph = pop(stack).toOptional<bool>();
+           IValue gradient_ivalue = pop(stack);
+           at::Tensor gradient = gradient_ivalue.isNone()
+               ? at::Tensor()
+               : gradient_ivalue.toTensor();
+           at::Tensor self = pop(stack).toTensor();
+           bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
+           self.backward(gradient, keep_graph, create_graph);
+           return 0;
+         },
+         aliasAnalysisConservative()),
      Operator(
          "prim::AutogradZero() -> Tensor",
          [](const Node* node) {
@@ -1233,34 +1280,6 @@ RegisterOperators reg(
              auto userObj = c10::ivalue::Object::create(
                  c10::StrongTypePtr(cu, type), numAttrs);
              push(stack, std::move(userObj));
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::GetAttr,
-         [](const Node* node) {
-           const auto type = node->input()->type()->expect<ClassType>();
-           const auto& field = node->s(attr::name);
-           const auto slot = type->getAttributeSlot(field);
-           return [slot](Stack& stack) {
-             auto userObj = pop(stack).toObject();
-             auto value = userObj->getSlot(slot);
-             push(stack, std::move(value));
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::SetAttr,
-         [](const Node* node) {
-           const auto type = node->inputs().at(0)->type()->expect<ClassType>();
-           const auto& field = node->s(attr::name);
-           const auto slot = type->getAttributeSlot(field);
-           return [slot](Stack& stack) {
-             auto v = pop(stack);
-             auto userObj = pop(stack).toObject();
-             userObj->setSlot(slot, std::move(v));
              return 0;
            };
          },
@@ -1838,7 +1857,11 @@ int listSort<at::Tensor>(Stack& stack) {
   std::sort(
       list.begin(),
       list.end(),
-      [reverse](const at::Tensor& a, const at::Tensor& b) {
+      [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
+        // "strict weak ordering" issue - see other sort
+        if (a.getIntrusivePtr() == b.getIntrusivePtr()) {
+          return false;
+        }
         return (a.lt(b).is_nonzero()) ^ reverse;
       });
   return 0;
@@ -2017,18 +2040,19 @@ int dictPop(Stack& stack) {
   }
   auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(key);
-  if (value == dict.end()) {
+  auto iter = dict.find(key);
+  if (iter == dict.end()) {
     if (has_default) {
       push(stack, default_value);
     } else {
       AT_ERROR("KeyError: ", key);
     }
   } else {
+    // note: before erase
+    push(stack, iter->value());
     auto erase_count = dict.erase(key);
     TORCH_CHECK(
         erase_count == 1, "Expected to erase 1 item, found ", erase_count);
-    push(stack, value->value());
   }
   return 0;
 }

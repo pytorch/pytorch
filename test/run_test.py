@@ -16,15 +16,18 @@ import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
+PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'autograd',
+    'cpp_api_parity',
     'cpp_extensions',
     'c10d',
     'c10d_spawn',
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
+    'dist_autograd',
     'distributed',
     'distributions',
     'docs_coverage',
@@ -43,7 +46,6 @@ TESTS = [
     'optim',
     'qat',
     'quantization',
-    'quantized_conv',
     'quantized',
     'quantized_tensor',
     'quantized_nn_mods',
@@ -61,12 +63,17 @@ TESTS = [
     'jit_disabled',
 ]
 
+# skip < 3.6 b/c fstrings added in 3.6
+if PY36:
+    TESTS.append('jit_py3')
+
 WINDOWS_BLACKLIST = [
     'distributed',
 ]
 
 ROCM_BLACKLIST = [
     'c10d',
+    'cpp_api_parity',
     'cpp_extensions',
     'distributed',
     'multiprocessing',
