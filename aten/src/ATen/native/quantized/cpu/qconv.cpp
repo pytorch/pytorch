@@ -241,10 +241,10 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 
 static auto registry =
     c10::RegisterOperators()
-        .op("quantized::quantized_conv2d",
+        .op("quantized::conv2d",
             c10::RegisterOperators::options().kernel<QConv2dInt8<false>>(
                 TensorTypeId::QuantizedCPUTensorId))
-        .op("quantized::quantized_conv2d_relu",
+        .op("quantized::conv2d_relu",
             c10::RegisterOperators::options().kernel<QConv2dInt8<true>>(
                 TensorTypeId::QuantizedCPUTensorId));
 
