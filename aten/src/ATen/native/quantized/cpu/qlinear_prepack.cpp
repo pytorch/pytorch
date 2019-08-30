@@ -117,7 +117,8 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     return cpp_custom_type_hack::create(std::move(ret_ptr), weight.options());
   }
 #else // USE_FBGEMM
-  at::Tensor operator()(at::Tensor /* weight */
+  at::Tensor operator()(at::Tensor /* weight */,
+      c10::optional<Tensor> /* bias */
   ) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide

@@ -118,10 +118,10 @@ class QLinearInt8 final : public torch::OperatorKernel {
             bias, pack_ptr.w_scale[0] * input_scale_float, 0, kQInt32);
       }
       // FIXME Adding this causes ASAN issues in unit tests.
-      //else {
-      //  qbias = at::quantize_linear(
-      //      at::dequantize(bias), weight_scale_float * input_scale_float, 0, kQInt32);
-      //}
+      // else {
+      //   qbias = at::quantize_linear(
+      //       at::dequantize(bias), pack_ptr.w_scale[0] * input_scale_float, 0, kQInt32);
+      // }
       TORCH_CHECK(qbias.dim() == 1, "bias should be a vector (1D Tensor)");
       TORCH_CHECK(
           qbias.size(0) == N,
@@ -215,7 +215,6 @@ class QLinearInt8 final : public torch::OperatorKernel {
   at::Tensor operator()(
       at::Tensor /* input */,
       at::Tensor /* packed_weight */,
-      c10::optional<Tensor> /* bias */,
       double /* output_scale */,
       int64_t /* output_zero_point */) {
     // We make a strong guarantee that models using these operators will have
