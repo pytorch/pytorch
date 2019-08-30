@@ -5,7 +5,7 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all, contfractbeta
+from torch.distributions.utils import broadcast_all, continued_fraction
 
 
 class Beta(ExponentialFamily):
@@ -71,16 +71,14 @@ class Beta(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
 
-        if (value == 0):
-            return 0
-        elif (value == 1):
-            return 1
+        if (value == 0) or (value == 1):
+            return torch.tensor([1])
         else:
-            lbeta = math.lgamma(self.concentration1+self.concentration0) - math.lgamma(self.concentration1) - math.lgamma(self.concentration0) + self.concentration1 * math.log(value) + self.concentration0 * math.log(1-value)
-            if (value < (self.concentration1+1) / (self.concentration1+self.concentration0+2)):
-                return math.exp(lbeta) * contfractbeta(self.concentration1, self.concentration0, value) / self.concentration1
+            lbeta = math.lgamma(self.concentration1 + self.concentration0) - math.lgamma(self.concentration1) - math.lgamma(self.concentration0) + self.concentration1 * math.log(value) + self.concentration0 * math.log(1 - value)
+            if (value < (self.concentration1 + 1) / (self.concentration1 + self.concentration0 + 2)):
+                return math.exp(lbeta) * continued_fraction(self.concentration1, self.concentration0, value) / self.concentration1
             else:
-                return 1 - math.exp(lbeta) * contfractbeta(self.concentration0, self.concentration1, 1-value) / self.concentration0
+                return 1 - math.exp(lbeta) * continued_fraction(self.concentration0, self.concentration1, 1 - value) / self.concentration0
 
     @property
     def concentration1(self):
