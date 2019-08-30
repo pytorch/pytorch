@@ -30,10 +30,6 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
               &DistAutogradContext::context_id,
               py::call_guard<py::gil_scoped_release>());
 
-  module.def("_init", [](int64_t worker_id) {
-    DistAutogradContainer::init(worker_id);
-  });
-
   module.def("_new_context", []() {
     return DistAutogradContainer::getInstance().newContext();
   });
@@ -44,6 +40,10 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
 
   module.def("_retrieve_context", [](int64_t context_id) {
     return DistAutogradContainer::getInstance().retrieveContext(context_id);
+  });
+
+  module.def("_init", [](int64_t worker_id) {
+    DistAutogradContainer::init(worker_id);
   });
 
   Py_RETURN_TRUE;

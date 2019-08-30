@@ -58,7 +58,7 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::Ty
       data_type_(data_type),
       device_opt_(device_opt),
       type_id_(type_id) {
-  if (type_id != UndefinedTensorId()) {
+  if (type_id != TensorTypeId::UndefinedTensorId) {
     AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
               device_opt_.has_value());
     // UndefinedTensorImpl is a singleton, so we skip logging it

@@ -10,7 +10,8 @@ constexpr int64_t kContextIdMask = (1LL << kContextIdBits) - 1;
 constexpr int kMaxWorkerId = 65535;
 constexpr int64_t kMaxContextId = kContextIdMask;
 
-DistAutogradContainer::DistAutogradContainer() : initialized_(false) {}
+DistAutogradContainer::DistAutogradContainer()
+    : current_context_id_(0), worker_id_(0), initialized_(false) {}
 
 DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
   TORCH_CHECK(

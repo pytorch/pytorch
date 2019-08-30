@@ -5,6 +5,7 @@ from collections import namedtuple
 import itertools
 import functools
 import torch
+from torch import Tensor
 import torch.nn.functional as F
 import sys
 
@@ -37,8 +38,12 @@ def parse_compressed_namedshape(string):
 
     string = string.strip()
 
+    # '' -> size: [], names:None
+    if len(string) == 0:
+        return None, []
+
     # '3, 2' -> size = [3, 2], None names.
-    if len(string) > 0 and ':' not in string:
+    if ':' not in string:
         return None, [int(size) for size in string.split(',')]
 
     dims = string.split(',')
@@ -415,7 +420,7 @@ class TestNamedTensor(TestCase):
             self.assertEqual(op(a, b).names, ('N', 'C'))
 
             d = torch.empty(2, 3, names=('C', None))
-            with self.assertRaisesRegex(RuntimeError, "misaligned"):
+            with self.assertRaisesRegex(RuntimeError, "Misaligned"):
                 op(d, c)
 
         def test_mixed_unnamed_named(op, is_inplace):
@@ -963,6 +968,21 @@ class TestNamedTensor(TestCase):
                 args=(create('N:3,C:2'), create('W:2,N:5')),
                 maybe_raises_regex='with duplicate names')
 
+    def test_expand(self):
+        for device in torch.testing.get_all_device_types():
+            self._test_name_inference(
+                Tensor.expand, device=device,
+                args=(create('D:1'), [3]), expected_names=('D'))
+
+            self._test_name_inference(
+                Tensor.expand, device=device,
+                args=(create('H:3,W:2'), [10, 3, 3, 2]),
+                expected_names=(None, None, 'H', 'W'))
+
+            self._test_name_inference(
+                Tensor.expand, device=device,
+                args=(create('3, 2'), [10, 3, 3, 2]),
+                expected_names=(None, None, None, None))
 
     def test_addmm(self):
         for device in torch.testing.get_all_device_types():
@@ -1001,6 +1021,189 @@ class TestNamedTensor(TestCase):
                 args=(create('N:3,H:5'), create('N:3,C:2'), create('W:2,N:5')),
                 maybe_raises_regex='with duplicate names')
 
+    def test_bmm(self):
+        for device in torch.testing.get_all_device_types():
+            # full names
+            self._test_name_inference(
+                torch.bmm, device=device,
+                args=(create('N:7,A:3,B:2'), create('N:7,A:2,B:5')),
+                expected_names=('N', 'A', 'B'))
+
+            # no name on left tensor
+            self._test_name_inference(
+                torch.bmm, device=device,
+                args=(create('7,3,2'), create('N:7,A:2,B:5')),
+                expected_names=('N', None, 'B'))
+
+            # no name on right tensor
+            self._test_name_inference(
+                torch.bmm, device=device,
+                args=(create('N:7,A:3,B:2'), create('7,2,5')),
+                expected_names=('N', 'A', None))
+
+            # out=
+            self._test_name_inference(
+                out_fn(torch.bmm), device=device,
+                args=(create('0'), create('N:7,A:3,B:2'), create('N:7,A:2,B:5')),
+                expected_names=('N', 'A', 'B'))
+
+            # duplicate names after mm
+            self._test_name_inference(
+                torch.bmm, device=device,
+                args=(create('N:7,A:3,B:2'), create('N:7,B:2,A:5')),
+                maybe_raises_regex='with duplicate names')
+
+            # matching error (batch dimensions must be alignable)
+            self._test_name_inference(
+                torch.bmm, device=device,
+                args=(create('N:3,A:3,B:3'), create('M:3,A:3,B:3')),
+                maybe_raises_regex='do not match')
+
+            # misalignment (batch dimension is getting contracted)
+            self._test_name_inference(
+                torch.bmm, device=device,
+                args=(create('N:3,A:3,B:3'), create('None:3,N:3,B:3')),
+                maybe_raises_regex='Misaligned')
+
+    def test_matmul(self):
+        for device in torch.testing.get_all_device_types():
+            # input tensors are less than 1D
+            self._test_name_inference(
+                torch.matmul, device=device,
+                args=(create(''), create('A:2')),
+                maybe_raises_regex='at least 1D')
+            self._test_name_inference(
+                torch.matmul, device=device,
+                args=(create('A:2'), create('')),
+                maybe_raises_regex='at least 1D')
+
+            # 1D @ 1D
+            self._test_name_inference(
+                torch.matmul, device=device,
+                args=(create('A:2'), create('B:2')),
+                expected_names=[])
+
+            # ND @ 1D
+            self._test_name_inference(
+                torch.matmul, device=device,
+                args=(create('A:3,C:2'), create('B:2')),
+                expected_names=['A'])
+            self._test_name_inference(
+                torch.matmul, device=device,
+                args=(create('A:5,C:3,D:2'), create('B:2')),
+                expected_names=['A', 'C'])
+
+            # 1D @ ND
+            self._test_name_inference(
+                torch.matmul, device=device,
+                args=(create('C:2'), create('A:2,B:3')),
+                expected_names=['B'])
+            self._test_name_inference(
+                torch.matmul, device=device,
+                args=(create('C:2'), create('A:3,B:2,D:5')),
+                expected_names=['A', 'D'])
+
+            # 2D @ 2D
+            self._test_name_inference(
+                torch.matmul, device=device,
+                args=(create('A:3,B:2'), create('A:2,B:3')),
+                expected_names=['A', 'B'])
+            self._test_name_inference(
+                torch.matmul, device=device,
+                args=(create('A:3,B:2'), create('B:2,A:5')),
+                maybe_raises_regex='with duplicate names')
+
+            # ND @ ND where N >= 2
+            self._test_name_inference(
+                torch.matmul, device=device,
+                args=(create('C:5,A:3,B:2'), create('A:2,B:3')),
+                expected_names=['C', 'A', 'B'])
+            self._test_name_inference(
+                torch.matmul, device=device,
+                args=(create('C:5,A:3,B:2'), create('None:1,A:2,B:3')),
+                expected_names=['C', 'A', 'B'])
+            self._test_name_inference(
+                torch.matmul, device=device,
+                args=(create('C:5,A:3,B:2'), create('None:2,None:1,A:2,B:3')),
+                expected_names=[None, 'C', 'A', 'B'])
+
+            # out=
+            self._test_name_inference(
+                out_fn(torch.matmul), device=device,
+                args=(create('0'), create('N:7,A:3,B:2'), create('N:7,A:2,B:5')),
+                expected_names=('N', 'A', 'B'))
+
+            # duplicate names after mm
+            self._test_name_inference(
+                torch.bmm, device=device,
+                args=(create('N:7,A:3,B:2'), create('N:7,B:2,A:5')),
+                maybe_raises_regex='with duplicate names')
+
+            # misalignment (batch dimension is getting contracted)
+            self._test_name_inference(
+                torch.matmul, device=device,
+                args=(create('N:3,A:3,B:3'), create('A:3,N:3,B:3')),
+                maybe_raises_regex='Misaligned')
+
+
+    def test_mv(self):
+        for device in torch.testing.get_all_device_types():
+            self._test_name_inference(
+                torch.mv, device=device,
+                args=(create('N:3,C:2'), create('W:2')),
+                expected_names=('N',))
+
+            # left arg is unnamed
+            self._test_name_inference(
+                torch.mv, device=device,
+                args=(create('3,2'), create('W:2')),
+                expected_names=(None,))
+
+            # right arg is unnamed
+            self._test_name_inference(
+                torch.mv, device=device,
+                args=(create('N:3,C:2'), create('2')),
+                expected_names=('N',))
+
+            # out=
+            self._test_name_inference(
+                out_fn(torch.mv), device=device,
+                args=(create('0'), create('N:3,C:2'), create('W:2')),
+                expected_names=('N',))
+
+    def test_addmv(self):
+        for device in torch.testing.get_all_device_types():
+            # full names
+            self._test_name_inference(
+                torch.addmv, device=device,
+                args=(create('N:3'), create('N:3,C:2'), create('H:2')),
+                expected_names=['N'])
+
+            # no name on bias
+            self._test_name_inference(
+                torch.addmv, device=device,
+                args=(create('3'), create('N:3,C:2'), create('H:2')),
+                expected_names=('N',))
+
+            # out=
+            self._test_name_inference(
+                out_fn(torch.addmv), device=device,
+                args=(create('0'), create('N:3'), create('N:3,C:2'), create('H:2')),
+                expected_names=('N',))
+
+            # inplace
+            self._test_name_inference(
+                torch.Tensor.addmv_, device=device,
+                args=(create('N:3'), create('N:3,C:2'), create('H:2')),
+                expected_names=('N',))
+
+    def test_dot(self):
+        for device in torch.testing.get_all_device_types():
+            # torch.dot ignores the names of both tensors
+            self._test_name_inference(
+                torch.dot, device=device,
+                args=(create('C:2'), create('W:2')),
+                expected_names=[])
 
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):

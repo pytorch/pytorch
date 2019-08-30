@@ -44,6 +44,9 @@ accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 
   THCTensor_(free)(state, src);
   THCTensor_(free)(state, self);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::check_names_for_dot(self, src);
+#endif
   return result;
 
 #else
@@ -76,6 +79,9 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   if(r_ != t)
   {
+#ifdef BUILD_NAMEDTENSOR
+    at::NoNamesGuard guard;
+#endif
     THCTensor_(resizeAs)(state, r_, t);
     THCTensor_(copy)(state, r_, t);
   }
@@ -156,6 +162,9 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 #endif
 #else
   ERROR_ONLY_FP_TYPES("addmv");
+#endif
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
 #endif
 }
 
@@ -507,6 +516,11 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
              "equal number of batches expected");
   THArgCheck(THCTensor_(size)(state, t, 0) == THCTensor_(size)(state, batch2, 0), 7,
              "equal number of batches expected");
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = at::namedinference::compute_baddbmm_outnames(result, batch1, batch2, t);
+  {
+    at::NoNamesGuard guard;
+#endif
   THArgCheck(THCTensor_(size)(state, t, 1) == THCTensor_(size)(state, batch1, 1), 6,
              "wrong matrix size");
   THArgCheck(THCTensor_(size)(state, t, 2) == THCTensor_(size)(state, batch2, 2), 7,
@@ -760,6 +774,10 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
   if (result_ != result) {
     THCTensor_(freeCopyTo)(state, result_, result);
   }
+#ifdef BUILD_NAMEDTENSOR
+  }
+  at::namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
 
 #else
   ERROR_ONLY_FP_TYPES("baddbmm");
