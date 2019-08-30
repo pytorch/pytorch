@@ -7,7 +7,7 @@ import torch
 from torch.nn import Conv2d, BatchNorm2d, ReLU
 from torch.nn._intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.quantization.QConfig import default_qat_qconfig
-from torch.utils.mkldnn import disable_mkldnn_conv
+import torch.backends.mkldnn as mkldnn
 from common_utils import TestCase, run_tests
 from hypothesis import given
 from hypothesis import strategies as st
@@ -59,7 +59,7 @@ class IntrinsicQATModuleTest(TestCase):
             momentum,
             freeze_bn
     ):
-        with disable_mkldnn_conv():
+        with torch.backends.mkldnn.flags(enabled=False):
             input_channels = input_channels_per_group * groups
             output_channels = output_channels_per_group * groups
             dilation_h = dilation_w = dilation
