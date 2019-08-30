@@ -63,6 +63,7 @@ def _init_rpc(name, backend=RpcBackend.PROCESS_GROUP):
     if backend == RpcBackend.PROCESS_GROUP:
         from .distributed_c10d import _get_default_group
         group = _get_default_group()
+        # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(name, group)
         init_rref_context(_agent)
     else:

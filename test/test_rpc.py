@@ -139,7 +139,9 @@ class RpcTest(MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
             dist.init_model_parallel("")
 
-        with self.assertRaisesRegex(RuntimeError, "shorter than"):
+        # If the number in the message does not match, it is likely that the
+        # value of MAX_NAME_LEN in RPC WorkerId has changed.
+        with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
             dist.init_model_parallel("".join(["a" for _ in range(500)]))
 
         dist.join_rpc()
