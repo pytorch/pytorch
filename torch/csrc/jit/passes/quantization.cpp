@@ -65,27 +65,14 @@ graph(%self, %input):
 }
 
 c10::optional<script::Module> findChildModule(
-    Node* n,
+    Value* module_instance,
     const script::Module& module) {
-  if (n->kind() == prim::CallMethod) {
-    auto child_instance = n->inputs()[0];
-    if (child_instance->node()->kind() == prim::GetAttr) {
-      auto child_module_name = child_instance->node()->s(attr::name);
-      auto child_module = module.find_module(child_module_name);
-      return child_module;
-    }
+  if (module_instance->node()->kind() == prim::GetAttr) {
+    auto child_module_name = module_instance->node()->s(attr::name);
+    auto child_module = module.find_module(child_module_name);
+    return child_module;
   }
   return c10::nullopt;
-}
-
-bool callSelfMethod(
-    Node* n,
-    Value* self) {
-  if (n->kind() == prim::CallMethod) {
-    auto* module_instance = n->inputs()[0];
-    return module_instance == self;
-  }
-  return false;
 }
 
 bool valueObserved(
@@ -93,16 +80,24 @@ bool valueObserved(
     Value* self,
     const script::Module& module,
     const ModulePtrSet& child_module_set) {
-  auto child_module = findChildModule(n, module);
-  if ((child_module &&
-       child_module_set.count(child_module.value().module_object()) > 0) ||
-      callSelfMethod(n, self)) {
-    return true;
+  if (n->kind() == prim::CallMethod) {
+    auto* module_instance = n->inputs()[0];
+    if (module_instance == self) {
+      // Calling a method of current module
+      return true;
+    } else {
+      // calling a method of child module
+      auto child_module = findChildModule(module_instance, module);
+      if ((child_module &&
+           child_module_set.count(child_module.value().module_object()) > 0)) {
+        return true;
+      }
+    }
   }
   return false;
 }
 
-bool valueObservedInChildModule(
+bool valueObservedInOtherMethod(
     Value* v,
     Value* self,
     const script::Module& module,
@@ -121,6 +116,10 @@ bool valueObservedInChildModule(
   // it in a separate PR if this is needed.
   for (const Use& u : v->uses()) {
     if (valueObserved(u.user, self, module, child_module_set)) {
+      if (v->uses().size() > 1) {
+        TORCH_WARN("Value has multiple uses, but we only support skipping observer for \
+                   one use right now.");
+      }
       return true;
     }
   }
@@ -275,7 +274,7 @@ void InsertObserversImpl(
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get()) &&
-        !valueObservedInChildModule(v, self, module, child_module_set)) {
+        !valueObservedInOtherMethod(v, self, module, child_module_set)) {
       auto qconfig = module_qconfig_map.at(module.module_object());
       if (qconfig) {
         auto observer_node =
@@ -304,18 +303,13 @@ void InsertObserversImpl(
       // for all values from it.
       for (Value* v : n->outputs()) {
         if (values_to_skip.count(v) == 0 &&
-            !valueObservedInChildModule(v, self, module, child_module_set)) {
+            !valueObservedInOtherMethod(v, self, module, child_module_set)) {
           values_to_observe.push_back(v);
         }
         if (v->node()->kind() == prim::CallMethod) {
           // If we find a call to a method of a child module,
           // we'll recursively insert observers for the forward function to
           // the child module.
-          // One important detail is that currently we insert observer twice for
-          // input and output of the forward function call of the chlid module,
-          // this is required if child module has different qconfig from the
-          // parent module, but it should be removed if they have the same
-          // qconfig, we'll do this in a separate PR.
           auto module_instance = v->node()->inputs()[0];
           if (module_instance->node()->kind() == prim::GetAttr) {
             auto child_module_name = module_instance->node()->s(attr::name);
