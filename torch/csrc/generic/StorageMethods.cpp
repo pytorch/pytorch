@@ -4,14 +4,14 @@
 #include <cuda_runtime.h>
 #endif
 
-static PyObject * THPStorage_(size)(THPStorage *self)
+static PyObject * THPStorage_(size)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromLong(THWStorage_(size)(LIBRARY_STATE self->cdata));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(dataPtr)(THPStorage *self)
+static PyObject * THPStorage_(dataPtr)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(THWStorage_(data)(LIBRARY_STATE self->cdata));
@@ -25,7 +25,7 @@ static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *k
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(isPinned)(THPStorage *self)
+static PyObject * THPStorage_(isPinned)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
 #if defined(USE_CUDA)
@@ -36,14 +36,14 @@ static PyObject * THPStorage_(isPinned)(THPStorage *self)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(elementSize)(THPStorage *self)
+static PyObject * THPStorage_(elementSize)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromLong(THWStorage_(elementSize)(LIBRARY_STATE_NOARGS));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(new)(THPStorage *self)
+static PyObject * THPStorage_(new)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   THWStoragePtr new_storage(THWStorage_(new)(LIBRARY_STATE_NOARGS));
@@ -278,7 +278,7 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
 }
 
 #ifdef THC_GENERIC_FILE
-PyObject * THPStorage_(getDevice)(THPStorage *self)
+PyObject * THPStorage_(getDevice)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromLong(THCStorage_(getDevice)(LIBRARY_STATE self->cdata));
