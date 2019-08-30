@@ -327,12 +327,9 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
     if(it == type_env.end()) {
       type_env[vt->name()] = actual;
       return actual;
-    }
-    // invariant match required, but strip refinements
-    auto unshaped_formal = unshapedType(it->second);
-    auto unshaped_actual = unshapedType(actual);
-    if(*unshaped_actual == *unshaped_formal) {
-      return actual;
+    } else if(auto unified = unifyTypes(it->second, actual)) {
+      type_env[vt->name()] = *unified;
+      return *unified;
     }
     std::stringstream ss;
     ss << "Type variable '" << vt->name() << "' previously matched to type " <<
