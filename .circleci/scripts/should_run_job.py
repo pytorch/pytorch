@@ -12,8 +12,12 @@ default_set = set([
     # PyTorch CPU
     # Selected oldest Python 2 version to ensure Python 2 coverage
     'pytorch-linux-xenial-py2.7.9',
+    'pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2',
     # PyTorch CUDA
     'pytorch-linux-xenial-cuda9-cudnn7-py3',
+    'pytorch-linux-xenial-cuda9_2-cudnn7-py3',
+    'pytorch-linux-xenial-cuda10-cudnn7-py3',
+    'pytorch-linux-xenial-cuda10_1-cudnn7-py3',
     # PyTorch ASAN
     'pytorch-linux-xenial-py3-clang5-asan',
     # PyTorch DEBUG
@@ -35,9 +39,13 @@ default_set = set([
     'manywheel 2.7mu cpu devtoolset7',
     'libtorch 2.7m cpu devtoolset7',
     'libtorch 2.7m cpu gcc5.4_cxx11-abi',
+    'libtorch 3.7m cu100 devtoolset7',
+    'conda 2.7 cpu',
 
     # Caffe2 Android
     'caffe2-py2-android-ubuntu16.04',
+    'pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a',
+    'pytorch_namedtensor_linux_xenial_py3_clang5_asan',
     # Caffe2 OSX
     'caffe2-py2-system-macos10.13',
     # PyTorch OSX
@@ -104,10 +112,10 @@ for m in markers:
 
 skip_override_set = set(skip_override.keys())
 should_run_set = default_set - skip_override_set
-for spec in should_run_set:
-    if spec in args.build_environment:
-        print("Accepting {} as part of default set".format(args.build_environment))
-        sys.exit(0)
+# for spec in should_run_set:
+#     if spec in args.build_environment:
+#         print("Accepting {} as part of default set".format(args.build_environment))
+sys.exit(0)
 
 print("Rejecting {}".format(args.build_environment))
 for spec, issue in skip_override.items():
