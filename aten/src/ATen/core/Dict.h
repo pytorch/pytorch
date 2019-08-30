@@ -343,6 +343,9 @@ public:
   // instead of optional<TypePtr> once types are mandatory.
   TypePtr keyType() const;
   TypePtr valueType() const;
+
+  void unsafeSetKeyType(TypePtr t);
+  void unsafeSetValueType(TypePtr t);
 };
 
 namespace impl {

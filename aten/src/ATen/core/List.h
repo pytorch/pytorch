@@ -424,6 +424,8 @@ public:
   size_t use_count() const;
 
   TypePtr elementType() const;
+  
+  void unsafeSetElementType(TypePtr t);
 
 private:
   explicit List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);

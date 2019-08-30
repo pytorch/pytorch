@@ -191,5 +191,14 @@ template<class Key, class Value>
 TypePtr Dict<Key, Value>::valueType() const {
   return impl_->elementTypes.valueType;
 }
+template <class Key, class Value>
+void Dict<Key, Value>::unsafeSetKeyType(TypePtr t) {
+  impl_->elementTypes.keyType = std::move(t);
+}
+
+template <class Key, class Value>
+void Dict<Key, Value>::unsafeSetValueType(TypePtr t) {
+  impl_->elementTypes.valueType = std::move(t);
+}
 
 }
