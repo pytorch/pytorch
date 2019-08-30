@@ -4,17 +4,26 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-Message createException(const Message& request, const std::exception& e) {
+void sendException(
+    const std::string& from,
+    const Message& request,
+    RpcAgent& agent,
+    const std::exception& e) {
   const char* err = e.what();
   std::vector<char> payload(err, err + strlen(err));
-  return Message(
-      std::move(payload),
-      std::vector<torch::Tensor>(),
-      MessageType::EXCEPTION,
-      request.id());
+  agent.send(
+      from,
+      Message(
+          std::move(payload),
+          std::vector<torch::Tensor>(),
+          MessageType::EXCEPTION,
+          request.id()));
 }
 
-Message processRequestBlocking(Message&& request) {
+void processRequestBlocking(
+    const std::string& from,
+    Message&& request,
+    RpcAgent& agent) {
   switch (request.type()) {
     case MessageType::SCRIPT_CALL: {
       try {
@@ -31,22 +40,24 @@ Message processRequestBlocking(Message&& request) {
 
         auto response = ScriptRet(std::move(stack.front())).toMessage();
         response.setId(request.id());
-        return response;
+        agent.send(from, std::move(response));
       } catch (std::exception& e) {
-        return createException(request, e);
+        sendException(from, request, agent, e);
       }
       break;
     }
     case MessageType::PYTHON_CALL: {
       try {
         auto payload = PythonRpcHandler::generatePythonUDFResult(request);
-        return Message(
-            std::move(payload),
-            std::vector<torch::Tensor>(),
-            MessageType::PYTHON_RET,
-            request.id());
+        agent.send(
+            from,
+            Message(
+                std::move(payload),
+                std::vector<torch::Tensor>(),
+                MessageType::PYTHON_RET,
+                request.id()));
       } catch (std::exception& e) {
-        return createException(request, e);
+        sendException(from, request, agent, e);
       }
       break;
     }

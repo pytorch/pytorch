@@ -27,10 +27,9 @@ void inlineCalls(Block* block) {
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
-        if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
-          auto function = class_type->getMethod(name);
-          inlineCallTo(cur, *function->graph());
-        }
+        auto function =
+            cur->input(0)->type()->expect<ClassType>()->getMethod(name);
+        inlineCallTo(cur, *function->graph());
       } break;
       default: {
         for (auto b : cur->blocks()) {
