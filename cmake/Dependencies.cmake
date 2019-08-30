@@ -230,6 +230,9 @@ if(USE_QNNPACK)
     if (NOT DEFINED QNNPACK_SOURCE_DIR)
       set(QNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/QNNPACK" CACHE STRING "QNNPACK source directory")
     endif()
+    if (NOT DEFINED PYTORCH_QNNPACK_SOURCE_DIR)
+      set(PYTORCH_QNNPACK_SOURCE_DIR "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/quantized/cpu/qnnpack" CACHE STRING "PyTorch QNNPACK source directory")
+    endif()
     if (NOT DEFINED FP16_SOURCE_DIR)
       set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
     endif()
@@ -254,14 +257,29 @@ if(USE_QNNPACK)
       add_subdirectory(
         "${QNNPACK_SOURCE_DIR}"
         "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
-      # We build static versions of QNNPACK and pthreadpool but link
-      # them into a shared library for Caffe2, so they need PIC.
       set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
       set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
       set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
     endif()
 
+    if(NOT TARGET pytorch_qnnpack)
+      set(PYTORCH_QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
+      set(PYTORCH_QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
+      set(PYTORCH_QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+      set(PYTORCH_QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
+      set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
+      set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+      set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
+      add_subdirectory(
+        "${PYTORCH_QNNPACK_SOURCE_DIR}"
+        "${CONFU_DEPENDENCIES_BINARY_DIR}/pytorch_qnnpack")
+      set_property(TARGET pytorch_qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
+      set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+      set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+    endif()
+
     list(APPEND Caffe2_DEPENDENCY_LIBS qnnpack)
+    list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
   endif()
 endif()
 
