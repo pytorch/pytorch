@@ -29,7 +29,7 @@ class TestNamedTupleAPI(unittest.TestCase):
             if name in all_operators_with_namedtuple_return:
                 operators_found.add(name)
                 continue
-            if '_backward' in name or name.endswith('_forward'):
+            if name.endswith('_backward') or name.endswith('_forward'):
                 continue
             if not ret.startswith('('):
                 continue

@@ -47,8 +47,9 @@ using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
  * share the same Quantizer. Quantizer should be immutable.
  */
 struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
+  const QScheme qscheme_;
   const ScalarType scalar_type_;
-  explicit Quantizer(ScalarType scalar_type) : scalar_type_(scalar_type) {}
+  explicit Quantizer(QScheme qscheme, ScalarType scalar_type) : qscheme_(qscheme), scalar_type_(scalar_type) {}
   virtual ~Quantizer();
 
   // Copied from torch/csrc/jit/scope.h
@@ -60,10 +61,9 @@ struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
     return c10::intrusive_ptr<Quantizer>::reclaim(this);
   }
 
-  /**
-   * Each concrete Quantizer type should have a unique QScheme type.
-   */
-  virtual QScheme qscheme() const = 0;
+  QScheme qscheme() {
+    return qscheme_;
+  }
 
   ScalarType scalar_type() {
     return scalar_type_;
@@ -92,7 +92,7 @@ struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
  * the most commonly used scheme in this category.
  */
 struct CAFFE2_API UniformQuantizer : public Quantizer {
-  explicit UniformQuantizer(ScalarType scalar_type) : Quantizer(scalar_type) {}
+  explicit UniformQuantizer(QScheme qscheme, ScalarType scalar_type) : Quantizer(qscheme, scalar_type) {}
 };
 
 /**
@@ -101,7 +101,7 @@ struct CAFFE2_API UniformQuantizer : public Quantizer {
  * value. K-means quantization is a representative example in this category.
  */
 struct CAFFE2_API NonUniformQuantizer : public Quantizer {
-  explicit NonUniformQuantizer(ScalarType scalar_type) : Quantizer(scalar_type) {}
+  explicit NonUniformQuantizer(QScheme qscheme, ScalarType scalar_type) : Quantizer(qscheme, scalar_type) {}
 };
 
 // There is also StochasticQuantizer which is uniform but not affine
@@ -115,7 +115,7 @@ struct CAFFE2_API NonUniformQuantizer : public Quantizer {
  * X = (Y - zero_point) * scale
  */
 struct CAFFE2_API AffineQuantizer : public UniformQuantizer {
-  explicit AffineQuantizer(ScalarType scalar_type) : UniformQuantizer(scalar_type) {}
+  explicit AffineQuantizer(QScheme qscheme, ScalarType scalar_type) : UniformQuantizer(qscheme, scalar_type) {}
 };
 
 // Note that we will not have Symmetric Quantizer in backend to reduce
@@ -127,16 +127,12 @@ struct CAFFE2_API AffineQuantizer : public UniformQuantizer {
  */
 struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
   explicit PerTensorAffineQuantizer(ScalarType scalar_type, double scale, int64_t zero_point)
-    : AffineQuantizer(scalar_type),
+    : AffineQuantizer(kPerTensorAffine, scalar_type),
         scale_(scale),
         zero_point_(zero_point) {}
 
   Tensor quantize(Tensor tensor) override;
   Tensor dequantize(Tensor tensor) override;
-
-  QScheme qscheme() const override {
-    return kPerTensorAffine;
-  }
 
   double scale() const {
     return scale_;
@@ -147,14 +143,14 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
   }
 
   bool equalTo(QuantizerPtr other) override {
-    if (!other.get() || other->qscheme() != kPerTensorAffine) {
-      return false;
+    if (auto* other_per_tensor_affine =
+            dynamic_cast<PerTensorAffineQuantizer*>(other.get())) {
+      return qscheme() == other_per_tensor_affine->qscheme() &&
+          scalar_type() == other_per_tensor_affine->scalar_type() &&
+          scale() == other_per_tensor_affine->scale() &&
+          zero_point() == other_per_tensor_affine->zero_point();
     }
-    auto* other_per_tensor_affine =
-        static_cast<PerTensorAffineQuantizer*>(other.get());
-    return scalar_type() == other_per_tensor_affine->scalar_type() &&
-        scale() == other_per_tensor_affine->scale() &&
-        zero_point() == other_per_tensor_affine->zero_point();
+    return false;
   }
 
  private:
@@ -180,17 +176,13 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
       const std::vector<double>& scales,
       const std::vector<int64_t>& zero_points,
       IntArrayRef axis)
-    : AffineQuantizer(scalar_type),
+    : AffineQuantizer(kPerChannelAffine, scalar_type),
     scales_(scales),
     zero_points_(zero_points),
     axis_(axis.vec()) {
     TORCH_CHECK(
         axis_.size() == 1,
         "Per channel affine quantization in multiple axis is not supported yet.");
-  }
-
-  QScheme qscheme() const override {
-    return kPerChannelAffine;
   }
 
   std::vector<double> scales() const {
@@ -209,15 +201,15 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
   Tensor dequantize(Tensor tensor) override;
 
   bool equalTo(QuantizerPtr other) override {
-    if (!other.get() || other->qscheme() != kPerChannelAffine) {
-      return false;
+    if (auto* other_per_channel_affine =
+            dynamic_cast<PerChannelAffineQuantizer*>(other.get())) {
+      return qscheme() == other_per_channel_affine->qscheme() &&
+          scalar_type() == other_per_channel_affine->scalar_type() &&
+          scales() == other_per_channel_affine->scales() &&
+          zero_points() == other_per_channel_affine->zero_points() &&
+          axis() == other_per_channel_affine->axis();
     }
-    auto* other_per_channel_affine =
-        static_cast<PerChannelAffineQuantizer*>(other.get());
-    return scalar_type() == other_per_channel_affine->scalar_type() &&
-        scales() == other_per_channel_affine->scales() &&
-        zero_points() == other_per_channel_affine->zero_points() &&
-        axis() == other_per_channel_affine->axis();
+    return false;
   }
 
  private:
