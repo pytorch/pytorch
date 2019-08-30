@@ -296,6 +296,9 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator *gen) {
   return ret;
 }
 
+/* The largest consecutive integer representable in float32 (2^24) */
+#define FLOAT32_MAX_CONSECUTIVE_INT 16777216.0f
+
 Tensor multinomial_cpu(const Tensor& self, int64_t n_sample, bool with_replacement, Generator *gen) {
   Tensor result = at::empty({0}, self.options().dtype(kLong));
   multinomial_out_cpu(result, self, n_sample, with_replacement, gen);
@@ -303,11 +306,23 @@ Tensor multinomial_cpu(const Tensor& self, int64_t n_sample, bool with_replaceme
 }
 
 Tensor& multinomial_out_cpu(Tensor& result, const Tensor& self, int64_t n_sample, bool with_replacement, Generator *gen) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "multinomial only supports floating-point dtypes for input, got: ", self.scalar_type());
-  TORCH_CHECK(result.scalar_type() == ScalarType::Long, "multinomial expects Long tensor out, got: ", result.scalar_type());
+  auto device1 = result.type().device_type();
+  auto device2 = prob_dist.type().device_type();
+  TORCH_CHECK(device1 == device2, "output and input must have the same device type. output: ", device1, " input: ", device2);
+  TORCH_CHECK(!result.is_cuda() || result.get_device() == self.get_device(), "device of output (", result.get_device(),
+      ") must match device of input (", input.get_device(), ")");
+  TORCH_CHECK(self.dim() > 0 && self.dim() <= 2, "prob_dist must be 1 or 2 dim");
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
+      "multinomial only supports floating-point dtypes for input, got: ", self.scalar_type());
+  TORCH_CHECK(result.scalar_type() == ScalarType::Long,
+      "multinomial expects Long tensor out, got: ", result.scalar_type());
   TORCH_CHECK(n_sample > 0, "cannot sample n_sample <= 0 samples");
   int64_t n_categories = self.size(-1);
-  TORCH_CHECK(with_replacement || (n_sample <= n_categories), "cannot sample n_sample > prob_dist.size(-1) samples without replacement");
+  TORCH_CHECK(with_replacement || (n_sample <= n_categories),
+      "cannot sample n_sample > prob_dist.size(-1) samples without replacement");
+  // Since the index tensor is float, numCategories cannot exceed max
+  // float integer precision
+  TORCH_CHECK(n_categories <= FLOAT32_MAX_CONSECUTIVE_INT, "number of categories cannot exceed 2^24");
   if (self.dim() > 1) {
     int64_t n_dist = self.size(-2);
     result.resize_({n_dist, n_sample});
