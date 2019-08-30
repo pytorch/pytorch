@@ -1017,9 +1017,9 @@ void testMemoryDAG() {
     auto a = t.makeFreshValue(aValue);
     auto b = t.makeFreshValue(bValue);
     // `a` does not point to `b`
-    ASSERT_FALSE(a->getMemoryLocations().test(b->index))
+    ASSERT_FALSE(a->getMemoryLocations().test(b->index));
     t.makePointerTo(a, b);
-    ASSERT_TRUE(a->getMemoryLocations().test(b->index))
+    ASSERT_TRUE(a->getMemoryLocations().test(b->index));
   }
   {
     // x(y) -> x contains y
