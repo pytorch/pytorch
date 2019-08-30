@@ -356,19 +356,15 @@ struct C10_API TensorOptions {
   /// effect of overwriting settings from self with specified options
   /// of options.
   ///
-  /// This merging operation respects device merges as specified by
-  /// Device::merge_in, which means it is suitable for implementing
-  /// APIs like new_empty.
+  /// NB: This merging operation does NOT respect device merges.
+  /// For example, if you device({kCUDA, 1}).merge_in(kCUDA)
+  /// you will get kCUDA in the end!  Functions like Tensor.new_empty
+  /// ensure the right device is selected anyway by way of a
+  /// device guard.
   ///
   TensorOptions merge_in(TensorOptions options) const noexcept {
     TensorOptions r = options;
-    if (!r.has_device()) {
-      r.set_device(device());
-    } else if (has_device()) {
-      // Both of these optionals are provably non-null and the compiler
-      // will optimize away the tests, but if I cocked up I want that exception
-      r.device_ = r.device_opt()->merge_in(*device_opt());
-    }
+    if (!r.has_device()) r.set_device(device());
     if (!r.has_dtype()) r.set_dtype(dtype());
     if (!r.has_layout()) r.set_layout(layout());
     // NB: requires grad is right biased; not a logical AND/OR!
