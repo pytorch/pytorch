@@ -201,10 +201,13 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.add(False, True), True)
 
     def test_create_bool_tensors(self):
-        self.assertEqual(torch.arange(False, True, device=self.device), torch.tensor([0], dtype=torch.int64, device=self.device))
-        self.assertEqual(torch.arange(True, device=self.device), torch.tensor([0], dtype=torch.int64, device=self.device))
-        self.assertEqual(torch.arange(False, True, 0.5, device=self.device), torch.tensor([0, 0.5], dtype=torch.get_default_dtype(), device=self.device))
-        self.assertEqual(torch.arange(False, False, device=self.device), torch.ones(0, dtype=torch.int64, device=self.device))
+        expected = torch.tensor([0], dtype=torch.int64, device=self.device)
+        self.assertEqual(torch.arange(False, True, device=self.device), expected)
+        self.assertEqual(torch.arange(True, device=self.device), expected)
+        expected = torch.tensor([0, 0.5], dtype=torch.get_default_dtype(), device=self.device)
+        self.assertEqual(torch.arange(False, True, 0.5, device=self.device), expected)
+        expected = torch.ones(0, dtype=torch.int64, device=self.device)
+        self.assertEqual(torch.arange(False, False, device=self.device), expected)
 
         self.assertEqual(torch.linspace(False, True, device=self.device), torch.linspace(0, 1, device=self.device))
         self.assertEqual(torch.logspace(False, True, device=self.device), torch.logspace(0, 1, device=self.device))
