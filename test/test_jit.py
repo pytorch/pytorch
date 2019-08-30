@@ -13804,6 +13804,7 @@ a")
         self.assertTrue(out[0].is_cuda)
 
 
+    @suppress_warnings
     def test_ignore_decorator(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -13822,9 +13823,6 @@ a")
 
         # Assert ignored code is run
         m = M()
-        self.assertEqual(m.some_state, torch.zeros(1))
-        m(torch.ones(1))
-        self.assertEqual(m.some_state, torch.zeros(1) + 100)
 
         m2 = self.getExportImportCopy(m)
         pp = str(m2.forward.code)
@@ -13838,12 +13836,12 @@ a")
             def __init__(self):
                 super(Model, self).__init__()
 
-            @torch.jit.ignore(drop_on_export=True)
+            @torch.jit.ignore(drop=True)
             def tuple_ignored(self, x):
                 # type: (Tensor) -> Tuple[Tensor, Tensor]
                 return x, x
 
-            @torch.jit.ignore(drop_on_export=True)
+            @torch.jit.ignore(drop=True)
             def single_val_ignored(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor
                 return x

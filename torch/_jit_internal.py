@@ -6,6 +6,7 @@ circular dependency problems
 
 import inspect
 import weakref
+import warnings
 import torch._C
 from torch._six import builtins
 
@@ -219,23 +220,22 @@ def export(fn):
     return fn
 
 
-def ignore(drop_on_export=False):
+def ignore(drop=False, **kwargs):
     """
     This decorator indicates to the compiler that a function or method should
     be ignored and left as a Python function.
 
     Arguments:
 
-        drop_on_export (bool):  When ``False``, calls to this function will
-                                that will be run with ``example_inputs``.
-                                arguments and returns to ``func`` must be tensors
-                                or (possibly nested) tuples that
-                                contain tensors. When ``True``, any calls to
-                                this function from other TorchScript code will be replaced
-                                with a `raise` when the model is saved.
-                                This allows you to leave code in your TorchScript model that is only ever
-                                run when the Python interpreter is present, but not run after you save
-                                and load your model.
+        drop (bool):    When ``False``, calls to this function will
+                        that will be run with ``example_inputs``.
+                        arguments and returns to ``func`` must be tensors
+                        or (possibly nested) tuples that
+                        contain tensors. When ``True``, any calls to
+                        this function from other TorchScript code will be replaced
+                        with a `raise`.
+                        This allows you to leave code in your model that is not
+                        yet TorchScript compatible.
 
     Example (using ``@torch.jit.ignore`` on a method)::
 
@@ -261,7 +261,7 @@ def ignore(drop_on_export=False):
         # Error! The call `debugger` cannot be saved since it calls into Python
         m.save("m.pt")
 
-    Example (using ``@torch.jit.ignore(drop_on_export=True)`` on a method):
+    Example (using ``@torch.jit.ignore(drop=True)`` on a method):
 
     .. testcode::
 
@@ -269,7 +269,7 @@ def ignore(drop_on_export=False):
         import torch.nn as nn
 
         class MyModule(nn.Module):
-            @torch.jit.ignore(drop_on_export=True)
+            @torch.jit.ignore(drop=True)
             def training_method(self, x):
                 import pdb
                 pdb.set_trace()
@@ -290,24 +290,35 @@ def ignore(drop_on_export=False):
         import os
         os.remove('m.pt')
     """
-    if callable(drop_on_export):
-        # used without any args, so drop_on_export is actually a function
+
+    if callable(drop):
+        # used without any args, so drop is actually a function
         #   @torch.jit.ignore
         #   def fn(...):
-        fn = drop_on_export
+        fn = drop
         fn._torchscript_modifier = FunctionModifiers.IGNORE
         return fn
 
-    if isinstance(drop_on_export, bool):
-        def decorator(fn):
-            if drop_on_export:
-                fn._torchscript_modifier = FunctionModifiers.IGNORE_AND_DROP
-            else:
-                fn._torchscript_modifier = FunctionModifiers.IGNORE
-            return fn
-        return decorator
-    raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
-                       "a function but got {}".format(drop_on_export))
+    if not isinstance(drop, bool):
+        raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
+                           "a function but got {}".format(drop))
+
+    # for backwards compat
+    drop_on_export = kwargs.pop("drop_on_export", None)
+    if drop_on_export:
+        warnings.warn("ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the drop "
+                      "call on compilation. Use drop=True now. {}")
+
+        warnings.warn("")
+        drop = drop_on_export
+
+    def decorator(fn):
+        if drop:
+            fn._torchscript_modifier = FunctionModifiers.IGNORE_AND_DROP
+        else:
+            fn._torchscript_modifier = FunctionModifiers.IGNORE
+        return fn
+    return decorator
 
 
 def module_has_exports(mod):
@@ -318,7 +329,7 @@ def module_has_exports(mod):
                 return True
     return False
 
-def should_drop_on_export(fn):
+def should_drop(fn):
     attr = get_torchscript_modifier(fn)
     if attr is None:
         return False

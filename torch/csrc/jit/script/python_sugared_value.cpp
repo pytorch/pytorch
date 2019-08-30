@@ -110,7 +110,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
   // If if a function is marked as dropped,
   // we throw an exception if it is invoked.
   if (py::cast<bool>(py::module::import("torch._jit_internal")
-                         .attr("should_drop_on_export")(self))) {
+                         .attr("should_drop")(self))) {
     auto g = m.graph();
     auto err_msg = insertConstant(
         *g,
