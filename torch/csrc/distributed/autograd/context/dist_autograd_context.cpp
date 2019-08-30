@@ -13,12 +13,12 @@ int64_t DistAutogradContext::context_id() const {
 }
 
 void DistAutogradContext::addSendFunction(
-    std::shared_ptr<SendRpcBackwards> func) {
+    std::shared_ptr<SendRpcBackward> func) {
   std::lock_guard<std::mutex> guard(lock_);
   sendAutogradFunctions_.push_back(func);
 }
 
-std::vector<std::shared_ptr<SendRpcBackwards>> DistAutogradContext::
+std::vector<std::shared_ptr<SendRpcBackward>> DistAutogradContext::
     sendFunctions() const {
   return sendAutogradFunctions_;
 }

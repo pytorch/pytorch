@@ -33,15 +33,11 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
           .def("_send_functions", [](const DistAutogradContext& ctx) {
             std::vector<py::object> funcs;
             for (const auto& sendFunction : ctx.sendFunctions()) {
-              funcs.push_back(py::reinterpret_borrow<py::object>(
+              funcs.push_back(py::reinterpret_steal<py::object>(
                   torch::autograd::functionToPyObject(sendFunction)));
             }
             return funcs;
           });
-
-  module.def("_init", [](int64_t worker_id) {
-    DistAutogradContainer::init(worker_id);
-  });
 
   module.def(
       "_new_context",
@@ -67,6 +63,10 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
         return DistAutogradContainer::getInstance().currentContext();
       },
       py::return_value_policy::reference);
+
+  module.def("_init", [](int64_t worker_id) {
+    DistAutogradContainer::init(worker_id);
+  });
 
   Py_RETURN_TRUE;
 }

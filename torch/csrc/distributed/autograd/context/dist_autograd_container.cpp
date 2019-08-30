@@ -12,7 +12,8 @@ constexpr int64_t kMaxContextId = kContextIdMask;
 
 thread_local int64_t DistAutogradContainer::current_context_id_ = -1;
 
-DistAutogradContainer::DistAutogradContainer() : initialized_(false) {}
+DistAutogradContainer::DistAutogradContainer()
+    : next_context_id_(0), worker_id_(0), initialized_(false) {}
 
 DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
   TORCH_CHECK(
@@ -40,12 +41,12 @@ const DistAutogradContext& DistAutogradContainer::newContext() {
   }
 
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
-  if (next_context_id_ == std::numeric_limits<int64_t>::max() ||
-      next_context_id_ >
-          (kMaxContextId |
-           (static_cast<int64_t>(worker_id_) << kContextIdBits))) {
-    throw std::runtime_error("We have run out of autograd context ids!!!");
-  }
+  TORCH_INTERNAL_ASSERT(
+      next_context_id_ < std::numeric_limits<int64_t>::max() &&
+          next_context_id_ <
+              (kMaxContextId |
+               (static_cast<int64_t>(worker_id_) << kContextIdBits)),
+      "We have run out of autograd context ids!!!");
 
   autograd_context_.emplace(
       std::piecewise_construct,
@@ -63,13 +64,16 @@ bool DistAutogradContainer::hasValidContext() const {
 DistAutogradContext& DistAutogradContainer::currentContext() {
   TORCH_CHECK(
       hasValidContext(),
-      "Current thread doesn't have a valid autograd context.");
+      "Current thread doesn't have a valid autograd context. Please wrap your "
+      "code using: `with torch.distributed.autograd.context() as context_id` "
+      "to generate a valid context");
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
-  if (autograd_context_.find(current_context_id_) == autograd_context_.end()) {
-    throw std::runtime_error(
-        "Couldn't find autograd context data for current autograd context id");
-  }
-  return autograd_context_.at(current_context_id_);
+  auto it = autograd_context_.find(current_context_id_);
+  TORCH_CHECK(
+      it != autograd_context_.end(),
+      "Couldn't find autograd context "
+      "data for current autograd context id");
+  return it->second;
 }
 
 void DistAutogradContainer::releaseContext(int64_t context_id) {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/distributed/autograd/functions/sendrpc_backwards.h>
+#include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 #include <cstdint>
 
 namespace torch {
@@ -17,9 +17,9 @@ class DistAutogradContext {
   int64_t context_id() const;
 
   // Records a 'send' autograd function for this context.
-  void addSendFunction(std::shared_ptr<SendRpcBackwards> func);
+  void addSendFunction(std::shared_ptr<SendRpcBackward> func);
 
-  std::vector<std::shared_ptr<SendRpcBackwards>> sendFunctions() const;
+  std::vector<std::shared_ptr<SendRpcBackward>> sendFunctions() const;
 
   DistAutogradContext(const DistAutogradContext&) = delete;
   DistAutogradContext& operator=(const DistAutogradContext&) = delete;
@@ -29,7 +29,7 @@ class DistAutogradContext {
  private:
   const int64_t context_id_;
 
-  std::vector<std::shared_ptr<SendRpcBackwards>> sendAutogradFunctions_;
+  std::vector<std::shared_ptr<SendRpcBackward>> sendAutogradFunctions_;
 
   // Lock to protect concurrent modification of the context.
   mutable std::mutex lock_;

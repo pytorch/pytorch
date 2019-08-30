@@ -1,20 +1,25 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import six
-import unittest
+import sys
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 from common_distributed import MultiProcessTestCase
 from functools import wraps
+import six
+import unittest
 import torch
 
+if not dist.is_available():
+    print("c10d not available, skipping tests")
+    sys.exit(0)
+
 def dist_init(func):
-    '''
-        We use this decorator for setting up and tearing down state since
-        MultiProcessTestCase runs each `test*` method in a separate process and
-        each process just runs the `test*` method without actually calling
-        'setUp' and 'tearDown' methods of unittest.
-    '''
+    """
+    We use this decorator for setting up and tearing down state since
+    MultiProcessTestCase runs each `test*` method in a separate process and
+    each process just runs the `test*` method without actually calling
+    'setUp' and 'tearDown' methods of unittest.
+    """
     @wraps(func)
     def wrapper(self):
         self.worker_id = self.rank
@@ -83,6 +88,29 @@ class TestDistAutograd(MultiProcessTestCase):
         # No autograd context available.
         with self.assertRaises(RuntimeError):
             ctx = dist_autograd._current_context()
+
+    @dist_init
+    def test_rpc_complex_args(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            num_tensors = 10
+            tensors = []
+            for i in range(num_tensors):
+                tensors.append(torch.ones(3, 3, requires_grad=(i % 2 == 0)))
+            ret = dist.rpc('worker{}'.format(dst_rank), torch.stack,
+                           args=(tensors,))
+            self.assertEqual(torch.stack(tensors), ret)
+
+            # Verify appropriate tensors have been attached the autograd graph.
+            next_funcs = dist_autograd._current_context()._send_functions()[0].next_functions
+            idx = 0
+            for i in range(num_tensors):
+                if i % 2 == 0:
+                    self.assertEqual('torch::autograd::AccumulateGrad', next_funcs[i][0].name())
+                    self.assertEqual(tensors[i], next_funcs[i][0].variable)
+                else:
+                    self.assertIsNone(next_funcs[i][0])
+
 
 if __name__ == '__main__':
     unittest.main()

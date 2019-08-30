@@ -5,7 +5,7 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/python_functions.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
-#include <torch/csrc/distributed/autograd/functions/sendrpc_backwards.h>
+#include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/tuple_parser.h>
@@ -103,9 +103,9 @@ void THPAutograd_initFunctions()
   static PyTypeObject CopyBackwardsClass;
   addClass<CopyBackwards, NoCtor>(module, CopyBackwardsClass, "CopyBackwards");
 
-  static PyTypeObject SendRpcBackwardsClass;
-  addClass<torch::distributed::autograd::SendRpcBackwards, NoCtor>(
-      module, SendRpcBackwardsClass, "SendRpcBackwards");
+  static PyTypeObject SendRpcBackwardClass;
+  addClass<torch::distributed::autograd::SendRpcBackward, NoCtor>(
+      module, SendRpcBackwardClass, "SendRpcBackward");
 
   static PyTypeObject CopySlicesClass;
   addClass<CopySlices, NoCtor>(module, CopySlicesClass, "CopySlices");
