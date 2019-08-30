@@ -22,11 +22,11 @@ struct WorkerId {
       : name_(std::move(name)), id_(id) {
     bool validSize = name_.length() < MAX_NAME_LEN && name_.length() > 0;
     bool validChar =
-        find_if(
+        std::find_if(
             name_.begin(),
             name_.end(),
             [](char c) {
-              return !(isalnum(c) || c == '-' || c == '_') ;
+              return !(std::isalnum(c) || c == '-' || c == '_') ;
             }
         ) == name_.end();
     TORCH_CHECK(validSize && validChar,
@@ -35,14 +35,7 @@ struct WorkerId {
         "but got ", name_);
   }
 
-  static bool isValidName(const std::string& name) {
-    return name.length() < MAX_NAME_LEN &&
-        find_if(
-            name.begin(), name.end(), [](char c) { return !isalnum(c);}
-        ) == name.end();
-  }
-
-  static const size_t MAX_NAME_LEN;
+  static constexpr size_t MAX_NAME_LEN=128;
 
   const std::string name_;
   const worker_id_t id_;

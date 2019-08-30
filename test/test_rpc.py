@@ -125,6 +125,25 @@ class RpcTest(MultiProcessTestCase):
             dist.init_model_parallel('duplicated_name')
         dist.join_rpc()
 
+    def test_invalid_names(self):
+        store = dist.FileStore(self.file.name, self.world_size)
+        dist.init_process_group(backend="gloo", rank=self.rank,
+                                world_size=self.world_size, store=store)
+
+        with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
+            dist.init_model_parallel("abc*")
+
+        with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
+            dist.init_model_parallel(" ")
+
+        with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
+            dist.init_model_parallel("")
+
+        with self.assertRaisesRegex(RuntimeError, "shorter than"):
+            dist.init_model_parallel("".join(["a" for _ in range(500)]))
+
+        dist.join_rpc()
+
     @_wrap_with_rpc
     def test_add(self):
         n = self.rank + 1

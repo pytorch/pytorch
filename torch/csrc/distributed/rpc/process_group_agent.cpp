@@ -58,12 +58,11 @@ Message deserialize(MessageType type, std::istream& is) {
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerId_.name_;
   const auto worldSize = pg_->getSize();
-  const int64_t length = workerName.length();
 
   // use c10d allgather to collect names
   torch::Tensor nameTensor =
       torch::zeros({WorkerId::MAX_NAME_LEN}, torch::kChar);
-  memcpy(nameTensor.storage().data(), workerName.c_str(), length);
+  memcpy(nameTensor.storage().data(), workerName.c_str(), workerName.length());
   std::vector<torch::Tensor> inputName = {nameTensor};
   std::vector<std::vector<torch::Tensor>> outputNames(1);
   for (int i = 0; i < worldSize; ++i) {
