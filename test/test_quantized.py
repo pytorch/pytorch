@@ -588,9 +588,10 @@ class TestDynamicQuantizedLinear(TestCase):
         output_channels=st.integers(4, 8),
         use_bias=st.booleans(),
         use_relu=st.booleans(),
-        use_multi_dim_input=st.booleans())
+        use_multi_dim_input=st.booleans(),
+        use_channelwise=st.booleans())
     def test_qlinear(self, batch_size, input_channels, output_channels,
-                     use_bias, use_relu, use_multi_dim_input):
+                     use_bias, use_relu, use_multi_dim_input, use_channelwise):
         qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
         if use_relu:
             qlinear_dynamic = torch.ops.quantized.fbgemm_linear_relu_dynamic
@@ -604,14 +605,19 @@ class TestDynamicQuantizedLinear(TestCase):
         X_zp = 0
         X_value_min = 0
         X_value_max = 255
-        X_q0 = np.round(np.random.rand(batch_size, input_channels) * (
-            X_value_max - X_value_min) + X_value_min
-        ).astype(np.uint8)
+        X_q0 = np.round(np.random.rand(batch_size, input_channels) *
+                        (X_value_max - X_value_min)
+                        + X_value_min
+                        ).astype(np.uint8)
+        X_q0 = np.round(np.random.rand(batch_size, input_channels) *
+                        (X_value_max - X_value_min) + X_value_min).astype(np.uint8)
         X_q0[0, 0] = X_value_min
         X_q0[0, 1] = X_value_max
 
-        W_scale = 1.0
-        W_zp = 0
+        # W_scale = 1.0
+        # W_zp = 0
+        W_scales = np.ones(output_channels)
+        W_zps = np.zeros(output_channels)
         W_value_min = -128
         W_value_max = 127
         W_q0 = np.round(
@@ -625,8 +631,8 @@ class TestDynamicQuantizedLinear(TestCase):
         b_value_min = -10
         b_value_max = 10
         b_q0 = np.round(
-            np.random.rand(output_channels) * (b_value_max - b_value_min) +
-            b_value_min
+            np.random.rand(output_channels) *
+            (b_value_max - b_value_min) + b_value_min
         ).astype(np.int32) if use_bias else None
 
         avoid_vpmaddubsw_overflow_linear(
@@ -642,16 +648,28 @@ class TestDynamicQuantizedLinear(TestCase):
         )
 
         X_fp32 = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
-        W_fp32 = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
-        b_fp32 = torch.from_numpy(
-            _dequantize(b_q0, X_scale * W_scale, 0)
-        ).to(dtype=torch.float) if use_bias else None
-
         if use_multi_dim_input:
             X_fp32 = X_fp32.view(3, int(batch_size / 3), input_channels)
 
-        W_scale, W_zp = _calculate_dynamic_qparams(W_fp32, torch.qint8)
-        W_q = torch.quantize_linear(W_fp32, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
+        # W_scale, W_zp = _calculate_dynamic_qparams(W_fp32, torch.qint8)
+        # We currently only check the case where W_scale = 1.0, W_zp = 0.
+
+        if use_channelwise:
+            W_fp32 = torch.from_numpy(_dequantize(W_q0, W_scales.reshape(
+                (-1, 1)), W_zps.reshape((-1, 1)))).to(dtype=torch.float)
+            W_q = torch.quantize_linear_per_channel(W_fp32, scales=torch.from_numpy(W_scales).to(
+                torch.double), zero_points=torch.from_numpy(W_zps).to(torch.int64), axis=[0], dtype=torch.qint8)
+            b_fp32 = torch.from_numpy(
+                _dequantize(b_q0, X_scale * W_scales, 0)
+            ).to(dtype=torch.float) if use_bias else None
+        else:
+            W_fp32 = torch.from_numpy(_dequantize(
+                W_q0, W_scales[0], W_zps[0])).to(dtype=torch.float)
+            W_q = torch.quantize_linear(W_fp32, scale=W_scales[0], zero_point=(
+                W_zps[0].astype(int).item()), dtype=torch.qint8)
+            b_fp32 = torch.from_numpy(
+                _dequantize(b_q0, X_scale * int(W_scales[0].item()), 0)
+            ).to(dtype=torch.float) if use_bias else None
 
         # Observe X_fp32 and determine X_scale and X_zero_point, this should match
         # internals of dynamic linear.
@@ -711,8 +729,7 @@ class TestQuantizedLinear(unittest.TestCase):
         ).astype(np.uint8)
 
         W_scales = np.random.rand(output_channels)
-        W_zps = np.round(np.random.rand(output_channels) * 100 -
-                         50).astype(np.int32)  # .astype(np.int64)
+        W_zps = np.round(np.random.rand(output_channels) * 100 - 50)
         W_value_min = -128
         W_value_max = 127
         W_q0 = np.round(
