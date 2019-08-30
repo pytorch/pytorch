@@ -1494,7 +1494,7 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 
 Value* Graph::insertFunctionCall(
     Function* callee,
-    script::MatchedSchema& matched) {
+    const script::MatchedSchema& matched) {
   std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->s_(attr::name, func_name)
@@ -1510,7 +1510,7 @@ Value* Graph::insertFunctionCall(
 
 Value* Graph::insertMethodCall(
     std::string method_name,
-    script::MatchedSchema& matched) {
+    const script::MatchedSchema& matched) {
   Value* result = insertNode(create(prim::CallMethod, matched.inputs))
                       ->s_(attr::name, std::move(method_name))
                       ->output()
