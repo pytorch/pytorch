@@ -378,6 +378,8 @@ def cmpfiles_with_eol_normalization(a, b, names):
                     if line[:2] != '  ':
                         sys.stdout.write('{:5d}: {}\n'.format(i, line))
                 sys.stdout.write('-' * 80 + '\n')
+                sys.stdout.write(ax)
+                sys.stdout.write('-' * 80 + '\n')
         except OSError:
             results[2].append(x)
     return results
