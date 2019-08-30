@@ -9266,6 +9266,7 @@ a")
         # constants not baked in
         self.assertEqual(g(x), f(x))
 
+    @_tmp_donotuse_dont_inline_everything
     def test_trace_optional(self):
         @torch.jit.script
         def test(x):
@@ -9288,9 +9289,7 @@ a")
         self.assertEqual(f_tensor(), torch.zeros(2))
 
         graph = f_tensor.graph
-        f = str(graph)
-        # tensor type correctly set as graph input
-        FileCheck().check("Double(2) = prim:").run(f)
+        FileCheck().check('name="test"').check_next("prim::CallFunction").run(graph)
 
     def test_trace_nested_datatypes(self):
         @torch.jit.script
@@ -10756,6 +10755,7 @@ a")
         self.assertTrue(len(list(traced_fn.graph.inputs())) == 1)
         FileCheck().check("aten::mm").check("aten::add").run(str(traced_fn.graph))
 
+    @_tmp_donotuse_dont_inline_everything
     def test_call_traced_fn_from_tracing_fn(self):
         @_trace(torch.rand(3, 4))
         def traced_fn1(x):
@@ -10765,7 +10765,7 @@ a")
         def traced_fn(x):
             return traced_fn1(x) + 1
 
-        FileCheck().check("aten::neg").check_same("scope: traced_fn1").check("aten::add") \
+        FileCheck().check("traced_fn").check("prim::CallFunction").check("aten::add") \
             .run(str(traced_fn.graph))
 
     @unittest.skip("error in first class mode")
@@ -10785,6 +10785,7 @@ a")
             def traced_fn(x):
                 return tm(x) + 1.0
 
+    @_tmp_donotuse_dont_inline_everything
     def test_call_script_fn_from_tracing_fn(self):
         @torch.jit.script
         def script_fn(x):
@@ -10794,7 +10795,7 @@ a")
         def traced_fn(x):
             return script_fn(x) + 1
 
-        FileCheck().check("aten::neg").check("aten::add").run(str(traced_fn.graph))
+        FileCheck().check("prim::CallFunction").check("aten::add").run(str(traced_fn.graph))
 
     @unittest.skip("error in first class mode")
     def test_call_script_mod_from_tracing_fn(self):
@@ -10860,6 +10861,7 @@ a")
         FileCheck().check_not("value=<Tensor>").check_count("aten::mm", 2).check("aten::add") \
             .run(str(tm.graph))
 
+    @_tmp_donotuse_dont_inline_everything
     def test_call_traced_fn_from_traced_module(self):
         @_trace(torch.rand(3, 4))
         def traced_fn(x):
@@ -10877,7 +10879,8 @@ a")
 
         # Note: neg op from the traced function should be properly inlined
         FileCheck().check("aten::mm").check_same("scope: TracedModule") \
-            .check_next("aten::neg").check("scope: TracedModule/traced_fn") \
+            .check('name="traced_fn"') \
+            .check_next("prim::CallFunction").check("scope: TracedModule/traced_fn") \
             .run(str(tm.graph))
 
     def test_trace_hierarchy(self):
@@ -10973,6 +10976,7 @@ a")
             f = io.BytesIO()
             torch.jit.save(module, f)
 
+    @_tmp_donotuse_dont_inline_everything
     def test_call_traced_module_from_traced_module(self):
         class TracedModule1(torch.nn.Module):
             def __init__(self):
@@ -10993,8 +10997,9 @@ a")
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
-        FileCheck().check_count("aten::mm", 2).check("aten::add").run(str(tm.graph))
+        FileCheck().check("aten::mm").check("prim::CallMethod").check_same("forward").check("aten::add").run(str(tm.graph))
 
+    @_tmp_donotuse_dont_inline_everything
     def test_call_script_fn_from_traced_module(self):
         @torch.jit.script
         def scripted_fn(x):
@@ -11009,8 +11014,9 @@ a")
                 return scripted_fn(torch.mm(x, self.param))
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
-        FileCheck().check("aten::mm").check("aten::neg").run(str(tm.graph))
+        FileCheck().check("aten::mm").check("name=\"scripted_fn\"").check("prim::CallFunction").run(str(tm.graph))
 
+    @_tmp_donotuse_dont_inline_everything
     def test_call_script_module_from_traced_module(self):
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
@@ -11032,7 +11038,7 @@ a")
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
-        FileCheck().check_count("aten::mm", 2).check("aten::add").run(str(tm.graph))
+        FileCheck().check("aten::mm").check("prim::CallMethod").check_same("forward").check("aten::add").run(str(tm.graph))
 
     def test_call_python_fn_from_script_fn(self):
         @torch.jit.ignore
@@ -12772,6 +12778,27 @@ a")
 
         FileCheck().check("prim::Loop").check_not("aten::rand").check("aten::__getitem__") \
             .check_count("aten::rand", 1, exactly=True).run(str(foo.graph))
+
+    def test_mutable_dce_indirect_wildcards(self):
+        def fn():
+            x = torch.ones(2, 3)
+            x_1 = x.view(-1)
+            l = []
+            l.append(x_1)
+            x_view = l[0]
+            x.add_(torch.ones(2, 3))
+            return x_view
+        self.checkScript(fn, ())
+
+    def test_mutable_dce_indirect_wildcard_write(self):
+        def fn():
+            indexes = torch.jit.annotate(List[Tensor], [])
+            word_ids = torch.zeros(10, dtype=torch.int32)
+            word_ids[1] = 1
+            indexes.append(word_ids)
+
+            return word_ids
+        self.checkScript(fn, ())
 
     def test_mutable_dce_wildcards(self):
         def fn():
@@ -15733,7 +15760,7 @@ EXCLUDE_SCRIPT_MODULES = {
     'test_nn_AdaptiveMaxPool2d_tuple_none',
     'test_nn_AdaptiveMaxPool3d_tuple_none',
 
-    # Uses Module._backend, so this is not supported
+    # Doesn't use future division, so this is not supported
     'test_nn_CrossMapLRN2d',
 }
 
@@ -16965,7 +16992,7 @@ class TestAsync(JitTestCase):
         self.assertEqual(y2, foo2(x1, x2))
         self.assertEqual(y3, foo3(x1, x2, x3))
 
-    @_tmp_donotuse_dont_inline_everything
+    @_inline_everything
     def test_async_script_trace(self):
         class Traced(nn.Module):
             def __init__(self):
@@ -17014,8 +17041,7 @@ class TestAsync(JitTestCase):
         self.assertGraphContainsExactly(module.graph, kind='prim::fork', num_kind_nodes=2)
         # Make sure 1 ::neg is in the root graph and 2 ::negs are in the subgraphs
         self.assertGraphContainsExactly(module.graph, kind='aten::neg', num_kind_nodes=1)
-        self.assertGraphContainsExactly(module.graph, kind='aten::neg', num_kind_nodes=2, consider_subgraphs=True)
-        self.assertGraphContainsExactly(module.graph, kind='prim::CallMethod', num_kind_nodes=1, consider_subgraphs=True)
+        self.assertGraphContainsExactly(module.graph, kind='aten::neg', num_kind_nodes=3, consider_subgraphs=True)
 
         y = torch.neg(x)
         self.assertEqual(module(x), (y, y, y, y, x, x))
