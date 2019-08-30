@@ -193,7 +193,7 @@ cmake_dependent_option(
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 
 # This is a fix for a rare build issue on Ubuntu:
-# symbol lookup error: /private/home/pbelevich/miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
+# symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
 # https://software.intel.com/en-us/articles/symbol-lookup-error-when-linking-intel-mkl-with-gcc-on-ubuntu
 if(NOT APPLE)
   set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "-Wl,--no-as-needed")
