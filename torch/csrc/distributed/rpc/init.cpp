@@ -43,23 +43,30 @@ PyObject* rpc_init(PyObject* /* unused */) {
           },
           py::call_guard<py::gil_scoped_release>());
 
-  auto processGroupAgent =
-      shared_ptr_class_<ProcessGroupAgent>(
-          module, "ProcessGroupAgent", rpcAgent)
-          .def(py::init<std::string,
-                        std::unordered_map<std::string, int>,
-                        std::shared_ptr<::c10d::ProcessGroup>,
-                        int>(),
-               py::arg("name"),
-               py::arg("name_map"),
-               py::arg("process_group"),
-               py::arg("num_send_recv_threads") = 4)
-          .def("join",
-               &ProcessGroupAgent::join,
-               py::call_guard<py::gil_scoped_release>())
-          .def("sync",
-               &ProcessGroupAgent::sync,
-               py::call_guard<py::gil_scoped_release>());
+  auto processGroupAgent = shared_ptr_class_<ProcessGroupAgent>(
+                               module, "ProcessGroupAgent", rpcAgent)
+                               .def(
+                                   py::init<
+                                       std::string,
+                                       std::unordered_map<std::string, int>,
+                                       std::shared_ptr<::c10d::ProcessGroup>,
+                                       int>(),
+                                   py::arg("name"),
+                                   py::arg("name_map"),
+                                   py::arg("process_group"),
+                                   py::arg("num_send_recv_threads") = 4)
+                               .def(
+                                   "get_worker_id",
+                                   &ProcessGroupAgent::getWorkerId,
+                                   py::call_guard<py::gil_scoped_release>())
+                               .def(
+                                   "join",
+                                   &ProcessGroupAgent::join,
+                                   py::call_guard<py::gil_scoped_release>())
+                               .def(
+                                   "sync",
+                                   &ProcessGroupAgent::sync,
+                                   py::call_guard<py::gil_scoped_release>());
 
   module.def("invoke_rpc_builtin", [](
       RpcAgent& agent,

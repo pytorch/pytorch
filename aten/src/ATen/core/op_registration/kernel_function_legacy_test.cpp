@@ -30,11 +30,6 @@ using std::unique_ptr;
 
 namespace {
 
-C10_DECLARE_TENSOR_TYPE(TensorType1);
-C10_DEFINE_TENSOR_TYPE(TensorType1);
-C10_DECLARE_TENSOR_TYPE(TensorType2);
-C10_DEFINE_TENSOR_TYPE(TensorType2);
-
 int64_t errorKernel(const Tensor& tensor, int64_t input) {
   EXPECT_TRUE(false); // this kernel should never be called
   return 0;
@@ -68,32 +63,32 @@ void expectCallsDecrement(TensorTypeId type_id) {
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel);
-  expectCallsIncrement(TensorType1());
+  expectCallsIncrement(TensorTypeId::CPUTensorId);
 }
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegisteredInConstructor_thenCanBeCalled) {
   auto registrar = RegisterOperators("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel);
-  expectCallsIncrement(TensorType1());
+  expectCallsIncrement(TensorTypeId::CPUTensorId);
 }
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
       .op("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel)
       .op("_test::error(Tensor dummy, int input) -> int", &errorKernel);
-  expectCallsIncrement(TensorType1());
+  expectCallsIncrement(TensorTypeId::CPUTensorId);
 }
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
   auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel);
   auto registrar2 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", &errorKernel);
-  expectCallsIncrement(TensorType1());
+  expectCallsIncrement(TensorTypeId::CPUTensorId);
 }
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
   {
     auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", &incrementKernel);
 
-    expectCallsIncrement(TensorType1());
+    expectCallsIncrement(TensorTypeId::CPUTensorId);
   }
 
   // now the registrar is destructed. Assert that the schema is gone.
@@ -112,7 +107,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithoutOutpu
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_return", ""});
   ASSERT_TRUE(op.has_value());
   was_called = false;
-  auto result = callOp(*op, dummyTensor(TensorType1()));
+  auto result = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId));
   EXPECT_TRUE(was_called);
   EXPECT_EQ(0, result.size());
 }
@@ -128,7 +123,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithZeroOutp
   auto op = c10::Dispatcher::singleton().findSchema({"_test::zero_outputs", ""});
   ASSERT_TRUE(op.has_value());
   was_called = false;
-  auto result = callOp(*op, dummyTensor(TensorType1()));
+  auto result = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId));
   EXPECT_TRUE(was_called);
   EXPECT_EQ(0, result.size());
 }
@@ -144,7 +139,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntOutpu
   auto op = c10::Dispatcher::singleton().findSchema({"_test::int_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(TensorType1()), 3, 6);
+  auto result = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), 3, 6);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(9, result[0].toInt());
 }
@@ -160,13 +155,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorOu
   auto op = c10::Dispatcher::singleton().findSchema({"_test::returning_tensor", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(TensorType1()));
+  auto result = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(TensorType1(), result[0].toTensor().type_id());
+  EXPECT_EQ(TensorTypeId::CPUTensorId, result[0].toTensor().type_id());
 
-  result = callOp(*op, dummyTensor(TensorType2()));
+  result = callOp(*op, dummyTensor(TensorTypeId::CUDATensorId));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(TensorType2(), result[0].toTensor().type_id());
+  EXPECT_EQ(TensorTypeId::CUDATensorId, result[0].toTensor().type_id());
 }
 
 std::vector<Tensor> kernelWithTensorListOutput(const Tensor& input1, const Tensor& input2, const Tensor& input3) {
@@ -180,12 +175,12 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorLi
   auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(TensorType1()), dummyTensor(TensorType2()), dummyTensor(TensorType1()));
+  auto result = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), dummyTensor(TensorTypeId::CPUTensorId));
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(3, result[0].toTensorListRef().size());
-  EXPECT_EQ(TensorType1(), result[0].toTensorListRef()[0].type_id());
-  EXPECT_EQ(TensorType2(), result[0].toTensorListRef()[1].type_id());
-  EXPECT_EQ(TensorType1(), result[0].toTensorListRef()[2].type_id());
+  EXPECT_EQ(TensorTypeId::CPUTensorId, result[0].toTensorListRef()[0].type_id());
+  EXPECT_EQ(TensorTypeId::CUDATensorId, result[0].toTensorListRef()[1].type_id());
+  EXPECT_EQ(TensorTypeId::CPUTensorId, result[0].toTensorListRef()[2].type_id());
 }
 
 std::vector<int64_t> kernelWithIntListOutput(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
@@ -199,7 +194,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListO
   auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(TensorType1()), 2, 4, 6);
+  auto result = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), 2, 4, 6);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(3, result[0].toIntListRef().size());
   EXPECT_EQ(2, result[0].toIntListRef()[0]);
@@ -209,12 +204,12 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListO
 
 std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> kernelWithMultipleOutputs(Tensor) {
   Dict<string, Tensor> dict;
-  dict.insert("first", dummyTensor(TensorType1()));
-  dict.insert("second", dummyTensor(TensorType2()));
+  dict.insert("first", dummyTensor(TensorTypeId::CPUTensorId));
+  dict.insert("second", dummyTensor(TensorTypeId::CUDATensorId));
   return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
-    dummyTensor(TensorType2()),
+    dummyTensor(TensorTypeId::CUDATensorId),
     5,
-    {dummyTensor(TensorType1()), dummyTensor(TensorType2())},
+    {dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId)},
     c10::optional<int64_t>(c10::in_place, 0),
     dict
   );
@@ -227,18 +222,18 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMultiple
   auto op = c10::Dispatcher::singleton().findSchema({"_test::multiple_outputs", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(TensorType1()));
+  auto result = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId));
   EXPECT_EQ(5, result.size());
-  EXPECT_EQ(TensorType2(), result[0].toTensor().type_id());
+  EXPECT_EQ(TensorTypeId::CUDATensorId, result[0].toTensor().type_id());
   EXPECT_EQ(5, result[1].toInt());
   EXPECT_EQ(2, result[2].toTensorListRef().size());
-  EXPECT_EQ(TensorType1(), result[2].toTensorListRef()[0].type_id());
-  EXPECT_EQ(TensorType2(), result[2].toTensorListRef()[1].type_id());
+  EXPECT_EQ(TensorTypeId::CPUTensorId, result[2].toTensorListRef()[0].type_id());
+  EXPECT_EQ(TensorTypeId::CUDATensorId, result[2].toTensorListRef()[1].type_id());
   EXPECT_EQ(0, result[3].toInt());
   auto result_dict = c10::impl::toTypedDict<string, Tensor>(result[4].toGenericDict());
   EXPECT_EQ(2, result_dict.size());
-  EXPECT_EQ(TensorType1(), result_dict.at("first").type_id());
-  EXPECT_EQ(TensorType2(), result_dict.at("second").type_id());
+  EXPECT_EQ(TensorTypeId::CPUTensorId, result_dict.at("first").type_id());
+  EXPECT_EQ(TensorTypeId::CUDATensorId, result_dict.at("second").type_id());
 }
 
 Tensor kernelWithTensorInputByReferenceWithOutput(const Tensor& input1) {
@@ -255,13 +250,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(TensorType1()));
+  auto result = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(TensorType1(), result[0].toTensor().type_id());
+  EXPECT_EQ(TensorTypeId::CPUTensorId, result[0].toTensor().type_id());
 
-  result = callOp(*op, dummyTensor(TensorType2()));
+  result = callOp(*op, dummyTensor(TensorTypeId::CUDATensorId));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(TensorType2(), result[0].toTensor().type_id());
+  EXPECT_EQ(TensorTypeId::CUDATensorId, result[0].toTensor().type_id());
 }
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
@@ -271,13 +266,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto result = callOp(*op, dummyTensor(TensorType1()));
+  auto result = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(TensorType1(), result[0].toTensor().type_id());
+  EXPECT_EQ(TensorTypeId::CPUTensorId, result[0].toTensor().type_id());
 
-  result = callOp(*op, dummyTensor(TensorType2()));
+  result = callOp(*op, dummyTensor(TensorTypeId::CUDATensorId));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(TensorType2(), result[0].toTensor().type_id());
+  EXPECT_EQ(TensorTypeId::CUDATensorId, result[0].toTensor().type_id());
 }
 
 Tensor captured_input;
@@ -297,13 +292,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(TensorType1()));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId));
   EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(TensorType1(), captured_input.type_id());
+  EXPECT_EQ(TensorTypeId::CPUTensorId, captured_input.type_id());
 
-  outputs = callOp(*op, dummyTensor(TensorType2()));
+  outputs = callOp(*op, dummyTensor(TensorTypeId::CUDATensorId));
   EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(TensorType2(), captured_input.type_id());
+  EXPECT_EQ(TensorTypeId::CUDATensorId, captured_input.type_id());
 }
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
@@ -313,13 +308,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(TensorType1()));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId));
   EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(TensorType1(), captured_input.type_id());
+  EXPECT_EQ(TensorTypeId::CPUTensorId, captured_input.type_id());
 
-  outputs = callOp(*op, dummyTensor(TensorType2()));
+  outputs = callOp(*op, dummyTensor(TensorTypeId::CUDATensorId));
   EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(TensorType2(), captured_input.type_id());
+  EXPECT_EQ(TensorTypeId::CUDATensorId, captured_input.type_id());
 }
 
 int64_t captured_int_input = 0;
@@ -336,7 +331,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntInput
   ASSERT_TRUE(op.has_value());
 
   captured_int_input = 0;
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), 3);
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), 3);
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(3, captured_int_input);
 }
@@ -352,7 +347,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntInput
   auto op = c10::Dispatcher::singleton().findSchema({"_test::int_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), 3);
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), 3);
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(4, outputs[0].toInt());
 }
@@ -371,7 +366,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListI
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::List<int64_t>({2, 4, 6}));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(3, captured_input_list_size);
 }
@@ -387,7 +382,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListI
   auto op = c10::Dispatcher::singleton().findSchema({"_test::int_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::List<int64_t>({2, 4, 6}));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), c10::List<int64_t>({2, 4, 6}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(3, outputs[0].toInt());
 }
@@ -404,7 +399,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorLi
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId)}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_input_list_size);
 }
@@ -420,7 +415,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorLi
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId)}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
 }
@@ -437,7 +432,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTe
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId)}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_input_list_size);
 }
@@ -453,7 +448,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTe
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId)}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
 }
@@ -470,7 +465,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTe
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId)}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_input_list_size);
 }
@@ -486,7 +481,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTe
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, c10::List<Tensor>({dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId)}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
 }
@@ -527,8 +522,8 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictInpu
 
   captured_dict_size = 0;
   Dict<string, Tensor> dict;
-  dict.insert("key1", dummyTensor(TensorType1()));
-  dict.insert("key2", dummyTensor(TensorType2()));
+  dict.insert("key1", dummyTensor(TensorTypeId::CPUTensorId));
+  dict.insert("key2", dummyTensor(TensorTypeId::CUDATensorId));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_dict_size);
@@ -589,8 +584,8 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnordere
 
   captured_dict_size = 0;
   c10::Dict<string, Tensor> dict;
-  dict.insert("key1", dummyTensor(TensorType1()));
-  dict.insert("key2", dummyTensor(TensorType2()));
+  dict.insert("key1", dummyTensor(TensorTypeId::CPUTensorId));
+  dict.insert("key2", dummyTensor(TensorTypeId::CUDATensorId));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_dict_size);
@@ -825,18 +820,18 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptional
   ASSERT_TRUE(op.has_value());
 
   called = false;
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), dummyTensor(TensorType2()), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), c10::IValue(), std::string("text"));
   EXPECT_EQ(0, outputs.size());
 
   EXPECT_TRUE(called);
   EXPECT_TRUE(called_arg2.has_value());
-  EXPECT_EQ(called_arg2->type_id(), TensorType2());
+  EXPECT_EQ(called_arg2->type_id(), TensorTypeId::CUDATensorId);
   EXPECT_FALSE(called_arg3.has_value());
   EXPECT_TRUE(called_arg4.has_value());
   EXPECT_EQ(*called_arg4, "text");
 
   called = false;
-  outputs = callOp(*op, dummyTensor(TensorType1()), c10::IValue(), 4, c10::IValue());
+  outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), c10::IValue(), 4, c10::IValue());
   EXPECT_EQ(0, outputs.size());
 
   EXPECT_TRUE(called);
@@ -860,19 +855,19 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptional
   ASSERT_TRUE(op.has_value());
 
   called = false;
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), dummyTensor(TensorType2()), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), c10::IValue(), std::string("text"));
   EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ(TensorType2(), outputs[0].toTensor().type_id());
+  EXPECT_EQ(TensorTypeId::CUDATensorId, outputs[0].toTensor().type_id());
 
   EXPECT_TRUE(called);
   EXPECT_TRUE(called_arg2.has_value());
-  EXPECT_EQ(called_arg2->type_id(), TensorType2());
+  EXPECT_EQ(called_arg2->type_id(), TensorTypeId::CUDATensorId);
   EXPECT_FALSE(called_arg3.has_value());
   EXPECT_TRUE(called_arg4.has_value());
   EXPECT_EQ(*called_arg4, "text");
 
   called = false;
-  outputs = callOp(*op, dummyTensor(TensorType1()), c10::IValue(), 4, c10::IValue());
+  outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), c10::IValue(), 4, c10::IValue());
   EXPECT_EQ(1, outputs.size());
   EXPECT_TRUE(outputs[0].isNone());
 
@@ -893,13 +888,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptional
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), dummyTensor(TensorType2()), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), c10::IValue(), std::string("text"));
   EXPECT_EQ(3, outputs.size());
-  EXPECT_EQ(TensorType2(), outputs[0].toTensor().type_id());
+  EXPECT_EQ(TensorTypeId::CUDATensorId, outputs[0].toTensor().type_id());
   EXPECT_TRUE(outputs[1].isNone());
   EXPECT_EQ("text", outputs[2].toString()->string());
 
-  outputs = callOp(*op, dummyTensor(TensorType1()), c10::IValue(), 4, c10::IValue());
+  outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), c10::IValue(), 4, c10::IValue());
   EXPECT_EQ(3, outputs.size());
   EXPECT_TRUE(outputs[0].isNone());
   EXPECT_EQ(4, outputs[1].toInt());
@@ -920,7 +915,7 @@ void expectCallsConcatUnboxed(TensorTypeId type_id) {
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", &concatKernel);
-  expectCallsConcatUnboxed(TensorType1());
+  expectCallsConcatUnboxed(TensorTypeId::CPUTensorId);
 }
 
 std::tuple<int64_t, Tensor> kernelForSchemaInference(Tensor arg1, int64_t arg2, const std::vector<Tensor>& arg3) {
