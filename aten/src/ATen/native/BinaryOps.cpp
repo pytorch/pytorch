@@ -16,7 +16,7 @@ DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(logical_xor_stub);
 
-static constexpr char* alpha_mismatch_err =
+static constexpr char alpha_mismatch_err[] =
   "For integral input tensors, argument alpha must not be a floating point number.";
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
