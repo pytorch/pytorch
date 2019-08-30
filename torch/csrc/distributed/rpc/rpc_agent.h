@@ -36,7 +36,7 @@ struct WorkerId {
         "but got ", name_);
   }
 
-  static constexpr size_t MAX_NAME_LEN=128;
+  static constexpr size_t MAX_NAME_LEN = 128;
 
   const std::string name_;
   const worker_id_t id_;
