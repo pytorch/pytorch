@@ -156,7 +156,7 @@ class TransformerEncoder(Module):
         self.norm = norm
 
     def forward(self, src, mask=None, src_key_padding_mask=None):
-        r"""Pass the input through the endocder layers in turn.
+        r"""Pass the input through the encoder layers in turn.
 
         Args:
             src: the sequnce to the encoder (required).
