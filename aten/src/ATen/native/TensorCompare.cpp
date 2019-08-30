@@ -21,6 +21,7 @@ void where_cpu(
   iter.add_input(condition);
   iter.add_input(self);
   iter.add_input(other);
+  iter.dont_compute_common_dtype();
   iter.build();
   if (condition.scalar_type() == at::ScalarType::Byte) {
     at::native::cpu_kernel(
