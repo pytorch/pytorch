@@ -62,7 +62,6 @@ ProcessGroupAgent::ProcessGroupAgent(
     int numSendRecvThreads)
     : RpcAgent(std::move(workerName), processRequestBlocking),
       nameMap_(std::move(nameMap)),
-      stop_(false),
       pg_(std::move(pg)),
       nextId_(0),
       sendMutexes_(pg_->getSize()),
