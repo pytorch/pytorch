@@ -150,8 +150,8 @@ inline constexpr typename std::remove_reference<T>::type&& constexpr_move(
 
 namespace detail_ {
 
-// VS doesn't handle constexpr well, so we need to skip these stuff.
-#if (defined _MSC_VER)
+// VS 2015 doesn't handle constexpr well, so we need to skip these stuff.
+#if (defined _MSC_VER) && (_MSC_VER <= 1900)
 template <typename T>
 T* static_addressof(T& ref) {
   return std::addressof(ref);

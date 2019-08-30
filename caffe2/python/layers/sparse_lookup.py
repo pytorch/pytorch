@@ -89,34 +89,30 @@ class SparseLookup(ModelLayer):
 
         super(SparseLookup, self).__init__(model, name, input_record, **kwargs)
 
-        self.sparse_key = get_key(self.input_record)()
-        logger.info("Setup the sparse lookup layer for " + self.sparse_key)
-
         # TODO Add some asserts about input type
         if isinstance(inner_shape, int):
             inner_shape = [inner_shape]
         assert isinstance(inner_shape, list) or isinstance(inner_shape, tuple),\
-            "Unexpected type for inner_shape, expected list or tuple, got {0} for {1}".\
-            format(type(inner_shape), self.sparse_key)
+            "Unexpected type for inner_shape, expected list or tuple, got {0}".\
+            format(type(inner_shape))
 
         if reducer == "PositionWeighted":
             assert _is_id_score_list(self.input_record), (
-                "PositionWeighted only support IdScoreList, but got {} for {}" +
+                "PositionWeighted only support IdScoreList, but got {} " +
                 "please use PositionWeighted layer to convert IdList " +
-                "to IdScoreList").format(repr(self.input_record), self.sparse_key)
+                "to IdScoreList").format(repr(self.input_record))
             self.external_weights = self.input_record.values()
 
         elif reducer == "RecencyWeighted":
             assert _is_id_score_list(self.input_record), (
-                "RecencyWeighted only supports IdScoreList, "
-                "while the sparse feature {} is not.".format(self.sparse_key))
+                "RecencyWeighted only supports IdScoreList.")
             self.external_weights = self.input_record.values()
         self.reducer = reducer
 
         input_dim = get_categorical_limit(self.input_record)
         assert input_dim > 0, (
             "{} should have categorical limit > 0, but got {}".format(
-                self.sparse_key, input_dim))
+                get_key(self.input_record)(), input_dim))
 
         self.input_dim = input_dim
         self.shape = [input_dim] + inner_shape
@@ -157,6 +153,13 @@ class SparseLookup(ModelLayer):
 
             assert regularizer is None, "Regularizer is not compatible with fp16"
 
+        if _is_id_list(self.input_record):
+            sparse_key = self.input_record.items()
+        elif _is_id_score_list(self.input_record):
+            sparse_key = self.input_record.keys()
+        else:
+            raise NotImplementedError()
+
         if self.input_record.lengths.metadata:
             avg_length = self.input_record.lengths.metadata.expected_value
         else:
@@ -168,7 +171,7 @@ class SparseLookup(ModelLayer):
             initializer=self.weight_init,
             optimizer=weight_optim,
             ps_param=LayerPsParam(
-                sparse_key=self.sparse_key,
+                sparse_key=sparse_key,
                 average_length=avg_length),
             regularizer=regularizer
         )
@@ -231,9 +234,7 @@ class SparseLookup(ModelLayer):
             default_weight_init = ("Float16UniformFill", {'min': -scale, 'max': scale})
         else:
             raise NotImplementedError(
-                "Train version {} is not currently supported for sparse feature {}".format(
-                    trainer_version, self.sparse_key
-                )
+                "Train version {} is not currently supported".format(trainer_version)
             )
 
         return default_weight_init
@@ -246,6 +247,7 @@ class SparseLookup(ModelLayer):
             return net.Gather([self.w, in_indices], out)
         elif version == 'fp16':
             gathered_w = net.Gather([self.w, in_indices], 'gathered_w')
+
             return net.HalfToFloat(gathered_w, out)
         elif version == 'uint8rowwise':
             gathered_w = net.Gather([self.w, in_indices], 'gathered_w')
@@ -261,9 +263,7 @@ class SparseLookup(ModelLayer):
             return net.Fused8BitRowwiseQuantizedToFloat(gathered_w, out)
         else:
             raise "Unsupported version of operators in SparseLookup " +\
-                "layer: {0} for sparse feature {1}".format(
-                    version, self.sparse_key
-                )
+                "layer: {0}".format(version)
 
     def _sparse_lengths_weighted_reducer(
             self, in_indices, weights, reducer,
@@ -304,16 +304,12 @@ class SparseLookup(ModelLayer):
                 op_input, self.output_schema.field_blobs())
         else:
             raise "Unsupported version of operator in SparseLookUp " +\
-                "layer: {0} for sparse feature {1}".format(
-                    version, self.sparse_key
-                )
+                "layer: {0}".format(version)
 
     # deal with sparse features of id_list type
     def _add_ops_id_list(self, net, version):
         assert self.reducer in self._id_list_supported_reducers, (
-            "Unsupported reducer: {} for ID_LIST {}".format(
-                self.reducer, self.sparse_key
-            )
+            "Unsupported reducer: {} for ID_LIST".format(self.reducer)
         )
         if self.reducer in ['Sum', 'Mean', 'WeightedSum', 'WeightedMean']:
             op_input = [self.w,
@@ -345,9 +341,7 @@ class SparseLookup(ModelLayer):
                     op_input, self.output_schema.field_blobs())
             else:
                 raise "Unsupported version of operator in SparseLookUp " +\
-                    "layer: {0} for sparse feature {1}".format(
-                        version, self.sparse_key
-                    )
+                    "layer: {0}".format(version)
 
         elif self.reducer == 'Sqrt':
             sqrt_weight = net.LengthsToWeights(
@@ -381,9 +375,7 @@ class SparseLookup(ModelLayer):
     # deal with sparse features of id_score_list type
     def _add_ops_id_score_list(self, net, version):
         assert self.reducer in self._id_score_list_supported_reducers, (
-            "Unsupported reducer: {} for ID_SCORE_LIST {}".format(
-                self.reducer, self.sparse_key
-            )
+            "Unsupported reducer: {} for ID_SCORE_LIST".format(self.reducer)
         )
         if self.reducer in ['WeightedSum', 'WeightedMean']:
             self._sparse_lengths_weighted_reducer(
@@ -411,9 +403,7 @@ class SparseLookup(ModelLayer):
                     op_input, self.output_schema.field_blobs())
             else:
                 raise "Unsupported version of operator in SparseLookUp " +\
-                    "layer: {0} for sparse feature {1}".format(
-                        version, self.sparse_key
-                    )
+                    "layer: {0}".format(version)
 
         elif self.reducer in ['PositionWeighted', 'RecencyWeighted']:
             self._sparse_lengths_weighted_reducer(
@@ -428,9 +418,7 @@ class SparseLookup(ModelLayer):
                                  self.output_schema.field_blobs())
         else:
             raise "Only Sum, Mean, None are supported for IdScoreList input." +\
-                "Trying to create with {} for sparse feature {}".format(
-                    self.reducer, self.sparse_key
-                )
+                "Trying to create with {}".format(self.reducer)
 
     def _add_ops(self, net, version='fp32'):
         if self.evicted_values:

@@ -197,8 +197,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
       Message message = deserialize(work.type_, ss);
 
       if (message.isRequest()) {
-        auto response = cb_(std::move(message));
-        send(names_[work.from_], std::move(response));
+        cb_(names_[work.from_], std::move(message), *this);
       } else if (message.isResponse()) {
         auto id = message.id();
         {
