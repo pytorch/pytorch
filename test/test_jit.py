@@ -12773,6 +12773,27 @@ a")
         FileCheck().check("prim::Loop").check_not("aten::rand").check("aten::__getitem__") \
             .check_count("aten::rand", 1, exactly=True).run(str(foo.graph))
 
+    def test_mutable_dce_indirect_wildcards(self):
+        def fn():
+            x = torch.ones(2, 3)
+            x_1 = x.view(-1)
+            l = []
+            l.append(x_1)
+            x_view = l[0]
+            x.add_(torch.ones(2, 3))
+            return x_view
+        self.checkScript(fn, ())
+
+    def test_mutable_dce_indirect_wildcard_write(self):
+        def fn():
+            indexes = torch.jit.annotate(List[Tensor], [])
+            word_ids = torch.zeros(10, dtype=torch.int32)
+            word_ids[1] = 1
+            indexes.append(word_ids)
+
+            return word_ids
+        self.checkScript(fn, ())
+
     def test_mutable_dce_wildcards(self):
         def fn():
             x = torch.ones(2, 3)
