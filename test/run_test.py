@@ -45,6 +45,7 @@ TESTS = [
     'optim',
     'qat',
     'quantization',
+    'quantized_conv',
     'quantized',
     'quantized_tensor',
     'quantized_nn_mods',
