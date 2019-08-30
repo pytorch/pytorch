@@ -611,27 +611,21 @@ smoke_mac_test: &smoke_mac_test
 pytorch_common: &pytorch_common
   parameters:
     build_environment:
-      description: "TODO"
       type: string
       default: ""
     docker_image:
-      description: "TODO"
       type: string
       default: ""
     resource_class:
-      description: "CircleCI resource class"
       type: string
       default: "large"
     python_version:
-      description: "CircleCI resource class"
       type: string
       default: ""
     use_cuda_docker_runtime:
-      description: "CircleCI resource class"
       type: string
       default: ""
     multi_gpu:
-      description: "CircleCI resource class"
       type: string
       default: ""
   environment:
