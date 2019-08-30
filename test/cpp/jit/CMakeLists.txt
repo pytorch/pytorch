@@ -25,6 +25,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_subgraph_matcher.cpp
   ${JIT_TEST_ROOT}/test_subgraph_utils.cpp
   ${JIT_TEST_ROOT}/test_utils.cpp
+  ${JIT_TEST_ROOT}/test_inliner.cpp
 )
 set(JIT_TEST_SRCS ${JIT_TEST_SRCS} PARENT_SCOPE)
 
