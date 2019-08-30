@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
@@ -34,9 +35,20 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
   int64_t other_zero_point = other.q_zero_point();
   double other_scale = other.q_scale();
 
+  // Broadcast out the parameters here to amortize out that cost across
+  // loop iterations.
+  // TODO: we can optimize dequantization by doing a premultiplication
+  // of the zero point by scale and doing FMA on scale*x_q - (scale*zero_point)
+  auto self_zero_point_vec = Vec256<float>((float)self_zero_point);
+  auto self_scale_vec = Vec256<float>(self_scale);
+  auto other_zero_point_vec = Vec256<float>((float)other_zero_point);
+  auto other_scale_vec = Vec256<float>(other_scale);
+
   auto iter = TensorIterator::binary_op(out, self, other);
+
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qadd", [&]() {
-    cpu_kernel(iter, [&](scalar_t a, scalar_t b) -> scalar_t {
+    using Vec = Vec256<scalar_t>;
+    cpu_kernel_vec(iter, [&](scalar_t a, scalar_t b) -> scalar_t {
       const auto da = at::dequantize_val(self_scale, self_zero_point, a);
       const auto db = at::dequantize_val(other_scale, other_zero_point, b);
       float c = da + db;
@@ -44,6 +56,26 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
         c = std::max<float>(c, 0.0);
       }
       return at::quantize_val<scalar_t>(scale, zero_point, c);
+    },
+    [&](Vec a, Vec b) -> Vec {
+      const auto da = a.dequantize(self_scale_vec, self_zero_point_vec);
+      const auto db = b.dequantize(other_scale_vec, other_zero_point_vec);
+      Vec::float_vec_return_type retvals;
+      for (int i = 0; i < Vec::float_num_vecs(); ++i) {
+        auto c = da[i] + db[i];
+        if (ReLUFused) {
+          c = vec256::maximum(c, Vec256<float>(0.0f));
+        }
+        retvals[i] = c;
+      }
+      // TODO: fbgemm::Quantize doesn't support taking in the pre-broadcasted
+      // parameters. We might be able to save some cycles by enabling that
+      // in the API.
+      // TODO: specialize fbgemm::Quantize for a single vector and make it
+      // inlineable. This could help with interleaving as suggested by the
+      // TensorIterator implementations
+      auto rv = Vec::quantize(retvals, scale, zero_point);
+      return rv;
     });
   });
   return out;
@@ -82,7 +114,8 @@ class QAdd final : public c10::OperatorKernel {
         qa.sizes(),
         at::device(kCPU).dtype(qa.scalar_type()),
         scale,
-        zero_point);
+        zero_point,
+        qa.suggest_memory_format());
     return _add_out<ReLUFused>(qc, qa, qb);
   }
 };
@@ -107,7 +140,11 @@ class QAddScalar final : public c10::OperatorKernel {
               qa.qscheme() == kPerTensorSymmetric,
               "Only per tensor quantization is suuported in Add.");
     auto qc = at::_empty_affine_quantized(qa.sizes(),
-      at::device(kCPU).dtype(qa.scalar_type()), scale, zero_point);
+      at::device(kCPU).dtype(
+        qa.scalar_type()),
+        scale,
+        zero_point,
+        qa.suggest_memory_format());
     return _add_scalar_out<ReLUFused>(qc, qa, b);
   }
 };
@@ -125,34 +162,34 @@ static auto registry = c10::RegisterOperators()
 .op("quantized::add(Tensor qa, Tensor qb, float scale, int zero_point)"
      "-> Tensor qc",
     c10::RegisterOperators::options()
-      .kernel<QAdd</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
+      .kernel<QAdd</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
 .op("quantized::add_relu(Tensor qa, Tensor qb, float scale, int zero_point)"
      "-> Tensor qc",
     c10::RegisterOperators::options()
-      .kernel<QAdd</*ReLUFused=*/true>>(QuantizedCPUTensorId()))
+      .kernel<QAdd</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId))
 .op("quantized::add_out(Tensor qa, Tensor qb, Tensor out)"
      "-> Tensor out",
     c10::RegisterOperators::options()
-      .kernel<QAddOut</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
+      .kernel<QAddOut</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
 .op("quantized::add_relu_out(Tensor qa, Tensor qb, Tensor out)"
      "-> Tensor out",
     c10::RegisterOperators::options()
-      .kernel<QAddOut</*ReLUFused=*/true>>(QuantizedCPUTensorId()))
+      .kernel<QAddOut</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId))
 .op("quantized::add_scalar(Tensor qa, Scalar b, float scale, int zero_point)"
      "-> Tensor qc",
     c10::RegisterOperators::options()
-      .kernel<QAddScalar</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
+      .kernel<QAddScalar</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
 .op("quantized::add_scalar_relu(Tensor qa, Scalar b, float scale,"
      "int zero_point) -> Tensor qc",
     c10::RegisterOperators::options()
-      .kernel<QAddScalar</*ReLUFused=*/true>>(QuantizedCPUTensorId()))
+      .kernel<QAddScalar</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId))
 .op("quantized::add_scalar_out(Tensor qa, Scalar b, Tensor out)"
      "-> Tensor out",
     c10::RegisterOperators::options()
-      .kernel<QAddScalarOut</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
+      .kernel<QAddScalarOut</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
 .op("quantized::add_scalar_relu_out(Tensor qa, Scalar b, Tensor out)"
      "-> Tensor out",
     c10::RegisterOperators::options()
-      .kernel<QAddScalarOut</*ReLUFused=*/true>>(QuantizedCPUTensorId()));
+      .kernel<QAddScalarOut</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId));
 }  // namespace
 }}  // namespace at::native

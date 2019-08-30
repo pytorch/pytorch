@@ -118,7 +118,8 @@ void THTensor_(normal_stddevs)(THTensor *self, at::Generator *gen, double mean, 
   THTensor_(resizeAs)(self, stddevs);
   THTensor_(normal)(self, gen, 0, 1);
   THTensor_(cmul)(self, self, stddevs);
-  THTensor_(add)(self, self, mean);
+  at::Tensor self_wrap = THTensor_wrap(self);
+  self_wrap.add_(mean);
 }
 
 void THTensor_(normal_means_stddevs)(THTensor *self, at::Generator *gen, THTensor *means, THTensor *stddevs)
@@ -156,7 +157,7 @@ void THTensor_(logNormal)(THTensor *self, at::Generator *_generator, double mean
   auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
-  
+
   at::lognormal_distribution<double> logNormal(mean, stdv);
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)logNormal(gen););
 }
