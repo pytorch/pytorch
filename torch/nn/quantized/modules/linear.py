@@ -130,7 +130,7 @@ class Linear(torch.nn.Module):
         )
 
     def forward(self, x):
-        return torch.ops.quantized.quantized_linear(
+        return torch.ops.quantized.linear(
             x, self._packed_weight, self.scale, self.zero_point)
 
     # ===== Serialization methods =====
@@ -189,11 +189,11 @@ class Linear(torch.nn.Module):
     # Function rather than property to make sure that JIT serialization doesn't
     # register this as an attribute
     def weight(self):
-        return torch.ops.quantized.quantized_linear_unpack(self._packed_weight)
+        return torch.ops.quantized.linear_unpack(self._packed_weight)
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        self._packed_weight = torch.ops.quantized.quantized_linear_prepack(w, b)
+        self._packed_weight = torch.ops.quantized.linear_prepack(w, b)
         self.weight_scale = w.q_scale()
 
     @classmethod
