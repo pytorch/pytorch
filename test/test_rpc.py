@@ -119,10 +119,10 @@ class RpcTest(MultiProcessTestCase):
 
     def test_duplicated_names(self):
         store = dist.FileStore(self.file.name, self.world_size)
-        dist.init_process_group(backend='gloo', rank=self.rank,
+        dist.init_process_group(backend="gloo", rank=self.rank,
                                 world_size=self.world_size, store=store)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
-            dist.init_model_parallel('duplicated_name')
+            dist.init_model_parallel("duplicated_name")
         dist.join_rpc()
 
     def test_invalid_names(self):

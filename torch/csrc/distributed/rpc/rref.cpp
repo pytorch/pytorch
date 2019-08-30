@@ -25,7 +25,7 @@ at::IValue RRefForkData::toIValue() const {
   return c10::ivalue::Tuple::create(std::move(ivalues));
 }
 
-RRefForkData RRefForkData::fromIValue(const at::IValue&& ivalue) {
+RRefForkData RRefForkData::fromIValue(at::IValue&& ivalue) {
   auto ivalues = ivalue.toTuple()->elements();
 
   TORCH_CHECK(ivalues.size() == 3, "Constructing RRefForkData from ivalue "

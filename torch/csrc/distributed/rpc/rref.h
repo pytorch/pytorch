@@ -36,7 +36,7 @@ struct RRefForkData {
                const RRefId& rrefId_,
                const ForkId& forkId_);
 
-  static RRefForkData fromIValue(const at::IValue&&);
+  static RRefForkData fromIValue(at::IValue&&);
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;
