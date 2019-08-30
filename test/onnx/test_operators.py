@@ -726,6 +726,11 @@ class TestOperators(TestCase):
         x = torch.randn(2, 3, 4, 5, requires_grad=True)
         self.assertONNX(lambda x: torch.nn.functional.gelu(x), x)
 
+    def test_unique(self):
+        x = torch.randint(3, (2, 3, 4, 5)).float()
+        self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
+                        opset_version=11)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

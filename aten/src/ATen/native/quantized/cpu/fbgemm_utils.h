@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/core/QScheme.h>
+
 #ifdef USE_FBGEMM
 #include "fbgemm/Fbgemm.h"
 #include "fbgemm/QuantUtils.h"
@@ -16,16 +18,18 @@
 struct FBGEMM_API PackedLinearWeight {
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
   std::vector<int32_t> col_offsets;
-  double w_scale;
-  int64_t w_zp;
+  std::vector<float> w_scale;
+  std::vector<int32_t> w_zp;
+  c10::QScheme q_scheme;
 };
 
 struct FBGEMM_API PackedConvWeight {
   std::unique_ptr<fbgemm::PackWeightsForConv<2>> w;
   std::vector<int32_t> col_offsets;
   std::vector<int64_t> kernel;
-  double w_scale;
-  int64_t w_zp;
+  std::vector<float> w_scale;
+  std::vector<int32_t> w_zp;
+  c10::QScheme q_scheme;
 };
 
 // PackWeight: Convert the weight from uint8 to int8.

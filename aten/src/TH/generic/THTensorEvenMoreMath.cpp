@@ -3,6 +3,9 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 // Finds non-zero elements of a tensor and returns their subscripts
 void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
@@ -762,35 +765,10 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
                    tensor_data += sz*tensor_stride;
                    src_data += sz*src_stride;
                    break;);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::check_names_for_dot(tensor, src);
+#endif
   return sum;
-}
-
-void THTensor_(add)(THTensor *r_, THTensor *t, scalar_t value)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(adds)(r__data, t_data, value, r__len););
-  } else {
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data + value;, ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-  }
-}
-
-void THTensor_(sub)(THTensor *r_, THTensor *t, scalar_t value)
-{
-  THTensor_(add)(r_, t, -value);
-}
-
-void THTensor_(add_scaled)(THTensor *r_, THTensor *t, scalar_t value, scalar_t alpha)
-{
-  THTensor_(add)(r_, t, value * alpha);
-}
-
-void THTensor_(sub_scaled)(THTensor *r_, THTensor *t, scalar_t value, scalar_t alpha)
-{
-  THTensor_(add)(r_, t, -value * alpha);
 }
 
 void THTensor_(lshift)(THTensor *r_, THTensor *t, scalar_t value)
