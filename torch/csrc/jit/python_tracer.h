@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/jit/source_range.h>
 
 #include <memory>
 #include <string>
@@ -19,8 +18,6 @@ namespace tracer {
 void initPythonTracerBindings(PyObject* module);
 
 std::string getPythonInterpreterStackTrace();
-SourceRange getPythonInterpreterSourceRange();
-
 Node* preRecordPythonTrace(
     THPObjectPtr pyobj,
     const std::string& arg_types,

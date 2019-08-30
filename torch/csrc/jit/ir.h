@@ -1096,10 +1096,10 @@ struct Graph {
 
   TORCH_API Value* insertFunctionCall(
       Function* callee,
-      const script::MatchedSchema& matched);
+      script::MatchedSchema& matched);
   TORCH_API Value* insertMethodCall(
       std::string method_name,
-      const script::MatchedSchema& matched);
+      script::MatchedSchema& matched);
 
   // Note: defined in python_ir.cpp and can be used only in python extension
   Node* createPythonOp(
