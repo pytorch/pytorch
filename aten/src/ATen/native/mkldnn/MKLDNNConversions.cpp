@@ -20,7 +20,7 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
 }
 
 Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
-  AT_ASSERTM(cpu_tensor.type_id() == CPUTensorId(),
+  AT_ASSERTM(cpu_tensor.type_id() == TensorTypeId::CPUTensorId,
              "dense_to_mkldnn expects dense CPU tensor input");
   AT_ASSERTM(cpu_tensor.scalar_type() == ScalarType::Float,
              "dense_to_mkldnn expects float tensor input");
