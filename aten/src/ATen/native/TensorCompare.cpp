@@ -7,7 +7,6 @@
 #include <c10/util/Exception.h>
 #include <ATen/native/cpu/TensorCompareKernel.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/cpu/vec256/vec256.h>
 
 namespace {
 template <typename scalar_t>
@@ -24,13 +23,13 @@ void where_cpu(
   iter.add_input(other);
   iter.build();
   if (condition.scalar_type() == at::ScalarType::Byte) {
-    at::native::cpu_serial_kernel(
+    at::native::cpu_kernel(
       iter,
       [=](uint8_t cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
         return cond_val ? self_val : other_val;
       });
   } else {
-    at::native::cpu_serial_kernel(
+    at::native::cpu_kernel(
       iter,
       [=](bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
         return cond_val ? self_val : other_val;
