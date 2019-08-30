@@ -12,8 +12,13 @@ Element::Element(MemoryDAG& dag_, const Value* value_, unsigned index_)
     : dag(dag_), index(index_), value(value_) {}
 
 const Element* MemoryDAG::fromIndex(unsigned x) const {
-  TORCH_INTERNAL_ASSERT(x < indexToElementMap.size());
-  return indexToElementMap[x].get();
+  TORCH_INTERNAL_ASSERT(x < indexToElementMap_.size());
+  return indexToElementMap_[x].get();
+}
+
+Element* MemoryDAG::fromIndex(unsigned x) {
+  TORCH_INTERNAL_ASSERT(x < indexToElementMap_.size());
+  return indexToElementMap_[x].get();
 }
 
 bool MemoryDAG::mayAlias(Element* a, Element* b) const {
@@ -90,6 +95,8 @@ bool MemoryDAG::mayContainAlias(
 
 void MemoryDAG::makePointerTo(Element* from, Element* to) {
   from->pointsTo.set(to->index);
+  from->cachedMemoryLocations_.clear();
+
   to->pointedFrom.set(from->index);
 }
 
@@ -101,9 +108,9 @@ void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
 
 // Give `v` a fresh alias (i.e. it does not point to any value)
 Element* MemoryDAG::makeFreshValue(const Value* v) {
-  indexToElementMap.emplace_back(
-    torch::make_unique<Element>(*this, v, indexToElementMap.size()));
-  return indexToElementMap.back().get();
+  indexToElementMap_.emplace_back(
+    torch::make_unique<Element>(*this, v, indexToElementMap_.size()));
+  return indexToElementMap_.back().get();
 }
 
 const MemoryLocations& Element::getMemoryLocations() const {
