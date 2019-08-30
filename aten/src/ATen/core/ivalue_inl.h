@@ -191,6 +191,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  public:
+  Future(TypePtr type) : type_(type) {}
   struct CAFFE2_API FutureError final : public std::exception {
     FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
@@ -269,13 +270,21 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   // Check if the current future has completed
-  bool completed() {
+  bool completed() const{
     return completed_;
   }
 
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const Future& v);
+
+  TypePtr type() {
+    if (!completed()) {
+      return type_;
+    } else {
+      return value().type();
+    }
+  }
 
  private:
   void fireCallbacks() {
@@ -293,6 +302,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   std::condition_variable finished_cv_;
 
   IValue value_; // when finished the value
+  TypePtr type_;
   std::vector<std::function<void(void)>> callbacks;
   bool has_error = false;
   FutureError error;

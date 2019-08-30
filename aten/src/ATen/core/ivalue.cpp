@@ -26,6 +26,46 @@ TupleTypePtr Tuple::type() const {
 
 TypePtr IValue::type() const {
   switch(tag) {
+    case Tag::None:
+      return NoneType::get();
+    case Tag::Tensor:
+      return TensorType::create(toTensor());
+    case Tag::Double:
+      return FloatType::get();
+    case Tag::Int:
+      return IntType::get();
+    case Tag::Bool:
+      return BoolType::get();
+    case Tag::IntList:
+      return ListType::ofInts();
+    case Tag::DoubleList:
+      return ListType::ofFloats();
+    case Tag::BoolList:
+      return ListType::ofBools();
+    case Tag::TensorList:
+      return ListType::ofTensors();
+    case Tag::String:
+      return StringType::get();
+    case Tag::Blob:
+      return AnyType::get();
+    case Tag::GenericDict: {
+      auto d = toGenericDict();
+      return DictType::create(d.keyType(), d.valueType());
+    }
+    case Tag::GenericList:
+      return ListType::create(toGenericList().elementType());
+    case Tag::Future:
+      return toFuture()->type();
+    case Tag::Device:
+      return DeviceObjType::get();
+    case Tag::Object:
+      return toObjectRef().type();
+    case Tag::Uninitialized:
+      return AnyType::get();
+    case Tag::Capsule:
+      return CapsuleType::get();
+    case Tag::Tuple:
+      return toTuple()->type();
   }
 }
 namespace {

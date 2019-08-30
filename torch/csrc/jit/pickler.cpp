@@ -639,8 +639,7 @@ OpCode Unpickler::readInstruction() {
   auto opcode = readOpCode();
   switch (opcode) {
     case OpCode::EMPTY_LIST: {
-      stack_.emplace_back(
-          c10::impl::GenericList(c10::impl::deprecatedUntypedList()));
+      stack_.emplace_back(c10::impl::GenericList(AnyType::get()));
     } break;
     case OpCode::EMPTY_TUPLE: {
       if (empty_tuple_.isNone()) {
@@ -725,7 +724,8 @@ OpCode Unpickler::readInstruction() {
         stack_.emplace_back(tuple);
     } break;
     case OpCode::EMPTY_DICT:
-      stack_.emplace_back(c10::impl::GenericDict(c10::impl::deprecatedUntypedDict()));
+      stack_.emplace_back(
+          c10::impl::GenericDict(AnyType::get(), AnyType::get()));
       break;
     case OpCode::APPENDS: {
       readList();
