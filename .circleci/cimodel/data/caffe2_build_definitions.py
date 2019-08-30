@@ -6,7 +6,6 @@ import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 from cimodel.lib.conf_tree import Ver
 import cimodel.lib.miniutils as miniutils
-import cimodel.lib.visualization as visualization
 from cimodel.data.caffe2_build_data import CONFIG_TREE_DATA, TopLevelNode
 
 

@@ -6,7 +6,6 @@ from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
 import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
-import cimodel.lib.visualization as visualization
 
 from dataclasses import dataclass, field
 from typing import List, Optional
