@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import unittest
 import torch
 import torch.nn as nn
@@ -40,7 +38,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         to nnq.Linear which is the quantized version of the module
         """
         model = SingleLayerLinearModel()
-        model = prepare(model)
+        prepare(model)
         # Check if observers and quant/dequant nodes are inserted
         self.checkNoPrepModules(model)
         self.checkHasPrepModules(model.fc1)
@@ -59,7 +57,8 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        model = quantize(SingleLayerLinearModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(SingleLayerLinearModel(), test_only_eval_fn,
+                         self.calib_data)
         checkQuantized(model)
 
     def test_two_layers(self):
@@ -67,7 +66,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         `fc2`, and `fc1`is not quantized
         """
         model = AnnotatedTwoLayerLinearModel()
-        model = prepare(model)
+        prepare(model)
 
         self.checkNoPrepModules(model)
         self.checkObservers(model)
@@ -89,7 +88,8 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        model = quantize(AnnotatedTwoLayerLinearModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(AnnotatedTwoLayerLinearModel(), test_only_eval_fn,
+                         self.calib_data)
         checkQuantized(model)
 
     def test_nested1(self):
@@ -110,7 +110,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
             self.checkNoPrepModules(model.sub2.fc2)
             self.checkHasPrepModules(model.fc3)
 
-        model = prepare(model)
+        prepare(model)
         checkPrepModules(model, True)
         test_only_eval_fn(model, self.calib_data)
         convert(model)
@@ -127,13 +127,14 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        model = quantize(AnnotatedNestedModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(AnnotatedNestedModel(), test_only_eval_fn,
+                         self.calib_data)
         checkQuantized(model)
 
 
     def test_nested2(self):
         model = AnnotatedSubNestedModel()
-        model = prepare(model)
+        prepare(model)
 
         def checkPrepModules(model, before_calib=False):
             if before_calib:
@@ -165,7 +166,8 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        model = quantize(AnnotatedSubNestedModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(AnnotatedSubNestedModel(), test_only_eval_fn,
+                         self.calib_data)
         checkQuantized(model)
 
     def test_nested3(self):
@@ -173,7 +175,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         parent qconfig
         """
         model = AnnotatedCustomConfigNestedModel()
-        model = prepare(model)
+        prepare(model)
 
         def checkPrepModules(model, before_calib=False):
             if before_calib:
@@ -203,7 +205,8 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        model = quantize(AnnotatedCustomConfigNestedModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(AnnotatedCustomConfigNestedModel(), test_only_eval_fn,
+                         self.calib_data)
         checkQuantized(model)
 
     def test_skip_quant(self):
@@ -293,7 +296,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         qconfig_dict = {
             '': default_dynamic_qconfig
         }
-        model = prepare_dynamic(model, qconfig_dict)
+        prepare_dynamic(model, qconfig_dict)
         convert_dynamic(model)
 
         def checkQuantized(model):
@@ -302,7 +305,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        model = quantize_dynamic(SingleLayerLinearDynamicModel().eval(), qconfig_dict)
+        model = quantize_dynamic(SingleLayerLinearDynamicModel().eval(),
+                                 qconfig_dict)
         checkQuantized(model)
 
     def test_two_layers(self):
@@ -313,7 +317,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         qconfig_dict = {
             'fc2': default_dynamic_qconfig
         }
-        model = prepare_dynamic(model, qconfig_dict)
+        prepare_dynamic(model, qconfig_dict)
 
         convert_dynamic(model)
 
@@ -337,7 +341,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             'sub2.fc1': default_dynamic_qconfig
         }
 
-        model = prepare_dynamic(model, qconfig_dict)
+        prepare_dynamic(model, qconfig_dict)
         convert_dynamic(model)
 
         def checkQuantized(model):
@@ -361,7 +365,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             'fc3': default_dynamic_qconfig,
             'sub2': default_dynamic_qconfig
         }
-        model = prepare_dynamic(model, qconfig_dict)
+        prepare_dynamic(model, qconfig_dict)
 
         convert_dynamic(model)
 
@@ -393,7 +397,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             'sub2': default_dynamic_qconfig,
             'sub2.fc1': custom_dynamic_qconfig
         }
-        model = prepare_dynamic(model, qconfig_dynamic_dict)
+        prepare_dynamic(model, qconfig_dynamic_dict)
 
         convert_dynamic(model)
 
@@ -419,7 +423,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             torch.nn.Linear: default_dynamic_qconfig
         }
 
-        model = prepare_dynamic(model, qconfig_dict)
+        prepare_dynamic(model, qconfig_dict)
         test_only_eval_fn(model, self.calib_data)
         convert_dynamic(model)
 
@@ -445,7 +449,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
         model = ManualLinearQATModel()
-        model = prepare_qat(model)
+        prepare_qat(model)
         self.checkObservers(model)
         test_only_train_fn(model, self.train_data)
         convert(model)
@@ -458,7 +462,8 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        model = quantize_qat(ManualLinearQATModel(), test_only_train_fn, self.train_data)
+        model = quantize_qat(ManualLinearQATModel(), test_only_train_fn,
+                             self.train_data)
         checkQuantized(model)
 
     def test_eval_only_fake_quant(self):
@@ -468,7 +473,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         """
         model = ManualLinearQATModel()
 
-        model = prepare_qat(model)
+        prepare_qat(model)
         self.checkObservers(model)
 
         model.eval()
@@ -477,7 +482,7 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
     def test_conv_linear(self):
         model = ManualConvLinearQATModel()
 
-        model = prepare_qat(model)
+        prepare_qat(model)
         self.checkObservers(model)
 
         test_only_train_fn(model, self.img_data)
@@ -547,7 +552,7 @@ class FusionTest(QuantizationTestCase):
                          "Non-fused submodule Conv")
         self.assertEqual(type(model.sub2.relu), torch.nn.ReLU,
                          "Non-fused submodule ReLU")
-        model = prepare_qat(model)
+        prepare_qat(model)
         self.checkObservers(model)
 
         def checkQAT(model):
@@ -606,7 +611,7 @@ class FusionTest(QuantizationTestCase):
         self.assertEqual(type(model.sub2.relu), torch.nn.ReLU,
                          "Non-fused submodule ReLU")
 
-        model = prepare(model)
+        prepare(model)
         self.checkObservers(model)
         test_only_eval_fn(model, self.img_data)
         convert(model)

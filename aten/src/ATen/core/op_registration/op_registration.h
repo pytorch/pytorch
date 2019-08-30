@@ -29,7 +29,7 @@ namespace c10 {
  * >
  * > static auto registry = c10::RegisterOperators()
  * >     .op("my_op", c10::RegisterOperators::options()
- * >         .kernel<my_kernel_cpu>(CPUTensorId()));
+ * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId));
  */
 class CAFFE2_API RegisterOperators final {
 public:
@@ -74,7 +74,7 @@ public:
      * >
      * > static auto registry = c10::RegisterOperators()
      * >     .op("my_op", c10::RegisterOperators::options()
-     * >         .kernel<my_kernel_cpu>(CPUTensorId()));
+     * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId));
      *
      * The functor constructor can take arguments to configure the kernel.
      * The arguments are defined in the kernel registration.
@@ -92,7 +92,7 @@ public:
      * >
      * > static auto registry = c10::RegisterOperators()
      * >     .op("my_op", c10::RegisterOperators::options()
-     * >         .kernel<my_kernel_cpu>(CPUTensorId(), "some_configuration", 3, true));
+     * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId, "some_configuration", 3, true));
      */
     template<class KernelFunctor, class... ConstructorParameters>
     // enable_if: only enable it if KernelFunctor is actually a functor
@@ -159,7 +159,7 @@ public:
      * >
      * > static auto registry = c10::RegisterOperators()
      * >     .op("my_op", c10::RegisterOperators::options()
-     * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()));
+     * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(TensorTypeId::CPUTensorId));
      */
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
@@ -225,7 +225,7 @@ public:
      *
      * > static auto registry = c10::RegisterOperators()
      * >     .op("my_op", c10::RegisterOperators::options()
-     * >         .kernel(CPUTensorId(), [] (Tensor a) -> Tensor {...}));
+     * >         .kernel(TensorTypeId::CPUTensorId, [] (Tensor a) -> Tensor {...}));
      */
     template<class Lambda>
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)

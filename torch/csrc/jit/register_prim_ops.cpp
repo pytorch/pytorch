@@ -584,7 +584,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::data(Tensor(a) a) -> Tensor(a|b)",
+         "prim::data(Tensor(a) a) -> Tensor(a)",
          [](Stack& stack) {
            at::Tensor a;
            pop(stack, a);
@@ -1292,34 +1292,6 @@ RegisterOperators reg(
              auto userObj = c10::ivalue::Object::create(
                  c10::StrongTypePtr(cu, type), numAttrs);
              push(stack, std::move(userObj));
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::GetAttr,
-         [](const Node* node) {
-           const auto type = node->input()->type()->expect<ClassType>();
-           const auto& field = node->s(attr::name);
-           const auto slot = type->getAttributeSlot(field);
-           return [slot](Stack& stack) {
-             auto userObj = pop(stack).toObject();
-             auto value = userObj->getSlot(slot);
-             push(stack, std::move(value));
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::SetAttr,
-         [](const Node* node) {
-           const auto type = node->inputs().at(0)->type()->expect<ClassType>();
-           const auto& field = node->s(attr::name);
-           const auto slot = type->getAttributeSlot(field);
-           return [slot](Stack& stack) {
-             auto v = pop(stack);
-             auto userObj = pop(stack).toObject();
-             userObj->setSlot(slot, std::move(v));
              return 0;
            };
          },
