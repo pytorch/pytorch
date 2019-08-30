@@ -739,7 +739,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allreduce_stress(inputs)
 
-    @skip_if_lt_x_gpu(1)
     def test_allreduce_coalesced_checks(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
@@ -763,10 +762,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         with self.assertRaisesRegex(ValueError, "unsupported layout"):
             opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t3, t3.clone()], opts)
-
-        with self.assertRaisesRegex(ValueError, "unsupported device type"):
-            opts = c10d.AllreduceCoalescedOptions()
-            pg.allreduce_coalesced([t1.cuda(), t2.cuda()], opts)
 
     def _test_allreduce_coalesced_basics(self, fn):
         store = c10d.FileStore(self.file.name, self.world_size)
