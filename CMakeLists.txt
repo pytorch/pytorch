@@ -185,7 +185,9 @@ cmake_dependent_option(
 
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 
-set(CMAKE_LINK_WHAT_YOU_USE TRUE)
+if(NOT APPLE)
+  set(CMAKE_LINK_WHAT_YOU_USE TRUE)
+endif()
 
 # For MSVC,
 # 1. Replace /Zi and /ZI with /Z7
