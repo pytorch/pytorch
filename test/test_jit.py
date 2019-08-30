@@ -5848,8 +5848,7 @@ a")
         def not_test(x):
             return ~x
 
-        z = torch.tensor([2, 4])
-        self.assertEqual(not_test(z), torch.jit.script(not_test)(z))
+        self.checkScript(not_test, torch.tensor([2, 4]))
 
     def test_number_all(self):
         def int1():
