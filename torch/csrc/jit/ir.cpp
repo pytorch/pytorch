@@ -919,20 +919,24 @@ bool Node::hasSideEffects() const {
 
   if (kind_.is_prim() || kind_.is_aten()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
-    // ops using AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::INTERNAL_SPECIAL_CASE,
-    // but this is the intended behavior for all current ops and a good error check.
-    // We can consider lifting this constraint later if we have a use case for it.
+    // ops using AliasAnalysisKind::FROM_SCHEMA,
+    // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, or
+    // AliasAnalysisKind::CONSERVATIVE but this is the intended behavior for all
+    // current ops and a good error check. We can consider lifting this
+    // constraint later if we have a use case for it.
     TORCH_INTERNAL_ASSERT(
         op->aliasAnalysisKind() == AliasAnalysisKind::INTERNAL_SPECIAL_CASE ||
-            op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA,
-        "aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE or AliasAnalysisKind::FROM_SCHEMA but ",
+            op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA ||
+            op->aliasAnalysisKind() == AliasAnalysisKind::CONSERVATIVE,
+        "aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE"
+        ", AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::CONSERVATIVE but ",
         kind_.toDisplayString(),
         " has ",
         toString(op->aliasAnalysisKind()));
   }
 
   switch (op->aliasAnalysisKind()) {
-    case AliasAnalysisKind::PURE:
+    case AliasAnalysisKind::PURE_FUNCTION:
       return false;
     case AliasAnalysisKind::FROM_SCHEMA:
       return false;

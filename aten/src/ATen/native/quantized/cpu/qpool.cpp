@@ -144,10 +144,11 @@ Tensor q_maxpool_2d(
       oSizes,
       qx.options().dtype(toQIntType(qx.scalar_type())),
       qx.q_scale(),
-      qx.q_zero_point());
+      qx.q_zero_point(),
+      qx.suggest_memory_format());
   auto qx_contig = qx.contiguous();
-  auto qxd = qx_contig.data<Q>();
-  auto qyd = qy.data<Q>();
+  auto qxd = qx_contig.data_ptr<Q>();
+  auto qyd = qy.data_ptr<Q>();
   std::vector<int64_t> index;
   index.resize(qy.numel());
 
@@ -255,7 +256,7 @@ static auto registry = torch::RegisterOperators().op(
     "int[] padding, "
     "int[] dilation) -> Tensor",
     torch::RegisterOperators::options().kernel<QMaxPool2D_arr_args>(
-        QuantizedCPUTensorId()));
+        TensorTypeId::QuantizedCPUTensorId));
 
 } // namespace
 } // namespace native

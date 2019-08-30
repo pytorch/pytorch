@@ -111,9 +111,9 @@ void syncStreams(
 
 } // namespace
 
-constexpr int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 100;
+const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 100;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
-constexpr int64_t ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis =
+const int64_t ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis =
     10 * 1000;
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
@@ -637,6 +637,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
             comm,
             stream.stream());
       });
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceCoalescedOptions& opts) {
+  throw std::runtime_error("allreduce_coalesced is currently not supported with NCCL");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(

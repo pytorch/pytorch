@@ -29,7 +29,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 
     // TODO: contiguous is called for further jit optimizations.
     auto input_contig = input.contiguous();
-    const auto* input_ptr = input_contig.data<float>();
+    const auto* input_ptr = input_contig.data_ptr<float>();
 
     TORCH_CHECK(
         input.dim() >= 2,
@@ -76,9 +76,6 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 
     q_params.precision = precision;
 
-    float weight_scale_float = pack_ptr.w_scale;
-    int32_t weight_zero_point_int32 = pack_ptr.w_zp;
-
     // This operation does the following:
     // 1) Quantizes the input matrix given the statistics we've calculated above
     // 2) Creates a "row buffer" vector with offset values that must be added
@@ -121,24 +118,8 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
           "bias should have N elements: " + std::to_string(N));
       // TODO: contiguous is called for further jit optimizations.
       auto bias_contig = bias_vec.contiguous();
-      bias_ptr = bias_contig.data<float>();
+      bias_ptr = bias_contig.data_ptr<float>();
     }
-
-    // After the uint8 * int8 matrix multiplication is performed, this operation
-    // does:
-    //  1) Add in row and column offsets to the rows and columns, respectively
-    //  2) Dequantize the results into floating point
-    //  3) Add in the bias term.
-    fbgemm::ReQuantizeForFloat<ReluFused> outputProcObj(
-        /*nextop=*/doNothingObj,
-        /*Aq_scale=*/q_params.scale,
-        /*Bq_scale=*/&weight_scale_float,
-        /*Aq_zero_point=*/q_params.zero_point,
-        /*Bq_zero_point=*/&weight_zero_point_int32,
-        /*row_offsets=*/packA.getRowOffsetBuffer(),
-        /*col_offsets=*/col_offsets.data(),
-        /*bias=*/bias_ptr,
-        /*nCol=*/N);
 
     // The resulting matrix here is 2-D, let's view it with the original
     // left hand dimensions of the input. Here are two examples:
@@ -150,16 +131,69 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     auto output = at::zeros(out_sizes, input.options().dtype(at::kFloat));
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
-    // Do the GEMM
-    fbgemm::fbgemmPacked(
-        /*packA=*/packA,
-        /*packB=*/*packB,
-        /*C=*/output.data<float>(),
-        /*C_buffer=*/buffer.data<int32_t>(),
-        /*ldc=*/N,
-        /*outProcess=*/outputProcObj,
-        /*thread_id=*/0,
-        /*num_threads=*/1);
+    if (pack_ptr.q_scheme == kPerTensorAffine) {
+      // Process the per tensor quantization.
+      //
+      // After the uint8 * int8 matrix multiplication is performed, this
+      // operation does:
+      //  1) Add in row and column offsets to the rows and columns, respectively
+      //  2) Dequantize the results into floating point
+      //  3) Add in the bias term.
+      fbgemm::ReQuantizeForFloat<ReluFused> outputProcObj(
+          /*nextop=*/doNothingObj,
+          /*Aq_scale=*/q_params.scale,
+          /*Bq_scale=*/pack_ptr.w_scale.data(),
+          /*Aq_zero_point=*/q_params.zero_point,
+          /*Bq_zero_point=*/pack_ptr.w_zp.data(),
+          /*row_offsets=*/packA.getRowOffsetBuffer(),
+          /*col_offsets=*/col_offsets.data(),
+          /*bias=*/bias_ptr,
+          /*nCol=*/N);
+
+      // Do the GEMM
+      fbgemm::fbgemmPacked(
+          /*packA=*/packA,
+          /*packB=*/*packB,
+          /*C=*/output.data_ptr<float>(),
+          /*C_buffer=*/buffer.data_ptr<int32_t>(),
+          /*ldc=*/N,
+          /*outProcess=*/outputProcObj,
+          /*thread_id=*/0,
+          /*num_threads=*/1);
+
+    } else if (pack_ptr.q_scheme == kPerChannelAffine) {
+      // Process the per channel quantization.
+      //
+      // After the uint8 * int8 matrix multiplication is performed, this
+      // operation does:
+      //  1) Add in row and column offsets to the rows and columns, respectively
+      //  2) Dequantize the results into floating point
+      //  3) Add in the bias term.
+      fbgemm::ReQuantizeForFloat<
+          ReluFused,
+          fbgemm::QuantizationGranularity::OUT_CHANNEL>
+          outputProcObj(
+              /*nextop=*/doNothingObj,
+              /*Aq_scale=*/q_params.scale,
+              /*Bq_scale=*/pack_ptr.w_scale.data(),
+              /*Aq_zero_point=*/q_params.zero_point,
+              /*Bq_zero_point=*/pack_ptr.w_zp.data(),
+              /*row_offsets=*/packA.getRowOffsetBuffer(),
+              /*col_offsets=*/col_offsets.data(),
+              /*bias=*/bias_ptr,
+              /*nCol=*/N);
+
+      // Do the GEMM
+      fbgemm::fbgemmPacked(
+          /*packA=*/packA,
+          /*packB=*/*packB,
+          /*C=*/output.data_ptr<float>(),
+          /*C_buffer=*/buffer.data_ptr<int32_t>(),
+          /*ldc=*/N,
+          /*outProcess=*/outputProcObj,
+          /*thread_id=*/0,
+          /*num_threads=*/1);
+    }
 
     return output;
   }
@@ -181,10 +215,10 @@ static auto registry =
     torch::RegisterOperators()
         .op("quantized::fbgemm_linear_dynamic(Tensor X, Tensor W_prepack, Tensor? b) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<false>>(CPUTensorId()))
+                .kernel<QLinearDynamicInt8<false>>(TensorTypeId::CPUTensorId))
         .op("quantized::fbgemm_linear_relu_dynamic(Tensor X, Tensor W_prepack, Tensor? b) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<true>>(CPUTensorId()));
+                .kernel<QLinearDynamicInt8<true>>(TensorTypeId::CPUTensorId));
 } // namespace
 } // namespace native
 } // namespace at
