@@ -157,18 +157,18 @@ class HistogramObserver(ObserverBase):
         max_val = self.max_val
         histogram = self.histogram
         if min_val is None or max_val is None or histogram is None:
+            # min_val = torch.min(x).item()
+            # max_val = torch.max(x).item()
             min_val = torch.min(x)
             max_val = torch.max(x)
             range = max_val - min_val
             self.relaxed_min = min_val - 0.5 * range
             self.relaxed_max = max_val + 0.5 * range
-            self.histogram = torch.histc(x, self.bins, min=self.relaxed_min, max=self.relaxed_max)
+            self.histogram = torch.histc(x, self.bins, min=self.relaxed_min.item(), max=self.relaxed_max.item())
             self.min_val = self.relaxed_min
             self.max_val = self.relaxed_max
         else:
-            new_min = torch.min(x)
-            new_max = torch.max(x)
-            new_histogram = torch.histc(x, self.bins, min=self.relaxed_min, max=self.relaxed_max)
+            new_histogram = torch.histc(x, self.bins, min=self.relaxed_min.item(), max=self.relaxed_max.item())
             self.histogram = new_histogram + histogram
 
     @torch.jit.export
