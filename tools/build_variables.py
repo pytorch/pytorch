@@ -7,8 +7,6 @@ load("//caffe2/caffe2/fb:defs_gpu.bzl", "gpu_library_selector")
 
 GENERATED_CPP = [
     "Functions.cpp",
-    "THCUNN.cpp",
-    "THNN.cpp",
     "VariableType_0.cpp",
     "VariableType_1.cpp",
     "VariableType_2.cpp",
@@ -36,6 +34,7 @@ libtorch_sources = [
     ":generate-code=VariableType_4.cpp",
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/autograd/anomaly_mode.cpp",
+    "torch/csrc/autograd/autograd.cpp",
     "torch/csrc/autograd/custom_function.cpp",
     "torch/csrc/autograd/cpp_hook.cpp",
     "torch/csrc/autograd/engine.cpp",
@@ -50,10 +49,12 @@ libtorch_sources = [
     "torch/csrc/autograd/record_function.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
-    "torch/csrc/distributed/rpc/FutureMessage.cpp",
-    "torch/csrc/distributed/rpc/Message.cpp",
-    "torch/csrc/distributed/rpc/ScriptCall.cpp",
-    "torch/csrc/distributed/rpc/ScriptRet.cpp",
+    "torch/csrc/distributed/autograd/context/dist_autograd_container.cpp",
+    "torch/csrc/distributed/autograd/context/dist_autograd_context.cpp",
+    "torch/csrc/distributed/rpc/future_message.cpp",
+    "torch/csrc/distributed/rpc/message.cpp",
+    "torch/csrc/distributed/rpc/script_call.cpp",
+    "torch/csrc/distributed/rpc/script_ret.cpp",
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/jit/autodiff.cpp",
     "torch/csrc/jit/attributes.cpp",
@@ -67,6 +68,7 @@ libtorch_sources = [
     "torch/csrc/jit/import.cpp",
     "torch/csrc/jit/pickle.cpp",
     "torch/csrc/jit/import_export_helpers.cpp",
+    "torch/csrc/jit/instruction.cpp",
     "torch/csrc/jit/interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/irparser.cpp",
@@ -198,7 +200,6 @@ def add_torch_libs():
     ]
 
     libtorch_python_sources = [
-        ":generate-code=THNN.cpp",
         ":generate-code=python_functions.cpp",
         ":generate-code=python_nn_functions.cpp",
         ":generate-code=python_torch_functions.cpp",
@@ -230,15 +231,16 @@ def add_torch_libs():
         "torch/csrc/autograd/python_variable.cpp",
         "torch/csrc/autograd/python_variable_indexing.cpp",
         "torch/csrc/byte_order.cpp",
+        "torch/csrc/distributed/autograd/init.cpp",
         "torch/csrc/distributed/c10d/comm.cpp",
         "torch/csrc/distributed/c10d/init.cpp",
         "torch/csrc/distributed/c10d/reducer.cpp",
-        "torch/csrc/distributed/rpc/init.cpp",
-        "torch/csrc/distributed/rpc/RpcAgent.cpp",
-        "torch/csrc/distributed/rpc/ProcessGroupAgent.cpp",
         "torch/csrc/distributed/rpc/functions.cpp",
+        "torch/csrc/distributed/rpc/init.cpp",
+        "torch/csrc/distributed/rpc/process_group_agent.cpp",
         "torch/csrc/distributed/rpc/python_functions.cpp",
-        "torch/csrc/distributed/rpc/PythonRpcHandler.cpp",
+        "torch/csrc/distributed/rpc/python_rpc_handler.cpp",
+        "torch/csrc/distributed/rpc/rpc_agent.cpp",
         "torch/csrc/jit/init.cpp",
         "torch/csrc/jit/passes/inline_fork_wait.cpp",
         "torch/csrc/jit/passes/onnx.cpp",
@@ -284,7 +286,6 @@ def add_torch_libs():
     libtorch_python_sources.extend(glob(["test/cpp/jit/test_*.cpp"]))
 
     libtorch_python_cuda_sources = [
-        ":generate-code=THCUNN.cpp",
         "torch/csrc/cuda/Event.cpp",
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
@@ -440,7 +441,6 @@ def add_torch_libs():
         link_whole=True,
         deps=[
             ":torch-cpp-cpu",
-            ":thnn",
             "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/c10d:c10d_cpu",
             "//caffe2/torch/lib/libshm:libshm",
@@ -460,7 +460,6 @@ def add_torch_libs():
         link_whole=True,
         deps=[
             ":torch-cpp-cuda",
-            ":thnn",
             "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/c10d:c10d",
             "//caffe2/torch/lib/libshm:libshm",

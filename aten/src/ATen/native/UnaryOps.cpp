@@ -48,7 +48,7 @@ Tensor& bitwise_not_(Tensor& self) {
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) {
   checkBackend("bitwise_not", result, self.type().backend());
   auto iter = TensorIterator::unary_op(result, self,
-    /*check_internal_overlap=*/true);
+    /*check_mem_overlap=*/true);
   bitwise_not_stub(iter.device_type(), iter);
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
@@ -68,7 +68,8 @@ Tensor& logical_not_(Tensor& self) {
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
   TensorIterator iter;
   iter.dont_compute_common_dtype();
-  iter.check_and_add_output(result);
+  iter.set_check_mem_overlap(true);
+  iter.add_output(result);
   iter.add_input(self);
   iter.build();
   logical_not_stub(iter.device_type(), iter);
@@ -97,6 +98,22 @@ Tensor& neg_out(Tensor& result, const Tensor& self) {
   return result;
 }
 
+Tensor ceil(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::ceil_out(result, self);
+}
+
+Tensor& ceil_(Tensor& self) {
+  return at::ceil_out(self, self);
+}
+
+Tensor& ceil_out(Tensor& result, const Tensor& self) {
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_internal_overlap=*/true);
+  ceil_stub(iter.device_type(), iter);
+  return result;
+}
+
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
@@ -113,7 +130,32 @@ Tensor clamp_min(const Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
-  return _clamp_out_cpu(self, self, min, max);
+  return clamp_out(self, self, min, max);
+}
+
+//used internally and not exposed by API
+Tensor& trigamma_out(Tensor& result, const Tensor& self) {
+  checkBackend("trigamma", result, Backend::CPU);
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_mem_overlap=*/true);
+  trigamma_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor polygamma(int64_t n, const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  at::polygamma_out(result, n, self);
+  return result;
+}
+Tensor& polygamma_(Tensor& self, int64_t n) {
+  return at::polygamma_out(self, n, self);
+}
+Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
+  checkBackend("polygamma", result, Backend::CPU);
+  auto iter = TensorIterator::unary_op(result, self,
+    /*check_mem_overlap=*/true);
+  polygamma_stub(iter.device_type(), iter, n);
+  return result;
 }
 
 Tensor& _clamp_out_cpu(
@@ -122,42 +164,59 @@ Tensor& _clamp_out_cpu(
     optional<Scalar> min,
     optional<Scalar> max) {
   if (min && max) {
-    legacy::cpu::_th_clamp_out(result, self, *min, *max);
+    checkBackend("clamp", result, Backend::CPU);
+    auto iter = TensorIterator::unary_op(result, self,
+        /*check_mem_overlap=*/true);
+    clamp_stub(iter.device_type(), iter, *min, *max);
   } else if (max) {
-    legacy::cpu::_th_clamp_max_out(result, self, *max);
+    clamp_max_out(result, self, *max);
   } else if (min) {
-    legacy::cpu::_th_clamp_min_out(result, self, *min);
+    clamp_min_out(result, self, *min);
   } else {
     AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
-  return legacy::cpu::_th_clamp_max_out(self, self, max);
+  return clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  legacy::cpu::_th_clamp_max_out(result, self, max);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
+  checkBackend("clamp_max", result, Backend::CPU);
+  auto iter = TensorIterator::unary_op(result, self,
+      /*check_mem_overlap=*/true);
+  clamp_max_stub(iter.device_type(), iter, max);
   return result;
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
-  return legacy::cpu::_th_clamp_min_out(self, self, min);
+  return clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  legacy::cpu::_th_clamp_min_out(result, self, min);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
+  checkBackend("clamp_min", result, Backend::CPU);
+  auto iter = TensorIterator::unary_op(result, self,
+      /*check_mem_overlap=*/true);
+  clamp_min_stub(iter.device_type(), iter, min);
   return result;
+}
+
+Tensor sign(const Tensor& self) {
+    Tensor result = at::empty({0}, self.options());
+    return at::sign_out(result, self);
+}
+
+Tensor& sign_(Tensor& self) {
+    return at::sign_out(self, self);
+}
+
+Tensor& sign_out(Tensor& result, const Tensor& self) {
+    checkBackend("sign", result, self.type().backend());
+    auto iter = TensorIterator::unary_op(result, self,
+      /*check_internal_overlap=*/true);
+    sign_stub(iter.device_type(), iter);
+    return result;
 }
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
@@ -191,30 +250,45 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
-#define IMPLEMENT_UNARY_OP_VEC(op)                              \
-  Tensor op(const Tensor& self) {                               \
-    Tensor result = at::empty({0}, self.options());             \
-    at::op##_out(result, self);                                 \
-    return result;                                              \
-  }                                                             \
-  Tensor& _##op##__cpu(Tensor& self) {                          \
-    return at::op##_out(self, self);                            \
-  }                                                             \
-  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
-    checkBackend(#op, result, Backend::CPU);                    \
-    auto iter = TensorIterator::unary_op(result, self,          \
-      /*check_internal_overlap=*/true);                         \
-    op##_stub(iter.device_type(), iter);                        \
-    return result;                                              \
+#define IMPLEMENT_UNARY_OP_CORE(op)                                    \
+  Tensor op(const Tensor& self) {                                      \
+    Tensor result = at::empty({0}, self.options());                    \
+    at::op##_out(result, self);                                        \
+    return result;                                                     \
   }
+
+#define IMPLEMENT_UNARY_OP_OUT_INPLACE(op, prefix, device)             \
+  Tensor& _##op##__##prefix(Tensor& self) {                            \
+    return at::op##_out(self, self);                                   \
+  }                                                                    \
+  Tensor& _##op##_out_##prefix(Tensor& result, const Tensor& self) {   \
+    checkBackend(#op, result, Backend::device);                        \
+    auto iter = TensorIterator::unary_op(result, self,                 \
+      /*check_mem_overlap=*/true);                                     \
+    op##_stub(iter.device_type(), iter);                               \
+    return result;                                                     \
+  }
+
+#define IMPLEMENT_UNARY_OP_VEC(op)                                     \
+  IMPLEMENT_UNARY_OP_CORE(op)                                          \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)
+
+#define IMPLEMENT_UNARY_OP_VEC_CUDA(op)                                \
+  IMPLEMENT_UNARY_OP_CORE(op)                                          \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
+
+#define IMPLEMENT_UNARY_OP(op)                                         \
+  IMPLEMENT_UNARY_OP_CORE(op)                                          \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)                       \
 
 IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
-IMPLEMENT_UNARY_OP_VEC(ceil)
 IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
+IMPLEMENT_UNARY_OP_VEC(digamma)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC(exp)
@@ -236,16 +310,23 @@ IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
 
+IMPLEMENT_UNARY_OP(erfinv)
+
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);
 DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);
 DEFINE_DISPATCH(bitwise_not_stub);
 DEFINE_DISPATCH(ceil_stub);
+DEFINE_DISPATCH(clamp_stub);
+DEFINE_DISPATCH(clamp_max_stub);
+DEFINE_DISPATCH(clamp_min_stub);
 DEFINE_DISPATCH(cos_stub);
 DEFINE_DISPATCH(cosh_stub);
+DEFINE_DISPATCH(digamma_stub);
 DEFINE_DISPATCH(erf_stub);
 DEFINE_DISPATCH(erfc_stub);
+DEFINE_DISPATCH(erfinv_stub);
 DEFINE_DISPATCH(exp_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
@@ -256,15 +337,18 @@ DEFINE_DISPATCH(log1p_stub);
 DEFINE_DISPATCH(log2_stub);
 DEFINE_DISPATCH(logical_not_stub);
 DEFINE_DISPATCH(neg_stub);
+DEFINE_DISPATCH(polygamma_stub);
 DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
 DEFINE_DISPATCH(rsqrt_stub);
 DEFINE_DISPATCH(sigmoid_stub);
+DEFINE_DISPATCH(sign_stub);
 DEFINE_DISPATCH(sin_stub);
 DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
+DEFINE_DISPATCH(trigamma_stub);
 DEFINE_DISPATCH(trunc_stub);
 }
 } // namespace at

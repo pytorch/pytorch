@@ -106,7 +106,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::CPUTensorId());
+  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::TensorTypeId::CPUTensorId);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -173,7 +173,7 @@ Tensor& empty_out(
     return self.to(ScalarType::n, non_blocking);                 \
   }
 
-AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, DEFINE_CAST_OP)
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
@@ -230,7 +230,7 @@ Tensor empty_like(
   }
 
 #ifdef BUILD_NAMEDTENSOR
-  return at::empty(self.sizes(), self.names(), options, use_memory_format);
+  return at::empty(self.sizes(), self.opt_names(), options, use_memory_format);
 #else
   return at::empty(self.sizes(), options, use_memory_format);
 #endif
@@ -262,8 +262,8 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "eye", [&]() -> void {
-    scalar_t* result_data = result.data<scalar_t>();
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
+    scalar_t* result_data = result.data_ptr<scalar_t>();
     at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       for(int64_t i = p_begin; i < p_end; i++)
         result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
@@ -501,7 +501,7 @@ Tensor randn_like(const Tensor& self, const TensorOptions& options) {
 namespace {
 template <typename scalar_t>
 void randperm_cpu(Tensor& result, int64_t n, CPUGenerator* generator) {
-  scalar_t *r__data = result.data<scalar_t>();
+  scalar_t *r__data = result.data_ptr<scalar_t>();
 
   result.resize_({n});
   int64_t r__stride_0 = result.stride(0);
@@ -592,7 +592,7 @@ Tensor tril_indices_cpu(
   //    sequentially, and then transpose it.
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
-    scalar_t* result_data = result.data<scalar_t>();
+    scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
 
     scalar_t r = std::max<int64_t>(0, -offset), c = 0;
@@ -625,7 +625,7 @@ Tensor triu_indices_cpu(
 
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
-    scalar_t* result_data = result.data<scalar_t>();
+    scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
     // not typing std::max with scalar_t as it could be an unsigned type
     // NOTE: no need to check if the returned value of std::max overflows
@@ -795,7 +795,7 @@ Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tensor_cpu", [&] {
-    std::copy(values.begin(), values.end(), result.template data<scalar_t>());
+    std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
   });
   return result;
 }
@@ -814,7 +814,7 @@ Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
       return tensor_cpu(values, options);                           \
     }                                                               \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, TENSOR)
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
@@ -829,7 +829,7 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
           filename.c_str(), flags, my_size * dtype.itemsize(), nullptr),
       /*allocator=*/nullptr,
       /*resizable=*/false);
-    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::CPUTensorId());
+    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::TensorTypeId::CPUTensorId);
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
     return tensor;
 }

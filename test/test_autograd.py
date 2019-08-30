@@ -323,6 +323,18 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad.data, x_grad)
         self.assertEqual(y.grad.data, y_grad)
 
+        # Test that grad_outputs and outputs have the same shape
+        grad_out = torch.ones(2)
+        try:
+            torch.autograd.grad(
+                outputs=[grad_sum], grad_outputs=[grad_out],
+                inputs=[x], create_graph=True)
+            self.assertFail()
+        except RuntimeError as error:
+            self.assertEqual(str(error), "Mismatch in shape: grad_output[0] has a shape of "
+                             + str(grad_out.shape) + " and output[0] has a shape of "
+                             + str(grad_sum.shape) + ".")
+
     def test_grad_nonleaf(self):
         x_init = torch.randn(2, 2, requires_grad=True)
         x = x_init
@@ -964,7 +976,7 @@ class TestAutograd(TestCase):
         check_index(x, y, (1, slice(2, None)))
         check_index(x, y, (slice(None, None), slice(2, None)))
         check_index(x, y, torch.LongTensor([0, 2]))
-        check_index(x, y, torch.rand(4, 4).bernoulli().byte())
+        check_index(x, y, torch.rand(4, 4).bernoulli().bool())
         check_index(x, y, (Ellipsis, slice(2, None)))
         check_index(x, y, ([0], [0]))
         check_index(x, y, ([1, 2, 3], [0]))
@@ -1504,7 +1516,7 @@ class TestAutograd(TestCase):
                                               3]), requires_grad=False), [2, 4], slice(None)])
 
     def test_setitem_mask(self):
-        mask = torch.ByteTensor(5, 5).bernoulli_()
+        mask = torch.BoolTensor(5, 5).bernoulli_()
         self._test_setitem((5, 5), Variable(mask))
         self._test_setitem((5,), Variable(mask[0]))
         self._test_setitem((1,), Variable(mask[0, 0:1]))
@@ -2451,17 +2463,38 @@ class TestAutograd(TestCase):
                               lambda y, x: torch.trapz(y, x),
                               True, f_args_variable, f_args_tensor)
 
+    # skip this test if running on rocm, because in cdist
+    # we use __shfl_down_sync on CUDA for fast reduction
+    # and it gives incorrect results on rocm platform
+    @skipIfRocm
     def test_cdist(self):
-        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
-            f_args_variable = (torch.randn(S, S, requires_grad=True),
-                               torch.randn(S, S, requires_grad=True))
+        def _test_cdist_for_size(sizes):
+            devices = torch.testing.get_all_device_types()
+            for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+                for device in devices:
+                    x = torch.randn(sizes, device=device, dtype=torch.double)
+                    y = torch.randn(sizes, device=device, dtype=torch.double)
 
-            def f(a, b):
-                return torch.cdist(a, b, p)
+                    eps = 1e-6
+                    # to avoid extremum
+                    x = x - (((x - y) < eps).double() * 2 * eps)
+                    x.requires_grad = True
+                    y.requires_grad = True
 
-            f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-            run_functional_checks(self, "test_cdist", "cdist", f,
-                                  True, f_args_variable, f_args_tensor)
+                    f_args_variable = (x, y)
+
+                    def f(a, b):
+                        return torch.cdist(a, b, p)
+
+                    f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+                    run_functional_checks(self, "test_cdist", "cdist", f,
+                                          True, f_args_variable, f_args_tensor)
+
+        _test_cdist_for_size((S, S))
+        _test_cdist_for_size((S, S, S))
+        _test_cdist_for_size((3, 5))
+        _test_cdist_for_size((2, 3, 5))
+        _test_cdist_for_size((1, 2, 3))
 
     def test_var_mean_differentiable(self):
         dim = [2, 4]
@@ -3139,6 +3172,58 @@ class TestAutograd(TestCase):
         test()
         self.assertEqual(dealloc[0], 1)
 
+    def test_inplace_view_backward(self):
+        # Issue #10532: Make sure that this does not raise RuntimeError.
+        net = nn.Sequential(
+            nn.InstanceNorm2d(1),
+            nn.ReLU(True)
+        )
+
+        x = torch.tensor([[[[1.0]]]], requires_grad=True)
+        g, = torch.autograd.grad(net(x).pow(2), [x], create_graph=True)
+        torch.autograd.grad(g.sum(), [x])
+        self.assertEqual(x, torch.tensor([[[[1.0]]]]))
+
+        # https://discuss.pytorch.org/t/freeing-buffer-strange-behavior/31955/8
+        inputs = torch.ones((1, 3, 256, 256), requires_grad=True)
+
+        tmp1 = (inputs + 1).view_as(inputs)
+        tmp2 = torch.nn.functional.threshold(tmp1, 0., 0., True)
+        prob_interpolated = torch.sigmoid(tmp2)
+
+        gradients = torch.autograd.grad(outputs=prob_interpolated, inputs=inputs,
+                                        grad_outputs=torch.ones(prob_interpolated.size()),
+                                        create_graph=True, retain_graph=True)[0]
+
+        gradient_penalty = gradients.sum()
+        gradient_penalty.backward()
+
+        fn = gradient_penalty.grad_fn.next_functions[0][0].next_functions[1][0]
+        self.assertEqual(fn.name(), "ThresholdBackwardBackward")
+
+    def test_inplace_view_weak_grad_fn(self):
+        # Issue 23502: Test that b's grad_fn is preserved.
+        a = torch.arange(10.0, requires_grad=True)
+
+        b = a.narrow(0, 0, 2).clone().view(-1)
+        b.relu_()
+
+        c = b.clone()
+        del b
+        gc.collect()
+
+        s = c.sum()
+        s.backward()
+        self.assertEqual(s, torch.tensor(1.0))
+
+        # Issue 23502: Ensure RuntimeError for modification of SavedVariable.
+        a = torch.rand(10, requires_grad=True).narrow(0, 0, 10)
+        b = a.relu_()
+        c = b.add_(100)
+        del b
+        with self.assertRaises(RuntimeError):
+            c.sum().backward(torch.ones(1, requires_grad=True))
+
     def test_mul_out(self):
         a = torch.randn(2, 2, requires_grad=True)
         b = torch.randn(2, 2, requires_grad=True)
@@ -3610,7 +3695,6 @@ def gradgradcheck_method_precision_override(test_name):
             # errors accumulated across multiple dimensions
             override = {'atol': override['atol'] * S * S, 'rtol': override['atol'] * S * S}
     return override
-
 
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):

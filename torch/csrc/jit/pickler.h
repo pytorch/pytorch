@@ -15,7 +15,7 @@ using ClassResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
 // See Python's pickletools.py for a detailed description of each of these codes
-enum class OpCode : char {
+enum class PickleOpCode : char {
   MARK = '(',
   STOP = '.',
   POP = '0',
@@ -133,7 +133,7 @@ class Pickler {
   // Push protocol onto the stack
   void protocol();
 
-  // Push STOP OpCode onto the stack
+  // Push STOP PickleOpCode onto the stack
   void stop();
 
   void pushIValue(const IValue& ivalue);
@@ -147,12 +147,16 @@ class Pickler {
   void startTuple();
   void endTuple();
 
+  const std::vector<WriteableTensorData>& tensorData() {
+    return tensor_data_;
+  }
+
  private:
   void pushIValueImpl(const IValue& ivalue);
   void pushDict(const IValue& ivalue);
-  void pushDouble(const IValue& ivalue);
+  void pushDouble(double value);
   void pushGenericList(const IValue& ivalue);
-  void pushInt(const IValue& ivalue);
+  void pushInt(int64_t value);
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
   void pushLiteralTensor(const IValue& ivalue);
@@ -225,24 +229,37 @@ class Pickler {
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
 };
 
-// [unpickler refactor] there is some cruft around OpCode::BUILD,
-// OpCode::NEWOBJ, and the last_opcode_ member below that should be deleted at
+// [unpickler refactor] there is some cruft around PickleOpCode::BUILD,
+// PickleOpCode::NEWOBJ, and the last_opcode_ member below that should be deleted at
 // some point, the Pickler doesn't produce it and it's only around to support
 // models saved before 1.1
 class Unpickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
 
  public:
+  // tensors inside the pickle are references to the tensor_table
   Unpickler(
       std::function<bool(char*, size_t)> reader,
-      const std::vector<at::Tensor>* tensor_table,
-      ClassResolver class_resolver)
+      ClassResolver class_resolver,
+      const std::vector<at::Tensor>* tensor_table)
       : reader_(reader),
         tensor_table_(tensor_table),
         class_resolver_(std::move(class_resolver)) {}
 
+  // tensors inside the pickle contain meta-data, the raw tensor
+  // dead is retrieved by calling `read_record`.
+  Unpickler(
+      std::function<bool(char*, size_t)> reader,
+      ClassResolver class_resolver,
+      std::function<at::DataPtr(const std::string&)> read_record,
+      c10::optional<at::Device> device)
+      : reader_(reader),
+        tensor_table_(nullptr),
+        class_resolver_(std::move(class_resolver)),
+        read_record_(std::move(read_record)),
+        device_(std::move(device)) {}
+
   IValue parse_ivalue();
-  IValue parseModule();
 
  private:
   // No arguments ensures that a template arugment must be specified
@@ -259,8 +276,8 @@ class Unpickler {
   std::string readBytes(size_t num_bytes);
 
   double readFloat();
-  OpCode readInstruction();
-  OpCode readOpCode();
+  PickleOpCode readInstruction();
+  PickleOpCode readOpCode();
   std::string readString();
   void readList();
   void setInput(size_t memo_id);
@@ -282,6 +299,9 @@ class Unpickler {
   // optionally nullptr, needs to be present for creating classes
   ClassResolver class_resolver_;
   IValue empty_tuple_;
+
+  std::function<at::DataPtr(const std::string&)> read_record_;
+  c10::optional<at::Device> device_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor

@@ -193,8 +193,8 @@ if (USE_CUDNN)
     # Basically, this is the case where $CUDA_HOME/lib64 has an old or
     # incompatible libcudnn.so, which we can inadvertently link to if
     # we're not careful.
-    list(INSERT 0 TORCH_PYTHON_LINK_LIBRARIES ${CUDNN_LIBRARY})
-    list(INSERT 0 TORCH_PYTHON_INCLUDE_DIRECTORIES ${CUDNN_INCLUDE_DIR})
+    list(INSERT 0 TORCH_PYTHON_LINK_LIBRARIES ${CUDNN_LIBRARY_PATH})
+    list(INSERT 0 TORCH_PYTHON_INCLUDE_DIRECTORIES ${CUDNN_INCLUDE_PATH})
 endif()
 
 if (USE_NUMPY)
@@ -223,16 +223,18 @@ if (USE_DISTRIBUTED)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if (NOT MSVC AND NOT APPLE)
       list(APPEND TORCH_PYTHON_SRCS
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/comm.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp
-
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/RpcAgent.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/ProcessGroupAgent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/functions.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/PythonRpcHandler.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_rpc_handler.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
         )
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
