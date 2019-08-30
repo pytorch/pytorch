@@ -465,8 +465,9 @@ static value_list getReverseCaptures(Gradient& grad_desc) {
 // nodes we have in our graphs are simply constants, which are cheap to execute
 // and replicate, and so it's better to just copy them into the reverse graph,
 // without polluting the output lists unnecessarily.
-static void liftConstants(Block* block, Block* if_not_in_this_block);
+static void liftConstants(Block* block, Block* move_to_this_block);
 
+// is node defined inside container?
 static bool inBlock(Node* node, Block* container) {
   Block* b = node->owningBlock();
   while (b) {
@@ -478,7 +479,7 @@ static bool inBlock(Node* node, Block* container) {
   return false;
 }
 
-static void liftConstants(Node* node, Block* if_not_in_this_block) {
+static void liftConstants(Node* node, Block* move_to_this_block) {
   static const auto err = [](Value*) -> Value* {
     throw std::runtime_error("unexpected input");
   };
@@ -486,10 +487,13 @@ static void liftConstants(Node* node, Block* if_not_in_this_block) {
   for (Value* input : node->inputs()) {
     if (input->node()->kind() != prim::Constant)
       continue;
-    if (inBlock(input->node(), if_not_in_this_block))
+    // if this constant is _already_ defined in the backward pass
+    // block, we do not need to duplicate and move it because
+    // it already won't be part of the capture set
+    if (inBlock(input->node(), move_to_this_block))
       continue;
     Node* lifted_constant = graph.createClone(input->node(), err);
-    if_not_in_this_block->prependNode(lifted_constant);
+    move_to_this_block->prependNode(lifted_constant);
     GRAPH_DEBUG(
         "Lifting constant ",
         input->debugName(),
@@ -499,15 +503,15 @@ static void liftConstants(Node* node, Block* if_not_in_this_block) {
     node->replaceInputWith(input, lifted_constant->output());
   }
   for (Block* sub : node->blocks()) {
-    liftConstants(sub, if_not_in_this_block);
+    liftConstants(sub, move_to_this_block);
   }
 }
 
-static void liftConstants(Block* block, Block* if_not_in_this_block) {
+static void liftConstants(Block* block, Block* move_to_this_block) {
   for (Node* node : block->nodes()) {
-    liftConstants(node, if_not_in_this_block);
+    liftConstants(node, move_to_this_block);
   }
-  liftConstants(block->return_node(), if_not_in_this_block);
+  liftConstants(block->return_node(), move_to_this_block);
 }
 
 static void deduplicateSizeCaptures(
