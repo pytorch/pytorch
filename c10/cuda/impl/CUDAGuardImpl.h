@@ -19,13 +19,13 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   CUDAGuardImpl() {}
   CUDAGuardImpl(DeviceType t) {
-    AT_ASSERT(t == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(t == DeviceType::CUDA);
   }
   DeviceType type() const override {
     return DeviceType::CUDA;
   }
   Device exchangeDevice(Device d) const override {
-    AT_ASSERT(d.type() == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);
     Device old_device = getDevice();
     if (old_device.index() != d.index()) {
       C10_CUDA_CHECK(cudaSetDevice(d.index()));
@@ -38,14 +38,11 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return Device(DeviceType::CUDA, device);
   }
   void setDevice(Device d) const override {
-    AT_ASSERT(d.type() == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);
     C10_CUDA_CHECK(cudaSetDevice(d.index()));
   }
   void uncheckedSetDevice(Device d) const noexcept override {
-    cudaError_t __err = cudaSetDevice(d.index());
-    if (__err != cudaSuccess) {
-      AT_WARN("CUDA error: ", cudaGetErrorString(__err));
-    }
+    C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
   }
   Stream getStream(Device d) const noexcept override {
     return getCurrentCUDAStream().unwrap();
@@ -77,7 +74,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         cuda_flag = cudaEventDefault;
         break;
       default:
-        AT_ERROR("CUDA event received unknown flag");
+        TORCH_CHECK(false, "CUDA event received unknown flag");
     }
 
     C10_CUDA_CHECK(cudaEventCreateWithFlags(cuda_event, cuda_flag));
@@ -89,10 +86,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (!event) return;
     auto cuda_event = static_cast<cudaEvent_t>(event);
     int orig_device;
-    cudaGetDevice(&orig_device);
-    cudaSetDevice(device_index);
-    cudaEventDestroy(cuda_event);
-    cudaSetDevice(orig_device);
+    C10_CUDA_CHECK_WARN(cudaGetDevice(&orig_device));
+    C10_CUDA_CHECK_WARN(cudaSetDevice(device_index));
+    C10_CUDA_CHECK_WARN(cudaEventDestroy(cuda_event));
+    C10_CUDA_CHECK_WARN(cudaSetDevice(orig_device));
   }
 
   void record(
