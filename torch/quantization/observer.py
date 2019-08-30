@@ -157,8 +157,6 @@ class HistogramObserver(ObserverBase):
         max_val = self.max_val
         histogram = self.histogram
         if min_val is None or max_val is None or histogram is None:
-            # min_val = torch.min(x).item()
-            # max_val = torch.max(x).item()
             min_val = torch.min(x)
             max_val = torch.max(x)
             range = max_val - min_val

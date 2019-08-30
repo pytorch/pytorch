@@ -43,4 +43,4 @@ if is_available():
             """
             _init_rpc(worker_name, rpc_backend)
             from .rpc import _agent
-            autograd._init(_agent.get_worker_id())
+            autograd._init(_agent.get_worker_id().id)
