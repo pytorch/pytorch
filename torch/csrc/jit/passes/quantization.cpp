@@ -64,6 +64,69 @@ graph(%self, %input):
   return values;
 }
 
+c10::optional<script::Module> findChildModule(
+    Node* n,
+    const script::Module& module) {
+  if (n->kind() == prim::CallMethod) {
+    auto child_instance = n->inputs()[0];
+    if (child_instance->node()->kind() == prim::GetAttr) {
+      auto child_module_name = child_instance->node()->s(attr::name);
+      auto child_module = module.find_module(child_module_name);
+      return child_module;
+    }
+  }
+  return c10::nullopt;
+}
+
+bool callSelfMethod(
+    Node* n,
+    Value* self) {
+  if (n->kind() == prim::CallMethod) {
+    auto* module_instance = n->inputs()[0];
+    return module_instance == self;
+  }
+  return false;
+}
+
+bool valueObserved(
+    Node* n,
+    Value* self,
+    const script::Module& module,
+    const ModulePtrSet& child_module_set) {
+  auto child_module = findChildModule(n, module);
+  if ((child_module &&
+       child_module_set.count(child_module.value().module_object()) > 0) ||
+      callSelfMethod(n, self)) {
+    return true;
+  }
+  return false;
+}
+
+bool valueObservedInChildModule(
+    Value* v,
+    Value* self,
+    const script::Module& module,
+    const ModulePtrSet& child_module_set) {
+  // Case 1. Value is produced by forward call of a child module
+  if (valueObserved(v->node(), self, module, child_module_set)) {
+    return true;
+  }
+
+  // Case 2. Value is used by a forward call of child module
+  // There is some complication when we have multiple uses of the value, let's say
+  // it is used in a child module, and also in the parent module, in this case
+  // we have to insert observer, but in insert_quant_dequant pass we'll have
+  // to replace uses of the original value with either output of dequant only
+  // if it is used in parent module, this case is not handled here, we can do
+  // it in a separate PR if this is needed.
+  for (const Use& u : v->uses()) {
+    if (valueObserved(u.user, self, module, child_module_set)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool outputsNeedToBeObserved(Node* n) {
   return n->kind() != prim::Constant;
 }
@@ -157,24 +220,22 @@ Node* insertObserver(
   return call;
 }
 
-c10::optional<QConfig> getQConfig(
-    const std::string& key,
-    const c10::optional<QConfig>& parent_qconfig,
-    const QConfigDict& qconfig_dict) {
-  if (qconfig_dict.find(key) != qconfig_dict.end()) {
-    return qconfig_dict.at(key);
-  }
-  return parent_qconfig;
-}
-
-void getQConfigMapHelper(
+void getQConfigMap(
     const script::Module& module,
     const QConfigDict& qconfig_dict,
     const std::string& key,
     const c10::optional<QConfig>& parent_qconfig,
-    ModuleQConfigMap& map) {
-  auto qconfig = getQConfig(key, parent_qconfig, qconfig_dict);
+    ModuleQConfigMap& map,
+    ModulePtrSet& child_module_set) {
+  c10::optional<QConfig> qconfig;
+  if (qconfig_dict.find(key) != qconfig_dict.end()) {
+    qconfig = qconfig_dict.at(key);
+  } else {
+    qconfig = parent_qconfig;
+    child_module_set.emplace(module.module_object());
+  }
   map[module.module_object()] = qconfig;
+
   for (script::Slot s : module.get_module_slots()) {
     std::string child_key;
     if (key == "") {
@@ -182,22 +243,15 @@ void getQConfigMapHelper(
     } else {
       child_key = key + "." + s.name();
     }
-    getQConfigMapHelper(s.to_module(), qconfig_dict, child_key, qconfig, map);
+    getQConfigMap(s.to_module(), qconfig_dict, child_key, qconfig, map, child_module_set);
   }
-}
-
-ModuleQConfigMap getQConfigMap(
-    const script::Module& module,
-    const QConfigDict& qconfig_dict) {
-  ModuleQConfigMap map;
-  getQConfigMapHelper(module, qconfig_dict, "", c10::nullopt, map);
-  return map;
 }
 
 void InsertObserversImpl(
     script::Module& module,
     const std::string& method_name,
-    const ModuleQConfigMap& module_qconfig_map) {
+    const ModuleQConfigMap& module_qconfig_map,
+    const ModulePtrSet& child_module_set) {
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   // For storing all values that need to be instrumented with an observer call.
@@ -217,9 +271,11 @@ void InsertObserversImpl(
   // prim::Param nodes do not belong to the graph. Hence the Insert
   // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
+  Value* self = graph->inputs()[0];
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
-    if (v->type()->isSubtypeOf(TensorType::get())) {
+    if (v->type()->isSubtypeOf(TensorType::get()) &&
+        !valueObservedInChildModule(v, self, module, child_module_set)) {
       auto qconfig = module_qconfig_map.at(module.module_object());
       if (qconfig) {
         auto observer_node =
@@ -247,12 +303,38 @@ void InsertObserversImpl(
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
-        if (values_to_skip.count(v) == 0) {
+        if (values_to_skip.count(v) == 0 &&
+            !valueObservedInChildModule(v, self, module, child_module_set)) {
           values_to_observe.push_back(v);
+        }
+        if (v->node()->kind() == prim::CallMethod) {
+          // If we find a call to a method of a child module,
+          // we'll recursively insert observers for the forward function to
+          // the child module.
+          // One important detail is that currently we insert observer twice for
+          // input and output of the forward function call of the chlid module,
+          // this is required if child module has different qconfig from the
+          // parent module, but it should be removed if they have the same
+          // qconfig, we'll do this in a separate PR.
+          auto module_instance = v->node()->inputs()[0];
+          if (module_instance->node()->kind() == prim::GetAttr) {
+            auto child_module_name = module_instance->node()->s(attr::name);
+            auto child_module = module.find_module(child_module_name);
+            TORCH_INTERNAL_ASSERT(
+                child_module,
+                "Child module " + child_module_name + " does not exist");
+            // Recursively insert observer for the forward function of child module
+            InsertObserversImpl(child_module.value(), v->node()->s(attr::name), module_qconfig_map, child_module_set);
+          } else {
+            TORCH_INTERNAL_ASSERT(
+                module_instance == graph->inputs()[0],
+                "We only support call method either on %self"
+                "or child instance in insert_observers_pass right now");
+            InsertObserversImpl(module, v->node()->s(attr::name), module_qconfig_map, child_module_set);
+          }
         }
       }
 
-      // Schedule subblocks (if any) for visiting.
       for (Block* subblock : n->blocks()) {
         blocks_to_visit.push(subblock);
       }
@@ -268,32 +350,6 @@ void InsertObserversImpl(
     if (v->node()->kind() == prim::GetAttr &&
         v->node()->s(c10::attr::name) == "bias") {
       continue;
-    }
-    if (v->node()->kind() == prim::CallMethod) {
-      // If we find a call to method of a child module,
-      // we'll recursively insert observers for the forward function to
-      // the child module.
-      // One important detail is that currently we insert observer twice for
-      // input and output of the forward function call of the chlid module,
-      // this is required if child module has different qconfig from the
-      // parent module, but it should be removed if they have the same
-      // qconfig, we'll do this in a separate PR.
-      auto child_instance = v->node()->inputs()[0];
-      if (child_instance->node()->kind() == prim::GetAttr) {
-        auto child_module_name = child_instance->node()->s(attr::name);
-        auto child_module = module.find_module(child_module_name);
-        TORCH_INTERNAL_ASSERT(
-            child_module,
-            "Child module " + child_module_name + " does not exist");
-        // Recursively insert observer for the forward function of child module
-        InsertObserversImpl(child_module.value(), v->node()->s(attr::name), module_qconfig_map);
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            child_instance == graph->inputs()[0],
-            "We only support call method either on %self"
-            "or child instance in insert_observers_pass right now");
-        InsertObserversImpl(module, v->node()->s(attr::name), module_qconfig_map);
-      }
     }
     auto qconfig = module_qconfig_map.at(module.module_object());
     // Skip inserting observer if no qconfig is specified
@@ -490,8 +546,7 @@ void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
 
 c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
     Value* v) {
-  if (v->node()->kind() == prim::CallMethod &&
-      v->node()->s(attr::name) == "forward") {
+  if (v->node()->kind() == prim::CallMethod) {
     auto child_instance = v->node()->inputs()[0];
     TORCH_INTERNAL_ASSERT(
         child_instance->node()->kind() == prim::GetAttr,
@@ -580,8 +635,20 @@ TORCH_API void InsertObservers(
     script::Module& module,
     const std::string& method_name,
     const QConfigDict& qconfig_dict) {
-  auto module_qconfig_map = getQConfigMap(module, qconfig_dict);
-  InsertObserversImpl(module, method_name, module_qconfig_map);
+  ModuleQConfigMap module_qconfig_map;
+  // Set of child modules that has the same qconfig
+  // as parent module, used for avoiding inserting
+  // observers for Tensors that's used in child module
+  // and produced by the child module if that module has
+  // the same qconfig as the parent module.
+  ModulePtrSet child_module_set;
+  getQConfigMap(module,
+                qconfig_dict,
+                "",
+                c10::nullopt,
+                module_qconfig_map,
+                child_module_set);
+  InsertObserversImpl(module, method_name, module_qconfig_map, child_module_set);
 }
 
 script::Module InsertQuantDeQuant(

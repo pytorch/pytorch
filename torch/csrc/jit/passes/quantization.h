@@ -15,6 +15,7 @@ using QConfig = std::tuple<script::Module, script::Module>;
 using QConfigDict = std::unordered_map<std::string, QConfig>;
 using ModuleQConfigMap =
     std::unordered_map<script::ModulePtr, c10::optional<QConfig>>;
+using ModulePtrSet = std::unordered_set<script::ModulePtr>;
 
 /** \brief Propagates QParams through nodes that are not supposed to change it.
  *
