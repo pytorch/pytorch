@@ -19,6 +19,8 @@ template<class Key, class Value> class Dict;
 template<class T> class List;
 struct IValue;
 struct ClassType;
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
 namespace ivalue {
 struct Tuple;
 struct Future;
@@ -431,6 +433,8 @@ struct CAFFE2_API IValue final {
     return payload.as_intrusive_ptr;
   }
 
+  TypePtr type() const;
+
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode
   // this value different (e.g. using NaN boxing), and this would make it more
@@ -454,7 +458,7 @@ struct CAFFE2_API IValue final {
     tag = Tag::None;
     is_intrusive_ptr = false;
   }
-private:
+
   union Payload {
     int64_t as_int;
     double as_double;

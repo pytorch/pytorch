@@ -13,8 +13,21 @@ CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
 
+TupleTypePtr Tuple::type() const {
+  if (!type_) {
+    type_ = TupleType::create(
+        fmap(elements_, [&](const IValue& v) { return v.type(); }));
+  }
+  return type_;
+}
+
 } // namespace ivalue
 
+
+TypePtr IValue::type() const {
+  switch(tag) {
+  }
+}
 namespace {
 
 template<class T>

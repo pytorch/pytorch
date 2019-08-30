@@ -1039,12 +1039,16 @@ RegisterOperators reg(
          [](const Node* node) {
            size_t num_inputs = node->inputs().size();
            auto type = node->output()->type()->expect<TupleType>();
+           bool named = type->name().has_value();
            return [=](Stack& stack) {
              std::vector<IValue> elems{
                  std::make_move_iterator(stack.end() - num_inputs),
                  std::make_move_iterator(stack.end())};
              drop(stack, num_inputs);
-             push(stack, c10::ivalue::Tuple::create(std::move(elems), type));
+             push(
+                 stack,
+                 named ? c10::ivalue::Tuple::createNamed(std::move(elems), type)
+                       : c10::ivalue::Tuple::create(std::move(elems)));
              return 0;
            };
          },
