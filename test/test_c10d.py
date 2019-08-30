@@ -766,7 +766,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         with self.assertRaisesRegex(ValueError, "unsupported device type"):
             opts = c10d.AllreduceCoalescedOptions()
-            pg.allreduce_coalesced([t1.cuda(), t2.cuda()], opts)
+            pg.allreduce_coalesced([t1.cuda(), t1.cuda()], opts)
 
     def _test_allreduce_coalesced_basics(self, fn):
         store = c10d.FileStore(self.file.name, self.world_size)

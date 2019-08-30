@@ -1964,6 +1964,8 @@
   name: _th_clamp
   cname: clamp
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1976,6 +1978,8 @@
   name: _th_clamp_min
   cname: cmaxValue
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1987,6 +1991,8 @@
   name: _th_clamp_max
   cname: cminValue
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
