@@ -91,9 +91,9 @@ struct CAFFE2_API OperandInfo {
   /// coalescing.
   Tensor tensor;
 
-  // Buffer the original tensor operand in cases when an output is modified
+  // Save the original tensor operand in cases when an output is modified
   // (e.g. if dtype is changed)
-  Tensor original_buffer;
+  Tensor original_tensor;
 
   /// The desired device and type for the operand. For inputs, this specifies that
   /// the input should be converted to this type if necessary. For outputs, this
@@ -196,9 +196,9 @@ struct CAFFE2_API TensorIterator {
   void cast_outputs() {
     if (compute_common_dtype_) {
       for(int i=0; i < noutputs(); i++) {
-        if (operands_[i].original_buffer.defined() && dtype(i) != operands_[i].original_buffer.scalar_type()) {
-          operands_[i].original_buffer.copy_(operands_[i].tensor);
-          operands_[i].tensor = operands_[i].original_buffer;
+        if (operands_[i].original_tensor.defined() && dtype(i) != operands_[i].original_tensor.scalar_type()) {
+          operands_[i].original_tensor.copy_(operands_[i].tensor);
+          operands_[i].tensor = operands_[i].original_tensor;
         }
       }
     }

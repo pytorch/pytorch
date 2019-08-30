@@ -150,17 +150,15 @@ static void validate_dtype(OperandInfo& op, ScalarType common_dtype, int ninputs
     // For binary_ops, we follow casting rules. For unary/nullary types
     // we require the type to match.
     if (op.is_output) {
-      if ((ninputs < 2 && op.dtype != op.tensor.scalar_type()) ||
-          !canCast(common_dtype, op.tensor.scalar_type()))
+      if (!canCast(common_dtype, op.tensor.scalar_type()))
       {
         AT_ERROR("result type ", common_dtype,
           " can't be cast to the desired output type ",
           op.tensor.scalar_type());
       }
-    } else {
-      if (ninputs < 2 && op.dtype != op.tensor.scalar_type()) {
-        AT_ERROR("expected dtype ", op.dtype, " but got dtype ", op.tensor.scalar_type());
-      }
+    }
+    if (ninputs < 2 && op.dtype != op.tensor.scalar_type()) {
+      AT_ERROR("expected dtype ", op.dtype, " but got dtype ", op.tensor.scalar_type());
     }
   }
 }
@@ -169,9 +167,9 @@ static void maybe_promote_common_dtype(OperandInfo& op, ScalarType common_dtype)
   if (op.tensor.defined() && op.tensor.scalar_type() != common_dtype)
   {
     op.dtype = common_dtype;
-    op.original_buffer = op.tensor;
+    op.original_tensor = op.tensor;
     op.tensor = op.tensor.to(common_dtype);
-    auto original_element_size = op.original_buffer.element_size();
+    auto original_element_size = op.original_tensor.element_size();
     auto new_element_size = op.tensor.element_size();
 
     // stride size (in bytes) can change if we change the dtype.
