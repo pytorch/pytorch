@@ -7,6 +7,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/expanding-array.cpp
   ${TORCH_API_TEST_DIR}/integration.cpp
   ${TORCH_API_TEST_DIR}/init.cpp
+  ${TORCH_API_TEST_DIR}/serialize.cpp
   ${TORCH_API_TEST_DIR}/jit.cpp
   ${TORCH_API_TEST_DIR}/memory.cpp
   ${TORCH_API_TEST_DIR}/misc.cpp

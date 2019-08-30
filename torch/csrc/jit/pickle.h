@@ -1,3 +1,5 @@
+#pragma once
+
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/pickler.h>
@@ -48,6 +50,15 @@ TORCH_API void pickle(
     std::function<void(const char* data_start, size_t data_len)> writer,
     const IValue& ivalue,
     std::vector<at::Tensor>* tensor_table = nullptr);
+
+// This lets you directly control the opcodes / data that is serialized. This is
+// will probably result in a pickle archive that cannot be unpickled. This
+// function is only indented to be used for implementing `torch::save()`
+void unsafe_pickle(
+    std::function<void(const char*, size_t)> writer,
+    jit::PickleOpCode op,
+    std::string data,
+    std::vector<at::Tensor>* tensor_table);
 
 /// `reader` is a function that takes in a size to read from some pickled
 /// binary. `reader` should remember where it last read, and return

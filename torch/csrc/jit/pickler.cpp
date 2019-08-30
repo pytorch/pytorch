@@ -94,55 +94,61 @@ void Pickler::stop() {
   push<PickleOpCode>(PickleOpCode::STOP);
 }
 
-void Pickler::torchSaveStop() {
-  // Add the binary data for all the tensors to be included in the same binary
-  // TODO: The pickler should be refactored to stream out to a stream directly
-  // instead of staging in the stack_ array
-  // As another pickle program in the same binary archive, add a list of
-  // keys for each tensor (see torch/serialization.py)
-  protocol();
-  push<PickleOpCode>(PickleOpCode::MARK);
-  for (size_t i = 0; i < tensor_data_.size(); ++i) {
-    std::string key = std::to_string(i);
-    push<PickleOpCode>(PickleOpCode::BINUNICODE);
-    push<uint32_t>(key.size());
-    pushBytes(key);
-  }
-
-  push<PickleOpCode>(PickleOpCode::TUPLE);
-  stop();
-
-  // Now dump the tensor binary data
-  for (const auto& data : tensor_data_) {
-    // first dump size
-    push<size_t>(data.numel());
-    writer_(data.data(), data.sizeInBytes());
-  }
+void Pickler::pushOp(PickleOpCode opcode, const std::string& data) {
+  push<PickleOpCode>(opcode);
+  pushBytes(data.data());
 }
 
-void Pickler::torchSaveStart() {
-  // Output data to match torch.save, see torch/serialization.py for details
-  // Magic number (0x1950a86a20f9469cfc6c)
-  protocol();
-  push<PickleOpCode>(PickleOpCode::LONG1);
-  // LONG1 size
-  pushBytes("\x0a");
-  // LONG1 data
-  pushBytes("\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19");
-  stop();
+// TODO: DELTE
+// void torchSaveStop() {
+//   // Add the binary data for all the tensors to be included in the same binary
+//   // TODO: The pickler should be refactored to stream out to a stream directly
+//   // instead of staging in the stack_ array
+//   // As another pickle program in the same binary archive, add a list of
+//   // keys for each tensor (see torch/serialization.py)
+//   protocol();
+//   push<PickleOpCode>(PickleOpCode::MARK);
+//   for (size_t i = 0; i < tensor_data_.size(); ++i) {
+//     std::string key = std::to_string(i);
+//     push<PickleOpCode>(PickleOpCode::BINUNICODE);
+//     push<uint32_t>(key.size());
+//     pushBytes(key);
+//   }
 
-  // Protocol Version (1001)
-  protocol();
-  push<PickleOpCode>(PickleOpCode::BININT2);
-  pushBytes("\xe9\x03");
-  stop();
+//   push<PickleOpCode>(PickleOpCode::TUPLE);
+//   stop();
 
-  // sys_info, this isn't actually used in de-serialization so we can leave this
-  // one empty
-  protocol();
-  push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
-  stop();
-}
+//   // Now dump the tensor binary data
+//   for (const auto& data : tensor_data_) {
+//     // first dump size
+//     push<size_t>(data.numel());
+//     writer_(data.data(), data.sizeInBytes());
+//   }
+// }
+
+// void Pickler::torchSaveStart() {
+//   // Output data to match torch.save, see torch/serialization.py for details
+//   // Magic number (0x1950a86a20f9469cfc6c)
+//   protocol();
+//   push<PickleOpCode>(PickleOpCode::LONG1);
+//   // LONG1 size
+//   pushBytes("\x0a");
+//   // LONG1 data
+//   pushBytes("\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19");
+//   stop();
+
+//   // Protocol Version (1001)
+//   protocol();
+//   push<PickleOpCode>(PickleOpCode::BININT2);
+//   pushBytes("\xe9\x03");
+//   stop();
+
+//   // sys_info, this isn't actually used in de-serialization so we can leave this
+//   // one empty
+//   protocol();
+//   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
+//   stop();
+// }
 
 // unmemoized version called by pushIValue
 void Pickler::pushIValueImpl(const IValue& ivalue) {
@@ -358,15 +364,7 @@ void Pickler::pushGlobal(
   }
 }
 
-void Pickler::pushTensor(const IValue& ivalue) {
-  if (tensor_table_ == nullptr) {
-    pushLiteralTensor(ivalue);
-  } else {
-    pushTensorReference(ivalue);
-  }
-}
-
-void Pickler::pushLiteralTensor(const IValue& ivalue) {
+void LiteralPickler::pushTensor(const IValue& ivalue) {
   // In contrast to tensor references, literal tensors are included in the
   // pickle program binary blob. They are written to the file after the STOP
   // opcode. They can't be included in the pickle program itself without a bunch
@@ -426,7 +424,7 @@ void Pickler::pushClass(PicklerClass cls) {
   pushGlobal("torch.jit._pickle", getClassName(cls));
 }
 
-void Pickler::pushTensorReference(const IValue& ivalue) {
+void Pickler::pushTensor(const IValue& ivalue) {
   pushClass(PicklerClass::TENSOR);
   tensor_table_->push_back(ivalue.toTensor());
   int64_t tensor_id = tensor_table_->size() - 1;

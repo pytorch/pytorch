@@ -127,8 +127,10 @@ class Pickler {
  public:
   Pickler(
       std::function<void(const char*, size_t)> writer,
-      std::vector<at::Tensor>* tensor_table = nullptr)
-      : writer_(writer), tensor_table_(tensor_table) {}
+      std::vector<at::Tensor>* tensor_table)
+      : writer_(writer), tensor_table_(tensor_table) {
+    TORCH_INTERNAL_ASSERT(tensor_table != nullptr);
+  }
 
   // Push protocol onto the stack
   void protocol();
@@ -138,11 +140,10 @@ class Pickler {
 
   void pushIValue(const IValue& ivalue);
 
-  // See torch/serialization.py for details, pushes a magic number, torch
-  // serialization version, and system info to the pickle archive all as
-  // individual pickle programs
-  void torchSaveStart();
-  void torchSaveStop();
+
+  // Internal function to directly push data to the pickle archive of types
+  // that aren't supported by IValue
+  void pushOp(PickleOpCode opcode, const std::string& data);
 
   void startTuple();
   void endTuple();
@@ -151,7 +152,7 @@ class Pickler {
     return tensor_data_;
   }
 
- private:
+ protected:
   void pushIValueImpl(const IValue& ivalue);
   void pushDict(const IValue& ivalue);
   void pushDouble(double value);
@@ -159,9 +160,7 @@ class Pickler {
   void pushInt(int64_t value);
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
-  void pushLiteralTensor(const IValue& ivalue);
-  void pushTensor(const IValue& ivalue);
-  void pushTensorReference(const IValue& ivalue);
+  virtual void pushTensor(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
   // unmemoized version
@@ -227,6 +226,15 @@ class Pickler {
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
+};
+
+class LiteralPickler : Pickler {
+  LiteralPickler(
+      std::function<void(const char*, size_t)> writer,
+      std::vector<at::Tensor>* tensor_table)
+      : Pickler(writer, tensor_table) {}
+
+  void pushTensor(const IValue& ivalue) override;
 };
 
 // [unpickler refactor] there is some cruft around PickleOpCode::BUILD,

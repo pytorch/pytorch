@@ -12,22 +12,21 @@ void pickle(
     const IValue& ivalue,
     std::vector<at::Tensor>* tensor_table) {
   Pickler pickler(std::move(writer), tensor_table);
-
-  if (tensor_table == nullptr) {
-    // No tensor table provided, so tensors will be stored directly in the blob.
-    // Add torch.save metadata so these tensors can be de-serialized later
-    pickler.torchSaveStart();
-  }
-
   pickler.protocol();
   pickler.pushIValue(ivalue);
   pickler.stop();
+}
 
-  if (tensor_table == nullptr) {
-    // No tensor table provided, so tensors will be stored directly in the blob.
-    // Add torch.save metadata so these tensors can be de-serialized later
-    pickler.torchSaveStop();
-  }
+
+void unsafe_pickle(
+    std::function<void(const char*, size_t)> writer,
+    jit::PickleOpCode op,
+    std::string data,
+    std::vector<at::Tensor>* tensor_table) {
+  Pickler pickler(std::move(writer), tensor_table);
+  pickler.protocol();
+  pickler.pushOp(op, data);
+  pickler.stop();
 }
 
 std::vector<char> pickle(
