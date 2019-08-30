@@ -64,12 +64,10 @@ class RRef {
   virtual IValue toHere() = 0;
 
  protected:
-  RRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
+  RRef(worker_id_t ownerId, const RRefId& rrefId);
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;
-  // If this is the owner, forkId_ == rrefId_.
-  const ForkId forkId_;
 };
 
 class UserRRef final: public RRef {
@@ -84,6 +82,8 @@ class UserRRef final: public RRef {
   friend class RRefContext;
 
   UserRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
+
+  const ForkId forkId_;
 };
 
 // Keep the template only on the derived class because ``RRefContext`` needs to
@@ -127,24 +127,14 @@ class OwnerRRef final: public RRef {
  private:
   friend class RRefContext;
 
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId)
-      : OwnerRRef(ownerId, rrefId, forkId, {}) {}
+  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId)
+      : OwnerRRef(ownerId, rrefId, {}) {}
 
   OwnerRRef(OwnerRRef<T>&& other) noexcept
-      : OwnerRRef(other.owner(),
-                  other.id(),
-                  other.forkId(),
-                  std::move(other.value_)) {}
+      : OwnerRRef(other.owner(), other.id(), std::move(other.value_)) {}
 
-  OwnerRRef(
-      worker_id_t ownerId,
-      const RRefId& rrefId,
-      const ForkId& forkId,
-      c10::optional<T> value)
-      : RRef(ownerId, rrefId, forkId) {
-    AT_ASSERT(forkId_ == rrefId_,
-        "Owner RRef's fork ID should be the same as its rref Id");
-
+  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, c10::optional<T> value)
+      : RRef(ownerId, rrefId) {
     value_ = std::move(value);
   }
 

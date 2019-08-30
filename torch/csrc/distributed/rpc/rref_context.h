@@ -71,12 +71,11 @@ class RRefContext {
     if (iter == rrefs_.end()) {
       // Scenario (1) the first time this owner knows about this RRef
       // Scenario (2) This owner is also the creator.
-      // Creating an RRef
-      OwnerRRef<T> ownerRRef(getWorkerId(), rrefId, rrefId);
+      //
       // NB: cannot use make_shared here as the constructor of OwnerRRef is
       // private.
       auto rref = std::shared_ptr<OwnerRRef<T>>(
-          new OwnerRRef<T>(getWorkerId(), rrefId, rrefId));
+          new OwnerRRef<T>(getWorkerId(), rrefId));
       rrefs_[rref->id()] = rref;
       return rref;
 
@@ -93,8 +92,9 @@ class RRefContext {
   RRefContext(std::shared_ptr<RpcAgent>);
 
   static std::unique_ptr<RRefContext> context_;
-  const std::shared_ptr<RpcAgent> agent_;
   static std::atomic<local_id_t> nextLocalId_;
+
+  const std::shared_ptr<RpcAgent> agent_;
   std::mutex mutex_;
   std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> rrefs_;
   std::unordered_map<RRefId,

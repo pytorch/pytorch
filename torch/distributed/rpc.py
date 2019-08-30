@@ -3,6 +3,7 @@
 from . import invoke_rpc_builtin, invoke_rpc_python_udf, invoke_remote_builtin
 from . import init_rref_context
 from . import ProcessGroupAgent
+from . import WorkerId
 from .internal_rpc_utils import serialize, PythonUDF
 
 import sys
@@ -86,6 +87,16 @@ def get_worker_id(worker_name=None):
         return _agent.get_worker_id()
 
 
+def _to_worker_id(name_or_id):
+    if isinstance(name_or_id, WorkerId):
+        return name_or_id
+    elif isinstance(name_or_id, str):
+        return get_worker_id(name_or_id)
+    else:
+        raise ValueError("Unsupported RPC worker ID type {}".format(name_or_id))
+
+
+@_require_initialized
 def remote(to, func, args=None, kwargs=None):
     r"""
     Make a ``remote`` call to run ``func`` on worker ``to``, and returns an
@@ -128,10 +139,8 @@ def remote(to, func, args=None, kwargs=None):
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
-    if isinstance(to, str):
-        to = _agent.get_worker_id(to)
-
-    return invoke_remote_builtin(_agent, to, qualified_name, *args, **kwargs)
+    return invoke_remote_builtin(
+        _agent, _to_worker_id(to), qualified_name, *args, **kwargs)
 
 
 @_require_initialized
@@ -205,13 +214,12 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
-    if isinstance(to, str):
-        to = get_worker_id(to)
-
     if qualified_name is not None:
-        fut = invoke_rpc_builtin(_agent, to, qualified_name, *args, **kwargs)
+        fut = invoke_rpc_builtin(
+            _agent, _to_worker_id(to), qualified_name, *args, **kwargs)
     else:
-        fut = invoke_rpc_python_udf(_agent, to, serialize(PythonUDF(func, args, kwargs)))
+        fut = invoke_rpc_python_udf(
+            _agent, _to_worker_id(to), serialize(PythonUDF(func, args, kwargs)))
 
     if async_call:
         return fut

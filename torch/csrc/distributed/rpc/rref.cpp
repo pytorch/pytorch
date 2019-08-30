@@ -29,7 +29,7 @@ RRefForkData RRefForkData::fromIValue(at::IValue&& ivalue) {
   auto ivalues = ivalue.toTuple()->elements();
 
   TORCH_CHECK(ivalues.size() == 3, "Constructing RRefForkData from ivalue "
-      "expects a GenericList of two elements, but got ", ivalues.size());
+      "expects a GenericList of 3 elements, but got ", ivalues.size());
 
   int64_t ownerId = ivalues[0].toInt();
   TORCH_CHECK(ownerId < std::numeric_limits<worker_id_t>::max(),
@@ -43,8 +43,8 @@ RRefForkData RRefForkData::fromIValue(at::IValue&& ivalue) {
 
 //////////////////////////////  RRef  /////////////////////////////////////
 
-RRef::RRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId)
-    : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId) {}
+RRef::RRef(worker_id_t ownerId, const RRefId& rrefId)
+    : ownerId_(ownerId), rrefId_(rrefId) {}
 
 worker_id_t RRef::owner() const {
   return ownerId_;
@@ -52,10 +52,6 @@ worker_id_t RRef::owner() const {
 
 const RRefId& RRef::id() const {
   return rrefId_;
-}
-
-const ForkId& RRef::forkId() const {
-  return forkId_;
 }
 
 at::IValue RRef::fork() const {
@@ -71,7 +67,7 @@ at::IValue RRef::fork() const {
 
 UserRRef::UserRRef(
     worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId)
-    : RRef(ownerId, rrefId, forkId) {
+    : RRef(ownerId, rrefId), forkId_(forkId) {
   AT_ASSERT(!(forkId_ == rrefId_),
       "User RRef's fork ID should not be the same as its rref Id");
   if (RRefContext::getInstance()->getWorkerId() == rrefId_.createdOn_) {
