@@ -1066,8 +1066,6 @@ graph(%x : Tensor,
         test_module(M2, 'prim::CallMethod[name="forward"]', 0)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("temoprarily disable the test since \
-    I want to put the insert_quant_dequant changes in a separate PR")
     def test_insert_quant_dequant(self):
         class Observer(torch.nn.Module):
             def __init__(self):
@@ -1118,7 +1116,7 @@ graph(%x : Tensor,
         FileCheck().check("aten::quantize_linear") \
                    .check_next("aten::int_repr") \
                    .check_next("aten::_dequantize_linear") \
-                   .check("prim::CallMethod[name=\"forward\"]") \
+                   .check("aten::conv2d") \
                    .check("aten::quantize_linear") \
                    .check_next("aten::int_repr") \
                    .check_next("aten::_dequantize_linear") \
