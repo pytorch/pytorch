@@ -19,13 +19,29 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
     int64_t N = static_cast<int64_t>(packB->numCols());
     int64_t K = static_cast<int64_t>(packB->numRows());
 
-    int32_t weight_zero_point_int32 = pack_ptr.w_zp;
+    Tensor weight_origin;
+    if (pack_ptr.q_scheme == kPerTensorAffine) {
+      weight_origin = _empty_affine_quantized(
+          {N, K},
+          at::device(kCPU).dtype(kQInt8),
+          pack_ptr.w_scale[0],
+          pack_ptr.w_zp[0]);
+    } else if (pack_ptr.q_scheme == kPerChannelAffine) {
+      auto scales = from_blob(
+          pack_ptr.w_scale.data(),
+          pack_ptr.w_scale.size(),
+          device(kCPU).dtype(kFloat));
+      auto zero_points = from_blob(
+          pack_ptr.w_zp.data(), pack_ptr.w_zp.size(), device(kCPU).dtype(kInt));
 
-    auto weight_origin = _empty_affine_quantized(
-        {N, K},
-        at::device(kCPU).dtype(kQInt8),
-        pack_ptr.w_scale,
-        weight_zero_point_int32);
+      weight_origin = _empty_per_channel_affine_quantized_like(
+          scales.toType(kDouble),
+          zero_points.toType(kLong),
+          {N, K},
+          {0}, // The output channel axis is 0
+          device(kCPU).dtype(kQInt8));
+    }
+
     int8_t* weight_ptr_int8 =
         reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
 
