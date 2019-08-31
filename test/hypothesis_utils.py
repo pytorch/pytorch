@@ -6,6 +6,8 @@ from hypothesis import assume
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as stnp
 from hypothesis.searchstrategy import SearchStrategy
+from hypothesis import settings
+from hypothesis import errors
 
 from common_quantized import _calculate_dynamic_qparams
 
@@ -250,3 +252,10 @@ def tensor_conv2d(draw,
     b = draw(tensor(shapes=(_out_channels,), elements=elements,
                     qparams=qparams[2]))
     return X, w, b, g
+
+# derandomize hypothesis testing
+def derandomize(fn):
+    try:
+        return settings(derandomize=True)(fn)
+    except errors.InvalidArgument:
+        return fn
