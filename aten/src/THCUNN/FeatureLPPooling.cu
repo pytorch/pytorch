@@ -447,7 +447,8 @@ runFeatureLPPoolingUpdateOutput(THCState* state,
       L2_STRIDE_CASE(2, WIDTH);                 \
       L2_STRIDE_CASE(3, WIDTH);                 \
       L2_STRIDE_CASE(4, WIDTH);                 \
-    }
+    }                                           \
+    break;
 
 #define LP_STRIDE_CASE(STRIDE, WIDTH)                                   \
   case STRIDE:                                                          \
@@ -467,7 +468,8 @@ runFeatureLPPoolingUpdateOutput(THCState* state,
       LP_STRIDE_CASE(2, WIDTH);                 \
       LP_STRIDE_CASE(3, WIDTH);                 \
       LP_STRIDE_CASE(4, WIDTH);                 \
-    }
+    }                                           \
+    break;
 
   if (power == 2.0f) {
     switch (width) {
@@ -583,7 +585,8 @@ runFeatureLPPoolingUpdateGradInput(THCState* state,
       L2_STRIDE_CASE(2, WIDTH);                 \
       L2_STRIDE_CASE(3, WIDTH);                 \
       L2_STRIDE_CASE(4, WIDTH);                 \
-    }
+    }                                           \
+    break;
 
 #define LP_STRIDE_CASE(STRIDE, WIDTH)                                   \
   case STRIDE:                                                          \
@@ -601,7 +604,8 @@ runFeatureLPPoolingUpdateGradInput(THCState* state,
       LP_STRIDE_CASE(2, WIDTH);                 \
       LP_STRIDE_CASE(3, WIDTH);                 \
       LP_STRIDE_CASE(4, WIDTH);                 \
-    }
+    }                                           \
+    break;
 
   if (power == 2.0f) {
     switch (width) {
