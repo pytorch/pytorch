@@ -1,5 +1,6 @@
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
+#include <google/protobuf/stubs/logging.h>
 
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/export.h>
@@ -275,13 +276,13 @@ void EncoderBase::EncodeBlock(
   // Since ONNX IR VERSION 4, initializers do not have to
   // be a subset of graph inputs. We use keep_initializers_as_inputs
   // argument to determine whether to add initializers
-  // as inputs or not. If keep_initializers_as_inputs=false, 
+  // as inputs or not. If keep_initializers_as_inputs=false,
   // we only add non-parameter inputs as inputs to ONNX graph, and.
   // not the initializers (parameters). If keep_initializers_as_inputs
   // =true, we add initializers as inputs too. Setting
-  // keep_initializers_as_inputs=false allows better 
+  // keep_initializers_as_inputs=false allows better
   // optimizations, such as constant-folding, on ONNX graphs
-  // by backends/optimizers.  
+  // by backends/optimizers.
   if (keep_initializers_as_inputs) {
     for (auto input : block->inputs()) {
       onnx::ValueInfoProto* v = graph_proto->add_input();
@@ -1317,6 +1318,22 @@ std::string pretty_print_onnx(
   return prettyPrint(graph_encoder.get_model_proto());
 }
 
+void protobuf_log_handler(
+    google::protobuf::LogLevel level,
+    const char* filename,
+    int line,
+    const std::string& message) {
+  if (level == google::protobuf::LogLevel::LOGLEVEL_INFO) {
+    LOG(INFO) << message;
+  } else if (level == google::protobuf::LogLevel::LOGLEVEL_WARNING) {
+    LOG(WARNING) << message;
+  } else if (level == google::protobuf::LogLevel::LOGLEVEL_ERROR) {
+    LOG(ERROR) << message;
+  } else {
+    LOG(FATAL) << message;
+  }
+}
+
 // export_raw_ir will export IR ops without turning them into ONNX ops.
 // The output will use the ONNX protobuf format, but the ops will not
 // conform to the ONNX op specification. Thus, the output will not
@@ -1331,6 +1348,8 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
     ::torch::onnx::OperatorExportTypes operator_export_type,
     bool strip_doc_string,
     bool keep_initializers_as_inputs) {
+  google::protobuf::LogHandler* old_logger_handler = google::protobuf::SetLogHandler(&protobuf_log_handler);
+
   auto graph_encoder = GraphEncoder(
       graph,
       onnx_opset_version,
@@ -1340,9 +1359,11 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       defer_weight_export,
       strip_doc_string,
       keep_initializers_as_inputs);
+
+  std::string proto_str;
+  TORCH_CHECK(graph_encoder.get_model_proto().SerializeToString(&proto_str), "Export ONNX Failed!");
   return std::make_tuple(
-      graph_encoder.get_model_proto().SerializeAsString(),
-      graph_encoder.get_raw_data_export_map());
+      std::move(proto_str), graph_encoder.get_raw_data_export_map());
 }
 
 
