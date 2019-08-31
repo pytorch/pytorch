@@ -323,6 +323,18 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad.data, x_grad)
         self.assertEqual(y.grad.data, y_grad)
 
+        # Test that grad_outputs and outputs have the same shape
+        grad_out = torch.ones(2)
+        try:
+            torch.autograd.grad(
+                outputs=[grad_sum], grad_outputs=[grad_out],
+                inputs=[x], create_graph=True)
+            self.assertFail()
+        except RuntimeError as error:
+            self.assertEqual(str(error), "Mismatch in shape: grad_output[0] has a shape of "
+                             + str(grad_out.shape) + " and output[0] has a shape of "
+                             + str(grad_sum.shape) + ".")
+
     def test_grad_nonleaf(self):
         x_init = torch.randn(2, 2, requires_grad=True)
         x = x_init
@@ -964,7 +976,7 @@ class TestAutograd(TestCase):
         check_index(x, y, (1, slice(2, None)))
         check_index(x, y, (slice(None, None), slice(2, None)))
         check_index(x, y, torch.LongTensor([0, 2]))
-        check_index(x, y, torch.rand(4, 4).bernoulli().byte())
+        check_index(x, y, torch.rand(4, 4).bernoulli().bool())
         check_index(x, y, (Ellipsis, slice(2, None)))
         check_index(x, y, ([0], [0]))
         check_index(x, y, ([1, 2, 3], [0]))
@@ -1504,7 +1516,7 @@ class TestAutograd(TestCase):
                                               3]), requires_grad=False), [2, 4], slice(None)])
 
     def test_setitem_mask(self):
-        mask = torch.ByteTensor(5, 5).bernoulli_()
+        mask = torch.BoolTensor(5, 5).bernoulli_()
         self._test_setitem((5, 5), Variable(mask))
         self._test_setitem((5,), Variable(mask[0]))
         self._test_setitem((1,), Variable(mask[0, 0:1]))

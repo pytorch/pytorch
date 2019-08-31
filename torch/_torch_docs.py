@@ -155,8 +155,8 @@ The shapes of :attr:`input` and :attr:`other` must be
 .. math::
     \text{{out}} = \text{{input}} + \text{{alpha}} \times \text{{other}}
 
-If the result of adding :attr:`self` and :attr:`other` would not have a
-floating-point type, :attr:`alpha` must be an integer.
+The category (floating point, integer, or Boolean) of :attr:`alpha` must match
+that of the result of addition between :attr:`input` and :attr:`other`.
 
 Args:
     input (Tensor): the first input tensor
@@ -4881,8 +4881,8 @@ The shapes of :attr:`input` and :attr:`other` must be
 .. math::
     \text{{out}} = \text{{input}} - \text{{alpha}} \times \text{{other}}
 
-If the result of subtracting :attr:`other` from :attr:`self` would not have a
-floating-point type, :attr:`alpha` must be an integer.
+The category (floating point, integer, or Boolean) of :attr:`alpha` must match
+that of the result of subtraction between :attr:`input` and :attr:`other`.
 
 Args:
     input (Tensor): the first input tensor
