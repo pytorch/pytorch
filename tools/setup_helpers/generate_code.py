@@ -38,11 +38,6 @@ def generate_code(ninja_global=None,
             os.makedirs(d)
 
     if subset == "pybindings" or not subset:
-        # Build THNN/THCUNN.cwrap and then THNN/THCUNN.cpp. These are primarily
-        # used by the legacy NN bindings.
-        from tools.nnwrap import generate_wrappers as generate_nn_wrappers
-        generate_nn_wrappers(nn_path, install_dir, 'tools/cwrap/plugins/templates')
-
         gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, 'tools/autograd')
 
     if subset == "libtorch" or not subset:
