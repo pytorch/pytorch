@@ -7,6 +7,7 @@
 #include <torch/nn/modules/embedding.h>
 #include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
+#include <torch/nn/modules/modulelist.h>
 #include <torch/nn/modules/named_any.h>
 #include <torch/nn/modules/rnn.h>
 #include <torch/nn/modules/sequential.h>
