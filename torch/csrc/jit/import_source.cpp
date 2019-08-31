@@ -35,12 +35,12 @@ struct ConstantValue : public SugaredValue {
   }
 };
 
-// Represents nested class namespaces, like `foo.bar.Baz`.
-// Right now these namespaces can only contain other namespaces or a class type.
+// Represents nested namespaces, like `foo.bar.Baz`.
+// Right now these namespaces can only contain other namespaces or NamedTypes
 struct TORCH_API ClassNamespaceValue : public SugaredValue {
   /**
    * @param  name  The fully qualified path, which can resolve either to a
-   *               namespace or a class value.
+   *               namespace or a NamedType
    * @param  cu    The compilation unit to search for classes in
    */
   explicit ClassNamespaceValue(
@@ -53,6 +53,7 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
       Function& m,
       const std::string& name) override {
     auto fullName = c10::QualifiedName(basename_, name);
+    // Could be a ClassType or NamedTuple constructor
     if (auto serializable_type = cu_.get_type(fullName)) {
       if (auto classType = serializable_type->cast<ClassType>()) {
         return std::make_shared<ClassValue>(classType);
@@ -61,6 +62,12 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
       }
     }
 
+    // Or it could be a free function
+    if (auto fn = cu_.find_function(fullName)) {
+      return std::make_shared<FunctionValue>(fn);
+    }
+
+    // If it's none of those things, assume it's another namespace
     return std::make_shared<ClassNamespaceValue>(std::move(fullName), cu_);
   }
   std::string kind() const override {
@@ -95,7 +102,8 @@ struct ConstantTableValue : public SugaredValue {
                              << " is out of bounds (constant table has "
                              << constants_.size() << " entries)";
     }
-    Value* value = m.graph()->insertConstant(constants_[offset], nullptr, loc);
+    Value* value =
+        m.graph()->insertConstant(constants_.at(offset), nullptr, loc);
 
     // specializing tensor type on compilation messes up typing relations
     value->setType(unshapedType(value->type()));
@@ -180,16 +188,20 @@ struct SourceImporter {
     while (L.cur().kind != TK_EOF) {
       parseImportsAndDoCallback();
 
-      auto parsed_treeref = p_.parseClassLike();
-      if (parsed_treeref->kind() == TK_CLASS_DEF) {
-        importClass(qualifier, ClassDef(parsed_treeref));
-      } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
-        importNamedTuple(qualifier, NamedTupleDef(parsed_treeref));
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            false,
-            "Got an unrecognized type from "
-            "parseClassLike");
+      auto tk = L.cur();
+      auto kind = tk.kind;
+      switch (kind) {
+        case TK_CLASS_DEF: {
+          auto parsed_treeref = p_.parseClass();
+          importNamedType(qualifier, ClassDef(parsed_treeref));
+        } break;
+        case TK_DEF: {
+          auto parsed_treeref = p_.parseFunction(/*is_method=*/false);
+          importFunction(qualifier, Def(parsed_treeref));
+        } break;
+        default:
+          throw ErrorReport(L.cur().range)
+              << "Unexpected token in code import: " << kindToString(kind);
       }
     }
   }
@@ -211,15 +223,40 @@ struct SourceImporter {
   }
 
  private:
-  void importClass(const std::string& qualifier, const ClassDef& class_def) {
-    bool is_module = class_def.superclass().present();
-    if (is_module &&
-        Var(class_def.superclass().get()).name().name() != "Module") {
+  void importFunction(const std::string& qualifier, const Def& def) {
+    std::vector<Def> definitions{def};
+    std::vector<ResolverPtr> resolvers{resolver_};
+    cu_->define(qualifier, definitions, resolvers, nullptr);
+  }
+
+  void importNamedType(
+      const std::string& qualifier,
+      const ClassDef& class_def) {
+    const auto qualified_name =
+        QualifiedName(QualifiedName(qualifier), class_def.name().name());
+    if (!class_def.superclass().present()) {
+      return importClass(qualified_name, class_def, /*is_module=*/false);
+    }
+    const auto& superclass_name =
+        Var(class_def.superclass().get()).name().name();
+    if (superclass_name == "Module") {
+      importClass(qualified_name, class_def, /*is_module=*/true);
+    } else if (superclass_name == "NamedTuple") {
+      // NamedTuples have special rules (since they are TupleTypes and not
+      // ClassTypes)
+      return importNamedTuple(qualified_name, class_def);
+    } else if (superclass_name == "Interface") {
+      cu_->define_interface(qualified_name, class_def, resolver_);
+    } else {
       throw ErrorReport(class_def.range())
           << "Torchscript does not support class inheritance.";
     }
-    const auto qualified_classname =
-        QualifiedName(QualifiedName(qualifier), class_def.name().name());
+  }
+
+  void importClass(
+      const QualifiedName& qualified_classname,
+      const ClassDef& class_def,
+      bool is_module) {
     auto class_type = ClassType::create(
         c10::QualifiedName(qualified_classname), cu_, is_module);
 
@@ -258,6 +295,11 @@ struct SourceImporter {
               } else {
                 // This is a regular attribute assignment, of the form:
                 //   foo : Tensor
+                if (assign.rhs().present()) {
+                  throw ErrorReport(assign.rhs())
+                      << "Unexpected right-hand found in assignment in class body. "
+                         "This is not yet supported.";
+                }
                 attributes.push_back(assign);
               }
             } break;
@@ -320,26 +362,23 @@ struct SourceImporter {
   }
 
   void importNamedTuple(
-      const std::string& qualifier,
-      const NamedTupleDef& named_tuple_def) {
-    auto qualified_name =
-        c10::QualifiedName(qualifier + "." + named_tuple_def.name().name());
-
+      const QualifiedName& qualified_name,
+      const ClassDef& named_tuple_def) {
+    ScriptTypeParser type_parser(resolver_);
     std::vector<std::string> field_names;
     std::vector<TypePtr> field_types;
-
-    for (const auto& name_ident : named_tuple_def.fields()) {
-      field_names.push_back(name_ident.name());
-    }
-
-    ScriptTypeParser type_parser(resolver_);
-    for (const auto& maybe_type_expr : named_tuple_def.type_exprs()) {
-      if (maybe_type_expr.present()) {
-        field_types.push_back(
-            type_parser.parseTypeFromExpr(maybe_type_expr.get()));
-      } else {
-        field_types.push_back(TensorType::get());
+    for (const auto& statement : named_tuple_def.body()) {
+      if (statement.kind() != TK_ASSIGN) {
+        throw ErrorReport(statement.range())
+            << "Unexpected statement in NamedTuple body: "
+               "only attribute annotations are currently supported.";
       }
+
+      const auto assign = Assign(statement);
+      auto name = Var(assign.lhs()).name().name();
+      field_names.emplace_back(std::move(name));
+      auto type = type_parser.parseTypeFromExpr(assign.type().get());
+      field_types.emplace_back(std::move(type));
     }
 
     auto tt = TupleType::create(

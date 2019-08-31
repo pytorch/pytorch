@@ -13,15 +13,15 @@ def relu(input, inplace=False):
     # type: (Tensor, bool) -> Tensor
     r"""relu(input, inplace=False) -> Tensor
 
-    .. note::
-      :attr:`inplace` is not supported for the quantized relu.
-
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
     """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.relu' must be quantized!")
     if inplace:
-        raise NotImplementedError("`inplace` is not implemented in quantized relu")
-    return torch.ops.quantized.relu(input)
+        return torch.relu_(input)
+    else:
+        return torch.relu(input)
 
 def linear(input, weight, bias=None, scale=None, zero_point=None):
     # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
@@ -54,6 +54,8 @@ def linear(input, weight, bias=None, scale=None, zero_point=None):
     if zero_point is None:
         zero_point = input.q_zero_point()
     _packed_weight = torch.ops.quantized.fbgemm_linear_prepack(weight)
+    if bias is not None:
+        bias = torch.quantize_linear(bias.dequantize(), weight.q_scale() * input.q_scale(), 0, torch.qint32)
     return torch.ops.quantized.fbgemm_linear(input, _packed_weight, bias, scale,
                                              zero_point)
 
@@ -116,6 +118,8 @@ def conv2d(input, weight, bias,
 
     prepacked_weight = torch.ops.quantized.fbgemm_conv_prepack(
         weight.permute([0, 2, 3, 1]), stride, padding, dilation, groups)
+    if bias is not None:
+        bias = torch.quantize_linear(bias.dequantize(), scale=weight.q_scale() * input.q_scale(), zero_point=0, dtype=torch.qint32)
     return torch.ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]),
                                              prepacked_weight, bias,
                                              stride, padding, dilation,

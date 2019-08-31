@@ -68,34 +68,34 @@ class ScriptModuleDeserializer final {
       script::ExtraFilesMap& extra_files);
 
  private:
-  at::Tensor loadTensor(
+  IValue readArchive(const std::string& archive_name);
+  script::Module LEGACY_deserialize();
+  at::Tensor LEGACY_loadTensor(
       const torch::TensorDef& tensor_proto,
       std::unordered_map<std::string, at::Storage>& storageMap);
 
-  void loadTensorTable(torch::ModelDef* model_def);
+  void LEGACY_loadTensorTable(torch::ModelDef* model_def);
   void importCallback(const std::string& qualifier);
-  void moduleSetState(const script::Module& module, IValue state);
+  void LEGACY_moduleSetState(const script::Module& module, IValue state);
 
   std::shared_ptr<script::CompilationUnit> compilation_unit_;
 
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
-  std::vector<std::string> moduleStack_;
+  std::vector<std::string> LEGACY_moduleStack_;
 
-  std::vector<at::Tensor> tensor_table_;
+  std::vector<at::Tensor> constants_table_;
   std::unordered_set<std::string> imported_libs_;
 
   IValue LEGACY_loadPickleArchive(const std::string& name);
   script::Module LEGACY_convertModule(const torch::ModuleDef& module_def);
   std::vector<IValue> LEGACY_pickled_ivalues_;
-  size_t proto_version_;
+  std::string export_prefix_ = "code/";
 };
 
-script::Module ScriptModuleDeserializer::deserialize(
-    c10::optional<at::Device> device,
-    script::ExtraFilesMap& extra_files) {
-  C10_LOG_API_USAGE_ONCE("torch.script.load");
+script::Module ScriptModuleDeserializer::LEGACY_deserialize() {
   torch::ModelDef model_def;
+
   at::DataPtr data_ptr;
   size_t data_size;
   std::tie(data_ptr, data_size) = reader_->getRecord("model.json");
@@ -125,13 +125,69 @@ script::Module ScriptModuleDeserializer::deserialize(
   AT_ASSERTM(
       model_def.ParseFromString(binary_string),
       "JSON transcoder produced invalid protobuf output.");
-  device_ = device;
-  proto_version_ = model_def.proto_version();
+  auto proto_version = model_def.proto_version();
+  export_prefix_ = "libs/";
 
+  LEGACY_loadTensorTable(&model_def);
+  AT_ASSERT(proto_version < 6);
+  if (proto_version == 2) {
+    const auto& list =
+        LEGACY_loadPickleArchive("attributes.pkl").toGenericList();
+    LEGACY_pickled_ivalues_.insert(
+        LEGACY_pickled_ivalues_.end(), list.begin(), list.end());
+  } else if (proto_version >= 3) {
+    LEGACY_pickled_ivalues_ =
+        LEGACY_loadPickleArchive("attributes.pkl").toTuple()->elements();
+  }
+  LEGACY_moduleStack_.push_back("__torch__");
+  const auto& module_def = model_def.main_module();
+  return LEGACY_convertModule(module_def);
+}
+
+IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
+  std::stringstream picklename;
+  picklename << archive_name << ".pkl";
+  at::DataPtr pickle_ptr;
+  size_t pickle_size;
+  std::tie(pickle_ptr, pickle_size) = reader_->getRecord(picklename.str());
+
+  size_t bytes_read = 0;
+  auto data = reinterpret_cast<const char*>(pickle_ptr.get());
+  auto reader = [&](char* buffer, size_t len) {
+    if (bytes_read + len > pickle_size) {
+      return false;
+    }
+    // Copy len bytes into buffer
+    const char* start = data + bytes_read;
+    std::memcpy(buffer, start, len);
+    bytes_read += len;
+    return true;
+  };
+
+  auto class_resolver = [&](const c10::QualifiedName& qn) {
+    importCallback(qn.prefix());
+    return c10::StrongTypePtr(
+        compilation_unit_, compilation_unit_->get_class(qn));
+  };
+  auto read_record = [&](const std::string& name) {
+    std::stringstream ss;
+    ss << archive_name << "/" << name;
+    return std::get<0>(reader_->getRecord(ss.str()));
+  };
+  Unpickler unpickler(
+      reader, std::move(class_resolver), std::move(read_record), device_);
+  return unpickler.parse_ivalue();
+}
+
+script::Module ScriptModuleDeserializer::deserialize(
+    c10::optional<at::Device> device,
+    script::ExtraFilesMap& extra_files) {
+  C10_LOG_API_USAGE_ONCE("torch.script.load");
+  device_ = device;
   // Load extra files.
   for (const auto& kv : extra_files) {
     const std::string& key = "extra/" + kv.first;
-    if (reader_->hasFile(key)) {
+    if (reader_->hasRecord(key)) {
       at::DataPtr meta_ptr;
       size_t meta_size;
       std::tie(meta_ptr, meta_size) = reader_->getRecord(key);
@@ -139,74 +195,42 @@ script::Module ScriptModuleDeserializer::deserialize(
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
     }
   }
-
-  loadTensorTable(&model_def);
-
-  if (proto_version_ < 6) {
-    if (proto_version_ == 2) {
-      auto list = LEGACY_loadPickleArchive("attributes.pkl").toGenericList();
-      LEGACY_pickled_ivalues_.insert(
-          LEGACY_pickled_ivalues_.end(), list.begin(), list.end());
-
-    } else {
-      LEGACY_pickled_ivalues_ =
-          LEGACY_loadPickleArchive("attributes.pkl").toTuple()->elements();
-    }
-    moduleStack_.push_back("__torch__");
-    const auto& module_def = model_def.main_module();
-    return LEGACY_convertModule(module_def);
-  } else {
-    at::DataPtr pickle_ptr;
-    size_t pickle_size;
-    std::tie(pickle_ptr, pickle_size) = reader_->getRecord("data.pkl");
-
-    size_t bytes_read = 0;
-    auto data = reinterpret_cast<const char*>(pickle_ptr.get());
-    auto reader = [&](char* buffer, size_t len) {
-      // Copy len bytes into buffer
-      const char* start = data + bytes_read;
-      std::memcpy(buffer, start, len);
-      bytes_read += len;
-    };
-    auto bounds_checker = [&]() { return bytes_read < pickle_size; };
-
-    Unpickler unpickler(
-        reader,
-        bounds_checker,
-        &tensor_table_,
-        [&](const c10::QualifiedName& qn) {
-          importCallback(qn.prefix());
-          return c10::StrongTypePtr(
-              compilation_unit_, compilation_unit_->get_class(qn));
-        });
-    return script::Module(unpickler.parseModule().toObject());
+  if (reader_->hasRecord("model.json")) {
+    return LEGACY_deserialize();
   }
+  auto tuple = readArchive("constants").toTuple();
+  for (auto constant : tuple->elements()) {
+    constants_table_.push_back(constant.toTensor());
+  }
+  return script::Module(readArchive("data").toObject());
 }
 
-IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(const std::string& name) {
+IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
+    const std::string& name) {
   at::DataPtr attributes_ptr;
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) = reader_->getRecord(name);
   auto ivalue = unpickle(
       reinterpret_cast<const char*>(attributes_ptr.get()),
       attributes_size,
-      &tensor_table_,
       [&](const c10::QualifiedName& qn) {
         importCallback(qn.prefix());
         return c10::StrongTypePtr(
             compilation_unit_, compilation_unit_->get_class(qn));
-      });
+      },
+      &constants_table_);
   return ivalue;
 }
 
-void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
+void ScriptModuleDeserializer::LEGACY_loadTensorTable(
+    torch::ModelDef* model_def) {
   std::unordered_map<std::string, at::Storage> storageMap;
   for (const torch::TensorDef& tensor : model_def->tensors()) {
-    tensor_table_.emplace_back(loadTensor(tensor, storageMap));
+    constants_table_.emplace_back(LEGACY_loadTensor(tensor, storageMap));
   }
 }
 
-at::Tensor ScriptModuleDeserializer::loadTensor(
+at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
     const torch::TensorDef& tensor_proto,
     std::unordered_map<std::string, at::Storage>& storageMap) {
   std::vector<int64_t> dims(
@@ -300,17 +324,18 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   std::function<void(const std::string&)> import_callback =
       [this](const std::string& qualifier) { importCallback(qualifier); };
   const std::string path =
-      ImportExportHelpers::qualifierToPath(qualifier, proto_version_);
+      ImportExportHelpers::qualifierToPath(qualifier, export_prefix_);
   at::DataPtr data;
   size_t size;
   std::tie(data, size) = reader_->getRecord(path);
 
   std::shared_ptr<ConcreteSourceRangeUnpickler> gen_ranges = nullptr;
-  if (proto_version_ >= 6) {
+
+  std::string debug_file = path + ".debug_pkl";
+  if (reader_->hasRecord(debug_file)) {
     at::DataPtr debug_data;
     size_t debug_size;
-    std::tie(debug_data, debug_size) = reader_->getRecord(path + ".debug_pkl");
-
+    std::tie(debug_data, debug_size) = reader_->getRecord(debug_file);
     gen_ranges = std::make_shared<ConcreteSourceRangeUnpickler>(
         std::move(debug_data), debug_size);
   }
@@ -322,10 +347,10 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
       gen_ranges);
 
   script::import_libs(
-      compilation_unit_, qualifier, src, tensor_table_, import_callback);
+      compilation_unit_, qualifier, src, constants_table_, import_callback);
 }
 
-void ScriptModuleDeserializer::moduleSetState(
+void ScriptModuleDeserializer::LEGACY_moduleSetState(
     const script::Module& module,
     IValue state) {
   auto setstate = module.find_method("__setstate__");
@@ -358,10 +383,10 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
   const auto atoms = c10::QualifiedName(module_def.name()).atoms();
   const size_t numPushed = atoms.size();
   for (const auto& atom : atoms) {
-    moduleStack_.emplace_back(atom);
+    LEGACY_moduleStack_.emplace_back(atom);
   }
-  auto module =
-      script::Module(c10::QualifiedName(moduleStack_), compilation_unit_);
+  auto module = script::Module(
+      c10::QualifiedName(LEGACY_moduleStack_), compilation_unit_);
   for (int i = 0; i < module_def.submodules_size(); ++i) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
     auto submodule = LEGACY_convertModule(sub_def);
@@ -369,7 +394,7 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
   }
   for (int i = 0; i < module_def.parameters_size(); ++i) {
     const torch::ParameterDef& param_def = module_def.parameters(i);
-    at::Tensor tensor = tensor_table_.at(param_def.tensor_id());
+    at::Tensor tensor = constants_table_.at(param_def.tensor_id());
     if (param_def.is_buffer()) {
       module.register_buffer(param_def.name(), tensor);
     } else {
@@ -424,11 +449,12 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
 
     std::function<void(const std::string&)> import_callback =
         [&, this](const std::string& qualifier) { importCallback(qualifier); };
-    script::LEGACY_import_methods(module, src, tensor_table_, import_callback);
+    script::LEGACY_import_methods(
+        module, src, constants_table_, import_callback);
   }
 
   if (module_def.has_get_state_attribute_id()) {
-    moduleSetState(
+    LEGACY_moduleSetState(
         module,
         LEGACY_pickled_ivalues_.at(module_def.get_state_attribute_id()));
   }
@@ -449,7 +475,7 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
   }
 
   for (size_t i = 0; i < numPushed; i++) {
-    moduleStack_.pop_back();
+    LEGACY_moduleStack_.pop_back();
   }
   return module;
 }
