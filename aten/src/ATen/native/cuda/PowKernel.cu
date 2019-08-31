@@ -10,18 +10,18 @@ namespace at { namespace native {
 namespace {
 
 void pow_tensor_tensor_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "pow_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "pow_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
       return std::pow(base, exp);
     });
   });
 }
 
 void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
-  auto exp = exp_scalar.to<double>();
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "pow_cuda", [&]() {
+  const auto exp = exp_scalar.to<double>();
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "pow_cuda", [&]() {
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-      return std::pow(base, exp);
+      return std::pow((double)base, exp);
     });
   });
 }
