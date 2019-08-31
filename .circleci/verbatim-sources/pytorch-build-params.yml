@@ -9,9 +9,6 @@ pytorch_params: &pytorch_params
     resource_class:
       type: string
       default: "large"
-    python_version:
-      type: string
-      default: ""
     use_cuda_docker_runtime:
       type: string
       default: ""
@@ -21,7 +18,6 @@ pytorch_params: &pytorch_params
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     DOCKER_IMAGE: << parameters.docker_image >>
-    PYTHON_VERSION: << parameters.python_version >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     MULTI_GPU: << parameters.multi_gpu >>
   resource_class: << parameters.resource_class >>
