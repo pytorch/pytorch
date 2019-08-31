@@ -361,8 +361,8 @@ class ModelLayer(object):
 
     def get_accessed_features(self):
         """
-        Return a map from field to AccessedFeatures, the map should contain all
-        features accessed in the model layer
+        Return a map from field to list of AccessedFeatures, the map should
+        contain all features accessed in the model layer
         """
         return {}
 

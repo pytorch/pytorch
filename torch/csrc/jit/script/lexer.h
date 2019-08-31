@@ -103,8 +103,7 @@ namespace script {
   _(TK_CONTINUE, "continue", "continue")         \
   _(TK_PASS, "pass", "pass")                     \
   _(TK_CLASS_DEF, "class", "class")              \
-  _(TK_IMPORT, "import", "import")               \
-  _(TK_NAMED_TUPLE_DEF, "named tuple", "")
+  _(TK_IMPORT, "import", "import")
 
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|";
 

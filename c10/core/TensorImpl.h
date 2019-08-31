@@ -5,14 +5,10 @@
 #include <numeric>
 
 #include <c10/core/Backend.h>
-#include <c10/core/DefaultDtype.h>
-#include <c10/core/Device.h>
-#include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
-#include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeId.h>
-#include <c10/core/TensorTypeIdRegistration.h>
 #include <c10/core/CopyBytes.h>
 
 #include <c10/util/Exception.h>
@@ -416,7 +412,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
-    return tid == SparseCPUTensorId() || tid == SparseCUDATensorId() || tid == SparseHIPTensorId();
+    return tid == TensorTypeId::SparseCPUTensorId || tid == TensorTypeId::SparseCUDATensorId || tid == TensorTypeId::SparseHIPTensorId;
   }
 
   bool is_quantized() const {
@@ -424,7 +420,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
-    return tid == QuantizedCPUTensorId();
+    return tid == TensorTypeId::QuantizedCPUTensorId;
   }
 
   bool is_cuda() const {
@@ -432,7 +428,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
-    return tid == CUDATensorId() || tid == SparseCUDATensorId();
+    return tid == TensorTypeId::CUDATensorId || tid == TensorTypeId::SparseCUDATensorId;
   }
 
   bool is_hip() const {
@@ -440,11 +436,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
-    return tid == HIPTensorId() || tid == SparseHIPTensorId();
+    return tid == TensorTypeId::HIPTensorId || tid == TensorTypeId::SparseHIPTensorId;
   }
 
   bool is_mkldnn() const {
-    return type_id() == MkldnnCPUTensorId();
+    return type_id() == TensorTypeId::MkldnnCPUTensorId;
   }
 
   int64_t get_device() const {
@@ -926,10 +922,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   inline bool has_compatible_shallow_copy_type(TensorTypeId from) {
     TensorTypeId self = type_id();
     return (self == from) ||
-        ((self == CPUTensorId() || self == CUDATensorId() || self == HIPTensorId()) &&
-        (from == CPUTensorId() || from == CUDATensorId() || from == HIPTensorId())) ||
-        ((self == SparseCPUTensorId() || self == SparseCUDATensorId() || self == SparseHIPTensorId()) &&
-        (from == SparseCPUTensorId() || from == SparseCUDATensorId() || from == SparseHIPTensorId()));
+        ((self == TensorTypeId::CPUTensorId || self == TensorTypeId::CUDATensorId || self == TensorTypeId::HIPTensorId) &&
+        (from == TensorTypeId::CPUTensorId || from == TensorTypeId::CUDATensorId || from == TensorTypeId::HIPTensorId)) ||
+        ((self == TensorTypeId::SparseCPUTensorId || self == TensorTypeId::SparseCUDATensorId || self == TensorTypeId::SparseHIPTensorId) &&
+        (from == TensorTypeId::SparseCPUTensorId || from == TensorTypeId::SparseCUDATensorId || from == TensorTypeId::SparseHIPTensorId));
   }
 
   /**

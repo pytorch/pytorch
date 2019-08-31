@@ -198,13 +198,6 @@ void ArgumentSpecCreator::specializeTypes(
   size_t optional_arg_spec_offset =
       0; // number of specialized optionals seen so far
 
-  auto dim_tensor_type_from_arg = [](const ArgumentInfo& arg) {
-    return DimensionedTensorType::create(
-        arg.type(),
-        ConvertIntToCPUOrCUDA(arg.device()),
-        arg.dim(),
-        arg.requires_grad());
-  };
   for (Inst inst : instructions_) {
     switch (inst) {
       case SPECIALIZE_OPTIONAL_TENSOR: {
@@ -216,15 +209,16 @@ void ArgumentSpecCreator::specializeTypes(
         }
         auto& arg = spec.tensorAt(tensor_arg_spec_offset++);
         AT_ASSERT(arg.defined());
-        result_stack.back().emplace_back(dim_tensor_type_from_arg(arg));
+        result_stack.back().emplace_back(arg.toType());
       } break;
       case SPECIALIZE_TENSOR: {
         input_stack.back()++;
         auto& arg = spec.tensorAt(tensor_arg_spec_offset++);
         if (!arg.defined()) {
-          result_stack.back().emplace_back(AutogradZeroTensorType::get());
+          result_stack.back().emplace_back(
+              TensorType::get()->withAutogradZero());
         } else {
-          result_stack.back().emplace_back(dim_tensor_type_from_arg(arg));
+          result_stack.back().emplace_back(arg.toType());
         }
       } break;
       case SPECIALIZE_OPTIONAL: {
