@@ -38,19 +38,19 @@ static inline int get_device(PyObject* args) {
 }
 
 static inline bool THNN_FloatTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CPUTensorId(), at::kFloat);
+  return torch::nn::check_type(obj, at::TensorTypeId::CPUTensorId, at::kFloat);
 }
 
 static inline bool THNN_DoubleTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CPUTensorId(), at::kDouble);
+  return torch::nn::check_type(obj, at::TensorTypeId::CPUTensorId, at::kDouble);
 }
 
 static inline bool THNN_LongTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CPUTensorId(), at::kLong);
+  return torch::nn::check_type(obj, at::TensorTypeId::CPUTensorId, at::kLong);
 }
 
 static inline bool THNN_IntTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CPUTensorId(), at::kInt);
+  return torch::nn::check_type(obj, at::TensorTypeId::CPUTensorId, at::kInt);
 }
 
 static inline THFloatTensor* THNN_FloatTensor_Unpack(PyObject* obj) {
@@ -72,19 +72,19 @@ static inline THIntTensor* THNN_IntTensor_Unpack(PyObject* obj) {
 #ifdef USE_CUDA
 
 static inline bool THNN_CudaHalfTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CUDATensorId(), at::kHalf);
+  return torch::nn::check_type(obj, at::TensorTypeId::CUDATensorId, at::kHalf);
 }
 
 static inline bool THNN_CudaFloatTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CUDATensorId(), at::kFloat);
+  return torch::nn::check_type(obj, at::TensorTypeId::CUDATensorId, at::kFloat);
 }
 
 static inline bool THNN_CudaDoubleTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CUDATensorId(), at::kDouble);
+  return torch::nn::check_type(obj, at::TensorTypeId::CUDATensorId, at::kDouble);
 }
 
 static inline bool THNN_CudaLongTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CUDATensorId(), at::kLong);
+  return torch::nn::check_type(obj, at::TensorTypeId::CUDATensorId, at::kLong);
 }
 
 static inline THCudaHalfTensor* THNN_CudaHalfTensor_Unpack(PyObject* obj) {

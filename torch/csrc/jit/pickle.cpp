@@ -46,36 +46,33 @@ std::vector<char> pickle(
 }
 
 IValue unpickle(
-    std::function<void(char*, size_t)> reader,
-    std::function<bool()> bounds_checker,
-    const std::vector<at::Tensor>* tensor_table,
-    ClassResolver class_resolver) {
+    std::function<bool(char*, size_t)> reader,
+    ClassResolver class_resolver,
+    const std::vector<at::Tensor>* tensor_table) {
   Unpickler unpickler(
-      std::move(reader),
-      std::move(bounds_checker),
-      tensor_table,
-      std::move(class_resolver));
+      std::move(reader), std::move(class_resolver), tensor_table);
   return unpickler.parse_ivalue();
 }
 
 IValue unpickle(
     const char* data,
     size_t size,
-    const std::vector<at::Tensor>* tensor_table,
-    ClassResolver class_resolver) {
+    ClassResolver class_resolver,
+    const std::vector<at::Tensor>* tensor_table) {
   size_t bytes_read = 0;
   return unpickle(
       [&](char* buffer, size_t len) {
+        if (bytes_read + len > size) {
+          return false;
+        }
         // Copy len bytes into buffer
         const char* start = data + bytes_read;
         std::memcpy(buffer, start, len);
         bytes_read += len;
+        return true;
       },
-      [&]() {
-        return bytes_read < size;
-      },
-      tensor_table,
-      std::move(class_resolver));
+      std::move(class_resolver),
+      tensor_table);
 }
 
 } // namespace jit

@@ -1,6 +1,5 @@
 #pragma once
 
-
 /*
  * We split Tensor.h into TensorBody.h and TensorMethods.h because we want
  * all TensorMethods to be inlined, but they depend on the Dispatcher,

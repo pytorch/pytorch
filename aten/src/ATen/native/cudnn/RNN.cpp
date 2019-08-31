@@ -445,7 +445,7 @@ namespace {
                 &data_type,
                 &format,
                 &nb_dims,
-                filter_dim_a.data<int>()
+                filter_dim_a.data_ptr<int>()
                 ));
 
           AT_ASSERTM(nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
@@ -460,7 +460,7 @@ namespace {
           // (same for the hh weights, and the ih and hh biases).
           // Since we're storing all the weights in a single tensor anyway,
           // might as well merge the CUDNN ones into a single tensor as well
-          int mat_numel = *filter_dim_a.prod(at::ScalarType::Int).data<int>();
+          int mat_numel = *filter_dim_a.prod(at::ScalarType::Int).data_ptr<int>();
           if (linear_id == 0 || linear_id == num_linear_layers / 2) {
             std::initializer_list<int64_t> size = {
               mat_numel * num_linear_layers / 2, 1};
@@ -1237,7 +1237,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   }
 
   TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
-  IntArrayRef batch_sizes { _batch_sizes.data<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
+  IntArrayRef batch_sizes { _batch_sizes.data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());
   std::unique_lock<DropoutState> lock { dropout_state };

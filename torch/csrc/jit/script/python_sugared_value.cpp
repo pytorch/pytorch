@@ -28,7 +28,8 @@ c10::optional<StrongFunctionPtr> as_function(const py::object& obj) {
 
 FunctionSchema PythonValue::getSchema(
     const size_t n_args,
-    const size_t n_binders) {
+    const size_t n_binders,
+    const SourceRange& loc) {
   auto annotations = py::module::import("torch.jit.annotations");
   auto signature = annotations.attr("get_signature")(self);
   std::vector<Argument> args, rets;
@@ -52,7 +53,7 @@ FunctionSchema PythonValue::getSchema(
 
     // First see if we can introspect the number of function parameters
     // irrespective of the presence of explicit type annotations
-    auto num_params = annotations.attr("get_num_params")(self);
+    auto num_params = annotations.attr("get_num_params")(self, loc);
     if (!num_params.is_none()) {
       // Return a signature with the correct number of params according to the
       // Python function. The error handling in call() will catch any mismatch
@@ -92,7 +93,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
   auto inputs = toValues(*m.graph(), inputs_);
-  auto schema = getSchema(inputs.size(), n_binders);
+  auto schema = getSchema(inputs.size(), n_binders, loc);
 
   std::stringstream failure_messages;
   c10::optional<MatchedSchema> matched_schema = tryMatchSchema(
@@ -218,25 +219,29 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
   std::vector<NamedValue> new_inputs = inputs.vec();
   new_inputs.insert(new_inputs.begin(), module_);
 
-  for (const std::string& method_name : method_names_) {
-    auto cls = module_->type()->expect<ClassType>();
-    const auto fn = cls->getMethod(method_name);
-    auto match = tryMatchSchema(
-        fn->getSchema(),
-        loc,
-        *caller.graph().get(),
-        c10::nullopt,
-        new_inputs,
-        attributes,
-        &err,
-        true);
-    if (match) {
-      return MethodValue(module_, method_name)
-          .call(loc, caller, inputs, attributes, n_binders);
+  std::stringstream failure_messages;
+  for (bool allow_conversions : {false, true}) {
+    // clear previous error messages
+    failure_messages.str("");
+    for (const std::string& method_name : method_names_) {
+      auto cls = module_->type()->expect<ClassType>();
+      const auto fn = cls->getMethod(method_name);
+      auto match = tryMatchSchema(
+          fn->getSchema(),
+          loc,
+          *caller.graph().get(),
+          c10::nullopt,
+          new_inputs,
+          attributes,
+          &err,
+          allow_conversions);
+      if (match) {
+        return MethodValue(module_, method_name)
+            .call(loc, caller, inputs, attributes, n_binders);
+      }
     }
   }
-  throw ErrorReport(loc) << "Could not find any matching overloads\n"
-                         << err.str();
+  throw ErrorReport(loc) << failure_messages.str();
 }
 
 std::shared_ptr<SugaredValue> OverloadedFunctionValue::call(
@@ -493,6 +498,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
       return toSimple(g.insertConstant(v, nullptr, loc));
+    } else if (THPQScheme_Check(obj.ptr())) {
+      auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+      const auto v = static_cast<uint8_t>(qscheme->qscheme);
+      return toSimple(g.insertConstant(v, nullptr, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       return std::make_shared<ConstantPythonTupleValue>(obj);
     }
@@ -552,16 +561,15 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         auto rcb = py::module::import("torch._jit_internal")
                        .attr("createResolutionCallbackForClassMethods")(obj);
 
-        // We're starting a new compilation, so update the error call stack in
-        // case it fails
-        ErrorReport::CallStack::push_function(qualname.name());
-        ErrorReport::CallStack::update_pending_range(loc);
+        {
+          // We're starting a new compilation, so update the error call stack in
+          // case it fails
+          ErrorReport::CallStack stack(qualname.name());
+          ErrorReport::CallStack::update_pending_range(loc);
 
-        py::module::import("torch.jit")
-            .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
-
-        // Compilation was successful, so pop this entry off the stack
-        ErrorReport::CallStack::pop_function();
+          py::module::import("torch.jit")
+              .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
+        }
 
         // Return class
         auto newClassType = pyCu->get_class(qualname);
