@@ -52,7 +52,6 @@ class SpatialBNOp : public Operator<Context> {
     const auto& bias = Input(BIAS);
 
     const int ndim = X.dim();
-    CAFFE_ENFORCE_GE(ndim, 3);
     const int N = X.dim32(0);
     const int C =
         (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1));
@@ -76,6 +75,8 @@ class SpatialBNOp : public Operator<Context> {
     T* alpha_data = alpha_.template mutable_data<T>();
     T* beta_data = beta_.template mutable_data<T>();
     if (is_test_) {
+      // relax the requirement to ndim >= 2 for ONNX
+      CAFFE_ENFORCE_GE(ndim, 2);
       if (N == 0) {
         return true;
       }
@@ -92,6 +93,7 @@ class SpatialBNOp : public Operator<Context> {
           alpha_data,
           beta_data);
     } else {
+      CAFFE_ENFORCE_GE(ndim, 3);
       auto* saved_mean = Output(SAVED_MEAN, {C}, at::dtype<T>());
       auto* saved_rstd = Output(SAVED_INV_STD, {C}, at::dtype<T>());
       T* saved_mean_data = saved_mean->template mutable_data<T>();
