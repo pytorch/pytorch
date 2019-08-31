@@ -2539,19 +2539,7 @@ class _TestTorchMixin(torchtest):
         floats = [0.0, 1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
         tensor = torch.tensor(ints, dtype=torch.int64, device=device)
         for pow in floats:
-            if device == 'cuda' and not TEST_WITH_ROCM:
-                # Current pow CUDA implementation casts exponent
-                # to tensor dtype, but numpy does not, that's why:
-                # pow CUDA  4 ^ 0.5 = 1
-                # numpy pow 4 ^ 0.5 = 2
-                # This line must be deleted as soon as
-                # pow CUDA implementation is fixed.
-                self._test_pow(tensor, pow, np_exponent=int(pow))
-            else:
-                # pow CPU implementation is already fixed and
-                # does not cast exponent to tensor dtype,
-                # that why it is compatible with numpy.
-                self._test_pow(tensor, pow)
+            self._test_pow(tensor, pow)
 
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
@@ -13108,7 +13096,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             ("div", True, True, 'cpu'),
             ("div", True, True, 'cuda'),
             ("pow", True, True, 'cpu'),
-            ("pow", False, False, 'cuda')
+            ("pow", True, True, 'cuda')
         ]
 
         for (fn, has_input_output_mem_overlap_check,
