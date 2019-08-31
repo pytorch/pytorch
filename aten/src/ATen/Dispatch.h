@@ -332,10 +332,6 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       AT_PRIVATE_CASE_TYPE(SCALARTYPE1, decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE1>::t), __VA_ARGS__)   \
       AT_PRIVATE_CASE_TYPE(SCALARTYPE2, decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE2>::t), __VA_ARGS__)   \
       AT_PRIVATE_CASE_TYPE(SCALARTYPE3, decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE3>::t), __VA_ARGS__)   \
-      AT_PRIVATE_CASE_TYPE(                                                                                      \
-          at::ScalarType::ComplexFloat, std::complex<float>, __VA_ARGS__)                                        \
-      AT_PRIVATE_CASE_TYPE(                                                                                      \
-          at::ScalarType::ComplexDouble, std::complex<double>, __VA_ARGS__)                                      \
       default:                                                                                                   \
         AT_ERROR(#NAME, " not implemented for '", TYPE, "'");                                                    \
     }                                                                                                            \
