@@ -7,7 +7,7 @@ import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import List, Optional
 
 
@@ -249,25 +249,163 @@ def instantiate_configs():
     return config_list
 
 
+@dataclass
+class BuildParameters:
+    """
+    Corresponds to parameters specified in pytorch-build-params.yml
+    """
+    name: str
+    build_environment: str
+    docker_image: str
+    resource_class: str
+    use_cuda_docker_runtime: str
+    requires: List[str]
+
+
+@dataclass
+class Spec:
+    base_name: str
+    phase: str
+    resource_class: str = "large"
+    extra_params: Optional[str] = None
+    dependency: "Optional[Spec]" = None
+
+    @property
+    def job_name(self):
+        full_name = self.base_name
+        if self.extra_params:
+            full_name += "_" + self.extra_params
+
+        return full_name.replace(".", "_").replace("-", "_") + "_" + self.phase
+
+    @property
+    def docker_image(self):
+        return DOCKER_IMAGE_PATH_BASE + self.base_name + ":" + str(DOCKER_IMAGE_VERSION)
+
+    @property
+    def build_environment(self):
+        if self.extra_params is not None:
+            extra_params = "-" + self.extra_params
+        else:
+            extra_params = ""
+
+        return self.base_name + extra_params + "-" + self.phase
+
+
+@dataclass
+class NamedTensorSpec(Spec):
+    @property
+    def docker_image(self):
+        docker_image = super().docker_image
+        return docker_image.replace("namedtensor-", "")
+
+@dataclass
+class XLASpec(Spec):
+    @property
+    def docker_image(self):
+        docker_image = super().docker_image
+        return docker_image.replace("xla-", "")
+
+specs = []
+
+specs += Spec(base_name="pytorch-linux-xenial-py2.7.9", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-py2.7.9", phase="test", dependency=specs[-1]),
+specs += Spec(base_name="pytorch-linux-xenial-py2.7",  phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-py2.7", phase="test", dependency=specs[-1]),
+specs += Spec(base_name="pytorch-linux-xenial-py3.5", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-py3.5", phase="test", dependency=specs[-1]),
+specs += Spec(base_name="pytorch-linux-xenial-pynightly", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-pynightly", phase="test", dependency=specs[-1]),
+specs += Spec(base_name="pytorch-linux-xenial-py3.6-gcc4.8", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-py3.6-gcc4.8", phase="test", dependency=specs[-1]),
+specs += Spec(base_name="pytorch-linux-xenial-py3.6-gcc5.4", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-py3.6-gcc5.4", phase="test", dependency=specs[-1]),
+specs += NamedTensorSpec(base_name="pytorch-namedtensor-linux-xenial-py3.6-gcc5.4", phase="build"),
+specs += NamedTensorSpec(base_name="pytorch-namedtensor-linux-xenial-py3.6-gcc5.4", phase="test", dependency=specs[-1]),
+specs += Spec(base_name="pytorch-linux-xenial-py3.6-gcc7", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-py3.6-gcc7", phase="test", dependency=specs[-1]),
+specs += Spec(base_name="pytorch-linux-xenial-py3-clang5-asan", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-py3-clang5-asan", phase="test", dependency=specs[-1]),
+specs += NamedTensorSpec(base_name="pytorch-namedtensor-linux-xenial-py3-clang5-asan", phase="build"),
+specs += NamedTensorSpec(base_name="pytorch-namedtensor-linux-xenial-py3-clang5-asan", phase="test", dependency=specs[-1]),
+specs += XLASpec(base_name="pytorch-xla-linux-xenial-py3.6-clang7", phase="build"),
+specs += XLASpec(base_name="pytorch-xla-linux-xenial-py3.6-clang7", phase="test", dependency=specs[-1]),
+specs += Spec(base_name="pytorch-linux-xenial-cuda9-cudnn7-py2", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-cuda9-cudnn7-py2", phase="test", resource_class="gpu.medium", dependency=specs[-1]),
+
+gpu_py3_spec = Spec(base_name="pytorch-linux-xenial-cuda9-cudnn7-py3", phase="build")
+specs += gpu_py3_spec,
+specs += Spec(base_name="pytorch-linux-xenial-cuda9-cudnn7-py3", phase="test", resource_class="gpu.medium", dependency=gpu_py3_spec),
+specs += Spec(base_name="pytorch-linux-xenial-cuda9-cudnn7-py3", extra_params="multigpu", resource_class="gpu.large", phase="test", dependency=gpu_py3_spec),
+specs += Spec(base_name="pytorch-linux-xenial-cuda9-cudnn7-py3", extra_params="NO_AVX2", phase="test", resource_class="gpu.medium", dependency=gpu_py3_spec),
+specs += Spec(base_name="pytorch-linux-xenial-cuda9-cudnn7-py3", extra_params="NO_AVX-NO_AVX2", phase="test", resource_class="gpu.medium", dependency=gpu_py3_spec),
+specs += Spec(base_name="pytorch-linux-xenial-cuda9-cudnn7-py3", extra_params="slow", phase="test", resource_class="gpu.medium", dependency=gpu_py3_spec),
+specs += Spec(base_name="pytorch-linux-xenial-cuda9-cudnn7-py3", extra_params="nogpu", phase="test", dependency=gpu_py3_spec),
+
+specs += NamedTensorSpec(base_name="pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2", phase="build"),
+specs += NamedTensorSpec(base_name="pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2", phase="test", resource_class="gpu.medium", dependency=specs[-1]),
+specs += Spec(base_name="pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7", phase="test", resource_class="gpu.medium", dependency=specs[-1]),
+specs += Spec(base_name="pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7", phase="test", resource_class="gpu.medium", dependency=specs[-1]),
+specs += Spec(base_name="pytorch-linux-xenial-py3-clang5-android-ndk-r19c", extra_params="x86_32", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-py3-clang5-android-ndk-r19c", extra_params="x86_64", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-py3-clang5-android-ndk-r19c", extra_params="arm-v7a", phase="build"),
+specs += Spec(base_name="pytorch-linux-xenial-py3-clang5-android-ndk-r19c", extra_params="arm-v8a", phase="build"),
+
+
+def get_jobs_from_spec(spec: Spec) -> List[BuildParameters]:
+    job_name = spec.job_name
+    build_environment = spec.build_environment
+    docker_image = spec.docker_image
+    resource_class = spec.resource_class
+
+    use_cuda_docker_runtime = "1" if "gpu" in resource_class else ""
+
+    requires = ["setup"]
+    if spec.dependency:
+        requires.append(spec.dependency.job_name)
+
+    build_params = BuildParameters(
+        name=job_name,
+        build_environment=miniutils.quote(build_environment),
+        docker_image=miniutils.quote(docker_image),
+        resource_class=resource_class,
+        use_cuda_docker_runtime=miniutils.quote(use_cuda_docker_runtime),
+        requires=requires
+    )
+    base_job_name = "pytorch_linux_" + spec.phase
+    return {base_job_name : asdict(build_params)}
+
+
 def get_workflow_jobs():
+    jobs = ["setup"]
+    for spec in specs:
+        jobs.append(get_jobs_from_spec(spec))
 
-    config_list = instantiate_configs()
+    # special jobs
+    return jobs
 
-    x = ["setup"]
-    for conf_options in config_list:
 
-        phases = conf_options.restrict_phases or dimensions.PHASES
 
-        for phase in phases:
+    # config_list = instantiate_configs()
 
-            # TODO why does this not have a test?
-            if phase == "test" and conf_options.cuda_version == "10":
-                continue
+    # x = ["setup"]
+    # for conf_options in config_list:
 
-            x.append(conf_options.gen_workflow_job(phase))
+    #     phases = conf_options.restrict_phases or dimensions.PHASES
 
-        # TODO convert to recursion
-        for conf in conf_options.get_dependents():
-            x.append(conf.gen_workflow_job("test"))
+    #     for phase in phases:
 
-    return x
+    #         # TODO why does this not have a test?
+    #         if phase == "test" and conf_options.cuda_version == "10":
+    #             continue
+
+    #         x.append(conf_options.gen_workflow_job(phase))
+
+    #     # TODO convert to recursion
+    #     for conf in conf_options.get_dependents():
+    #         x.append(conf.gen_workflow_job("test"))
+
+    # return x
