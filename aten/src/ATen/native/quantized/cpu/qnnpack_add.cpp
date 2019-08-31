@@ -98,7 +98,7 @@ class QNNPACKAdd final : public torch::OperatorKernel {
 static auto registry = torch::RegisterOperators().op(
     "quantized::qnnpack_add",
     torch::RegisterOperators::options().kernel<QNNPACKAdd>(
-        QuantizedCPUTensorId()));
+        TensorTypeId::QuantizedCPUTensorId));
 } // namespace
 } // namespace native
 } // namespace at
