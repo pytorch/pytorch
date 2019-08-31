@@ -53,6 +53,8 @@ class ProcessGroupAgent : public RpcAgent {
 
   void sync() override;
 
+  int16_t getWorkerId() override;
+
  private:
   // put SendWork into a queue and notify the worker thread
   void enqueueSend(SendWork work);
