@@ -7,9 +7,9 @@ namespace at {
 
 namespace {
   DeviceType sparseTensorIdToDeviceType(TensorTypeId type_id) {
-    if (type_id == SparseCPUTensorId()) {
+    if (type_id == TensorTypeId::SparseCPUTensorId) {
       return kCPU;
-    } else if (type_id == SparseCUDATensorId()) {
+    } else if (type_id == TensorTypeId::SparseCUDATensorId) {
       return kCUDA;
     } else {
       AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", type_id);

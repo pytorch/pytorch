@@ -236,6 +236,12 @@ public:
     }
     return false;
   }
+
+  // can a function with this schema be substituted for a function of rhs's 
+  // schema and have the program typecheck?
+  // as_method - if true, treat this schema as a method and ignore 
+  // the first argument, which will be the object in both cases
+  bool isSubtypeOf(const FunctionSchema& rhs, bool as_method, std::ostream* why_not=nullptr) const;
 };
 
 inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
@@ -254,15 +260,19 @@ inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
 // print out Argument, which is compatible with FunctionSchema parser
 // full format: Type(alias)? name=default_value
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
-  bool optional_type = arg.type()->isSubclass(TypeKind::OptionalType);
+  bool optional_type = arg.type()->kind() == OptionalType::Kind;
   // for adjusting the ? position.
   // in schema, we have Tensor?(a!) input, and t(a!)?.
   // however, t?(a!) doesn't work with schema parser.
   // so we always use Type(alias)? format
   std::stringstream oss;
-  if (arg.type()->isSubclass(TypeKind::ListType) && arg.N()) {
-    oss << arg.type()->cast<ListType>()->getElementType()->str();
-    oss << "[" << arg.N().value() << "]";
+  if (auto list = arg.type()->cast<c10::ListType>()) {
+    oss << list->getElementType()->str();
+    oss << "[";
+    if (arg.N()) {
+      oss << *arg.N();
+    }
+    oss << "]";
   } else {
     oss << arg.type()->str();
   }

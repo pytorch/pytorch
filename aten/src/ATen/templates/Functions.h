@@ -9,7 +9,7 @@
 #include <c10/util/Deprecated.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/DeviceGuard.h>
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 #include <ATen/core/Reduction.h>
 #include <c10/util/Optional.h>
 #include <ATen/TensorUtils.h>
@@ -68,29 +68,6 @@ inline Tensor from_blob(
     const TensorOptions& options = {}) {
   return from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, options);
 }
-
-namespace detail {
-
-static inline Backend infer_backend(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return tensorTypeIdToBackend(t.type_id());
-}
-static inline Backend infer_backend(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tensorTypeIdToBackend(tl[0].type_id());
-}
-
-static inline bool infer_is_variable(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return t.is_variable();
-}
-static inline bool infer_is_variable(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tl[0].is_variable();
-}
-
-
-} // namespace detail
 
 // function definitions are all static inline because
 // they are one-line statically dispatched functions that

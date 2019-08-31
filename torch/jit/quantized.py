@@ -1,8 +1,8 @@
 import torch
 
-from torch._jit_internal import Tuple, Optional, List
+from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 
-from torch import Tensor  # noqa
+from torch import Tensor  # noqa: F401
 from torch.nn import _VF
 
 from torch._jit_internal import _parameter_list
