@@ -1319,15 +1319,15 @@ std::string pretty_print_onnx(
 }
 
 void protobuf_log_handler(
-    google::protobuf::LogLevel level,
+    ::google::protobuf::LogLevel level,
     const char* filename,
     int line,
     const std::string& message) {
-  if (level == google::protobuf::LogLevel::LOGLEVEL_INFO) {
+  if (level == ::google::protobuf::LogLevel::LOGLEVEL_INFO) {
     LOG(INFO) << message;
-  } else if (level == google::protobuf::LogLevel::LOGLEVEL_WARNING) {
+  } else if (level == ::google::protobuf::LogLevel::LOGLEVEL_WARNING) {
     LOG(WARNING) << message;
-  } else if (level == google::protobuf::LogLevel::LOGLEVEL_ERROR) {
+  } else if (level == ::google::protobuf::LogLevel::LOGLEVEL_ERROR) {
     LOG(ERROR) << message;
   } else {
     LOG(FATAL) << message;
@@ -1348,7 +1348,8 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
     ::torch::onnx::OperatorExportTypes operator_export_type,
     bool strip_doc_string,
     bool keep_initializers_as_inputs) {
-  google::protobuf::LogHandler* old_logger_handler = google::protobuf::SetLogHandler(&protobuf_log_handler);
+  auto old_logger_handler =
+      ::google::protobuf::SetLogHandler(&protobuf_log_handler);
 
   auto graph_encoder = GraphEncoder(
       graph,
@@ -1361,11 +1362,12 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       keep_initializers_as_inputs);
 
   std::string proto_str;
-  TORCH_CHECK(graph_encoder.get_model_proto().SerializeToString(&proto_str), "Export ONNX Failed!");
+  auto status = graph_encoder.get_model_proto().SerializeToString(&proto_str);
+  ::google::protobuf::SetLogHandler(old_logger_handler);
+  TORCH_CHECK(status, "Export ONNX Failed!");
   return std::make_tuple(
       std::move(proto_str), graph_encoder.get_raw_data_export_map());
 }
-
 
 void ExportModule(
     const script::Module& module,
