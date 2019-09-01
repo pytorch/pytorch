@@ -1,0 +1,4 @@
+framework module Pytorch {
+    umbrella header "Pytorch.h"
+    export *
+}
