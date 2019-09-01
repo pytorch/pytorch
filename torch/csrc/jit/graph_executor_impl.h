@@ -11,7 +11,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/symbolic_variable.h>
+#include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>

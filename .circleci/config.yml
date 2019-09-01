@@ -147,9 +147,6 @@ pytorch_params: &pytorch_params
     resource_class:
       type: string
       default: "large"
-    python_version:
-      type: string
-      default: ""
     use_cuda_docker_runtime:
       type: string
       default: ""
@@ -159,7 +156,6 @@ pytorch_params: &pytorch_params
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     DOCKER_IMAGE: << parameters.docker_image >>
-    PYTHON_VERSION: << parameters.python_version >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     MULTI_GPU: << parameters.multi_gpu >>
   resource_class: << parameters.resource_class >>
@@ -175,9 +171,6 @@ caffe2_params: &caffe2_params
     docker_image:
       type: string
       default: ""
-    python_version:
-      type: string
-      default: ""
     use_cuda_docker_runtime:
       type: string
       default: ""
@@ -190,7 +183,6 @@ caffe2_params: &caffe2_params
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     BUILD_IOS: << parameters.build_ios >>
-    PYTHON_VERSION: << parameters.python_version >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     DOCKER_IMAGE: << parameters.docker_image >>
     BUILD_ONLY: << parameters.build_only >>
@@ -1206,19 +1198,15 @@ jobs:
           export COMMAND='((echo "source ./workspace/env" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id_x86_32" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
-          mkdir -p ~/workspace/build_android_aar
-          docker cp $id_x86_32:/var/lib/jenkins/workspace/android/pytorch_android/build/outputs/aar/pytorch_android.aar ~/workspace/build_android_aar/
-          docker cp $id_x86_32:/var/lib/jenkins/workspace/android/pytorch_android_torchvision/build/outputs/aar/pytorch_android_torchvision.aar ~/workspace/build_android_aar/
+          mkdir -p ~/workspace/build_android_artifacts
+          docker cp $id_x86_32:/var/lib/jenkins/workspace/android/artifacts.tgz ~/workspace/build_android_artifacts/
 
           output_image=$docker_image_libtorch_android_x86_32-gradle
           docker commit "$id_x86_32" ${output_image}
           docker push ${output_image}
     - store_artifacts:
-        path: ~/workspace/build_android_aar/pytorch_android.aar
-        destination: pytorch_android.aar
-    - store_artifacts:
-        path: ~/workspace/build_android_aar/pytorch_android_torchvision.aar
-        destination: pytorch_android_torchvision.aar
+        path: ~/workspace/build_android_artifacts/artifacts.tgz
+        destination: artifacts.tgz
 
   pytorch_android_gradle_build-x86_32:
     environment:
@@ -1261,20 +1249,15 @@ jobs:
           export COMMAND='((echo "source ./workspace/env" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
-          mkdir -p ~/workspace/build_android_aar_x86_32
-          docker cp $id:/var/lib/jenkins/workspace/android/pytorch_android/build/outputs/aar/pytorch_android.aar ~/workspace/build_android_aar_x86_32/
-          docker cp $id:/var/lib/jenkins/workspace/android/pytorch_android_torchvision/build/outputs/aar/pytorch_android_torchvision.aar ~/workspace/build_android_aar_x86_32/
+          mkdir -p ~/workspace/build_android_x86_32_artifacts
+          docker cp $id:/var/lib/jenkins/workspace/android/artifacts.tgz ~/workspace/build_android_x86_32_artifacts/
 
           output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-gradle-x86_32
           docker commit "$id" ${output_image}
           docker push ${output_image}
     - store_artifacts:
-        path: ~/workspace/build_android_aar_x86_32/pytorch_android.aar
-        destination: pytorch_android_x86.aar
-    - store_artifacts:
-        path: ~/workspace/build_android_aar_x86_32/pytorch_android_torchvision.aar
-        destination: pytorch_android_torchvision_x86.aar
-
+        path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
+        destination: artifacts.tgz
   
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
@@ -1573,7 +1556,6 @@ workflows:
             - setup
           build_environment: "pytorch-linux-xenial-py3-clang5-asan-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:339"
-          python_version: "3.6"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_py3_clang5_asan_test
           requires:
@@ -1581,7 +1563,6 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_asan_build
           build_environment: "pytorch-linux-xenial-py3-clang5-asan-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:339"
-          python_version: "3.6"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_namedtensor_linux_xenial_py3_clang5_asan_build
@@ -1589,7 +1570,6 @@ workflows:
             - setup
           build_environment: "pytorch-namedtensor-linux-xenial-py3-clang5-asan-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:339"
-          python_version: "3.6"
       - pytorch_linux_test:
           name: pytorch_namedtensor_linux_xenial_py3_clang5_asan_test
           requires:
@@ -1597,7 +1577,6 @@ workflows:
             - pytorch_namedtensor_linux_xenial_py3_clang5_asan_build
           build_environment: "pytorch-namedtensor-linux-xenial-py3-clang5-asan-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:339"
-          python_version: "3.6"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_xla_linux_xenial_py3_6_clang7_build
@@ -1624,7 +1603,6 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py2-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:339"
-          python_version: "2.7"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda9_cudnn7_py2_test
           requires:
@@ -1637,7 +1615,6 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py2-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:339"
-          python_version: "2.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_build:
@@ -1646,7 +1623,6 @@ workflows:
             - setup
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
-          python_version: "3.6"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda9_cudnn7_py3_test
           requires:
@@ -1654,7 +1630,6 @@ workflows:
             - pytorch_linux_xenial_cuda9_cudnn7_py3_build
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
-          python_version: "3.6"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_test:
@@ -1664,7 +1639,6 @@ workflows:
             - pytorch_linux_xenial_cuda9_cudnn7_py3_build
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-multigpu-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
-          python_version: "3.6"
           use_cuda_docker_runtime: "1"
           multi_gpu: "1"
           resource_class: gpu.large
@@ -1675,7 +1649,6 @@ workflows:
             - pytorch_linux_xenial_cuda9_cudnn7_py3_build
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-NO_AVX2-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
-          python_version: "3.6"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_test:
@@ -1685,7 +1658,6 @@ workflows:
             - pytorch_linux_xenial_cuda9_cudnn7_py3_build
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-NO_AVX-NO_AVX2-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
-          python_version: "3.6"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_test:
@@ -1695,7 +1667,6 @@ workflows:
             - pytorch_linux_xenial_cuda9_cudnn7_py3_build
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-slow-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
-          python_version: "3.6"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_test:
@@ -1705,7 +1676,6 @@ workflows:
             - pytorch_linux_xenial_cuda9_cudnn7_py3_build
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-nogpu-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
-          python_version: "3.6"
           resource_class: large
       - pytorch_short_perf_test_gpu:
           requires:
@@ -1722,7 +1692,6 @@ workflows:
             - setup
           build_environment: "pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:339"
-          python_version: "2.7"
       - pytorch_linux_test:
           name: pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_test
           requires:
@@ -1730,7 +1699,6 @@ workflows:
             - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_build
           build_environment: "pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:339"
-          python_version: "2.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_build:
@@ -1744,7 +1712,6 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:339"
-          python_version: "3.6"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test
           requires:
@@ -1757,7 +1724,6 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:339"
-          python_version: "3.6"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_build:
@@ -1771,7 +1737,6 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7:339"
-          python_version: "3.6"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build
           requires:
@@ -1783,7 +1748,6 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:339"
-          python_version: "3.6"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_test
           requires:
@@ -1796,7 +1760,6 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:339"
-          python_version: "3.6"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_build:
@@ -1805,7 +1768,6 @@ workflows:
             - setup
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:339"
-          python_version: "3.6"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
           requires:
@@ -1817,7 +1779,6 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:339"
-          python_version: "3.6"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
           requires:
@@ -1829,7 +1790,6 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v7a-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:339"
-          python_version: "3.6"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
           requires:
@@ -1841,7 +1801,6 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:339"
-          python_version: "3.6"
       # Warning: indentation here matters!
 
       # Pytorch MacOS builds
@@ -2066,13 +2025,11 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-ios-macos10.13-build"
           build_ios: "1"
-          python_version: "2"
       - caffe2_macos_build:
           name: caffe2_py2_system_macos10_13_build
           requires:
             - setup
           build_environment: "caffe2-py2-system-macos10.13-build"
-          python_version: "2"
       # Binary builds (subset, to smoke test that they'll work)
       #
       # NB: If you modify this file, you need to also modify
