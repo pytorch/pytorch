@@ -1,8 +1,12 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
+#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
+#include <torch/csrc/distributed/autograd/utils.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+using namespace torch::distributed::autograd;
 
 py::object to_py_obj(const Message& message) {
   switch (message.type()) {
@@ -49,8 +53,18 @@ std::shared_ptr<FutureMessage> py_rpc_builtin(
           continue;
         }
 
+        Message message = ScriptCall(op, std::move(stack)).toMessage();
+        auto& autogradContainer = DistAutogradContainer::getInstance();
+        if (autogradContainer.hasValidContext()) {
+          // Retrieve the appropriate context to modify.
+          auto& autogradContext = autogradContainer.currentContext();
+
+          // Record autograd information for 'send'.
+          addSendRpcBackward(autogradContext, message);
+        }
+
         // Found the right op! Send it along...
-        return agent.send(dst, ScriptCall(op, std::move(stack)).toMessage());
+        return agent.send(dst, std::move(message));
       }
     }
 

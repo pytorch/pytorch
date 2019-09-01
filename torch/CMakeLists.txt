@@ -226,16 +226,18 @@ if (USE_DISTRIBUTED)
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/recvrpc_backward.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/comm.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_rpc_handler.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback_impl.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
         )
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)

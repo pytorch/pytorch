@@ -38,6 +38,29 @@ enum MessageType {
 // implementation to determine how to serialize a message.
 class TORCH_API Message final {
  public:
+  // Holds AutogradMetadata that needs to be passed around via RPC.
+  class AutogradMetadata {
+   public:
+    AutogradMetadata();
+
+    AutogradMetadata(int64_t autograd_context_id, int64_t autograd_message_id);
+
+    int64_t getAutogradContextId() const;
+
+    int64_t getAutogradMessageId() const;
+
+    void setAutogradContextId(int64_t autograd_context_id);
+
+    void setAutogradMessageId(int64_t autograd_message_id);
+
+   private:
+    // autograd_context_id_ is a globally unique integer that identifies a
+    // particular distributed autograd pass.
+    int64_t autograd_context_id_;
+    // autograd_message_id_ is a globally unique integer that identifies a pair
+    // of send/recv autograd functions.
+    int64_t autograd_message_id_;
+  };
 
   Message();
 
@@ -45,10 +68,12 @@ class TORCH_API Message final {
           std::vector<torch::Tensor>&& tensors,
           MessageType type);
 
-  Message(std::vector<char>&& payload,
-          std::vector<torch::Tensor>&& tensors,
-          MessageType type,
-          int64_t id);
+  Message(
+      std::vector<char>&& payload,
+      std::vector<torch::Tensor>&& tensors,
+      MessageType type,
+      int64_t id,
+      const AutogradMetadata& autograd_metadata = AutogradMetadata());
 
   Message(const Message& other);
   Message(Message&& other) noexcept;
@@ -57,6 +82,7 @@ class TORCH_API Message final {
   void swap(Message& rhs) noexcept;
 
   const std::vector<char>& payload() const;
+  std::vector<torch::Tensor>& tensors();
   const std::vector<torch::Tensor>& tensors() const;
   const MessageType& type() const;
 
@@ -70,11 +96,22 @@ class TORCH_API Message final {
   int64_t id() const;
   void setId(int64_t id);
 
+  int64_t getAutogradContextId() const;
+
+  int64_t getAutogradMessageId() const;
+
+  void setAutogradMetadata(const AutogradMetadata& autograd_metadata);
+
+  bool hasAutogradMetadata() const;
+
  private:
+  static constexpr int64_t kInvalidAutogradId = -1;
+
   std::vector<char> payload_;
   std::vector<torch::Tensor> tensors_;
   MessageType type_ = MessageType::UNKNOWN;
   int64_t id_ = -1;
+  AutogradMetadata autograd_metadata_;
 };
 
 } // rpc

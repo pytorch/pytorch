@@ -1,5 +1,6 @@
-#include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/rpc/request_callback_impl.h>
 
 #include <Python.h>
 
@@ -22,9 +23,12 @@ void serialize(const Message& message, std::ostream& os) {
   std::vector<torch::Tensor> tensors = message.tensors();
   // append payload as a tensor
   tensors.push_back(torch::from_blob(payload, payload_size, {torch::kChar}));
-  // append id as a tensor
-  tensors.push_back(torch::tensor({message.id()}, {torch::kInt64}
-  ));
+  // append id and autograd metadata as a tensor
+  tensors.push_back(torch::tensor(
+      {message.id(),
+       message.getAutogradContextId(),
+       message.getAutogradMessageId()},
+      {torch::kInt64}));
 
   torch::save(tensors, os);
 }
@@ -40,7 +44,11 @@ Message deserialize(MessageType type, std::istream& is) {
   auto payloadTensor = std::move(tensors.back());
   tensors.pop_back();
 
-  int64_t id = idTensor.storage().data<int64_t>()[0];
+  TORCH_INTERNAL_ASSERT(3, idTensor.numel());
+  auto idTensorRawData = idTensor.storage().data<int64_t>();
+  int64_t id = idTensorRawData[0];
+  Message::AutogradMetadata autograd_metadata(
+      idTensorRawData[1], idTensorRawData[2]);
 
   std::vector<char> payload(payloadTensor.numel());
 
@@ -50,7 +58,8 @@ Message deserialize(MessageType type, std::istream& is) {
                 payloadTensor.numel());
   }
 
-  return Message(std::move(payload), std::move(tensors), type, id);
+  return Message(
+      std::move(payload), std::move(tensors), type, id, autograd_metadata);
 }
 
 } // namespace
@@ -62,8 +71,7 @@ ProcessGroupAgent::ProcessGroupAgent(
     int numSendRecvThreads)
     : RpcAgent(
           WorkerId(std::move(workerName), pg->getRank()),
-          processRequestBlocking
-      ),
+          std::unique_ptr<RequestCallback>(new RequestCallbackImpl())),
       nameMap_(std::move(nameMap)),
       pg_(std::move(pg)),
       nextId_(0),
@@ -134,7 +142,7 @@ void ProcessGroupAgent::sync() {
   pg_->barrier()->wait();
 }
 
-std::shared_ptr<FutureMessage> ProcessGroupAgent::sendImpl(
+std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerId& to,
     Message&& message) {
   TORCH_CHECK(to.id_ != (worker_id_t)pg_->getRank(),
@@ -220,31 +228,26 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
 
 void ProcessGroupAgent::enqueueRecv(RecvWork work) {
   threadPool_.run(std::bind(
-    [&](RecvWork& work) {
+      [&](RecvWork& work) {
+        torch::Tensor& payload = work.payload_;
+        std::stringstream ss(std::string(
+            (char*)payload.storage().data<signed char>(), payload.numel()));
 
-      torch::Tensor& payload = work.payload_;
-      std::stringstream ss(std::string(
-        (char*)payload.storage().data<signed char>(), payload.numel()));
+        Message message = deserialize(work.type_, ss);
 
-      Message message = deserialize(work.type_, ss);
-
-      if (message.isRequest()) {
-        auto response = cb_(std::move(message));
-        send(work.from_, std::move(response));
-      } else if (message.isResponse()) {
-        auto id = message.id();
-        {
-          std::lock_guard<std::mutex> lock{futureMutex_};
-          futures_[id]->markCompleted(std::move(message));
-          futures_.erase(id);
+        if (message.isRequest()) {
+          auto response = cb_->operator()(std::move(message));
+          send(work.from_, std::move(response));
+        } else if (message.isResponse()) {
+          auto id = message.id();
+          {
+            std::lock_guard<std::mutex> lock{futureMutex_};
+            futures_[id]->markCompleted(std::move(message));
+            futures_.erase(id);
+          }
         }
-      } else {
-        // TODO: pass the error back to the caller instead of crashing here.
-        AT_ERROR("unrecognized message type ", message.type());
-      }
-    },
-    std::move(work)
-  ));
+      },
+      std::move(work)));
 }
 
 void ProcessGroupAgent::listenLoop() {
