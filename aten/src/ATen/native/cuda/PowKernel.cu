@@ -20,9 +20,35 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
 void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
   const auto exp = exp_scalar.to<double>();
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "pow_cuda", [&]() {
-    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-      return std::pow((double)base, exp);
-    });
+    if (exp == 0.5) {
+      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+        return std::sqrt(base);
+      });
+    } else if (exp == 2) {
+      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+        return base * base;
+      });
+    } else if (exp == 3) {
+      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+        return base * base * base;
+      });
+    } else if (exp == -0.5) {
+      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+        return 1.0 / std::sqrt(base);
+      });
+    } else if (exp == -1) {
+      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+        return 1.0 / base;
+      });
+    } else if (exp == -2) {
+      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+        return 1.0 / (base * base);
+      });
+    } else {
+      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+        return std::pow((double)base, exp);
+      });
+    }
   });
 }
 
