@@ -169,8 +169,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
    * they may have different streams.
    */
   c10::optional<c10::Stream> stream(const c10::DeviceType device_type) {
-    for (const auto& metadata : input_metadata_)
+    for (const auto& metadata : input_metadata_) {
       if (metadata.device().type() == device_type) return metadata.stream();
+    }
 
     return c10::nullopt;
   }

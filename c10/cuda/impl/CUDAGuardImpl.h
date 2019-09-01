@@ -2,7 +2,7 @@
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
-#include "c10/util/Exception.h"
+#include <c10/util/Exception.h>
 
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAStream.h>
@@ -18,7 +18,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
 
   CUDAGuardImpl() {}
-  CUDAGuardImpl(DeviceType t) {
+  explicit CUDAGuardImpl(DeviceType t) {
     TORCH_INTERNAL_ASSERT(t == DeviceType::CUDA);
   }
   DeviceType type() const override {
@@ -141,7 +141,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (!event) return true;
     cudaEvent_t cuda_event = static_cast<cudaEvent_t>(event);
     const cudaError_t err = cudaEventQuery(cuda_event);
-    if (err != cudaErrorNotReady) C10_CUDA_CHECK(err);
+    if (err != cudaErrorNotReady) {
+      C10_CUDA_CHECK(err);
+    }
     return (err == cudaSuccess);
   }
 };

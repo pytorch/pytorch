@@ -142,7 +142,7 @@ struct C10_API DeviceGuardImplInterface {
     void* event,
     const Stream& stream) const {
     TORCH_CHECK(false, "Backend doesn't support events.");
-  };
+  }
 
 /**
  * Returns true if (and only if)

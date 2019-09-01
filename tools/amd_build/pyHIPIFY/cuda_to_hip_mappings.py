@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import collections
 
 from pyHIPIFY.constants import *
