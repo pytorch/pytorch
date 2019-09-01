@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import collections
 
 from pyHIPIFY.constants import *
@@ -2345,6 +2346,7 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/impl/CUDAGuardImpl.h", ("c10/hip/impl/HIPGuardImpl.h", API_C10)),
     ("c10/cuda/impl/cuda_cmake_macros.h", ("c10/hip/impl/hip_cmake_macros.h", API_C10)),
     ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
+    ("C10_CUDA_CHECK_WARN", ("C10_HIP_CHECK_WARN", API_C10)),
     ("c10::cuda", ("c10::hip", API_C10)),
     ("cuda::CUDAStream", ("hip::HIPStream", API_C10)),
     ("CUDAStream", ("HIPStream", API_C10)),
