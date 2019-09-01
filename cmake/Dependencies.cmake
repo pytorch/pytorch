@@ -33,13 +33,11 @@ macro(enable_ubsan)
   endif()
 endmacro()
 
-if(NOT BUILD_ATEN_ONLY)
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
   enable_ubsan()
-endif()
 endif()
 
 # For MSVC,
@@ -1037,7 +1035,6 @@ if (USE_ZSTD)
 endif()
 
 # ---[ Onnx
-if(NOT BUILD_ATEN_ONLY)
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
@@ -1081,7 +1078,6 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
-endif()
 
 # --[ TensorRT integration with onnx-trt
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
@@ -1117,6 +1113,8 @@ if (NOT INTERN_BUILD_MOBILE)
   IF (MSVC)
     # we want to respect the standard, and we are bored of those **** .
     ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
+    # skip unwanted includes from windows.h
+    ADD_DEFINITIONS(-DWIN32_LEAN_AND_MEAN)
     LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
   ENDIF()
 
