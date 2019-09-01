@@ -52,11 +52,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           py::init<
               std::string,
-              std::unordered_map<std::string, int>,
               std::shared_ptr<::c10d::ProcessGroup>,
               int>(),
           py::arg("name"),
-          py::arg("name_map"),
           py::arg("process_group"),
           py::arg("num_send_recv_threads") = 4)
       .def("get_worker_id",

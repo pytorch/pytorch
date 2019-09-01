@@ -735,8 +735,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
     auto x_nearest = x.round();
     auto y_nearest = y.round();
 
-    auto i_x_nearest = convert_to_int_of_same_size(x_nearest);
-    auto i_y_nearest = convert_to_int_of_same_size(y_nearest);
+    auto i_x_nearest = convert_to_int_of_same_size<scalar_t>(x_nearest);
+    auto i_y_nearest = convert_to_int_of_same_size<scalar_t>(y_nearest);
 
     auto i_mask = must_in_bound ? iVec(-1)
                                 : (i_x_nearest > iVec(-1)) & (i_x_nearest < iVec(inp_W)) &

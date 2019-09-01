@@ -22,6 +22,7 @@
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/jit/import.h"
+#include "torch/script.h"
 
 C10_DEFINE_string(model, "", "The given torch script model to benchmark.");
 C10_DEFINE_string(
@@ -73,9 +74,9 @@ int main(int argc, char** argv) {
       input_dims.push_back(c10::stoi(s));
     }
     if (input_type_list[i] == "float") {
-      inputs.push_back(at::ones(input_dims, at::ScalarType::Float));
+      inputs.push_back(torch::ones(input_dims, at::ScalarType::Float));
     } else if (input_type_list[i] == "uint8_t") {
-      inputs.push_back(at::ones(input_dims, at::ScalarType::Byte));
+      inputs.push_back(torch::ones(input_dims, at::ScalarType::Byte));
     } else {
       CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
     }
@@ -83,6 +84,8 @@ int main(int argc, char** argv) {
 
   torch::autograd::AutoGradMode guard(false);
   auto module = torch::jit::load(FLAGS_model);
+
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
   if (FLAGS_print_output) {
     std::cout << module.forward(inputs) << std::endl;
   }
