@@ -85,13 +85,13 @@ Message processRequestBlocking(Message&& request) {
       response.setId(request.id());
       return response;
     }
-    case MessageType::RREF_ADD_FORK: {
-      ScriptRRefAdd sra = ScriptRRefAdd::fromMessage(request);
+    case MessageType::RREF_USER_CREATE: {
+      ScriptRRefCreate sra = ScriptRRefCreate::fromMessage(request);
       RRefContext::getInstance()->addFork(sra.value());
       return Message();
     }
-    case MessageType::RREF_DEL_FORK: {
-      ScriptRRefDel srd = ScriptRRefDel::fromMessage(request);
+    case MessageType::RREF_USER_DELETE: {
+      ScriptRRefDelete srd = ScriptRRefDelete::fromMessage(request);
       RRefContext::getInstance()->delFork(srd.value());
       return Message();
     }

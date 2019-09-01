@@ -8,6 +8,13 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 cmake_policy(SET CMP0010 NEW)
 cmake_policy(SET CMP0025 NEW)
 
+# Suppress warning flags in default MSVC configuration.  It's not
+# mandatory that we do this (and we don't if cmake is old), but it's
+# nice when it's possible, and it's possible on our Windows configs.
+if(NOT CMAKE_VERSION VERSION_LESS 3.15.0)
+  cmake_policy(SET CMP0092 NEW)
+endif()
+
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
@@ -81,7 +88,6 @@ endif ()
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
-option(BUILD_ATEN_ONLY "Build only a subset focused on ATen only" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
@@ -185,30 +191,73 @@ cmake_dependent_option(
 
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 
-# For MSVC,
-# 1. Replace /Zi and /ZI with /Z7
-# 2. Switch off incremental linking in debug builds
 if (MSVC)
-  string(APPEND CMAKE_C_FLAGS " /EHa")
-  string(APPEND CMAKE_CXX_FLAGS " /EHa")
-  if(MSVC_Z7_OVERRIDE)
-    foreach(flag_var
-        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
-        CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
-        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+  foreach(flag_var
+      CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+      CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+    # Replace /Zi and /ZI with /Z7
+    if(MSVC_Z7_OVERRIDE)
       if(${flag_var} MATCHES "/Z[iI]")
         string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
       endif(${flag_var} MATCHES "/Z[iI]")
-    endforeach(flag_var)
-  endif(MSVC_Z7_OVERRIDE)
+    endif(MSVC_Z7_OVERRIDE)
+    # Turn off warnings on Windows.  In an ideal world we'd be warning
+    # clean on Windows too, but this is too much work for our
+    # non-Windows developers.
+    #
+    # NB: Technically, this is not necessary if CMP0092 was applied
+    # properly, but only cmake >= 3.15 has this policy, so we nail
+    # it one more time just be safe.
+    #
+    # NB2: This is NOT enough to prevent warnings from nvcc on MSVC.  At the
+    # moment only CMP0092 is enough to prevent those warnings too.
+    string(REPLACE "/W3" "" ${flag_var} "${${flag_var}}")
+    # Suppress EHs is overridden by EHa warning
+    string(REPLACE "/EHsc" "" ${flag_var} "${${flag_var}}")
+
+    # Turn off warnings (Windows build is currently is extremely warning
+    # unclean and the warnings aren't telling us anything useful.)
+    #
+    # Turn on EHa; I'm not altogether clear why we use the asynchronous
+    # exception handling model, but someone added it at some point, so
+    # keep using it.
+    string(APPEND ${flag_var} " /w /EHa")
+
+    if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
+      if(${flag_var} MATCHES "/MD")
+        string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
+      endif(${flag_var} MATCHES "/MD")
+    else()
+      if(${flag_var} MATCHES "/MT")
+        string(REGEX REPLACE "/MT" "/MD" ${flag_var} "${${flag_var}}")
+      endif()
+    endif()
+
+    # /bigobj increases number of sections in .obj file, which is needed to link
+    # against libaries in Python 2.7 under Windows
+    set(${flag_var} "${${flag_var}} /MP /bigobj")
+  endforeach(flag_var)
+
   foreach(flag_var
       CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
       CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
+    # Switch off incremental linking in debug builds
     if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
       string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
     endif()
   endforeach(flag_var)
+
+  foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS CMAKE_STATIC_LINKER_FLAGS
+      CMAKE_EXE_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS)
+    string(APPEND ${flag_var} " /ignore:4049 /ignore:4217")
+  endforeach(flag_var)
+
+  # Try harder
+  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
+
   # Turning off USE_DISTRIBUTED on default
   set(USE_DISTRIBUTED OFF)
 endif(MSVC)
@@ -238,22 +287,6 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(FEATURE_TORCH_MOBILE ON)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
-endif()
-
-if (BUILD_ATEN_ONLY)
-  set(BUILD_CAFFE2_OPS OFF)
-  set(BUILD_PYTHON OFF)
-  set(USE_NUMA OFF)
-  set(USE_LEVELDB OFF)
-  set(USE_GFLAGS OFF)
-  set(USE_GLOG OFF)
-  set(USE_NCCL OFF)
-  set(USE_NNPACK OFF)
-  set(USE_NUMPY OFF)
-  set(USE_OPENCV OFF)
-  set(USE_MKLDNN OFF)
-  set(USE_DISTRIBUTED OFF)
-  set(USE_LMDB OFF)
 endif()
 
 # ---[ Utils
@@ -406,25 +439,6 @@ if(NOT MSVC)
   set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-math-errno")
   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-trapping-math")
-else()
-  foreach(flag_var
-      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO
-      CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
-      CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO)
-    if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-      if(${flag_var} MATCHES "/MD")
-        string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
-      endif(${flag_var} MATCHES "/MD")
-    else()
-      if(${flag_var} MATCHES "/MT")
-        string(REGEX REPLACE "/MT" "/MD" ${flag_var} "${${flag_var}}")
-      endif()
-    endif()
-    # /bigobj increases number of sections in .obj file, which is needed to link
-    # against libaries in Python 2.7 under Windows
-    set(${flag_var} "${${flag_var}} /MP /bigobj")
-  endforeach(flag_var)
 endif()
 
 if (USE_ASAN)

@@ -7,8 +7,6 @@ load("//caffe2/caffe2/fb:defs_gpu.bzl", "gpu_library_selector")
 
 GENERATED_CPP = [
     "Functions.cpp",
-    "THCUNN.cpp",
-    "THNN.cpp",
     "VariableType_0.cpp",
     "VariableType_1.cpp",
     "VariableType_2.cpp",
@@ -204,7 +202,6 @@ def add_torch_libs():
     ]
 
     libtorch_python_sources = [
-        ":generate-code=THNN.cpp",
         ":generate-code=python_functions.cpp",
         ":generate-code=python_nn_functions.cpp",
         ":generate-code=python_torch_functions.cpp",
@@ -294,7 +291,6 @@ def add_torch_libs():
     libtorch_python_sources.extend(glob(["test/cpp/jit/test_*.cpp"]))
 
     libtorch_python_cuda_sources = [
-        ":generate-code=THCUNN.cpp",
         "torch/csrc/cuda/Event.cpp",
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
@@ -450,7 +446,6 @@ def add_torch_libs():
         link_whole=True,
         deps=[
             ":torch-cpp-cpu",
-            ":thnn",
             "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/c10d:c10d_cpu",
             "//caffe2/torch/lib/libshm:libshm",
@@ -470,7 +465,6 @@ def add_torch_libs():
         link_whole=True,
         deps=[
             ":torch-cpp-cuda",
-            ":thnn",
             "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/c10d:c10d",
             "//caffe2/torch/lib/libshm:libshm",

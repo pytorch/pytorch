@@ -60,8 +60,11 @@ ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
 
 ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
   AT_ASSERTM(
-      tensor.type_id() == TensorTypeId::CPUTensorId,
-      "itensor_view_from_dense expects dense CPU tensor input");
+      tensor.device().type() == DeviceType::CPU,
+      "itensor_view_from_dense expects CPU tensor input");
+  AT_ASSERTM(
+      tensor.layout() == Layout::Strided,
+      "itensor_view_from_dense expects dense tensor input");
   AT_ASSERTM(tensor.scalar_type() == ScalarType::Float,
              "itensor_view_from_dense expects float tensor input");
   AT_ASSERTM(

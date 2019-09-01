@@ -448,6 +448,14 @@ struct TORCH_API IsInstanceValue : SugaredValue {
   }
 };
 
+// matched against for special handling of tuple() call
+struct TORCH_API TupleCallValue : SugaredValue {
+  TupleCallValue() = default;
+  std::string kind() const override {
+    return "tuple";
+  }
+};
+
 // matched against for special handling of range expressions
 struct TORCH_API RangeValue : SugaredValue {
   RangeValue(const SourceRange& loc, Function& m, std::vector<Value*> inputs);

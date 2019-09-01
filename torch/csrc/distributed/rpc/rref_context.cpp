@@ -58,7 +58,7 @@ void RRefContext::delFork(at::IValue&& value) {
       "Attempt to delete a non-exist fork ", rfd.forkId_);
   rrefForks.erase(rfd.forkId_);
   if (rrefForks.empty()) {
-    rrefs_.erase(rfd.rrefId_);
+    owners_.erase(rfd.rrefId_);
     forks_.erase(rfd.rrefId_);
   }
 }

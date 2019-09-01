@@ -67,8 +67,8 @@ class RRefContext {
   std::shared_ptr<RRef> getOrCreateOwnerRRef(RRefId rrefId) {
 
     std::lock_guard<std::mutex> lock(mutex_);
-    const auto iter = rrefs_.find(rrefId);
-    if (iter == rrefs_.end()) {
+    const auto iter = owners_.find(rrefId);
+    if (iter == owners_.end()) {
       // Scenario (1) the first time this owner knows about this RRef
       // Scenario (2) This owner is also the creator.
       //
@@ -76,7 +76,7 @@ class RRefContext {
       // private.
       auto rref = std::shared_ptr<OwnerRRef<T>>(
           new OwnerRRef<T>(getWorkerId(), rrefId));
-      rrefs_[rref->id()] = rref;
+      owners_[rref->id()] = rref;
       return rref;
 
     } else {
@@ -96,9 +96,11 @@ class RRefContext {
 
   const std::shared_ptr<RpcAgent> agent_;
   std::mutex mutex_;
-  std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> rrefs_;
+  // Keep OwnerRRefs alive until there is no living UserRRefs.
+  std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> owners_;
+  // Tracks known living UserRRefs of an OwnerRRef
   std::unordered_map<RRefId,
-                     std::unordered_set<RRefId, RRefId::Hash>,
+                     std::unordered_set<ForkId, ForkId::Hash>,
                      RRefId::Hash> forks_;
 };
 

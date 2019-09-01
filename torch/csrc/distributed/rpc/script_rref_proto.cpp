@@ -43,12 +43,12 @@ ScriptRRefValue ScriptRRefValue::fromMessage(const Message& message) {
   return ScriptRRefValue(ScriptRRefBase::fromMessage(message));
 }
 
-ScriptRRefAdd ScriptRRefAdd::fromMessage(const Message& message) {
-  return ScriptRRefAdd(ScriptRRefBase::fromMessage(message));
+ScriptRRefCreate ScriptRRefCreate::fromMessage(const Message& message) {
+  return ScriptRRefCreate(ScriptRRefBase::fromMessage(message));
 }
 
-ScriptRRefDel ScriptRRefDel::fromMessage(const Message& message) {
-  return ScriptRRefDel(ScriptRRefBase::fromMessage(message));
+ScriptRRefDelete ScriptRRefDelete::fromMessage(const Message& message) {
+  return ScriptRRefDelete(ScriptRRefBase::fromMessage(message));
 }
 
 } // namespace rpc
