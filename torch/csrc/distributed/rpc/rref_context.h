@@ -67,8 +67,8 @@ class RRefContext {
   std::shared_ptr<RRef> getOrCreateOwnerRRef(RRefId rrefId) {
 
     std::lock_guard<std::mutex> lock(mutex_);
-    const auto iter = rrefs_.find(rrefId);
-    if (iter == rrefs_.end()) {
+    const auto iter = owners_.find(rrefId);
+    if (iter == owners_.end()) {
       // Scenario (1) the first time this owner knows about this RRef
       // Scenario (2) This owner is also the creator.
       //
@@ -76,7 +76,7 @@ class RRefContext {
       // private.
       auto rref = std::shared_ptr<OwnerRRef<T>>(
           new OwnerRRef<T>(getWorkerId(), rrefId));
-      rrefs_[rref->id()] = rref;
+      owners_[rref->id()] = rref;
       return rref;
 
     } else {
@@ -96,10 +96,35 @@ class RRefContext {
 
   const std::shared_ptr<RpcAgent> agent_;
   std::mutex mutex_;
-  std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> rrefs_;
+  // Keep OwnerRRefs alive until there is no living UserRRefs.
+  std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> owners_;
+  // Tracks known living UserRRefs of an OwnerRRef
   std::unordered_map<RRefId,
-                     std::unordered_set<RRefId, RRefId::Hash>,
+                     std::unordered_set<ForkId, ForkId::Hash>,
                      RRefId::Hash> forks_;
+
+  // This map keeps UserRRefs alive by holding a shared_ptr to the RRef
+  // instances. A UserRRef must be added into this map if any of the following
+  // two conditions is ture:
+  //
+  // (1) A UserRRef has not been accepted by owner yet.
+  //
+  //     It can be used or shared, but cannot be deleted, and hence in this map.
+  //     A message of type RREF_USER_ACCEPT will remove the corresponding RRef
+  //     from this map.
+  //
+  // (2) A UserRRef has pending fork requests that are not accepted by the owner
+  //     yet.
+  //
+  //     This is case, this UserRRef cannot send out RREF_USER_DELETE message,
+  //     because it is not guaranteed communications are FIFO between any pair
+  //     of worker (due to thread pool and potentially new RpcAgent
+  //     implementations). As a result, RREF_USER_DELETE might be processed
+  //     by the owner before previous RREF_FORK_NOTIFY messages, which would
+  //     mess up RRef reference counts.
+  std::unordered_map<ForkId,
+                     std::shared_ptr<UserRRef>,
+                     ForkId::Hash> pendingUsers_;
 };
 
 } // namespace rpc

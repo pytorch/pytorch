@@ -75,7 +75,7 @@ UserRRef::UserRRef(
     auto& agent = RRefContext::getInstance()->agent();
     agent->send(
         agent->getWorkerId(ownerId_),
-        ScriptRRefAdd(
+        ScriptRRefCreate(
             RRefForkData(ownerId_, rrefId_, forkId_).toIValue()
         ).toMessage());
   } else {
@@ -88,7 +88,7 @@ UserRRef::~UserRRef() {
   if (ctx->getWorkerId() != ownerId_) {
     ctx->agent()->send(
         ctx->agent()->getWorkerId(ownerId_),
-        ScriptRRefDel(
+        ScriptRRefDelete(
             RRefForkData(ownerId_, rrefId_, forkId_).toIValue()
         ).toMessage());
   }
