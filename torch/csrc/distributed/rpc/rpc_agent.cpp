@@ -8,13 +8,17 @@ namespace rpc {
 
 using namespace torch::distributed::autograd;
 
-RpcAgent::RpcAgent(std::string workerName, RequestCallback cb)
-    : workerName_(std::move(workerName)), cb_(std::move(cb)) {}
+RpcAgent::RpcAgent(WorkerId workerId, RequestCallback cb)
+    : workerId_(std::move(workerId)), cb_(std::move(cb)) {}
 
 RpcAgent::~RpcAgent() = default;
 
+const WorkerId& RpcAgent::getWorkerId() const {
+  return workerId_;
+}
+
 std::shared_ptr<FutureMessage> RpcAgent::send(
-    const std::string& to,
+    const WorkerId& to,
     Message&& message) {
   // Record appropriate autograd information before sending the message over the
   // wire.

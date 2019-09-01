@@ -17,7 +17,7 @@ class DistAutogradContext {
   int64_t context_id() const;
 
   // Records a 'send' autograd function for this context.
-  void addSendFunction(std::shared_ptr<SendRpcBackward> func);
+  void addSendFunction(const std::shared_ptr<SendRpcBackward>& func);
 
   std::vector<std::shared_ptr<SendRpcBackward>> sendFunctions() const;
 

@@ -27,14 +27,13 @@ py::object to_py_obj(const Message& message) {
 
 std::shared_ptr<FutureMessage> py_rpc_builtin(
     RpcAgent& agent,
-    const std::string& dstName,
+    const WorkerId& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
     // builtin operators.
     Symbol symbol = Symbol::fromQualString(opName);
-    if (true) {
-      // if (symbol.is_aten()) {
+    if (symbol.is_aten()) {
       Stack stack;
       for (const auto& op : torch::jit::getAllOperatorsFor(symbol)) {
         try {
@@ -44,15 +43,14 @@ std::shared_ptr<FutureMessage> py_rpc_builtin(
               op->schema(), args, kwargs, c10::nullopt);
 
         } catch (std::runtime_error& e) {
-          LOG(INFO) << "Couldn't match schema: " << op->schema()
-                    << " to args: " << args << " and kwargs: " << kwargs
-                    << ", reason: " << e.what();
+          VLOG(1) << "Couldn't match schema: " << op->schema()
+                  << " to args: " << args << " and kwargs: " << kwargs
+                  << ", reason: " << e.what();
           continue;
         }
 
         // Found the right op! Send it along...
-        return agent.send(
-            dstName, ScriptCall(op, std::move(stack)).toMessage());
+        return agent.send(dst, ScriptCall(op, std::move(stack)).toMessage());
       }
     }
 
@@ -69,15 +67,15 @@ std::shared_ptr<FutureMessage> py_rpc_builtin(
 
 std::shared_ptr<FutureMessage> py_rpc_python_udf(
     RpcAgent& agent,
-    const std::string& dstName,
+    const WorkerId& dst,
     const std::string& pickledPythonUDF) {
   std::vector<char> data(pickledPythonUDF.begin(), pickledPythonUDF.end());
   std::vector<torch::Tensor> tensor_table;
 
-  return agent.send(
-      dstName,
-      Message(
-          std::move(data), std::move(tensor_table), MessageType::PYTHON_CALL));
+  return agent.send(dst,
+                    Message(std::move(data),
+                            std::move(tensor_table),
+                            MessageType::PYTHON_CALL));
 }
 
 } // namespace rpc

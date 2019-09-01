@@ -6,7 +6,6 @@ from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
 import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
-import cimodel.lib.visualization as visualization
 
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -73,44 +72,30 @@ class Conf:
     def get_dependents(self):
         return self.dependent_tests or []
 
-    def gen_yaml_tree(self, build_or_test):
-
-        build_job_name_pieces = self.get_build_job_name_pieces(build_or_test)
+    def gen_workflow_params(self, phase):
+        parameters = OrderedDict()
+        build_job_name_pieces = self.get_build_job_name_pieces(phase)
 
         build_env_name = "-".join(map(str, build_job_name_pieces))
-
-        env_dict = OrderedDict([
-            ("BUILD_ENVIRONMENT", build_env_name),
-            ("DOCKER_IMAGE", self.gen_docker_image_path()),
-        ])
-
-        if self.pyver:
-            env_dict["PYTHON_VERSION"] = miniutils.quote(self.pyver)
-
-        if build_or_test == "test" and self.gpu_resource:
-            env_dict["USE_CUDA_DOCKER_RUNTIME"] = miniutils.quote("1")
-
-        d = {
-            "environment": env_dict,
-            "<<": "*" + "_".join(["pytorch", "linux", build_or_test, "defaults"]),
-        }
-
-        if build_or_test == "test":
+        parameters["build_environment"] = miniutils.quote(build_env_name)
+        parameters["docker_image"] = self.gen_docker_image_path()
+        if phase == "test" and self.gpu_resource:
+            parameters["use_cuda_docker_runtime"] = miniutils.quote("1")
+        if phase == "test":
             resource_class = "large"
             if self.gpu_resource:
                 resource_class = "gpu." + self.gpu_resource
 
                 if self.gpu_resource == "large":
-                    env_dict["MULTI_GPU"] = miniutils.quote("1")
+                    parameters["multi_gpu"] = miniutils.quote("1")
+            parameters["resource_class"] = resource_class
+        return parameters
 
-            d["resource_class"] = resource_class
-
-        return d
-
-    def gen_workflow_yaml_item(self, phase):
-
+    def gen_workflow_job(self, phase):
         # All jobs require the setup job
-        parameters = OrderedDict({"requires": ["setup"]})
+        job_def = OrderedDict()
+        job_def["name"] = self.gen_build_name(phase)
+        job_def["requires"] = ["setup"]
 
         if phase == "test":
 
@@ -120,14 +105,19 @@ class Conf:
             #  pytorch build job (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259452641)
 
             dependency_build = self.parent_build or self
-            parameters["requires"].append(dependency_build.gen_build_name("build"))
+            job_def["requires"].append(dependency_build.gen_build_name("build"))
+            job_name = "pytorch_linux_test"
+        else:
+            job_name = "pytorch_linux_build"
+
 
         if not self.is_important:
             # If you update this, update
             # caffe2_build_definitions.py too
-            parameters["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+        job_def.update(self.gen_workflow_params(phase))
 
-        return {self.gen_build_name(phase): parameters}
+        return {job_name : job_def}
 
 
 # TODO This is a hack to special case some configs just for the workflow list
@@ -136,7 +126,7 @@ class HiddenConf(object):
         self.name = name
         self.parent_build = parent_build
 
-    def gen_workflow_yaml_item(self, phase):
+    def gen_workflow_job(self, phase):
         return {self.gen_build_name(phase): {"requires": [self.parent_build.gen_build_name("build")]}}
 
     def gen_build_name(self, _):
@@ -262,38 +252,7 @@ def instantiate_configs():
     return config_list
 
 
-def add_build_env_defs(jobs_dict):
-
-    mydict = OrderedDict()
-
-    config_list = instantiate_configs()
-    for c in config_list:
-
-        phases = c.restrict_phases or dimensions.PHASES
-
-        for phase in phases:
-
-            # TODO why does this not have a test?
-            if phase == "test" and c.cuda_version == "10":
-                continue
-
-            d = c.gen_yaml_tree(phase)
-            mydict[c.gen_build_name(phase)] = d
-
-            if phase == "test":
-                for x in filter(lambda x: type(x) is not HiddenConf, c.get_dependents()):
-
-                    d = x.gen_yaml_tree(phase)
-                    mydict[x.gen_build_name(phase)] = d
-
-    # this is the circleci api version and probably never changes
-    jobs_dict["jobs"] = mydict
-
-    graph = visualization.generate_graph(get_root())
-    graph.draw("pytorch-config-dimensions.png", prog="twopi")
-
-
-def get_workflow_list():
+def get_workflow_jobs():
 
     config_list = instantiate_configs()
 
@@ -308,10 +267,10 @@ def get_workflow_list():
             if phase == "test" and conf_options.cuda_version == "10":
                 continue
 
-            x.append(conf_options.gen_workflow_yaml_item(phase))
+            x.append(conf_options.gen_workflow_job(phase))
 
         # TODO convert to recursion
         for conf in conf_options.get_dependents():
-            x.append(conf.gen_workflow_yaml_item("test"))
+            x.append(conf.gen_workflow_job("test"))
 
     return x
