@@ -175,32 +175,6 @@ class RNNBase(torch.nn.Module):
     def _get_quantized_weights(self):
         return [getattr(self, name) for name in self._quantized_weights]
 
-#     # TODO: for some reason torch.jit.script_method causes a destruction of the
-#     # module to occur, which in turn frees the packed_ih object via its DataPtr
-#     # deleter. This is bizarre and should probably get fixed.
-#     # @torch._jit_internal.torch.jit.script_method
-#     # @torch.jit.script_method
-#     # _load_from_state_dict
-#     # __setstate__
-#     # load from the file
-#     def _unpack(self):
-#         packed_weights = self._get_packed_weights()
-#         quantized_weights = self._get_quantized_weights()
-#         assert len(packed_weights) == len(quantized_weights)
-#         for i in range(len(packed_weights)):
-#             packed = packed_weights[i]
-#             quantized = quantized_weights[i]
-#             packed.set_(torch.fbgemm_pack_quantized_matrix(quantized))
-#
-#     # @torch.jit.script_method
-#     # _save_to_state_dict
-#     # __getstate__
-#     # save to the file
-#     def _pack(self):
-#         for weight in self._get_packed_weights():
-#             weight.set_(torch.zeros(torch.jit.annotate(List[int], []),
-#                         dtype=torch.uint8).detach())
-
     @classmethod
     def from_float(cls, mod):
         assert type(mod) == torch.nn.LSTM, 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM'
@@ -302,10 +276,6 @@ class LSTM(RNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
         assert batch_sizes is None
-
-        # print("self._get_all_weights():")
-        # print(self._get_all_weights())
-        # print("End printing self._get_all_weights():")
 
         result = _VF.quantized_lstm(input, hx, self._get_all_weights(), self.bias, self.num_layers,
                                    float(self.dropout), self.training, self.bidirectional,

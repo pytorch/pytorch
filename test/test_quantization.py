@@ -467,7 +467,6 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
                 [100, -155]]
         if isinstance(cell, torch.nn.LSTM):
             num_chunks = 4
-        # print(num_chunks)
         vals = vals[:d_hid * num_chunks]
         cell.weight_ih_l0 = torch.nn.Parameter(
             torch.tensor(vals, dtype=torch.float),
@@ -475,9 +474,6 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         cell.weight_hh_l0 = torch.nn.Parameter(
             torch.tensor(vals, dtype=torch.float),
             requires_grad=False)
-
-        # print("cell.bias_ih_l0:")
-        # print(cell.bias_ih_l0)
 
         ref = copy.deepcopy(cell)
 
@@ -492,21 +488,12 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         )
         cell_int8 = model_int8.lstm
 
-        # print("cell:")
-        # print(cell)
-        # print(type(cell))
-        # print("cell_int8:")
-        # print(cell_int8)
-        # print(type(cell_int8))
+        assert type(cell_int8) == torch.nn.quantized.dynamic.LSTM, 'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
 
         niter = 10
         x = torch.tensor([[100, -155],
                           [-155, 100],
                           [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
-
-        # print("input_x:")
-        # print(x)
-        # print(x.shape)
 
         h0_vals = [[-155, 100],
                    [-155, 155],
@@ -520,57 +507,13 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         ref_out, ref_hid = ref(x, hiddens)
 
-        # print("ref_out:")
-        # print(ref_out)
-        # print(ref_out.shape)
-        # print("ref_hid:")
-        # print(ref_hid)
-        # print(ref_hid.shape)
-
         # Compare int8 quantized to unquantized
         output_int8, final_hiddens_int8 = cell_int8(x, hiddens)
 
-        # print("output_int8:")
-        # print(output_int8)
-        # print("final_hiddens_int8:")
-        # print(final_hiddens_int8)
-
         torch.testing.assert_allclose(output_int8, ref_out)
         self.assertEqual(output_int8, ref_out)
-
-#             for out, ref in zip(final_hiddens_int8, ref_hid):
-#                 torch.testing.assert_allclose(out, ref)
-# 
-#             def compare_quantized_unquantized(ScriptWrapper, cell):
-#                 wrapper = ScriptWrapper(cell)
-# 
-#                 # Compare quantize scripted module to unquantized
-#                 script_out, script_hid = wrapper(x, hiddens)
-#                 torch.testing.assert_allclose(script_out, ref_out)
-#                 for out, ref in zip(script_hid, ref_hid):
-#                     torch.testing.assert_allclose(out, ref)
-# 
-#                 # Compare export/import to unquantized
-#                 export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
-#                 ei_out, ei_hid = export_import_wrapper(x, hiddens)
-#                 torch.testing.assert_allclose(ei_out, ref_out)
-#                 for out, ref in zip(ei_hid, ref_hid):
-#                     torch.testing.assert_allclose(out, ref)
-# 
-#             if isinstance(cell, torch.jit.quantized.QuantizedLSTM):
-#                 for cell in [cell_int8,]:
-#                     class ScriptWrapper(torch.jit.ScriptModule):
-#                         def __init__(self, cell):
-#                             super(ScriptWrapper, self).__init__()
-#                             self.cell = cell
-# 
-#                         @torch.jit.script_method
-#                         def forward(self, x, hiddens):
-#                             # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
-#                             #        -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
-#                             return self.cell(x, hiddens)
-#                     compare_quantized_unquantized(ScriptWrapper, cell)
-
+        for out, ref in zip(final_hiddens_int8, ref_hid):
+            torch.testing.assert_allclose(out, ref)
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),

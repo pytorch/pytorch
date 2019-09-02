@@ -166,6 +166,15 @@ struct QuantizedCellParams {
   }
 };
 
+// QuantizedCellParams vs. QuantizedCellParamsDynamic
+//
+// QuantizedCellParams uses the legacy
+// fbgemm_linear_int8_weighjt_fp32_activation API, which requires the explicit
+// scale and zero point parameters for the weight. QuantizedCellParamsDynamic
+// uses the new fbgemm_linear_dynamic API, which doesn't require the explicit
+// scale and zero point parameters. These quantization parameters are
+// encapsulated in the `PackedLinearWeight` struct in
+// aten/src/ATen/native/quantized/cpu/fbgemm_utils.h.
 struct QuantizedCellParamsDynamic {
   QuantizedCellParamsDynamic(
       const Tensor& _w_ih, /* Prepacked Weight Tensor */
