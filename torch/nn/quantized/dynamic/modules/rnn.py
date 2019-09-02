@@ -51,8 +51,6 @@ class RNNBase(torch.nn.Module):
 
         if mode == 'LSTM':
             gate_size = 4 * hidden_size
-        elif mode == 'GRU':
-            gate_size = 3 * hidden_size
         else:
             raise ValueError("Unrecognized RNN mode: " + mode)
 

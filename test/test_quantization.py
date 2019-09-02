@@ -488,7 +488,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         )
         cell_int8 = model_int8.lstm
 
-        assert type(cell_int8) == torch.nn.quantized.dynamic.LSTM, 'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
+        assert type(cell_int8) == torch.nn.quantized.dynamic.LSTM, \
+            'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
 
         niter = 10
         x = torch.tensor([[100, -155],
