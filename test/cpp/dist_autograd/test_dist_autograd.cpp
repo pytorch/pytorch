@@ -13,9 +13,8 @@ TEST(DistAutogradTest, TestSendFunction) {
   ASSERT_FALSE(in2.grad().defined());
 
   // Attach the send autograd function to tensors.
-  std::vector<at::IValue> ivalues{in1, in2};
   auto send_function =
-      torch::distributed::autograd::addSendRpcBackward(ivalues);
+      torch::distributed::autograd::addSendRpcBackward({in1, in2});
   ASSERT_NE(send_function, nullptr);
 
   // Build loss and attach it as input to send autograd function.
