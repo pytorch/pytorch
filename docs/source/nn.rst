@@ -870,6 +870,7 @@ Utilities
 
 .. autofunction:: torch.nn.utils.rnn.pack_sequence
 
+.. currentmodule:: torch.nn
 :hidden:`Flatten`
 ~~~~~~~~~~~~~~~~~
 
