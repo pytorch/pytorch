@@ -23,6 +23,8 @@ namespace {
 //  - All code in this file should go through the DECLARE_DISPATCH,
 //    DEFINE_DISPATCH, and REGISTER_DISPATCH mechanism to ensure the correct
 //    runtime dispatch occurs.
+//  - THE CODE MUST RESIDE IN THE ANONYMOUS NAMESPACE. FAILURE TO ENSURE THIS
+//    IS THE CASE CAN LEAD TO HARD-TO-DEBUG ODR VIOLATIONS.
 //  - **Make sure different variants of the code (AVX, AVX2) are tested!**
 //    There are build variants that do things like have NO AVX and NO AVX2 in
 //    CI. Make sure they work!
