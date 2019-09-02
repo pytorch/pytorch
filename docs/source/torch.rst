@@ -237,6 +237,7 @@ Reduction Ops
 .. autofunction:: argmin
 .. autofunction:: cumprod
 .. autofunction:: cumsum
+.. autofunction:: cummax
 .. autofunction:: dist
 .. autofunction:: logsumexp
 .. autofunction:: mean

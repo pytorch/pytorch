@@ -122,7 +122,8 @@ Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & 
       norm = norm.unsqueeze(dim[0]);
     } else {
       auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, sizes.size());
-      for (size_t i = 0; i < sizes.size(); i++){
+      for (
+          size_t i = 0; i < sizes.size(); i++){
         if (dims_to_unsqueeze[i]) {
           grad = grad.unsqueeze(i);
           norm = norm.unsqueeze(i);
@@ -423,6 +424,11 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   ret -= ret_sum.expand(ret.sizes());
   ret += x;
   return ret;
+}
+
+Tensor cummax_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
+  // TODO
+  return grad;
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {

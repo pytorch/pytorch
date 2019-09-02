@@ -1249,6 +1249,7 @@ class ShapePropagator {
         {
           "aten::cumprod(Tensor self, int dim, *, int? dtype) -> Tensor",
           "aten::cumsum(Tensor self, int dim, *, int? dtype) -> Tensor",
+          "aten::cummax(Tensor self, int dim, *, int? dtype) -> Tensor",
           "aten::log_softmax(Tensor self, int dim, int? dtype) -> Tensor"
         },
         [](Node* node) -> type_vec_t {

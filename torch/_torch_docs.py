@@ -1306,6 +1306,36 @@ Example::
             -1.8209, -2.9780, -3.4022])
 """.format(**reduceops_common_args))
 
+add_docstr(torch.cummax,
+           r"""
+cummax(input, dim, out=None, dtype=None) -> Tensor
+
+Returns the cumulative max of elements of :attr:`input` in the dimension
+:attr:`dim`.
+
+For example, if :attr:`input` is a vector of size N, the result will also be
+a vector of size N, with elements.
+
+.. math::
+    y_i = max(x_1, x_2, x_3, \dots, x_i)
+
+Args:
+    {input}
+    dim  (int): the dimension to do the operation over
+    {dtype}
+    {out}
+
+Example::
+
+    >>> a = torch.randn(10)
+    >>> a
+    tensor([-0.8286, -0.4890,  0.5155,  0.8443,  0.1865, -0.1752, -2.0595,
+             0.1850, -1.1571, -0.4243])
+    >>> torch.cummax(a, dim=0)
+    tensor([-0.8286, -0.4890,  0.5155,  0.8443,  0.8443,  0.8443, 0.8443,
+             0.8443,  0.8443,  0.8443])
+""".format(**reduceops_common_args))
+
 add_docstr(torch.diag,
            r"""
 diag(input, diagonal=0, out=None) -> Tensor

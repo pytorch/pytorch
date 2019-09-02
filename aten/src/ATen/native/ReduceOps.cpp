@@ -183,6 +183,21 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
   return at::_cumprod_out(result, self.toType(result.scalar_type()), dim);
 }
 
+Tensor cummax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  return at::_cummax(integer_upcast(self, dtype), dim);
+}
+
+Tensor& cummax_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
+  TORCH_CHECK(
+      !dtype.has_value() || (result.scalar_type() == dtype.value()),
+      "provided dtype must match dtype of result in cumprod. Got ",
+      toString(result.scalar_type()),
+      " and ",
+      toString(dtype.value()),
+      ".");
+  return at::_cummax_out(result, self.toType(result.scalar_type()), dim);
+}
 
 // ALL REDUCE #################################################################
 
