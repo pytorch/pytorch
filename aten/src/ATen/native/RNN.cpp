@@ -168,45 +168,43 @@ struct QuantizedCellParams {
 
 struct QuantizedCellParamsDynamic {
   QuantizedCellParamsDynamic(
-      const Tensor& _w_ih, /* QTensor, qint8 */
-      const Tensor& _w_hh, /* QTensor, qint8 */
-      const Tensor& _b_ih, /* float Tensor */
-      const Tensor& _b_hh /* float Tensor */)
-      : w_ih(_w_ih),
-        w_hh(_w_hh),
-        b_ih(_b_ih),
-        b_hh(_b_hh) {}
+      const Tensor& _w_ih, /* Prepacked Weight Tensor */
+      const Tensor& _w_hh, /* Prepacked Weight Tensor */
+      const Tensor& _b_ih, /* float Bias Tensor */
+      const Tensor& _b_hh /* float Bias Tensor */)
+      : w_ih(_w_ih), w_hh(_w_hh), b_ih(_b_ih), b_hh(_b_hh) {}
 
   const Tensor& w_ih;
   const Tensor& w_hh;
   const Tensor& b_ih;
   const Tensor& b_hh;
 
-  Tensor matmul_ih(Tensor input) const {
+  Tensor matmul_ih(const Tensor& input) const {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
-  Tensor matmul_hh(Tensor h) const {
+  Tensor matmul_hh(const Tensor& h) const {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
 
-  template <class... Inputs>
-  inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
-    return {std::forward<Inputs>(inputs)...};
-  }
-
-  Tensor linear_ih(Tensor input_ih) const {
+  Tensor linear_ih(const Tensor& input_ih) const {
     const auto kFuncName = "quantized::fbgemm_linear_dynamic";
     const auto kOvrldName = "";
-    const std::vector<c10::IValue> output_ih_list = callOp(
-        kFuncName, kOvrldName, input_ih, w_ih, b_ih);
+    const std::vector<c10::IValue> output_ih_list =
+        callOp(kFuncName, kOvrldName, input_ih, w_ih, b_ih);
+    TORCH_CHECK(
+        output_ih_list.size() == 1,
+        "The output vector should have exact one element");
     const Tensor output_ih = output_ih_list[0].toTensor();
     return output_ih;
   }
-  Tensor linear_hh(Tensor input_hh) const {
+  Tensor linear_hh(const Tensor& input_hh) const {
     const auto kFuncName = "quantized::fbgemm_linear_dynamic";
     const auto kOvrldName = "";
-    const std::vector<c10::IValue> output_hh_list = callOp(
-        kFuncName, kOvrldName, input_hh, w_hh, b_hh);
+    const std::vector<c10::IValue> output_hh_list =
+        callOp(kFuncName, kOvrldName, input_hh, w_hh, b_hh);
+    TORCH_CHECK(
+        output_hh_list.size() == 1,
+        "The output vector should have exact one element");
     const Tensor output_hh = output_hh_list[0].toTensor();
     return output_hh;
   }
@@ -1066,7 +1064,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
       const Tensor& _input, TensorList hx,
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
-      bool batch_first, c10::optional<ScalarType> dtype) {
+      bool batch_first, c10::optional<ScalarType> dtype, bool use_dynamic) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
@@ -1083,10 +1081,17 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
 
   std::tuple<Tensor, Tensor, Tensor> results;
   if (result_dtype == at::kChar) {
-    auto params = gather_quantized_params(_params);
-    results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-        input, params, hx[0], hx[1], num_layers,
-        dropout_p, train, bidirectional);
+    if (use_dynamic) {
+      auto params = gather_quantized_params_dynamic(_params);
+      results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
+          input, params, hx[0], hx[1], num_layers,
+          dropout_p, train, bidirectional);
+    } else {
+      auto params = gather_quantized_params(_params);
+      results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
+          input, params, hx[0], hx[1], num_layers,
+          dropout_p, train, bidirectional);
+    }
   } else {
     auto params = gather_quantized_params_fp16(_params);
     results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
@@ -1099,56 +1104,6 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
   }
   return results;
 
-}
-
-// Dynamic quantized implementations
-//
-// These implementations use FBGEMM to do the i2h and h2h linear layers with
-// an int8 quantized weight. This is advantageous in small-batch-size
-// scenarios where runtime is dominated by memory fetches of the weight matrix.
-
-std::tuple<Tensor, Tensor, Tensor> quantized_lstm_dynamic(
-    const Tensor& _input,
-    TensorList hx,
-    TensorList _params,
-    bool has_biases,
-    int64_t num_layers,
-    double dropout_p,
-    bool train,
-    bool bidirectional,
-    bool batch_first) {
-  TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  if (at::cudnn_is_acceptable(_input)) {
-    Tensor output, hy, cy;
-    lstm_cudnn_stub(
-        _input.type().device_type(),
-        output,
-        hy,
-        cy,
-        _input,
-        hx,
-        _params,
-        has_biases,
-        num_layers,
-        dropout_p,
-        train,
-        bidirectional,
-        batch_first);
-    return std::make_tuple(output, hy, cy);
-  }
-  check_device(_input, _params, hx);
-  auto input = batch_first ? _input.transpose(0, 1) : _input;
-  TORCH_CHECK(has_biases, "quantized LSTM requires biases");
-
-  std::tuple<Tensor, Tensor, Tensor> results;
-  auto params = gather_quantized_params_dynamic(_params);
-  results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-      input, params, hx[0], hx[1], num_layers, dropout_p, train, bidirectional);
-
-  if (batch_first) {
-    std::get<0>(results) = std::get<0>(results).transpose(0, 1);
-  }
-  return results;
 }
 
 #define DEFINE_QUANTIZED_RNN_CELL(name, hx_type, cell_type, return_type, prepare_hx_fn) \

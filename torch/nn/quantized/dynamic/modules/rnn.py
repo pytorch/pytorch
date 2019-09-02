@@ -203,10 +203,7 @@ class RNNBase(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod):
-        # print(type(mod))
-        # assert LSTM or GRU
-        # assert type(mod) == torch.nn.quantized.dynamic.RNNBase.from_float,
-        #     'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM'
+        assert type(mod) == torch.nn.LSTM, 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM'
         assert hasattr(
             mod, 'qconfig'), 'Input float module must have qconfig defined'
         if mod.qconfig is not None and mod.qconfig.weight() is not None:
@@ -222,17 +219,14 @@ class RNNBase(torch.nn.Module):
         if mod.mode == 'LSTM':
             qRNNBase = LSTM(mod.input_size, mod.hidden_size, mod.num_layers,
                             mod.bias, mod.batch_first, mod.dropout, mod.bidirectional)
-        # else:
-        #     qRNNBase = GRU(mod.input_size, mod.hidden_size, mod.num_layers,
-        #                    mod.bias, mod.batch_first, mod.dropout, mod.bidirectional)
 
         num_directions = 2 if mod.bidirectional else 1
 
         assert mod.bias
 
         # TODO: support more than just LSTM
-        if qRNNBase.mode != 'LSTM' and qRNNBase.mode != 'GRU':
-            raise RuntimeError('Only LSTM or GRU is supported for QuantizedRNN')
+        if qRNNBase.mode != 'LSTM':
+            raise RuntimeError('Only LSTM is supported for QuantizedRNN')
 
         qRNNBase._all_weights = []
         packed_weights = []
@@ -309,10 +303,13 @@ class LSTM(RNNBase):
         self.check_forward_args(input, hx, batch_sizes)
         assert batch_sizes is None
 
-        result = _VF.quantized_lstm_dynamic(input, hx, self._get_all_weights(), self.bias, self.num_layers,
-                                            float(
-                                                self.dropout), self.training, self.bidirectional,
-                                            self.batch_first)
+        # print("self._get_all_weights():")
+        # print(self._get_all_weights())
+        # print("End printing self._get_all_weights():")
+
+        result = _VF.quantized_lstm(input, hx, self._get_all_weights(), self.bias, self.num_layers,
+                                   float(self.dropout), self.training, self.bidirectional,
+                                   self.batch_first, dtype=torch.int8, use_dynamic=True)
         output = result[0]
         hidden = result[1:]
 
