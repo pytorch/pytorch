@@ -796,10 +796,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 2 * [torch.Tensor([(i * self.world_size) + (self.world_size * (self.world_size - 1) / 2)])],
                 inputs[i],
-                "Mismatch in interation {}".format(i)
+                message="Mismatch in interation {}".format(i)
             )
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25427")
     def test_allreduce_coalesced_stress(self):
         inputs = [2 * [torch.Tensor([i + self.rank])] for i in range(1000)]
         self._test_allreduce_coalesced_stress(inputs)
