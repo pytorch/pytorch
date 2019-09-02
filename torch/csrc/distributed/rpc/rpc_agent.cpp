@@ -6,6 +6,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+constexpr size_t WorkerId::MAX_NAME_LEN;
 using namespace torch::distributed::autograd;
 
 RpcAgent::RpcAgent(WorkerId workerId, RequestCallback cb)

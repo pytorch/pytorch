@@ -39,7 +39,6 @@ class ProcessGroupAgent : public RpcAgent {
  public:
 
   ProcessGroupAgent(std::string workerName,
-                    std::unordered_map<std::string, int> nameMap,
                     std::shared_ptr<c10d::ProcessGroup> pg,
                     int numSendRecvThreads = 4);
 
@@ -59,6 +58,7 @@ class ProcessGroupAgent : public RpcAgent {
       override;
 
  private:
+  void collectNames();
   // put SendWork into a queue and notify the worker thread
   void enqueueSend(SendWork work);
   // put RecvWork into a queue and notify the worker thread
@@ -70,10 +70,10 @@ class ProcessGroupAgent : public RpcAgent {
     return nextId_++;
   }
 
-  // worker name -> rank
-  const std::unordered_map<std::string, int> nameMap_;
-  std::vector<WorkerId> workerIds_;
   std::shared_ptr<c10d::ProcessGroup> pg_;
+  // worker name -> rank
+  std::unordered_map<std::string, int> nameMap_;
+  std::vector<WorkerId> workerIds_;
   std::atomic<int64_t> nextId_;
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
