@@ -215,11 +215,8 @@ Tensor quantized_adaptive_avg_pool2d(
     IntArrayRef output_size) {
   const auto output_shape = get_output_shape(input, output_size);
   Tensor output = at::_empty_affine_quantized(
-      output_shape,
-      input.options(),
-      input.q_scale(),
-      input.q_zero_point(),
-      input.suggest_memory_format());
+      output_shape, input.options(), input.q_scale(), input.q_zero_point());
+  ;
   adaptive_avg_pool2d_out_template(output, input, output_shape);
   return output;
 }
