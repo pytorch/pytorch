@@ -22,7 +22,7 @@ class SparseAdam(Optimizer):
         https://arxiv.org/abs/1412.6980
     """
 
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8):
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0):
         if not 0.0 < lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 < eps:
@@ -31,7 +31,7 @@ class SparseAdam(Optimizer):
             raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
-        defaults = dict(lr=lr, betas=betas, eps=eps)
+        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         super(SparseAdam, self).__init__(params, defaults)
 
     def step(self, closure=None):
@@ -78,6 +78,10 @@ class SparseAdam(Optimizer):
 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
                 beta1, beta2 = group['betas']
+
+                if group['weight_decay'] != 0:
+                    param_values = p.data.sparse_mask(grad)._values()
+                    grad_values.add_(group['weight_decay'], param_values)
 
                 # Decay the first and second moment running average coefficient
                 #      old <- b * old + (1 - b) * new
