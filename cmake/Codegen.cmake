@@ -140,6 +140,25 @@ if (INTERN_BUILD_ATEN_OPS)
   ENDFOREACH()
   list(APPEND ATen_CPU_SRCS ${cpu_kernel_cpp})
 
+  FILE(GLOB cpu_quantized_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
+  FOREACH(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
+    FOREACH(IMPL ${cpu_quantized_kernel_cpp_in})
+      string(REPLACE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/" "" NAME ${IMPL})
+      LIST(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
+      SET(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
+      CONFIGURE_FILE(${IMPL} ${NEW_IMPL} COPYONLY)
+      SET(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
+      LIST(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
+      IF(MSVC)
+        SET(MACRO_FLAG "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
+      ELSE(MSVC)
+        SET(MACRO_FLAG "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
+      ENDIF(MSVC)
+      SET_SOURCE_FILES_PROPERTIES(${NEW_IMPL} PROPERTIES COMPILE_FLAGS "${FLAGS} ${MACRO_FLAG}")
+    ENDFOREACH()
+  ENDFOREACH()
+  list(APPEND ATen_CPU_SRCS ${cpu_kernel_cpp})
+
   set(cwrap_files
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/Declarations.cwrap
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/THNN/generic/THNN.h
