@@ -713,6 +713,13 @@ cumsum(dim, dtype=None) -> Tensor
 See :func:`torch.cumsum`
 """)
 
+add_docstr_all('cummax',
+               r"""
+cummax(dim, dtype=None) -> Tensor
+
+See :func:`torch.cummax`
+""")
+
 add_docstr_all('data_ptr',
                r"""
 data_ptr() -> int

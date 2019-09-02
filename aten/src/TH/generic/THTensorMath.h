@@ -106,6 +106,7 @@ TH_API void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *inde
 
 TH_API void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension);
 TH_API void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension);
+TH_API void THTensor_(cummax)(THTensor *r_, THTensor *t, int dimension);
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 

@@ -328,6 +328,8 @@ tests = [
     ('cumprod', small_3d, lambda t: [-1], 'neg_dim'),
     ('cumsum', small_3d, lambda t: [1]),
     ('cumsum', small_3d, lambda t: [-1], 'neg_dim'),
+    ('cummax', small_3d, lambda t: [1]),
+    ('cummax', small_3d, lambda t: [-1], 'neg_dim'),
     ('dim', small_3d, lambda t: [],),
     ('dist', small_2d, lambda t: [small_2d(t)]),
     ('dist', small_2d, lambda t: [small_2d(t), 3], '3_norm'),
