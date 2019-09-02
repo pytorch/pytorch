@@ -278,8 +278,8 @@ class LSTM(RNNBase):
         assert batch_sizes is None
 
         result = _VF.quantized_lstm(input, hx, self._get_all_weights(), self.bias, self.num_layers,
-                                   float(self.dropout), self.training, self.bidirectional,
-                                   self.batch_first, dtype=torch.int8, use_dynamic=True)
+                                    float(self.dropout), self.training, self.bidirectional,
+                                    self.batch_first, dtype=torch.int8, use_dynamic=True)
         output = result[0]
         hidden = result[1:]
 
