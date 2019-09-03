@@ -78,4 +78,4 @@ else
     $GRADLE_PATH -p ~/workspace/android/ assembleRelease
 fi
 
-find . -type f -name *aar | xargs ls -lah
+find . -type f -name *aar -print | xargs tar cfvz ~/workspace/android/artifacts.tgz
