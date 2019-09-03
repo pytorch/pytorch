@@ -199,6 +199,10 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.add(False, False), False)
         self.assertEqual(torch.add(False, True), True)
 
+        self.assertRaisesRegex(RuntimeError, "Boolean alpha only supported",
+                               lambda: torch.add(1, 1, alpha=True))
+        self.assertEquals(torch.add(torch.tensor(True), torch.tensor(True), True), torch.tensor(True))
+
     def test_create_bool_tensors(self):
         expected = torch.tensor([0], dtype=torch.int64, device=self.device)
         self.assertEqual(torch.arange(False, True, device=self.device), expected)
