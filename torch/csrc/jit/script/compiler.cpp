@@ -384,6 +384,7 @@ struct Environment {
     if (!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
           {"print", std::make_shared<PrintValue>()},
+          {"tuple", std::make_shared<TupleCallValue>()},
           {"float",
            makeMagic(
                "__float__",
@@ -2051,6 +2052,8 @@ struct to_ir {
         return "__sub__";
       case TK_UNARY_MINUS:
         return "__neg__";
+      case '~':
+        return "__invert__";
       case '*':
         return "__mul__";
       case TK_POW:
@@ -2201,6 +2204,15 @@ struct to_ir {
       auto out = graph->insertNode(graph->createUninitialized(type))
                      ->setSourceRange(loc);
       return std::make_shared<SimpleValue>(out->output());
+    } else if (auto tuple_call = dynamic_cast<TupleCallValue*>(sv.get())) {
+      checkApplyExpr(apply, loc, /*expected_inputs*/ 1);
+      auto arg = emitSugaredExpr(apply.inputs()[0], 1);
+      auto inputs = arg->asTuple(apply.range(), method);
+      auto inp_values = fmap(inputs, [&](const SugaredValuePtr& sv) {
+        return sv->asValue(loc, method);
+      });
+      return std::make_shared<SimpleValue>(
+          graph->insertNode(graph->createTuple(inp_values))->output());
     } else if (auto isinstance = dynamic_cast<IsInstanceValue*>(sv.get())) {
       // NOTE: for `isinstance` builtin call in JIT, we only check the static
       // types on the inputs to evaluate, and insert the corresponding constant
@@ -2370,31 +2382,32 @@ struct to_ir {
     }
   }
 
-  Value* emitNegate(const TreeRef& tree) {
+  Value* emitUnaryOp(const TreeRef& tree, const std::string &magicMethod, const c10::Symbol &opSymbol) {
     const auto& inputs = tree->trees();
     auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-    auto neg_val =
+    auto val =
         asSimple(makeMagic(
-                     "__neg__",
-                     std::make_shared<BuiltinFunction>(aten::neg, at::nullopt))
+                     magicMethod,
+                     std::make_shared<BuiltinFunction>(opSymbol, at::nullopt))
                      ->call(tree->range(), method, named_values, {}, 0));
 
-    // if we emitted a aten::neg and not some other overloaded function,
+    // if we emitted the unary op and not some other overloaded function,
     // then try to constantfold
-    if (neg_val->node()->kind() != aten::neg) {
-      return neg_val;
+    if (val->node()->kind() != opSymbol) {
+      return val;
     }
-    auto maybe_constant_input = toIValue(neg_val->node()->input());
+    auto maybe_constant_input = toIValue(val->node()->input());
     if (!maybe_constant_input) {
-      return neg_val;
+      return val;
     }
-    auto op = getOperation(neg_val->node());
+    auto op = getOperation(val->node());
     Stack stack;
     stack.push_back(*maybe_constant_input);
     op(stack);
     AT_ASSERT(stack.size() == 1);
     return graph->insertConstant(stack[0], tree->range());
   }
+
 
   // We construct the iterable tree here using the IterableTree SugaredValue,
   // The tree consists of SimpleValue, RangeValue or IterableValue:
@@ -2562,7 +2575,10 @@ struct to_ir {
       }
 
       case TK_UNARY_MINUS: {
-        return emitNegate(tree);
+        return emitUnaryOp(tree, "__neg__", aten::neg);
+      }
+      case '~': {
+        return emitUnaryOp(tree, "__invert__", aten::bitwise_not);
       }
       case TK_AND:
       case TK_OR: {
@@ -3108,7 +3124,8 @@ CompilationUnit::CompilationUnit(const std::string& source)
   define(c10::nullopt, source, nativeResolver(), nullptr);
 }
 
-c10::QualifiedName CompilationUnit::mangle(const c10::QualifiedName& name) const {
+c10::QualifiedName CompilationUnit::mangle(
+    const c10::QualifiedName& name) const {
   static const std::string manglePrefix = "___torch_mangle_";
   std::vector<std::string> atoms = name.atoms();
 

@@ -25,22 +25,26 @@ if is_available():
 
         def init_model_parallel(worker_name, rpc_backend=RpcBackend.PROCESS_GROUP):
             r"""
-                Initializes model parallel primitives such as the local rpc agent
-                and distributed autograd.
+            Initializes model parallel primitives such as the local rpc agent
+            and distributed autograd.
 
-                Initializes the local RPC agent which immediately makes the current process
-                ready to send and receive RPCs. The caller needs to make sure the specified
-                backend is properly intialized before calling this method. For example, to
-                use ``pg`` (ProcessGroup) backend, ``init_process_group`` must be invoked
-                prior to this method.
+            Initializes the local RPC agent which immediately makes the current
+            process ready to send and receive RPCs. The caller needs to make
+            sure the specified backend is properly intialized before calling
+            this method. For example, to use ``pg`` (ProcessGroup) backend,
+            ``init_process_group`` must be invoked prior to this method.
 
-                Arguments:
-                    worker_name (str): a globally unique name of this node. (e.g.,
-                                       ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
-                    rpc_backend (Enum): type of RPC backend implementation. Currently,
-                                        process group backend is the only available
-                                        backend implementation. (default: ``RpcBackend.PROCESS_GROUP``).
+            Arguments:
+                worker_name (str): a globally unique name of this node. (e.g.,
+                            ``Trainer3``, ``ParameterServer2``, ``Master``,
+                            ``Worker1``) Name can only contain number, alphabet,
+                            underscore, and/or dash, and must be shorter than
+                            128 characters.
+                rpc_backend (Enum): type of RPC backend implementation.
+                            Currently, process group backend is the only
+                            available backend implementation. (default:
+                            ``RpcBackend.PROCESS_GROUP``).
             """
             _init_rpc(worker_name, rpc_backend)
             from .rpc import _agent
-            autograd._init(_agent.get_worker_id())
+            autograd._init(_agent.get_worker_id().id)
