@@ -3,37 +3,11 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 
-#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/native/c10_utils.h>
 
 namespace at { namespace native {
 
 namespace {
-
-template <class... Inputs>
-inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
-  return {std::forward<Inputs>(inputs)...};
-}
-
-template <class... Args>
-inline std::vector<c10::IValue> callOp(
-    const c10::OperatorHandle& op,
-    Args... args) {
-  auto stack = makeStack(std::forward<Args>(args)...);
-  auto kernel = c10::Dispatcher::singleton().lookup(op, &stack);
-  kernel.call(&stack);
-  return stack;
-}
-
-template <class... Args>
-inline std::vector<c10::IValue> callOp(
-    const char* func_name,
-    const char* overload_name,
-    Args... args) {
-  const c10::optional<c10::OperatorHandle> op_handle =
-      c10::Dispatcher::singleton().findSchema({func_name, overload_name});
-  assert(op_handle.has_value());
-  return callOp(op_handle.value(), args...);
-}
 
 // Check if pytorch is compiled with MIOpen.
 bool use_miopen(const at::Tensor& input, const double dropout_state) {
