@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/pickler.h>
 #include <torch/serialize.h>
 
 #include <vector>
@@ -27,22 +28,24 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
   jit::unsafe_pickle(writer, jit::PickleOpCode::EMPTY_DICT, "", &tensors);
   TORCH_INTERNAL_ASSERT(tensors.size() == 0);
 
-  jit::pickle(writer, ivalue, &tensors);
+  jit::pickle<jit::LiteralPickler>(writer, ivalue, &tensors);
 
   std::vector<at::IValue> keys;
-  std::vector<TypePtr> types;
+  keys.reserve(tensors.size());
+  std::vector<TypePtr> types(tensors.size(), StringType::get());
 
   for (size_t i = 0; i < tensors.size(); i++) {
-      keys.push_back(std::to_string(i));
-      types.push_back(StringType::get());
+    keys.push_back(std::to_string(i));
   }
 
   auto keys_tuple = at::ivalue::Tuple::create(keys, TupleType::create(types));
   jit::pickle(writer, keys_tuple, &tensors);
 
   for (auto tensor : tensors) {
-    // write tensor data
-    std::cout << "writing a tensor\n";
+    auto data = jit::getWriteableTensorData(tensor);
+    size_t numel = data.numel();
+    writer(reinterpret_cast<const char*>(&numel), sizeof(numel));
+    writer(data.data(), data.sizeInBytes());
   }
 
   return data;

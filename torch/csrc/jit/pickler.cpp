@@ -99,57 +99,6 @@ void Pickler::pushOp(PickleOpCode opcode, const std::string& data) {
   pushBytes(data.data());
 }
 
-// TODO: DELTE
-// void torchSaveStop() {
-//   // Add the binary data for all the tensors to be included in the same binary
-//   // TODO: The pickler should be refactored to stream out to a stream directly
-//   // instead of staging in the stack_ array
-//   // As another pickle program in the same binary archive, add a list of
-//   // keys for each tensor (see torch/serialization.py)
-//   protocol();
-//   push<PickleOpCode>(PickleOpCode::MARK);
-//   for (size_t i = 0; i < tensor_data_.size(); ++i) {
-//     std::string key = std::to_string(i);
-//     push<PickleOpCode>(PickleOpCode::BINUNICODE);
-//     push<uint32_t>(key.size());
-//     pushBytes(key);
-//   }
-
-//   push<PickleOpCode>(PickleOpCode::TUPLE);
-//   stop();
-
-//   // Now dump the tensor binary data
-//   for (const auto& data : tensor_data_) {
-//     // first dump size
-//     push<size_t>(data.numel());
-//     writer_(data.data(), data.sizeInBytes());
-//   }
-// }
-
-// void Pickler::torchSaveStart() {
-//   // Output data to match torch.save, see torch/serialization.py for details
-//   // Magic number (0x1950a86a20f9469cfc6c)
-//   protocol();
-//   push<PickleOpCode>(PickleOpCode::LONG1);
-//   // LONG1 size
-//   pushBytes("\x0a");
-//   // LONG1 data
-//   pushBytes("\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19");
-//   stop();
-
-//   // Protocol Version (1001)
-//   protocol();
-//   push<PickleOpCode>(PickleOpCode::BININT2);
-//   pushBytes("\xe9\x03");
-//   stop();
-
-//   // sys_info, this isn't actually used in de-serialization so we can leave this
-//   // one empty
-//   protocol();
-//   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
-//   stop();
-// }
-
 // unmemoized version called by pushIValue
 void Pickler::pushIValueImpl(const IValue& ivalue) {
   if (ivalue.isTensor()) {
@@ -418,6 +367,9 @@ void LiteralPickler::pushTensor(const IValue& ivalue) {
 
   // Call torch._utils._rebuild_tensor_v2
   push<PickleOpCode>(PickleOpCode::REDUCE);
+
+  // Store the tensor so it can be written later
+  tensor_table_->emplace_back(std::move(tensor));
 }
 
 void Pickler::pushClass(PicklerClass cls) {

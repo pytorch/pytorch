@@ -72,6 +72,7 @@ void save(const std::vector<torch::Tensor>& tensor_vec, SaveToArgs&&... args) {
   archive.save_to(std::forward<SaveToArgs>(args)...);
 }
 
+// TODO: rename to torch::save
 TORCH_API std::vector<char> pickle_save(const torch::IValue& ivalue);
 
 /// Deserializes the given `value`.

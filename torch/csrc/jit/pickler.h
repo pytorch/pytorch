@@ -228,12 +228,14 @@ class Pickler {
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
 };
 
-class LiteralPickler : Pickler {
+class LiteralPickler : public Pickler {
+ public:
   LiteralPickler(
       std::function<void(const char*, size_t)> writer,
       std::vector<at::Tensor>* tensor_table)
       : Pickler(writer, tensor_table) {}
 
+ private:
   void pushTensor(const IValue& ivalue) override;
 };
 
