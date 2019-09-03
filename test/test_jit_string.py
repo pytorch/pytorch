@@ -1,5 +1,7 @@
 from test_jit import JitTestCase
 from common_utils import run_tests
+import sys
+sys.setrecursionlimit(1500)
 
 
 class TestScript(JitTestCase):
