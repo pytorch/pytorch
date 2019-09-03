@@ -753,6 +753,7 @@ class ScriptModuleSerializer2 {
 
   void writeByteCode(const script::Module& module) {
     auto methods = module.get_methods();
+    std::vector<c10::IValue> elements;
     for (const auto& method : methods) {
       const auto& func = method.function();
       torch::jit::Code code(func.graph());
@@ -780,10 +781,11 @@ class ScriptModuleSerializer2 {
       auto constants = c10::ivalue::Tuple::create(code.constant_table());
       auto named_consts = c10::ivalue::Tuple::create({"constants", constants});
 
-      auto elements = c10::ivalue::Tuple::create({named_ins, named_ops, named_consts});
-      auto named_elements = c10::ivalue::Tuple::create({func.name(), elements});
-      writeArchive("bytecode", named_elements);
+      auto element = c10::ivalue::Tuple::create({named_ins, named_ops, named_consts});
+      elements.push_back(c10::ivalue::Tuple::create({func.name(), element}));
     }
+    auto telements = c10::ivalue::Tuple::create(elements);
+    writeArchive("bytecode", telements);
   }
 
   void convertNamedType(const c10::NamedTypePtr& class_type) {

@@ -476,6 +476,7 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR}/aten/src/)
 # ---[ Main build
 add_subdirectory(c10)
 add_subdirectory(caffe2)
+add_subdirectory(${PROJECT_SOURCE_DIR}/torch/csrc/jit/lite_interpreter)
 
 # --[ Documentation
 if(BUILD_DOCS)

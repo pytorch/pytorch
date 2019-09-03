@@ -1,6 +1,8 @@
 #include <test/cpp/jit/test_base.h>
-#include "torch/csrc/jit/script/module.h"
-#include "torch/csrc/autograd/generated/variable_factories.h"
+#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/jit/lite_interpreter/import_bytecode.h>
+#include <torch/csrc/jit/lite_interpreter/bytecode.h>
 #include <torch/csrc/jit/import.h>
 
 // Tests go in torch::jit
@@ -15,10 +17,15 @@ void testLiteInterpreter() {
       return self.foo + x + b
   )");
 
+  std::stringstream s_script;
+  m.save(s_script);
+  auto m_load = load(s_script);
+
 //  script::Module m = load("/Users/myuan/data/lenet/lenet_traced.pt");
-  std::stringstream sout;
-  m.save_for_mobile(sout);
-  m.save_for_mobile("/Users/myuan/temp/test.zip");
+  std::stringstream ss;
+  m.save_for_mobile(ss);
+  auto bc = load_bytecode(ss);
+
 }
 
 void testLiteWithFile() {
