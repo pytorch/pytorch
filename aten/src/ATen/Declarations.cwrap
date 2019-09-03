@@ -1111,8 +1111,7 @@
     - THTensor* self
     - arg: long dim
       wrap_dim: self
-    - arg: bool descending
-      default: "false"
+    - bool descending
 ]]
 [[
   name: _th_topk
@@ -1600,7 +1599,6 @@
         - arg: bool unbiased
           if_true: 0
           if_false: 1
-          default: 0
     - cname: var
       return: argument 0
       scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
@@ -1613,7 +1611,6 @@
         - arg: bool unbiased
           if_true: 0
           if_false: 1
-          default: 0
         - bool keepdim
 ]]
 [[
@@ -1632,7 +1629,6 @@
         - arg: bool unbiased
           if_true: 0
           if_false: 1
-          default: 0
     - cname: std
       return: argument 0
       scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
@@ -1645,7 +1641,6 @@
         - arg: bool unbiased
           if_true: 0
           if_false: 1
-          default: 0
         - bool keepdim
 ]]
 [[
@@ -2290,7 +2285,6 @@
     - arg: bool eigenvectors
       if_true: V
       if_false: N
-      default: N
 ]]
 [[
   name: _th_potri
@@ -2312,7 +2306,6 @@
     - arg: bool upper
       if_true: U
       if_false: L
-      default: U
 ]]
 [[
   name: _th_geqrf
@@ -2372,11 +2365,9 @@
     - arg: bool left
       if_true: L
       if_false: R
-      default: L
     - arg: bool transpose
       if_true: T
       if_false: N
-      default: N
 ]]
 [[
   name: _th_random_
