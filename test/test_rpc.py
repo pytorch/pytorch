@@ -389,7 +389,7 @@ class RpcTest(MultiProcessTestCase):
 
     @_wrap_with_rpc
     def test_multi_builtin_remote_ret(self):
-        m = 20
+        m = 10
         n = self.rank + 1
         dst_rank = n % self.world_size
         rrefs = []
