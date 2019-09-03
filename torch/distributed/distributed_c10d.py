@@ -207,30 +207,23 @@ def _get_group_size(group):
 
 def _check_single_tensor(param, param_name):
     """
-    Helper that check the parameter: param_name is a single Tensor
+    Helper to check that the parameter ``param_name`` is a single tensor.
 
     """
     if not isinstance(param, torch.Tensor):
-        raise RuntimeError("Invalid function argument. Expecting parameter: {} "
-                           "to be a torch.Tensor type".format(param_name))
+        raise RuntimeError("Invalid function argument. Expected parameter `{}` "
+                           "to be of type torch.Tensor.".format(param_name))
 
 
 def _check_tensor_list(param, param_name):
     """
-    Helper that check the parameter: param_name is a Tensor list
+    Helper to check that the parameter ``param_name`` is a list of tensors.
 
     """
-    wrong_type = False
-    if isinstance(param, list):
-        for p in param:
-            if not isinstance(p, torch.Tensor):
-                wrong_type = True
-                break
-    else:
-        wrong_type = True
-    if wrong_type:
-        raise RuntimeError("Invalid function argument. Expecting parameter: {} "
-                           "to be a List[torch.Tensor] type".format(param_name))
+    if not isinstance(param, list) or \
+       not all(isinstance(p, torch.Tensor) for p in param):
+        raise RuntimeError("Invalid function argument. Expected parameter `{}` "
+                           "to be of type List[torch.Tensor].".format(param_name))
 
 
 def is_mpi_available():
