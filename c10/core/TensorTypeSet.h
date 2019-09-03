@@ -2,6 +2,7 @@
 
 #include <c10/core/TensorTypeId.h>
 #include <c10/util/llvmMathExtras.h>
+#include <c10/util/Exception.h>
 #include <ostream>
 
 namespace c10 {
@@ -27,6 +28,7 @@ public:
               : 1ULL << (static_cast<uint8_t>(t) - 1)) {}
   // Test if a TensorTypeId is in the set
   bool has(TensorTypeId t) const {
+    TORCH_INTERNAL_ASSERT(t != TensorTypeId::UndefinedTensorId);
     return static_cast<bool>(repr_ & TensorTypeSet(t).repr_);
   }
   // Perform set union
@@ -59,15 +61,15 @@ public:
     // singleton constructor to shift from the right, we can get rid of the
     // subtraction here.  It's modestly more complicated to get right so I
     // didn't do it for now.
-    return static_cast<TensorTypeId>(64 - llvm::countTrailingZeros(repr_));
+    return static_cast<TensorTypeId>(64 - llvm::countLeadingZeros(repr_));
   }
 private:
   TensorTypeSet(uint64_t repr) : repr_(repr) {}
   uint64_t repr_ = 0;
 };
 
-std::string toString(TensorTypeSet);
-std::ostream& operator<<(std::ostream&, TensorTypeSet);
+C10_API std::string toString(TensorTypeSet);
+C10_API std::ostream& operator<<(std::ostream&, TensorTypeSet);
 
 // Historically, every tensor only had a single TensorTypeId, and it was
 // always something like CPUTensorId and not something weird like VariableId.
