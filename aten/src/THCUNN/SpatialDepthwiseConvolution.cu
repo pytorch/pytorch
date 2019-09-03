@@ -126,7 +126,7 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
       }
     }
 
-    output.data()[thread_id] = static_cast<T>(sum);
+    output.data()[linearIndex] = ScalarConvert<AccT, T>::to(sum);
   }
 }
 
