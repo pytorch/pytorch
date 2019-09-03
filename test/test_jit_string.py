@@ -1,5 +1,6 @@
 from test_jit import JitTestCase
-
+import sys
+sys.setrecursionlimit(10000)
 
 class TestScript(JitTestCase):
     def test_str_ops(self):
@@ -263,9 +264,10 @@ class TestScript(JitTestCase):
         self.checkScript(test_rpartition, ())
 
         def test_split():
-            # type: () -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str]]
+            # type: () -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str]]
             return (
                 "a a a a a".split(),
+                "a\na\ta a".split(),
                 " a a a a a ".split(" "),
                 "a a a a a ".split(" ", 10),
                 "a a a a a ".split(" ", -1),
@@ -278,18 +280,20 @@ class TestScript(JitTestCase):
         self.checkScript(test_split, ())
 
         def test_rsplit():
-            # type: () -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str]]
+            # type: () -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str]]
             return (
                 "a a a a a".rsplit(),
-                " a a a a a ".rsplit(" "),
-                "a a a a a ".rsplit(" ", 10),
-                "a a a a a ".rsplit(" ", -1),
-                "a a a a a ".rsplit(" ", 3),
-                " a a a a a ".rsplit("*"),
-                " a*a a*a a ".rsplit("*"),
-                " a*a a*a a ".rsplit("*", -1),
-                " a*a a*a a".rsplit("a*", 10),
+                "b\nb\tb b".rsplit(),
+                " c c c c c ".rsplit(" "),
+                "d d d d d ".rsplit(" ", 10),
+                "e e e e e ".rsplit(" ", -1),
+                "f f f f f ".rsplit(" ", 3),
+                " g g g g g ".rsplit("*"),
+                " h*h h*h h ".rsplit("*"),
+                " i*i i*i i ".rsplit("*", -1),
+                " j*j j*j j".rsplit("j*", 10),
             )
+
         self.checkScript(test_rsplit, ())
 
         def test_splitlines():

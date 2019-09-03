@@ -547,29 +547,56 @@ auto reg_str_ops_2 = torch::RegisterOperators()
            post_partition);
         })
 
-    .op("aten::split(str self, str separator=' ', int max=-1) -> str[]",
+    // Due to type constraints in TorchScript, we use a sentinel string
+    // "__DO_NOT_USE" as the default separator for split functions.
+    // This denotes splitting by any whitespace, or default behavior when
+    // the separator is not specified
+    .op("aten::split(str self, str separator='__DO_NOT_USE', int max=-1) -> str[]",
         [](std::string string, std::string separator, int64_t max) {
+          TORCH_CHECK(separator != "", "empty separator");
+          std::string default_separator = "__DO_NOT_USE"; 
           std::string::size_type prev_pos = 0;
           std::string::size_type pos = 0;
           c10::List<std::string> splits;
           auto count = 0;
-          while ((pos = string.find(separator, pos)) != std::string::npos) {
-            count++;
-            if (max >= 0 && count > max) {
-              break;
-            } else {
-              splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
-            }
-            pos += separator.size();
-            prev_pos = pos;
+          std::vector<std::string> separators = {separator};
+          if (separator == default_separator) {
+            separators = { "\n", "\t", " " };
           }
+          do {
+            auto min_pos = std::string::npos;
+            for (const auto & sep : separators) {
+              auto candidate_pos = string.find(sep, pos);
+              if (candidate_pos < min_pos) {
+                min_pos = candidate_pos;
+                separator = sep;
+              }
+            }
+            pos = min_pos;
+            if (pos != std::string::npos) {
+              count++;
+              if (max >= 0 && count > max) {
+                break;
+              } else {
+                splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
+              }
+              pos += separator.size();
+              prev_pos = pos;
+            } else {
+              break;
+            }
+          } while (true);
+
           splits.emplace_back(
               string.substr(prev_pos, string.size() - prev_pos));
           return splits;
         })
 
-    .op("aten::rsplit(str self, str separator=' ', int max=-1) -> str[]",
+    .op("aten::rsplit(str self, str separator='__DO_NOT_USE', int max=-1) -> str[]",
         [](std::string string, std::string separator, int64_t max) {
+          TORCH_CHECK(separator != "", "empty separator");
+          std::string default_separator = "__DO_NOT_USE"; 
+          std::reverse(default_separator.begin(), default_separator.end());
           std::reverse(separator.begin(), separator.end());
           std::reverse(string.begin(), string.end());
 
@@ -577,18 +604,37 @@ auto reg_str_ops_2 = torch::RegisterOperators()
           std::string::size_type pos = 0;
           c10::List<std::string> splits;
           auto count = 0;
-          while ((pos = string.find(separator, pos)) != std::string::npos) {
-            count++;
-            if (max >= 0 && count > max) {
-              break;
-            } else {
-              auto substr = string.substr(prev_pos, pos - prev_pos);
-              std::reverse(substr.begin(), substr.end());
-              splits.emplace(splits.begin(), substr);
-            }
-            pos += separator.size();
-            prev_pos = pos;
+
+          std::vector<std::string> separators = {separator};
+          if (separator == default_separator) {
+            separators = { "\n", "\t", " " };
           }
+
+          do {
+            auto min_pos = std::string::npos;
+            for (const auto & sep : separators) {
+              auto candidate_pos = string.find(sep, pos);
+              if (candidate_pos < min_pos) {
+                min_pos = candidate_pos;
+                separator = sep;
+              }
+            }
+            pos = min_pos;
+            if (pos != std::string::npos) {
+              count++;
+              if (max >= 0 && count > max) {
+                break;
+              } else {
+                auto substr = string.substr(prev_pos, pos - prev_pos);
+                std::reverse(substr.begin(), substr.end());
+                splits.emplace(splits.begin(), substr);
+              }
+              pos += separator.size();
+              prev_pos = pos;
+            } else {
+              break;
+            }
+          } while (true);
           auto substr = string.substr(prev_pos, string.size() - prev_pos);
           std::reverse(substr.begin(), substr.end());
           splits.emplace(splits.begin(), substr);
