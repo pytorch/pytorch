@@ -347,19 +347,15 @@
           export COMMAND='((echo "source ./workspace/env" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id_x86_32" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
-          mkdir -p ~/workspace/build_android_aar
-          docker cp $id_x86_32:/var/lib/jenkins/workspace/android/pytorch_android/build/outputs/aar/pytorch_android.aar ~/workspace/build_android_aar/
-          docker cp $id_x86_32:/var/lib/jenkins/workspace/android/pytorch_android_torchvision/build/outputs/aar/pytorch_android_torchvision.aar ~/workspace/build_android_aar/
+          mkdir -p ~/workspace/build_android_artifacts
+          docker cp $id_x86_32:/var/lib/jenkins/workspace/android/artifacts.tgz ~/workspace/build_android_artifacts/
 
           output_image=$docker_image_libtorch_android_x86_32-gradle
           docker commit "$id_x86_32" ${output_image}
           docker push ${output_image}
     - store_artifacts:
-        path: ~/workspace/build_android_aar/pytorch_android.aar
-        destination: pytorch_android.aar
-    - store_artifacts:
-        path: ~/workspace/build_android_aar/pytorch_android_torchvision.aar
-        destination: pytorch_android_torchvision.aar
+        path: ~/workspace/build_android_artifacts/artifacts.tgz
+        destination: artifacts.tgz
 
   pytorch_android_gradle_build-x86_32:
     environment:
@@ -402,17 +398,12 @@
           export COMMAND='((echo "source ./workspace/env" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
-          mkdir -p ~/workspace/build_android_aar_x86_32
-          docker cp $id:/var/lib/jenkins/workspace/android/pytorch_android/build/outputs/aar/pytorch_android.aar ~/workspace/build_android_aar_x86_32/
-          docker cp $id:/var/lib/jenkins/workspace/android/pytorch_android_torchvision/build/outputs/aar/pytorch_android_torchvision.aar ~/workspace/build_android_aar_x86_32/
+          mkdir -p ~/workspace/build_android_x86_32_artifacts
+          docker cp $id:/var/lib/jenkins/workspace/android/artifacts.tgz ~/workspace/build_android_x86_32_artifacts/
 
           output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-gradle-x86_32
           docker commit "$id" ${output_image}
           docker push ${output_image}
     - store_artifacts:
-        path: ~/workspace/build_android_aar_x86_32/pytorch_android.aar
-        destination: pytorch_android_x86.aar
-    - store_artifacts:
-        path: ~/workspace/build_android_aar_x86_32/pytorch_android_torchvision.aar
-        destination: pytorch_android_torchvision_x86.aar
-
+        path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
+        destination: artifacts.tgz

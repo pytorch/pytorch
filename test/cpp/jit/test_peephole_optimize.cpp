@@ -3,6 +3,7 @@
 
 #include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/ir.h>
 
 namespace torch {
 namespace jit {
@@ -93,6 +94,24 @@ graph(%1 : Float(*, *, *)?):
         graph.get());
     PeepholeOptimize(graph);
     testing::FileCheck().check_count("unwrap", 2)->run(*graph);
+  }
+
+  // tests addmm fusion
+  // Note: addmm fusion is disabled by default
+  {
+    auto graph = std::make_shared<Graph>();
+    parseIR(R"IR(
+      graph(
+        %0 : Float(2, 3, 4),
+        %1 : Float(2, 3, 4),
+        %2 : Float(1, 1, 1)):
+        %3 : int = prim::Constant[value=1]()
+        %4 : Tensor = aten::mm(%0, %1)
+        %5 : Tensor = aten::add(%4, %2, %3)
+        return (%5)
+        )IR", graph.get());
+    PeepholeOptimize(graph, true);
+    testing::FileCheck().check("addmm")->run(*graph);
   }
 }
 } // namespace jit

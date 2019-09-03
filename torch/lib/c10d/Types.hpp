@@ -26,7 +26,7 @@ struct AllreduceOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
-struct AllreduceCoalescedOptions : AllreduceOptions { };
+struct AllreduceCoalescedOptions : AllreduceOptions {};
 
 struct ReduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;

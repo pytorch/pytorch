@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/symbolic_variable.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/autograd/edge.h>
@@ -62,50 +61,6 @@ struct GraphExecutorImplBase {
 
   // entry point where execution begins
   void run(Stack& stack);
-
-  void runTraced(Stack& stack) {
-    const auto& state = tracer::getTracingState();
-    auto inputs = last(stack, num_inputs);
-    auto input_values = fmap(
-        inputs, [](const IValue& v) { return tracer::getValueTrace(v); });
-
-    // NB: we could just run the fallback in here and call it a day, but that
-    // would loose all the control flow information we have in the graph. Thus,
-    // we run the fallback to get the correct output values, but we will
-    // override the tracing states later.
-    {
-      // No need to trace a script module.
-      ResourceGuard guard(tracer::pauseTracing());
-      run(stack);
-    }
-
-    // Traces always have types propagated through them, so we make sure to
-    // also propagate types through the graph we are inserting here.
-    // However, this->graph itself may already have been generated with
-    // tracing and so we only do the type propgation if no concrete types have
-    // been set.
-    auto local_graph = this->graph->copy();
-    for (size_t i = 0; i < input_values.size(); ++i) {
-      // propagate tensor types
-      if (input_values.at(i)->type()->isSubtypeOf(TensorType::get())) {
-        local_graph->inputs().at(i)->setType(input_values.at(i)->type());
-      }
-
-      // None does not subtype Optional[T], schema matching relies on
-      // None values being set to Optional[T] so update type here
-      // see logic for Nones in tryConvertToType
-      if (input_values.at(i)->type() == NoneType::get()) {
-        input_values.at(i)->setType(local_graph->inputs().at(i)->type());
-      }
-    }
-    PropagateInputShapes(local_graph);
-    auto output_values = insertGraph(*state->graph, *local_graph, input_values);
-
-    auto outputs = last(stack, num_outputs);
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      tracer::setValueTrace(outputs[i], output_values[i]);
-    }
-  }
 
   virtual ExecutionPlan getPlanFor(Stack& stack) = 0;
   virtual GraphExecutorState getDebugState() = 0;
