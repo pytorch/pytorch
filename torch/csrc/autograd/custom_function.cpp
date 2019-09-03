@@ -4,7 +4,7 @@
 namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
-  : backend(tensorTypeIdToBackend(var.type_id()))
+  : layout(var.layout())
   , device(var.device())
   , scalar_type(var.scalar_type())
   , size(var.sizes().vec())
@@ -12,10 +12,8 @@ VariableInfo::VariableInfo(const Variable& var)
 }
 
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
-  // NB: This will NOT work if we ever get mixed device gradients
-  device_guard.reset_device(device);
   return at::zeros(size,
-    at::TensorOptions(scalar_type).device(backendToDeviceType(backend)).layout(layout_from_backend(backend)).is_variable(true));
+    at::TensorOptions(scalar_type).device(device).layout(layout).is_variable(true));
 }
 
 variable_list _wrap_outputs(const variable_list &input_vars,

@@ -64,6 +64,7 @@ class SyncBatchNorm(Function):
             saved_input,
             mean,
             invstd,
+            weight,
             self.needs_input_grad[0],
             self.needs_input_grad[1],
             self.needs_input_grad[2]
@@ -112,7 +113,6 @@ class CrossMapLRN2d(Function):
         ctx.alpha = alpha
         ctx.beta = beta
         ctx.k = k
-        ctx._backend = None
         ctx.scale = None
 
         assert input.dim() == 4

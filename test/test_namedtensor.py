@@ -7,6 +7,9 @@ import functools
 import torch
 from torch import Tensor
 import torch.nn.functional as F
+from multiprocessing.reduction import ForkingPickler
+import pickle
+import io
 import sys
 
 
@@ -162,6 +165,23 @@ class TestNamedTensor(TestCase):
 
         none_named_tensor = torch.zeros(2, 3).names_(None, None)
         self.assertEqual(repr(none_named_tensor), expected)
+
+    def test_no_save_support(self):
+        named_tensor = torch.zeros(2, 3, names=('N', 'C'))
+        buf = io.BytesIO()
+        with self.assertRaisesRegex(RuntimeError, "NYI"):
+            torch.save(named_tensor, buf)
+
+    def test_no_pickle_support(self):
+        named_tensor = torch.zeros(2, 3, names=('N', 'C'))
+        with self.assertRaisesRegex(RuntimeError, "NYI"):
+            serialized = pickle.dumps(named_tensor)
+
+    def test_no_multiprocessing_support(self):
+        named_tensor = torch.zeros(2, 3, names=('N', 'C'))
+        buf = io.BytesIO()
+        with self.assertRaisesRegex(RuntimeError, "NYI"):
+            ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
 
     def test_noncontig_contiguous(self):
         # This type of contiguous is special-cased and therefore needs its own test
@@ -653,11 +673,19 @@ class TestNamedTensor(TestCase):
             self.assertEqual(result.names, names)
 
     def test_reduction_fns(self):
+        def check_output(output, expected_names):
+            if isinstance(output, torch.Tensor):
+                self.assertEqual(output.names, expected_names)
+                return
+            assert isinstance(output, tuple)
+            for out in output:
+                self.assertEqual(out.names, expected_names)
+
         def test_simple_reduce(op_name, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            op = getattr(torch.Tensor, op_name)
-            self.assertEqual(op(t, 1).names, ['N', 'L'])
-            self.assertEqual(op(t, 'C').names, ['N', 'L'])
+            op = getattr(torch, op_name)
+            check_output(op(t, 1), ['N', 'L'])
+            check_output(op(t, 'C'), ['N', 'L'])
             with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
                 op(t, None)
             with self.assertRaisesRegex(RuntimeError, 'Name \'H\' not found'):
@@ -665,15 +693,15 @@ class TestNamedTensor(TestCase):
 
         def test_complete_reduce(op_name, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            op = getattr(torch.Tensor, op_name)
-            self.assertEqual(op(t).names, [])
+            op = getattr(torch, op_name)
+            check_output(op(t), [])
 
         def test_multidim_reduce(op_name, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            op = getattr(torch.Tensor, op_name)
+            op = getattr(torch, op_name)
 
-            self.assertEqual(op(t, [1, 2]).names, ['N'])
-            self.assertEqual(op(t, ['C', 'L']).names, ['N'])
+            check_output(op(t, [1, 2]), ['N'])
+            check_output(op(t, ['C', 'L']), ['N'])
             with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
                 op(t, [None, 'C'])
 
@@ -681,30 +709,37 @@ class TestNamedTensor(TestCase):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
             out = t.new_empty([0])
             getattr(torch, op_name)(t, 'C', out=out)
-            self.assertEqual(out.names, ['N', 'L'])
+            check_output(out, ['N', 'L'])
 
         def test_keepdim(op_name, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            op = getattr(torch.Tensor, op_name)
-            self.assertEqual(op(t, 'C', keepdim=True).names, ['N', 'C', 'L'])
+            op = getattr(torch, op_name)
+            check_output(op(t, 'C', keepdim=True), ['N', 'C', 'L'])
 
         Case = namedtuple('Case', [
             'op_name',
             'supports_complete_reduce',
             'supports_multidim_reduce',
+            'supports_out_variant',
         ])
 
         tests = [
-            Case(op_name='sum', supports_complete_reduce=True, supports_multidim_reduce=True),
-            Case(op_name='prod', supports_complete_reduce=True, supports_multidim_reduce=False),
+            Case('sum', True, True, True),
+            Case('prod', True, False, True),
+            Case('mean', True, True, True),
+            Case('var', True, True, True),
+            Case('std', True, True, True),
+            Case('std_mean', True, True, False),
+            Case('var_mean', True, True, False),
         ]
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             op_name = testcase.op_name
             test_simple_reduce(op_name, device)
             test_keepdim(op_name, device)
-            test_out_variant(op_name, device)
 
+            if testcase.supports_out_variant:
+                test_out_variant(op_name, device)
             if testcase.supports_complete_reduce:
                 test_complete_reduce(op_name, device)
             if testcase.supports_multidim_reduce:
@@ -802,6 +837,26 @@ class TestNamedTensor(TestCase):
     @unittest.skipIf(not TEST_CUDA, 'no CUDA')
     def test_as_strided_cuda(self):
         self._test_as_strided('cuda')
+
+    def test_no_jit_support(self):
+        @torch.jit.script
+        def foo(x):
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, 'NYI'):
+            foo(torch.randn(2, 3, names=('N', 'C')))
+
+        @torch.jit.ignore
+        def add_names(x):
+            x.names = ('N', 'C')
+
+        @torch.jit.script
+        def return_named_tensor(input):
+            add_names(input)
+            return input
+
+        with self.assertRaisesRegex(RuntimeError, "NYI"):
+            return_named_tensor(torch.randn(1, 1))
 
     def test_align_to(self):
         def _test(tensor_namedshape, align_names, expected_sizes, expected_error):
