@@ -741,7 +741,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allreduce_stress(inputs)
 
-    @skip_if_lt_x_gpu(1)
     def test_allreduce_coalesced_checks(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
@@ -766,9 +765,16 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t3, t3.clone()], opts)
 
+    @skip_if_lt_x_gpu(1)
+    def test_allreduce_coalesced_checks_cuda(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        t1 = torch.zeros(1, dtype=torch.float32)
+
         with self.assertRaisesRegex(ValueError, "unsupported device type"):
             opts = c10d.AllreduceCoalescedOptions()
-            pg.allreduce_coalesced([t1.cuda(), t2.cuda()], opts)
+            pg.allreduce_coalesced([t1.cuda(), t1.cuda()], opts)
 
     def _test_allreduce_coalesced_basics(self, fn):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -796,10 +802,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 2 * [torch.Tensor([(i * self.world_size) + (self.world_size * (self.world_size - 1) / 2)])],
                 inputs[i],
-                "Mismatch in interation {}".format(i)
+                message="Mismatch in interation {}".format(i)
             )
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25427")
     def test_allreduce_coalesced_stress(self):
         inputs = [2 * [torch.Tensor([i + self.rank])] for i in range(1000)]
         self._test_allreduce_coalesced_stress(inputs)

@@ -1,7 +1,7 @@
 #include <gloo/transport/tcp/device.h>
 
-#include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
