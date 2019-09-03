@@ -108,13 +108,18 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
-      .def("_jit_pass_onnx_cast_all_constant_to_floating", CastAllConstantToFloating)
+      .def(
+          "_jit_pass_onnx_cast_all_constant_to_floating",
+          CastAllConstantToFloating)
       .def(
           "_jit_pass_onnx_constant_fold",
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, at::Tensor>& paramsDict,
              int opset_version) {
-            ConstantFoldONNX(graph->block(), paramsDict, opset_version); // overload resolution
+            ConstantFoldONNX(
+                graph->block(),
+                paramsDict,
+                opset_version); // overload resolution
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -127,7 +132,12 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_dce_allow_deleting_nodes_with_side_effects",
           [](std::shared_ptr<Graph>& g) {
-            return EliminateDeadCode(g->block(), true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS); // overload resolution
+            return EliminateDeadCode(
+                g->block(),
+                true,
+                DCESideEffectPolicy::
+                    ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS); // overload
+                                                             // resolution
           })
       .def(
           "_jit_pass_cse",
@@ -143,22 +153,19 @@ void initJITBindings(PyObject* module) {
              const std::string& method_name,
              const py::dict& qconfig_dict) {
             auto dict = py::cast<std::unordered_map<
-              std::string,
-              std::tuple<script::Module, script::Module>>>(qconfig_dict);
+                std::string,
+                std::tuple<script::Module, script::Module>>>(qconfig_dict);
             return InsertObservers(module, method_name, dict);
           })
       .def(
           "_jit_pass_insert_quant_dequant",
-          [](script::Module& module,
-             const std::string& method_name) {
+          [](script::Module& module, const std::string& method_name) {
             return InsertQuantDeQuant(module, method_name);
-          }
-      )
+          })
       .def(
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
-      .def(
-          "_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
+      .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
       .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
@@ -215,8 +222,8 @@ void initJITBindings(PyObject* module) {
             ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
             arg_spec_creator.specializeTypes(*graph, spec);
             // We only get partial specialization from the arg_spec_creator, but
-            // we want full shape specialization. The alternative would be to have a
-            // "complete type inference" function in ArguemntSpecCreator.
+            // we want full shape specialization. The alternative would be to
+            // have a "complete type inference" function in ArguemntSpecCreator.
             auto g_inputs = graph->inputs();
             for (size_t i = 0; i < inputs.size(); ++i) {
               if (stack[i].isTensor()) {
