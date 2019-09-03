@@ -221,6 +221,9 @@ void TensorIterator::compute_names() {
       [](const OperandInfo& op) {
         return op.tensor.defined() && op.tensor.has_names();
       });
+  if (!should_infer_names) {
+    return;
+  }
 
   for (auto& op : operands_) {
     if (!op.tensor.defined()) continue;
