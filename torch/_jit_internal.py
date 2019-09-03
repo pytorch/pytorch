@@ -307,9 +307,8 @@ def ignore(drop=False, **kwargs):
     drop_on_export = kwargs.pop("drop_on_export", None)
     if drop_on_export:
         warnings.warn("ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the drop "
-                      "call on compilation. Use drop=True now. {}")
+                      "call on compilation. Use drop=True now. {}", category=DeprecationWarning)
 
-        warnings.warn("")
         drop = drop_on_export
 
     def decorator(fn):
