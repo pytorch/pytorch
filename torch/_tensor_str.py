@@ -196,7 +196,11 @@ def _tensor_str(self, indent):
         return '[]'
 
     if torch._C._BUILD_NAMEDTENSOR and self.has_names():
-        # Many fns involved in printing don't support names, so drop them first
+        # There are two main codepaths (possibly more) that tensor printing goes through:
+        # - tensor data can fit comfortably on screen
+        # - tensor data needs to be summarized
+        # Some of the codepaths don't fully support named tensors, so we send in
+        # an unnamed tensor to the formatting code as a workaround.
         self = self.view_names(None)
 
     summarize = self.numel() > PRINT_OPTS.threshold
