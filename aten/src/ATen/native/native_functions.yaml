@@ -262,9 +262,19 @@
 
 - func: argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
   variants: function, method
+  named_guard: False
+
+- func: argmax.names(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: argmin.names(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
+  variants: function, method
+  named_guard: False
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   variants: function, method

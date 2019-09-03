@@ -740,6 +740,8 @@ class TestNamedTensor(TestCase):
             Case('var_mean', True, True, False, None),
             Case('min', True, False, True, get_minmax_output),
             Case('max', True, False, True, get_minmax_output),
+            Case('argmax', True, False, False, None),
+            Case('argmin', True, False, False, None),
         ]
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
