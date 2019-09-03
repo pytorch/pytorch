@@ -761,6 +761,44 @@ class TestNamedTensor(TestCase):
             (create('0'), create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C')),
             expected_names=[None])
 
+    def test_masked_fill(self):
+        # simple
+        self._test_name_inference(
+            Tensor.masked_fill,
+            (create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C'), 3.14),
+            expected_names=['N', 'C'])
+
+        # left broadcast
+        self._test_name_inference(
+            Tensor.masked_fill,
+            (create('C:3'), (create('2,3') > 0).view_names('N', 'C'), 3.14),
+            maybe_raises_regex="must be less than or equal to")
+
+        # right broadcast
+        self._test_name_inference(
+            Tensor.masked_fill,
+            (create('N:2,C:3'), (create('3') > 0).view_names('C'), 3.14),
+            expected_names=['N', 'C'])
+
+        # error
+        self._test_name_inference(
+            Tensor.masked_fill,
+            (create('N:2,C:3'), (create('3') > 0).view_names('D'), 3.14),
+            maybe_raises_regex='do not match')
+
+        # inplace
+        self._test_name_inference(
+            Tensor.masked_fill_,
+            (create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C'), 3.14),
+            expected_names=['N', 'C'])
+
+        # inplace, computed names don't match output tensor names
+        self._test_name_inference(
+            Tensor.masked_fill_,
+            (create('N:2,None:3'), (create('2,3') > 0).view_names('N', 'C'), 3.14),
+            maybe_raises_regex="not the same as the computed output names")
+
+
     def test_using_seen_interned_string_doesnt_bump_refcount(self):
         def see_name():
             seen_name = 'N'
