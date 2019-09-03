@@ -645,6 +645,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     (i * self.world_size) + (i % self.world_size)
                 ]),
                 inputs[i],
+                None,
                 "Mismatch in iteration %d" % i,
             )
 
@@ -727,6 +728,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     (self.world_size * (self.world_size - 1) / 2)
                 ]),
                 inputs[i],
+                None,
                 "Mismatch in iteration %d" % i,
             )
 
@@ -974,6 +976,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 torch.Tensor([iter + root]),
                 outputs[iter][root],
+                None,
                 "Mismatch in iteration %d for rank %d" % (iter, root)
             )
 
@@ -1120,6 +1123,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(
                     expected_outputs[iter],
                     outputs[iter],
+                    None,
                     "Mismatch in iteration %d for root %d" % (iter, root)
                 )
 
@@ -1220,6 +1224,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 expected_outputs[i],
                 outputs[i],
+                None,
                 "Mismatch in iteration %d" % i
             )
 
@@ -1308,6 +1313,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                         (self.world_size * (self.world_size - 1) / 2)
                     ]),
                     outputs[i],
+                    None,
                     "Mismatch in iteration %d with root rank %d" % (iter, root),
                 )
 
@@ -2895,12 +2901,20 @@ class CommTest(MultiProcessTestCase):
         # Need to skip return code checking for these tests since the child
         # processes don't exit cleanly.
         self.skip_return_code_checks = [
-            self.test_nccl_errors_blocking_abort,
-            self.test_nccl_errors_blocking_sigkill,
-            self.test_nccl_errors_blocking_sigstop,
-            self.test_nccl_errors_blocking_sigterm,
+            self._get_wrapped_func(self.test_nccl_errors_blocking_abort),
+            self._get_wrapped_func(self.test_nccl_errors_blocking_sigkill),
+            self._get_wrapped_func(self.test_nccl_errors_blocking_sigterm),
+            self._get_wrapped_func(self.test_nccl_errors_blocking_nonzero_exit),
         ]
-        self.op_timeout_sec = 1
+
+    def _get_wrapped_func(self, func):
+        # Get the original function which was wrapped in the decorator.
+        if hasattr(func, '__wrapped__'):
+            # py3 way.
+            return func.__wrapped__
+        else:
+            # py2 way.
+            return func.func_closure[0].cell_contents
 
     def tearDown(self):
         super(CommTest, self).tearDown()
@@ -2908,7 +2922,10 @@ class CommTest(MultiProcessTestCase):
             os.remove(self.file.name)
         except OSError:
             pass
-        os.environ["NCCL_BLOCKING_WAIT"] = "0"
+
+    @property
+    def op_timeout_sec(self):
+        return 1
 
     @property
     def world_size(self):
@@ -2961,8 +2978,9 @@ class CommTest(MultiProcessTestCase):
             # Now the work scheduled next should hang forever since the previous
             # allreduce will never complete.
             t = threading.Thread(target=self._run_all_reduce, args=(process_group,))
+            t.daemon = True
             t.start()
-            t.join(int(get_timeout(self.id()) / 2))
+            t.join(int(get_timeout(self.id()) / 5))
             self.assertTrue(t.is_alive())
 
     def _test_nccl_errors_blocking(self, func):
@@ -2985,6 +3003,11 @@ class CommTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    def test_nccl_errors_blocking_nonzero_exit(self):
+        self._test_nccl_errors_blocking(lambda : sys.exit(1))
+
+    @requires_nccl()
+    @skip_if_not_multigpu
     def test_nccl_errors_blocking_abort(self):
         self._test_nccl_errors_blocking(lambda : os.abort())
 
@@ -2992,15 +3015,6 @@ class CommTest(MultiProcessTestCase):
     @skip_if_not_multigpu
     def test_nccl_errors_blocking_sigkill(self):
         self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGKILL))
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_blocking_sigstop(self):
-        self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGSTOP))
-        if self.rank == 0:
-            time.sleep(2 * self.op_timeout_sec)
-            for i in range(1, len(self.processes)):
-                os.kill(self.processes[i].pid, signal.SIGCONT)
 
     @requires_nccl()
     @skip_if_not_multigpu

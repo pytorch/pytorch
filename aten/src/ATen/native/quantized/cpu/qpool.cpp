@@ -144,8 +144,7 @@ Tensor q_maxpool_2d(
       oSizes,
       qx.options().dtype(toQIntType(qx.scalar_type())),
       qx.q_scale(),
-      qx.q_zero_point(),
-      qx.suggest_memory_format());
+      qx.q_zero_point());
   auto qx_contig = qx.contiguous();
   auto qxd = qx_contig.data_ptr<Q>();
   auto qyd = qy.data_ptr<Q>();
