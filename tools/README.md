@@ -16,10 +16,6 @@ Modern infrastructure:
     them to the PYTHONPATH first.
 
 Legacy infrastructure (we should kill this):
-
-* [nnwrap](nnwrap) - Generates the THNN/THCUNN wrappers which make
-  legacy functionality available.  (TODO: What exactly does this
-  implement?)
 * [cwrap](cwrap) - Implementation of legacy code generation for THNN/THCUNN.
   This is used by nnwrap.
 

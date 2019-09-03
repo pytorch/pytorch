@@ -339,7 +339,7 @@ Tensor _bincount_cuda(
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
       return _bincount_cuda_template<scalar_t, float>(self, weights, minlength);
     return _bincount_cuda_template<scalar_t, double>(
-        self, weights.toType(CUDA(kDouble)), minlength);
+        self, weights.to(kDouble), minlength);
   });
 }
 

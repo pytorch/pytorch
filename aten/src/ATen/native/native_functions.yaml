@@ -1573,7 +1573,7 @@
     CPU: batch_norm_backward_cpu
     CUDA: batch_norm_backward_cuda
 
-- func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
+- func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CUDA: batch_norm_backward_reduce_cuda
 
@@ -3847,6 +3847,8 @@
   dispatch:
     CPU: legacy::cpu::_th_index_select
     CUDA: legacy::cuda::_th_index_select
+    SparseCPU: index_select_sparse
+    SparseCUDA: index_select_sparse
 
 - func: masked_select.out(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -4057,13 +4059,13 @@
 
 - func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_multinomial_out
+    CPU: multinomial_out_cpu
     CUDA: legacy::cuda::_th_multinomial_out
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_multinomial
+    CPU: multinomial_cpu
     CUDA: legacy::cuda::_th_multinomial
 
 - func: _multinomial_alias_setup(Tensor probs) -> (Tensor, Tensor)
