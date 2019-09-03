@@ -94,6 +94,10 @@ UserRRef::~UserRRef() {
   }
 }
 
+const ForkId& UserRRef::forkId() const {
+  return forkId_;
+}
+
 bool UserRRef::isOwner() const {
   return false;
 }

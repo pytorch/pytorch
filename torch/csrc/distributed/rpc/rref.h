@@ -55,7 +55,6 @@ class RRef {
 
   worker_id_t owner() const;
   const RRefId& id() const;
-  const ForkId& forkId() const;
   IValue fork() const;
 
   virtual bool isOwner() const = 0;
@@ -72,6 +71,7 @@ class RRef {
 
 class UserRRef final: public RRef {
  public:
+  const ForkId& forkId() const;
   bool isOwner() const override;
   IValue getValue() const override;
   void setValue(IValue&& value) override;
