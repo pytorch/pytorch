@@ -2,6 +2,7 @@ from collections import defaultdict
 import numpy as np
 import torch
 
+import hypothesis
 from hypothesis import assume
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as stnp
