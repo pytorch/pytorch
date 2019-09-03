@@ -62,16 +62,24 @@ Message processRequestBlocking(Message&& request) {
     case MessageType::REMOTE_CALL: {
       ScriptRemoteCall src = ScriptRemoteCall::fromMessage(request);
 
+      auto rrefId = RRefId::fromIValue(src.retRRefId());
+      auto forkId = ForkId::fromIValue(src.retForkId());
+      auto& ctx = RRefContext::getInstance();
+
+      auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(std::move(rrefId));
+
+      if (forkId != rrefId) {
+        ctx->acceptUserRRef(rrefId, forkId, rrefId.createdOn_);
+      }
+
+      // make this asynchronous
       auto stack = src.stack();
       src.op()->getOperation()(stack);
       AT_ASSERT(stack.size() == 1, "Return value of a builtin operator or a "
           "TorchScript function should be a single IValue, got a vector of "
           "size ", stack.size());
 
-      RRefContext::getInstance()
-          ->getOrCreateRRef<IValue>(src.ret())
-          ->setValue(std::move(stack.front()));
-
+      ownerRRef->setValue(std::move(stack.front()));
       return Message();
     }
     case MessageType::RREF_FETCH: {
@@ -85,14 +93,24 @@ Message processRequestBlocking(Message&& request) {
       response.setId(request.id());
       return response;
     }
-    case MessageType::RREF_USER_CREATE: {
-      ScriptRRefCreate sra = ScriptRRefCreate::fromMessage(request);
-      RRefContext::getInstance()->addFork(sra.value());
+    case MessageType::RREF_USER_ACCEPT: {
+      ScriptUserAccept sua = ScriptUserAccept::fromMessage(request);
+      RRefContext::getInstance()->finishUserRRef(sua.value());
       return Message();
     }
     case MessageType::RREF_USER_DELETE: {
-      ScriptRRefDelete srd = ScriptRRefDelete::fromMessage(request);
-      RRefContext::getInstance()->delFork(srd.value());
+      ScriptUserDelete srd = ScriptUserDelete::fromMessage(request);
+      RRefContext::getInstance()->delForkOfOwner(srd.value());
+      return Message();
+    }
+    case MessageType::RREF_FORK_NOTIFY: {
+      ScriptForkNotify sfn = ScriptForkNotify::fromMessage(request);
+      RRefContext::getInstance()->acceptForkRequest(sfn.value(), sfn.forkDst());
+      return Message();
+    }
+    case MessageType::RREF_FORK_ACCEPT: {
+      ScriptForkAccept sfa = ScriptForkAccept::fromMessage(request);
+      RRefContext::getInstance()->finishForkRequest(sfa.value());
       return Message();
     }
     default: {

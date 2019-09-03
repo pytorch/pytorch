@@ -71,7 +71,7 @@ std::shared_ptr<FutureMessage> py_rpc_builtin(
   return agent.send(dst, ScriptCall(op, std::move(stack)).toMessage());
 }
 
-std::shared_ptr<RRef> py_remote_builtin(
+PyRRef py_remote_builtin(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& opName,
@@ -82,9 +82,22 @@ std::shared_ptr<RRef> py_remote_builtin(
   std::shared_ptr<RRef> ret =
       RRefContext::getInstance()->createRRef<at::IValue>(dst.id_);
 
-  agent.send(
-      dst, ScriptRemoteCall(op, std::move(stack), ret->fork()).toMessage());
-  return ret;
+  if (ret->isOwner()) {
+    AT_ERROR("Does not support remote call to self.");
+  } else {
+    auto userRRefRet = std::dynamic_pointer_cast<UserRRef>(ret);
+    agent.send(
+        dst,
+        ScriptRemoteCall(
+            op,
+            std::move(stack),
+            userRRefRet->id().toIValue(),
+            userRRefRet->forkId().toIValue()
+        ).toMessage()
+    );
+  }
+
+  return PyRRef(ret);
 }
 
 std::shared_ptr<FutureMessage> py_rpc_python_udf(

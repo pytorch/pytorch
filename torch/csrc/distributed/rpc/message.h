@@ -15,7 +15,6 @@ enum MessageType {
   REMOTE_CALL,      // A remote call
   RREF_FETCH,       // A UserRRef uses this message to fetch value from owner
   RREF_VALUE,       // An OwnerRRef uses this message to send value to user
-  RREF_USER_CREATE, // A creator UserRRef uses this message to notify owner
   RREF_USER_ACCEPT, // An OwnerRRef uses this message to accept any user
   RREF_USER_DELETE, // A UserRRef uses this message to deref on owner
   RREF_FORK_NOTIFY, // A UserRRef uses this message to notify owner on fork

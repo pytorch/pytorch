@@ -2,6 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
@@ -30,7 +31,7 @@ std::shared_ptr<FutureMessage> py_rpc_python_udf(
     const WorkerId& dst,
     const std::string& pickledPythonUDF);
 
-std::shared_ptr<RRef> py_remote_builtin(
+PyRRef py_remote_builtin(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& opName,

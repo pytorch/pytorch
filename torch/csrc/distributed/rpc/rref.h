@@ -55,8 +55,6 @@ class RRef {
 
   worker_id_t owner() const;
   const RRefId& id() const;
-  const ForkId& forkId() const;
-  IValue fork() const;
 
   virtual bool isOwner() const = 0;
   virtual void setValue(IValue&& value) = 0;
@@ -64,7 +62,11 @@ class RRef {
   virtual IValue toHere() = 0;
 
  protected:
+  friend class RRefContext;
+
   RRef(worker_id_t ownerId, const RRefId& rrefId);
+
+  RRefForkData fork() const;
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;
@@ -72,6 +74,7 @@ class RRef {
 
 class UserRRef final: public RRef {
  public:
+  const ForkId& forkId() const;
   bool isOwner() const override;
   IValue getValue() const override;
   void setValue(IValue&& value) override;

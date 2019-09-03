@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/rpc/functions.h>
 #include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
@@ -35,34 +36,20 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def_readonly("name", &WorkerId::name_)
       .def_readonly("id", &WorkerId::id_);
 
-  struct PyRRef {
-    PyRRef() : rref(nullptr) {}
-
-    std::shared_ptr<RRef> rref;
-  };
-
   auto pyRRef = shared_ptr_class_<PyRRef>(module, "RRef")
       .def("owner",
-           [&](PyRRef& pyRRef) {
-             return pyRRef.rref->owner();
-           },
+           &PyRRef::owner,
            py::call_guard<py::gil_scoped_release>())
       .def("to_here",
-           [&](PyRRef& pyRRef) {
-             return torch::jit::toPyObject(pyRRef.rref->toHere());
-           },
+           &PyRRef::toHere,
            py::call_guard<py::gil_scoped_release>())
-      .def("__getstate__",
-           [](const PyRRef& pyRRef) {
-             return py::make_tuple(torch::jit::toPyObject(pyRRef.rref->fork()));
+      .def(py::pickle(
+           [](const PyRRef &self) { // __getstate__
+             return self.pickle();
            },
-           py::call_guard<py::gil_scoped_release>())
-      .def("__setstate__",
-           [](PyRRef& pyRRef, py::tuple t) {
-             new (&pyRRef) PyRRef();
-             auto& ctx = RRefContext::getInstance();
-             pyRRef.rref = ctx->getOrCreateRRef<IValue>(t[0].cast<IValue>());
-           },
+           [](py::tuple t) { // __setstate__
+             return PyRRef::unpickle(std::move(t));
+           }),
            py::call_guard<py::gil_scoped_release>());
 
   auto rpcAgent = shared_ptr_class_<RpcAgent>(module, "RpcAgent")

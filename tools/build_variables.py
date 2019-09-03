@@ -240,6 +240,7 @@ def add_torch_libs():
         "torch/csrc/distributed/rpc/functions.cpp",
         "torch/csrc/distributed/rpc/init.cpp",
         "torch/csrc/distributed/rpc/process_group_agent.cpp",
+        "torch/csrc/distributed/rpc/py_rref.cpp",
         "torch/csrc/distributed/rpc/python_functions.cpp",
         "torch/csrc/distributed/rpc/python_rpc_handler.cpp",
         "torch/csrc/distributed/rpc/rpc_agent.cpp",
