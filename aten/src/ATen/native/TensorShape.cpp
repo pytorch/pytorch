@@ -50,8 +50,30 @@ static void check_cat_no_zero_dim(TensorList tensors) {
 Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat_out(result, tensors, dim);
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_cat_outnames(tensors);
+  {
+    NoNamesGuard guard;
+#endif
+    at::_cat_out(result, tensors, dim);
+#ifdef BUILD_NAMEDTENSOR
+  }
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
+
+#ifdef BUILD_NAMEDTENSOR
+Tensor& cat_out(Tensor& result, TensorList tensors, Dimname dim) {
+  TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
+  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
+}
+
+Tensor cat(TensorList tensors, Dimname dim) {
+  TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
+  return at::cat(tensors, dimname_to_position(tensors[0], dim));
+}
+#endif
 
 static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_except /* should already be wrapped */) {
   if (s1.size() != s2.size()) {
@@ -180,7 +202,20 @@ Tensor cat(TensorList tensors, int64_t dim) {
   }
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat(tensors, dim);
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_cat_outnames(tensors);
+#endif
+  Tensor result;
+  {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    result = at::_cat(tensors, dim);
+  }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {

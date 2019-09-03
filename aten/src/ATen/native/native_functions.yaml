@@ -445,8 +445,16 @@
   device_guard: False
 
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
+  named_guard: False
 
 - func: cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
+- func: cat.names(Tensor[] tensors, Dimname dim) -> Tensor
+  named_guard: False
+
+- func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: ceil(Tensor self) -> Tensor
   named_guard: False
