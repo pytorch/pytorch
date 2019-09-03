@@ -10,7 +10,7 @@ import torch
 import warnings
 import zipfile
 
-from urlparse import urlparse
+from urllib.parse import urlparse
 import requests
 
 try:
