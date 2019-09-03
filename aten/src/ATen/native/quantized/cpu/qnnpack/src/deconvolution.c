@@ -175,8 +175,10 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
         group_input_channels,
         nr,
         kr,
+#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
         input_zero_point,
         kernel_zero_point,
+#endif
         kernel +
             group * group_output_channels * kernel_size * group_input_channels,
         bias + group * group_output_channels,

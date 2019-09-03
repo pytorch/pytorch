@@ -9,6 +9,7 @@
 #include <arm_neon.h>
 
 #include <qnnpack/q8gemm.h>
+#include <requantization/runtime-neon.h>
 
 void q8gemm_ukernel_8x8__neon(
     size_t mr,
@@ -70,32 +71,42 @@ void q8gemm_ukernel_8x8__neon(
     a7 = a6;
   }
 
+  const uint8x8_t va_zero_point =
+      vld1_dup_u8((const uint8_t*)&quantization_params->neon.input_zero_point);
   const uint8x8_t vb_zero_point =
       vld1_dup_u8((const uint8_t*)&quantization_params->neon.kernel_zero_point);
   for (; k >= 8; k -= 8) {
     const uint8x8_t va0 = vld1_u8(a0);
-    const int16x8_t vxa0 = vreinterpretq_s16_u16(vmovl_u8(va0));
+    const int16x8_t vxa0 =
+        vreinterpretq_s16_u16(sub_zero_point(va0, va_zero_point));
     a0 += 8;
     const uint8x8_t va1 = vld1_u8(a1);
-    const int16x8_t vxa1 = vreinterpretq_s16_u16(vmovl_u8(va1));
+    const int16x8_t vxa1 =
+        vreinterpretq_s16_u16(sub_zero_point(va1, va_zero_point));
     a1 += 8;
     const uint8x8_t va2 = vld1_u8(a2);
-    const int16x8_t vxa2 = vreinterpretq_s16_u16(vmovl_u8(va2));
+    const int16x8_t vxa2 =
+        vreinterpretq_s16_u16(sub_zero_point(va2, va_zero_point));
     a2 += 8;
     const uint8x8_t va3 = vld1_u8(a3);
-    const int16x8_t vxa3 = vreinterpretq_s16_u16(vmovl_u8(va3));
+    const int16x8_t vxa3 =
+        vreinterpretq_s16_u16(sub_zero_point(va3, va_zero_point));
     a3 += 8;
     const uint8x8_t va4 = vld1_u8(a4);
-    const int16x8_t vxa4 = vreinterpretq_s16_u16(vmovl_u8(va4));
+    const int16x8_t vxa4 =
+        vreinterpretq_s16_u16(sub_zero_point(va4, va_zero_point));
     a4 += 8;
     const uint8x8_t va5 = vld1_u8(a5);
-    const int16x8_t vxa5 = vreinterpretq_s16_u16(vmovl_u8(va5));
+    const int16x8_t vxa5 =
+        vreinterpretq_s16_u16(sub_zero_point(va5, va_zero_point));
     a5 += 8;
     const uint8x8_t va6 = vld1_u8(a6);
-    const int16x8_t vxa6 = vreinterpretq_s16_u16(vmovl_u8(va6));
+    const int16x8_t vxa6 =
+        vreinterpretq_s16_u16(sub_zero_point(va6, va_zero_point));
     a6 += 8;
     const uint8x8_t va7 = vld1_u8(a7);
-    const int16x8_t vxa7 = vreinterpretq_s16_u16(vmovl_u8(va7));
+    const int16x8_t vxa7 =
+        vreinterpretq_s16_u16(sub_zero_point(va7, va_zero_point));
     a7 += 8;
 
     const uint8x8_t vb01234567c0 = vld1_u8(w);
@@ -407,28 +418,36 @@ void q8gemm_ukernel_8x8__neon(
     const int64x1_t va_shift = vmov_n_s64(-8 * a_predecrement);
     const uint8x8_t va0 = vreinterpret_u8_u64(
         vshl_u64(vreinterpret_u64_u8(vld1_u8(a0 - a_predecrement)), va_shift));
-    const int16x8_t vxa0 = vreinterpretq_s16_u16(vmovl_u8(va0));
+    const int16x8_t vxa0 =
+        vreinterpretq_s16_u16(sub_zero_point(va0, va_zero_point));
     const uint8x8_t va1 = vreinterpret_u8_u64(
         vshl_u64(vreinterpret_u64_u8(vld1_u8(a1 - a_predecrement)), va_shift));
-    const int16x8_t vxa1 = vreinterpretq_s16_u16(vmovl_u8(va1));
+    const int16x8_t vxa1 =
+        vreinterpretq_s16_u16(sub_zero_point(va1, va_zero_point));
     const uint8x8_t va2 = vreinterpret_u8_u64(
         vshl_u64(vreinterpret_u64_u8(vld1_u8(a2 - a_predecrement)), va_shift));
-    const int16x8_t vxa2 = vreinterpretq_s16_u16(vmovl_u8(va2));
+    const int16x8_t vxa2 =
+        vreinterpretq_s16_u16(sub_zero_point(va2, va_zero_point));
     const uint8x8_t va3 = vreinterpret_u8_u64(
         vshl_u64(vreinterpret_u64_u8(vld1_u8(a3 - a_predecrement)), va_shift));
-    const int16x8_t vxa3 = vreinterpretq_s16_u16(vmovl_u8(va3));
+    const int16x8_t vxa3 =
+        vreinterpretq_s16_u16(sub_zero_point(va3, va_zero_point));
     const uint8x8_t va4 = vreinterpret_u8_u64(
         vshl_u64(vreinterpret_u64_u8(vld1_u8(a4 - a_predecrement)), va_shift));
-    const int16x8_t vxa4 = vreinterpretq_s16_u16(vmovl_u8(va4));
+    const int16x8_t vxa4 =
+        vreinterpretq_s16_u16(sub_zero_point(va4, va_zero_point));
     const uint8x8_t va5 = vreinterpret_u8_u64(
         vshl_u64(vreinterpret_u64_u8(vld1_u8(a5 - a_predecrement)), va_shift));
-    const int16x8_t vxa5 = vreinterpretq_s16_u16(vmovl_u8(va5));
+    const int16x8_t vxa5 =
+        vreinterpretq_s16_u16(sub_zero_point(va5, va_zero_point));
     const uint8x8_t va6 = vreinterpret_u8_u64(
         vshl_u64(vreinterpret_u64_u8(vld1_u8(a6 - a_predecrement)), va_shift));
-    const int16x8_t vxa6 = vreinterpretq_s16_u16(vmovl_u8(va6));
+    const int16x8_t vxa6 =
+        vreinterpretq_s16_u16(sub_zero_point(va6, va_zero_point));
     const uint8x8_t va7 = vreinterpret_u8_u64(
         vshl_u64(vreinterpret_u64_u8(vld1_u8(a7 - a_predecrement)), va_shift));
-    const int16x8_t vxa7 = vreinterpretq_s16_u16(vmovl_u8(va7));
+    const int16x8_t vxa7 =
+        vreinterpretq_s16_u16(sub_zero_point(va7, va_zero_point));
 
     const uint8x8_t vb01234567c0 = vld1_u8(w);
     w = (const void*)((uintptr_t)w + 8);

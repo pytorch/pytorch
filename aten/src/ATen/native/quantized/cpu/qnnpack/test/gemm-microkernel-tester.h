@@ -202,14 +202,17 @@ class GemmMicrokernelTester {
       std::fill(c.begin(), c.end(), 0xA5);
 
       std::fill(packedW.begin(), packedW.end(), bZeroPoint());
+
       pack_q8gemm_w(
           n(),
           k(),
           nr(),
           np(),
           kr(),
+#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
           aZeroPoint(),
           bZeroPoint(),
+#endif
           b.data(),
           bias.data(),
           packedW.data());
@@ -338,14 +341,17 @@ class GemmMicrokernelTester {
       std::fill(c.begin(), c.end(), 0xA5);
 
       std::fill(packedW.begin(), packedW.end(), bZeroPoint());
+
       pack_q8conv_w(
           n(),
           ks(),
           k(),
           np(),
           kr(),
+#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
           aZeroPoint(),
           bZeroPoint(),
+#endif
           b.data(),
           bias.data(),
           packedW.data());
@@ -522,8 +528,10 @@ class GemmMicrokernelTester {
           np(),
           kr(),
           8,
+#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
           aZeroPoint(),
           bZeroPoint(),
+#endif
           b.data(),
           bias.data(),
           packedW.data());

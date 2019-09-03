@@ -33,6 +33,7 @@
 #include <qnnpack/x8lut.h>
 #include <qnnpack/x8zip.h>
 
+
 #ifdef _MSC_VER
 static INIT_ONCE init_guard;
 BOOL CALLBACK init_win(PINIT_ONCE InitOnce, PVOID Parameter, PVOID* lpContex);
@@ -56,6 +57,7 @@ static void init(void) {
       .nr = 8,
       .kr = 1,
   };
+#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
   pytorch_qnnp_params.q8conv_xzp = (struct q8conv_xzp_parameters){
       .gemm = q8gemm_xzp_ukernel_4x8c2__aarch32_neon,
       .mr = 4,
@@ -81,6 +83,11 @@ static void init(void) {
     default:
       break;
   }
+#else
+  pytorch_qnnp_params.q8conv_xzp = (struct q8conv_xzp_parameters){
+      .kthreshold = SIZE_MAX,
+  };
+#endif
   pytorch_qnnp_params.q8dw9 = (struct q8dwconv_up_parameters){
       .updw = q8dwconv_ukernel_up8x9__aarch32_neon,
       .cr = 8,

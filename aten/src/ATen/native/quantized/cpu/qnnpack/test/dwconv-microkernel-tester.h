@@ -210,11 +210,14 @@ class DWConvMicrokernelTester {
           kernelWidth(),
           channels(),
           cr(),
+#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
           inputZeroPoint(),
           kernelZeroPoint(),
+#endif
           kernel.data(),
           bias.data(),
           packedWeights.data());
+
       for (size_t i = 0;
            i < kernelSize() + (width() * subsampling() - 1) * kernelHeight();
            i++) {

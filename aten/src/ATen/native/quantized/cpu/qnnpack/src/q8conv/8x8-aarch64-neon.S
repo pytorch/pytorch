@@ -7,6 +7,8 @@
  */
 
 #include <qnnpack/assembly.h>
+#include <requantization/runtime-assembly.h>
+
 
 # void q8conv_ukernel_8x8__aarch64_neon(
 #    size_t mr,
@@ -29,7 +31,7 @@ BEGIN_FUNCTION q8conv_ukernel_8x8__aarch64_neon
 
     # Load bias0123, bias4567
     LD1 {v8.4s, v9.4s}, [x5], 32
-    MOV x9, 4
+    MOV x9, 2
 
     # v10 := vacc1x0123
     MOV v10.16b, v8.16b
@@ -38,6 +40,8 @@ BEGIN_FUNCTION q8conv_ukernel_8x8__aarch64_neon
     MOV v11.16b, v9.16b
     # Load b_zero_point
     LD1R {v25.8b}, [x8], x9
+    # Load a_zero_point
+    LD1R {v24.8b}, [x8], x9
 
     # v12 := vacc2x0123
     MOV v12.16b, v8.16b
@@ -101,21 +105,21 @@ BEGIN_FUNCTION q8conv_ukernel_8x8__aarch64_neon
 
     # va0 - va7 := va - va_offset
     LD1 {v0.8b}, [x16], 8
-    UXTL v0.8h, v0.8b
+    SUB_ZERO_POINT v0.8h, v0.8b, v24.8b
     LD1 {v1.8b}, [x9], 8
-    UXTL v1.8h, v1.8b
+    SUB_ZERO_POINT v1.8h, v1.8b, v24.8b
     LD1 {v2.8b}, [x10], 8
-    UXTL v2.8h, v2.8b
+    SUB_ZERO_POINT v2.8h, v2.8b, v24.8b
     LD1 {v3.8b}, [x11], 8
-    UXTL v3.8h, v3.8b
+    SUB_ZERO_POINT v3.8h, v3.8b, v24.8b
     LD1 {v4.8b}, [x12], 8
-    UXTL v4.8h, v4.8b
+    SUB_ZERO_POINT v4.8h, v4.8b, v24.8b
     LD1 {v5.8b}, [x13], 8
-    UXTL v5.8h, v5.8b
+    SUB_ZERO_POINT v5.8h, v5.8b, v24.8b
     LD1 {v6.8b}, [x14], 8
-    UXTL v6.8h, v6.8b
+    SUB_ZERO_POINT v6.8h, v6.8b, v24.8b
     LD1 {v7.8b}, [x15], 8
-    UXTL v7.8h, v7.8b
+    SUB_ZERO_POINT v7.8h, v7.8b, v24.8b
 
     // b0-7 (channel 1)
     LD1 {v28.8b}, [x5], 8
@@ -307,35 +311,35 @@ BEGIN_FUNCTION q8conv_ukernel_8x8__aarch64_neon
     // Load x0-a7
     LD1 {v0.8b}, [x16], 8
     USHL d0, d0, d29
-    UXTL v0.8h, v0.8b
+    SUB_ZERO_POINT v0.8h, v0.8b, v24.8b
 
     LD1 {v1.8b}, [x9], 8
     USHL d1, d1, d29
-    UXTL v1.8h, v1.8b
+    SUB_ZERO_POINT v1.8h, v1.8b, v24.8b
 
     LD1 {v2.8b}, [x10], 8
     USHL d2, d2, d29
-    UXTL v2.8h, v2.8b
+    SUB_ZERO_POINT v2.8h, v2.8b, v24.8b
 
     LD1 {v3.8b}, [x11], 8
     USHL d3, d3, d29
-    UXTL v3.8h, v3.8b
+    SUB_ZERO_POINT v3.8h, v3.8b, v24.8b
 
     LD1 {v4.8b}, [x12], 8
     USHL d4, d4, d29
-    UXTL v4.8h, v4.8b
+    SUB_ZERO_POINT v4.8h, v4.8b, v24.8b
 
     LD1 {v5.8b}, [x13], 8
     USHL d5, d5, d29
-    UXTL v5.8h, v5.8b
+    SUB_ZERO_POINT v5.8h, v5.8b, v24.8b
 
     LD1 {v6.8b}, [x14], 8
     USHL d6, d6, d29
-    UXTL v6.8h, v6.8b
+    SUB_ZERO_POINT v6.8h, v6.8b, v24.8b
 
     LD1 {v7.8b}, [x15], 8
     USHL d7, d7, d29
-    UXTL v7.8h, v7.8b
+    SUB_ZERO_POINT v7.8h, v7.8b, v24.8b
 
     // Channel 0
     LD1 {v27.8b}, [x5], 8

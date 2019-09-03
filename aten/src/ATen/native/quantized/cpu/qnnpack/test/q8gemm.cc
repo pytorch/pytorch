@@ -2058,6 +2058,301 @@ TEST(Q8GEMM_2x4c8__SSE2, k_div_8_subtile) {
   }
 }
 
+// Following tests fail both on original QNNPack and the version
+// with runtime requantization.
+
+#if 0
+  TEST(Q8GEMM_4x4c2__SSE2, k_eq_1) {
+    TEST_REQUIRES_X86_SSE2;
+    GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(1)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+  }
+
+  TEST(Q8GEMM_4x4c2__SSE2, k_eq_1_strided_a) {
+    TEST_REQUIRES_X86_SSE2;
+    GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(1)
+      .aStride(37)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+  }
+
+  TEST(Q8GEMM_4x4c2__SSE2, k_eq_1_strided_c) {
+    TEST_REQUIRES_X86_SSE2;
+    GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(1)
+      .cStride(17)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+  }
+
+  TEST(Q8GEMM_4x4c2__SSE2, k_eq_1_qmin128) {
+    TEST_REQUIRES_X86_SSE2;
+    GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(1)
+      .qmin(128)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+  }
+
+  TEST(Q8GEMM_4x4c2__SSE2, k_eq_1_qmax128) {
+    TEST_REQUIRES_X86_SSE2;
+    GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(1)
+      .qmax(128)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+  }
+
+  TEST(Q8GEMM_4x4c2__SSE2, k_eq_1_azp0) {
+    TEST_REQUIRES_X86_SSE2;
+    GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(1)
+      .aZeroPoint(0)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+  }
+
+  TEST(Q8GEMM_4x4c2__SSE2, k_eq_1_bzp0) {
+    TEST_REQUIRES_X86_SSE2;
+    GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(1)
+      .bZeroPoint(0)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+  }
+
+  TEST(Q8GEMM_4x4c2__SSE2, k_eq_1_nozp) {
+    TEST_REQUIRES_X86_SSE2;
+    GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(1)
+      .aZeroPoint(0)
+      .bZeroPoint(0)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+  }
+#endif
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_4) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester().mr(4).nr(4).np(4).kr(2).m(4).n(4).k(3).test(
+      q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_4_strided_a) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(3)
+      .aStride(37)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_4_strided_c) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(3)
+      .cStride(17)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_4_qmin128) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester().mr(4).nr(4).np(4).kr(2).m(4).n(4).k(3).qmin(128).test(
+      q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_4_qmax128) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester().mr(4).nr(4).np(4).kr(2).m(4).n(4).k(3).qmax(128).test(
+      q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_4_azp0) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(3)
+      .aZeroPoint(0)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_4_bzp0) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(3)
+      .bZeroPoint(0)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_4_nozp) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(3)
+      .aZeroPoint(0)
+      .bZeroPoint(0)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_8) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester().mr(4).nr(4).np(4).kr(2).m(4).n(4).k(5).test(
+      q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_8_strided_a) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(5)
+      .aStride(37)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_8_strided_c) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(5)
+      .cStride(17)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_8_qmin128) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester().mr(4).nr(4).np(4).kr(2).m(4).n(4).k(5).qmin(128).test(
+      q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_8_qmax128) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester().mr(4).nr(4).np(4).kr(2).m(4).n(4).k(5).qmax(128).test(
+      q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_8_azp0) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(5)
+      .aZeroPoint(0)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_8_bzp0) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(5)
+      .bZeroPoint(0)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+}
+
+TEST(Q8GEMM_4x4c2__SSE2, k_lt_8_nozp) {
+  TEST_REQUIRES_X86_SSE2;
+  GemmMicrokernelTester()
+      .mr(4)
+      .nr(4)
+      .np(4)
+      .kr(2)
+      .m(4)
+      .n(4)
+      .k(5)
+      .aZeroPoint(0)
+      .bZeroPoint(0)
+      .test(q8gemm_ukernel_4x4c2__sse2);
+}
+
 TEST(Q8GEMM_4x4c2__SSE2, k_eq_8) {
   TEST_REQUIRES_X86_SSE2;
   GemmMicrokernelTester().mr(4).nr(4).np(4).kr(2).m(4).n(4).k(8).test(

@@ -117,8 +117,10 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_nc_q8(
       nr,
       nr,
       kr,
+#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
       input_zero_point,
       kernel_zero_point,
+#endif
       kernel,
       bias,
       fully_connected->packed_weights);

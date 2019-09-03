@@ -58,54 +58,51 @@ class QNNPACKLinear final : public torch::OperatorKernel {
     Tensor output = at::_empty_affine_quantized(
         {rows_x, rows_y}, input.options(), output_scale, output_zero_point);
 
-    pytorch_qnnp_operator_t qnnpack_operator{nullptr};
+    qnnp_operator_t qnnpack_operator{nullptr};
 
     // QNNPACK expects both weights and inputs to be uint8
-    const pytorch_qnnp_status createStatus =
-        pytorch_qnnp_create_fully_connected_nc_q8(
-            cols_x /* input channels */,
-            rows_y /* output channels */,
-            input_contig.q_zero_point() /* input zero_point */,
-            input_contig.q_scale() /* input scale */,
-            weight.q_zero_point() /* kernel zero_point */,
-            weight.q_scale() /* kernel scale */,
-            (uint8_t*)weight.data_ptr<c10::quint8>() /* kernel data */,
-            (int32_t*)bias.data_ptr<c10::qint32>() /* bias data */,
-            output.q_zero_point() /* output zero_point */,
-            output.q_scale() /* output scale */,
-            std::numeric_limits<uint8_t>::min() /* output_min */,
-            std::numeric_limits<uint8_t>::max() /* output_max */,
-            0 /* flags */,
-            &qnnpack_operator);
+    const qnnp_status createStatus = qnnp_create_fully_connected_nc_q8(
+        cols_x /* input channels */,
+        rows_y /* output channels */,
+        input_contig.q_zero_point() /* input zero_point */,
+        input_contig.q_scale() /* input scale */,
+        weight.q_zero_point() /* kernel zero_point */,
+        weight.q_scale() /* kernel scale */,
+        (uint8_t*)weight.data_ptr<c10::quint8>() /* kernel data */,
+        (int32_t*)bias.data_ptr<c10::qint32>() /* bias data */,
+        output.q_zero_point() /* output zero_point */,
+        output.q_scale() /* output scale */,
+        std::numeric_limits<uint8_t>::min() /* output_min */,
+        std::numeric_limits<uint8_t>::max() /* output_max */,
+        0 /* flags */,
+        &qnnpack_operator);
 
-    std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
-        qnnpack_uniq_ptr(qnnpack_operator);
+    std::unique_ptr<qnnp_operator, QnnpackOperatorDeleter> qnnpack_uniq_ptr(
+        qnnpack_operator);
 
     TORCH_INTERNAL_ASSERT(
-        createStatus == pytorch_qnnp_status_success,
+        createStatus == qnnp_status_success,
         "failed to create QNNPACK Linear operator");
     TORCH_INTERNAL_ASSERT(qnnpack_operator != nullptr);
 
-    const pytorch_qnnp_status setupStatus =
-        pytorch_qnnp_setup_fully_connected_nc_q8(
-            qnnpack_operator /* fully_connected */,
-            rows_x /* batch_size */,
-            (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input */,
-            cols_x /* input stride */,
-            (uint8_t*)output.data_ptr<c10::quint8>() /* output */,
-            rows_y /* output stride */);
+    const qnnp_status setupStatus = qnnp_setup_fully_connected_nc_q8(
+        qnnpack_operator /* fully_connected */,
+        rows_x /* batch_size */,
+        (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input */,
+        cols_x /* input stride */,
+        (uint8_t*)output.data_ptr<c10::quint8>() /* output */,
+        rows_y /* output stride */);
 
     TORCH_INTERNAL_ASSERT(
-        setupStatus == pytorch_qnnp_status_success,
+        setupStatus == qnnp_status_success,
         "failed to setup QNNPACK Linear operator");
     pthreadpool_t threadpool = caffe2::mobile_threadpool();
 
-    const pytorch_qnnp_status runStatus =
-        pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
+    const qnnp_status runStatus =
+        qnnp_run_operator(qnnpack_operator, threadpool);
 
     TORCH_INTERNAL_ASSERT(
-        runStatus == pytorch_qnnp_status_success,
-        "failed to run QNNPACK operator");
+        runStatus == qnnp_status_success, "failed to run QNNPACK operator");
 
     return output;
   }

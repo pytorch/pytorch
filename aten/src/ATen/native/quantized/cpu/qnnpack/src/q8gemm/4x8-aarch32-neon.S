@@ -7,6 +7,7 @@
  */
 
 #include <qnnpack/assembly.h>
+#include <requantization/runtime-assembly.h>
 
 .syntax unified
 
@@ -49,9 +50,15 @@ BEGIN_FUNCTION q8gemm_ukernel_4x8__aarch32_neon
     # Load b_zero_point:
     # - d15 = b_zero_point
     VLD1.8 {d15[]}, [r7]
+    ADD r7, r7, 2
+
+    # Load a_zero_point:
+    # - d14 = a_zero_point
+    VLD1.8 {d14[]}, [r7]
+
     MOVLO r4, r3
 
-    ADD r7, r7, 4
+    ADD r7, r7, 2
     ADD r5, r4, r6
 
     # q10 := vacc1x0123
@@ -95,14 +102,14 @@ BEGIN_FUNCTION q8gemm_ukernel_4x8__aarch32_neon
     VLD1.8 {d5}, [r5]!
 
     # q0 = va0 = a0
-    VMOVL.U8 q0, d1
+    SUB_ZERO_POINT q0, d1, d14
 
     # Load a3
     # - d7 = a3
     VLD1.8 {d7}, [r6]!
 
     # q1 = va1 = a1
-    VMOVL.U8 q1, d3
+    SUB_ZERO_POINT q1, d3, d14
 
     # q4 = b0:7 - b_zero_point
     # - d8 = vb0123 (channel 0)
@@ -110,9 +117,9 @@ BEGIN_FUNCTION q8gemm_ukernel_4x8__aarch32_neon
     VSUBL.U8 q4, d9, d15
 
     # q2 = va2 = a2
-    VMOVL.U8 q2, d5
+    SUB_ZERO_POINT q2, d5, d14
     # q3 = va3 = a3
-    VMOVL.U8 q3, d7
+    SUB_ZERO_POINT q3, d7, d14
 
     ### Channel 0 ###
 
@@ -389,7 +396,7 @@ BEGIN_FUNCTION q8gemm_ukernel_4x8__aarch32_neon
 
     # q0 = va0 = a0
     VSHL.U64 d1, d1, d13
-    VMOVL.U8 q0, d1
+    SUB_ZERO_POINT q0, d1, d14
 
     # Load a3
     # - d7 = a3
@@ -397,7 +404,7 @@ BEGIN_FUNCTION q8gemm_ukernel_4x8__aarch32_neon
 
     # q1 = va1 = a1
     VSHL.U64 d3, d3, d13
-    VMOVL.U8 q1, d3
+    SUB_ZERO_POINT q1, d3, d14
 
     # q4 = b0:7 - b_zero_point
     # - d8 = vb0123 (channel 0)
@@ -406,10 +413,10 @@ BEGIN_FUNCTION q8gemm_ukernel_4x8__aarch32_neon
 
     # q2 = va2 = a2
     VSHL.U64 d5, d5, d13
-    VMOVL.U8 q2, d5
+    SUB_ZERO_POINT q2, d5, d14
     # q3 = va3 = a3
     VSHL.U64 d7, d7, d13
-    VMOVL.U8 q3, d7
+    SUB_ZERO_POINT q3, d7, d14
 
     ### Channel 0 ###
 

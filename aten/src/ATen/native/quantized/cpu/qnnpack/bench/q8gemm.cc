@@ -92,13 +92,25 @@ class Q8GEMM : public benchmark::Fixture {
     std::generate(a_.begin(), a_.end(), std::ref(u8rng));
     k_.resize(nc() * kc());
     std::generate(k_.begin(), k_.end(), std::ref(u8rng));
-    b_.resize(mc());
+    b_.resize(nc());
     std::generate(b_.begin(), b_.end(), std::ref(s32rng));
     w_.resize(
         kcStride() * ncStride() +
         ncStride() * sizeof(int32_t) / sizeof(uint8_t));
     std::fill(w_.begin(), w_.end(), 127);
-    pack_q8gemm_w(nc(), kc(), nr(), np(), kr(), 127, 127, k(), b(), w());
+    pack_q8gemm_w(
+        nc(),
+        kc(),
+        nr(),
+        np(),
+        kr(),
+#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
+        127,
+        127,
+#endif
+        k(),
+        b(),
+        w());
     c_.resize(mc() * nc());
     std::fill(c_.begin(), c_.end(), 0xA5);
 
@@ -247,7 +259,19 @@ class Q8GEMM_XZP : public Q8GEMM {
     std::generate(b_.begin(), b_.end(), std::ref(s32rng));
     w_.resize(ncStride() * (kcStride() + sizeof(int32_t) / sizeof(uint8_t)));
     std::fill(w_.begin(), w_.end(), 127);
-    pack_swizzle_q8gemm_b(nc(), kc(), np(), kr(), 8, 127, 127, k(), b(), w());
+    pack_swizzle_q8gemm_b(
+        nc(),
+        kc(),
+        np(),
+        kr(),
+        8,
+#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
+        127,
+        127,
+#endif
+        k(),
+        b(),
+        w());
     c_.resize(mc() * nc());
     std::fill(c_.begin(), c_.end(), 0xA5);
     aRowSums_.resize(roundUp(mc(), mr()));

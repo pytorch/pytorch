@@ -9,7 +9,11 @@
 #pragma once
 #include <qnnpack/math.h>
 
-static inline void pack_q8gemm_w(
+// Legend:
+//  dq: Design-time Quantization
+//  rq: Run-time Quantization
+
+static inline void pack_q8gemm_wdq(
     size_t nc,
     size_t kc,
     uint32_t nr,
@@ -55,7 +59,47 @@ static inline void pack_q8gemm_w(
   }
 }
 
-static inline void pack_q8conv_w(
+static inline void pack_q8gemm_wrq(
+    const size_t nc,
+    const size_t kc,
+    const uint32_t nr,
+    const uint32_t np,
+    const uint32_t kr,
+    const uint8_t* const k,
+    const int32_t* const b,
+    void* const packed_w) {
+  union {
+    void* const as_void_ptr;
+    uint8_t* as_uint8_ptr;
+    int32_t* as_int32_ptr;
+  } packed = {packed_w};
+
+  for (size_t nr_block_start = 0; nr_block_start < nc; nr_block_start += nr) {
+    const size_t nr_block_size = min(nc - nr_block_start, nr);
+    for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
+         nr_block_offset++) {
+      *(packed.as_int32_ptr++) = b[nr_block_start + nr_block_offset];
+    }
+    packed.as_int32_ptr += (nr - nr_block_size);
+    for (size_t kr_block_start = 0; kr_block_start < kc; kr_block_start += kr) {
+      const size_t kr_block_size = min(kc - kr_block_start, kr);
+      for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
+           nr_block_offset++) {
+        for (size_t kr_block_offset = 0; kr_block_offset < kr_block_size;
+             kr_block_offset++) {
+          const uint8_t kv =
+              k[(nr_block_start + nr_block_offset) * kc +
+                (kr_block_start + kr_block_offset)];
+          *(packed.as_uint8_ptr++) = kv;
+        }
+        packed.as_uint8_ptr += (kr - kr_block_size);
+      }
+      packed.as_uint8_ptr += ((nr - nr_block_size) & (np - 1)) * kr;
+    }
+  }
+}
+
+static inline void pack_q8conv_wdq(
     size_t n,
     size_t ks,
     size_t kc,
@@ -104,7 +148,50 @@ static inline void pack_q8conv_w(
   }
 }
 
-static inline void pack_q8deconv_w(
+static inline void pack_q8conv_wrq(
+    const size_t n,
+    const size_t ks,
+    const size_t kc,
+    const uint32_t nr,
+    const uint32_t kr,
+    const uint8_t* const k,
+    const int32_t* const b,
+    void* const packed_w) {
+  union {
+    void* const as_void_ptr;
+    uint8_t* as_uint8_ptr;
+    int32_t* as_int32_ptr;
+  } packed = {packed_w};
+
+  for (size_t nr_block_start = 0; nr_block_start < n; nr_block_start += nr) {
+    const size_t nr_block_size = min(n - nr_block_start, nr);
+    for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
+         nr_block_offset++) {
+      *(packed.as_int32_ptr++) = b[nr_block_start + nr_block_offset];
+    }
+    packed.as_int32_ptr += (nr - nr_block_size);
+    for (size_t ki = 0; ki < ks; ki++) {
+      for (size_t kr_block_start = 0; kr_block_start < kc;
+           kr_block_start += kr) {
+        const size_t kr_block_size = min(kc - kr_block_start, kr);
+        for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
+             nr_block_offset++) {
+          for (size_t kr_block_offset = 0; kr_block_offset < kr_block_size;
+               kr_block_offset++) {
+            const uint8_t kv =
+                k[((nr_block_start + nr_block_offset) * ks + ki) * kc +
+                  (kr_block_start + kr_block_offset)];
+            *(packed.as_uint8_ptr++) = kv;
+          }
+          packed.as_uint8_ptr += (kr - kr_block_size);
+        }
+        packed.as_uint8_ptr += (nr - nr_block_size) * kr;
+      }
+    }
+  }
+}
+
+static inline void pack_q8deconv_wdq(
     size_t n,
     size_t ks,
     size_t kc,
@@ -153,7 +240,50 @@ static inline void pack_q8deconv_w(
   }
 }
 
-static inline void pack_q8dw_w(
+static inline void pack_q8deconv_wrq(
+    const size_t n,
+    const size_t ks,
+    const size_t kc,
+    const uint32_t nr,
+    const uint32_t kr,
+    const uint8_t* const k,
+    const int32_t* const b,
+    void* const packed_w) {
+  union {
+    void* const as_void_ptr;
+    uint8_t* as_uint8_ptr;
+    int32_t* as_int32_ptr;
+  } packed = {packed_w};
+
+  for (size_t nr_block_start = 0; nr_block_start < n; nr_block_start += nr) {
+    const size_t nr_block_size = min(n - nr_block_start, nr);
+    for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
+         nr_block_offset++) {
+      *(packed.as_int32_ptr++) = b[nr_block_start + nr_block_offset];
+    }
+    packed.as_int32_ptr += (nr - nr_block_size);
+    for (size_t ki = 0; ki < ks; ki++) {
+      for (size_t kr_block_start = 0; kr_block_start < kc;
+           kr_block_start += kr) {
+        const size_t kr_block_size = min(kc - kr_block_start, kr);
+        for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
+             nr_block_offset++) {
+          for (size_t kr_block_offset = 0; kr_block_offset < kr_block_size;
+               kr_block_offset++) {
+            const uint8_t kv =
+                k[((kr_block_start + kr_block_offset) * ks + ki) * n +
+                  (nr_block_start + nr_block_offset)];
+            *(packed.as_uint8_ptr++) = kv;
+          }
+          packed.as_uint8_ptr += (kr - kr_block_size);
+        }
+        packed.as_uint8_ptr += (nr - nr_block_size) * kr;
+      }
+    }
+  }
+}
+
+static inline void pack_q8dw_wdq(
     size_t h,
     size_t w,
     size_t c,
@@ -186,6 +316,41 @@ static inline void pack_q8dw_w(
         }
         packed_w =
             (void*)((uintptr_t)packed_w + (cr - cr_block_size) * sizeof(uint8_t));
+      }
+    }
+  }
+}
+
+static inline void pack_q8dw_wrq(
+    const size_t h,
+    const size_t w,
+    const size_t c,
+    const size_t cr,
+    const uint8_t* const k,
+    const int32_t* const b,
+    void* const packed_w) {
+  union {
+    void* const as_void_ptr;
+    uint8_t* as_uint8_ptr;
+    int32_t* as_int32_ptr;
+  } packed = {packed_w};
+
+  for (size_t cr_block_start = 0; cr_block_start < c; cr_block_start += cr) {
+    const size_t cr_block_size = min(c - cr_block_start, cr);
+    for (size_t cr_block_offset = 0; cr_block_offset < cr_block_size;
+         cr_block_offset++) {
+      *(packed.as_int32_ptr++) = b[cr_block_start + cr_block_offset];
+    }
+    packed.as_int32_ptr += (cr - cr_block_size);
+    for (size_t x = 0; x < w; x++) {
+      for (size_t y = 0; y < h; y++) {
+        for (size_t cr_block_offset = 0; cr_block_offset < cr_block_size;
+             cr_block_offset++) {
+          const uint8_t kv =
+              k[((cr_block_start + cr_block_offset) * h + y) * w + x];
+          *(packed.as_uint8_ptr++) = kv;
+        }
+        packed.as_uint8_ptr += (cr - cr_block_size);
       }
     }
   }
@@ -230,7 +395,7 @@ static inline void pack_q8dw_w_dilation(
   }
 }
 
-static inline void pack_swizzle_q8gemm_b(
+static inline void pack_swizzle_q8gemm_bdq(
     size_t n,
     size_t kc,
     uint32_t nr,
@@ -257,7 +422,6 @@ static inline void pack_swizzle_q8gemm_b(
          kr_block_start += kr) {
       for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
            nr_block_offset++) {
-        int32_t ksum = 0;
         for (size_t kr_block_offset = 0; kr_block_offset < kr;
              kr_block_offset++) {
           const uint8_t kv =
@@ -265,7 +429,6 @@ static inline void pack_swizzle_q8gemm_b(
                 (kr_block_start & -sr) +
                 ((kr_block_start + nr_block_offset * kr) & (sr - 1)) +
                 kr_block_offset];
-          ksum += (int32_t)kv;
           packed_b[nr_block_offset] -= (int32_t)kv * (int32_t)izp;
           *((uint8_t*)packed_w) = kv;
           packed_w = (void*)((uintptr_t)packed_w + sizeof(uint8_t));
@@ -280,13 +443,11 @@ static inline void pack_swizzle_q8gemm_b(
       const size_t kr_block_size = min(kc - kr_block_start, kr);
       for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
            nr_block_offset++) {
-        int32_t ksum = 0;
         for (size_t kr_block_offset = 0; kr_block_offset < kr_block_size;
              kr_block_offset++) {
           const uint8_t kv =
               k[(nr_block_start + nr_block_offset) * kc +
                 (kr_block_start + kr_block_offset)];
-          ksum += (int32_t)kv;
           packed_b[nr_block_offset] -= (int32_t)kv * (int32_t)izp;
           *((uint8_t*)packed_w) = kv;
           packed_w = (void*)((uintptr_t)packed_w + sizeof(uint8_t));
@@ -296,6 +457,66 @@ static inline void pack_swizzle_q8gemm_b(
       }
       packed_w =
           (void*)((uintptr_t)packed_w + (nr - nr_block_size) * kr * sizeof(uint8_t));
+    }
+  }
+}
+
+static inline void pack_swizzle_q8gemm_brq(
+    const size_t n,
+    const size_t kc,
+    const uint32_t nr,
+    const uint32_t kr,
+    const uint32_t sr,
+    const uint8_t* const k,
+    const int32_t* const b,
+    void* const packed_w) {
+  union {
+    void* const as_void_ptr;
+    uint8_t* as_uint8_ptr;
+    int32_t* as_int32_ptr;
+  } packed = {packed_w};
+
+  for (size_t nr_block_start = 0; nr_block_start < n; nr_block_start += nr) {
+    const size_t nr_block_size = min(n - nr_block_start, nr);
+    for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
+         nr_block_offset++) {
+      *(packed.as_int32_ptr++) = b[nr_block_start + nr_block_offset];
+    }
+
+    packed.as_int32_ptr += (nr - nr_block_size);
+
+    for (size_t kr_block_start = 0; kr_block_start < (kc & -sr);
+         kr_block_start += kr) {
+      for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
+           nr_block_offset++) {
+        for (size_t kr_block_offset = 0; kr_block_offset < kr;
+             kr_block_offset++) {
+          const uint8_t kv =
+              k[(nr_block_start + nr_block_offset) * kc +
+                (kr_block_start & -sr) +
+                ((kr_block_start + nr_block_offset * kr) & (sr - 1)) +
+                kr_block_offset];
+          *(packed.as_uint8_ptr++) = kv;
+        }
+      }
+      packed.as_uint8_ptr += (nr - nr_block_size) * kr;
+    }
+
+    for (size_t kr_block_start = (kc & -sr); kr_block_start < kc;
+         kr_block_start += kr) {
+      const size_t kr_block_size = min(kc - kr_block_start, kr);
+      for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
+           nr_block_offset++) {
+        for (size_t kr_block_offset = 0; kr_block_offset < kr_block_size;
+             kr_block_offset++) {
+          const uint8_t kv =
+              k[(nr_block_start + nr_block_offset) * kc +
+                (kr_block_start + kr_block_offset)];
+          *(packed.as_uint8_ptr++) = kv;
+        }
+        packed.as_uint8_ptr += (kr - kr_block_size);
+      }
+      packed.as_uint8_ptr += (nr - nr_block_size) * kr;
     }
   }
 }
@@ -399,3 +620,21 @@ static inline void pack_sconv_w(
     }
   }
 }
+
+#if PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
+
+#define pack_q8gemm_w pack_q8gemm_wrq
+#define pack_q8conv_w pack_q8conv_wrq
+#define pack_q8deconv_w pack_q8deconv_wrq
+#define pack_q8dw_w pack_q8dw_wrq
+#define pack_swizzle_q8gemm_b pack_swizzle_q8gemm_brq
+
+#else
+
+#define pack_q8gemm_w pack_q8gemm_wdq
+#define pack_q8conv_w pack_q8conv_wdq
+#define pack_q8deconv_w pack_q8deconv_wdq
+#define pack_q8dw_w pack_q8dw_wdq
+#define pack_swizzle_q8gemm_b pack_swizzle_q8gemm_bdq
+
+#endif

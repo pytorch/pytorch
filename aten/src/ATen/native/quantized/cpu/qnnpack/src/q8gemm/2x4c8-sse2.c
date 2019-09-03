@@ -9,6 +9,7 @@
 #include <immintrin.h>
 
 #include <qnnpack/q8gemm.h>
+#include <requantization/runtime-sse2.h>
 
 static inline __m128i sse_reduce4_i32(
     __m128i x,
@@ -79,15 +80,19 @@ void q8gemm_ukernel_2x4c8__sse2(
   }
   const size_t b_stride = nr * 8;
 
+  const __m128i va_zero_point = _mm_load_si128(
+      (const __m128i*)quantization_params->sse2.input_zero_point);
   const __m128i vb_zero_point = _mm_load_si128(
       (const __m128i*)quantization_params->sse2.kernel_zero_point);
   const __m128i vzero = _mm_setzero_si128();
   for (; k >= 8; k -= 8) {
     const __m128i va0 = _mm_loadl_epi64((const __m128i*)a0);
-    const __m128i vxa0 = _mm_unpacklo_epi8(va0, vzero);
+    const __m128i vxa0 =
+        sub_zero_point(_mm_unpacklo_epi8(va0, vzero), va_zero_point);
     a0 += 8;
     const __m128i va1 = _mm_loadl_epi64((const __m128i*)a1);
-    const __m128i vxa1 = _mm_unpacklo_epi8(va1, vzero);
+    const __m128i vxa1 =
+        sub_zero_point(_mm_unpacklo_epi8(va1, vzero), va_zero_point);
     a1 += 8;
 
     const __m128i vb0 = _mm_loadl_epi64((const __m128i*)b0);
@@ -120,12 +125,18 @@ void q8gemm_ukernel_2x4c8__sse2(
     const size_t a_predecrement = 8 - k;
     const __m128i va_shift = _mm_cvtsi32_si128(8 * a_predecrement);
 
+    const __m128i va_zero_point_partial = _mm_unpacklo_epi8(
+        _mm_srl_epi64(_mm_packus_epi16(va_zero_point, va_zero_point), va_shift),
+        vzero);
+
     const __m128i va0 = _mm_srl_epi64(
         _mm_loadl_epi64((const __m128i*)(a0 - a_predecrement)), va_shift);
-    const __m128i vxa0 = _mm_unpacklo_epi8(va0, vzero);
+    const __m128i vxa0 =
+        sub_zero_point(_mm_unpacklo_epi8(va0, vzero), va_zero_point_partial);
     const __m128i va1 = _mm_srl_epi64(
         _mm_loadl_epi64((const __m128i*)(a1 - a_predecrement)), va_shift);
-    const __m128i vxa1 = _mm_unpacklo_epi8(va1, vzero);
+    const __m128i vxa1 =
+        sub_zero_point(_mm_unpacklo_epi8(va1, vzero), va_zero_point_partial);
 
     const __m128i vb0 = _mm_loadl_epi64((const __m128i*)b0);
     const __m128i vxb0 =
