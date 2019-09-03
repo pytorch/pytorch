@@ -1,4 +1,5 @@
 from .. import Tensor
+from typing import overload
 import builtins
 
 class Parameter(Tensor):
