@@ -6,6 +6,7 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/Exception.h>
 #include <ATen/native/cpu/TensorCompareKernel.h>
+#include <ATen/native/cpu/Loops.h>
 
 namespace {
 template <typename scalar_t>
@@ -14,31 +15,27 @@ void where_cpu(
     const at::Tensor& condition,
     const at::Tensor& self,
     const at::Tensor& other) {
+  auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(ret);
+  iter.add_input(condition);
+  iter.add_input(self);
+  iter.add_input(other);
+  iter.dont_compute_common_dtype();
+  iter.build();
   if (condition.scalar_type() == at::ScalarType::Byte) {
-    at::CPU_tensor_apply4<scalar_t, uint8_t, scalar_t, scalar_t>(
-        ret,
-        condition,
-        self,
-        other,
-        [](scalar_t& ret_val,
-           const uint8_t& cond_val,
-           const scalar_t& self_val,
-           const scalar_t& other_val) {
-          ret_val = cond_val ? self_val : other_val;
-        });
-    } else {
-      at::CPU_tensor_apply4<scalar_t, bool, scalar_t, scalar_t>(
-          ret,
-          condition,
-          self,
-          other,
-          [](scalar_t& ret_val,
-             const bool& cond_val,
-             const scalar_t& self_val,
-             const scalar_t& other_val) {
-            ret_val = cond_val ? self_val : other_val;
-          });
-    }
+    at::native::cpu_kernel(
+      iter,
+      [=](uint8_t cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
+        return cond_val ? self_val : other_val;
+      });
+  } else {
+    at::native::cpu_kernel(
+      iter,
+      [=](bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
+        return cond_val ? self_val : other_val;
+      });
+  }
 }
 } // namespace
 

@@ -139,7 +139,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     int32_t act_zero_point = act.q_zero_point();
 
     std::vector<float> output_multiplier_float(1, 0.0);
-    auto qtype = kPerTensorAffine;
     TORCH_CHECK(
         pack_ptr.w_scale.size() == pack_ptr.w_zp.size(),
         "Weight scales and zero points vectors should have the same size.");
@@ -184,8 +183,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
           conv_p,
           act_ptr,
           *packB,
-          reinterpret_cast<uint8_t*>(output.data<c10::quint8>()),
-          buffer.data<int32_t>(),
+          reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+          buffer.data_ptr<int32_t>(),
           outputProcObj,
           0 /* thread_id*/,
           1 /* num_threads */);
