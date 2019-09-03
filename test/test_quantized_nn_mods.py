@@ -11,7 +11,6 @@ from common_quantization import QuantizationTestCase, no_deadline, prepare_dynam
 from common_quantized import _calculate_dynamic_qparams
 from hypothesis import given
 from hypothesis import strategies as st
-from hypothesis_utils import derandomize
 import unittest
 
 '''
@@ -33,7 +32,6 @@ class FunctionalAPITest(QuantizationTestCase):
         self.assertEqual(qY, qY_hat)
 
     @no_deadline
-    @derandomize
     @unittest.skipIf(
         not torch.fbgemm_is_cpu_supported(),
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"

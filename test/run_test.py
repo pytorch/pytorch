@@ -16,6 +16,7 @@ import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
+from hypothesis import settings
 PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
@@ -396,6 +397,8 @@ def get_selected_tests(options):
 
 def main():
     options = parse_args()
+    settings.register_profile('ci', derandomize=True)
+    settings.load_profile('ci')
     executable = get_executable_command(options)  # this is a list
     print_to_stderr('Test executor: {}'.format(executable))
     test_directory = os.path.dirname(os.path.abspath(__file__))
