@@ -250,3 +250,12 @@ def tensor_conv2d(draw,
     b = draw(tensor(shapes=(_out_channels,), elements=elements,
                     qparams=qparams[2]))
     return X, w, b, g
+
+
+# Disable deadline testing if this version of hypthesis supports it, otherwise
+# just return the original function
+def no_deadline(fn):
+    try:
+        return hypothesis.settings(deadline=None)(fn)
+    except hypothesis.errors.InvalidArgument:
+        return fn

@@ -18,15 +18,6 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, QConfig, default_observer, default_weight_observer, \
     default_qat_qconfig, propagate_qconfig, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
 
-
-# Disable deadline testing if this version of hypthesis supports it, otherwise
-# just return the original function
-def no_deadline(fn):
-    try:
-        return hypothesis.settings(deadline=None)(fn)
-    except hypothesis.errors.InvalidArgument:
-        return fn
-
 def test_only_eval_fn(model, calib_data):
     r"""
     Default evaluation function takes a torch.utils.data.Dataset or a list of
