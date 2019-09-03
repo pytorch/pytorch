@@ -112,16 +112,16 @@ TEST(TorchScriptTest, TestOptionalArgMatching) {
 
 }
 
-TEST(TorchScriptTest, TestPickle) {
-  torch::IValue float_value(2.3);
+// TEST(TorchScriptTest, TestPickle) {
+//   torch::IValue float_value(2.3);
 
-  // TODO: when tensors are stored in the pickle, delete this
-  std::vector<at::Tensor> tensor_table;
-  auto data = torch::jit::pickle(float_value, &tensor_table);
+//   // TODO: when tensors are stored in the pickle, delete this
+//   std::vector<at::Tensor> tensor_table;
+//   auto data = torch::jit::pickle(float_value, &tensor_table);
 
-  torch::IValue ivalue = torch::jit::unpickle(data.data(), data.size());
+//   torch::IValue ivalue = torch::jit::unpickle(data.data(), data.size());
 
-  double diff = ivalue.toDouble() - float_value.toDouble();
-  double eps = 0.0001;
-  ASSERT_TRUE(diff < eps && diff > -eps);
-}
+//   double diff = ivalue.toDouble() - float_value.toDouble();
+//   double eps = 0.0001;
+//   ASSERT_TRUE(diff < eps && diff > -eps);
+// }

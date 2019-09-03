@@ -645,7 +645,7 @@ class ScriptModuleSerializer2 {
     // TODO: use torch::save API
     std::vector<char> data;
     std::vector<at::Tensor> tensors;
-    LiteralPickler data_pickle(
+    Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
         },

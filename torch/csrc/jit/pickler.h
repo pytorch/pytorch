@@ -158,7 +158,7 @@ class Pickler {
   void pushInt(int64_t value);
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
-  virtual void pushTensor(const IValue& ivalue);
+  void pushTensor(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
   // unmemoized version
@@ -224,17 +224,6 @@ class Pickler {
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
-};
-
-class LiteralPickler : public Pickler {
- public:
-  LiteralPickler(
-      std::function<void(const char*, size_t)> writer,
-      std::vector<at::Tensor>* tensor_table)
-      : Pickler(writer, tensor_table) {}
-
- private:
-  void pushTensor(const IValue& ivalue) override;
 };
 
 // [unpickler refactor] there is some cruft around PickleOpCode::BUILD,
