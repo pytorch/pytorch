@@ -195,6 +195,10 @@ def _tensor_str(self, indent):
     if self.numel() == 0:
         return '[]'
 
+    if torch._C._BUILD_NAMEDTENSOR and self.has_names():
+        # Many fns involved in printing don't support names, so drop them first
+        self = self.view_names(None)
+
     summarize = self.numel() > PRINT_OPTS.threshold
     if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
         self = self.float()
