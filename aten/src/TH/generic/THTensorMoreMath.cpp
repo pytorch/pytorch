@@ -1053,7 +1053,7 @@ LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_
 
 LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
-void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
+void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, bool biased, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
       dimension);
@@ -1094,7 +1094,7 @@ void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
   }
 }
 
-void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
+void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, bool biased, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
       dimension);
@@ -1300,7 +1300,7 @@ accreal THTensor_(meanall)(THTensor *tensor)
   return THTensor_(sumall)(tensor)/THTensor_(nElement)(tensor);
 }
 
-accreal THTensor_(varall)(THTensor *tensor, int biased)
+accreal THTensor_(varall)(THTensor *tensor, bool biased)
 {
   accreal mean = THTensor_(meanall)(tensor);
   accreal sum = 0;
@@ -1309,7 +1309,7 @@ accreal THTensor_(varall)(THTensor *tensor, int biased)
   return sum;
 }
 
-accreal THTensor_(stdall)(THTensor *tensor, int biased)
+accreal THTensor_(stdall)(THTensor *tensor, bool biased)
 {
   return sqrt(THTensor_(varall)(tensor, biased));
 }

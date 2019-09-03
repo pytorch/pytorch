@@ -148,7 +148,7 @@ void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar
   THCTensor_(free)(state, data);
 }
 
-void THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, int biased, int keepdim)
+void THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, bool biased, int keepdim)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
@@ -167,7 +167,7 @@ void THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dime
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, int biased, int keepdim)
+void THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, bool biased, int keepdim)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
@@ -186,13 +186,13 @@ void THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dime
   THCudaCheck(cudaGetLastError());
 }
 
-accreal THCTensor_(stdall)(THCState *state, THCTensor *self, int biased)
+accreal THCTensor_(stdall)(THCState *state, THCTensor *self, bool biased)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
   return THCNumerics<accreal>::sqrt((THCTensor_(varall)(state, self, biased)));
 }
 
-accreal THCTensor_(varall)(THCState *state, THCTensor *self, int biased)
+accreal THCTensor_(varall)(THCState *state, THCTensor *self, bool biased)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
   accreal mean = THCTensor_(meanall)(state, self);
