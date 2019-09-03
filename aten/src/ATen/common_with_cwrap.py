@@ -1,9 +1,6 @@
 # this code should be common among cwrap and ATen preprocessing
 # for now, I have put it in one place but right now is copied out of cwrap
 
-from copy import deepcopy
-from itertools import product
-
 
 def parse_arguments(args):
     new_args = []
