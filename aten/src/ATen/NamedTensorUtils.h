@@ -73,6 +73,10 @@ void check_names_for_dot(TensorImpl* vec1, TensorImpl* vec2);
 
 void propagate_names_for_expand(Tensor& result, const Tensor& self);
 
+optional<std::vector<Dimname>> compute_broadcast_outnames(
+    const Tensor& self,
+    const Tensor& other);
+
 optional<std::vector<Dimname>> compute_baddbmm_outnames(
     TensorImpl* result,
     TensorImpl* self,
