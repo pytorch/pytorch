@@ -104,6 +104,9 @@ static TensorIterator make_reduction(
   auto mask = make_dim_mask(dim, ndim);
   allocate_reduction_result(result, self, mask, keepdim, dtype);
   auto viewed_result = review_reduce_result(result, ndim, mask, keepdim);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
+#endif
 
   // special case for type promotion in mixed precision, improves computational
   // efficiency.
@@ -139,6 +142,11 @@ static TensorIterator make_reduction(
 
   allocate_reduction_result(result2, self, mask, keepdim, dtype);
   auto viewed_result2 = review_reduce_result(result2, ndim, mask, keepdim);
+
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result1, self, dim, keepdim);
+  namedinference::propagate_names_for_reduction(result2, self, dim, keepdim);
+#endif
 
   // special case for type promotion in mixed precision, improves computational
   // efficiency.
@@ -209,9 +217,6 @@ Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
   } else {
     sum_stub(iter.device_type(), iter);
   }
-#ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
-#endif
   return result;
 }
 
@@ -242,9 +247,6 @@ static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim
   } else {
     prod_stub(iter.device_type(), iter);
   }
-#ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
-#endif
   return result;
 }
 
@@ -320,13 +322,11 @@ Tensor mean(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarTy
 
 #ifdef BUILD_NAMEDTENSOR
 Tensor mean(const Tensor& self, DimnameList dim, bool keepdim, optional<ScalarType> dtype) {
-  TORCH_CHECK(false, "NYI: mean with names");
   return at::mean(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
 Tensor& mean_out(Tensor& result, const Tensor& self, DimnameList dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  TORCH_CHECK(false, "NYI: mean with names");
   return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 #endif
@@ -679,52 +679,42 @@ Tensor &std_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbias
 
 #ifdef BUILD_NAMEDTENSOR
 Tensor std(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  TORCH_CHECK(false, "NYI: std with names");
   return  at::std(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
 Tensor& std_out(Tensor& result, const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  TORCH_CHECK(false, "NYI: std with names");
   return at::std_out(result, self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
 Tensor var(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  TORCH_CHECK(false, "NYI: var with names");
   return  at::var(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
 Tensor& var_out(Tensor& result, const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  TORCH_CHECK(false, "NYI: var with names");
   return at::std_out(result, self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
 std::tuple<Tensor,Tensor> var_mean(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  TORCH_CHECK(false, "NYI: var_mean with names");
   return at::var_mean(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
 std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  TORCH_CHECK(false, "NYI: std_mean with names");
   return at::std_mean(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
 Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) {
-  TORCH_CHECK(false, "NYI: norm with names");
   return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
 Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim) {
-  TORCH_CHECK(false, "NYI: norm with names");
   return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim);
 }
 
 Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) {
-  TORCH_CHECK(false, "NYI: norm with names");
   return at::norm(self, p, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
 Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim) {
-  TORCH_CHECK(false, "NYI: norm with names");
   return at::norm(self, p, dimnames_to_positions(self, dim), keepdim);
 }
 #endif
