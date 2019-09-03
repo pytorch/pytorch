@@ -24,8 +24,9 @@ TORCH_NN_MODULE_COMMON_TEST_HARNESS = """\n
 
 const char * const parity_test_error_msg_prefix = "Parity test failed: ";
 
-#define GENERATE_PARITY_TEST_ERROR_MSG_SUFFIX(cpp_value, python_value) \
-  " in C++ has value: ", cpp_value, ", which does not match the corresponding value in Python: ", python_value \
+#define GENERATE_PARITY_TEST_ERROR_MSG(name, cpp_value, python_value) \
+  parity_test_error_msg_prefix, \
+  name, " in C++ has value: ", cpp_value, ", which does not match the corresponding value in Python: ", python_value \
 
 bool check_tensor_equality(const torch::Tensor& tensor1, const torch::Tensor& tensor2) {
   return tensor1.sizes().vec() == tensor2.sizes().vec() && \
@@ -57,35 +58,35 @@ bool check_ivalue_equality(const c10::IValue& ivalue1, const c10::IValue& ivalue
 CHECK_MODULE_PARAM_EQUALITY = Template("""\
 TORCH_CHECK(
   check_tensor_equality(${script_module_prefix}.get_parameter("${param_name}"), ${cpp_module_prefix}->${param_name}),
-  parity_test_error_msg_prefix,
-  "`${cpp_module_prefix}->${param_name}`",
-  GENERATE_PARITY_TEST_ERROR_MSG_SUFFIX(
-    ${cpp_module_prefix}->${param_name}, ${script_module_prefix}.get_parameter("${param_name}")));
+  GENERATE_PARITY_TEST_ERROR_MSG(
+    "`${cpp_module_prefix}->${param_name}`",
+    ${cpp_module_prefix}->${param_name},
+    ${script_module_prefix}.get_parameter("${param_name}")));
 TORCH_CHECK(
   ${script_module_prefix}.get_parameter("${param_name}").requires_grad() == ${cpp_module_prefix}->${param_name}.requires_grad(),
-  parity_test_error_msg_prefix,
-  "`${cpp_module_prefix}->${param_name}.requires_grad()`",
-  GENERATE_PARITY_TEST_ERROR_MSG_SUFFIX(
-    ${cpp_module_prefix}->${param_name}.requires_grad(), ${script_module_prefix}.get_parameter("${param_name}").requires_grad()));
+  GENERATE_PARITY_TEST_ERROR_MSG(
+    "`${cpp_module_prefix}->${param_name}.requires_grad()`",
+    ${cpp_module_prefix}->${param_name}.requires_grad(),
+    ${script_module_prefix}.get_parameter("${param_name}").requires_grad()));
 """)
 
 CHECK_MODULE_BUFFER_EQUALITY = Template("""\
 TORCH_CHECK(
   check_tensor_equality(${script_module_prefix}.get_buffer("${buffer_name}"), ${cpp_module_prefix}->${buffer_name}),
-  parity_test_error_msg_prefix,
-  "`${cpp_module_prefix}->${buffer_name}`",
-  GENERATE_PARITY_TEST_ERROR_MSG_SUFFIX(
-    ${cpp_module_prefix}->${buffer_name}, ${script_module_prefix}.get_buffer("${buffer_name}")));
+  GENERATE_PARITY_TEST_ERROR_MSG(
+    "`${cpp_module_prefix}->${buffer_name}`",
+    ${cpp_module_prefix}->${buffer_name},
+    ${script_module_prefix}.get_buffer("${buffer_name}")));
 """)
 
 CHECK_MODULE_ATTR_EQUALITY = Template("""\
 TORCH_CHECK(
   check_ivalue_equality(
     ${script_module_prefix}.get_attribute("${attr_name}"), c10::IValue(${cpp_module_prefix}->${attr_name})),
-  parity_test_error_msg_prefix,
-  "`${cpp_module_prefix}->${attr_name}`",
-  GENERATE_PARITY_TEST_ERROR_MSG_SUFFIX(
-    ${cpp_module_prefix}->${attr_name}, ${script_module_prefix}.get_attribute("${attr_name}")));
+  GENERATE_PARITY_TEST_ERROR_MSG(
+    "`${cpp_module_prefix}->${attr_name}`",
+    ${cpp_module_prefix}->${attr_name},
+    ${script_module_prefix}.get_attribute("${attr_name}")));
 """)
 
 TORCH_NN_MODULE_TEST_CTOR_ARGS = Template("""\n
@@ -123,9 +124,10 @@ void ${module_variant_name}_test_forward(
 
   TORCH_CHECK(
     check_tensor_equality(cpp_output, python_output),
-    parity_test_error_msg_prefix,
-    "forward output",
-    GENERATE_PARITY_TEST_ERROR_MSG_SUFFIX(cpp_output, python_output));
+    GENERATE_PARITY_TEST_ERROR_MSG(
+      "forward output",
+      cpp_output,
+      python_output));
 
   ${extra_stmts}
 }
@@ -153,9 +155,10 @@ void ${module_variant_name}_test_backward(
     auto grad = python_grad_module->parameters()[i];
     TORCH_CHECK(
       check_tensor_equality(named_param->grad(), grad),
-      parity_test_error_msg_prefix,
-      "gradient of `", named_param.key(), "`",
-      GENERATE_PARITY_TEST_ERROR_MSG_SUFFIX(named_param->grad(), grad));
+      GENERATE_PARITY_TEST_ERROR_MSG(
+        "gradient of `" + named_param.key() + "`",
+        named_param->grad(),
+        grad));
   }
 
   ${extra_stmts}
