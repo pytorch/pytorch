@@ -17,14 +17,14 @@ py::object to_py_obj(const Message& message);
 
 std::shared_ptr<FutureMessage> py_rpc_builtin(
     RpcAgent& agent,
-    const std::string& dstName,
+    const WorkerId& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs);
 
 std::shared_ptr<FutureMessage> py_rpc_python_udf(
     RpcAgent& agent,
-    const std::string& dstName,
+    const WorkerId& dst,
     const std::string& pickledPythonUDF);
 
 } // namespace rpc
