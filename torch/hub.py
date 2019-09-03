@@ -11,9 +11,9 @@ import warnings
 import zipfile
 
 if sys.version_info[0] == 2:
-    from urllib.parse import urlparse
-else:
     from urlparse import urlparse
+else:
+    from urllib.parse import urlparse
 import requests
 
 try:
