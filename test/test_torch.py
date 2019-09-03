@@ -1306,7 +1306,7 @@ class _TestTorchMixin(torchtest):
                         check(torch.full((), identity, device=device), fn(x))
                     except TypeError as err:
                         # ignore if there is no allreduce.
-                        self.assertTrue('required positional arguments: "dim"' in str(err))
+                        self.assertTrue('dim' in str(err))
 
             # any
             xb = x.to(torch.uint8)
