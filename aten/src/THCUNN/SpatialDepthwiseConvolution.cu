@@ -85,8 +85,8 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
               multiplier +
               depthwiseMultiplier *
                   (in_channel + inputChannels * (filter_col + filter_offset_temp));
-          sum = THCNumerics<AccT>::add(
-            sum,
+          value = THCNumerics<AccT>::add(
+            value,
             THCNumerics<AccT>::mul(
               ScalarConvert<T, AccT>::to(weight.data()[filter_offset]),
               ScalarConvert<T, AccT>::to(input.data()[input_offset])));
@@ -116,8 +116,8 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
                 multiplier +
                 depthwiseMultiplier *
                     (in_channel + inputChannels * (filter_col + filter_offset_temp));
-            sum = THCNumerics<AccT>::add(
-              sum,
+            value = THCNumerics<AccT>::add(
+              value,
               THCNumerics<AccT>::mul(
                 ScalarConvert<T, AccT>::to(weight.data()[filter_offset]),
                 ScalarConvert<T, AccT>::to(input.data()[input_offset])));
@@ -126,7 +126,7 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
       }
     }
 
-    output.data()[linearIndex] = ScalarConvert<AccT, T>::to(sum);
+    output.data()[linearIndex] = ScalarConvert<AccT, T>::to(value);
   }
 }
 
