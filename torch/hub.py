@@ -10,7 +10,10 @@ import torch
 import warnings
 import zipfile
 
-from urllib.parse import urlparse
+if sys.version_info[0] == 2:
+    from urllib.parse import urlparse
+else:
+    from urlparse import urlparse
 import requests
 
 try:
