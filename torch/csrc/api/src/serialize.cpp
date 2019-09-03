@@ -18,11 +18,14 @@ std::vector<char> save(const at::IValue& ivalue) {
     data.insert(data.end(), bytes, bytes + len);
   };
 
+  // Output data to match torch.save, see torch/serialization.py for details
+  // Magic number (0x1950a86a20f9469cfc6c)
+  jit::unsafe_pickle(writer, jit::PickleOpCode::LONG1, torch_save_magic_number);
 
-  jit::unsafe_pickle(
-      writer, jit::PickleOpCode::LONG1, torch_save_magic_number);
-  jit::unsafe_pickle(
-      writer, jit::PickleOpCode::BININT2, protocol_version);
+  // Protocol Version (1001)
+  jit::unsafe_pickle(writer, jit::PickleOpCode::BININT2, protocol_version);
+  // sys_info, this isn't actually used in de-serialization so we can leave this
+  // one empty
   jit::unsafe_pickle(writer, jit::PickleOpCode::EMPTY_DICT, "");
 
   std::vector<at::Tensor> tensors;

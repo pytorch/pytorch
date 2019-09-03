@@ -738,7 +738,7 @@ PickleOpCode Unpickler::readInstruction() {
             case PicklerClass::TENSOR:
               TORCH_CHECK(
                   tensor_table_,
-                  "Found a tensor table reference but Pickler"
+                  "Found a tensor table reference but Unpickler"
                   " has no tensor table\n");
               stack_.emplace_back(tensor_table_->at(data.toInt()));
               break;

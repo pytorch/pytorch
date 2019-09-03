@@ -275,13 +275,13 @@ void EncoderBase::EncodeBlock(
   // Since ONNX IR VERSION 4, initializers do not have to
   // be a subset of graph inputs. We use keep_initializers_as_inputs
   // argument to determine whether to add initializers
-  // as inputs or not. If keep_initializers_as_inputs=false, 
+  // as inputs or not. If keep_initializers_as_inputs=false,
   // we only add non-parameter inputs as inputs to ONNX graph, and.
   // not the initializers (parameters). If keep_initializers_as_inputs
   // =true, we add initializers as inputs too. Setting
-  // keep_initializers_as_inputs=false allows better 
+  // keep_initializers_as_inputs=false allows better
   // optimizations, such as constant-folding, on ONNX graphs
-  // by backends/optimizers.  
+  // by backends/optimizers.
   if (keep_initializers_as_inputs) {
     for (auto input : block->inputs()) {
       onnx::ValueInfoProto* v = graph_proto->add_input();
@@ -642,12 +642,14 @@ class ScriptModuleSerializer2 {
 
  private:
   void writeArchive(const std::string& archive_name, const IValue& value) {
+    // TODO: use torch::save API
     std::vector<char> data;
-    Pickler data_pickle(
+    std::vector<at::Tensor> tensors;
+    LiteralPickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
         },
-        nullptr);
+        &tensors);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();

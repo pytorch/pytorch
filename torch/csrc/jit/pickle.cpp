@@ -10,6 +10,7 @@ void unsafe_pickle(
     std::function<void(const char*, size_t)> writer,
     jit::PickleOpCode op,
     std::string data) {
+  // This is only supposed to be 1 op, so there are no tensors to write
   Pickler pickler(std::move(writer), /*tensor_table=*/nullptr);
   pickler.protocol();
   pickler.pushOp(op, data);
