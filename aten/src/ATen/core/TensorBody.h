@@ -845,6 +845,10 @@ class CAFFE2_API Tensor {
   Tensor __or__(const Tensor & other) const;
   Tensor & __ior__(Scalar other) const;
   Tensor & __ior__(const Tensor & other) const;
+  Tensor bitwise_xor(Scalar other) const;
+  Tensor bitwise_xor(const Tensor & other) const;
+  Tensor & bitwise_xor_(Scalar other) const;
+  Tensor & bitwise_xor_(const Tensor & other) const;
   Tensor __xor__(Scalar other) const;
   Tensor __xor__(const Tensor & other) const;
   Tensor & __ixor__(Scalar other) const;

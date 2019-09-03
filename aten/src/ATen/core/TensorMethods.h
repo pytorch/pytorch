@@ -4148,15 +4148,41 @@ inline Tensor & Tensor::__ior__(const Tensor & other) const {
         op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this, other)), const_cast<Tensor&>(*this), other);
 #endif
 }
+inline Tensor Tensor::bitwise_xor(Scalar other) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::bitwise_xor(const_cast<Tensor&>(*this), other);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::bitwise_xor.Scalar(Tensor self, Scalar other) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Scalar)>(type_set(), is_variable())(const_cast<Tensor&>(*this), other);
+#endif
+}
+inline Tensor Tensor::bitwise_xor(const Tensor & other) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::bitwise_xor(const_cast<Tensor&>(*this), other);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::bitwise_xor.Tensor(Tensor self, Tensor other) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, const Tensor &)>(type_set(), is_variable())(const_cast<Tensor&>(*this), other);
+#endif
+}
+inline Tensor & Tensor::bitwise_xor_(Scalar other) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::bitwise_xor_(const_cast<Tensor&>(*this), other);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::bitwise_xor_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, Scalar)>(type_set(), is_variable())(const_cast<Tensor&>(*this), other);
+#endif
+}
+inline Tensor & Tensor::bitwise_xor_(const Tensor & other) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::bitwise_xor_(const_cast<Tensor&>(*this), other);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::bitwise_xor_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, const Tensor &)>(type_set(), is_variable())(const_cast<Tensor&>(*this), other);
+#endif
+}
 inline Tensor Tensor::__xor__(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::__xor__(const_cast<Tensor&>(*this), other);
-            break;
-        default:
-            AT_ERROR("__xor__ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::__xor__(const_cast<Tensor&>(*this), other);
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::__xor__", "Scalar"}).value();
     return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor &, Scalar>(
@@ -4165,13 +4191,7 @@ inline Tensor Tensor::__xor__(Scalar other) const {
 }
 inline Tensor Tensor::__xor__(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::__xor__(const_cast<Tensor&>(*this), other);
-            break;
-        default:
-            AT_ERROR("__xor__ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::__xor__(const_cast<Tensor&>(*this), other);
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::__xor__", "Tensor"}).value();
     return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor &, const Tensor &>(
@@ -4180,13 +4200,7 @@ inline Tensor Tensor::__xor__(const Tensor & other) const {
 }
 inline Tensor & Tensor::__ixor__(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::__ixor__(const_cast<Tensor&>(*this), other);
-            break;
-        default:
-            AT_ERROR("__ixor__ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::__ixor__(const_cast<Tensor&>(*this), other);
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::__ixor__", "Scalar"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, Scalar>(
@@ -4195,13 +4209,7 @@ inline Tensor & Tensor::__ixor__(Scalar other) const {
 }
 inline Tensor & Tensor::__ixor__(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::__ixor__(const_cast<Tensor&>(*this), other);
-            break;
-        default:
-            AT_ERROR("__ixor__ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::__ixor__(const_cast<Tensor&>(*this), other);
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::__ixor__", "Tensor"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &, const Tensor &>(

@@ -96,6 +96,26 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
+void bitwise_xor_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    // Boolean type does not work with ^ (bitwise XOR) in C++. bitwise_xor wraps this operation for both Boolean and
+    // integral types.
+    cpu_kernel(
+          iter,
+          [](bool a, bool b) {
+            return a != b;
+          });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_xor_cpu", [&]() {
+      cpu_kernel(
+          iter,
+          [](scalar_t a, scalar_t b) -> scalar_t {
+            return a ^ b;
+      });
+    });
+  }
+}
+
 void logical_xor_kernel(TensorIterator& iter) {
   cpu_kernel(iter,
     [](bool a, bool b) -> bool {
@@ -111,6 +131,7 @@ REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
+REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
 
 }} // namespace at::native

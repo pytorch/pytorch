@@ -14,6 +14,7 @@ DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
+DEFINE_DISPATCH(bitwise_xor_stub);
 DEFINE_DISPATCH(logical_xor_stub);
 
 static constexpr char alpha_mismatch_err[] =
@@ -180,6 +181,52 @@ Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
+}
+
+Tensor& bitwise_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
+  bitwise_xor_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor bitwise_xor(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  native::bitwise_xor_out(result, self, other);
+  return result;
+}
+
+Tensor& bitwise_xor_(Tensor& self, const Tensor& other) {
+  return native::bitwise_xor_out(self, self, other);
+}
+
+Tensor& bitwise_xor_out(Tensor& result, const Tensor& self, Scalar other) {
+  return native::bitwise_xor_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor bitwise_xor(const Tensor& self, Scalar other) {
+  return native::bitwise_xor(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& bitwise_xor_(Tensor& self, Scalar other) {
+  return native::bitwise_xor_(self, wrapped_scalar_tensor(other));
+}
+
+// Legacy xor interfaces. They are aliased to bitwise_xor* functions
+Tensor __xor__(const Tensor& self, const Tensor& other) {
+  return native::bitwise_xor(self, other);
+}
+
+Tensor __xor__(const Tensor& self, Scalar other) {
+  return native::bitwise_xor(self, other);
+}
+
+Tensor& __ixor__(Tensor& self, const Tensor& other) {
+  return native::bitwise_xor_(self, other);
+}
+
+Tensor& __ixor__(Tensor& self, Scalar other) {
+  return native::bitwise_xor_(self, other);
 }
 
 Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
