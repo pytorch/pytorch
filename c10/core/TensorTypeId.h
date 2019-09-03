@@ -34,7 +34,7 @@ enum class TensorTypeId : uint8_t {
   ComplexCPUTensorId, // PyTorch only
   ComplexCUDATensorId, // PyTorch only
 
-  // VariableTensorId,  // upcoming!
+  VariableTensorId,
 
   NumTensorIds, // Sentinel
 };

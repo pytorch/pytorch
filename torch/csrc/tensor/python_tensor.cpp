@@ -83,9 +83,9 @@ static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
     // skip initializign aten_type(), but TestAutograd.test_type_conversions
     // seems to violate this property (for whatever reason.)
     //
-    // TODO: Actually, this might be bad.  Because Variable-ness
-    // XXXX THIS IS BAD
-    if (var.type_set().firstTypeId() == self->get_type_id() &&
+    // TODO: Stop using legacyExtractTypeId here (probably need to build
+    // in instanceof checking to Tensor class itself)
+    if (legacyExtractTypeId(var.type_set()) == self->get_type_id() &&
         var.scalar_type() == static_cast<ScalarType>(self->scalar_type)) {
       Py_RETURN_TRUE;
     }

@@ -154,7 +154,7 @@ ${return_type} VariableType::${api_name}(${type_method_formals}) {
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-.registerVariableOp<${return_type} (${formal_types})>("${schema_string}", &VariableType::${api_name})
+.registerOp<${return_type} (${formal_types})>(TensorTypeId::VariableTensorId, "${schema_string}", &VariableType::${api_name})
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\

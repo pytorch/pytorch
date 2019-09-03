@@ -21,7 +21,12 @@ namespace c10 {
 // An undefined tensor is one with an empty tensor type set.
 class TensorTypeSet {
 public:
-  TensorTypeSet() {}
+  enum Full { FULL };
+
+  TensorTypeSet()
+    : repr_(0) {}
+  TensorTypeSet(Full)
+    : repr_(-1) {}
   explicit TensorTypeSet(TensorTypeId t)
     : repr_(t == TensorTypeId::UndefinedTensorId
               ? 0
@@ -34,6 +39,10 @@ public:
   // Perform set union
   TensorTypeSet operator|(TensorTypeSet other) const {
     return TensorTypeSet(repr_ | other.repr_);
+  }
+  // Perform set intersection
+  TensorTypeSet operator&(TensorTypeSet other) const {
+    return TensorTypeSet(repr_ & other.repr_);
   }
   // Perform set equality
   bool operator==(TensorTypeSet other) const {
@@ -75,10 +84,8 @@ C10_API std::ostream& operator<<(std::ostream&, TensorTypeSet);
 // always something like CPUTensorId and not something weird like VariableId.
 // For the forseeable future, it will still be possible to extract /that/
 // TensorTypeId, and that's what this function does.
-//
-// TODO: this will need to change when Variable drops.
 static inline TensorTypeId legacyExtractTypeId(TensorTypeSet s) {
-  return s.firstTypeId();
+  return s.remove(TensorTypeId::VariableTensorId).firstTypeId();
 }
 
 }
