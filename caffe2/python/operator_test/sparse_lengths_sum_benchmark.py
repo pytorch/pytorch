@@ -16,7 +16,7 @@ DTYPES = {
 
 
 def benchmark_sparse_lengths_sum(
-    dtype_str, categorical_limit, embedding_size, average_len, batch_size, iterations
+    dtype_str, categorical_limit, embedding_size, average_len, batch_size, iterations, flush_cache
 ):
     print("Preparing lookup table. " + str(datetime.datetime.now()))
 
@@ -46,9 +46,17 @@ def benchmark_sparse_lengths_sum(
         )
         outputs[0].feed(indices)
         outputs[1].feed(lengths)
+    init_net = core.Net("init_net")
+    init_net.Python(f)([], ["indices", "lengths"])
+    workspace.RunNetOnce(init_net)
 
     net = core.Net("mynet")
-    net.Python(f)([], ["indices", "lengths"])
+    if flush_cache:
+        l3_cache_size = 30 * 2 ** 20 // 4
+        workspace.FeedBlob(
+            "huge_blob", np.random.randn(l3_cache_size).astype(np.float32)
+        )
+        net.Scale("huge_blob", "huge_blob_2x", value=2.0)
     if dtype_str == "uint8":
         net.SparseLengthsSum8BitsRowwise(["X", "indices", "lengths", "scale_bias"], "Y")
     elif dtype_str == "uint8_fused":
@@ -63,7 +71,15 @@ def benchmark_sparse_lengths_sum(
 
     print("Preparation finished. " + str(datetime.datetime.now()))
 
-    workspace.BenchmarkNet(net.Name(), 1, iterations, True)
+    runtimes = workspace.BenchmarkNet(net.Name(), 1, iterations, True)
+    print(
+        "{} billion sums per cycle".format(
+            embedding_size
+            * workspace.FetchBlob("indices").size
+            / runtimes[2 if flush_cache else 1]
+            / 1e6
+        )
+    )
 
 
 if __name__ == "__main__":
@@ -93,6 +109,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "-i", "--iteration", type=int, default=100000, help="The number of iterations."
     )
+    parser.add_argument(
+        "--flush-cache", action="store_true", help="If true, flush cache"
+    )
     args, extra_args = parser.parse_known_args()
     core.GlobalInit(["python"] + extra_args)
     benchmark_sparse_lengths_sum(
@@ -102,4 +121,5 @@ if __name__ == "__main__":
         args.average_len,
         args.batch_size,
         args.iteration,
+        args.flush_cache,
     )
