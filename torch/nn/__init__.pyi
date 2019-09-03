@@ -5,7 +5,3 @@ from .parallel import DataParallel as DataParallel
 from . import init as init
 from . import functional as functional
 from . import utils as utils
-
-class Parameter:
-    @overload
-    def __init__(self, data, requires_grad: builtins.bool): ...
