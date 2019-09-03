@@ -42,63 +42,91 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
     const int padWidth, const int padHeight,
     const int dilationWidth, const int dilationHeight)
 {
-  const int KW_LIMIT = (kSize !=0) ? kSize : kernelWidth;
-  const int KH_LIMIT = (kSize !=0) ? kSize : kernelHeight;
+  const int inputChannels = outputChannels / depthwiseMultiplier;
 
+  for (IndexType thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+       thread_id < totalElements;
+       thread_id += gridDim.x * blockDim.x) {
 
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < totalElements;
-       linearIndex += gridDim.x * blockDim.x) {
-    //calculate n,c,h,w indices, replacing modulos by divide and multiply add,
-    //result is same as would be in the code below
-    //const int n = linearIndex / batchStride; //batchStride = outputChannels * outputHeight * outputWidth
-    //const int c = (linearIndex / channelStride) % outputChannels; //channelStride = outputHeight * outputWidth
-    //const int h = (linearIndex / outputWidth) % outputHeight;
-    //const int w = linearIndex % outputWidth;
+    const int out_col = thread_id % outputWidth;
+    const int out_row = (thread_id / outputWidth) % outputHeight;
+    const int out_channel = (thread_id / outputWidth / outputHeight) % outputChannels;
+    const int batch = thread_id / outputWidth / outputHeight / outputChannels;
 
-    int indtmp1 = linearIndex/outputWidth;
-    const int w = linearIndex - indtmp1 * outputWidth;
-    int indtmp2 = indtmp1/outputHeight;
-    const int h = indtmp1 - indtmp2 * outputHeight;
-    indtmp1 = indtmp2;
-    indtmp2 = indtmp1/outputChannels;
-    const int c = indtmp1 - indtmp2 * outputChannels;
-    const int n = indtmp2;
+    const int in_channel = out_channel / depthwiseMultiplier;
+    const int multiplier = out_channel % depthwiseMultiplier;
 
-    int inputChannel = c;
-    int inputChannels = outputChannels;
-    if (depthwiseMultiplier !=1) {
-      inputChannel /= depthwiseMultiplier;
-      inputChannels /= depthwiseMultiplier;
-    }
+    const int input_offset_temp =
+        (batch * inputChannels + in_channel) * (inputHeight * inputWidth);
 
-    int weightOffset = c * kernelHeight * kernelWidth;
+    const int input_row_start = out_row * strideWidth - padHeight;
+    const int input_col_start = out_col * strideHeight - padWidth;
+    const int input_row_end = input_row_start + kernelHeight;
+    const int input_col_end = input_col_start + kernelWidth;
 
     AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[c]) : ScalarConvert<int, AccT>::to(0);
-    const IndexType offset0 = (n * inputChannels + inputChannel) * inputHeight * inputWidth;
+    if (input_row_start >= 0 && input_col_start >= 0 &&
+        input_row_end < inputHeight && input_col_end < inputWidth) {
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
-    for (int kH = 0; kH < KH_LIMIT; ++kH) {
+      for (int filter_row = 0; filter_row < kernelHeight; ++filter_row) {
+        const int in_row = input_row_start + filter_row;
+        const int filter_offset_temp = kernelWidth * filter_row;
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
-      for (int kW = 0; kW < KW_LIMIT; ++kW) {
-        const int h_in = -padHeight + h * strideHeight + kH * dilationHeight;
-        const int w_in = -padWidth + w * strideWidth + kW * dilationWidth;
+        for (int filter_col = 0; filter_col < kernelWidth; ++filter_col) {
+          const int in_col = input_col_start + filter_col;
 
-        if ((h_in >= 0) && (h_in < inputHeight) && (w_in >= 0) && (w_in < inputWidth)) {
-          const IndexType offset = offset0 + h_in * inputWidth + w_in;
-          value = THCNumerics<AccT>::add(
-            value,
+          const int input_offset =
+              (input_offset_temp) + (in_row * inputWidth) + in_col;
+          const int filter_offset =
+              multiplier +
+              depthwiseMultiplier *
+                  (in_channel + inputChannels * (filter_col + filter_offset_temp));
+          sum = THCNumerics<AccT>::add(
+            sum,
             THCNumerics<AccT>::mul(
-              ScalarConvert<T, AccT>::to(weight.data()[weightOffset]),
-              ScalarConvert<T, AccT>::to(input.data()[offset])));
+              ScalarConvert<T, AccT>::to(weight.data()[filter_offset]),
+              ScalarConvert<T, AccT>::to(input.data()[input_offset])));
         }
-        ++weightOffset;
+      }
+    } else {
+#ifndef __HIP_PLATFORM_HCC__
+#pragma unroll
+#endif
+      for (int filter_row = 0; filter_row < kernelHeight; ++filter_row) {
+        const int in_row = input_row_start + filter_row;
+        const int filter_offset_temp = kernelWidth * filter_row;
+#ifndef __HIP_PLATFORM_HCC__
+#pragma unroll
+#endif
+        for (int filter_col = 0; filter_col < kernelWidth; ++filter_col) {
+          const int in_col = input_col_start + filter_col;
+
+          if (in_row >= 0 && in_row < inputHeight && in_col >= 0 &&
+              in_col < inputWidth) {
+            const int in_col = input_col_start + filter_col;
+
+            const int input_offset =
+                (input_offset_temp) + (in_row * inputWidth) + in_col;
+
+            const int filter_offset =
+                multiplier +
+                depthwiseMultiplier *
+                    (in_channel + inputChannels * (filter_col + filter_offset_temp));
+            sum = THCNumerics<AccT>::add(
+              sum,
+              THCNumerics<AccT>::mul(
+                ScalarConvert<T, AccT>::to(weight.data()[filter_offset]),
+                ScalarConvert<T, AccT>::to(input.data()[input_offset])));
+          }
+        }
       }
     }
-    output.data()[linearIndex] = ScalarConvert<AccT, T>::to(value);
+
+    output.data()[thread_id] = static_cast<T>(sum);
   }
 }
 
