@@ -11,6 +11,9 @@ from caffe2.proto import caffe2_pb2
 import logging
 
 
+logger = logging.getLogger(__name__)
+
+
 class CNNModelHelper(ModelHelper):
     """A helper model so we can write CNN models more easily, without having to
     manually define parameter initializations and operators separately.
@@ -21,7 +24,7 @@ class CNNModelHelper(ModelHelper):
                  ws_nbytes_limit=None, init_params=True,
                  skip_sparse_optim=False,
                  param_model=None):
-        logging.warning(
+        logger.warning(
             "[====DEPRECATE WARNING====]: you are creating an "
             "object from CNNModelHelper class which will be deprecated soon. "
             "Please use ModelHelper object with brew module. For more "

@@ -29,6 +29,9 @@ from caffe2.python.modeling.initializers import Initializer
 from caffe2.python.model_helper import ModelHelper
 
 
+logger = logging.getLogger(__name__)
+
+
 def _RectifyName(blob_reference_or_name):
     if blob_reference_or_name is None:
         return None
@@ -1652,7 +1655,7 @@ class UnrolledCell(RNNCell):
             outputs_with_grads)
         for i in outputs_without_grad:
             model.net.ZeroGradient(outputs[i], [])
-        logging.debug("Added 0 gradients for blobs:",
+        logger.debug("Added 0 gradients for blobs:",
                       [outputs[i] for i in outputs_without_grad])
 
         final_output = self.cell._prepare_output_sequence(model, outputs)

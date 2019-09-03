@@ -23,6 +23,8 @@ import logging
 import six
 
 
+logger = logging.getLogger(__name__)
+
 # _known_working_ops are operators that do not need special care.
 _known_working_ops = [
     "Accuracy",
@@ -240,7 +242,7 @@ class ModelHelper(object):
     # This method is deprecated, use create_param method which
     # also does parameter initialization when needed
     def add_param_DEPRECATED(self, param, key=None, shape=None, length=None):
-        logging.warning("add_param method is DEPRECATED")
+        logger.warning("add_param method is DEPRECATED")
         self._update_param_info_deprecated()
         self.AddParameter(param)
         if key is not None and self.net.input_record() is not None:
@@ -438,7 +440,7 @@ class ModelHelper(object):
                 raise AttributeError(
                     "Operator {} is not known to be safe".format(op_type))
 
-            logging.warning("You are creating an op that the ModelHelper "
+            logger.warning("You are creating an op that the ModelHelper "
                             "does not recognize: {}.".format(op_type))
         return self.net.__getattr__(op_type)
 
@@ -617,7 +619,7 @@ def ExtractPredictorNet(
             )
 
         else:
-            logging.debug(
+            logger.debug(
                 "Op {} had unknown inputs: {}".format(
                     op.type, set(op.input).difference(known_blobs)
                 )

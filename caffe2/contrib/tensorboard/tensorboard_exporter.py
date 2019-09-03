@@ -27,6 +27,9 @@ except ImportError:
         from tensorflow.core.framework.graph_pb2 import NodeDef, GraphDef
 
 
+logger = logging.getLogger(__name__)
+
+
 def _make_unique_name(seen, name, min_version=0):
     assert name is not None
     i = min_version
@@ -317,7 +320,7 @@ def _try_get_shapes(nets):
         shapes, _ = workspace.InferShapesAndTypes(nets)
         return shapes
     except Exception as e:
-        logging.warning('Failed to compute shapes: %s', e)
+        logger.warning('Failed to compute shapes: %s', e)
         return {}
 
 
