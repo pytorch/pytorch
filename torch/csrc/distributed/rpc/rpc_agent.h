@@ -81,8 +81,7 @@ class RpcAgent {
   // If ``message.isRequest()`` is true, the ``FutureMessage`` will be completed
   // when the response arrives. For other message types, the Future should be
   // ignored by the caller.
-  virtual std::shared_ptr<FutureMessage> send(
-      const WorkerId& to, Message&& message) = 0;
+  std::shared_ptr<FutureMessage> send(const WorkerId& to, Message&& message);
 
   // Return a reference to the ``WorkerId`` of this RpcAgent.
   // NB: not using ``c10::optional<const std::string&>`` here because we might
@@ -106,6 +105,14 @@ class RpcAgent {
 
  protected:
   const WorkerId workerId_;
+
+  // Method that needs to be overridden by all implementations of this
+  // interface. The public send() method is responsible for common
+  // pre-processing shared across all implementations.
+  virtual std::shared_ptr<FutureMessage> sendImpl(
+      const WorkerId& to,
+      Message&& message) = 0;
+  const std::string workerName_;
   const RequestCallback cb_;
 };
 
