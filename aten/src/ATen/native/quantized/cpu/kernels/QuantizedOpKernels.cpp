@@ -8,26 +8,9 @@ namespace at {
 namespace native {
 namespace {
 
-// ****** HEY YOU! YES YOU! Read this! ************
+// ****************** HEY YOU! YES YOU! Read this! ********************
 //
-// This file is compiled multiple times for different CPU vector instruction
-// sets (e.g. AVX, AVX2). The purpose of putting code in this file is to make
-// sure we can generate the optimal code for a given processor's vector
-// capabilities. Much of this is done via preprocessor guards in vec256_qint.h.
-// Although the code in this file may look generic, the instantiations of
-// the Vec256 methods can be wildly different!
-//
-// The considerations for code written in this file include:
-//  - Keep code in this file to a minimum, since we're compiling it several
-//    times.
-//  - All code in this file should go through the DECLARE_DISPATCH,
-//    DEFINE_DISPATCH, and REGISTER_DISPATCH mechanism to ensure the correct
-//    runtime dispatch occurs.
-//  - THE CODE MUST RESIDE IN THE ANONYMOUS NAMESPACE. FAILURE TO ENSURE THIS
-//    IS THE CASE CAN LEAD TO HARD-TO-DEBUG ODR VIOLATIONS.
-//  - **Make sure different variants of the code (AVX, AVX2) are tested!**
-//    There are build variants that do things like have NO AVX and NO AVX2 in
-//    CI. Make sure they work!
+// Please read the README.md in this directory before editing this file
 
 void qrelu_kernel(const Tensor& qx, Tensor& qy) {
   const auto zero_point = qx.q_zero_point();

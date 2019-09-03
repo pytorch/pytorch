@@ -38,7 +38,6 @@ Tensor& quantized_relu_(Tensor& qx) {
 namespace {
 Tensor quantized_relu6(const Tensor& qx) {
   Tensor qy;
-  const auto zero_point = qx.q_zero_point();
   qrelu6_stub(qx.device().type(), qx, qy);
   return qy;
 }
