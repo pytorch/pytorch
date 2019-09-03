@@ -27,12 +27,23 @@ class RRefContext {
 
   // create a new RRef
   template <typename T>
-  std::shared_ptr<RRef> createRRef(worker_id_t ownerId) {
-    if (ownerId == getWorkerId()) {
-      return getOrCreateOwnerRRef<T>(genRRefId());
-    } else {
-      return createUserRRef<T>(ownerId, genRRefId(), genRRefId());
-    }
+  std::shared_ptr<OwnerRRef<T>> createOwnerRRef(worker_id_t ownerId) {
+    TORCH_CHECK(ownerId == getWorkerId(), "Cannot create OwnerRRef on user.");
+    return getOrCreateOwnerRRef<T>(genRRefId());
+  }
+
+  std::shared_ptr<UserRRef> createUserRRef(worker_id_t ownerId) {
+    TORCH_CHECK(ownerId != getWorkerId(), "Cannot create UserRRef on owner.");
+    return createUserRRef(ownerId, genRRefId(), genRRefId());
+  }
+
+  std::shared_ptr<UserRRef> createUserRRef(
+      worker_id_t ownerId, RRefId rrefId, ForkId forkId) {
+    TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
+    // RRefContext does not track user RRefs, it will be destructed when there is
+    // no shared_ptrs pointing to it.
+    // NB: cannot use make_shared here as the constructor of UserRRef is private
+    return std::shared_ptr<UserRRef>(new UserRRef(ownerId, rrefId, forkId));
   }
 
   // get an existing RRef or create a new one from a serialized
@@ -49,22 +60,12 @@ class RRefContext {
     if (ownerId == getWorkerId()) {
       return getOrCreateOwnerRRef<T>(rrefId);
     } else {
-      return createUserRRef<T>(ownerId, rrefId, forkId);
+      return createUserRRef(ownerId, rrefId, forkId);
     }
   }
 
   template <typename T>
-  std::shared_ptr<RRef> createUserRRef(
-      worker_id_t ownerId, RRefId rrefId, ForkId forkId) {
-    TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
-    // RRefContext does not track user RRefs, it will be destructed when there is
-    // no shared_ptrs pointing to it.
-    // NB: cannot use make_shared here as the constructor of UserRRef is private
-    return std::shared_ptr<UserRRef>(new UserRRef(ownerId, rrefId, forkId));
-  }
-
-  template <typename T>
-  std::shared_ptr<RRef> getOrCreateOwnerRRef(RRefId rrefId) {
+  std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(RRefId rrefId) {
 
     std::lock_guard<std::mutex> lock(mutex_);
     const auto iter = owners_.find(rrefId);
@@ -81,7 +82,7 @@ class RRefContext {
 
     } else {
       // Scenario (3) retrieving an existing RRef
-      return iter->second;;
+      return std::dynamic_pointer_cast<OwnerRRef<T>>(iter->second);
     }
   }
 

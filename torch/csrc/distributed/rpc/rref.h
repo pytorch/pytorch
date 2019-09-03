@@ -58,8 +58,6 @@ class RRef {
   IValue fork() const;
 
   virtual bool isOwner() const = 0;
-  virtual void setValue(IValue&& value) = 0;
-  virtual IValue getValue() const = 0;
   virtual IValue toHere() = 0;
 
  protected:
@@ -73,8 +71,6 @@ class UserRRef final: public RRef {
  public:
   const ForkId& forkId() const;
   bool isOwner() const override;
-  IValue getValue() const override;
-  void setValue(IValue&& value) override;
   IValue toHere() override;
 
   ~UserRRef() override;
@@ -95,27 +91,19 @@ class OwnerRRef final: public RRef {
     return true;
   }
 
-  IValue getValue() const override {
-    if(std::is_same<T, IValue>::value) {
-      // TODO: use callback to make this non-blocking
-      std::unique_lock<std::mutex> lock(mutex_);
-      valueCV_.wait(lock, [this]{return value_.has_value();});
-      return value_.value();
-    } else {
-      AT_ERROR("Trying to store an IValue in incompatible RRef[T].");
-    }
+  T getValue() const {
+    // TODO: use callback to make this non-blocking
+    std::unique_lock<std::mutex> lock(mutex_);
+    valueCV_.wait(lock, [this]{return value_.has_value();});
+    return value_.value();
   }
 
-  void setValue(IValue&& value) override {
-    if(std::is_same<T, IValue>::value) {
-      {
-        std::lock_guard<std::mutex> lock(mutex_);
-        value_ = std::move(value);
-      }
-      valueCV_.notify_all();
-    } else {
-      AT_ERROR("Trying to store an IValue in incompatible RRef[T].");
+  void setValue(T&& value) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      value_ = std::move(value);
     }
+    valueCV_.notify_all();
   }
 
   IValue toHere() override {

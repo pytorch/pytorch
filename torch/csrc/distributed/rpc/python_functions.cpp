@@ -79,12 +79,33 @@ std::shared_ptr<RRef> py_remote_builtin(
     const py::kwargs& kwargs) {
   Stack stack;
   auto op = match_builtin_op(opName, args, kwargs, stack);
-  std::shared_ptr<RRef> ret =
-      RRefContext::getInstance()->createRRef<at::IValue>(dst.id_);
 
-  agent.send(
-      dst, ScriptRemoteCall(op, std::move(stack), ret->fork()).toMessage());
-  return ret;
+  auto& ctx = RRefContext::getInstance();
+  if (ctx->getWorkerId() == dst.id_) {
+    auto ownerRRef = ctx->createOwnerRRef<IValue>(dst.id_);
+    agent.send(
+        dst,
+        ScriptRemoteCall(
+            op,
+            std::move(stack),
+            ownerRRef->id().toIValue(),
+            ownerRRef->id().toIValue()
+        ).toMessage()
+    );
+    return ownerRRef;
+  } else {
+    auto userRRef = ctx->createUserRRef(dst.id_);
+    agent.send(
+        dst,
+        ScriptRemoteCall(
+            op,
+            std::move(stack),
+            userRRef->id().toIValue(),
+            userRRef->forkId().toIValue()
+        ).toMessage()
+    );
+    return userRRef;
+  }
 }
 
 std::shared_ptr<FutureMessage> py_rpc_python_udf(

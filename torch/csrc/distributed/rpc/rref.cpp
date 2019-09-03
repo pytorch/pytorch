@@ -102,14 +102,6 @@ bool UserRRef::isOwner() const {
   return false;
 }
 
-IValue UserRRef::getValue() const {
-  AT_ERROR("UserRRef does not support getValue(), use toHere() instead.");
-}
-
-void UserRRef::setValue(IValue&& value) {
-  AT_ERROR("UserRRef does not support setValue.");
-}
-
 IValue UserRRef::toHere() {
   auto& agent = RRefContext::getInstance()->agent();
   std::shared_ptr<FutureMessage> fm =

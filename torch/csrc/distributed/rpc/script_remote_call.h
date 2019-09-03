@@ -18,15 +18,18 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
  public:
   ScriptRemoteCall(std::shared_ptr<Operator> op,
                    std::vector<at::IValue>&& args,
-                   at::IValue ret);
+                   at::IValue retRRefId,
+                   at::IValue retForkId);
 
-  at::IValue ret();
+  at::IValue retRRefId();
+  at::IValue retForkId();
 
   Message toMessage() const;
   static ScriptRemoteCall fromMessage(const Message& message);
 
  private:
-   const at::IValue ret_;
+   const at::IValue retRRefId_;
+   const at::IValue retForkId_;
 };
 
 }

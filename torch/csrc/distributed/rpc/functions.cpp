@@ -62,22 +62,27 @@ Message processRequestBlocking(Message&& request) {
     case MessageType::REMOTE_CALL: {
       ScriptRemoteCall src = ScriptRemoteCall::fromMessage(request);
 
+      auto rrefId = RRefId::fromIValue(src.retRRefId());
+      auto forkId = ForkId::fromIValue(src.retForkId());
+      TORCH_CHECK(rrefId != forkId, "Does not support remote call to self.");
+
+      auto& ctx = RRefContext::getInstance();
+      auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(std::move(rrefId));
+
+      // TODO: make this asynchronous
       auto stack = src.stack();
       src.op()->getOperation()(stack);
       AT_ASSERT(stack.size() == 1, "Return value of a builtin operator or a "
           "TorchScript function should be a single IValue, got a vector of "
           "size ", stack.size());
 
-      RRefContext::getInstance()
-          ->getOrCreateRRef<IValue>(src.ret())
-          ->setValue(std::move(stack.front()));
-
+      ownerRRef->setValue(std::move(stack.front()));
       return Message();
     }
     case MessageType::RREF_FETCH: {
       ScriptRRefFetch srf = ScriptRRefFetch::fromMessage(request);
       // TODO: make this asynchronous
-      std::shared_ptr<RRef> rref =
+      std::shared_ptr<OwnerRRef<IValue>> rref =
           RRefContext::getInstance()->getOrCreateOwnerRRef<IValue>(
               RRefId::fromIValue(srf.value())
           );

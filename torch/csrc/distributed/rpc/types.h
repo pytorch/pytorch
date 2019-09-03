@@ -15,6 +15,7 @@ struct GloballyUniqueId final {
   GloballyUniqueId(const GloballyUniqueId& other) = default;
 
   bool operator==(const GloballyUniqueId& other) const;
+  bool operator!=(const GloballyUniqueId& other) const;
 
   at::IValue toIValue() const;
   static GloballyUniqueId fromIValue(at::IValue&&);
