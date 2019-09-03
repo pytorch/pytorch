@@ -75,8 +75,7 @@ TORCH_API std::vector<char> pickle(
 void unsafe_pickle(
     std::function<void(const char*, size_t)> writer,
     jit::PickleOpCode op,
-    std::string data,
-    std::vector<at::Tensor>* tensor_table);
+    std::string data);
 
 /// `reader` is a function that takes in a size to read from some pickled
 /// binary. `reader` should remember where it last read, and return

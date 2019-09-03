@@ -6,28 +6,26 @@
 
 namespace torch {
 
-std::vector<char> pickle_save(const at::IValue& ivalue) {
+// These are both defined in `torch/serialization.py`
+const char* torch_save_magic_number =
+    "\x0a\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19";
+const char* protocol_version = "\xe9\x03";
+
+std::vector<char> save(const at::IValue& ivalue) {
   std::vector<char> data;
 
   auto writer = [&](const char* bytes, size_t len) {
     data.insert(data.end(), bytes, bytes + len);
   };
 
-  std::vector<at::Tensor> tensors;
 
   jit::unsafe_pickle(
-      writer,
-      jit::PickleOpCode::LONG1,
-      "\x0a\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19",
-      &tensors);
-  TORCH_INTERNAL_ASSERT(tensors.size() == 0);
+      writer, jit::PickleOpCode::LONG1, torch_save_magic_number);
+  jit::unsafe_pickle(
+      writer, jit::PickleOpCode::BININT2, protocol_version);
+  jit::unsafe_pickle(writer, jit::PickleOpCode::EMPTY_DICT, "");
 
-  jit::unsafe_pickle(writer, jit::PickleOpCode::BININT2, "\xe9\x03", &tensors);
-  TORCH_INTERNAL_ASSERT(tensors.size() == 0);
-
-  jit::unsafe_pickle(writer, jit::PickleOpCode::EMPTY_DICT, "", &tensors);
-  TORCH_INTERNAL_ASSERT(tensors.size() == 0);
-
+  std::vector<at::Tensor> tensors;
   jit::pickle<jit::LiteralPickler>(writer, ivalue, &tensors);
 
   std::vector<at::IValue> keys;

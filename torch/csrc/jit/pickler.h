@@ -128,9 +128,7 @@ class Pickler {
   Pickler(
       std::function<void(const char*, size_t)> writer,
       std::vector<at::Tensor>* tensor_table)
-      : writer_(writer), tensor_table_(tensor_table) {
-    TORCH_INTERNAL_ASSERT(tensor_table != nullptr);
-  }
+      : writer_(writer), tensor_table_(tensor_table) {}
 
   // Push protocol onto the stack
   void protocol();

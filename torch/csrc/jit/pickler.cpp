@@ -369,6 +369,9 @@ void LiteralPickler::pushTensor(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::REDUCE);
 
   // Store the tensor so it can be written later
+  TORCH_INTERNAL_ASSERT(
+      tensor_table_,
+      "Pickler tried to write a tensor but had no tensor table to write to");
   tensor_table_->emplace_back(std::move(tensor));
 }
 
@@ -378,6 +381,9 @@ void Pickler::pushClass(PicklerClass cls) {
 
 void Pickler::pushTensor(const IValue& ivalue) {
   pushClass(PicklerClass::TENSOR);
+  TORCH_INTERNAL_ASSERT(
+      tensor_table_,
+      "Pickler tried to write a tensor but had no tensor table to write to");
   tensor_table_->push_back(ivalue.toTensor());
   int64_t tensor_id = tensor_table_->size() - 1;
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
@@ -710,6 +716,9 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.pop_back();
           switch (pickler_class) {
             case PicklerClass::TENSOR:
+              TORCH_INTERNAL_ASSERT(
+                  tensor_table_,
+                  "Pickler tried to write a tensor but had no tensor table to write to");
               stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
               break;
             case PicklerClass::INTLIST:

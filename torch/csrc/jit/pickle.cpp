@@ -9,9 +9,8 @@ namespace jit {
 void unsafe_pickle(
     std::function<void(const char*, size_t)> writer,
     jit::PickleOpCode op,
-    std::string data,
-    std::vector<at::Tensor>* tensor_table) {
-  Pickler pickler(std::move(writer), tensor_table);
+    std::string data) {
+  Pickler pickler(std::move(writer), /*tensor_table=*/nullptr);
   pickler.protocol();
   pickler.pushOp(op, data);
   pickler.stop();
