@@ -86,23 +86,6 @@ struct C10_API Device final {
     return type_ == DeviceType::CPU;
   }
 
-  /// Return the right-biased merge of two devices.  This usually just returns
-  /// the right argument, except if self.type() == device.type() and
-  /// !device.has_index(), in which case we retain the index from self.  This
-  /// retains consistency with the new_* APIs from PyTorch, which also
-  /// respect original device indices in this way:
-  ///
-  ///     >>> torch.zeros(0, device='cuda:1').new_empty(1, device='cuda')
-  ///     tensor([0.], device='cuda:1')
-  ///
-  Device merge_in(Device device) const noexcept {
-    if (type_ == device.type_ && !device.has_index()) {
-      return *this;
-    } else {
-      return device;
-    }
-  }
-
  private:
   DeviceType type_;
   DeviceIndex index_ = -1;
