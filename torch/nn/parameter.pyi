@@ -1,4 +1,5 @@
 from .. import Tensor
+import builtins
 
 class Parameter(Tensor):
     @overload
