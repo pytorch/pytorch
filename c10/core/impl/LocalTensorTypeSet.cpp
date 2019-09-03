@@ -1,5 +1,7 @@
 #include <c10/core/impl/LocalTensorTypeSet.h>
 
+#include <iostream>
+
 namespace c10 {
 namespace impl {
 
@@ -10,30 +12,31 @@ namespace {
 /// `at::NonVariableTypeMode`.
 #ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
 
-thread_local TensorTypeSet valid(TensorTypeSet::FULL);
+// NB: Zero initialized!
+thread_local uint64_t raw_excluded;
 
 #else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
-TensorTypeSet valid(TensorTypeSet::FULL)
+uint64_t raw_excluded = 0;
 
 #endif
 
 }
 
+TensorTypeSet tls_excluded_tensor_type_set() {
+  return TensorTypeSet(TensorTypeSet::RAW, raw_excluded);
+}
+
 bool tls_variable_is_enabled() {
-  return valid.has(TensorTypeId::VariableTensorId);
+  return !tls_excluded_tensor_type_set().has(TensorTypeId::VariableTensorId);
 }
 
 void tls_variable_set_enabled(bool enabled) {
   if (enabled) {
-    valid = valid.add(TensorTypeId::VariableTensorId);
+    raw_excluded = tls_excluded_tensor_type_set().remove(TensorTypeId::VariableTensorId).raw_repr();
   } else {
-    valid = valid.remove(TensorTypeId::VariableTensorId);
+    raw_excluded = tls_excluded_tensor_type_set().add(TensorTypeId::VariableTensorId).raw_repr();
   }
-}
-
-TensorTypeSet tls_valid_tensor_type_set() {
-  return valid;
 }
 
 }} // namespace c10::impl
