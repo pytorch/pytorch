@@ -1,4 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+
+import copy
 import torch.nn as nn
 import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
@@ -150,19 +152,18 @@ def add_quant_dequant(module):
 
 def prepare(model):
     r"""Prepares the model for calibration or training.
+
+    The model will be attached with observer and quant dequant or fake quant
+    modules, and qconfig will be propagated.
+
     Note that the model will be modified inplace but in case the input model
     is a leaf model, a wrapped model will be returned.
 
     Args:
         mod: input model
-    Return:
-        A model with qconfig propogated, observer and quant dequant or fake
-        quant modules attached, a model that is ready for calibration or
-        training
     """
     propagate_qconfig(model)
     add_observer(model)
-    return model
 
 class QuantStub(nn.Module):
     r"""Quantize stub module, before calibration, this is same as an observer,
@@ -199,6 +200,7 @@ DEFAULT_MODULE_MAPPING = {
     nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
+    # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
     nni.ConvReLU2d: nniq.ConvReLU2d,
@@ -242,10 +244,12 @@ def quantize(model, run_fn, run_args, mapping=DEFAULT_MODULE_MAPPING):
         run_args: positional arguments for `run_fn`
 
     Return:
-        A quantized model
+        Quantized model.
     """
+
+    model = copy.deepcopy(model)
     model.eval()
-    model = prepare(model)
+    prepare(model)
     run_fn(model, run_args)
     convert(model, mapping)
     return model
@@ -255,23 +259,35 @@ DEFAULT_QCONFIG_DICT = {
 }
 
 def quantize_dynamic(model, qconfig_dict=DEFAULT_QCONFIG_DICT, mapping=DEFAULT_DYNAMIC_MODULE_MAPPING):
-    r"""Converts a float model to dynamic quantized model. Do dynamic training and output a quantized model.
+    r"""Converts a float model to dynamic quantized model.
+
+    Perform dynamic training and output a quantized model.
     """
+    model = copy.deepcopy(model)
     model.eval()
     propagate_qconfig(model, qconfig_dict)
     convert(model, mapping)
     return model
 
 def prepare_qat(model):
-    model = prepare(model)
-    model = convert(model, DEFAULT_QAT_MODULE_MAPPING)
-    return model
+    prepare(model)
+    convert(model, DEFAULT_QAT_MODULE_MAPPING)
 
 def quantize_qat(model, run_fn, run_args):
     r"""Do quantization aware training and output a quantized model
+
+    Args:
+        model: input model
+        run_fn: a function for evaluating the prepared model, can be a
+            function that simply runs the prepared model or a training loop
+        run_args: positional arguments for `run_fn`
+
+    Return:
+        Quantized model.
     """
+    model = copy.deepcopy(model)
     model.train()
-    model = prepare_qat(model)
+    prepare_qat(model)
     run_fn(model, run_args)
     convert(model)
     return model
@@ -283,26 +299,21 @@ def convert(module, mapping=DEFAULT_MODULE_MAPPING):
         module: calibrated module with observers
         mapping: a dictionary that maps from float module type to quantized
            module type, can be overwrritten to allow swapping user defined Modules
-    Return:
-        A quantized module
     """
-    module_swapped = swap_module(module, mapping)
-
     reassign = {}
-    # TODO(jerryzh): remove after deciding on the impl of
-    # intrinsic moudles
-    if type(module) in [nni.ConvBn2d, nni.ConvBnReLU2d, nni.LinearReLU, nni.ConvReLU2d]:
-        return module_swapped
+    # TODO(jerryzh): remove after deciding on the impl of intrinsic modules
+    SWAPPABLE_MODULES = (nni.ConvBn2d,
+                         nni.ConvBnReLU2d,
+                         nni.LinearReLU,
+                         nni.ConvReLU2d)
 
     for name, mod in module.named_children():
-        new_mod = convert(mod, mapping)
-        if new_mod is not mod:
-            reassign[name] = new_mod
+        if type(mod) not in SWAPPABLE_MODULES:
+            convert(mod, mapping)
+        reassign[name] = swap_module(mod, mapping)
 
-    for name, mod in reassign.items():
-        setattr(module_swapped, name, mod)
-
-    return module_swapped
+    for key, value in reassign.items():
+        module._modules[key] = value
 
 def swap_module(mod, mapping):
     r"""Swaps the module if it has a quantized counterpart and it has an
@@ -319,5 +330,4 @@ def swap_module(mod, mapping):
     if hasattr(mod, 'qconfig') and mod.qconfig is not None:
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)
-
     return new_mod

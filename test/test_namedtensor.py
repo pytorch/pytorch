@@ -7,6 +7,9 @@ import functools
 import torch
 from torch import Tensor
 import torch.nn.functional as F
+from multiprocessing.reduction import ForkingPickler
+import pickle
+import io
 import sys
 
 
@@ -162,6 +165,23 @@ class TestNamedTensor(TestCase):
 
         none_named_tensor = torch.zeros(2, 3).names_(None, None)
         self.assertEqual(repr(none_named_tensor), expected)
+
+    def test_no_save_support(self):
+        named_tensor = torch.zeros(2, 3, names=('N', 'C'))
+        buf = io.BytesIO()
+        with self.assertRaisesRegex(RuntimeError, "NYI"):
+            torch.save(named_tensor, buf)
+
+    def test_no_pickle_support(self):
+        named_tensor = torch.zeros(2, 3, names=('N', 'C'))
+        with self.assertRaisesRegex(RuntimeError, "NYI"):
+            serialized = pickle.dumps(named_tensor)
+
+    def test_no_multiprocessing_support(self):
+        named_tensor = torch.zeros(2, 3, names=('N', 'C'))
+        buf = io.BytesIO()
+        with self.assertRaisesRegex(RuntimeError, "NYI"):
+            ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
 
     def test_noncontig_contiguous(self):
         # This type of contiguous is special-cased and therefore needs its own test
@@ -802,6 +822,26 @@ class TestNamedTensor(TestCase):
     @unittest.skipIf(not TEST_CUDA, 'no CUDA')
     def test_as_strided_cuda(self):
         self._test_as_strided('cuda')
+
+    def test_no_jit_support(self):
+        @torch.jit.script
+        def foo(x):
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, 'NYI'):
+            foo(torch.randn(2, 3, names=('N', 'C')))
+
+        @torch.jit.ignore
+        def add_names(x):
+            x.names = ('N', 'C')
+
+        @torch.jit.script
+        def return_named_tensor(input):
+            add_names(input)
+            return input
+
+        with self.assertRaisesRegex(RuntimeError, "NYI"):
+            return_named_tensor(torch.randn(1, 1))
 
     def test_align_to(self):
         def _test(tensor_namedshape, align_names, expected_sizes, expected_error):
