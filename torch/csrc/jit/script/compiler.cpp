@@ -828,13 +828,15 @@ struct to_ir {
       if (!result_type) {
         result_type = result->type();
       }
-      if (!unifyTypes(result_type, result->type())) {
+      auto merged_result_type = unifyTypes(result_type, result->type());
+      if (!merged_result_type) {
         throw ErrorReport(stmt.range())
             << "Previous return statement returned a value of type "
             << result_type->python_str()
             << " but this return statement returns a value of type "
             << result->type()->python_str();
       }
+      result_type = merged_result_type.value();
     }
     AT_ASSERT(result_type);
     def_stack_.back().merged_return_type_ = result_type;
