@@ -39,19 +39,6 @@
 #include <TH/generic/THTensorMath.h>
 #include <TH/THGenerateBFloat16Type.h>
 
-/* fill and zero*/
-#include <TH/generic/THTensorFill.h>
-#include <TH/THGenerateAllTypes.h>
-
-#include <TH/generic/THTensorFill.h>
-#include <TH/THGenerateHalfType.h>
-
-#include <TH/generic/THTensorFill.h>
-#include <TH/THGenerateBoolType.h>
-
-#include <TH/generic/THTensorFill.h>
-#include <TH/THGenerateBFloat16Type.h>
-
 /* convolutions */
 #include <TH/generic/THTensorConv.h>
 #include <TH/THGenerateAllTypes.h>

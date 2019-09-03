@@ -140,7 +140,8 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
 {
   INITIAL_CHECK;
   THTensor_(resizeAs)(gradInput, input);
-  THTensor_(zero)(gradInput);
+  at::Tensor gradInput_wrap = THTensor_wrap(gradInput);
+  gradInput_wrap.zero_();
   THArgCheck(THTensor_(isContiguous)(gradInput), 4,
               "gradInput must be contiguous");
   THNN_CHECK_SHAPE(input, gradInput);

@@ -306,7 +306,8 @@ THNN_(FeatureLPPooling_updateGradInput)(
   THNN_(FeatureLPPooling_resizeCPU)(gradInput, input);
 
   // Zero gradInput for accumulation
-  THTensor_(zero)(gradInput);
+  at::Tensor gradInput_wrap = THTensor_wrap(gradInput);
+  gradInput_wrap.zero_();
 
   FeatureLPPoolingSizes gradInputDesc =
     THNN_(FeatureLPPooling_upcastCPU)(gradInput, batchMode);

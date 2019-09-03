@@ -623,7 +623,6 @@ void THTensor_(conv2DRevger)(THTensor *r_, scalar_t beta, scalar_t alpha, THTens
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
-    /*THTensor_(zero)(r_);*/
     at::parallel_for(0, r_->size(0)*r_->size(1), 0, [&](int64_t start, int64_t end) {
       for (auto k = start; k < end; k++) {
         scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
@@ -732,8 +731,6 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, scalar_t beta, scalar_t alpha, THTen
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
-    /*THTensor_(zero)(r_);*/
-
     at::parallel_for(0, r_->size(0)*r_->size(1), 0, [&](int64_t start, int64_t end) {
       for (auto k = start; k < end; k++) {
         scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
@@ -846,7 +843,6 @@ void THTensor_(conv2Dger)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor 
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
-    /*THTensor_(zero)(r_);*/
     at::parallel_for(0, r_->size(0)*r_->size(1), 0, [&](int64_t start, int64_t end) {
       for (auto k = start; k < end; k++) {
         scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
@@ -987,7 +983,6 @@ void THTensor_(conv2Dmv)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor *
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
-    /*THTensor_(zero)(r_);*/
     at::parallel_for(0, r_->size(0), 0, [&](int64_t start, int64_t end) {
       for (auto k = start; k < end; k++) {
         scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
@@ -1128,7 +1123,6 @@ void THTensor_(conv2Dmm)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor *
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
-    /*THTensor_(zero)(r_);*/
     at::parallel_for(0, r_->size(0), 0, [&](int64_t start, int64_t end) {
       for (auto p = start; p < end; p++) {
         int64_t k;
@@ -1252,8 +1246,11 @@ void THTensor_(conv2Dmul)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor 
 
   nelem = THTensor_(nElement)(r_);
   THTensor_(resize2d)(r_, nOutputRows, nOutputCols);
-  if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
-    THTensor_(zero)(r_);
+  if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_)) {
+    at::Tensor r_wrap = THTensor_wrap(r_);
+    r_wrap.zero_();
+  }
+
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
@@ -1320,7 +1317,8 @@ void THTensor_(conv2Dcmul)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
-    THTensor_(zero)(r_);
+    at::Tensor r_wrap = THTensor_wrap(r_);
+    r_wrap.zero_();
   }
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
@@ -1400,7 +1398,8 @@ void THTensor_(conv2Dmap)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor 
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
-    THTensor_(zero)(r_);
+     at::Tensor r_wrap = THTensor_wrap(r_);
+     r_wrap.zero_();
   }
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
@@ -1489,7 +1488,8 @@ void THTensor_(conv3DRevger)(THTensor *r_, scalar_t beta, scalar_t alpha, THTens
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
-    THTensor_(zero)(r_);
+    at::Tensor r_wrap = THTensor_wrap(r_);
+    r_wrap.zero_();
   }
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
@@ -1580,7 +1580,8 @@ void THTensor_(conv3Dger)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor 
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
-    THTensor_(zero)(r_);
+    at::Tensor r_wrap = THTensor_wrap(r_);
+    r_wrap.zero_();
   }
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
@@ -1675,7 +1676,8 @@ void THTensor_(conv3Dmv)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor *
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
-    THTensor_(zero)(r_);
+    at::Tensor r_wrap = THTensor_wrap(r_);
+    r_wrap.zero_();
   }
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
@@ -1755,9 +1757,10 @@ void THTensor_(conv3Dmul)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor 
 
   nelem = THTensor_(nElement)(r_);
   THTensor_(resize3d)(r_, nOutputDepth, nOutputRows, nOutputCols);
-  if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
-    THTensor_(zero)(r_);
-  else if (beta != 1)
+  if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_)) {
+    at::Tensor r_wrap = THTensor_wrap(r_);
+    r_wrap.zero_();
+  } else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
   ptr_input = input->data<scalar_t>();
@@ -1830,7 +1833,8 @@ void THTensor_(conv3Dcmul)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
-    THTensor_(zero)(r_);
+    at::Tensor r_wrap = THTensor_wrap(r_);
+    r_wrap.zero_();
   }
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
@@ -1920,7 +1924,8 @@ void THTensor_(conv3Dmap)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor 
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
-    THTensor_(zero)(r_);
+    at::Tensor r_wrap = THTensor_wrap(r_);
+    r_wrap.zero_();
   }
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);

@@ -301,7 +301,8 @@ static void THNN_(VolumetricConvolutionMM_updateOutput_frame)(
         );
       }
   } else {
-    THTensor_(zero)(output);
+    at::Tensor output_wrap = THTensor_wrap(output);
+    output_wrap.zero_();
   }
 
   THTensor_(addmm)(output2d, 1, output2d, 1, weight, finput);
@@ -547,7 +548,8 @@ static void THNN_(VolumetricConvolutionMM_updateGradInput_frame)(
   THTensor_(addmm)(fgradInput, 0, fgradInput, 1, weight, gradOutput2d);
   c10::raw::intrusive_ptr::decref(gradOutput2d);
 
-  THTensor_(zero)(gradInput);
+  at::Tensor gradInput_wrap = THTensor_wrap(gradInput);
+  gradInput_wrap.zero_();
 
   THNN_(unfolded_acc_vol)(
     fgradInput, gradInput,
@@ -590,7 +592,8 @@ void THNN_(VolumetricConvolutionMM_updateGradInput)(
   // depending on the BLAS library, fgradInput (result tensor) might
   // be left uninitialized on zero alpha, which might lead to weird behavior
   // hence, to be safe, zero it
-  THTensor_(zero)(fgradInput);
+  at::Tensor fgradInput_wrap = THTensor_wrap(fgradInput);
+  fgradInput_wrap.zero_();
   THTensor *tweight = THTensor_(new)();
   THTensor_(transpose)(tweight, weight, 0, 1);
 

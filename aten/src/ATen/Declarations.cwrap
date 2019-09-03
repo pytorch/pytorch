@@ -45,6 +45,8 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  backends:
+    - CUDA
   options:
     - arguments:
       - THTensor* self
@@ -1844,6 +1846,8 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  backends:
+    - CUDA
   variants:
     - function
   arguments:

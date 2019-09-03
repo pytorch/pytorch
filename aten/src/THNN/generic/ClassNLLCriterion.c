@@ -123,7 +123,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
           int64_t ignore_index)
 {
   THTensor_(resizeAs)(gradInput, input);
-  THTensor_(zero)(gradInput);
+  at::Tensor gradInput_wrap = THTensor_wrap(gradInput);
+  gradInput_wrap.zero_();
 
   int n_dims = THTensor_(nDimensionLegacyAll)(input);
   int n_classes = THTensor_(size)(input, n_dims - 1);

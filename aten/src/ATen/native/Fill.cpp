@@ -27,6 +27,18 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
 
 DEFINE_DISPATCH(fill_stub);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  zero ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor& zero_out(Tensor& self) {
+  auto iter = TensorIterator::nullary_op(self);
+  fill_stub(iter.device_type(), iter, 0);
+  return self;
+}
+
+Tensor& zero_(Tensor& self) {
+  return fill_out(self, 0);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill_diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor& fill_diagonal_(Tensor& self, Scalar fill_value, bool wrap) {

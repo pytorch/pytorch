@@ -46,7 +46,8 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   if (!isTarget->sizes().equals(target->sizes())) {
     THTensor_(resizeNd)(isTarget, target->dim(), THTensor_getSizePtr(target), nullptr);
   }
-  THTensor_(zero)(isTarget);
+  at::Tensor isTarget_wrap = THTensor_wrap(isTarget);
+  isTarget_wrap.zero_();
   isTarget_data = isTarget->data<scalar_t>();
 
   if (reduction != Reduction::None)
@@ -194,7 +195,8 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
 
   THTensor_(resizeAs)(gradInput, input);
   gradInput = THTensor_(newContiguous)(gradInput);
-  THTensor_(zero)(gradInput);
+  at::Tensor gradInput_wrap = THTensor_wrap(gradInput);
+  gradInput_wrap.zero_();
   gradInput_data = gradInput->data<scalar_t>();
 
   g = reduction == Reduction::Mean ? (1./((scalar_t)(nframe*dim))) : (1./((scalar_t)dim));

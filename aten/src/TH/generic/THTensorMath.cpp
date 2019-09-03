@@ -402,7 +402,8 @@ void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
   // handle beta, whereas gemm does for case where (x,0).mm(0,y).
   if (THTensor_sizeLegacyNoScalars(vec, 0) == 0 && mat->size(0) != 0) {
     if (beta == 0) {
-      THTensor_(zero)(r_);
+      at::Tensor r_wrap = THTensor_wrap(r_);
+      r_wrap.zero_();
     } else if (beta != 1) {
       THTensor_(mul)(r_, r_, beta);
     }
@@ -447,7 +448,8 @@ void THTensor_(addr)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, T
   }
 
   if(beta == 0) {
-    THTensor_(zero)(r_);
+    at::Tensor r_wrap = THTensor_wrap(r_);
+    r_wrap.zero_();
   }
   else if(beta != 1)
     THTensor_(mul)(r_, r_, beta);

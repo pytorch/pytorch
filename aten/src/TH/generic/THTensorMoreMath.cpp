@@ -157,9 +157,11 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       at::native::copy_(values__wrap, right_shape);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
-      THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
+      at::Tensor values_wrap = THTensor_wrap(values_);
+      values_wrap.fill_(THTensor_(get1d)(t, 0));
     }
-    THLongTensor_zero(indices_);
+    at::Tensor indices_wrap = THTensor_wrap(indices_);
+    indices_wrap.zero_();
 
     if(THTensor_sizeLegacyNoScalars(t, dimension) == 1) {
       if (!keepdim) {
@@ -241,9 +243,11 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       at::native::copy_(values__wrap, right_shape);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
-      THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
+      at::Tensor values_wrap = THTensor_wrap(values_);
+      values_wrap.fill_(THTensor_(get1d)(t, 0));
     }
-    THLongTensor_zero(indices_);
+    at::Tensor indices_wrap = THTensor_wrap(indices_);
+    indices_wrap.zero_();
 
     if(THTensor_sizeLegacyNoScalars(t, dimension) == 1) {
       if (!keepdim) {
@@ -423,7 +427,8 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
                              prod *= t_data[i*t_stride];
                            *r__data = (scalar_t)prod;);
     } else {
-      THTensor_(fill)(r_, 1);
+      at::Tensor r_wrap = THTensor_wrap(r_);
+      r_wrap.fill_(1);
       THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
       temp_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
@@ -475,7 +480,8 @@ void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
     int64_t i;
 
     THTensor_(resize2d)(r_, sz, sz);
-    THTensor_(zero)(r_);
+    at::Tensor r_wrap = THTensor_wrap(r_);
+    r_wrap.zero_();
     r__data = r_->data<scalar_t>();
     r__stride_0 = THTensor_(stride)(r_, 0);
     r__stride_1 = THTensor_(stride)(r_, 1);
@@ -1324,7 +1330,8 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t 
   scalar_t *h_data;
 
   THTensor_(resize1d)(hist, nbins);
-  THTensor_(zero)(hist);
+  at::Tensor hist_wrap = THTensor_wrap(hist);
+  hist_wrap.zero_();
   minval = minvalue;
   maxval = maxvalue;
   if (minval == maxval)
@@ -1360,7 +1367,8 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t
   scalar_t maxval;
 
   THTensor_(resize2d)(hist, THTensor_sizeLegacyNoScalars(tensor, 0), nbins);
-  THTensor_(zero)(hist);
+  at::Tensor hist_wrap = THTensor_wrap(hist);
+  hist_wrap.zero_();
 
   minval = minvalue;
   maxval = maxvalue;
