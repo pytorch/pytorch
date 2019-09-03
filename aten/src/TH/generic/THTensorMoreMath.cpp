@@ -461,13 +461,13 @@ accreal THTensor_(trace)(THTensor *t)
 
 void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 {
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(t) == 1 || THTensor_(nDimensionLegacyNoScalars)(t) == 2, 1, "matrix or a vector expected");
+  THArgCheck(THTensor_(nDimension)(t) == 1 || THTensor_(nDimension)(t) == 2, 1, "matrix or a vector expected");
 
-  if(THTensor_(nDimensionLegacyNoScalars)(t) == 1)
+  if(THTensor_(nDimension)(t) == 1)
   {
     scalar_t *t_data = t->data<scalar_t>();
-    int64_t t_stride_0 = THTensor_strideLegacyNoScalars(t, 0);
-    int64_t t_size = THTensor_sizeLegacyNoScalars(t, 0);
+    int64_t t_stride_0 = THTensor_(stride)(t, 0);
+    int64_t t_size = THTensor_(size)(t, 0);
     int64_t sz = t_size + (k >= 0 ? k : -k);
     scalar_t *r__data;
     int64_t r__stride_0;
