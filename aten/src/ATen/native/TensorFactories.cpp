@@ -307,6 +307,16 @@ Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& opt
   return native::full(self.sizes(), fill_value, options);
 }
 
+Tensor new_full(
+    const Tensor& self,
+    IntArrayRef size,
+    Scalar fill_value,
+    const TensorOptions& options
+    ) {
+  return at::full(size, fill_value, self.options().merge_in(options));
+}
+
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor linspace(
