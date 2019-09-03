@@ -150,14 +150,10 @@ pytorch_params: &pytorch_params
     use_cuda_docker_runtime:
       type: string
       default: ""
-    multi_gpu:
-      type: string
-      default: ""
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     DOCKER_IMAGE: << parameters.docker_image >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
-    MULTI_GPU: << parameters.multi_gpu >>
   resource_class: << parameters.resource_class >>
 
 caffe2_params: &caffe2_params
@@ -348,7 +344,7 @@ jobs:
           else
             export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
-          if [ -n "${MULTI_GPU}" ]; then
+          if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           else
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"'&& echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -1640,7 +1636,6 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-multigpu-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
           use_cuda_docker_runtime: "1"
-          multi_gpu: "1"
           resource_class: gpu.large
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda9_cudnn7_py3_NO_AVX2_test
