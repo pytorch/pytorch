@@ -109,11 +109,11 @@ void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor
 void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a_, bool eigenvectors)
 {
 #ifdef USE_MAGMA
-  char jobvr = eigenvectors ? 'V' : 'N';
+  char jobvrs = eigenvectors ? 'V' : 'N';
   THArgCheck(a_->dim() == 2, 3, "A should be 2 dimensional");
   THArgCheck(a_->size(0) == a_->size(1), 3, "A should be square");
 
-  magma_vec_t jobvr = jobvr == 'N' ? MagmaNoVec : MagmaVec;
+  magma_vec_t jobvr = jobvrs == 'N' ? MagmaNoVec : MagmaVec;
   int64_t n = a_->size(0);
 
   scalar_t *a_data = th_magma_malloc_pinned<scalar_t>(n * n);
