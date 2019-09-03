@@ -58,18 +58,16 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
 }
 
 Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
-  Tensor result;
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_broadcast_outnames(self, mask);
+  namedinference::compute_broadcast_outnames(self, mask);
 #endif
   if (mask.dtype() == at::ScalarType::Byte) {
     AT_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
-    result = legacy::cpu::_th_masked_select(self, mask);
+    return legacy::cpu::_th_masked_select(self, mask);
   } else {
-    result = legacy::cpu::_th_masked_select_bool(self, mask);
+    return legacy::cpu::_th_masked_select_bool(self, mask);
   }
-  return result;
 }
 
 Tensor & masked_select_out_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
@@ -77,11 +75,10 @@ Tensor & masked_select_out_cpu(Tensor & result, const Tensor & self, const Tenso
   namedinference::compute_broadcast_outnames(self, mask);
 #endif
   if (mask.dtype() == at::ScalarType::Bool) {
-    legacy::cpu::_th_masked_select_bool_out(result, self, mask);
+    return legacy::cpu::_th_masked_select_bool_out(result, self, mask);
   } else {
-    legacy::cpu::_th_masked_select_out(result, self, mask);
+    return legacy::cpu::_th_masked_select_out(result, self, mask);
   }
-  return result;
 }
 
 Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
