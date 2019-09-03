@@ -37,6 +37,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def_readonly("id", &WorkerId::id_);
 
   auto pyRRef = shared_ptr_class_<PyRRef>(module, "RRef")
+      .def("is_owner",
+           &PyRRef::isOwner,
+           py::call_guard<py::gil_scoped_release>())
       .def("owner",
            &PyRRef::owner,
            py::call_guard<py::gil_scoped_release>())
@@ -51,9 +54,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
              return self.pickle();
            },
            [](py::tuple t) { // __setstate__
-             return PyRRef::unpickle(std::move(t));
-           }),
-           py::call_guard<py::gil_scoped_release>());
+             return PyRRef::unpickle(t);
+           }));
 
   auto rpcAgent = shared_ptr_class_<RpcAgent>(module, "RpcAgent")
       .def("join",

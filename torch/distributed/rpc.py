@@ -146,8 +146,9 @@ def remote(to, func, args=None, kwargs=None):
     else:
         to = _to_worker_id(to)
         set_current_rpc_dst(to)
-        rref = invoke_rpc_python_udf(
+        rref = invoke_remote_python_udf(
             _agent, to, serialize(PythonUDF(func, args, kwargs)))
+
         return rref
 
 

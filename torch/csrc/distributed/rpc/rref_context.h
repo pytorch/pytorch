@@ -107,7 +107,7 @@ class RRefContext {
   void acceptUserRRef(
       const RRefId& rrefId, const ForkId& forkId, worker_id_t user);
 
-  IValue forkTo(std::shared_ptr<RRef>, worker_id_t forkDst);
+  RRefForkData forkTo(std::shared_ptr<RRef>, worker_id_t forkDst);
   void acceptForkRequest(IValue request, worker_id_t forkDst);
   void finishForkRequest(IValue request);
   void finishUserRRef(IValue forkId);

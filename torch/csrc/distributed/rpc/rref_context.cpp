@@ -38,7 +38,7 @@ const std::shared_ptr<RpcAgent>& RRefContext::agent() const {
   return agent_;
 }
 
-IValue RRefContext::forkTo(std::shared_ptr<RRef> rref, worker_id_t forkDst) {
+RRefForkData RRefContext::forkTo(std::shared_ptr<RRef> rref, worker_id_t forkDst) {
   auto forkRequest = rref->fork();
   if (rref->owner() != forkDst) {
     // if fork destination if not owner, the forked UserRRef needs to be tracked
@@ -60,7 +60,7 @@ IValue RRefContext::forkTo(std::shared_ptr<RRef> rref, worker_id_t forkDst) {
       );
     }
   }
-  return forkRequest.toIValue();
+  return forkRequest;
 }
 
 void RRefContext::acceptUserRRef(

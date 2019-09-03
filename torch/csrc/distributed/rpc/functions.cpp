@@ -100,8 +100,7 @@ Message processRequestBlocking(Message&& request) {
       }
 
       auto pickledPythonUDF = py::bytes(prc.udf());
-      py::object result = PythonRpcHandler::runPythonUDF(pickledPythonUDF);
-      ownerRRef->setValue(std::move(result));
+      ownerRRef->setValue(PythonRpcHandler::runPythonUDF(pickledPythonUDF));
       return Message();
     }
     case MessageType::RREF_FETCH: {

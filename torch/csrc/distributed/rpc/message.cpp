@@ -65,6 +65,7 @@ bool Message::isRequest() const {
       || MessageType::PYTHON_CALL == type_
       || MessageType::PYTHON_REMOTE_CALL == type_
       || MessageType::REMOTE_CALL == type_
+      || MessageType::PYTHON_RREF_FETCH == type_
       || MessageType::RREF_FETCH == type_
       || MessageType::RREF_USER_DELETE == type_
       || MessageType::RREF_FORK_NOTIFY == type_;
@@ -73,6 +74,7 @@ bool Message::isRequest() const {
 bool Message::requiresResponse() const {
   return MessageType::SCRIPT_CALL == type_
       || MessageType::PYTHON_CALL == type_
+      || MessageType::PYTHON_RREF_FETCH == type_
       || MessageType::RREF_FETCH == type_;
 }
 

@@ -12,11 +12,12 @@ class PyRRef {
  public:
   PyRRef(std::shared_ptr<RRef> rref);
 
+  bool isOwner() const;
   worker_id_t owner() const;
   py::object toHere();
   py::object localValue();
   py::tuple pickle() const;
-  static PyRRef unpickle(py::tuple t);
+  static PyRRef unpickle(const py::tuple& t);
   static void setCurrentDst(worker_id_t dst) {
     currentDst = dst;
   }

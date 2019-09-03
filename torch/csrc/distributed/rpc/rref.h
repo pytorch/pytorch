@@ -30,6 +30,10 @@ class UserRRef;
 // done within ``RRef`` and ``RRefContext``.
 struct RRefForkData {
   at::IValue toIValue() const;
+
+  const worker_id_t ownerId_;
+  const RRefId rrefId_;
+  const ForkId forkId_;
  private:
   friend class RRef;
   friend class RRefContext;
@@ -41,10 +45,6 @@ struct RRefForkData {
                const ForkId& forkId_);
 
   static RRefForkData fromIValue(at::IValue&&);
-
-  const worker_id_t ownerId_;
-  const RRefId rrefId_;
-  const ForkId forkId_;
 };
 
 // TODO: make RRef an IValue, and edit createStackForSchema accordingly
