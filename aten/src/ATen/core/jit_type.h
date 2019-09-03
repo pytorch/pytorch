@@ -72,7 +72,7 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
 
   // subtyping relation. By default, we return true for the case
   // when the type is exactly equal or if this <: T where rhs = Optional[T]
-  
+
   // if this returns false and the why_not stream is non-null, it contains
   // additional details that describe why this is not a subtype of 'rhs'.
   // This additional information should only contain details that are not obvious
@@ -312,8 +312,8 @@ struct CAFFE2_API VaryingShape {
     return dims.size();
   }
 
-  const c10::optional<ListOfOptionalInts>& sizes() const { 
-    return dims_; 
+  const c10::optional<ListOfOptionalInts>& sizes() const {
+    return dims_;
   }
 
   VaryingShape merge(const VaryingShape& other) const;
@@ -586,16 +586,16 @@ struct CAFFE2_API TensorType : public Type {
     }
     return strides;
   }
-  
+
   c10::optional<at::ScalarType> scalar_type_;
   c10::optional<at::Device> device_;
   VaryingShape sizes_;
   VaryingStrides strides_;
   c10::optional<bool> requires_grad_;
-  // we exploit the fact certain tensors must be zero in the autograd to 
+  // we exploit the fact certain tensors must be zero in the autograd to
   // optimize gradient computation. If true, this means that this tensor
   // must only contain zeros. Normally this will be nullopt, meaning
-  // the tensor may or may not contain only zeros. If false, 
+  // the tensor may or may not contain only zeros. If false,
   // this means the tensor must have some non-zero elements.
   c10::optional<bool> autograd_zero_;
 };
@@ -612,7 +612,7 @@ struct CAFFE2_API ListType
     return ListTypePtr(
         new ListType(std::forward<T>(all)...)); // NOLINT(modernize-make-shared)
   }
-  
+
   std::string str() const override {
     std::stringstream ss;
     ss << getElementType()->str() << "[]";
@@ -782,7 +782,7 @@ struct CAFFE2_API TupleType : public NamedType {
         std::move(name),
         std::move(schema))); // NOLINT(modernize-make-shared)
   }
-  
+
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
   }
@@ -1472,7 +1472,6 @@ using ::torch::jit::Function;
 // Interfaces are a list of abstract methods that a class might meet.
 // If a class provides those methods, it implicitly meets the interface.
 struct CAFFE2_API InterfaceType : public NamedType {
-  friend struct ClassType; // for isSubclassOf
   static InterfaceTypePtr create(
       QualifiedName qualifiedName);
 
@@ -1490,7 +1489,7 @@ struct CAFFE2_API InterfaceType : public NamedType {
   std::string python_str() const override {
     return name()->qualifiedName();
   }
-  
+
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
 
   // try to find a method of this interface,
@@ -1505,7 +1504,7 @@ struct CAFFE2_API InterfaceType : public NamedType {
  private:
   InterfaceType(QualifiedName name);
 
-  // shared_ptr so that this header does not have to depend on 
+  // shared_ptr so that this header does not have to depend on
   // FunctionSchema.h
   std::shared_ptr<std::vector<FunctionSchema>> methods_;
 };
