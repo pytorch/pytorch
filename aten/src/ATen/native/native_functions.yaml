@@ -3847,6 +3847,8 @@
   dispatch:
     CPU: legacy::cpu::_th_index_select
     CUDA: legacy::cuda::_th_index_select
+    SparseCPU: index_select_sparse
+    SparseCUDA: index_select_sparse
 
 - func: masked_select.out(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
