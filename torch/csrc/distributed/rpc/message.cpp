@@ -63,6 +63,7 @@ const MessageType& Message::type() const {
 bool Message::isRequest() const {
   return MessageType::SCRIPT_CALL == type_
       || MessageType::PYTHON_CALL == type_
+      || MessageType::PYTHON_REMOTE_CALL == type_
       || MessageType::REMOTE_CALL == type_
       || MessageType::RREF_FETCH == type_
       || MessageType::RREF_USER_DELETE == type_

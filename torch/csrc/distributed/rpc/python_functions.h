@@ -1,16 +1,8 @@
 #pragma once
 
 #include <torch/csrc/distributed/rpc/future_message.h>
-#include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref_context.h>
-#include <torch/csrc/distributed/rpc/rref.h>
-#include <torch/csrc/distributed/rpc/script_call.h>
-#include <torch/csrc/distributed/rpc/script_remote_call.h>
-#include <torch/csrc/distributed/rpc/script_ret.h>
-#include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -37,6 +29,11 @@ PyRRef py_remote_builtin(
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs);
+
+PyRRef py_remote_python_udf(
+    RpcAgent& agent,
+    const WorkerId& dst,
+    const std::string& pickledPythonUDF);
 
 } // namespace rpc
 } // namespace distributed

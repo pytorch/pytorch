@@ -12,7 +12,10 @@ namespace PythonRpcHandler {
 // defined function (UDF) will run there
 void init();
 // execute python UDF, result is pickled to binary string
-std::vector<char> generatePythonUDFResult(const Message& request);
+std::vector<char> generatePythonUDFResult(const py::bytes& pickledPythonUDF);
+py::object runPythonUDF(const py::bytes& pickledPythonUDF);
+std::string serialize(py::object obj);
+py::object deserialize(const std::string& serializedObj);
 // returned python UDF result is pickled binary string, so run python
 // function to unpickle the python UDF result and return pyObject to user
 py::object loadPythonUDFResult(const Message& message);

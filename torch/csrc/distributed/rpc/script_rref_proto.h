@@ -36,6 +36,15 @@ class TORCH_API ScriptRRefFetch final : public ScriptRRefBase {
   static ScriptRRefFetch fromMessage(const Message& message);
 };
 
+class TORCH_API PythonRRefFetch final : public ScriptRRefBase {
+ public:
+  PythonRRefFetch(at::IValue rrefForkData)
+      : ScriptRRefBase(std::move(rrefForkData),
+                       MessageType::PYTHON_RREF_FETCH) {}
+
+  static PythonRRefFetch fromMessage(const Message& message);
+};
+
 // OwnerRRef uses this message to send the RRef value to a remote UserRRef
 class TORCH_API ScriptRRefValue final : public ScriptRRefBase {
  public:

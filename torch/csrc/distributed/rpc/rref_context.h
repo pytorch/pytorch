@@ -27,12 +27,42 @@ class RRefContext {
 
   // create a new RRef
   template <typename T>
-  std::shared_ptr<RRef> createRRef(worker_id_t ownerId) {
-    if (ownerId == getWorkerId()) {
-      return getOrCreateOwnerRRef<T>(genRRefId());
-    } else {
-      return createUserRRef<T>(ownerId, genRRefId(), genRRefId());
+  std::shared_ptr<OwnerRRef<T>> createOwnerRRef(worker_id_t ownerId) {
+    TORCH_CHECK(ownerId == getWorkerId(), "Cannot create OwnerRRef on user.");
+    return getOrCreateOwnerRRef<T>(genRRefId());
+  }
+
+  template <typename T>
+  std::shared_ptr<UserRRef<T>> createUserRRef(worker_id_t ownerId) {
+    TORCH_CHECK(ownerId != getWorkerId(), "Cannot create UserRRef on owner.");
+    return createUserRRef<T>(ownerId, genRRefId(), genRRefId());
+  }
+
+  template <typename T>
+  std::shared_ptr<UserRRef<T>> createUserRRef(
+      worker_id_t ownerId, RRefId rrefId, ForkId forkId) {
+    TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
+    // RRefContext does not track user RRefs, it will be destructed when there is
+    // no shared_ptrs pointing to it.
+    // NB: cannot use make_shared here as the constructor of UserRRef is private
+    auto userRRef =
+        std::shared_ptr<UserRRef<T>>(new UserRRef<T>(ownerId, rrefId, forkId));
+
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      TORCH_CHECK(pendingUsers_.find(forkId) == pendingUsers_.end(),
+          "Inconsistent state, attempt to create the same UserRRef twice.")
+
+      auto iter = pendingAcceptedUsers_.find(forkId);
+      if (iter == pendingAcceptedUsers_.end()) {
+        // UserRRef created before receiving RREF_USER_ACCEPT message
+        pendingUsers_[forkId] = userRRef;
+      } else {
+        // RREF_USER_ACCEPT arrives before UserRRef is created, remove it
+        pendingAcceptedUsers_.erase(iter);
+      }
     }
+    return userRRef;
   }
 
   // get an existing RRef or create a new one from a serialized
@@ -54,35 +84,7 @@ class RRefContext {
   }
 
   template <typename T>
-  std::shared_ptr<RRef> createUserRRef(
-      worker_id_t ownerId, RRefId rrefId, ForkId forkId) {
-    TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
-    // RRefContext does not track user RRefs, it will be destructed when there is
-    // no shared_ptrs pointing to it.
-    // NB: cannot use make_shared here as the constructor of UserRRef is private
-    auto userRRef =
-        std::shared_ptr<UserRRef>(new UserRRef(ownerId, rrefId, forkId));
-
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      TORCH_CHECK(pendingUsers_.find(forkId) == pendingUsers_.end(),
-          "Inconsistent state, attempt to create the same UserRRef twice.")
-
-      auto iter = pendingAcceptedUsers_.find(forkId);
-      if (iter == pendingAcceptedUsers_.end()) {
-        // UserRRef created before receiving RREF_USER_ACCEPT message
-        pendingUsers_[forkId] = userRRef;
-      } else {
-        // RREF_USER_ACCEPT arrives before UserRRef is created, remove it
-        pendingAcceptedUsers_.erase(iter);
-      }
-    }
-    return std::move(userRRef);
-  }
-
-  template <typename T>
-  std::shared_ptr<RRef> getOrCreateOwnerRRef(RRefId rrefId) {
-
+  std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(RRefId rrefId) {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto iter = owners_.find(rrefId);
     if (iter == owners_.end()) {
@@ -98,7 +100,7 @@ class RRefContext {
 
     } else {
       // Scenario (3) retrieving an existing RRef
-      return iter->second;;
+      return std::dynamic_pointer_cast<OwnerRRef<T>>(iter->second);
     }
   }
 
@@ -140,7 +142,7 @@ class RRefContext {
   //     A message of type RREF_USER_ACCEPT will remove the corresponding RRef
   //     from this map.
   std::unordered_map<ForkId,
-                     std::shared_ptr<UserRRef>,
+                     std::shared_ptr<RRef>,
                      ForkId::Hash> pendingUsers_;
 
   // (2) A UserRRef has pending fork requests that are not accepted by the owner
@@ -153,7 +155,7 @@ class RRefContext {
   //     by the owner before previous RREF_FORK_NOTIFY messages, which would
   //     mess up RRef reference counts.
   std::unordered_map<ForkId,
-                     std::shared_ptr<UserRRef>,
+                     std::shared_ptr<RRef>,
                      ForkId::Hash> pendingForkRequests_;
 
   // RREF_USER_ACCEPT message arrives before the UserRRef was created. This may

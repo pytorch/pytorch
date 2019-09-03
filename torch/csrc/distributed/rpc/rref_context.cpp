@@ -51,8 +51,7 @@ IValue RRefContext::forkTo(std::shared_ptr<RRef> rref, worker_id_t forkDst) {
       // accepted by the owner
       {
         std::lock_guard<std::mutex> lock(mutex_);
-        pendingForkRequests_[forkRequest.forkId_] =
-            std::dynamic_pointer_cast<UserRRef>(rref);
+        pendingForkRequests_[forkRequest.forkId_] = rref;
       }
       // notify owner
       agent_->send(

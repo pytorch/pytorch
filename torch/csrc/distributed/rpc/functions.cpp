@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/rpc/functions.h>
 
 #include <torch/csrc/distributed/rpc/future_message.h>
+#include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref.h>
@@ -48,7 +49,10 @@ Message processRequestBlocking(Message&& request) {
     }
     case MessageType::PYTHON_CALL: {
       try {
-        auto payload = PythonRpcHandler::generatePythonUDFResult(request);
+        auto pickledPythonUDF =
+            py::bytes(request.payload().data(), request.payload().size());
+        auto payload =
+            PythonRpcHandler::generatePythonUDFResult(pickledPythonUDF);
         return Message(
             std::move(payload),
             std::vector<torch::Tensor>(),
@@ -72,7 +76,7 @@ Message processRequestBlocking(Message&& request) {
         ctx->acceptUserRRef(rrefId, forkId, rrefId.createdOn_);
       }
 
-      // make this asynchronous
+      // TODO: make this asynchronous
       auto stack = src.stack();
       src.op()->getOperation()(stack);
       AT_ASSERT(stack.size() == 1, "Return value of a builtin operator or a "
@@ -82,14 +86,44 @@ Message processRequestBlocking(Message&& request) {
       ownerRRef->setValue(std::move(stack.front()));
       return Message();
     }
+    case MessageType::PYTHON_REMOTE_CALL: {
+      PythonRemoteCall prc = PythonRemoteCall::fromMessage(request);
+
+      auto rrefId = RRefId::fromIValue(prc.retRRefId());
+      auto forkId = ForkId::fromIValue(prc.retForkId());
+      auto& ctx = RRefContext::getInstance();
+
+      auto ownerRRef = ctx->getOrCreateOwnerRRef<py::object>(std::move(rrefId));
+
+      if (forkId != rrefId) {
+        ctx->acceptUserRRef(rrefId, forkId, rrefId.createdOn_);
+      }
+
+      auto pickledPythonUDF = py::bytes(prc.udf());
+      py::object result = PythonRpcHandler::runPythonUDF(pickledPythonUDF);
+      ownerRRef->setValue(std::move(result));
+      return Message();
+    }
     case MessageType::RREF_FETCH: {
       ScriptRRefFetch srf = ScriptRRefFetch::fromMessage(request);
       // TODO: make this asynchronous
-      std::shared_ptr<RRef> rref =
+      std::shared_ptr<OwnerRRef<IValue>> rref =
           RRefContext::getInstance()->getOrCreateOwnerRRef<IValue>(
               RRefId::fromIValue(srf.value())
           );
       auto response = ScriptRRefValue(rref->getValue()).toMessage();
+      response.setId(request.id());
+      return response;
+    }
+    case MessageType::PYTHON_RREF_FETCH: {
+      PythonRRefFetch srf = PythonRRefFetch::fromMessage(request);
+      // TODO: make this asynchronous
+      std::shared_ptr<OwnerRRef<py::object>> rref =
+          RRefContext::getInstance()->getOrCreateOwnerRRef<py::object>(
+              RRefId::fromIValue(srf.value())
+          );
+      auto response = ScriptRRefValue(
+          PythonRpcHandler::serialize(rref->getValue())).toMessage();
       response.setId(request.id());
       return response;
     }

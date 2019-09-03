@@ -43,6 +43,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def("to_here",
            &PyRRef::toHere,
            py::call_guard<py::gil_scoped_release>())
+      .def("local_value",
+           &PyRRef::localValue,
+           py::call_guard<py::gil_scoped_release>())
       .def(py::pickle(
            [](const PyRRef &self) { // __getstate__
              return self.pickle();
@@ -100,6 +103,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
     RRefContext::initInstance(std::move(agent));
   });
 
+  module.def("set_current_rpc_dst", [](const WorkerId& dst) {
+    PyRRef::setCurrentDst(dst.id_);
+  });
+
   module.def("invoke_rpc_builtin", [](
       RpcAgent& agent,
       const WorkerId& dst,
@@ -125,6 +132,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
       const WorkerId& dst,
       const std::string& pickledPythonUDF) {
     return py_rpc_python_udf(agent, dst, pickledPythonUDF);
+  });
+
+  module.def("invoke_remote_python_udf", [](
+      RpcAgent& agent,
+      const WorkerId& dst,
+      const std::string& pickledPythonUDF) {
+    return py_remote_python_udf(agent, dst, pickledPythonUDF);
   });
 
   Py_RETURN_TRUE;

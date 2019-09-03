@@ -53,6 +53,7 @@ libtorch_sources = [
     "torch/csrc/distributed/autograd/context/dist_autograd_context.cpp",
     "torch/csrc/distributed/rpc/future_message.cpp",
     "torch/csrc/distributed/rpc/message.cpp",
+    "torch/csrc/distributed/rpc/python_remote_call.cpp",
     "torch/csrc/distributed/rpc/script_call.cpp",
     "torch/csrc/distributed/rpc/script_remote_call.cpp",
     "torch/csrc/distributed/rpc/script_rref_proto.cpp",

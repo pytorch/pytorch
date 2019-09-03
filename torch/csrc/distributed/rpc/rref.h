@@ -4,6 +4,8 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/types.h>
+#include <torch/csrc/utils/pybind.h>
+
 
 #include <atomic>
 
@@ -14,6 +16,7 @@ namespace rpc {
 
 class RRef;
 class RRefContext;
+template <typename T>
 class UserRRef;
 
 // Represents fork of an RRef to be sent over the wire.
@@ -30,6 +33,7 @@ struct RRefForkData {
  private:
   friend class RRef;
   friend class RRefContext;
+  template <typename T>
   friend class UserRRef;
 
   RRefForkData(worker_id_t ownerId,
@@ -57,9 +61,7 @@ class RRef {
   const RRefId& id() const;
 
   virtual bool isOwner() const = 0;
-  virtual void setValue(IValue&& value) = 0;
-  virtual IValue getValue() const = 0;
-  virtual IValue toHere() = 0;
+  virtual bool isPyObj() = 0;
 
  protected:
   friend class RRefContext;
@@ -72,13 +74,17 @@ class RRef {
   const RRefId rrefId_;
 };
 
+template <typename T>
 class UserRRef final: public RRef {
  public:
   const ForkId& forkId() const;
   bool isOwner() const override;
-  IValue getValue() const override;
-  void setValue(IValue&& value) override;
-  IValue toHere() override;
+
+  bool isPyObj() override {
+    return std::is_same<T, py::object>::value;
+  }
+
+  T toHere();
 
   ~UserRRef() override;
  private:
@@ -98,31 +104,23 @@ class OwnerRRef final: public RRef {
     return true;
   }
 
-  IValue getValue() const override {
-    if(std::is_same<T, IValue>::value) {
-      // TODO: use callback to make this non-blocking
-      std::unique_lock<std::mutex> lock(mutex_);
-      valueCV_.wait(lock, [this]{return value_.has_value();});
-      return value_.value();
-    } else {
-      AT_ERROR("Trying to store an IValue in incompatible RRef[T].");
-    }
+  T getValue() const {
+    // TODO: use callback to make this non-blocking
+    std::unique_lock<std::mutex> lock(mutex_);
+    valueCV_.wait(lock, [this]{return value_.has_value();});
+    return value_.value();
   }
 
-  void setValue(IValue&& value) override {
-    if(std::is_same<T, IValue>::value) {
-      {
-        std::lock_guard<std::mutex> lock(mutex_);
-        value_ = std::move(value);
-      }
-      valueCV_.notify_all();
-    } else {
-      AT_ERROR("Trying to store an IValue in incompatible RRef[T].");
+  void setValue(T&& value) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      value_ = std::move(value);
     }
+    valueCV_.notify_all();
   }
 
-  IValue toHere() override {
-    AT_ERROR("OwnerRRef does not support toHere(), use getValue() instead.");
+  bool isPyObj() override {
+    return std::is_same<T, py::object>::value;
   }
 
   // TODO: add setValue(py::object) and getPyObj() for Python UDF

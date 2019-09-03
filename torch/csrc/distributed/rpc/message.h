@@ -13,7 +13,9 @@ enum MessageType {
   PYTHON_CALL,
   PYTHON_RET,
   REMOTE_CALL,      // A remote call
+  PYTHON_REMOTE_CALL,
   RREF_FETCH,       // A UserRRef uses this message to fetch value from owner
+  PYTHON_RREF_FETCH,
   RREF_VALUE,       // An OwnerRRef uses this message to send value to user
   RREF_USER_ACCEPT, // An OwnerRRef uses this message to accept any user
   RREF_USER_DELETE, // A UserRRef uses this message to deref on owner

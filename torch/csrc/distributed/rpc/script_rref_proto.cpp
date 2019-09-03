@@ -40,6 +40,10 @@ ScriptRRefFetch ScriptRRefFetch::fromMessage(const Message& message) {
   return ScriptRRefFetch(ScriptRRefBase::fromMessage(message));
 }
 
+PythonRRefFetch PythonRRefFetch::fromMessage(const Message& message) {
+  return PythonRRefFetch(ScriptRRefBase::fromMessage(message));
+}
+
 ScriptRRefValue ScriptRRefValue::fromMessage(const Message& message) {
   return ScriptRRefValue(ScriptRRefBase::fromMessage(message));
 }
