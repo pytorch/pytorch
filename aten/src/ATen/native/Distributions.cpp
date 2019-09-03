@@ -307,10 +307,10 @@ Tensor multinomial_cpu(const Tensor& self, int64_t n_sample, bool with_replaceme
 
 Tensor& multinomial_out_cpu(Tensor& result, const Tensor& self, int64_t n_sample, bool with_replacement, Generator *gen) {
   auto device1 = result.type().device_type();
-  auto device2 = prob_dist.type().device_type();
+  auto device2 = self.type().device_type();
   TORCH_CHECK(device1 == device2, "output and input must have the same device type. output: ", device1, " input: ", device2);
   TORCH_CHECK(!result.is_cuda() || result.get_device() == self.get_device(), "device of output (", result.get_device(),
-      ") must match device of input (", input.get_device(), ")");
+      ") must match device of input (", self.get_device(), ")");
   TORCH_CHECK(self.dim() > 0 && self.dim() <= 2, "prob_dist must be 1 or 2 dim");
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
       "multinomial only supports floating-point dtypes for input, got: ", self.scalar_type());
