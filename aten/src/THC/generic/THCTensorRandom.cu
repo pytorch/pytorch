@@ -46,7 +46,6 @@ void THCTensor_(multinomial)(struct THCState *state,
   int64_t numCategoriesLong =
     inputSize == 1 ? THCTensor_(sizeLegacyNoScalars)(state, prob_dist, 0) :
     THCTensor_(sizeLegacyNoScalars)(state, prob_dist, 1);
-  
   int numCategories = (int) numCategoriesLong;
 
   int free_prob_dist = 0;
