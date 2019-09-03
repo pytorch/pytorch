@@ -1,7 +1,7 @@
 import sys
 import torch
 import torch._C as _C
-from torch.namedtensor import _update_names
+from torch.namedtensor import _update_names, _check_serializing_named_tensor
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -37,6 +37,7 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
+        _check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         if self.is_quantized:
