@@ -426,34 +426,32 @@ def _process_test_params(test_params_dict, module_metadata, device):
     desc = test_params_dict.get('desc', None)
     module_variant_name = test_params_dict.get('fullname', module_name + (('_' + desc) if desc else ''))
     module_variant_name += ('_' + device) if device != 'cpu' else ''
+    python_module_class = getattr(torch.nn, module_name)
 
-    input_size = test_params_dict.get('input_size', None)
-    input_fn = test_params_dict.get('input_fn', None)
-    input_value = test_params_dict.get('input', None)
-    if input_size is not None:
-        example_inputs = [torch.randn(input_size)]
-    elif input_fn:
-        example_inputs = input_fn()
-        if type(example_inputs) == tuple:
-            example_inputs = list(example_inputs)
-        elif type(example_inputs) == torch.Tensor:
-            example_inputs = [example_inputs]
-        else:
-            raise RuntimeError("Unexpected input type: {}".format(type(example_inputs)))
-    elif input_value:
-        example_inputs = [input_value]
-    else:
+    test_params_dict['constructor'] = test_params_dict.get('constructor', python_module_class)
+    test = common_nn.TestBase(**test_params_dict)
+    try:
+        example_inputs = test._get_input()
+    except:
         raise RuntimeError("Missing `input_size`, `input_fn` or `input` for {}".format(module_variant_name))
+
+    if type(example_inputs) == tuple:
+        example_inputs = list(example_inputs)
+    elif type(example_inputs) == torch.Tensor:
+        example_inputs = [example_inputs]
+    else:
+        raise RuntimeError("Unexpected input type: {}".format(type(example_inputs)))
+
     if device != 'cuda' or TEST_CUDA:
         example_inputs = [x.to(device) for x in example_inputs]
     return TorchNNTestParams(
         module_name=module_name,
         module_variant_name=module_variant_name,
-        python_constructor_args=test_params_dict.get('constructor_args'),
+        python_constructor_args=test.constructor_args,
         cpp_constructor_args=test_params_dict.get('cpp_constructor_args'),
         example_inputs=example_inputs,
         has_parity=test_params_dict.get('has_parity', True),
-        python_module_class=getattr(torch.nn, module_name),
+        python_module_class=python_module_class,
         cpp_sources=module_metadata.cpp_sources,
         num_attrs_recursive=module_metadata.num_attrs_recursive,
         device=device,
@@ -486,7 +484,8 @@ for test_params_dict in all_module_tests:
 
     assert hasattr(torch.nn, module_name), \
         "`torch.nn` doesn't have module `{}`. ".format(module_name) + \
-        "If you are adding a new test, please name your test following format `ModuleName_desc`."
+        "If you are adding a new test, please set `fullname` using format `ModuleName_desc`, " + \
+        "or set `module_name` using format `ModuleName`."
 
     module_full_name = 'torch.nn.' + module_name
     if module_full_name not in parity_table['torch.nn']:
