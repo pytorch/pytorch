@@ -4059,13 +4059,13 @@
 
 - func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_multinomial_out
+    CPU: multinomial_out_cpu
     CUDA: legacy::cuda::_th_multinomial_out
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_multinomial
+    CPU: multinomial_cpu
     CUDA: legacy::cuda::_th_multinomial
 
 - func: _multinomial_alias_setup(Tensor probs) -> (Tensor, Tensor)
