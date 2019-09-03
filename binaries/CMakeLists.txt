@@ -1,8 +1,8 @@
-caffe2_binary_target("convert_caffe_image_db.cc")
-caffe2_binary_target("convert_db.cc")
-caffe2_binary_target("make_cifar_db.cc")
-caffe2_binary_target("make_mnist_db.cc")
 if (NOT ANDROID)
+  caffe2_binary_target("convert_caffe_image_db.cc")
+  caffe2_binary_target("convert_db.cc")
+  caffe2_binary_target("make_cifar_db.cc")
+  caffe2_binary_target("make_mnist_db.cc")
   caffe2_binary_target("parallel_info.cc")
   target_include_directories(parallel_info PUBLIC
     ${CMAKE_BINARY_DIR}/aten/src) # provides "ATen/TypeExtendedInterface.h" to ATen.h
@@ -15,7 +15,9 @@ if (NOT ANDROID)
   target_include_directories(at_launch_benchmark PUBLIC
     ${CMAKE_BINARY_DIR}/aten/src)
 endif()
-caffe2_binary_target("predictor_verifier.cc")
+if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
+  caffe2_binary_target("predictor_verifier.cc")
+endif()
 caffe2_binary_target("print_registered_core_operators.cc")
 caffe2_binary_target("run_plan.cc")
 caffe2_binary_target("speed_benchmark.cc")
@@ -23,6 +25,9 @@ caffe2_binary_target("split_db.cc")
 
 caffe2_binary_target("db_throughput.cc")
 
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
+  caffe2_binary_target("speed_benchmark_torch.cc")
+endif()
 
 if (BUILD_TEST AND NOT ANDROID)
   # Core overhead benchmark

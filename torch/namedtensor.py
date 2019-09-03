@@ -14,6 +14,13 @@ def _assert_namedtensor_build(api_name):
                            'of our named tensors project.'.format(api_name))
 
 
+def _check_serializing_named_tensor(tensor):
+    if torch._C._BUILD_NAMEDTENSOR and tensor.has_names():
+        raise RuntimeError(
+            "NYI: Named tensors don't support serialization. Please drop "
+            "names before serialization and/or serialize them seperately.")
+
+
 def _build_dim_map(tensor):
     """Returns a map of { dim: dim_name } where dim is a name if the dim is named
     and the dim index otherwise."""

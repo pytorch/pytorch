@@ -49,7 +49,7 @@
 #     'output_differentiability' entry (see above).
 #
 #   - Any of the input arguments, tensor or non-tensor, including
-#     argument names that only appear in Declarations.cwrap, e.g. 'output'.
+#     argument names that only appear in Declarations.yaml, e.g. 'output'.
 #
 #   - 'result', representing the result of evaluating the forward
 #     expression for ATen native function declarations. If the forward
@@ -92,7 +92,7 @@
 # OpName.apply to see if it's still using a legacy Python style API.
 #
 # NB: The parameter names here MUST be consistent with the parameter names
-# in ./torch/lib/ATen/Declarations.cwrap
+# in Decalarations.yaml
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sign()
 

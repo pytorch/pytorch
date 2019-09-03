@@ -92,6 +92,16 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   return static_cast<T>(qvalue);
 }
 
+template <typename T, int precision>
+void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, size_t count) {
+  fbgemm::Quantize<typename T::underlying>(
+    src,
+    (typename T::underlying*)dst,
+    count,
+    fbgemm::TensorQuantizationParams{(float)scale, (int32_t)zero_point, precision}
+  );
+}
+
 // TODO: dequantize_val?
 
 template <typename T>
@@ -120,7 +130,6 @@ inline float dequantize_val(double scale, int64_t zero_point, T value) {
     .zero_point = static_cast<int32_t>(zero_point)
   };
   return fbgemm::Dequantize<typename T::underlying>(value.val_, qparams);
-
 }
 
 template <typename T>
@@ -160,6 +169,13 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   qvalue = std::max<int64_t>(qvalue, qmin);
   qvalue = std::min<int64_t>(qvalue, qmax);
   return static_cast<T>(qvalue);
+}
+
+template <typename T, int precision>
+void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, size_t count) {
+  for (int64_t i = 0; i < count; ++i) {
+    dst[i] = quantize_val<T>(scale, zero_point, src[i]);
+  }
 }
 
 template <typename T>
@@ -209,6 +225,9 @@ DST_T requantize_val(double src_scale, int64_t src_zero_point,
 template CAFFE2_API qint8 quantize_val<qint8>(double scale, int64_t zero_point, float value);
 template CAFFE2_API quint8 quantize_val<quint8>(double scale, int64_t zero_point, float value);
 template CAFFE2_API qint32 quantize_val<qint32>(double scale, int64_t zero_point, float value);
+template CAFFE2_API void quantize_vec<c10::qint8>(double scale, int64_t zero_point, const float *src, c10::qint8 *dst, size_t count);
+template CAFFE2_API void quantize_vec<c10::quint8>(double scale, int64_t zero_point, const float *src, c10::quint8 *dst, size_t count);
+template CAFFE2_API void quantize_vec<c10::qint32, 32>(double scale, int64_t zero_point, const float *src, c10::qint32 *dst, size_t count);
 template CAFFE2_API Tensor quantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 template CAFFE2_API Tensor quantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 template CAFFE2_API Tensor quantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);

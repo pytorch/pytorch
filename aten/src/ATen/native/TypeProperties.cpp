@@ -46,7 +46,7 @@ bool _has_compatible_shallow_copy_type(const Tensor& self, const Tensor& from) {
 }
 
 Tensor type_as(const Tensor& self, const Tensor& other) {
-  return self.toType(other.type());
+  return self.to(other.options());
 }
 
 }} // namespace at::native

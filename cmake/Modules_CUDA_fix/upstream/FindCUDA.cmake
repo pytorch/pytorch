@@ -1632,6 +1632,11 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         set(verbose_output ON)
       elseif(CMAKE_GENERATOR MATCHES "Makefiles")
         set(verbose_output "$(VERBOSE)")
+      # This condition lets us also turn on verbose output when someone
+      # specifies CMAKE_VERBOSE_MAKEFILE, even if the generator isn't
+      # the Makefiles generator (this is important for us, Ninja users.)
+      elseif(CMAKE_VERBOSE_MAKEFILE)
+        set(verbose_output ON)
       else()
         set(verbose_output OFF)
       endif()
