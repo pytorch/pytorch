@@ -92,11 +92,10 @@ std::vector<char> SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
                                        srs->serialize(range.range)};
     ivalues.emplace_back(c10::ivalue::Tuple::create(std::move(row_elems)));
   }
-  std::vector<at::Tensor> table;
   auto ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
-  auto result = jit::pickle(ivalue, &table);
-  TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
-  return result;
+  auto result = jit::pickle(ivalue);
+  TORCH_INTERNAL_ASSERT(result.second.size() == 0);
+  return result.first;
 }
 
 

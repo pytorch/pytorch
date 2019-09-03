@@ -19,8 +19,15 @@ const at::IValue& ScriptRet::value() {
 }
 
 Message ScriptRet::toMessage() {
-  std::vector<torch::Tensor> tensor_table;
-  auto payload = jit::pickle(value_, &tensor_table);;
+  std::vector<char> payload;
+  std::vector<jit::WriteableStorageData> storages;
+
+  std::tie(payload, storages) = jit::pickle(value_);
+
+  std::vector<torch::Tensor> tensor_table = fmap(
+      storages,
+      [](const jit::WriteableStorageData& data) { return data.tensor(); });
+
   return Message(std::move(payload),
                  std::move(tensor_table),
                  MessageType::SCRIPT_RET);

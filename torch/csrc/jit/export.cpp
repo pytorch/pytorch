@@ -642,23 +642,18 @@ class ScriptModuleSerializer2 {
 
  private:
   void writeArchive(const std::string& archive_name, const IValue& value) {
-    // TODO: use torch::save API
     std::vector<char> data;
-    std::vector<at::Tensor> tensors;
-    Pickler data_pickle(
-        [&](const char* buf, size_t size) {
-          data.insert(data.end(), buf, buf + size);
-        },
-        &tensors);
-    data_pickle.protocol();
-    data_pickle.pushIValue(value);
-    data_pickle.stop();
-    size_t i = 0;
-    for (const auto& td : data_pickle.tensorData()) {
+    std::vector<WriteableStorageData> storages;
+    std::tie(data, storages) = pickle(value);
+
+    // Write a separate file for each of the unique storages in `value`
+    for (const auto& storage : storages) {
       std::stringstream fname;
-      fname << archive_name << "/" << i++;
-      writer_.writeRecord(fname.str(), td.data(), td.sizeInBytes());
+      fname << archive_name << "/" << storage.key();
+      writer_.writeRecord(fname.str(), storage.data(), storage.sizeInBytes());
     }
+
+    // Write the pickle file
     std::stringstream fname;
     fname << archive_name << ".pkl";
     writer_.writeRecord(fname.str(), data.data(), data.size());
@@ -979,8 +974,9 @@ void ScriptModuleSerializer::convertAndWriteTensor(
   auto* key = tensor.storage().unsafeGetStorageImpl();
   auto storage_it = storageMap.find(key);
   if (storage_it == storageMap.end()) {
-    WriteableTensorData data = getWriteableTensorData(tensor);
-    std::string name = "tensors/" + std::to_string(tensor_id);
+    auto name_key = std::to_string(tensor_id);
+    auto data = getWriteableStorageData(name_key, tensor);
+    std::string name = "tensors/" + name_key;
     writer_.writeRecord(name, data.data(), data.sizeInBytes());
     storage_it = storageMap.insert({key, name}).first;
   }
@@ -1006,8 +1002,12 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
 void ScriptModuleSerializer::writePickleArchive(
     const std::string& name,
     const std::vector<IValue>& ivalues) {
-  auto data = pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table_);
-  writer_.writeRecord(name, data.data(), data.size(), /*compress=*/true);
+  auto data = pickle(c10::ivalue::Tuple::create(ivalues));
+  for (auto storage : data.second) {
+    tensor_table_.push_back(storage.tensor());
+  }
+  writer_.writeRecord(
+      name, data.first.data(), data.second.size(), /*compress=*/true);
 }
 
 void ScriptModuleSerializer::convertModule(

@@ -22,16 +22,18 @@ const std::vector<at::IValue>& ScriptCall::stack() const {
 
 Message ScriptCall::toMessage() {
 
-  std::vector<IValue> ivalues;
+  // std::vector<IValue> ivalues;
+  // c10::impl::GenericList list(c10::impl::deprecatedUntypedList());
+  c10::List<IValue> list = c10::impl::GenericList(c10::impl::deprecatedUntypedList());
   for (auto& value: stack_) {
-    ivalues.push_back(value);
+    list.push_back(value);
   }
   if (op_) {
     // builtin ops
 
     // TODO: replace this with a real overload_name when FunctionSchema supports
     // that.
-    ivalues.emplace_back(toString((*op_)->schema()));
+    list.emplace_back(toString((*op_)->schema()));
     // insert qualified name
     auto opName = (*op_)->schema().name();
     TORCH_CHECK(opName.find("::") == opName.rfind("::") &&
@@ -39,12 +41,17 @@ Message ScriptCall::toMessage() {
                 "Unexpected operator name ", opName);
     // aten::add -> torch.ops.aten.add
     opName.replace(0, ATEN_PREFIX_.length(), BUILTIN_OP_NAMESPACE_);
-    ivalues.emplace_back(std::move(opName));
+    list.emplace_back(std::move(opName));
   }
 
-  std::vector<torch::Tensor> tensor_table;
-  auto payload =
-      jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
+  std::vector<char> payload;
+  std::vector<jit::WriteableStorageData> storages;
+
+  std::tie(payload, storages) = jit::pickle(list);
+
+  std::vector<torch::Tensor> tensor_table = fmap(
+      storages,
+      [](const jit::WriteableStorageData& data) { return data.tensor(); });
 
   return Message(std::move(payload),
                  std::move(tensor_table),
