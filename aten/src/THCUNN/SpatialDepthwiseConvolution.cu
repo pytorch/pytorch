@@ -42,16 +42,19 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
     const int padWidth, const int padHeight,
     const int dilationWidth, const int dilationHeight)
 {
+  const int KW_LIMIT = (kSize !=0) ? kSize : kernelWidth;
+  const int KH_LIMIT = (kSize !=0) ? kSize : kernelHeight;
+
   const int inputChannels = outputChannels / depthwiseMultiplier;
 
-  for (IndexType thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-       thread_id < totalElements;
-       thread_id += gridDim.x * blockDim.x) {
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalElements;
+       linearIndex += gridDim.x * blockDim.x) {
 
-    const int out_col = thread_id % outputWidth;
-    const int out_row = (thread_id / outputWidth) % outputHeight;
-    const int out_channel = (thread_id / outputWidth / outputHeight) % outputChannels;
-    const int batch = thread_id / outputWidth / outputHeight / outputChannels;
+    const int out_col = linearIndex % outputWidth;
+    const int out_row = (linearIndex / outputWidth) % outputHeight;
+    const int out_channel = (linearIndex / outputWidth / outputHeight) % outputChannels;
+    const int batch = linearIndex / outputWidth / outputHeight / outputChannels;
 
     const int in_channel = out_channel / depthwiseMultiplier;
     const int multiplier = out_channel % depthwiseMultiplier;
@@ -64,32 +67,32 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
     const int input_row_end = input_row_start + kernelHeight;
     const int input_col_end = input_col_start + kernelWidth;
 
-    AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[c]) : ScalarConvert<int, AccT>::to(0);
+    AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[out_channel]) : ScalarConvert<int, AccT>::to(0);
     if (input_row_start >= 0 && input_col_start >= 0 &&
         input_row_end < inputHeight && input_col_end < inputWidth) {
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
-      for (int filter_row = 0; filter_row < kernelHeight; ++filter_row) {
+      for (int filter_row = 0; filter_row < KH_LIMIT; ++filter_row) {
         const int in_row = input_row_start + filter_row;
         const int filter_offset_temp = kernelWidth * filter_row;
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
-        for (int filter_col = 0; filter_col < kernelWidth; ++filter_col) {
+        for (int filter_col = 0; filter_col < KW_LIMIT; ++filter_col) {
           const int in_col = input_col_start + filter_col;
 
-          const int input_offset =
+          const int offset =
               (input_offset_temp) + (in_row * inputWidth) + in_col;
-          const int filter_offset =
+          const int weightOffset =
               multiplier +
               depthwiseMultiplier *
                   (in_channel + inputChannels * (filter_col + filter_offset_temp));
           value = THCNumerics<AccT>::add(
             value,
             THCNumerics<AccT>::mul(
-              ScalarConvert<T, AccT>::to(weight.data()[filter_offset]),
-              ScalarConvert<T, AccT>::to(input.data()[input_offset])));
+              ScalarConvert<T, AccT>::to(weight.data()[weightOffset]),
+              ScalarConvert<T, AccT>::to(input.data()[offset])));
         }
       }
     } else {
@@ -109,23 +112,22 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
               in_col < inputWidth) {
             const int in_col = input_col_start + filter_col;
 
-            const int input_offset =
+            const int offset =
                 (input_offset_temp) + (in_row * inputWidth) + in_col;
 
-            const int filter_offset =
+            const int weightOffset =
                 multiplier +
                 depthwiseMultiplier *
                     (in_channel + inputChannels * (filter_col + filter_offset_temp));
             value = THCNumerics<AccT>::add(
               value,
               THCNumerics<AccT>::mul(
-                ScalarConvert<T, AccT>::to(weight.data()[filter_offset]),
-                ScalarConvert<T, AccT>::to(input.data()[input_offset])));
+                ScalarConvert<T, AccT>::to(weight.data()[weightOffset]),
+                ScalarConvert<T, AccT>::to(input.data()[offset])));
           }
         }
       }
     }
-
     output.data()[linearIndex] = ScalarConvert<AccT, T>::to(value);
   }
 }
