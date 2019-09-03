@@ -214,7 +214,10 @@ class TestCppApiParity(common.TestCase):
 The constructor of `torch::nn::{}` in C++ must take the exact same number of non-keyword arguments
 as the constructor of `torch.nn.{}` in Python. However, currently the C++ constructor expects
 {} non-keyword argument(s), while the Python constructor expects {} non-keyword argument(s): {}'''.format(
-            module_name, module_name, len(cpp_default_constructor_arg_values), len(python_default_constructor_arg_names), python_default_constructor_arg_names)
+            module_name, module_name,
+            len(cpp_default_constructor_arg_values),
+            len(python_default_constructor_arg_names),
+            python_default_constructor_arg_names)
 
         cpp_module_option = 'torch::nn::{}Options{}'.format(module_name, cpp_default_constructor_args_str)
         init_kwargs = init_arg_spec.args[-len(init_kwargs_defaults):]
@@ -438,7 +441,7 @@ def _process_test_params(test_params_dict, module_metadata, device):
     test = common_nn.TestBase(**test_params_dict)
     try:
         example_inputs = test._get_input()
-    except:
+    except AssertionError:
         raise RuntimeError("Missing `input_size`, `input_fn` or `input` for {}".format(module_variant_name))
 
     if type(example_inputs) == tuple:
