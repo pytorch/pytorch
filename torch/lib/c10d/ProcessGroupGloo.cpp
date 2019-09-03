@@ -195,7 +195,8 @@ void initializeStreamsEvents(
     for (size_t j = 1; j < tensors[i].size(); j++) {
       if (tensors[i][j].device().index() != device_id) {
         throw std::runtime_error(
-            "tensors in the nested tensor vectors need to be on the same device");
+            "tensors in the nested tensor vectors need to "
+            "be on the same device");
       }
     }
   }
@@ -583,11 +584,11 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
 class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
  public:
   AsyncAllreduceCoalescedWork(
-    const std::shared_ptr<gloo::Context>& context,
-    std::vector<at::Tensor>& inputs,
-    ReduceOp reduceOp,
-    uint32_t tag)
-    : AsyncAllreduceWork(context, inputs, reduceOp, tag) {}
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<at::Tensor>& inputs,
+      ReduceOp reduceOp,
+      uint32_t tag)
+      : AsyncAllreduceWork(context, inputs, reduceOp, tag) {}
 
   void run() override {
     allreduceCoalesced(inputs);
@@ -605,8 +606,8 @@ class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
     for (at::Tensor& tensor : tensors) {
       const int64_t tensorNumel = tensor.numel();
       const c10::IntArrayRef tensorShape = tensor.sizes();
-      tensor.copy_(
-        coalescedTensor.slice(0, offset, offset+tensorNumel).view(tensorShape));
+      tensor.copy_(coalescedTensor.slice(0, offset, offset + tensorNumel)
+                       .view(tensorShape));
       offset += tensorNumel;
     }
   }
@@ -1033,61 +1034,63 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
-  std::vector<at::Tensor>& tensors,
-  const AllreduceCoalescedOptions& opts) {
-    static auto invalidArgument = [](const std::string& msg) {
-      throw std::invalid_argument("ProcessGroupGloo::allreduce_coalesced: " + msg);
-    };
-    assertNonEmpty(invalidArgument, tensors);
+    std::vector<at::Tensor>& tensors,
+    const AllreduceCoalescedOptions& opts) {
+  static auto invalidArgument = [](const std::string& msg) {
+    throw std::invalid_argument(
+        "ProcessGroupGloo::allreduce_coalesced: " + msg);
+  };
+  assertNonEmpty(invalidArgument, tensors);
 
-    // tensors will be flattened and concatenated (coalesced). This means that input
-    // tensors must have the same device, layout and type.
-    assertLayoutMatch(invalidArgument, tensors);
-    if (!std::all_of(tensors.begin(),
-                     tensors.end(),
-                     [&](at::Tensor& t){return t.type() == tensors[0].type();})) {
-      invalidArgument("tensors must all have the same type");
-    }
-    if (!std::all_of(tensors.begin(),
-                     tensors.end(),
-                     [&](at::Tensor& t){return t.device() == tensors[0].device();})) {
-      invalidArgument("tensors must all be on the same device");
-    }
+  // tensors will be flattened and concatenated (coalesced). This means that
+  // input
+  // tensors must have the same device, layout and type.
+  assertLayoutMatch(invalidArgument, tensors);
+  if (!std::all_of(tensors.begin(), tensors.end(), [&](at::Tensor& t) {
+        return t.type() == tensors[0].type();
+      })) {
+    invalidArgument("tensors must all have the same type");
+  }
+  if (!std::all_of(tensors.begin(), tensors.end(), [&](at::Tensor& t) {
+        return t.device() == tensors[0].device();
+      })) {
+    invalidArgument("tensors must all be on the same device");
+  }
 
-    const c10::Device& device = tensors[0].device();
-    const c10::Layout& layout = tensors[0].layout();
+  const c10::Device& device = tensors[0].device();
+  const c10::Layout& layout = tensors[0].layout();
 
-    // invalid arguments are detected early here before any calls to nextTag()
-    // which result in the collectiveCounter_ being incremented.
-    switch (device.type()) {
-      case c10::kCPU:
-        break;
-      default:
-        invalidArgument("unsupported device type");
-    }
+  // invalid arguments are detected early here before any calls to nextTag()
+  // which result in the collectiveCounter_ being incremented.
+  switch (device.type()) {
+    case c10::kCPU:
+      break;
+    default:
+      invalidArgument("unsupported device type");
+  }
 
-    switch (layout) {
-      case c10::kStrided:
-        break;
-      default:
-        invalidArgument("unsupported layout");
-    }
+  switch (layout) {
+    case c10::kStrided:
+      break;
+    default:
+      invalidArgument("unsupported layout");
+  }
 
-    std::shared_ptr<AsyncWork> work;
-    const uint32_t tag = nextTag();
-    std::shared_ptr<gloo::Context> context = getContext(tag);
-    if (device.type() == c10::kCPU) {
-      if (layout == c10::kStrided) {
-        work = std::make_shared<AsyncAllreduceCoalescedWork>(
-            std::move(context), tensors, opts.reduceOp, tag);
-      } else {
-        invalidArgument("unsupported layout");
-      }
+  std::shared_ptr<AsyncWork> work;
+  const uint32_t tag = nextTag();
+  std::shared_ptr<gloo::Context> context = getContext(tag);
+  if (device.type() == c10::kCPU) {
+    if (layout == c10::kStrided) {
+      work = std::make_shared<AsyncAllreduceCoalescedWork>(
+          std::move(context), tensors, opts.reduceOp, tag);
     } else {
-      throw std::runtime_error("Invalid backend");
+      invalidArgument("unsupported layout");
     }
-    enqueue(work);
-    return work;
+  } else {
+    throw std::runtime_error("Invalid backend");
+  }
+  enqueue(work);
+  return work;
 }
 
 namespace {
