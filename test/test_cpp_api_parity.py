@@ -415,6 +415,9 @@ as the constructor of `torch.nn.{}` in Python. However, currently the C++ constr
 def _compute_module_name(test_params_dict):
     fullname = test_params_dict.get('fullname', None)
     if fullname:
+        # NOTE: This doesn't work for some of the `wrap_functional` module tests such as "interpolate_nearest_1d",
+        # because in that case the module `interpolate` is not in `torch.nn` but rather in `torch.nn.functional`.
+        # We will fix this when we have parity tests for `torch.nn.functional` modules.
         module_name = fullname.split('_')[0]
     else:
         module_name = test_params_dict.get('module_name')
