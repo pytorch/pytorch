@@ -296,14 +296,14 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator *gen) {
   return ret;
 }
 
-/* The largest consecutive integer representable in float32 (2^24) */
-#define FLOAT32_MAX_CONSECUTIVE_INT 16777216.0f
-
 Tensor multinomial_cpu(const Tensor& self, int64_t n_sample, bool with_replacement, Generator *gen) {
   Tensor result = at::empty({0}, self.options().dtype(kLong));
   multinomial_out_cpu(result, self, n_sample, with_replacement, gen);
   return result;
 }
+
+/* The largest consecutive integer representable in float32 (2^24) */
+#define FLOAT32_MAX_CONSECUTIVE_INT 16777216.0f
 
 Tensor& multinomial_out_cpu(Tensor& result, const Tensor& self, int64_t n_sample, bool with_replacement, Generator *gen) {
   auto device1 = result.type().device_type();

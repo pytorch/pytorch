@@ -16,6 +16,7 @@ import pickle
 import gzip
 import types
 import textwrap
+import zipfile
 from torch._utils_internal import get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
@@ -1305,7 +1306,7 @@ class _TestTorchMixin(torchtest):
                         check(torch.full((), identity, device=device), fn(x))
                     except TypeError as err:
                         # ignore if there is no allreduce.
-                        self.assertTrue('required positional arguments: "dim"' in str(err))
+                        self.assertTrue('dim' in str(err))
 
             # any
             xb = x.to(torch.uint8)
@@ -8499,6 +8500,20 @@ class _TestTorchMixin(torchtest):
                     idx[tuple(ii)] = torch.randperm(dim_size)[0:elems_per_row]
 
     def test_flatten(self):
+        # Test that flatten returns 1-dim tensor when given a 0-dim tensor
+        zero_dim_tensor = torch.tensor(123)
+        flat0 = zero_dim_tensor.flatten()
+        one_dim_tensor = torch.tensor([123])
+        flat1 = zero_dim_tensor.flatten()
+
+        self.assertEqual(zero_dim_tensor.shape, torch.Size([]))
+        self.assertEqual(flat0.shape, torch.Size([1]))
+        self.assertEqual(one_dim_tensor.shape, torch.Size([1]))
+        self.assertEqual(flat1.shape, torch.Size([1]))
+        self.assertEqual(flat0, one_dim_tensor)
+        self.assertEqual(flat0, flat1)
+        self.assertEqual(flat0.shape, flat1.shape)
+
         # Test both float tensor and quantized tensor
         tensors = [torch.randn(5, 5, 5, 5),
                    torch._empty_affine_quantized([5, 5, 5, 5],
@@ -10602,6 +10617,28 @@ class _TestTorchMixin(torchtest):
             f.seek(0)
             c = torch.load(f)
         self._test_serialization_assert(b, c)
+
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
+    def test_serialization_fake_zip(self):
+        data = [
+            ord('P'),
+            ord('K'),
+            5,
+            6
+        ]
+        for i in range(0, 100):
+            data.append(0)
+        t = torch.tensor(data, dtype=torch.uint8)
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(t, f.name)
+
+            # If this check is False for all Python versions (i.e. the fix
+            # has been backported), this test and torch.serialization._is_zipfile
+            # can be deleted
+            self.assertTrue(zipfile.is_zipfile(f))
+            self.assertFalse(torch.serialization._is_zipfile(f))
+            self.assertEqual(torch.load(f.name), t)
 
     def test_serialization_gzip(self):
         # Test serialization with gzip file

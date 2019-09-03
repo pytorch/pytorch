@@ -55,20 +55,50 @@ Message deserialize(MessageType type, std::istream& is) {
 
 } // namespace
 
+void ProcessGroupAgent::collectNames() {
+  const std::string& workerName = workerId_.name_;
+  const auto worldSize = pg_->getSize();
+
+  // use c10d allgather to collect names
+  torch::Tensor nameTensor =
+      torch::zeros({WorkerId::MAX_NAME_LEN}, torch::kChar);
+  memcpy(nameTensor.storage().data(), workerName.c_str(), workerName.length());
+  std::vector<torch::Tensor> inputName = {nameTensor};
+  std::vector<std::vector<torch::Tensor>> outputNames(1);
+  for (int i = 0; i < worldSize; ++i) {
+    outputNames[0].emplace_back(
+        torch::empty({WorkerId::MAX_NAME_LEN}, {torch::kChar})
+    );
+  }
+  pg_->allgather(outputNames, inputName)->wait();
+
+  // convert collected name tensors into string names
+  for (int i = 0; i < worldSize; ++i) {
+    torch::Tensor& tensor = outputNames[0][i];
+    std::string peerName(
+        (const char*)tensor.storage().data<signed char>()
+    );
+
+    TORCH_CHECK(nameMap_.find(peerName) == nameMap_.end(),
+        "RpcAgent name ", peerName, " is not unique.");
+
+    nameMap_[std::move(peerName)] = i;
+  }
+}
+
 ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
-    std::unordered_map<std::string, int> nameMap,
     std::shared_ptr<c10d::ProcessGroup> pg,
     int numSendRecvThreads)
     : RpcAgent(
           WorkerId(std::move(workerName), pg->getRank()),
           processRequestBlocking
       ),
-      nameMap_(std::move(nameMap)),
       pg_(std::move(pg)),
       nextId_(0),
       sendMutexes_(pg_->getSize()),
       threadPool_(numSendRecvThreads) {
+  collectNames();
   TORCH_CHECK(nameMap_.size() > 1, "ProcessGroupAgent requires world_size to "
       "be at least 2, but got ", nameMap_.size());
   auto workerRankIter = nameMap_.find(workerId_.name_);
@@ -134,8 +164,9 @@ void ProcessGroupAgent::sync() {
   pg_->barrier()->wait();
 }
 
-std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
-    const WorkerId& to, Message&& message) {
+std::shared_ptr<FutureMessage> ProcessGroupAgent::sendImpl(
+    const WorkerId& to,
+    Message&& message) {
   TORCH_CHECK(to.id_ != (worker_id_t)pg_->getRank(),
       "ProcessGroupAgent does not support making RPC calls to self.")
   TORCH_CHECK(to.id_ < (worker_id_t)pg_->getSize(),
