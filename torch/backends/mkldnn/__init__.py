@@ -1,8 +1,7 @@
 import sys
 import torch
-import types
 from contextlib import contextmanager
-
+from torch.backends import ContextProp, PropModule, __allow_nonbracketed_mutation
 
 def is_available():
     r"""Returns whether PyTorch is built with MKL-DNN support."""
@@ -15,33 +14,17 @@ def set_flags(_enabled):
 
 @contextmanager
 def flags(enabled=False):
-    orig_flags = set_flags(enabled)
+    with __allow_nonbracketed_mutation():
+        orig_flags = set_flags(enabled)
     try:
         yield
     finally:
-        set_flags(orig_flags[0])
+        with __allow_nonbracketed_mutation():
+            set_flags(orig_flags[0])
 
-# from cudnn/__init__.py
-#
-#
-class ContextProp(object):
-    def __init__(self, getter, setter):
-        self.getter = getter
-        self.setter = setter
-
-    def __get__(self, obj, objtype):
-        return self.getter()
-
-    def __set__(self, obj, val):
-        self.setter(val)
-
-class MkldnnModule(types.ModuleType):
+class MkldnnModule(PropModule):
     def __init__(self, m, name):
-        super(MkldnnModule, self).__init__(name)
-        self.m = m
-
-    def __getattr__(self, attr):
-        return self.m.__getattribute__(attr)
+        super(MkldnnModule, self).__init__(m, name)
 
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
 

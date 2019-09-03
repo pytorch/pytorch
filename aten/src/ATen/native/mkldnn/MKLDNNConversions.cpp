@@ -28,7 +28,6 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
              "dense_to_mkldnn expects float tensor input");
   AT_ASSERTM(cpu_tensor.dim() <= 5,
              "Can't convert cpu tensor with the number of dimensions > 5");
-  TORCH_CHECK(at::globalContext().userEnabledMkldnn(), "mkldnn backend was disabled by users");
   // TODO: consider to convert non-contiguous tensor to `ideep::tensor` directly.
   auto cpu_tensor_cont = cpu_tensor.contiguous();
   Tensor mkldnn_tensor = empty_mkldnn(cpu_tensor_cont.sizes(), cpu_tensor_cont.options());

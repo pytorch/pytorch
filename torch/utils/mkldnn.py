@@ -150,4 +150,3 @@ def to_mkldnn(module):
         return new_m
 
     return m_fn_rec(module)
-
