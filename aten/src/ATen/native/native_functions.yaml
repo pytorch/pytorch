@@ -1573,7 +1573,7 @@
     CPU: batch_norm_backward_cpu
     CUDA: batch_norm_backward_cuda
 
-- func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
+- func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CUDA: batch_norm_backward_reduce_cuda
 

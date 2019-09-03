@@ -301,12 +301,14 @@ class ModuleAPITest(QuantizationTestCase):
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])), check_save_load=True)
 
-        # Test from_float
+        # Test from_float.
         float_linear = torch.nn.Linear(in_features, out_features).float()
         float_linear.qconfig = torch.quantization.default_qconfig
         torch.quantization.prepare(float_linear)
         float_linear(X.float())
-        quantized_float_linear = torch.quantization.convert(float_linear)
+        # Sequential allows swapping using "convert".
+        quantized_float_linear = torch.nn.Sequential(float_linear)
+        torch.quantization.convert(quantized_float_linear)
 
         # Smoke test to make sure the module actually runs
         quantized_float_linear(X_q)
@@ -493,14 +495,15 @@ class ModuleAPITest(QuantizationTestCase):
         float_conv.qconfig = torch.quantization.default_qconfig
         torch.quantization.prepare(float_conv)
         float_conv(X.float())
-        quantized_float_conv = torch.quantization.convert(float_conv)
+        quantized_float_conv = torch.nn.Sequential(float_conv)
+        torch.quantization.convert(quantized_float_conv)
 
         # Smoke test to make sure the module actually runs
         quantized_float_conv(qX)
         # Check that bias is quantized based on output scale
         if use_bias:
-            qbias = torch.quantize_linear(float_conv.bias, quantized_float_conv.scale / 2**16, 0, torch.qint32)
-            self.assertEqual(quantized_float_conv.bias.dequantize(), qbias.dequantize())
+            qbias = torch.quantize_linear(float_conv.bias, quantized_float_conv[0].scale / 2**16, 0, torch.qint32)
+            self.assertEqual(quantized_float_conv[0].bias.dequantize(), qbias.dequantize())
         # Smoke test extra_repr
         str(quantized_float_conv)
 

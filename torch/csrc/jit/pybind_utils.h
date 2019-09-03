@@ -9,7 +9,10 @@
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
@@ -308,6 +311,14 @@ inline IValue createGenericDict(
   return IValue(std::move(elems));
 }
 
+template <class T>
+inline void guardAgainstNamedTensor(const T& var) {
+#ifdef BUILD_NAMEDTENSOR
+  TORCH_CHECK(!var.has_names(),
+      "NYI: Named tensors are currently unsupported in TorchScript.");
+#endif
+}
+
 inline IValue toIValue(
     py::handle obj,
     const TypePtr& type,
@@ -322,6 +333,7 @@ inline IValue toIValue(
             "include the fact that the network is running sparse tensors in any bug "
             "reports submitted.");
       }
+      guardAgainstNamedTensor<autograd::Variable>(var);
       return var;
     }
     case TypeKind::FloatType:
@@ -544,6 +556,7 @@ inline py::object toPyObject(IValue&& ivalue) {
           "include the fact that the network is running sparse tensors in any bug "
           "reports submitted.");
     }
+    guardAgainstNamedTensor<at::Tensor>(tensor);
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
@@ -749,33 +762,96 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
   return result;
 }
 
-inline py::object invokeScriptFunctionFromPython(
+// Run `callee`, potentially inserting a CallFunction/CallMethod node into the
+// tracing graph.
+inline py::object runAndInsertCall(
     Function& callee,
     tuple_slice args,
     py::kwargs kwargs,
-    c10::optional<IValue> self = c10::nullopt) {
+    c10::optional<IValue> self,
+    // Lambda that tells this function how to insert `callee` into the graph if
+    // we're tracing.
+    std::function<Value*(Graph&, const script::MatchedSchema& match)>
+        callInserter) {
   auto stack = createStackForSchema(
       callee.getSchema(), std::move(args), std::move(kwargs), std::move(self));
-  {
+  auto tracing_state = tracer::getTracingState();
+  if (!tracing_state) {
     AutoNoGIL no_gil_guard;
+    // If we're not tracing, just run the callee as normal.
     callee.run(stack);
+  } else {
+    // If we are tracing, insert the appropriate CallFunction or CallMethod node
+    // and then run the callee with tracing disabled.
+
+    // Get the graph `Value`s that represent the input IValues
+    auto inputs = last(stack, callee.graph()->inputs().size());
+    auto input_values =
+        fmap(inputs, [](const IValue& v) { return tracer::getValueTrace(v); });
+    TORCH_INTERNAL_ASSERT(callee.getSchema().returns().size() == 1)
+    auto return_type = callee.getSchema().returns().at(0).type();
+    auto graph = tracing_state->graph;
+    std::vector<NamedValue> named_values;
+    for (Value* v : input_values) {
+      named_values.emplace_back(v);
+    }
+
+    // Add a call node.
+    script::MatchedSchema match = script::matchSchema(
+        callee.getSchema(),
+        tracer::getPythonInterpreterSourceRange(),
+        *graph,
+        named_values,
+        {});
+    auto output_value = callInserter(*graph, match);
+
+    // Actually run the callee. Pause the tracer so that we don't double-add the
+    // callee nodes.
+    {
+      AutoNoGIL no_gil_guard;
+      ResourceGuard guard(tracer::pauseTracing());
+      callee.run(stack);
+    }
+
+    // Associate the output IValues with the output `Value`s in the graph
+    tracer::setValueTrace(stack.back(), output_value);
   }
+
   TORCH_CHECK(
       stack.size() > 0,
       "Expected values in the stack after execution but found none");
   return toPyObject(std::move(stack.back()));
 }
 
+inline py::object invokeScriptFunctionFromPython(
+    Function& callee,
+    tuple_slice args,
+    py::kwargs kwargs) {
+  return runAndInsertCall(
+      callee,
+      args,
+      kwargs,
+      /*self=*/c10::nullopt,
+      [&](Graph& graph, const script::MatchedSchema& match) {
+        return graph.insertFunctionCall(&callee, match);
+      });
+}
+
 inline py::object invokeScriptMethodFromPython(
     script::Method& callee,
     tuple_slice args,
     py::kwargs kwargs) {
-  return invokeScriptFunctionFromPython(
+  auto self = callee.owner().module_object();
+  return runAndInsertCall(
       callee.function(),
-      std::move(args),
-      std::move(kwargs),
-      callee.owner().module_object());
+      args,
+      kwargs,
+      self,
+      [&](Graph& graph, const script::MatchedSchema& match) {
+        return graph.insertMethodCall(callee.name(), match);
+      });
 }
+
 inline py::object invokeOperatorFromPython(
     const Operator& op,
     py::args args,
