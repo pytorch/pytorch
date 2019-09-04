@@ -27,10 +27,10 @@ class TORCH_API ScriptCall final {
   static ScriptCall fromMessage(const Message& message);
 
  private:
-
   // Given an operator symbol and a string schema, return the matched operator.
   static std::shared_ptr<Operator> matchOperator(
-      at::Symbol& symbol, const std::string& str_schema);
+      at::Symbol& symbol,
+      const std::string& str_schema);
 
   static const std::string BUILTIN_OP_NAMESPACE_;
   static const std::string ATEN_PREFIX_;
@@ -41,6 +41,6 @@ class TORCH_API ScriptCall final {
   const std::vector<at::IValue> stack_;
 };
 
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

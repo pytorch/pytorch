@@ -7,7 +7,6 @@ r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
 
-import hypothesis
 import io
 import torch
 import torch.nn as nn
@@ -180,6 +179,16 @@ class SingleLayerLinearDynamicModel(torch.nn.Module):
 
     def forward(self, x):
         x = self.fc1(x)
+        return x
+
+class LSTMDynamicModel(torch.nn.Module):
+    def __init__(self):
+        super(LSTMDynamicModel, self).__init__()
+        self.qconfig = default_qconfig
+        self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.lstm(x)
         return x
 
 class TwoLayerLinearModel(torch.nn.Module):
