@@ -80,13 +80,10 @@ def pool_output_shape(input_size, kernel_size, padding, stride,
 class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the quantized::relu op."""
-    @given(qparams=hu.qparams())
-    def test_qrelu(self, qparams):
-        X = np.array([[-3, -2, 1, 2],
-                      [0, 0, 0, 0],
-                      [-5, -4, -3, -2],
-                      [1, 2, 3, 4]], dtype=np.float32)
-        scale, zero_point, torch_type = qparams
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qrelu(self, X):
+        X, (scale, zero_point, torch_type) = X
 
         Y = X.copy()
         Y[Y < 0] = 0
