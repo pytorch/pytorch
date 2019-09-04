@@ -12,6 +12,13 @@ void* ATenOpTable::getFallbackOp(TensorTypeId tid) const {
   // and then redispatch gain (automatic delegation).  I haven't done this
   // for now to make it easier to smoke out error cases.
   if (function_table_[static_cast<int64_t>(TensorTypeId::UndefinedTensorId)] == nullptr) {
+    // If there is no fallback dispatch, and dispatch failed because we didn't
+    // find any valid keys to dispatch on, this usually means the user gave
+    // us a non-empty list of tensors.  So report a better error in this case.
+    // TODO: Maybe we should reword this error message
+    if (tid == TensorTypeId::UndefinedTensorId) {
+      TORCH_CHECK(false, "expected a non-empty list of Tensors")
+    }
     std::ostringstream oss;
     bool first = true;
     for (int64_t i = 0; i < static_cast<int64_t>(TensorTypeId::NumTensorIds); i++) {
