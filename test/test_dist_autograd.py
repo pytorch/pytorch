@@ -5,7 +5,9 @@ import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 from common_distributed import MultiProcessTestCase
 from functools import wraps
+import six
 import unittest
+import torch
 
 if not dist.is_available():
     print("c10d not available, skipping tests")
@@ -30,9 +32,13 @@ def dist_init(func):
 
     return wrapper
 
-@unittest.skipIf(sys.version_info < (3, 0), "Pytorch distributed autograd package "
+@unittest.skipIf(not six.PY3, "Pytorch distributed autograd package "
                  "does not support python2")
 class TestDistAutograd(MultiProcessTestCase):
+
+    @property
+    def world_size(self):
+        return 4
 
     @dist_init
     def test_autograd_context(self):
@@ -47,6 +53,64 @@ class TestDistAutograd(MultiProcessTestCase):
         for context_id in context_ids:
             with self.assertRaisesRegex(RuntimeError, 'Could not find autograd context with id: {}'.format(context_id)):
                 dist_autograd._retrieve_context(context_id)
+
+    @dist_init
+    def test_autograd_send_function(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=True)
+            t2 = torch.zeros(3, 3, requires_grad=True)
+            ret = dist.rpc('worker{}'.format(dst_rank), torch.add,
+                           args=(t1, t2))
+
+            # Get send function.
+            ctx = dist_autograd._current_context()
+            self.assertEqual(context_id, ctx._context_id())
+            send_functions = ctx._send_functions()
+            self.assertEqual(1, len(send_functions))
+
+            # Retrieve the next functions in the graph.
+            next_funcs = send_functions[0].next_functions
+            self.assertEqual(2, len(next_funcs))
+
+            # We should now hit t1 and t2 in the autograd graph.
+            self.assertEqual('torch::autograd::AccumulateGrad', next_funcs[0][0].name())
+            self.assertEqual(t1, next_funcs[0][0].variable)
+            self.assertEqual(0, next_funcs[0][1])
+            self.assertEqual('torch::autograd::AccumulateGrad', next_funcs[1][0].name())
+            self.assertEqual(t2, next_funcs[1][0].variable)
+            self.assertEqual(0, next_funcs[1][1])
+
+        # autograd context should be cleaned up by now.
+        with self.assertRaises(RuntimeError):
+            ctx = dist_autograd._retrieve_context(context_id)
+
+        # No autograd context available.
+        with self.assertRaises(RuntimeError):
+            ctx = dist_autograd._current_context()
+
+    @dist_init
+    def test_rpc_complex_args(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            num_tensors = 10
+            tensors = []
+            for i in range(num_tensors):
+                tensors.append(torch.ones(3, 3, requires_grad=(i % 2 == 0)))
+            ret = dist.rpc('worker{}'.format(dst_rank), torch.stack,
+                           args=(tensors,))
+            self.assertEqual(torch.stack(tensors), ret)
+
+            # Verify appropriate tensors have been attached the autograd graph.
+            next_funcs = dist_autograd._current_context()._send_functions()[0].next_functions
+            idx = 0
+            for i in range(num_tensors):
+                if i % 2 == 0:
+                    self.assertEqual('torch::autograd::AccumulateGrad', next_funcs[i][0].name())
+                    self.assertEqual(tensors[i], next_funcs[i][0].variable)
+                else:
+                    self.assertIsNone(next_funcs[i][0])
+
 
 if __name__ == '__main__':
     unittest.main()
