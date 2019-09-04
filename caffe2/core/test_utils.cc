@@ -13,6 +13,17 @@ void assertTensorEqualsWithType(
     CAFFE_ENFORCE_EQ(tensor1.data<T>()[idx], tensor2.data<T>()[idx]);
   }
 }
+
+template <>
+void assertTensorEqualsWithType<float>(
+    const caffe2::TensorCPU& tensor1,
+    const caffe2::TensorCPU& tensor2) {
+  CAFFE_ENFORCE_EQ(tensor1.sizes(), tensor2.sizes());
+  for (auto idx = 0; idx < tensor1.numel(); ++idx) {
+    CAFFE_ENFORCE_LT(
+        fabs(tensor1.data<float>()[idx] - tensor2.data<float>()[idx]), 1e-6);
+  }
+}
 } // namespace
 
 namespace caffe2 {

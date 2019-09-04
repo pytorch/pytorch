@@ -20,7 +20,6 @@ TH_API void THTensor_(normal_means_stddevs)(THTensor *self, THTensor *means, THT
 TH_API void THTensor_(exponential)(THTensor *self, double lambda, at::Generator *_generator);
 TH_API void THTensor_(cauchy)(THTensor *self, double median, double sigma, at::Generator *_generator);
 TH_API void THTensor_(logNormal)(THTensor *self, double mean, double stdv, at::Generator *_generator);
-TH_API void THTensor_(multinomial)(THLongTensor *self, THTensor *prob_dist, int n_sample, int with_replacement, at::Generator *_generator);
 TH_API void THTensor_(multinomialAliasSetup)(THTensor *prob_dist, THLongTensor *J, THTensor *q);
 TH_API void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTensor *J, int n_sample, at::Generator *_generator);
 #endif

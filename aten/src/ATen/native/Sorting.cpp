@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
+#include <ATen/NamedTensorUtils.h>
 
 namespace at {
 namespace native {
@@ -223,6 +224,26 @@ std::tuple<Tensor, Tensor> median(
   at::median_out(values, indices, self, dim, keepdim);
   return std::make_tuple(values, indices);
 }
+
+#ifdef BUILD_NAMEDTENSOR
+std::tuple<Tensor&, Tensor&> median_out(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    Dimname dim,
+    bool keepdim) {
+  TORCH_CHECK(false, "NYI: median with names");
+  return at::median_out(values, indices, self, dimname_to_position(self, dim), keepdim);
+}
+
+std::tuple<Tensor, Tensor> median(
+    const Tensor& self,
+    Dimname dim,
+    bool keepdim) {
+  TORCH_CHECK(false, "NYI: median with names");
+  return at::median(self, dimname_to_position(self, dim), keepdim);
+}
+#endif
 
 // this does not reduce to median with dim beause we don't want to copy twice
 Tensor median_cpu(const Tensor& self) {
