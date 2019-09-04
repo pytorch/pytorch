@@ -27,7 +27,8 @@ install_ubuntu() {
                    cxlactivitylogger \
                    hipsparse \
                    rocrand \
-                   hip-thrust \
+                   hipcub \
+                   rocthrust \
                    rccl
 }
 
@@ -59,7 +60,8 @@ install_centos() {
                    hipsparse \
                    rocrand \
                    rccl \
-                   hip-thrust
+                   hipcub \
+                   rocthrust
 }
  
 # Install Python packages depending on the base OS
