@@ -3,6 +3,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
+#include <c10/util/Exception.h>
 
 // Just for C10_ANONYMOUS_VARIABLE
 #include <c10/util/Registry.h>
@@ -10,6 +11,34 @@
 #include <atomic>
 
 namespace c10 {
+
+/**
+ * Flags defining the behavior of events.
+ *
+ * PYTORCH_DEFAULT and BACKEND_DEFAULT are valid for all backends. The
+ * BACKEND_DEFAULT is what a particular backend would select if no
+ * flags were given. PYTORCH_DEFAULT is the PyTorch's framework default
+ * choice for events on that backend, which may not be the same. For example,
+ * when PyTorch creates a CUDA event it sets the flag
+ * CUDA_EVENT_DISABLING_TIMING by default to improve performance.
+ *
+ * The mapping of PYTORCH_DEFAULT and BACKEND_DEFAULT is done by each
+ * backend implementation. Backend-specific flags, like CUDA_EVENT_DEFAULT,
+ * should map one-to-one with actual event flags for those backends.
+ */
+enum class EventFlag {
+    PYTORCH_DEFAULT,
+    BACKEND_DEFAULT,
+    // CUDA flags
+    CUDA_EVENT_DEFAULT,
+    CUDA_EVENT_DISABLE_TIMING, // PyTorch-default for CUDA
+    // HIP flags
+    HIP_EVENT_DEFAULT,
+    HIP_EVENT_DISABLE_TIMING, // PyTorch-default for HIP
+    // FOR TESTING ONLY
+    INVALID
+};
+
 namespace impl {
 
 /**
@@ -79,6 +108,51 @@ struct C10_API DeviceGuardImplInterface {
    * to set the current device to match the device of this stream.
    */
   virtual Stream exchangeStream(Stream) const noexcept = 0;
+
+/**
+ * Destroys the given event.
+ */
+  virtual void destroyEvent (
+    void* event,
+    const DeviceIndex device_index) const noexcept { }
+
+/**
+ * Increments the event's version and enqueues a job with this version
+ * in the stream's work queue. When the stream process that job
+ * it nofifies all streams waiting on / blocked by that version of the
+ * event to continue and marks that version as recorded.
+ * */
+  virtual void record(
+    void** event,
+    const Stream& stream,
+    const DeviceIndex device_index,
+    const c10::EventFlag flag) const {
+    TORCH_CHECK(false, "Backend doesn't support events.");
+  }
+
+/**
+ * Does nothing if the event has not been scheduled to be recorded.
+ * If the event was previously enqueued to be recorded, a command
+ * to wait for the version of the event that exists at the time of this call
+ * is inserted in the stream's work queue.
+ * When the stream reaches this command it will stop processing
+ * additional commands until that version of the event is marked as recorded.
+ */
+  virtual void block(
+    void* event,
+    const Stream& stream) const {
+    TORCH_CHECK(false, "Backend doesn't support events.");
+  }
+
+/**
+ * Returns true if (and only if)
+ *  (1) the event has never been scheduled to be recorded
+ *  (2) the current version is marked as recorded.
+ * Returns false otherwise.
+ */
+  virtual bool queryEvent(void* event) const {
+    TORCH_CHECK(false, "Backend doesn't support events.");
+  }
 
   /**
    * Get the number of devices.  WARNING: This is REQUIRED to not raise
