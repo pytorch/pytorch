@@ -503,6 +503,13 @@ Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Sc
   }
 }
 
+Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, const Tensor& dense, const Scalar& alpha) {
+  AT_ASSERT(sparse_.is_sparse());
+  auto sparse = sparse_.coalesce();
+  Tensor grad_sparse = maybe_multiply(grad.mm(dense.t()), alpha);
+  return grad_sparse.sparse_mask(sparse);
+}
+
 Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, const Tensor & mat1, const Scalar & alpha) {
   // if input was column-major, return grad as column-order for efficiency
   if (mat2.is_sparse()) {
@@ -524,27 +531,17 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef si
   // if input was column-major, return grad as column-order for efficiency
   if (strides[0] == 1 && strides[1] == sizes[0]) {
     if (mat1.is_sparse()) {
-      // Since mm(dense, sparse) doesn't exist,
-      // pass a transposed output matrix to the underlying "addmm"
-      // function directly.
       int64_t out_rows = mat1.size(1);
       int64_t out_cols = grad.size(1);
       Tensor t = at::zeros({}, grad.options()).expand({out_rows, out_cols}, true);
       Tensor r = at::empty({out_cols, out_rows}, grad.options()).t();
-      at::s_native_addmm_out(r, t, mat1.t(), grad, alpha, 1);
+      at::addmm_out(r, t, mat1.t(), grad, alpha, 1);
       return r;
     }
     return maybe_multiply(grad.t().mm(mat1).t(), alpha);
   } else {
     return maybe_multiply(mat1.t().mm(grad), alpha);
   }
-}
-
-Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, const Tensor& dense, const Scalar& alpha) {
-  AT_ASSERT(sparse_.is_sparse());
-  auto sparse = sparse_.coalesce();
-  Tensor grad_sparse = maybe_multiply(grad.mm(dense.t()), alpha);
-  return grad_sparse.sparse_mask(sparse);
 }
 
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
