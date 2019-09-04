@@ -207,18 +207,6 @@ def discover_zero_dim_tensor_operations(declaration):
                     # print("SHARED "+names[i])
 
 
-def discover_sparse_tensor_operations(declaration):
-    def exclude(arg):
-        return arg.get('ignore_check')
-
-    def signature(option, i=None, value=None):
-        elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
-                    if i is None or j != i else value
-                    for j, arg in enumerate(option['arguments'])
-                    if not exclude(arg)]
-        return '#'.join(elements)
-
-
 def is_extended_method(option):
     if 'method' in option['variants']:
         return False
@@ -241,7 +229,6 @@ def run(declarations):
         common_with_cwrap.sort_by_number_of_options(declaration)
 
         discover_zero_dim_tensor_operations(declaration)
-        discover_sparse_tensor_operations(declaration)
 
         for option in declaration['options']:
             set_mode(option)

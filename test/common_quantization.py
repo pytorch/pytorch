@@ -191,6 +191,16 @@ class SingleLayerLinearDynamicModel(torch.nn.Module):
         x = self.fc1(x)
         return x
 
+class LSTMDynamicModel(torch.nn.Module):
+    def __init__(self):
+        super(LSTMDynamicModel, self).__init__()
+        self.qconfig = default_qconfig
+        self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.lstm(x)
+        return x
+
 class TwoLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super(TwoLayerLinearModel, self).__init__()
