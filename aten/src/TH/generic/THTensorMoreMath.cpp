@@ -327,7 +327,7 @@ void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension)
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
-void THTensor_(baddbmm)(THTensor *result, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha)
+void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
 {
   int64_t batch;
 
