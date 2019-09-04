@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/passes/fuse_linear.h>
 
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/irparser.h>
@@ -668,7 +669,11 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {
-  std::string pattern = R"(
+  // First fuse aten::linear op
+  FuseLinear(graph);
+  const std::unordered_map<std::string, std::string> pattern_and_replacements = {
+    // quantized::conv2d
+    {R"(
 graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
         %a_intrepr = aten::int_repr(%a_quant)
         %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
@@ -678,9 +683,8 @@ graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale,
         %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b_dequant, %c, %d, %e, %f)
         %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_quant))";
-
-  std::string replacement = R"(
+        return (%r_quant))",
+     R"(
 graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %0 : int = prim::Constant[value=0]()
         %1 : int = prim::Constant[value=1]()
@@ -693,10 +697,39 @@ graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale,
         %r = quantized::fbgemm_conv2d(%a_perm, %w_packed, %b_quant, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
         %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
         %r_perm = aten::permute(%r, %out_param)
-        return (%r_perm))";
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(pattern, replacement);
-  rewriter.runOnGraph(graph);
+        return (%r_perm))"},
+    // quantized::linear
+    {R"(
+graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype):
+        %a_intrepr = aten::int_repr(%a_quant)
+        %a_dequant = aten::_dequantize_linear(%a_intrepr, %a_scale, %a_zero_point, %a_dtype)
+        %w_intrepr = aten::int_repr(%w_quant)
+        %w_dequant = aten::_dequantize_linear(%w_intrepr, %w_scale, %w_zero_point, %w_dtype)
+        %b_intrepr = aten::int_repr(%b_quant)
+        %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
+        %r = aten::linear(%a_dequant, %w_dequant, %b_dequant)
+        %r_quant = aten::quantize_linear(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant))",
+    R"(
+graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype):
+        %0 : int = prim::Constant[value=0]()
+        %1 : int = prim::Constant[value=1]()
+        %2 : int = prim::Constant[value=2]()
+        %3 : int = prim::Constant[value=3]()
+        %in_param : int[] = prim::ListConstruct(%0, %2, %3, %1)
+        %a_perm : Tensor = aten::permute(%a_quant, %in_param)
+        %w_perm : Tensor = aten::permute(%w_quant, %in_param)
+        %w_packed = quantized::fbgemm_linear_prepack(%w_perm)
+        %r = quantized::fbgemm_linear(%a_perm, %w_packed, %b_quant, %r_scale, %r_zero_point)
+        %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
+        %r_perm = aten::permute(%r, %out_param)
+        return (%r_perm))"}
+  };
+  for (const auto& item: pattern_and_replacements) {
+    SubgraphRewriter rewriter;
+    rewriter.RegisterRewritePattern(item.first, item.second);
+    rewriter.runOnGraph(graph);
+  }
 }
 
 struct ConvBNParameters {
