@@ -7,6 +7,7 @@
 #include <c10/util/Exception.h>
 #include <ATen/native/cpu/TensorCompareKernel.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/NamedTensorUtils.h>
 
 namespace {
 template <typename scalar_t>
@@ -235,5 +236,28 @@ Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
     return std::get<1>(self.min(dim.value(), keepdim));
   return std::get<1>(self.reshape({-1}).min(/*dim=*/0));
 }
+
+#ifdef BUILD_NAMEDTENSOR
+// Named tensor overloads
+
+std::tuple<Tensor, Tensor> min(const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: min with names");
+  return at::min(self, dimname_to_position(self, dim), keepdim);
+}
+std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
+                                      const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: min with names");
+  return at::min_out(min, min_indices, self, dimname_to_position(self, dim), keepdim);
+}
+std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: max with names");
+  return at::max(self, dimname_to_position(self, dim), keepdim);
+}
+std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
+                                      const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: max with names");
+  return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
+}
+#endif
 
 }} // namespace at::native

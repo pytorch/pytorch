@@ -1,5 +1,7 @@
+#ifndef C10_MOBILE
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
+#endif // C10_MOBILE
 
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
@@ -94,6 +96,7 @@ class ScriptModuleDeserializer final {
 };
 
 script::Module ScriptModuleDeserializer::LEGACY_deserialize() {
+#ifndef C10_MOBILE
   torch::ModelDef model_def;
 
   at::DataPtr data_ptr;
@@ -142,6 +145,9 @@ script::Module ScriptModuleDeserializer::LEGACY_deserialize() {
   LEGACY_moduleStack_.push_back("__torch__");
   const auto& module_def = model_def.main_module();
   return LEGACY_convertModule(module_def);
+#else
+  AT_ERROR("Legacy model.json is not supported on mobile.");
+#endif // C10_MOBILE
 }
 
 IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
