@@ -88,7 +88,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
         /*col_offsets=*/col_offsets.data(),
         /*qtype=*/qtype);
 
-    at::Tensor bias_contig;
+    c10::optional<at::Tensor> bias_contig;
     if (bias.has_value()) {
       Tensor bias_vec = bias.value();
       TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
@@ -117,7 +117,8 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     return cpp_custom_type_hack::create(std::move(ret_ptr), weight.options());
   }
 #else // USE_FBGEMM
-  at::Tensor operator()(at::Tensor /* weight */,
+  at::Tensor operator()(
+      at::Tensor /* weight */,
       c10::optional<Tensor> /* bias */
   ) {
     // We make a strong guarantee that models using these operators will have

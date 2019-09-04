@@ -115,7 +115,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
         qlinear.set_weight_bias(W_q, B)
 
         # Simple round-trip test to ensure weight()/set_weight() API
-        self.assertEqual(qlinear.weight(), W_q)
+        self.assertEqual(qlinear.weight()[0], W_q)
         W_pack = qlinear._packed_weight
         qlinear.bias = B if use_bias else None
         Z_dq = qlinear(X)
@@ -143,7 +143,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
         self.assertEqual(linear_unpack(qlinear._packed_weight),
                          linear_unpack(loaded_qlinear._packed_weight))
         if use_bias:
-            self.assertEqual(qlinear.bias, loaded_qlinear.bias)
+            self.assertEqual(qlinear.weight()[1], loaded_qlinear.weight()[1])
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
         self.assertTrue(hasattr(qlinear, '_packed_weight'))
         self.assertTrue(hasattr(loaded_qlinear, '_packed_weight'))
@@ -236,7 +236,7 @@ class ModuleAPITest(QuantizationTestCase):
 
         qlinear.set_weight_bias(W_q, B_q)
         # Simple round-trip test to ensure weight()/set_weight() API
-        self.assertEqual(qlinear.weight(), W_q)
+        self.assertEqual(qlinear.weight()[0], W_q)
         W_pack = qlinear._packed_weight
         qlinear.bias = B_q if use_bias else None
 
@@ -273,7 +273,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(linear_unpack(qlinear._packed_weight),
                          linear_unpack(loaded_qlinear._packed_weight))
         if use_bias:
-            self.assertEqual(qlinear.bias, loaded_qlinear.bias)
+            self.assertEqual(qlinear.weight()[1], loaded_qlinear.weight()[1])
         self.assertEqual(qlinear.scale, loaded_qlinear.scale)
         self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))

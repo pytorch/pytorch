@@ -882,7 +882,7 @@ class TestQuantizedLinear(unittest.TestCase):
         # Weight prepacking operator for quantized Linear
         W_prepack = qlinear_prepack(W_q)
         # Weight unpack operator for quantized Linear (Used for serialization)
-        W_q_origin = qlinear_unpack(W_prepack)
+        W_q_origin = qlinear_unpack(W_prepack)[0]
 
         # Assert equal
         np.testing.assert_equal(W_q.int_repr(), W_q_origin.int_repr().numpy())

@@ -106,22 +106,30 @@ class QLinearInt8 final : public torch::OperatorKernel {
     // This is the end of the pipeline, pass the resulting matrix through.
     fbgemm::DoNothing<> doNothingObj{};
 
-    at::Tensor bias = pack_ptr.bias;
-
     const int32_t* bias_ptr = nullptr;
-
-    if (bias.defined()) {
+    at::Tensor qbias;
+    if (pack_ptr.bias.has_value()) {
+      at::Tensor bias = pack_ptr.bias.value();
       // Temporary: Quantize bias
-      at::Tensor qbias = bias;
-      if (!bias.is_quantized()) {
+      qbias = bias;
+      if (pack_ptr.q_scheme == kPerTensorAffine) {
         qbias = at::quantize_linear(
-            bias, pack_ptr.w_scale[0] * input_scale_float, 0, kQInt32);
+            at::dequantize(bias),
+            pack_ptr.w_scale[0] * input_scale_float,
+            0,
+            kQInt32);
+      } else if (pack_ptr.q_scheme == kPerChannelAffine) {
+        std::vector<int64_t> vect(1, 0);
+        IntArrayRef axis(vect.data(), 1);
+        at::Tensor bias_scale = at::ones({N}, at::dtype(at::kDouble));
+        at::Tensor bias_zp = at::zeros({N}, at::dtype(at::kLong));
+        for (int i = 0; i < N; ++i) {
+          bias_scale.data_ptr<double>()[i] =
+              pack_ptr.w_scale[i] * input_scale_float;
+        }
+        qbias = quantize_linear_per_channel_cpu(
+            at::dequantize(bias), bias_scale, bias_zp, axis, kQInt32);
       }
-      // FIXME Adding this causes ASAN issues in unit tests.
-      // else {
-      //   qbias = at::quantize_linear(
-      //       at::dequantize(bias), pack_ptr.w_scale[0] * input_scale_float, 0, kQInt32);
-      // }
       TORCH_CHECK(qbias.dim() == 1, "bias should be a vector (1D Tensor)");
       TORCH_CHECK(
           qbias.size(0) == N,
@@ -208,7 +216,6 @@ class QLinearInt8 final : public torch::OperatorKernel {
           /*thread_id=*/0,
           /*num_threads=*/1);
     }
-
     return output;
   }
 #else // USE_FBGEMM

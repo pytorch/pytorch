@@ -140,18 +140,20 @@ class Linear(torch.nn.Module):
     # from the QTensor weight.
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(Linear, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'weight'] = self.weight()
+        (w, b) = self.weight()
+        destination[prefix + 'weight'] = w
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
-        destination[prefix + 'bias'] = self.bias
+        destination[prefix + 'bias'] = b
 
     @torch.jit.export
     def __getstate__(self):
+        (w, b) = self.weight()
         return (
             self.in_features,
             self.out_features,
-            self.bias,
-            self.weight(),
+            b,
+            w,
             self.scale,
             self.zero_point
         )
@@ -163,6 +165,7 @@ class Linear(torch.nn.Module):
                               missing_keys, unexpected_keys, error_msgs):
         self.set_weight_bias(state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
         state_dict.pop(prefix + 'weight')
+        state_dict.pop(prefix + 'bias')
 
         self.scale = float(state_dict[prefix + 'scale'])
         state_dict.pop(prefix + 'scale')

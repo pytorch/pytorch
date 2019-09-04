@@ -17,7 +17,7 @@
 // Note that in JIT mode we can think of a way to fuse col_offsets with bias.
 struct FBGEMM_API PackedLinearWeight {
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
-  at::Tensor bias;
+  c10::optional<at::Tensor> bias;
   std::vector<int32_t> col_offsets;
   std::vector<float> w_scale;
   std::vector<int32_t> w_zp;
