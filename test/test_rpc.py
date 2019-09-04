@@ -398,4 +398,4 @@ class RpcTest(MultiProcessTestCase):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()
