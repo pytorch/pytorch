@@ -28,6 +28,7 @@ caffe2_binary_target("predictor_verifier.cc")
 caffe2_binary_target("print_registered_core_operators.cc")
 caffe2_binary_target("run_plan.cc")
 caffe2_binary_target("speed_benchmark.cc")
+caffe2_binary_target("speed_benchmark_torch.cc")
 caffe2_binary_target("split_db.cc")
 
 caffe2_binary_target("db_throughput.cc")
