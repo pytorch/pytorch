@@ -776,6 +776,37 @@ class TestNamedTensor(TestCase):
             (create('0'), create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C')),
             expected_names=[None])
 
+    def test_cat(self):
+        # simple
+        self._test_name_inference(
+            torch.cat,
+            [[create('N:2,C:3'), create('N:2,C:3')]],
+            expected_names=['N', 'C'])
+
+        # error: zero dim
+        self._test_name_inference(
+            torch.cat,
+            [[create(''), create('')]],
+            maybe_raises_regex='zero-dim')
+
+        # error: names don't match
+        self._test_name_inference(
+            torch.cat,
+            [[create('N:2,C:3'), create('C:3,N:2')]],
+            maybe_raises_regex='do not match')
+
+        # error: different number of dims
+        self._test_name_inference(
+            torch.cat,
+            [[create('N:2,C:3'), create('C:3')]],
+            maybe_raises_regex='must have same number of dimensions')
+
+        # out=
+        self._test_name_inference(
+            out_fn(torch.cat),
+            [create('0'), [create('N:2,C:3'), create('N:2,C:3')]],
+            expected_names=['N', 'C'])
+
     def test_masked_fill(self):
         # simple
         self._test_name_inference(
