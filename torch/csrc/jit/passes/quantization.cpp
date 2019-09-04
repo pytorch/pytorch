@@ -427,7 +427,7 @@ class QuantizeHelper {
  public:
   QuantizeHelper(const script::Module& m) : module_(m) {}
   IValue getQParams(Value* v);
-  c10::optional<script::Module> findChildModuleToQuantize(Value* v);
+  c10::optional<script::Module> findChildModuleToQuantize(Value* child_instance);
   void quantizeBias(Value* v);
   void quantizeTensor(Value* v, bool insert_after = true);
   void removeObserver(Value* v, const std::string& observer_name);
@@ -540,21 +540,18 @@ void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
 }
 
 c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
-    Value* v) {
-  if (v->node()->kind() == prim::CallMethod) {
-    auto child_instance = v->node()->inputs()[0];
+    Value* child_instance) {
+  TORCH_INTERNAL_ASSERT(
+      child_instance->node()->kind() == prim::GetAttr,
+      "Child instance should come from GetAttr.");
+  auto child_module_name = child_instance->node()->s(attr::name);
+  if (child_module_name.find("observer_for_") == std::string::npos) {
+    auto child_module = module_.find_module(child_module_name);
     TORCH_INTERNAL_ASSERT(
-        child_instance->node()->kind() == prim::GetAttr,
-        "Child instance should come from GetAttr.");
-    auto child_module_name = child_instance->node()->s(attr::name);
-    if (child_module_name.find("observer_for_") == std::string::npos) {
-      auto child_module = module_.find_module(child_module_name);
-      TORCH_INTERNAL_ASSERT(
-          child_module,
-          "InsertQuantDeQuant - Child module " + child_module_name +
-              " does not exist");
-      return child_module;
-    }
+        child_module,
+        "InsertQuantDeQuant - Child module " + child_module_name +
+        " does not exist");
+    return child_module;
   }
   return c10::nullopt;
 }
@@ -582,7 +579,7 @@ void InsertQuantDeQuantImpl(
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
-    for (auto it = b->nodes().begin(), end=b->nodes().end(); it != end;) {
+    for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end;) {
       Node* n = *it++;
       for (Value* v : n->outputs()) {
         if (v->type()->isSubtypeOf(TensorType::get())) {
@@ -593,7 +590,7 @@ void InsertQuantDeQuantImpl(
             if (module_instance == graph->inputs()[0]) {
               InsertQuantDeQuantImpl(module, module_method_name);
             } else {
-              auto child_module = qh.findChildModuleToQuantize(v);
+              auto child_module = qh.findChildModuleToQuantize(module_instance);
               if (child_module) {
                 InsertQuantDeQuantImpl(child_module.value(), module_method_name);
               }

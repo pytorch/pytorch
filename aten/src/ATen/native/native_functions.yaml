@@ -445,8 +445,16 @@
   device_guard: False
 
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
+  named_guard: False
 
 - func: cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
+- func: cat.names(Tensor[] tensors, Dimname dim) -> Tensor
+  named_guard: False
+
+- func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: ceil(Tensor self) -> Tensor
   named_guard: False
@@ -1861,6 +1869,7 @@
     CUDA: relu
     MkldnnCPU: mkldnn_relu
     QuantizedCPU: quantized_relu
+  named_guard: False
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
@@ -2275,11 +2284,14 @@
 # TODO: namespace threshold in 'nn'
 - func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
   variants: function
+  named_guard: False
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
   variants: function
+  named_guard: False
 
 - func: threshold.out(Tensor self, Scalar threshold, Scalar value, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
   variants: function
@@ -3171,7 +3183,7 @@
 - func: rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih=None, Tensor? b_hh=None) -> Tensor
 
 # Quantized RNN layers
-- func: quantized_lstm(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None) -> (Tensor, Tensor, Tensor)
+- func: quantized_lstm(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)
 
 # Quantized GRU layers
 
@@ -3243,18 +3255,22 @@
   dispatch:
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
+  named_guard: False
 
 - func: masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: masked_fill_.Tensor(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
+  named_guard: False
 
 - func: masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: masked_scatter_(Tensor(a!) self, Tensor mask, Tensor source) -> Tensor(a!)
   variants: method
@@ -3933,12 +3949,14 @@
   dispatch:
     CPU: masked_select_out_cpu
     CUDA: masked_select_out_cuda
+  named_guard: False
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
   variants: method, function
   dispatch:
     CPU: masked_select_cpu
     CUDA: masked_select_cuda
+  named_guard: False
 
 - func: nonzero.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

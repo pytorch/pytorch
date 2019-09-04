@@ -124,7 +124,7 @@ REGISTRATION_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
 """)
 
-# add non-virtual declaration to Tensor.h
+# add non-virtual declaration to TensorBody.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
@@ -1153,7 +1153,7 @@ def create_generic(top_env, declarations):
 
         # Emit #ifdef BUILD_NAMEDTENSOR macros for any code generated here
         # that is sent to top_env. This is because some of this code (Type.h,
-        # Tensor.h, TensorMethods.h) is checked into the repo and must be
+        # TensorBody.h, TensorMethods.h) is checked into the repo and must be
         # the same regardless of BUILD_NAMEDTENSOR status.
         is_named_tensor_only = (has_named_tensor_formals(formals) or
                                 option['api_name'] == 'align_tensors')
