@@ -67,7 +67,7 @@ Message processRequestBlocking(Message&& request) {
       TORCH_CHECK(rrefId != forkId, "Does not support remote call to self.");
 
       auto& ctx = RRefContext::getInstance();
-      auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(std::move(rrefId));
+      auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(rrefId);
 
       // TODO: make this asynchronous
       auto stack = src.stack();

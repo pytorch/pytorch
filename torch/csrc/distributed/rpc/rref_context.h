@@ -38,7 +38,7 @@ class RRefContext {
   }
 
   std::shared_ptr<UserRRef> createUserRRef(
-      worker_id_t ownerId, RRefId rrefId, ForkId forkId) {
+      worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId) {
     TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
     // RRefContext does not track user RRefs, it will be destructed when there is
     // no shared_ptrs pointing to it.
@@ -56,7 +56,7 @@ class RRefContext {
 
   template <typename T>
   std::shared_ptr<RRef> getOrCreateRRef(
-      worker_id_t ownerId, RRefId rrefId, ForkId forkId) {
+      worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId) {
     if (ownerId == getWorkerId()) {
       return getOrCreateOwnerRRef<T>(rrefId);
     } else {
@@ -65,7 +65,7 @@ class RRefContext {
   }
 
   template <typename T>
-  std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(RRefId rrefId) {
+  std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId) {
 
     std::lock_guard<std::mutex> lock(mutex_);
     const auto iter = owners_.find(rrefId);
