@@ -39,7 +39,7 @@ __device__ __forceinline__ T digamma(T* in) {
     }
     // Rounding errors in tan's input can really affect the output
     // for extreme values, so we always perform this computation in double.
-    result = static_cast<compute_type>(- PI_f64 / tan(PI_f64 * static_cast<double>(x)));
+    result = static_cast<compute_type>(- PI_f64 / ::tan(PI_f64 * static_cast<double>(x)));
     x = 1 - x;
   }
 

@@ -71,29 +71,29 @@ void erfinv_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-    void digamma_kernel_cuda(TensorIterator& iter) {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "digamma_cuda", [&]() {
-        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return digamma<scalar_t, scalar_t>(a);
-        });
-      });
-    }
+void digamma_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "digamma_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return digamma<scalar_t, scalar_t>(a);
+    });
+  });
+}
 
-    void trigamma_kernel_cuda(TensorIterator& iter) {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "trigamma_cuda", [&]() {
-        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return trigamma<scalar_t, scalar_t>(a);
-        });
-      });
-    }
+void trigamma_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "trigamma_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return trigamma<scalar_t, scalar_t>(a);
+    });
+  });
+}
 
-    void polygamma_kernel_cuda(TensorIterator& iter, int64_t n) {
-      switch (n) {
-        case 0: digamma_kernel_cuda(iter); break;
-        case 1: trigamma_kernel_cuda(iter); break;
-        default: AT_ERROR("polygamma(n,x) is not implemented for n>=2");
-      }
-    }
+void polygamma_kernel_cuda(TensorIterator& iter, int64_t n) {
+  switch (n) {
+    case 0: digamma_kernel_cuda(iter); break;
+    case 1: trigamma_kernel_cuda(iter); break;
+    default: AT_ERROR("polygamma(n,x) is not implemented for n>=2");
+  }
+}
 
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
