@@ -97,7 +97,11 @@ class RpcTest(MultiProcessTestCase):
     @classmethod
     def setUpClass(cls):
         super(RpcTest, cls). setUpClass()
-        multiprocessing.set_start_method("spawn")
+        try:
+            multiprocessing.set_start_method("spawn")
+        except RuntimeError:
+            logging.warning("Failed to set start method to spawn")
+            pass
 
     @property
     def world_size(self):
