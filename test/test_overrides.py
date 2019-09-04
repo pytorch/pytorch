@@ -29,7 +29,7 @@ class DiagonalTensor:
         self._i = value
 
     def __repr__(self):
-        return f"{self.__class__.__name__}(N={self._N}, value={self._i})"
+        return "DiagonalTensor(N={}, value={})".format(self._N, self._i)
 
     def __array__(self):
         return self._i * np.eye(self._N)
@@ -401,7 +401,7 @@ class TestTensorMethods(TestCase):
 
     def test_repr(self):
         class MyTensor(torch.Tensor):
-            def __torch_function__(*args, **kwargs):
+            def __torch_function__(self, *args, **kwargs):
                 return NotImplemented
 
         tensor = MyTensor([1])
