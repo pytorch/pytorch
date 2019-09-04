@@ -14,10 +14,19 @@
 #include <torch/csrc/jit/source_range_serialization.h>
 #include <torch/csrc/jit/source_range_serialization_impl.h>
 
+#ifndef C10_MOBILE
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/proto/torch_pb.h"
+#else
+namespace torch {
+struct ModelDef;
+struct ModuleDef;
+struct TensorDef;
+}
+#endif // C10_MOBILE
+
 #include "caffe2/serialize/file_adapter.h"
 #include "caffe2/serialize/inline_container.h"
 #include "caffe2/serialize/istream_adapter.h"
@@ -146,7 +155,7 @@ script::Module ScriptModuleDeserializer::LEGACY_deserialize() {
   const auto& module_def = model_def.main_module();
   return LEGACY_convertModule(module_def);
 #else
-  AT_ERROR("Legacy model.json is not supported on mobile.");
+  AT_ERROR("Legacy model format is not supported on mobile.");
 #endif // C10_MOBILE
 }
 
@@ -230,15 +239,20 @@ IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
 
 void ScriptModuleDeserializer::LEGACY_loadTensorTable(
     torch::ModelDef* model_def) {
+#ifndef C10_MOBILE
   std::unordered_map<std::string, at::Storage> storageMap;
   for (const torch::TensorDef& tensor : model_def->tensors()) {
     constants_table_.emplace_back(LEGACY_loadTensor(tensor, storageMap));
   }
+#else
+  AT_ERROR("Legacy model format is not supported on mobile.");
+#endif // C10_MOBILE
 }
 
 at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
     const torch::TensorDef& tensor_proto,
     std::unordered_map<std::string, at::Storage>& storageMap) {
+#ifndef C10_MOBILE
   std::vector<int64_t> dims(
       tensor_proto.dims().begin(), tensor_proto.dims().end());
   std::vector<int64_t> strides(
@@ -320,6 +334,9 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
   result = autograd::make_variable(result, tensor_proto.requires_grad());
 
   return result;
+#else
+  AT_ERROR("Legacy model format is not supported on mobile.");
+#endif // C10_MOBILE
 }
 
 void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
@@ -384,6 +401,7 @@ void ScriptModuleDeserializer::LEGACY_moduleSetState(
 
 script::Module ScriptModuleDeserializer::LEGACY_convertModule(
     const torch::ModuleDef& module_def) {
+#ifndef C10_MOBILE
   // HACK: The current model exporter can create module_defs with invalid Python
   // identifiers as names (they contain `.`)
   const auto atoms = c10::QualifiedName(module_def.name()).atoms();
@@ -484,6 +502,9 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
     LEGACY_moduleStack_.pop_back();
   }
   return module;
+#else
+  AT_ERROR("Legacy model format is not supported on mobile.");
+#endif // C10_MOBILE
 }
 } // namespace
 
