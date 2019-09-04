@@ -125,8 +125,8 @@ class MultiProcessTestCase(TestCase):
                 fn = getattr(cls, attr)
                 setattr(cls, attr, cls.join_or_run(fn))
 
-    def __init__(self, methodName):
-        super().__init__(methodName)
+    def __init__(self, *args, **kwargs):
+        super(MultiProcessTestCase, self).__init__(*args, **kwargs)
 
         self.rank = self.MAIN_PROCESS_RANK
 
@@ -169,7 +169,8 @@ class MultiProcessTestCase(TestCase):
 
         # We're retrieving a corresponding test and executing it.
         getattr(self, test_name)()
-        sys.exit(0)
+        if multiprocessing.get_start_method() != "spawn":
+                sys.exit(0)
 
     def _join_processes(self, fn):
         timeout = get_timeout(self.id())

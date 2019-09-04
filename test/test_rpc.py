@@ -99,7 +99,7 @@ class RpcTest(MultiProcessTestCase):
         super(RpcTest, cls). setUpClass()
         try:
             multiprocessing.set_start_method("spawn")
-        except RuntimeError:
+        except Exception:
             logging.warning("Failed to set start method to spawn")
             pass
 
@@ -398,4 +398,4 @@ class RpcTest(MultiProcessTestCase):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
 
 if __name__ == "__main__":
-    run_tests()
+    unittest.main()
