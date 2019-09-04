@@ -727,7 +727,16 @@ inline Tensor & Tensor::fill_diagonal_(Scalar fill_value, bool wrap) const {
 }
 inline Tensor Tensor::div(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::div(const_cast<Tensor&>(*this), other);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::div(const_cast<Tensor&>(*this), other);
+            break;
+        case Backend::SparseCPU:
+            return SparseCPUType::div(const_cast<Tensor&>(*this), other);
+            break;
+        default:
+            AT_ERROR("div not implemented for ", at::toString(type_set()));
+    }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::div.Tensor(Tensor self, Tensor other) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, other))(const_cast<Tensor&>(*this), other);
@@ -735,7 +744,16 @@ inline Tensor Tensor::div(const Tensor & other) const {
 }
 inline Tensor & Tensor::div_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::div_(const_cast<Tensor&>(*this), other);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::div_(const_cast<Tensor&>(*this), other);
+            break;
+        case Backend::SparseCPU:
+            return SparseCPUType::div_(const_cast<Tensor&>(*this), other);
+            break;
+        default:
+            AT_ERROR("div_ not implemented for ", at::toString(type_set()));
+    }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::div_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, const Tensor &)>(at::detail::multi_dispatch_tensor_type_set(*this, other))(const_cast<Tensor&>(*this), other);
@@ -2345,7 +2363,16 @@ inline Tensor & Tensor::zero_() const {
 }
 inline Tensor Tensor::sub(const Tensor & other, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::sub(const_cast<Tensor&>(*this), other, alpha);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::sub(const_cast<Tensor&>(*this), other, alpha);
+            break;
+        case Backend::SparseCPU:
+            return SparseCPUType::sub(const_cast<Tensor&>(*this), other, alpha);
+            break;
+        default:
+            AT_ERROR("sub not implemented for ", at::toString(type_set()));
+    }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const Tensor &, Scalar)>(at::detail::multi_dispatch_tensor_type_set(*this, other))(const_cast<Tensor&>(*this), other, alpha);
@@ -2353,7 +2380,16 @@ inline Tensor Tensor::sub(const Tensor & other, Scalar alpha) const {
 }
 inline Tensor & Tensor::sub_(const Tensor & other, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::sub_(const_cast<Tensor&>(*this), other, alpha);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::sub_(const_cast<Tensor&>(*this), other, alpha);
+            break;
+        case Backend::SparseCPU:
+            return SparseCPUType::sub_(const_cast<Tensor&>(*this), other, alpha);
+            break;
+        default:
+            AT_ERROR("sub_ not implemented for ", at::toString(type_set()));
+    }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, const Tensor &, Scalar)>(at::detail::multi_dispatch_tensor_type_set(*this, other))(const_cast<Tensor&>(*this), other, alpha);

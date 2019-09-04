@@ -715,13 +715,28 @@
 
 - func: div.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: div
+    CUDA: div
+    SparseCPU: div_sparse
+    SparseCUDA: div_sparse
   named_guard: False
 
 - func: div_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: div_
+    CUDA: div_
+    SparseCPU: div_sparse_
+    SparseCUDA: div_sparse_
   named_guard: False
 
 - func: div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: div_out
+    CUDA: div_out
+    SparseCPU: div_out_sparse_zerodim
+    SparseCUDA: div_out_sparse_zerodim
   named_guard: False
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
@@ -1481,19 +1496,18 @@
   dispatch:
     CPU: mul
     CUDA: mul
-    SparseCPU: mul
-    SparseCUDA: mul
+    SparseCPU: mul_sparse
+    SparseCUDA: mul_sparse
     MkldnnCPU: mkldnn_mul
   named_guard: False
-
 
 - func: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: mul_
     CUDA: mul_
-    SparseCPU: mul_
-    SparseCUDA: mul_
+    SparseCPU: mul_sparse_
+    SparseCUDA: mul_sparse_
     MkldnnCPU: mkldnn_mul_
   named_guard: False
 
@@ -1501,8 +1515,8 @@
   dispatch:
     CPU: mul_out
     CUDA: mul_out
-    SparseCPU: mul_out
-    SparseCUDA: mul_out
+    SparseCPU: mul_out_sparse_cpu
+    SparseCUDA: mul_out_sparse_cuda
     MkldnnCPU: mkldnn_mul_out
   named_guard: False
 
@@ -2010,31 +2024,6 @@
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
 
-- func: _sparse_div_zerodim.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    SparseCPU: div_out_sparse_zerodim
-    SparseCUDA: div_out_sparse_zerodim
-
-- func: _sparse_div_scalar.out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    SparseCPU: div_out_sparse_scalar
-    SparseCUDA: div_out_sparse_scalar
-
-- func: _sparse_mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    SparseCPU: mul_out_sparse_cpu
-    SparseCUDA: mul_out_sparse_cuda
-
-- func: _sparse_mul_zerodim.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    SparseCPU: mul_out_sparse_zerodim
-    SparseCUDA: mul_out_sparse_zerodim
-
-- func: _sparse_mul_scalar.out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    SparseCPU: mul_out_sparse_scalar
-    SparseCUDA: mul_out_sparse_scalar
-
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_guard: False
@@ -2540,14 +2529,29 @@
     MkldnnCPU: mkldnn_zero_
 
 - func: sub.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: sub_out
+    CUDA: sub_out
+    SparseCPU: sub_out_sparse
+    SparseCUDA: sub_out_sparse
   named_guard: False
 
 - func: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: sub
+    CUDA: sub
+    SparseCPU: sub_sparse
+    SparseCUDA: sub_sparse
   named_guard: False
 
 - func: sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: sub_
+    CUDA: sub_
+    SparseCPU: sub_sparse_
+    SparseCUDA: sub_sparse_
   named_guard: False
 
 # For C++ only, until we have conversion from C++ numbers to Tensor

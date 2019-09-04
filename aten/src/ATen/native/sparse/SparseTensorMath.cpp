@@ -148,10 +148,23 @@ SparseTensor pow_sparse_scalar(const SparseTensor& t, Scalar value) {
 // div(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
+SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value);
+
+Tensor div_sparse(const Tensor& self, const Tensor& value) {
+  Tensor result = at::empty({0}, self.options());
+  return div_out_sparse_zerodim(result, self, value);
+}
+
+Tensor& div_sparse_(Tensor& self, const Tensor& value) {
+  return div_out_sparse_zerodim(self, self, value);
+}
+
 SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
+  TORCH_CHECK(value.dim() == 0, "sparse division only supports division by a scalar (got shape ",
+      value.sizes(), " for argument 'other')");
+
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
-  AT_ASSERT(value.dim() == 0);
 
   if (is_same_tensor(r, t)) {
     r._values().div_(value);
@@ -197,6 +210,20 @@ Tensor add_sparse(const Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& add_sparse_(Tensor& self, const Tensor& other, Scalar alpha) {
   return at::add_out(self, self, other, alpha);  // redispatch!
+}
+
+// There's actually nothing sparse specific about these implementations
+
+Tensor sub_sparse(const Tensor& self, const Tensor& other, Scalar alpha) {
+  return native::add_sparse(self, other, -alpha);
+}
+
+Tensor& sub_sparse_(Tensor& self, const Tensor& other, Scalar alpha) {
+  return native::add_sparse_(self, other, -alpha);
+}
+
+Tensor& sub_out_sparse(Tensor& r, const Tensor& self, const Tensor& other, Scalar alpha) {
+  return at::add_out(r, self, other, -alpha);  // redispatch!
 }
 
 Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, Scalar value);
@@ -391,6 +418,15 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
 // --------------------------------------------------------------------
 // mul(SparseTensor, SparseTensor)  [broadcasts]
 // --------------------------------------------------------------------
+
+Tensor mul_sparse(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::mul_out(result, self, other);  // redispatch!
+}
+
+Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
+  return at::mul_out(self, self, other);  // redispatch!
+}
 
 SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor& src_) {
   if (src_.dim() == 0) {
