@@ -3574,9 +3574,6 @@
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   named_guard: False
   variants: method
-  dispatch:
-    CPU: polygamma_
-    CUDA: legacy::cuda::_th_polygamma_
 
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
   variants: method
@@ -4207,14 +4204,11 @@
   named_guard: False
   dispatch:
     CPU: polygamma_out
-    CUDA: legacy::cuda::_th_polygamma_out
+    CUDA: polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
   named_guard: False
   variants: method, function
-  dispatch:
-    CPU: polygamma
-    CUDA: legacy::cuda::_th_polygamma
 
 - func: erfinv(Tensor self) -> Tensor
   named_guard: False
