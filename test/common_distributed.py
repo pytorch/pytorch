@@ -125,13 +125,18 @@ class MultiProcessTestCase(TestCase):
                 fn = getattr(cls, attr)
                 setattr(cls, attr, cls.join_or_run(fn))
 
+    def __init__(self, methodName):
+        super().__init__(methodName)
+
+        self.rank = self.MAIN_PROCESS_RANK
+
     def setUp(self):
         super(MultiProcessTestCase, self).setUp()
         self.skip_return_code_checks = []
-        self.rank = self.MAIN_PROCESS_RANK
-        # spawn can not pass file handle, so pass file name here
-        self.file_name = tempfile.NamedTemporaryFile(delete=False).name
-        self.processes = [self._spawn_process(rank) for rank in range(int(self.world_size))]
+        if self.rank == self.MAIN_PROCESS_RANK:
+            # spawn can not pass file handle, so pass file name here
+            self.file_name = tempfile.NamedTemporaryFile(delete=False).name
+            self.processes = [self._spawn_process(rank) for rank in range(int(self.world_size))]
 
     def tearDown(self):
         super(MultiProcessTestCase, self).tearDown()
@@ -159,6 +164,8 @@ class MultiProcessTestCase(TestCase):
 
         self.rank = rank
         self.file_name = file_name
+
+        self.setUp()
 
         # We're retrieving a corresponding test and executing it.
         getattr(self, test_name)()
