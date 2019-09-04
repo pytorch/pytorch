@@ -445,8 +445,16 @@
   device_guard: False
 
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
+  named_guard: False
 
 - func: cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+
+- func: cat.names(Tensor[] tensors, Dimname dim) -> Tensor
+  named_guard: False
+
+- func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
 
 - func: ceil(Tensor self) -> Tensor
   named_guard: False
@@ -3243,18 +3251,22 @@
   dispatch:
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
+  named_guard: False
 
 - func: masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: masked_fill_.Tensor(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
+  named_guard: False
 
 - func: masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: masked_scatter_(Tensor(a!) self, Tensor mask, Tensor source) -> Tensor(a!)
   variants: method
@@ -3933,12 +3945,14 @@
   dispatch:
     CPU: masked_select_out_cpu
     CUDA: masked_select_out_cuda
+  named_guard: False
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
   variants: method, function
   dispatch:
     CPU: masked_select_cpu
     CUDA: masked_select_cuda
+  named_guard: False
 
 - func: nonzero.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

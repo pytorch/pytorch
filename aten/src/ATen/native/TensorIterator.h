@@ -302,6 +302,7 @@ protected:
   std::tuple<Device, ScalarType> compute_common_type();
   void allocate_outputs();
 #ifdef BUILD_NAMEDTENSOR
+  void compute_names();
   void propagate_names_to_outputs();
 #endif
   void coalesce_dimensions();
@@ -309,6 +310,9 @@ protected:
 protected:
   DimVector shape_;
   DimVector perm_;
+#ifdef BUILD_NAMEDTENSOR
+  NameVector names_;
+#endif
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
   bool has_coalesced_dimensions_ = false;
