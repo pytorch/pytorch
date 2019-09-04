@@ -160,8 +160,8 @@
   dispatch:
     CPU: add
     CUDA: add
-    SparseCPU: add
-    SparseCUDA: add
+    SparseCPU: add_sparse
+    SparseCUDA: add_sparse
     MkldnnCPU: mkldnn_add
   named_guard: False
 
@@ -170,8 +170,8 @@
   dispatch:
     CPU: add_
     CUDA: add_
-    SparseCPU: add_
-    SparseCUDA: add_
+    SparseCPU: add_sparse_
+    SparseCUDA: add_sparse_
     MkldnnCPU: mkldnn_add_
   named_guard: False
 
@@ -179,8 +179,8 @@
   dispatch:
     CPU: add_out
     CUDA: add_out
-    SparseCPU: add_out
-    SparseCUDA: add_out
+    SparseCPU: add_out_sparse_cpu
+    SparseCUDA: add_out_sparse_cuda
     MkldnnCPU: mkldnn_add_out
   named_guard: False
 
@@ -2009,16 +2009,6 @@
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
-
-- func: _sparse_add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    SparseCPU: add_out_sparse_cpu
-    SparseCUDA: add_out_sparse_cuda
-
-- func: _sparse_dense_add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: add_out_dense_sparse_cpu
-    CUDA: add_out_dense_sparse_cuda
 
 - func: _sparse_div_zerodim.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

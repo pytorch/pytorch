@@ -129,14 +129,13 @@ TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 # add non-virtual declaration to Tensor.cpp
-# TODO: This will need to be adjusted for multiple dispatch
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${mobile_method_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(type_set())(${method_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${method_actuals});
 #endif
 }
 """)
@@ -835,6 +834,19 @@ def create_generic(top_env, declarations):
 
         return None
 
+    def find_multidispatch_tensors(formals):
+        # type: (List[AtFormal]) -> List[str]
+        # Compute the list of all tensor arguments which should be considered
+        # for multiple dispatch.  Note that this doesn't completely replace
+        # find_dispatch_tensor because we use the "dispatch tensor" to determine
+        # device guards.  This is ONLY used for multiple dispatch in
+        # ATenDispatch.h
+        r = []
+        for formal in formals:
+            if 'TensorList' == formal['dynamic_type'] or is_any_tensor_type(formal):
+                r.append(formal['name'])
+        return r
+
     def format_formal(f):
         # type: (AtFormal) -> str
         return '{} {}'.format(f['type'], f['name'])
@@ -903,6 +915,8 @@ def create_generic(top_env, declarations):
 
     def process_option(option):
         # type: (FunctionOption) -> None
+        # Mutably populate option with derived values computed from values
+        # passed in to option.
         option['inplace'] = re.search(
             '(^__i|[^_]_$)', option['api_name']) is not None
 
@@ -1090,8 +1104,23 @@ def create_generic(top_env, declarations):
         def has_named_tensor_formals(formals):
             return any(['Dimname' in formal['dynamic_type'] for formal in formals])
 
-        def gen_tensor_method(option):
+        def gen_tensor_method(option, multidispatch_tensors):
             # type: (Any) -> FunctionCode
+            # TODO: Swing this shared code to top level
+            if multidispatch_tensors:
+                def swizzle_self(t):  # blegh
+                    if t == 'self':
+                        return '*this'
+                    else:
+                        return t
+                option['inferred_type_set'] = 'at::detail::multi_dispatch_tensor_type_set({})'.format(
+                    ', '.join(swizzle_self(t) for t in multidispatch_tensors)
+                )
+            else:
+                # TODO: Err, what?  If we didn't trigger multidispatch_tensors
+                # codepath... how?!  This is a method, surely something must be
+                # dispatching!
+                option['inferred_type_set'] = 'type_set(/* HMMMM */)'
             if isinstance(type_method_dispatch, dict):
                 mobile_function_switches = []
                 # NB: As this code is currently written, there will NEVER be
@@ -1125,10 +1154,10 @@ def create_generic(top_env, declarations):
                 declaration=TENSOR_METHOD_DECLARATION.substitute(option, mobile_method_body=mobile_method_body),
                 definition=TENSOR_METHOD_DEFINITION.substitute(option, mobile_method_body=mobile_method_body))
 
-        def gen_namespace_function(option, dispatch_tensor, dispatch_options):
+        def gen_namespace_function(option, multidispatch_tensors, dispatch_options):
             # type: (Any, Optional[str], Any) -> FunctionCode
-            if dispatch_tensor:
-                option['inferred_type_set'] = 'at::detail::infer_tensor_type_set({})'.format(dispatch_tensor)
+            if multidispatch_tensors:
+                option['inferred_type_set'] = 'at::detail::multi_dispatch_tensor_type_set({})'.format(', '.join(multidispatch_tensors))
             elif dispatch_options:
                 option['inferred_type_set'] = '{}.type_set()'.format(dispatch_options['name'])
             else:
@@ -1188,6 +1217,9 @@ def create_generic(top_env, declarations):
         dispatch_options = find_formal('TensorOptions', formals)
         # Only dispatch via tensor if there is no Options argument
         dispatch_tensor = None if dispatch_options else find_dispatch_tensor(formals)
+
+        # TODO: Not entirely clear what to do about TensorOptions
+        multidispatch_tensors = None if dispatch_options else find_multidispatch_tensors(formals)
 
         option['type_method_formals'] = [format_formal(f) for f in formals]
         option['type_method_actuals'] = [f['name'] for f in formals]
@@ -1256,7 +1288,7 @@ def create_generic(top_env, declarations):
 
         method_of = ['Type']
         if is_method:
-            code = gen_tensor_method(option)
+            code = gen_tensor_method(option, multidispatch_tensors)
             if is_named_tensor_only:
                 code = add_namedtensor_enabled_macro(code)
             top_env['tensor_method_declarations'].append(code.declaration)
@@ -1264,7 +1296,7 @@ def create_generic(top_env, declarations):
             method_of.append('Tensor')
 
         if is_namespace_function:
-            code = gen_namespace_function(option, dispatch_tensor, dispatch_options)
+            code = gen_namespace_function(option, multidispatch_tensors, dispatch_options)
             if is_named_tensor_only:
                 code = add_namedtensor_enabled_macro(code)
             top_env['function_definitions'].append(code.definition)
@@ -1303,7 +1335,7 @@ def create_generic(top_env, declarations):
             option["schema_string"] = declaration["schema_string"]
             try:
                 if option['mode'] != 'native':
-                    # XXX: Does the following line do anything meaningful?
+                    # Mutably populate option with values
                     process_option(option)
                 else:
                     output_option = process_native(option)

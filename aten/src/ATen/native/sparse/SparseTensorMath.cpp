@@ -187,9 +187,26 @@ Tensor norm_sparse(const SparseTensor& self, Scalar value) {
 // add(SparseTensor, SparseTensor, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
 
+Tensor add_sparse(const Tensor& self, const Tensor& other, Scalar alpha) {
+  // TODO: Why?! Can't we just flip the order here...
+  TORCH_CHECK(!(self.is_sparse() && !other.is_sparse()),
+              "add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
+  Tensor result = at::empty({0}, self.options());
+  return at::add_out(result, self, other, alpha);  // redispatch!
+}
+
+Tensor& add_sparse_(Tensor& self, const Tensor& other, Scalar alpha) {
+  return at::add_out(self, self, other, alpha);  // redispatch!
+}
+
+Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, Scalar value);
+
 SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value) {
-  AT_ASSERT(r.is_sparse());
-  AT_ASSERT(t.is_sparse());
+  if (!t.is_sparse()) {
+    return add_out_dense_sparse_cpu(r, t, src, value);
+  }
+  // TODO: This test seems a bit goofy
+  TORCH_CHECK(src.is_sparse(), "add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
   AT_ASSERT(!t.is_cuda());  // the dispatch argument
   TORCH_CHECK(!r.is_cuda(), "add: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!src.is_cuda(), "add: expected 'other' to be a CPU tensor, but got a CUDA tensor");

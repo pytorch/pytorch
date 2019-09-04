@@ -351,6 +351,11 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
 // --------------------------------------------------------------------
 
 SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const SparseTensor& src, Scalar value) {
+  // TODO: This is almost certainly wrong; harmonize with add_out_sparse_cpu
+  if (!t.is_sparse()) {
+    return add_out_dense_sparse_cuda(r_, t, src, value);
+  }
+
   AT_ASSERT(t.is_cuda()); // dispatch argument
   TORCH_CHECK(src.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");

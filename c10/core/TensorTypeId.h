@@ -19,8 +19,6 @@ enum class TensorTypeId : uint8_t {
   // the hierarchy for convenience and performance
   CPUTensorId, // PyTorch/Caffe2 supported
   CUDATensorId, // PyTorch/Caffe2 supported
-  SparseCPUTensorId, // PyTorch only
-  SparseCUDATensorId, // PyTorch only
   MKLDNNTensorId, // Caffe2 only
   OpenGLTensorId, // Caffe2 only
   OpenCLTensorId, // Caffe2 only
@@ -33,6 +31,10 @@ enum class TensorTypeId : uint8_t {
   QuantizedCPUTensorId, // PyTorch only
   ComplexCPUTensorId, // PyTorch only
   ComplexCUDATensorId, // PyTorch only
+
+  // Sparse has multi-dispatch with dense; handle it first
+  SparseCPUTensorId, // PyTorch only
+  SparseCUDATensorId, // PyTorch only
 
   VariableTensorId,
 

@@ -8,6 +8,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
+#include <ATen/core/Variadic.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/NamedTensor.h>
 #endif
@@ -19,6 +20,27 @@
 #endif
 
 namespace at {
+
+namespace detail {
+
+struct MultiDispatchTensorTypeSet : IterArgs<MultiDispatchTensorTypeSet> {
+  TensorTypeSet ts;
+  void operator()(const at::Tensor& x) {
+    ts = ts | x.type_set();
+  }
+  void operator()(at::ArrayRef<at::Tensor> xs) {
+    for (const auto& x : xs) {
+      ts = ts | x.type_set();
+    }
+  }
+};
+
+template <typename... Args>
+TensorTypeSet multi_dispatch_tensor_type_set(Args&&... args) {
+  return MultiDispatchTensorTypeSet().apply(std::forward<Args>(args)...).ts;
+}
+
+}
 
 struct Quantizer;
 // This is temporary typedef to enable Quantizer in aten native function API
