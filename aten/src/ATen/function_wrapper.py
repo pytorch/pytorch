@@ -185,6 +185,21 @@ static inline ${return_type} ${api_name}(${formals}) {
 }
 """)
 
+C10_FUNCTION_DEFINITION = CodeTemplate("""\
+static inline ${return_type} ${api_name}(${formals}) {
+#ifdef USE_STATIC_DISPATCH
+    ${mobile_function_body}
+#else
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
+    if (${inferred_is_variable}) {
+        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${formals_types_with_return}>(op ${native_actuals_with_comma_prefix});
+    } else {
+        return c10::Dispatcher::singleton().lookup(op, backendToTensorTypeId(${inferred_backend})).callUnboxed<${formals_types_with_return}>(${native_actuals});
+    }
+#endif
+}
+""")
+
 # for mobile builds, we rely on the linker to strip unused ops.
 # this requires us to dispatch statically in Functions.h and TensorMethods.h
 MOBILE_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
@@ -201,21 +216,6 @@ MOBILE_FUNCTION_SWITCH_STATEMENT = CodeTemplate("""\
 case Backend::${backend}:
     ${return_call} ${backend}Type::${api_name}(${native_arguments});
     break;
-""")
-
-C10_FUNCTION_DEFINITION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals}) {
-#ifdef USE_STATIC_DISPATCH
-    ${mobile_method_body}
-#else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
-    if (${inferred_is_variable}) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${formals_types_with_return}>(op ${native_actuals_with_comma_prefix});
-    } else {
-        return c10::Dispatcher::singleton().lookup(op, backendToTensorTypeId(${inferred_backend})).callUnboxed<${formals_types_with_return}>(${native_actuals});
-    }
-#endif
-}
 """)
 
 # add a native declaration for a native function
