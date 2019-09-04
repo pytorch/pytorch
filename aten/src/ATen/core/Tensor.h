@@ -494,15 +494,36 @@ class CAFFE2_API Tensor {
   Tensor log_softmax(Dimname dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
   #endif
   Tensor logsumexp(IntArrayRef dim, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor logsumexp(DimnameList dim, bool keepdim=false) const;
+  #endif
   Tensor matmul(const Tensor & other) const;
   Tensor matrix_power(int64_t n) const;
   std::tuple<Tensor,Tensor> max(int64_t dim, bool keepdim=false) const;
   Tensor max_values(IntArrayRef dim, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::tuple<Tensor,Tensor> max(Dimname dim, bool keepdim=false) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor max_values(DimnameList dim, bool keepdim=false) const;
+  #endif
   Tensor mean(c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor mean(IntArrayRef dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor mean(DimnameList dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
+  #endif
   std::tuple<Tensor,Tensor> median(int64_t dim, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::tuple<Tensor,Tensor> median(Dimname dim, bool keepdim=false) const;
+  #endif
   std::tuple<Tensor,Tensor> min(int64_t dim, bool keepdim=false) const;
   Tensor min_values(IntArrayRef dim, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::tuple<Tensor,Tensor> min(Dimname dim, bool keepdim=false) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor min_values(DimnameList dim, bool keepdim=false) const;
+  #endif
   Tensor mm(const Tensor & mat2) const;
   std::tuple<Tensor,Tensor> mode(int64_t dim=-1, bool keepdim=false) const;
   Tensor mul(const Tensor & other) const;
@@ -583,6 +604,9 @@ class CAFFE2_API Tensor {
   Tensor & sqrt_() const;
   Tensor std(bool unbiased=true) const;
   Tensor std(IntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor std(DimnameList dim, bool unbiased=true, bool keepdim=false) const;
+  #endif
   Tensor prod(c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor prod(int64_t dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
   #ifdef BUILD_NAMEDTENSOR
@@ -609,12 +633,21 @@ class CAFFE2_API Tensor {
   Tensor & unsqueeze_(int64_t dim) const;
   Tensor var(bool unbiased=true) const;
   Tensor var(IntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor var(DimnameList dim, bool unbiased=true, bool keepdim=false) const;
+  #endif
   Tensor view_as(const Tensor & other) const;
   Tensor where(const Tensor & condition, const Tensor & other) const;
   Tensor norm(c10::optional<Scalar> p, ScalarType dtype) const;
   Tensor norm(Scalar p=2) const;
   Tensor norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) const;
   Tensor norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdim=false) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor norm(c10::optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor norm(c10::optional<Scalar> p, DimnameList dim, bool keepdim=false) const;
+  #endif
   Tensor clone() const;
   Tensor & resize_as_(const Tensor & the_template) const;
   Tensor pow(Scalar exponent) const;
