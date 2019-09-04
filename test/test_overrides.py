@@ -144,7 +144,6 @@ class TestGetImplementingArgs(TestCase):
         args = get_overloaded_types_and_args([tensor, other])
         self.assertEqual(list(args), [[type(tensor), type(other)], [tensor, other]])
 
-    @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
     def test_tensor_subclass_and_duck_tensor(self):
 
         class OverrideSub(torch.Tensor):
@@ -154,13 +153,13 @@ class TestGetImplementingArgs(TestCase):
             __torch_function__ = _return_not_implemented
 
         tensor = torch.tensor(1)
-        subtensor = torch.tensor(1).view(OverrideSub)
+        subtensor = OverrideSub([1])
         other = Other()
 
-        self.assertEqual(get_overloaded_types_and_args([tensor, subtensor, other]),
-                     [subtensor, tensor, other])
-        self.assertEqual(get_overloaded_types_and_args([tensor, other, subtensor]),
-                     [subtensor, tensor, other])
+        args = get_overloaded_types_and_args([tensor, subtensor, other])[1]
+        self.assertEqual(args, [subtensor, tensor, other])
+        args = get_overloaded_types_and_args([tensor, other, subtensor])[1]
+        self.assertEqual(args, [subtensor, tensor, other])
 
     def test_many_duck_tensors(self):
 
@@ -428,27 +427,24 @@ class TestTensorMethods(TestCase):
 
 class TestTorchFunctions(TestCase):
 
-    @unittest.expectedFailure # Discuss
     def test_set_module(self):
-        self.assertEqual(torch.sum.__module__, 'torch')
-        self.assertEqual(torch.char.equal.__module__, 'torch.char')
-        self.assertEqual(torch.fft.fft.__module__, 'torch.fft')
-        self.assertEqual(torch.linalg.solve.__module__, 'torch.linalg')
+        # TODO: add a few more in other namespaces once we have C++ overrides
+        #self.assertEqual(torch.sum.__module__, 'torch')
+        self.assertEqual(torch.unique.__module__, 'torch.functional')
 
-    @unittest.expectedFailure # Discuss
-    def test_inspect_sum(self):
-        signature = inspect.signature(torch.sum)
-        assert 'axis' in signature.parameters
+    def test_inspect_unique(self):
+        # Ensure that functions defined in Python can be introspected
+        signature = inspect.signature(torch.unique)
+        assert 'dim' in signature.parameters
 
-    @unittest.expectedFailure # Discuss
-    def test_override_sum(self):
+    def test_override_unique_with_different_name(self):
         MyTensor, implements = _new_duck_type_and_implements()
 
-        @implements(torch.sum)
+        @implements(torch.unique)
         def _(tensor):
             return 'yes'
 
-        self.assertEqual(torch.sum(MyTensor()), 'yes')
+        self.assertEqual(torch.unique(MyTensor()), 'yes')
 
     @unittest.expectedFailure # Discuss
     def test_sum_on_mock_tensor(self):
