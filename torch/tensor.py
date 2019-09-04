@@ -522,7 +522,7 @@ def _torch_function(func, types, args, kwargs):
     individual functions.
     """
     for t in types:
-        if t is not Tensor:
+        if not issubclass(t, Tensor):
             # This is a guard, it  errors if a "foreign" __torch_function__
             # is encountered.  This makes sense, because the dispatcher for
             # `func` should ensure that if another __torch_function__ is
@@ -534,4 +534,4 @@ def _torch_function(func, types, args, kwargs):
 
     # Arguments contain no overrides, so we can safely call the
     # overloaded function again.
-    return func(*args, **kwargs)
+    return func._implementation(*args, **kwargs)

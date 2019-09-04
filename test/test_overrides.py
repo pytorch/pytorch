@@ -205,7 +205,6 @@ class TestGetImplementingArgs(TestCase):
 
 class TestTensorTorchFunction(TestCase):
 
-    @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
     def test_method(self):
 
         class Other(object):
@@ -219,41 +218,41 @@ class TestTensorTorchFunction(TestCase):
 
         tensor = torch.tensor([1])
         other = Other()
-        no_override_sub = tensor.view(NoOverrideSub)
-        override_sub = tensor.view(OverrideSub)
+        no_override_sub = NoOverrideSub([1])
+        override_sub = OverrideSub([1])
 
         result = tensor.__torch_function__(func=dispatched_two_arg,
-                                          types=(torch.tensor,),
+                                          types=(torch.Tensor,),
                                           args=(tensor, 1.), kwargs={})
         self.assertEqual(result, 'original')
 
         result = tensor.__torch_function__(func=dispatched_two_arg,
-                                          types=(torch.tensor, Other),
+                                          types=(torch.Tensor, Other),
                                           args=(tensor, other), kwargs={})
         assert result is NotImplemented
 
         result = tensor.__torch_function__(func=dispatched_two_arg,
-                                          types=(torch.tensor, NoOverrideSub),
+                                          types=(torch.Tensor, NoOverrideSub),
                                           args=(tensor, no_override_sub),
                                           kwargs={})
         self.assertEqual(result, 'original')
 
         result = tensor.__torch_function__(func=dispatched_two_arg,
-                                          types=(torch.tensor, OverrideSub),
+                                          types=(torch.Tensor, OverrideSub),
                                           args=(tensor, override_sub),
                                           kwargs={})
-        assert_equal(result, 'original')
+        self.assertEqual(result, 'original')
 
-        with self.assertRaisesRegex(TypeError, 'no implementation found'):
-            torch.cat((tensor, other))
+        # TODO: uncomment once `torch.cat` is overridable (and change use of view)
+        #with self.assertRaisesRegex(TypeError, 'no implementation found'):
+        #    torch.cat((tensor, other))
+        #
+        #expected = torch.cat((tensor, tensor))
+        #result = torch.cat((tensor, no_override_sub))
+        #self.assertEqual(result, expected.view(NoOverrideSub))
+        #result = torch.cat((tensor, override_sub))
+        #self.assertEqual(result, expected.view(OverrideSub))
 
-        expected =torch.cat((tensor, tensor))
-        result = torch.cat((tensor, no_override_sub))
-        assert_equal(result, expected.view(NoOverrideSub))
-        result = torch.cat((tensor, override_sub))
-        assert_equal(result, expected.view(OverrideSub))
-
-    @unittest.expectedFailure # TODO
     def test_no_wrapper(self):
         # This shouldn't happen unless a user intentionally calls
         # __torch_function__ with invalid arguments, but check that we raise
