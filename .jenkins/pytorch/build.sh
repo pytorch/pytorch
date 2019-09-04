@@ -65,7 +65,6 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
   build_args=()
-  build_args+=("-DBUILD_BINARY=ON")
   build_args+=("-DBUILD_CAFFE2_MOBILE=OFF")
 
   build_args+=("-DBUILD_SHARED_LIBS=ON")
