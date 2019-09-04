@@ -460,6 +460,15 @@ void propagate_names_for_expand(Tensor& result, const Tensor& self) {
   propagate_names(result, std::move(outnames), /*validate_names=*/false);
 }
 
+optional<std::vector<Dimname>> compute_broadcast_outnames(
+    const Tensor& self,
+    const Tensor& other) {
+  if (!self.has_names() && !other.has_names()) {
+    return nullopt;
+  }
+  return unify_from_right(self.names(), other.names());
+}
+
 optional<std::vector<Dimname>> compute_matmul_outnames(
     const Tensor& self,
     const Tensor& other) {

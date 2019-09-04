@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/NamedTensorUtils.h>
 
 namespace at { namespace native {
 
@@ -43,6 +44,9 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor & mask, const Tensor & 
 }
 
 Tensor masked_select_cuda(const Tensor & self, const Tensor & mask) {
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::compute_broadcast_outnames(self, mask);
+#endif
   if (mask.dtype() == at::ScalarType::Byte) {
     AT_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
@@ -53,6 +57,9 @@ Tensor masked_select_cuda(const Tensor & self, const Tensor & mask) {
 }
 
 Tensor & masked_select_out_cuda(Tensor & result, const Tensor & self, const Tensor & mask) {
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::compute_broadcast_outnames(self, mask);
+#endif
   if (mask.dtype() == at::ScalarType::Bool) {
     return legacy::cuda::_th_masked_select_bool_out(result, self, mask);
   } else {
