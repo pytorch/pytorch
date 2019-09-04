@@ -3,6 +3,7 @@
 #include "caffe2/core/tensor_impl.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/proto_utils.h"
+#include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
 
