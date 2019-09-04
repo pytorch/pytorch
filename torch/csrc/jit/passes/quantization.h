@@ -97,5 +97,10 @@ TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
  */
 TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
 
+/** \brief Fold quantize function call into module
+ */
+TORCH_API void FoldQuantize(script::Module& module, const std::string& method_name);
+
+
 } // namespace jit
 } // namespace torch
