@@ -3,7 +3,16 @@ from __future__ import absolute_import, division, print_function
 from .common import Benchmark
 
 from torch import Tensor
-from torch._overrides import torch_function_dispatch
+
+try:
+    from torch._overrides import torch_function_dispatch
+except ImportError:
+    # Define so we only get errors for individual benchmarks if
+    # `torch._overrides` doesn't exist.
+    def torch_function_dispatch(func):
+        def wrapper():
+            return None
+        return wrapper
 
 
 def _broadcast_tensors_dispatcher(*tensors):
