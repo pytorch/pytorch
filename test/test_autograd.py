@@ -1067,6 +1067,18 @@ class TestAutograd(TestCase):
         expected_grad[1].fill_(3)
         self.assertEqual(y.grad.data, expected_grad)
 
+    def test_index_backward_does_not_save_tensor(self):
+        # Example from https://github.com/pytorch/pytorch/issues/24853.
+        # if `index(tensor, indices)` saves `tensor` for backwards, then it will
+        # trigger a version check on `tensor` during the backward pass, which
+        # will cause the following code to error because `tensor` gets modified
+        # by the indexing line.
+        a = torch.tensor([1., 0, 0])
+        b = torch.zeros(3, requires_grad=True)
+        tensor = b + 0
+        tensor[a != 0] = tensor[a != 0]
+        tensor.backward(torch.zeros_like(tensor))
+
     def test_volatile_deprecated(self):
         v = torch.autograd.torch.randn(3, 3)
         with warnings.catch_warnings(record=True) as w:
