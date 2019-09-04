@@ -1011,7 +1011,16 @@ void testMemoryDAG() {
     // But a and f don't alias
     ASSERT_FALSE(t.mayAlias(a, f));
   }
-
+  {
+    // Test invalidation of memory locations
+    MemoryDAG t;
+    auto a = t.makeFreshValue(aValue);
+    auto b = t.makeFreshValue(bValue);
+    // `a` does not point to `b`
+    ASSERT_FALSE(a->getMemoryLocations().test(b->index));
+    t.makePointerTo(a, b);
+    ASSERT_TRUE(a->getMemoryLocations().test(b->index));
+  }
   {
     // x(y) -> x contains y
 

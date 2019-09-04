@@ -323,7 +323,7 @@ struct SymbolicVariable {
       return insertConstant(static_cast<int64_t>(*value));
     } else {
       return v->owningGraph()
-          ->insertNode(v->owningGraph()->createNone(IntType::get()))
+          ->insertNode(v->owningGraph()->createNone())
           ->output();
     }
   }
