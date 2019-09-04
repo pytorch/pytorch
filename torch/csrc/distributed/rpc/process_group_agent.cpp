@@ -164,8 +164,9 @@ void ProcessGroupAgent::sync() {
   pg_->barrier()->wait();
 }
 
-std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
-    const WorkerId& to, Message&& message) {
+std::shared_ptr<FutureMessage> ProcessGroupAgent::sendImpl(
+    const WorkerId& to,
+    Message&& message) {
   TORCH_CHECK(to.id_ != (worker_id_t)pg_->getRank(),
       "ProcessGroupAgent does not support making RPC calls to self.")
   TORCH_CHECK(to.id_ < (worker_id_t)pg_->getSize(),
