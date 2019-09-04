@@ -2285,6 +2285,11 @@ class TestCuda(TestCase):
     def test_cholesky_batched(self):
         _TestTorchMixin._test_cholesky_batched(self, lambda t: t.cuda())
 
+    @slowTest
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_cholesky_batched_many_batches(self):
+        _TestTorchMixin._test_cholesky_batched_many_batches(self, lambda t: t.cuda())
+
     def test_view(self):
         _TestTorchMixin._test_view(self, lambda t: t.cuda())
 
@@ -2542,10 +2547,25 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda(), pivot=False)
         _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda(), pivot=True)
 
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_lu_solve_batched(self):
+        _TestTorchMixin._test_lu_solve_batched(self, lambda t: t.cuda(), pivot=False)
+        _TestTorchMixin._test_lu_solve_batched(self, lambda t: t.cuda(), pivot=True)
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lu_solve_batched_non_contiguous(self):
+        _TestTorchMixin._test_lu_solve_batched_non_contiguous(self, lambda t: t.cuda())
+
     @slowTest
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu_solve_batched_many_batches(self):
         _TestTorchMixin._test_lu_solve_batched_many_batches(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lu_solve_batched_broadcasting(self):
+        _TestTorchMixin._test_lu_solve_batched_broadcasting(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu_unpack(self):

@@ -1715,20 +1715,6 @@
         - THTensor* self
 ]]
 [[
-  name: _th_reciprocal_
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  options:
-    - cname: cinv
-      return: self
-      arguments:
-        - THTensor* self
-        - THTensor* self
-]]
-[[
   name: _th_pow
   backends:
     - CUDA
@@ -2434,7 +2420,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - function
