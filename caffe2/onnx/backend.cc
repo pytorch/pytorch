@@ -710,7 +710,7 @@ Caffe2Ops Caffe2Backend::CreateGather(
   inputs.emplace_back(node.input(0));
   inputs.emplace_back(node.input(1));
 
-  auto axis = onnx_node->attributes.get<int64_t>("axis", 1L);
+  auto axis = onnx_node->attributes.get<int64_t>("axis", 0L);
   caffe2::Argument arg_axis;
   arg_axis.set_name("axis");
   arg_axis.set_i(axis);
