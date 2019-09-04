@@ -42,146 +42,93 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
     const int padWidth, const int padHeight,
     const int dilationWidth, const int dilationHeight)
 {
-  const int in_height = inputHeight;
-  const int in_width = inputWidth;
-  const int in_depth = outputChannels;
-  const int filter_height = kernelHeight;
-  const int filter_width = kernelWidth;
-  const int depth_multiplier = depthwiseMultiplier;
-  const int stride = strideWidth;
-  const int pad_height = padHeight;
-  const int pad_width = padWidth;
-  const int out_height = outputHeight;
-  const int out_width = outputWidth;
-  const int out_depth = outputChannels;
+  const int KW_LIMIT = (kSize !=0) ? kSize : kernelWidth;
+  const int KH_LIMIT = (kSize !=0) ? kSize : kernelHeight;
 
-  for (IndexType thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-       thread_id < totalElements;
-       thread_id += gridDim.x * blockDim.x) {
-    // Compute the indexes of this thread in the output.
-    //
-    // We want coalesced reads so we make sure that each warp reads
-    // a contiguous chunk of memory.
-    //
-    // THIS IS PROBABLY WRONG, we are not doing coalesced reads
-    // into the input, because of the depth multiplier division...
-    const int out_col = thread_id % out_width;
-    const int out_row = (thread_id / out_width) % out_height;
-    const int out_channel = (thread_id / out_width / out_height) % out_depth;
-    const int batch = thread_id / out_width / out_height / out_depth;
 
-    // Compute the input depth and the index of depth multiplier
-    // based off the output depth index that this thread is
-    // computing n.
-    const int in_channel = out_channel / depth_multiplier;
-    const int multiplier = out_channel % depth_multiplier;
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalElements;
+       linearIndex += gridDim.x * blockDim.x) {
+    const int w = linearIndex % outputWidth; // w
+    const int h = (linearIndex / outputWidth) % outputHeight; // h
+    const int c = (linearIndex / outputWidth / outputHeight) % outputChannels; // c?
+    const int n = linearIndex / outputWidth / outputHeight / outputChannels; // n?
 
-    // Data is stored in the following format (let's assume we
-    // flatten the height and width into one contiguous dimension
-    // called "P".
-    //
-    // B1C1P1 B1C1P2 ..... B1C2P1 B1C2P2 ....
-    // B2C1P1 B2C1P2 ..... B2C2P1 B2C2P2 ....
-    //
-    // Each row contains in_depth * in_height * in_width values
-    // for each sample in the batch.
-    //
-    // We can further flatten it into:
-    //
-    // B1C1P1 B1C1P2 .....
-    // B1C2P1 B1C2P2 ....
-    // B2C1P1 B2C1P2 .....
-    // B2C2P1 B2C2P2 ....
-    //
-    // where each row is a contiguous array of all of the spatial
-    // pixels for a given batch and input depth.  The following
-    // loop unrolls across the filter dimensions for a given thread,
-    // indexing into the filter value and the corresponding input
-    // patch.
-    //
-    // We can compute the index into the patch once right here.
+    const int in_channel = c / depthwiseMultiplier;
+    const int multiplier = c % depthwiseMultiplier;
+
+    const int in_depth = outputChannels;
     const int input_offset_temp =
-        (batch * in_depth + in_channel) * (in_height * in_width);
+        (n * in_depth + in_channel) * (inputHeight * inputWidth);
 
-    // Finally, we can iterate over the spatial dimensions and perform the
-    // convolution, writing into the output at the end.
-    //
-    // We perform an additional optimization, where we can determine
-    // whether the patch fits within the image indices statically, and
-    // avoid boundary checking within the loop.
-    const int input_row_start = out_row * stride - pad_height;
-    const int input_col_start = out_col * stride - pad_width;
-    const int input_row_end = input_row_start + filter_height;
-    const int input_col_end = input_col_start + filter_width;
+    const int input_row_start = h * strideHeight - padHeight;
+    const int input_col_start = w * strideWidth - padWidth;
+    const int input_row_end = input_row_start + KH_LIMIT;
+    const int input_col_end = input_col_start + KW_LIMIT;
 
-    AccT sum = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[out_channel]) : ScalarConvert<int, AccT>::to(0);
+    AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[c]) : ScalarConvert<int, AccT>::to(0);
     if (input_row_start >= 0 && input_col_start >= 0 &&
-        input_row_end < in_height && input_col_end < in_width) {
+        input_row_end < inputHeight && input_col_end < inputWidth) {
       // Loop that doesn't need to check for boundary conditions.
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
-      for (int filter_row = 0; filter_row < filter_height; ++filter_row) {
-        const int in_row = input_row_start + filter_row;
-        const int filter_offset_temp = filter_width * filter_row;
+      for (int kH = 0; kH < KH_LIMIT; ++kH) {
+        const int in_row = input_row_start + kH;
+        const int filter_offset_temp = KW_LIMIT * kH;
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
-        for (int filter_col = 0; filter_col < filter_width; ++filter_col) {
-          const int in_col = input_col_start + filter_col;
+        for (int kW = 0; kW < KW_LIMIT; ++kW) {
+          const int in_col = input_col_start + kW;
 
-          const int input_offset =
-              (input_offset_temp) + (in_row * in_width) + in_col;
-          const int filter_offset =
+          const int offset =
+              (input_offset_temp) + (in_row * inputWidth) + in_col;
+          const int weightOffset =
               multiplier +
-              depth_multiplier *
-                  (in_channel + in_depth * (filter_col + filter_offset_temp));
-          sum = THCNumerics<AccT>::add(
-            sum,
+              depthwiseMultiplier *
+                  (in_channel + in_depth * (kW + filter_offset_temp));
+          value = THCNumerics<AccT>::add(
+            value,
             THCNumerics<AccT>::mul(
-              ScalarConvert<T, AccT>::to(weight.data()[filter_offset]),
-              ScalarConvert<T, AccT>::to(input.data()[input_offset])));
+              ScalarConvert<T, AccT>::to(weight.data()[weightOffset]),
+              ScalarConvert<T, AccT>::to(input.data()[offset])));
         }
       }
     } else {
-      // Loop that needs to check for boundary conditions.
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
-      for (int filter_row = 0; filter_row < filter_height; ++filter_row) {
-        const int in_row = input_row_start + filter_row;
-        const int filter_offset_temp = filter_width * filter_row;
+      for (int kH = 0; kH < KH_LIMIT; ++kH) {
+        const int in_row = input_row_start + kH;
+        const int filter_offset_temp = KW_LIMIT * kH;
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
-        for (int filter_col = 0; filter_col < filter_width; ++filter_col) {
-          const int in_col = input_col_start + filter_col;
-          // TODO(vrv): the in_row check can be done outside of this loop;
-          // benchmark both methods to determine the better decision.
-          if (in_row >= 0 && in_row < in_height && in_col >= 0 &&
-              in_col < in_width) {
-            const int in_col = input_col_start + filter_col;
+        for (int kW = 0; kW < KW_LIMIT; ++kW) {
+          const int in_col = input_col_start + kW;
+          if (in_row >= 0 && in_row < inputHeight && in_col >= 0 &&
+              in_col < inputWidth) {
+            const int in_col = input_col_start + kW;
 
-            // input_offset_temp indexes into the start of memory
-            // where the spatial data starts.
-            const int input_offset =
-                (input_offset_temp) + (in_row * in_width) + in_col;
+            const int offset =
+                (input_offset_temp) + (in_row * inputWidth) + in_col;
 
-            const int filter_offset =
+            const int weightOffset =
                 multiplier +
-                depth_multiplier *
-                    (in_channel + in_depth * (filter_col + filter_offset_temp));
-            sum = THCNumerics<AccT>::add(
-              sum,
+                depthwiseMultiplier *
+                    (in_channel + in_depth * (kW + filter_offset_temp));
+            value = THCNumerics<AccT>::add(
+              value,
               THCNumerics<AccT>::mul(
-                ScalarConvert<T, AccT>::to(weight.data()[filter_offset]),
-                ScalarConvert<T, AccT>::to(input.data()[input_offset])));
+                ScalarConvert<T, AccT>::to(weight.data()[weightOffset]),
+                ScalarConvert<T, AccT>::to(input.data()[offset])));
           }
         }
       }
     }
 
-    output.data()[thread_id] = ScalarConvert<AccT, T>::to(sum);
+    output.data()[linearIndex] = ScalarConvert<AccT, T>::to(value);
   }
 }
 
