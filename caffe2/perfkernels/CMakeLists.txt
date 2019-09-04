@@ -89,3 +89,14 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
 set(Caffe2_DEPENDENCY_WHOLE_LINK_LIBS
     ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS}
     PARENT_SCOPE)
+
+# For iOS x86_64 build, the libCaffe2_perfkernels_avx2.a is not installed properly.
+# In the future, this file might be removed from mobile.  This is just a temporary fix 
+# until we find a better solution.
+
+if (IOS)
+    if (${IOS_PLATFORM} STREQUAL "SIMULATOR")
+        install (TARGETS Caffe2_perfkernels_avx2 EXPORT Caffe2Targets DESTINATION lib)
+    endif()
+endif()
+
