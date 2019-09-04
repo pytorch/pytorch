@@ -57,7 +57,7 @@ def linear(input, weight, bias=None, scale=None, zero_point=None):
     if bias is not None:
         bias = torch.quantize_linear(bias.dequantize(), weight.q_scale() * input.q_scale(), 0, torch.qint32)
     return torch.ops.quantized.linear(input, _packed_weight, bias, scale,
-                                             zero_point)
+                                      zero_point)
 
 def conv2d(input, weight, bias,
            stride=1, padding=0, dilation=1, groups=1,
@@ -118,12 +118,10 @@ def conv2d(input, weight, bias,
 
     prepacked_weight = torch.ops.quantized.conv_prepack(
         weight.permute([0, 2, 3, 1]), bias, stride, padding, dilation, groups)
-    if bias is not None:
-        bias = torch.quantize_linear(bias.dequantize(), scale=weight.q_scale() * input.q_scale(), zero_point=0, dtype=torch.qint32)
     return torch.ops.quantized.conv2d(input.permute([0, 2, 3, 1]),
-                                             prepacked_weight,
-                                             stride, padding, dilation,
-                                             groups, scale, zero_point).permute([0, 3, 1, 2])
+                                      prepacked_weight,
+                                      stride, padding, dilation,
+                                      groups, scale, zero_point).permute([0, 3, 1, 2])
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):

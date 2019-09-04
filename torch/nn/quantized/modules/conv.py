@@ -124,10 +124,10 @@ class Conv2d(torch.nn.Module):
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
         output = ops.quantized.conv2d(input.permute([0, 2, 3, 1]),
-                                             self._packed_weight,
-                                             self.stride, self.padding,
-                                             self.dilation, self.groups,
-                                             self.scale, self.zero_point)
+                                      self._packed_weight,
+                                      self.stride, self.padding,
+                                      self.dilation, self.groups,
+                                      self.scale, self.zero_point)
         return output.permute([0, 3, 1, 2])
 
     # ===== Serialization methods =====
