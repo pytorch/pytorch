@@ -104,7 +104,7 @@ class class_ {
     c10::getCustomClassTypeMap().insert({typeid(c10::tagged_capsule<CurClass>).name(),
                               StrongTypePtr(classCu, classTypePtr)});
 
-    classCu->register_class(classTypePtr);
+    classCu->register_type(classTypePtr);
   }
 
   template <typename... Types>
@@ -188,7 +188,8 @@ class class_ {
     }
     graph->registerOutput(res);
 
-    classCu->create_function(qualClassName + "." + name, graph);
+    auto method = classCu->create_function(qualClassName + "." + name, graph);
+    classTypePtr->addMethod(method);
   }
   template <typename Func, typename R, typename... Types>
   class_& def_(string name, Func f, detail::types<R, Types...> funcInfo) {

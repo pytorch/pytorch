@@ -66,4 +66,48 @@ namespace {
 
     EXPECT_FLOAT_EQ(in, out);
   }
+
+  TEST(BFloat16Math, Addition) {
+    // This test verifies that if only first 7 bits of float's mantisa are
+    // changed after addition, we should have no loss in precision.
+
+    // input bits
+    // S | Exponent | Mantissa
+    // 0 | 10000000 | 10010000000000000000000 = 3.125
+    float input = float_from_bytes(0, 0, 0x40480000);
+
+    // expected bits
+    // S | Exponent | Mantissa
+    // 0 | 10000001 | 10010000000000000000000 = 6.25
+    float expected = float_from_bytes(0, 0, 0x40c80000);
+
+    c10::BFloat16 b;
+    b.x = c10::detail::bits_from_f32(input);
+    b = b + b;
+
+    float res = c10::detail::f32_from_bits(b.x);
+    EXPECT_EQ(res, expected);
+  }
+
+  TEST(BFloat16Math, Substraction) {
+    // This test verifies that if only first 7 bits of float's mantisa are
+    // changed after substraction, we should have no loss in precision.
+
+    // input bits
+    // S | Exponent | Mantissa
+    // 0 | 10000001 | 11101000000000000000000 = 7.625
+    float input = float_from_bytes(0, 0, 0x40f40000);
+
+    // expected bits
+    // S | Exponent | Mantissa
+    // 0 | 10000000 | 01010000000000000000000 = 2.625
+    float expected = float_from_bytes(0, 0, 0x40280000);
+
+    c10::BFloat16 b;
+    b.x = c10::detail::bits_from_f32(input);
+    b = b - 5;
+
+    float res = c10::detail::f32_from_bits(b.x);
+    EXPECT_EQ(res, expected);
+  }
 } // namespace

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/QScheme.h>
 #ifdef USE_FBGEMM
 #include "fbgemm/Fbgemm.h"
 #include "fbgemm/QuantUtils.h"
@@ -16,20 +17,22 @@
 struct FBGEMM_API PackedLinearWeight {
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
   std::vector<int32_t> col_offsets;
-  double w_scale;
-  int64_t w_zp;
+  std::vector<float> w_scale;
+  std::vector<int32_t> w_zp;
+  c10::QScheme q_scheme;
 };
 
 struct FBGEMM_API PackedConvWeight {
   std::unique_ptr<fbgemm::PackWeightsForConv<2>> w;
   std::vector<int32_t> col_offsets;
   std::vector<int64_t> kernel;
-  double w_scale;
-  int64_t w_zp;
+  std::vector<float> w_scale;
+  std::vector<int32_t> w_zp;
+  c10::QScheme q_scheme;
 };
 
 // PackWeight: Convert the weight from uint8 to int8.
-static void convert_uint8_int8(
+inline void convert_uint8_int8(
     int len,
     const uint8_t* src_uint8,
     int8_t* dst_int8) {
@@ -39,7 +42,7 @@ static void convert_uint8_int8(
 }
 
 // UnpackWeight: Convert the weight from int8 to uint8.
-static void convert_int8_uint8(
+inline void convert_int8_uint8(
     int len,
     const int8_t* src_int8,
     uint8_t* dst_uint8) {

@@ -42,7 +42,7 @@ class DotGenerator {
     for (const auto& node : sg.getNodes()) {
       generateNode(node, sg, output);
     }
-    for (auto i = 0; i < subgraphs.size(); ++i) {
+    for (size_t i = 0; i < subgraphs.size(); ++i) {
       const auto& subgraph = subgraphs[i];
       output << "subgraph cluster" << i << " {\n";
       output << "style=dotted;\n";
