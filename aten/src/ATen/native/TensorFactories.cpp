@@ -236,6 +236,14 @@ Tensor empty_like(
 #endif
 }
 
+Tensor new_empty(
+    const Tensor& self,
+    IntArrayRef size,
+    const TensorOptions& options
+    ) {
+  return at::empty(size, self.options().merge_in(options));
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor eye(int64_t n, const TensorOptions& options) {
@@ -298,6 +306,16 @@ Tensor full_like(const Tensor& self, Scalar fill_value) {
 Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& options) {
   return native::full(self.sizes(), fill_value, options);
 }
+
+Tensor new_full(
+    const Tensor& self,
+    IntArrayRef size,
+    Scalar fill_value,
+    const TensorOptions& options
+    ) {
+  return at::full(size, fill_value, self.options().merge_in(options));
+}
+
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
