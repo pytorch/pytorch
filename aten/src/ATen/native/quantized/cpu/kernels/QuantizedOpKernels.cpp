@@ -161,7 +161,7 @@ void qmaxpool_2d_nhwc_kernel(const Tensor &qx,
           // Interleaved vector loop 4x
           constexpr auto vec_width = Vec256<scalar_t>::size();
           for (; c + 4 * vec_width <= iC; c+= 4 * vec_width) {
-            Vec256<scalar_t> acc(scalar_t(std::numeric_limits<typename scalar_t::underlying>::lowest()));
+            Vec256<scalar_t> acc(scalar_t(std::numeric_limits<scalar_t::underlying>::lowest()));
             Vec256<scalar_t> accs[4] = {acc, acc, acc, acc};
             int64_t tcntr = 0;
             int64_t x, y;
@@ -181,7 +181,7 @@ void qmaxpool_2d_nhwc_kernel(const Tensor &qx,
 
           // Vector loop
           for (; c + vec_width <= iC; c+= vec_width) {
-            Vec256<scalar_t> acc(scalar_t(std::numeric_limits<typename scalar_t::underlying>::lowest()));
+            Vec256<scalar_t> acc(scalar_t(std::numeric_limits<scalar_t::underlying>::lowest()));
             int64_t tcntr = 0;
             int64_t x, y;
             for (y = h_start; y < h_end; y += dH) {
@@ -195,7 +195,7 @@ void qmaxpool_2d_nhwc_kernel(const Tensor &qx,
           }  // for c
 
           for (; c < iC; ++c) {
-            auto max_val = std::numeric_limits<typename scalar_t::underlying>::lowest();
+            auto max_val = std::numeric_limits<scalar_t::underlying>::lowest();
             int64_t tcntr = 0;
             int64_t x, y;
             for (y = h_start; y < h_end; y += dH) {
