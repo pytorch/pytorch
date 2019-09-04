@@ -1106,10 +1106,10 @@ graph(%x : Tensor,
 
         get_forward(m)(data)
         FileCheck().check_not("aten::quantize_linear") \
-                 .check("prim::CallMethod[name=\"forward\"]") \
-                 .check_not("aten::quantize_linear") \
-                 .check("return") \
-                 .run(str(get_forward(m).graph))
+                   .check("prim::CallMethod[name=\"forward\"]") \
+                   .check_not("aten::quantize_linear") \
+                   .check("return") \
+                   .run(str(get_forward(m).graph))
         FileCheck().check("aten::quantize_linear") \
                    .check_next("aten::int_repr") \
                    .check_next("aten::_dequantize_linear") \
@@ -1150,7 +1150,7 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         # CHECK: aten::_dequantize_linear
         %r_dequant = aten::_dequantize_linear(%r_intrepr, %r_scale, %r_zero_point, %r_dtype)
         return (%r_dequant)""",
-        """
+                      """
 graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
 %b_scale, %b_zero_point, %b_dtype, %r_scale, %r_zero_point, %r_dtype):
         %a_quant = aten::quantize_linear(%a, %a_scale, %a_zero_point, %a_dtype)
