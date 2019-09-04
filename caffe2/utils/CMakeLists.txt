@@ -8,13 +8,18 @@ list(APPEND Caffe2_CPU_SRCS
   utils/math/utils.cc
   utils/math_cpu.cc
   utils/murmur_hash3.cc
-  utils/proto_convert.cc
-  utils/proto_utils.cc
-  utils/proto_wrap.cc
-  utils/signal_handler.cc
-  utils/smart_tensor_printer.cc
   utils/string_utils.cc
   utils/threadpool/ThreadPool.cc)
+
+if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
+  list(APPEND Caffe2_CPU_SRCS
+    utils/proto_convert.cc
+    utils/proto_utils.cc
+    utils/proto_wrap.cc
+    utils/signal_handler.cc
+    utils/smart_tensor_printer.cc
+  )
+endif()
 
 # ---[ threadpool/pthreadpool* is a local modification of the NNPACK
 # pthreadpool with a very similar interface. Neither NNPACK, nor this
