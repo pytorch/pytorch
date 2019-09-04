@@ -2194,11 +2194,11 @@
       output: True
       resize: [ [self,0], [self,1], [mat2,2] ]
       cpu_zero: True
-    - CONSTANT AS_REAL(0)
     - argument 0
-    - CONSTANT AS_REAL(1)
     - THTensor* self
     - THTensor* mat2
+    - CONSTANT AS_REAL(0)
+    - CONSTANT AS_REAL(1)
 ]]
 [[
   name: _th_addbmm
