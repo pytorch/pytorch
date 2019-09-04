@@ -58,36 +58,32 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
     const int multiplier = c % depthwiseMultiplier;
 
     const int in_depth = outputChannels;
-    const int input_offset_temp =
-        (n * in_depth + in_channel) * (inputHeight * inputWidth);
 
-    const int input_row_start = h * strideHeight - padHeight;
-    const int input_col_start = w * strideWidth - padWidth;
+
+    const int input_row_start = -padHeight + h * strideHeight;
+    const int input_col_start = -padWidth + w * strideWidth;
     const int input_row_end = input_row_start + KH_LIMIT;
     const int input_col_end = input_col_start + KW_LIMIT;
 
     AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[c]) : ScalarConvert<int, AccT>::to(0);
+    const IndexType offset0 = (n * in_depth + in_channel) * inputHeight * inputWidth;
+
     if (input_row_start >= 0 && input_col_start >= 0 &&
         input_row_end < inputHeight && input_col_end < inputWidth) {
-      // Loop that doesn't need to check for boundary conditions.
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
       for (int kH = 0; kH < KH_LIMIT; ++kH) {
-        const int in_row = input_row_start + kH;
+        const int h_in = input_row_start + kH * dilationHeight;
         const int filter_offset_temp = KW_LIMIT * kH;
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
         for (int kW = 0; kW < KW_LIMIT; ++kW) {
-          const int in_col = input_col_start + kW;
+          const int w_in = input_col_start + kW * dilationWidth;
 
-          const int offset =
-              (input_offset_temp) + (in_row * inputWidth) + in_col;
-          const int weightOffset =
-              multiplier +
-              depthwiseMultiplier *
-                  (in_channel + in_depth * (kW + filter_offset_temp));
+          const IndexType offset = offset0 + h_in * inputWidth + w_in;
+          const int weightOffset = multiplier + depthwiseMultiplier * (in_channel + in_depth * (kW + filter_offset_temp));
           value = THCNumerics<AccT>::add(
             value,
             THCNumerics<AccT>::mul(
@@ -100,24 +96,19 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
 #pragma unroll
 #endif
       for (int kH = 0; kH < KH_LIMIT; ++kH) {
-        const int in_row = input_row_start + kH;
+        const int h_in = input_row_start + kH * dilationHeight;
         const int filter_offset_temp = KW_LIMIT * kH;
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
         for (int kW = 0; kW < KW_LIMIT; ++kW) {
-          const int in_col = input_col_start + kW;
-          if (in_row >= 0 && in_row < inputHeight && in_col >= 0 &&
-              in_col < inputWidth) {
-            const int in_col = input_col_start + kW;
+          const int w_in = input_col_start + kW * dilationWidth;
+          if (h_in >= 0 && h_in < inputHeight && w_in >= 0 &&
+              w_in < inputWidth) {
+            const int w_in = input_col_start + kW * dilationWidth;
 
-            const int offset =
-                (input_offset_temp) + (in_row * inputWidth) + in_col;
-
-            const int weightOffset =
-                multiplier +
-                depthwiseMultiplier *
-                    (in_channel + in_depth * (kW + filter_offset_temp));
+            const int offset = offset0 + h_in * inputWidth + w_in;
+            const int weightOffset = multiplier + depthwiseMultiplier * (in_channel + in_depth * (kW + filter_offset_temp));
             value = THCNumerics<AccT>::add(
               value,
               THCNumerics<AccT>::mul(
