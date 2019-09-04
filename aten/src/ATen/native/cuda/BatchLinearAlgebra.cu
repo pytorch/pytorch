@@ -824,9 +824,28 @@ AT_ERROR("cholesky: MAGMA library not found in "
     }
 
     MAGMAQueue magma_queue(self.get_device());
-    magmaCholeskyBatched<scalar_t>(
-      uplo, n, self_array, n, info_array,
-      batch_size, magma_queue);
+
+    constexpr int64_t batch_limit = 262140;
+    // Compute as many batches of 262140 possible
+    // 262140 is the size of the largest batch of matrices that can be run with
+    // violating maximum kernel configuration
+    // The number of "mini"-batches are floor(batch_size / batch_limit)
+    // and these cover floor(batch_size / batch_limit) * batch_limit cholesky calls
+    int64_t mini_batches = batch_size / batch_limit, mini_idx;
+    for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
+      scalar_t** self_array_cur = &self_array[mini_idx];
+      magma_int_t* info_array_cur = &info_array[mini_idx];
+
+      magmaCholeskyBatched<scalar_t>(
+        uplo, n, self_array_cur, n, info_array_cur, batch_limit, magma_queue);
+    }
+
+    // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
+    // which concisely is equal to batch_size % batch_limit
+    if (batch_size % batch_limit != 0) {
+      magmaCholeskyBatched<scalar_t>(
+        uplo, n, &self_array[mini_idx], n, &info_array[mini_idx], batch_size % batch_limit, magma_queue);
+    }
 
     for (int64_t i = 0; i < batch_size; i++) {
       infos[i] = info_array[i];
