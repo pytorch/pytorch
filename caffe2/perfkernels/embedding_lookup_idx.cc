@@ -1,7 +1,9 @@
 #include "caffe2/perfkernels/embedding_lookup_idx.h"
 
-#include "caffe2/core/types.h"
+#include "caffe2/core/common.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/perfkernels/common.h"
+#include <c10/util/Half.h>
 
 namespace caffe2 {
 
