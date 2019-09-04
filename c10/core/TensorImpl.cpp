@@ -58,7 +58,7 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set, const caffe2::
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt),
-      type_set_(type_set) {
+      type_set_(type_set.remove(TensorTypeId::VariableTensorId)) {
   if (!type_set.empty()) {
     AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
               device_opt_.has_value());
