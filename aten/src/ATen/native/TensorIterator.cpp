@@ -214,29 +214,37 @@ void TensorIterator::allocate_outputs() {
 }
 
 #ifdef BUILD_NAMEDTENSOR
-void TensorIterator::propagate_names_to_outputs() {
-  bool should_perform_name_inference = std::any_of(
+void TensorIterator::compute_names() {
+  bool should_infer_names = std::any_of(
       operands_.begin(),
       operands_.end(),
       [](const OperandInfo& op) {
         return op.tensor.defined() && op.tensor.has_names();
       });
-  if (!should_perform_name_inference) {
+  if (!should_infer_names) {
     return;
   }
 
-  // build names
-  NameVector names;
   for (auto& op : operands_) {
     if (!op.tensor.defined()) continue;
     // don't include output tensors that are not also input tensors.
     if (resize_outputs_ && op.is_output && !op.is_read_write) continue;
     // perform name inference
-    if (names.empty()) {
-      names = op.tensor.names();
+    if (names_.empty()) {
+      names_ = op.tensor.names();
     } else {
-      names = NameVector(unify_from_right(names, op.tensor.names()));
+      names_ = NameVector(unify_from_right(names_, op.tensor.names()));
     }
+  }
+}
+
+void TensorIterator::propagate_names_to_outputs() {
+  // names_ can be empty for two reasons:
+  // 1. We were performing ops on scalar tensors. Then there should be no names.
+  // 2. All of the defined inputs/outputs had no names. Then we shouldn't
+  //    run name inference.
+  if (names_.empty()) {
+    return;
   }
 
   // propagate names
@@ -244,10 +252,10 @@ void TensorIterator::propagate_names_to_outputs() {
     auto& op = operands_[i];
     // must call propagate_names_to_outputs after outputs have been allocated.
     TORCH_INTERNAL_ASSERT(op.tensor.defined());
-    if (names.empty()) {
+    if (names_.empty()) {
       namedinference::propagate_names(op.tensor, nullopt);
     } else {
-      namedinference::propagate_names(op.tensor, names);
+      namedinference::propagate_names(op.tensor, names_);
     }
   }
 }
@@ -752,6 +760,10 @@ void TensorIterator::build() {
   // Check that the outputs have no internal overlap
   // and do not share memory with inputs.
   check_mem_overlaps();
+#ifdef BUILD_NAMEDTENSOR
+  // Check that input dimensions are aligned correctly & compute outnames.
+  compute_names();
+#endif
   // compute the broadcasted shape
   compute_shape();
   // compute each tensor's stride after broadcasting
