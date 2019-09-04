@@ -471,20 +471,6 @@ class TestTorchFunctions(TestCase):
             torch.sum, (TensorProxy,), (proxy,), {})
         proxy.value.__tensor__.assert_not_called()
 
-    @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
-    def test_sum_forwarding_implementation(self):
-
-        class MyTensor(torch.Tensor):
-
-            def sum(self, axis, out):
-                return 'summed'
-
-            def __torch_function__(self, func, types, args, kwargs):
-                return super().__torch_function__(func, types, args, kwargs)
-
-        # note: the internal implementation of torch.sum() calls the .sum() method
-        tensor = torch.tensor(1).view(MyTensor)
-        self.assertEqual(torch.sum(tensor), 'summed')
 
 if __name__ == '__main__':
     unittest.main()
