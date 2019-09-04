@@ -23,7 +23,7 @@ def dist_init(func):
     @wraps(func)
     def wrapper(self):
         self.worker_id = self.rank
-        store = dist.FileStore(self.file.name, self.world_size)
+        store = dist.FileStore(self.file, self.world_size)
         dist.init_process_group(backend='gloo', rank=self.rank,
                                 world_size=self.world_size, store=store)
         dist.init_model_parallel('worker%d' % self.rank)
