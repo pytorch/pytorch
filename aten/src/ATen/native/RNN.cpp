@@ -143,7 +143,7 @@ struct QuantizedCellParams {
 // QuantizedCellParams vs. QuantizedCellParamsDynamic
 //
 // QuantizedCellParams uses the legacy
-// fbgemm_linear_int8_weighjt_fp32_activation API, which requires the explicit
+// fbgemm_linear_int8_weight_fp32_activation API, which requires the explicit
 // scale and zero point parameters for the weight. QuantizedCellParamsDynamic
 // uses the new fbgemm_linear_dynamic API, which doesn't require the explicit
 // scale and zero point parameters. These quantization parameters are
@@ -174,7 +174,7 @@ struct QuantizedCellParamsDynamic {
     const auto kOvrldName = "";
     const std::vector<c10::IValue> output_ih_list =
         callOp(kFuncName, kOvrldName, input_ih, w_ih, b_ih);
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT(
         output_ih_list.size() == 1,
         "The output vector should have exact one element");
     const Tensor output_ih = output_ih_list[0].toTensor();
@@ -185,7 +185,7 @@ struct QuantizedCellParamsDynamic {
     const auto kOvrldName = "";
     const std::vector<c10::IValue> output_hh_list =
         callOp(kFuncName, kOvrldName, input_hh, w_hh, b_hh);
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT(
         output_hh_list.size() == 1,
         "The output vector should have exact one element");
     const Tensor output_hh = output_hh_list[0].toTensor();
