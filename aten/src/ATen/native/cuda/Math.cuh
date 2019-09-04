@@ -39,8 +39,7 @@ __device__ __forceinline__ T digamma(T* in) {
     }
     // Rounding errors in tan's input can really affect the output
     // for extreme values, so we always perform this computation in double.
-    result = static_cast<compute_type>(
-        - PI_f64 / tan(PI_f64 * static_cast<double>(x)));
+    result = static_cast<compute_type>(- PI_f64 / tan(PI_f64 * static_cast<double>(x)));
     x = 1 - x;
   }
 
@@ -75,7 +74,7 @@ __device__ __forceinline__ T trigamma(T* in) {
   compute_type result = 0;
   if (x < 0.5f) {
     sign = -1;
-    compute_type sin_pi_x = THCNumerics<compute_type>::sin(PI * x);
+    compute_type sin_pi_x = static_cast<compute_type>(::sin(PI * x));
     result -= (PI * PI) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
