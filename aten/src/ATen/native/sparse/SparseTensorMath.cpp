@@ -629,6 +629,19 @@ Tensor& s_addmm_out_sparse_dense_cpu(
 
 }
 
+Tensor& addmm_out_sparse_dense_cpu(
+    Tensor& result,
+    const Tensor& self,
+    const SparseTensor& mat1,
+    const Tensor& mat2,
+    Scalar beta,
+    Scalar alpha
+) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_out_sparse_dense_cpu(result, b_self, mat1, mat2, beta, alpha);
+}
+
 Tensor s_addmm_sparse_dense_cpu(
     const Tensor& t,
     const SparseTensor& sparse,
@@ -641,6 +654,18 @@ Tensor s_addmm_sparse_dense_cpu(
   return r;
 }
 
+Tensor addmm_sparse_dense_cpu(
+    const Tensor& self,
+    const SparseTensor& mat1,
+    const Tensor& mat2,
+    Scalar beta,
+    Scalar alpha
+) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_sparse_dense_cpu(b_self, mat1, mat2, beta, alpha);
+}
+
 Tensor& s_addmm_sparse_dense_cpu_(
     Tensor& t,
     const SparseTensor& sparse,
@@ -651,24 +676,14 @@ Tensor& s_addmm_sparse_dense_cpu_(
   return s_addmm_out_sparse_dense_cpu(t, t, sparse, dense, beta, alpha);
 }
 
-Tensor _sparse_addmm(
-  const Tensor& t,
-  const SparseTensor& sparse,
-  const Tensor& dense,
-  Scalar beta,
-  Scalar alpha
-) {
-  Tensor b_t;
-  std::tie(b_t) = expand_size(t, {sparse.size(0), dense.size(1)}, "addmm");
-  return at::s_native_addmm(b_t, sparse, dense, beta, alpha);
-}
+// NB: Purposely no broadcasting version of addmm inplace
 
 Tensor _sparse_mm(
   const SparseTensor& sparse,
   const Tensor& dense
 ) {
   Tensor t = at::zeros({}, dense.options());
-  return at::_sparse_addmm(t, sparse, dense, 0, 1);
+  return at::addmm(t, sparse, dense, 0, 1);  // redispatch!
 }
 
 SparseTensor& _sparse_mm_out(
@@ -677,7 +692,7 @@ SparseTensor& _sparse_mm_out(
   const Tensor& dense
 ) {
   Tensor t = at::zeros({}, dense.options());
-  return at::addmm_out(result, t, sparse, dense, 0, 1);
+  return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
 }
 
 // --------------------------------------------------------------------

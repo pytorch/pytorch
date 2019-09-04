@@ -2572,32 +2572,32 @@
   variants: function
   named_guard: False
 
-- func: s_native_addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: s_addmm_out_sparse_dense_cpu
-    CUDA: s_addmm_out_sparse_dense_cuda
-
-- func: s_native_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  dispatch:
-    CPU: s_addmm_sparse_dense_cpu
-    CUDA: s_addmm_sparse_dense_cuda
-
-- func: s_native_addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  dispatch:
-    CPU: s_addmm_sparse_dense_cpu_
-    CUDA: s_addmm_sparse_dense_cuda_
-
-- func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_addmm_out
+    CUDA: legacy::cuda::_th_addmm_out
+    SparseCPU: addmm_out_sparse_dense_cpu
+    SparseCUDA: addmm_out_sparse_dense_cuda
   named_guard: False
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: legacy::cpu::_th_addmm
+    CUDA: legacy::cuda::_th_addmm
+    SparseCPU: addmm_sparse_dense_cpu
+    SparseCUDA: addmm_sparse_dense_cuda
   named_guard: False
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_addmm_
+    CUDA: legacy::cuda::_th_addmm_
+    # Warning!  For whatever reason, the inplace sparse addmm is NON
+    # broadcasting
+    SparseCPU: s_addmm_sparse_dense_cpu_
+    SparseCUDA: s_addmm_sparse_dense_cuda_
   named_guard: False
 
 
@@ -4433,24 +4433,6 @@
   dispatch:
     CPU: legacy::cpu::_th_std
     CUDA: legacy::cuda::_th_std
-
-- func: _addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_addmm_out
-    CUDA: legacy::cuda::_th_addmm_out
-  named_guard: False
-
-- func: _addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  dispatch:
-    CPU: legacy::cpu::_th_addmm
-    CUDA: legacy::cuda::_th_addmm
-  named_guard: False
-
-- func: _addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_addmm_
-    CUDA: legacy::cuda::_th_addmm_
-  named_guard: False
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:

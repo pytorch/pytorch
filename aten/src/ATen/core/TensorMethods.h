@@ -2413,7 +2413,16 @@ inline Tensor & Tensor::sub_(Scalar other, Scalar alpha) const {
 }
 inline Tensor Tensor::addmm(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::addmm(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::addmm(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
+            break;
+        case Backend::SparseCPU:
+            return SparseCPUType::addmm(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
+            break;
+        default:
+            AT_ERROR("addmm not implemented for ", at::toString(type_set()));
+    }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar)>(at::detail::multi_dispatch_tensor_type_set(*this, mat1, mat2))(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
@@ -2421,7 +2430,16 @@ inline Tensor Tensor::addmm(const Tensor & mat1, const Tensor & mat2, Scalar bet
 }
 inline Tensor & Tensor::addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::addmm_(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
+    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
+        case Backend::CPU:
+            return CPUType::addmm_(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
+            break;
+        case Backend::SparseCPU:
+            return SparseCPUType::addmm_(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
+            break;
+        default:
+            AT_ERROR("addmm_ not implemented for ", at::toString(type_set()));
+    }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar, Scalar)>(at::detail::multi_dispatch_tensor_type_set(*this, mat1, mat2))(const_cast<Tensor&>(*this), mat1, mat2, beta, alpha);
