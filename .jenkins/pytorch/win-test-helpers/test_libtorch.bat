@@ -17,8 +17,6 @@ goto :eof
 :: See https://github.com/pytorch/pytorch/issues/25161
 if "%~1" == "c10_metaprogramming_test" goto :eof
 if "%~1" == "module_test" goto :eof
-:: See https://github.com/pytorch/pytorch/issues/25304
-if "%~1" == "cuda_distributions_test" goto :eof
 :: See https://github.com/pytorch/pytorch/issues/25312
 if "%~1" == "converter_nomigraph_test" goto :eof
 
