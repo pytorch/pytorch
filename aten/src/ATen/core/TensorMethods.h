@@ -2476,8 +2476,8 @@ inline Tensor & Tensor::sparse_resize_and_clear_(IntArrayRef size, int64_t spars
 inline Tensor Tensor::sparse_mask(const Tensor & mask) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::sparse_mask(const_cast<Tensor&>(*this), mask);
+        case Backend::SparseCPU:
+            return SparseCPUType::sparse_mask(const_cast<Tensor&>(*this), mask);
             break;
         default:
             AT_ERROR("sparse_mask not implemented for ", at::toString(type_set()));

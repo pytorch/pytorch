@@ -2757,8 +2757,8 @@
 - func: sparse_mask(Tensor self, Tensor mask) -> Tensor
   variants: method
   dispatch:
-    CPU: sparse_mask_cpu
-    CUDA: sparse_mask_cuda
+    SparseCPU: sparse_mask_cpu
+    SparseCUDA: sparse_mask_cuda
   requires_tensor: True
 
 
