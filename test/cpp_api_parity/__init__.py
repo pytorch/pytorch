@@ -71,7 +71,7 @@ def parse_parity_tracker_table(file_path):
             else:
                 parity_tracker_dict[package_name] = {}
             for api_status in lines[3:]:
-                api_name, has_impl_parity_str, has_doc_parity_str = api_status.split('|')
+                api_name, has_impl_parity_str, has_doc_parity_str = [x.strip() for x in api_status.split('|')]
                 parity_tracker_dict[package_name][api_name] = ParityStatus(
                     has_impl_parity=parse_parity_choice(has_impl_parity_str),
                     has_doc_parity=parse_parity_choice(has_doc_parity_str))

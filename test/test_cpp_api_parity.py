@@ -210,14 +210,13 @@ class TestCppApiParity(common.TestCase):
         init_kwargs_defaults = init_arg_spec.defaults
         python_default_constructor_arg_names = [x for x in init_arg_spec.args[1:-len(init_kwargs_defaults)] if x != 'has_parity']
         cpp_default_constructor_arg_values = cpp_default_constructor_args_str.strip('()').split(',')
-        assert len(cpp_default_constructor_arg_values) == len(python_default_constructor_arg_names), '''\
-The constructor of `torch::nn::{}` in C++ must take the exact same number of non-keyword arguments
-as the constructor of `torch.nn.{}` in Python. However, currently the C++ constructor expects
-{} non-keyword argument(s), while the Python constructor expects {} non-keyword argument(s): {}'''.format(
-            module_name, module_name,
-            len(cpp_default_constructor_arg_values),
-            len(python_default_constructor_arg_names),
-            python_default_constructor_arg_names)
+        self.assertEqual(len(cpp_default_constructor_arg_values), len(python_default_constructor_arg_names),
+            "The constructor of `torch::nn::{}` in C++ must take the exact same number of non-keyword arguments ".format(module_name),
+            "as the constructor of `torch.nn.{}` in Python. However, currently the C++ constructor expects ".format(module_name),
+            "{} non-keyword argument(s), while the Python constructor expects {} non-keyword argument(s): {}".format(
+                len(cpp_default_constructor_arg_values),
+                len(python_default_constructor_arg_names),
+                python_default_constructor_arg_names))
 
         cpp_module_option = 'torch::nn::{}Options{}'.format(module_name, cpp_default_constructor_args_str)
         init_kwargs = init_arg_spec.args[-len(init_kwargs_defaults):]
@@ -433,16 +432,12 @@ def _compute_module_name(test_params_dict):
 def _process_test_params(test_params_dict, module_metadata, device):
     module_name = _compute_module_name(test_params_dict)
     desc = test_params_dict.get('desc', None)
-    module_variant_name = test_params_dict.get('fullname', module_name + (('_' + desc) if desc else ''))
-    module_variant_name += ('_' + device) if device != 'cpu' else ''
     python_module_class = getattr(torch.nn, module_name)
 
     test_params_dict['constructor'] = test_params_dict.get('constructor', python_module_class)
     test = common_nn.TestBase(**test_params_dict)
-    try:
-        example_inputs = test._get_input()
-    except AssertionError:
-        raise RuntimeError("Missing `input_size`, `input_fn` or `input` for {}".format(module_variant_name))
+    module_variant_name = test.get_name()[5:] + (('_' + device) if device != 'cpu' else '')
+    example_inputs = test._get_input()
 
     if type(example_inputs) == tuple:
         example_inputs = list(example_inputs)
