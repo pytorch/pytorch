@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/core/QScheme.h>
-
 #ifdef USE_FBGEMM
 #include "fbgemm/Fbgemm.h"
 #include "fbgemm/QuantUtils.h"
