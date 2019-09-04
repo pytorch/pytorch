@@ -745,6 +745,37 @@ class TestNamedTensor(TestCase):
             if testcase.supports_multidim_reduce:
                 test_multidim_reduce(op_name, device)
 
+    def test_masked_select(self):
+        # simple
+        self._test_name_inference(
+            torch.masked_select,
+            (create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C')),
+            expected_names=[None])
+
+        # left broadcast
+        self._test_name_inference(
+            torch.masked_select,
+            (create('C:3'), (create('2,3') > 0).view_names('N', 'C')),
+            expected_names=[None])
+
+        # right broadcast
+        self._test_name_inference(
+            torch.masked_select,
+            (create('N:2,C:3'), (create('3') > 0).view_names('C')),
+            expected_names=[None])
+
+        # error
+        self._test_name_inference(
+            torch.masked_select,
+            (create('N:2,C:3'), (create('3') > 0).view_names('D')),
+            maybe_raises_regex='do not match')
+
+        # out=
+        self._test_name_inference(
+            out_fn(torch.masked_select),
+            (create('0'), create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C')),
+            expected_names=[None])
+
     def test_using_seen_interned_string_doesnt_bump_refcount(self):
         def see_name():
             seen_name = 'N'
