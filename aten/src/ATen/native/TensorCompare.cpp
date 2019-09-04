@@ -6,6 +6,8 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/Exception.h>
 #include <ATen/native/cpu/TensorCompareKernel.h>
+#include <ATen/native/cpu/Loops.h>
+#include <ATen/NamedTensorUtils.h>
 
 namespace {
 template <typename scalar_t>
@@ -14,31 +16,27 @@ void where_cpu(
     const at::Tensor& condition,
     const at::Tensor& self,
     const at::Tensor& other) {
+  auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(ret);
+  iter.add_input(condition);
+  iter.add_input(self);
+  iter.add_input(other);
+  iter.dont_compute_common_dtype();
+  iter.build();
   if (condition.scalar_type() == at::ScalarType::Byte) {
-    at::CPU_tensor_apply4<scalar_t, uint8_t, scalar_t, scalar_t>(
-        ret,
-        condition,
-        self,
-        other,
-        [](scalar_t& ret_val,
-           const uint8_t& cond_val,
-           const scalar_t& self_val,
-           const scalar_t& other_val) {
-          ret_val = cond_val ? self_val : other_val;
-        });
-    } else {
-      at::CPU_tensor_apply4<scalar_t, bool, scalar_t, scalar_t>(
-          ret,
-          condition,
-          self,
-          other,
-          [](scalar_t& ret_val,
-             const bool& cond_val,
-             const scalar_t& self_val,
-             const scalar_t& other_val) {
-            ret_val = cond_val ? self_val : other_val;
-          });
-    }
+    at::native::cpu_kernel(
+      iter,
+      [=](uint8_t cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
+        return cond_val ? self_val : other_val;
+      });
+  } else {
+    at::native::cpu_kernel(
+      iter,
+      [=](bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
+        return cond_val ? self_val : other_val;
+      });
+  }
 }
 } // namespace
 
@@ -238,5 +236,28 @@ Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
     return std::get<1>(self.min(dim.value(), keepdim));
   return std::get<1>(self.reshape({-1}).min(/*dim=*/0));
 }
+
+#ifdef BUILD_NAMEDTENSOR
+// Named tensor overloads
+
+std::tuple<Tensor, Tensor> min(const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: min with names");
+  return at::min(self, dimname_to_position(self, dim), keepdim);
+}
+std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
+                                      const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: min with names");
+  return at::min_out(min, min_indices, self, dimname_to_position(self, dim), keepdim);
+}
+std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: max with names");
+  return at::max(self, dimname_to_position(self, dim), keepdim);
+}
+std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
+                                      const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: max with names");
+  return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
+}
+#endif
 
 }} // namespace at::native

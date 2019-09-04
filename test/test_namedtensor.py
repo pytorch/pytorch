@@ -419,9 +419,9 @@ class TestNamedTensor(TestCase):
     def test_binary_ops(self):
         def test_basic(op):
             a = torch.empty(2, 3, names=('N', 'C'))
-            b = torch.empty(2, 3, names=('C', 'N'))
+            b = torch.empty(3, 2, names=('C', 'N'))
             c = torch.empty(3, names=('C',))
-            d = torch.empty(3, names=('W',))
+            d = torch.empty(5, names=('W',))
 
             self.assertEqual(op(a, a).names, ('N', 'C'))
             self.assertEqual(op(a, c).names, ('N', 'C'))
@@ -673,11 +673,19 @@ class TestNamedTensor(TestCase):
             self.assertEqual(result.names, names)
 
     def test_reduction_fns(self):
+        def check_output(output, expected_names):
+            if isinstance(output, torch.Tensor):
+                self.assertEqual(output.names, expected_names)
+                return
+            assert isinstance(output, tuple)
+            for out in output:
+                self.assertEqual(out.names, expected_names)
+
         def test_simple_reduce(op_name, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            op = getattr(torch.Tensor, op_name)
-            self.assertEqual(op(t, 1).names, ['N', 'L'])
-            self.assertEqual(op(t, 'C').names, ['N', 'L'])
+            op = getattr(torch, op_name)
+            check_output(op(t, 1), ['N', 'L'])
+            check_output(op(t, 'C'), ['N', 'L'])
             with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
                 op(t, None)
             with self.assertRaisesRegex(RuntimeError, 'Name \'H\' not found'):
@@ -685,15 +693,15 @@ class TestNamedTensor(TestCase):
 
         def test_complete_reduce(op_name, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            op = getattr(torch.Tensor, op_name)
-            self.assertEqual(op(t).names, [])
+            op = getattr(torch, op_name)
+            check_output(op(t), [])
 
         def test_multidim_reduce(op_name, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            op = getattr(torch.Tensor, op_name)
+            op = getattr(torch, op_name)
 
-            self.assertEqual(op(t, [1, 2]).names, ['N'])
-            self.assertEqual(op(t, ['C', 'L']).names, ['N'])
+            check_output(op(t, [1, 2]), ['N'])
+            check_output(op(t, ['C', 'L']), ['N'])
             with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
                 op(t, [None, 'C'])
 
@@ -701,34 +709,141 @@ class TestNamedTensor(TestCase):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
             out = t.new_empty([0])
             getattr(torch, op_name)(t, 'C', out=out)
-            self.assertEqual(out.names, ['N', 'L'])
+            check_output(out, ['N', 'L'])
 
         def test_keepdim(op_name, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            op = getattr(torch.Tensor, op_name)
-            self.assertEqual(op(t, 'C', keepdim=True).names, ['N', 'C', 'L'])
+            op = getattr(torch, op_name)
+            check_output(op(t, 'C', keepdim=True), ['N', 'C', 'L'])
 
         Case = namedtuple('Case', [
             'op_name',
             'supports_complete_reduce',
             'supports_multidim_reduce',
+            'supports_out_variant',
         ])
 
         tests = [
-            Case(op_name='sum', supports_complete_reduce=True, supports_multidim_reduce=True),
-            Case(op_name='prod', supports_complete_reduce=True, supports_multidim_reduce=False),
+            Case('sum', True, True, True),
+            Case('prod', True, False, True),
+            Case('mean', True, True, True),
+            Case('var', True, True, True),
+            Case('std', True, True, True),
+            Case('std_mean', True, True, False),
+            Case('var_mean', True, True, False),
         ]
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             op_name = testcase.op_name
             test_simple_reduce(op_name, device)
             test_keepdim(op_name, device)
-            test_out_variant(op_name, device)
 
+            if testcase.supports_out_variant:
+                test_out_variant(op_name, device)
             if testcase.supports_complete_reduce:
                 test_complete_reduce(op_name, device)
             if testcase.supports_multidim_reduce:
                 test_multidim_reduce(op_name, device)
+
+    def test_masked_select(self):
+        # simple
+        self._test_name_inference(
+            torch.masked_select,
+            (create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C')),
+            expected_names=[None])
+
+        # left broadcast
+        self._test_name_inference(
+            torch.masked_select,
+            (create('C:3'), (create('2,3') > 0).view_names('N', 'C')),
+            expected_names=[None])
+
+        # right broadcast
+        self._test_name_inference(
+            torch.masked_select,
+            (create('N:2,C:3'), (create('3') > 0).view_names('C')),
+            expected_names=[None])
+
+        # error
+        self._test_name_inference(
+            torch.masked_select,
+            (create('N:2,C:3'), (create('3') > 0).view_names('D')),
+            maybe_raises_regex='do not match')
+
+        # out=
+        self._test_name_inference(
+            out_fn(torch.masked_select),
+            (create('0'), create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C')),
+            expected_names=[None])
+
+    def test_cat(self):
+        # simple
+        self._test_name_inference(
+            torch.cat,
+            [[create('N:2,C:3'), create('N:2,C:3')]],
+            expected_names=['N', 'C'])
+
+        # error: zero dim
+        self._test_name_inference(
+            torch.cat,
+            [[create(''), create('')]],
+            maybe_raises_regex='zero-dim')
+
+        # error: names don't match
+        self._test_name_inference(
+            torch.cat,
+            [[create('N:2,C:3'), create('C:3,N:2')]],
+            maybe_raises_regex='do not match')
+
+        # error: different number of dims
+        self._test_name_inference(
+            torch.cat,
+            [[create('N:2,C:3'), create('C:3')]],
+            maybe_raises_regex='must have same number of dimensions')
+
+        # out=
+        self._test_name_inference(
+            out_fn(torch.cat),
+            [create('0'), [create('N:2,C:3'), create('N:2,C:3')]],
+            expected_names=['N', 'C'])
+
+    def test_masked_fill(self):
+        # simple
+        self._test_name_inference(
+            Tensor.masked_fill,
+            (create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C'), 3.14),
+            expected_names=['N', 'C'])
+
+        # left broadcast
+        self._test_name_inference(
+            Tensor.masked_fill,
+            (create('C:3'), (create('2,3') > 0).view_names('N', 'C'), 3.14),
+            maybe_raises_regex="must be less than or equal to")
+
+        # right broadcast
+        self._test_name_inference(
+            Tensor.masked_fill,
+            (create('N:2,C:3'), (create('3') > 0).view_names('C'), 3.14),
+            expected_names=['N', 'C'])
+
+        # error
+        self._test_name_inference(
+            Tensor.masked_fill,
+            (create('N:2,C:3'), (create('3') > 0).view_names('D'), 3.14),
+            maybe_raises_regex='do not match')
+
+        # inplace
+        self._test_name_inference(
+            Tensor.masked_fill_,
+            (create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C'), 3.14),
+            expected_names=['N', 'C'])
+
+        # inplace, computed names don't match output tensor names
+        self._test_name_inference(
+            Tensor.masked_fill_,
+            (create('N:2,None:3'), (create('2,3') > 0).view_names('N', 'C'), 3.14),
+            maybe_raises_regex="not the same as the computed output names")
+
 
     def test_using_seen_interned_string_doesnt_bump_refcount(self):
         def see_name():
