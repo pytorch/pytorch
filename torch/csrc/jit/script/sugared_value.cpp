@@ -289,6 +289,24 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
   }
 }
 
+std::shared_ptr<SugaredValue> callClassMethod(
+    const ClassTypePtr& class_ptr,
+    const std::string& desugared_name,
+    const SourceRange& loc,
+    Function& m,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  if (!class_ptr->getMethod(desugared_name)) {
+    throw ErrorReport(loc) << class_ptr->python_str() << " does not define a "
+                           << desugared_name << " method";
+  }
+
+  Value* self = inputs[0].value(*m.graph());
+  return MethodValue(self, desugared_name)
+      .call(loc, m, inputs.slice(1), attributes, n_binders);
+}
+
 Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
   Value* val = getValue();
   TypePtr val_type = val->type();
@@ -309,7 +327,11 @@ Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
     cur_elem = g.insert(aten::__getitem__, {val, idx}, {}, loc);
   } else if (val_type->isSubtypeOf(TensorType::get())) {
     cur_elem = g.insert(aten::select, {val, 0, idx}, {}, loc);
-  } else {
+  } else if (auto class_type = val_type->cast<ClassType>()) {
+    return callClassMethod(class_type, "__getitem__", loc, m, {val, idx}, {}, 1)
+        ->asValue(loc, m);
+  }
+  {
     throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
                            << " object is not subscriptable";
   }
@@ -409,6 +431,21 @@ Value* IterableTree::getitem(const SourceRange& loc, Function& m, Value* idx) {
   return g.insertNode(g.createTuple(child_items))->output();
 }
 
+std::shared_ptr<SugaredValue> MagicMethod::call(
+    const SourceRange& loc,
+    Function& m,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  if (inputs.size() > 0) {
+    Value* self = inputs[0].value(*m.graph());
+    if (auto class_ptr = self->type()->cast<ClassType>()) {
+      return callClassMethod(
+          class_ptr, desugared_name_, loc, m, inputs, attributes, n_binders);
+    }
+  }
+  return base_value_->call(loc, m, inputs, attributes, n_binders);
+}
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
     Function& m,
