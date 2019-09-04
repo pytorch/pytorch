@@ -42,7 +42,7 @@
     // list indicates to just test against the default (latest)
     // version.
     "matrix": {
-    	"six": [],
+        "six": [],
     },
 
     // The directory (relative to the current directory) that benchmarks are
