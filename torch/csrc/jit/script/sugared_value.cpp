@@ -311,11 +311,10 @@ Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
   Value* val = getValue();
   TypePtr val_type = val->type();
   Graph& g = *m.graph();
-  Value* cur_elem = nullptr;
 
   // if it's a List/String/Dict, emit a regular __getitem__ op
   if (val_type->cast<ListType>() || val_type->cast<StringType>()) {
-    cur_elem = g.insert(aten::__getitem__, {val, idx}, {}, loc);
+    return g.insert(aten::__getitem__, {val, idx}, {}, loc);
   } else if (auto dict_type = val_type->cast<DictType>()) {
     if (!idx->type()->isSubtypeOf(dict_type->getKeyType())) {
       throw ErrorReport(loc)
@@ -324,18 +323,16 @@ Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
           << dict_type->getKeyType()->python_str() << "' of the dict '"
           << dict_type->python_str() << "'";
     }
-    cur_elem = g.insert(aten::__getitem__, {val, idx}, {}, loc);
+    return g.insert(aten::__getitem__, {val, idx}, {}, loc);
   } else if (val_type->isSubtypeOf(TensorType::get())) {
-    cur_elem = g.insert(aten::select, {val, 0, idx}, {}, loc);
+    return g.insert(aten::select, {val, 0, idx}, {}, loc);
   } else if (auto class_type = val_type->cast<ClassType>()) {
     return callClassMethod(class_type, "__getitem__", loc, m, {val, idx}, {}, 1)
         ->asValue(loc, m);
-  }
-  {
+  } else {
     throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
                            << " object is not subscriptable";
   }
-  return cur_elem;
 }
 
 RangeValue::RangeValue(
