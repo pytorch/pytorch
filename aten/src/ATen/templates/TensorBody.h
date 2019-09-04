@@ -15,6 +15,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
+#include <ATen/core/DeprecatedTypeProperties.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/NamedTensor.h>
 #endif
@@ -242,7 +243,9 @@ class CAFFE2_API Tensor {
 
   /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
   /// Defined in Type.h because of include order issues.
-  bool is_variable() const noexcept;
+  bool is_variable() const noexcept {
+    return impl_->is_variable();
+  }
 
   /// Returns a `Tensor`'s layout. Defined in Type.h
   Layout layout() const noexcept;
@@ -422,5 +425,3 @@ inline bool infer_is_variable(const TensorList & tl) {
 } // namespace detail
 
 } // namespace at
-
-#include <ATen/core/TensorMethods.h>
