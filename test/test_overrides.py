@@ -429,25 +429,24 @@ class TestTorchFunctions(TestCase):
 
         self.assertEqual(torch.unique(MyTensor()), 'yes')
 
-    @unittest.expectedFailure # Discuss
     def test_sum_on_mock_tensor(self):
-
         # We need a proxy for mocks because __torch_function__ is only looked
         # up in the class dict
         class TensorProxy:
             def __init__(self, value):
                 self.value = value
-            def __tensor_function__(self, *args, **kwargs):
-                return self.value.__tensor_function__(*args, **kwargs)
+            def __torch_function__(self, *args, **kwargs):
+                return self.value.__torch_function__(*args, **kwargs)
             def __tensor__(self, *args, **kwargs):
                 return self.value.__tensor__(*args, **kwargs)
 
         proxy = TensorProxy(mock.Mock(spec=TensorProxy))
         proxy.value.__torch_function__.return_value = 1
-        result = torch.sum(proxy)
+        result = torch.unique(proxy)
         self.assertEqual(result, 1)
+
         proxy.value.__torch_function__.assert_called_once_with(
-            torch.sum, (TensorProxy,), (proxy,), {})
+            torch.unique, [TensorProxy,], (proxy,), {})
         proxy.value.__tensor__.assert_not_called()
 
 
