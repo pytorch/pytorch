@@ -34,8 +34,7 @@ void spatial_dilated_max_pooling(
     int64_t pW, // padding
     int64_t dH,
     int64_t dW, // dilation
-    T* oData,
-    int64_t* index) { // output arrays (data and max-index)
+    T* oData) { // output arrays (data and max-index)
   at::parallel_for(0, iC, 0, [&](int64_t start, int64_t end) {
     for (auto p = start; p < end; ++p) {
       int64_t row, col;
@@ -53,10 +52,8 @@ void spatial_dilated_max_pooling(
 
           // local pointers
           T* o_p = oData + p * oW * oH + row * oW + col;
-          int64_t* ind_p = index + p * oW * oH + row * oW + col;
 
           // local max
-          int64_t max_index = -1;
           auto max_val = std::numeric_limits<typename T::underlying>::lowest();
           int64_t tcntr = 0; // center point
           int64_t x, y;
@@ -66,12 +63,10 @@ void spatial_dilated_max_pooling(
               auto val = (i_p + tcntr)->val_;
               if (val > max_val) {
                 max_val = val;
-                max_index = tcntr;
               }
             }
           }
           *o_p = T(max_val); // Output.
-          *ind_p = max_index; // Max index for backprop.
         }
       }
     }
@@ -148,13 +143,9 @@ Tensor q_maxpool_2d(
   auto qx_contig = qx.contiguous();
   auto qxd = qx_contig.data_ptr<Q>();
   auto qyd = qy.data_ptr<Q>();
-  std::vector<int64_t> index;
-  index.resize(qy.numel());
-
   if (ndim == 3 || nbatch == 1) {
     auto* iData = qxd;
     auto* oData = qyd;
-    int64_t* indData = index.data();
     spatial_dilated_max_pooling<Q>(
         iData,
         iC,
@@ -170,14 +161,12 @@ Tensor q_maxpool_2d(
         pW,
         dH,
         dW,
-        oData,
-        indData);
+        oData);
   } else {
     at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
       for (auto p = start; p < end; ++p) {
         auto* iData = qxd + p * iC * iW * iH;
         auto* oData = qyd + p * oC * oW * oH;
-        int64_t* indData = index.data() + p * oC * oW * oH;
         spatial_dilated_max_pooling<Q>(
             iData,
             iC,
@@ -193,8 +182,7 @@ Tensor q_maxpool_2d(
             pW,
             dH,
             dW,
-            oData,
-            indData);
+            oData);
       }
     });
   }
