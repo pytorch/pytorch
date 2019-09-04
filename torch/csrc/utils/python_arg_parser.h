@@ -76,7 +76,7 @@
 namespace torch {
 
 enum class ParameterType {
-  TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
+  TENSOR, SCALAR, INT64, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STRING,
   DIMNAME, DIMNAME_LIST, QSCHEME
 };
@@ -156,6 +156,8 @@ struct PythonArgs {
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
   inline double toDouble(int i);
   inline double toDoubleWithDefault(int i, double default_double);
+  inline std::complex<double> toComplex(int i);
+  inline std::complex<double> toComplexWithDefault(int i, std::complex<double> default_complex);
   inline bool toBool(int i);
   inline bool toBoolWithDefault(int i, bool default_bool);
   inline bool isNone(int i);
@@ -204,6 +206,7 @@ struct FunctionParameter {
     bool default_bool;
     int64_t default_int;
     double default_double;
+    double default_complex[2]; // see Scalar
     at::ScalarType default_scalartype;
     THPLayout* default_layout;
   };
@@ -482,6 +485,18 @@ inline double PythonArgs::toDouble(int i) {
 
 inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
   if (!args[i]) return default_double;
+  return toDouble(i);
+}
+
+inline std::complex<double> PythonArgs::toComplex(int i) {
+  std::complex<double> default_value = *const_cast<std::complex<double> *>(
+    reinterpret_cast<const std::complex<double> *>(signature.params[i].default_complex));
+  if (!args[i]) return default_value;
+  return THPUtils_unpackComplexDouble(args[i]);
+}
+
+inline std::complex<double> PythonArgs::toComplexWithDefault(int i, std::complex<double> default_value) {
+  if (!args[i]) return default_value;
   return toDouble(i);
 }
 
