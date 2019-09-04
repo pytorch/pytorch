@@ -7,8 +7,6 @@ load("//caffe2/caffe2/fb:defs_gpu.bzl", "gpu_library_selector")
 
 GENERATED_CPP = [
     "Functions.cpp",
-    "THCUNN.cpp",
-    "THNN.cpp",
     "VariableType_0.cpp",
     "VariableType_1.cpp",
     "VariableType_2.cpp",
@@ -51,8 +49,10 @@ libtorch_sources = [
     "torch/csrc/autograd/record_function.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
+    "torch/csrc/distributed/autograd/utils.cpp",
     "torch/csrc/distributed/autograd/context/dist_autograd_container.cpp",
     "torch/csrc/distributed/autograd/context/dist_autograd_context.cpp",
+    "torch/csrc/distributed/autograd/functions/sendrpc_backward.cpp",
     "torch/csrc/distributed/rpc/future_message.cpp",
     "torch/csrc/distributed/rpc/message.cpp",
     "torch/csrc/distributed/rpc/script_call.cpp",
@@ -202,7 +202,6 @@ def add_torch_libs():
     ]
 
     libtorch_python_sources = [
-        ":generate-code=THNN.cpp",
         ":generate-code=python_functions.cpp",
         ":generate-code=python_nn_functions.cpp",
         ":generate-code=python_torch_functions.cpp",
@@ -238,6 +237,7 @@ def add_torch_libs():
         "torch/csrc/distributed/c10d/comm.cpp",
         "torch/csrc/distributed/c10d/init.cpp",
         "torch/csrc/distributed/c10d/reducer.cpp",
+        "torch/csrc/distributed/autograd/init.cpp",
         "torch/csrc/distributed/rpc/functions.cpp",
         "torch/csrc/distributed/rpc/init.cpp",
         "torch/csrc/distributed/rpc/process_group_agent.cpp",
@@ -289,7 +289,6 @@ def add_torch_libs():
     libtorch_python_sources.extend(glob(["test/cpp/jit/test_*.cpp"]))
 
     libtorch_python_cuda_sources = [
-        ":generate-code=THCUNN.cpp",
         "torch/csrc/cuda/Event.cpp",
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
@@ -445,7 +444,6 @@ def add_torch_libs():
         link_whole=True,
         deps=[
             ":torch-cpp-cpu",
-            ":thnn",
             "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/c10d:c10d_cpu",
             "//caffe2/torch/lib/libshm:libshm",
@@ -465,7 +463,6 @@ def add_torch_libs():
         link_whole=True,
         deps=[
             ":torch-cpp-cuda",
-            ":thnn",
             "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/c10d:c10d",
             "//caffe2/torch/lib/libshm:libshm",

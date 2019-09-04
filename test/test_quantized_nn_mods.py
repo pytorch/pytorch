@@ -63,7 +63,7 @@ class FunctionalAPITest(QuantizationTestCase):
 
         b = torch.randn(oC, dtype=torch.float32) if use_bias else None
         q_bias = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32) if use_bias else None
-        q_filters_ref = torch.ops.quantized.fbgemm_conv_prepack(qw.permute([0, 2, 3, 1]),
+        q_filters_ref = torch.ops.quantized.conv_prepack(qw.permute([0, 2, 3, 1]),
                                                                 stride,
                                                                 i_padding,
                                                                 dilation,
@@ -71,7 +71,7 @@ class FunctionalAPITest(QuantizationTestCase):
 
 
         requantized_bias = torch.quantize_linear(q_bias.dequantize(), scale * scale, 0 , torch.qint32) if use_bias else None
-        ref_result = torch.ops.quantized.fbgemm_conv2d(qX.permute([0, 2, 3, 1]), q_filters_ref,
+        ref_result = torch.ops.quantized.conv2d(qX.permute([0, 2, 3, 1]), q_filters_ref,
                                                        requantized_bias, stride,
                                                        i_padding, dilation,
                                                        g, scale, zero_point).permute([0, 3, 1, 2])
@@ -139,7 +139,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
         loaded_qlinear = nnqd.Linear(in_features, out_features)
         loaded_qlinear.load_state_dict(loaded_dict)
 
-        linear_unpack = torch.ops.quantized.fbgemm_linear_unpack
+        linear_unpack = torch.ops.quantized.linear_unpack
         self.assertEqual(linear_unpack(qlinear._packed_weight),
                          linear_unpack(loaded_qlinear._packed_weight))
         if use_bias:
@@ -151,7 +151,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
         self.assertTrue(hasattr(loaded_qlinear, 'weight'))
 
         self.assertEqual(qlinear.weight(), loaded_qlinear.weight())
-        self.assertEqual(qlinear.weight(), torch.ops.quantized.fbgemm_linear_unpack(qlinear._packed_weight))
+        self.assertEqual(qlinear.weight(), torch.ops.quantized.linear_unpack(qlinear._packed_weight))
         Z_dq2 = qlinear(X)
         self.assertEqual(Z_dq, Z_dq2)
 
@@ -246,9 +246,9 @@ class ModuleAPITest(QuantizationTestCase):
         # Check if the module implementation matches calling the
         # ops directly
         if use_fused:
-            Z_ref = torch.ops.quantized.fbgemm_linear_relu(X_q, W_pack, B_q, scale, zero_point)
+            Z_ref = torch.ops.quantized.linear_relu(X_q, W_pack, B_q, scale, zero_point)
         else:
-            Z_ref = torch.ops.quantized.fbgemm_linear(X_q, W_pack, B_q, scale, zero_point)
+            Z_ref = torch.ops.quantized.linear(X_q, W_pack, B_q, scale, zero_point)
         self.assertEqual(Z_ref, Z_q)
 
         # Test serialization of quantized Linear Module using state_dict
@@ -269,7 +269,7 @@ class ModuleAPITest(QuantizationTestCase):
             loaded_qlinear = nnq.Linear(in_features, out_features)
         loaded_qlinear.load_state_dict(loaded_dict)
 
-        linear_unpack = torch.ops.quantized.fbgemm_linear_unpack
+        linear_unpack = torch.ops.quantized.linear_unpack
         self.assertEqual(linear_unpack(qlinear._packed_weight),
                          linear_unpack(loaded_qlinear._packed_weight))
         if use_bias:
@@ -282,7 +282,7 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertTrue(hasattr(qlinear, 'weight'))
         self.assertTrue(hasattr(loaded_qlinear, 'weight'))
         self.assertEqual(qlinear.weight(), loaded_qlinear.weight())
-        self.assertEqual(qlinear.weight(), torch.ops.quantized.fbgemm_linear_unpack(qlinear._packed_weight))
+        self.assertEqual(qlinear.weight(), torch.ops.quantized.linear_unpack(qlinear._packed_weight))
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 

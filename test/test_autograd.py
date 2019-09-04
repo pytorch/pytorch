@@ -323,6 +323,18 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad.data, x_grad)
         self.assertEqual(y.grad.data, y_grad)
 
+        # Test that grad_outputs and outputs have the same shape
+        grad_out = torch.ones(2)
+        try:
+            torch.autograd.grad(
+                outputs=[grad_sum], grad_outputs=[grad_out],
+                inputs=[x], create_graph=True)
+            self.assertFail()
+        except RuntimeError as error:
+            self.assertEqual(str(error), "Mismatch in shape: grad_output[0] has a shape of "
+                             + str(grad_out.shape) + " and output[0] has a shape of "
+                             + str(grad_sum.shape) + ".")
+
     def test_grad_nonleaf(self):
         x_init = torch.randn(2, 2, requires_grad=True)
         x = x_init
@@ -1054,6 +1066,18 @@ class TestAutograd(TestCase):
         expected_grad = torch.Tensor(4, 4, 4).zero_()
         expected_grad[1].fill_(3)
         self.assertEqual(y.grad.data, expected_grad)
+
+    def test_index_backward_does_not_save_tensor(self):
+        # Example from https://github.com/pytorch/pytorch/issues/24853.
+        # if `index(tensor, indices)` saves `tensor` for backwards, then it will
+        # trigger a version check on `tensor` during the backward pass, which
+        # will cause the following code to error because `tensor` gets modified
+        # by the indexing line.
+        a = torch.tensor([1., 0, 0])
+        b = torch.zeros(3, requires_grad=True)
+        tensor = b + 0
+        tensor[a != 0] = tensor[a != 0]
+        tensor.backward(torch.zeros_like(tensor))
 
     def test_volatile_deprecated(self):
         v = torch.autograd.torch.randn(3, 3)

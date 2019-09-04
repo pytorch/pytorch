@@ -109,12 +109,12 @@ class Conv2d(torch.nn.Module):
         return s.format(**self.__dict__)
 
     def set_weight(self, w):
-        self._packed_weight = torch.ops.quantized.fbgemm_conv_prepack(
+        self._packed_weight = torch.ops.quantized.conv_prepack(
             w.permute([0, 2, 3, 1]), self.stride, self.padding, self.dilation, self.groups)
         self.weight_scale = w.q_scale()
 
     def weight(self):
-        return torch.ops.quantized.fbgemm_conv_unpack(
+        return torch.ops.quantized.conv_unpack(
             self._packed_weight).permute([0, 3, 1, 2])
 
     def forward(self, input):
@@ -127,7 +127,7 @@ class Conv2d(torch.nn.Module):
         bias = self.bias
         if bias is not None:
             bias = torch.quantize_linear(bias.dequantize(), self.weight_scale * input.q_scale(), 0, torch.qint32)
-        output = ops.quantized.fbgemm_conv2d(input.permute([0, 2, 3, 1]),
+        output = ops.quantized.conv2d(input.permute([0, 2, 3, 1]),
                                              self._packed_weight, bias,
                                              self.stride, self.padding,
                                              self.dilation, self.groups,

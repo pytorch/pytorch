@@ -899,7 +899,6 @@ bool Node::hasSideEffects() const {
     case aten::warn:
     case aten::save:
     case aten::manual_seed:
-    case aten::set_grad_enabled:
     case prim::AddStatValue:
     case prim::TimePoint:
     case prim::CallFunction:
@@ -1337,9 +1336,9 @@ Node* Graph::createAutogradZero() {
   return create(prim::AutogradZero);
 }
 
-Node* Graph::createNone(TypePtr typ) {
+Node* Graph::createNone() {
   Node* n = create(prim::Constant);
-  n->output()->setType(OptionalType::create(std::move(typ)));
+  n->output()->setType(NoneType::get());
   return n;
 }
 
@@ -1495,7 +1494,7 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 
 Value* Graph::insertFunctionCall(
     Function* callee,
-    script::MatchedSchema& matched) {
+    const script::MatchedSchema& matched) {
   std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->s_(attr::name, func_name)
@@ -1511,7 +1510,7 @@ Value* Graph::insertFunctionCall(
 
 Value* Graph::insertMethodCall(
     std::string method_name,
-    script::MatchedSchema& matched) {
+    const script::MatchedSchema& matched) {
   Value* result = insertNode(create(prim::CallMethod, matched.inputs))
                       ->s_(attr::name, std::move(method_name))
                       ->output()
@@ -1542,11 +1541,10 @@ Node* Graph::createClone(
 
 Value* Graph::insertConstant(
     IValue val,
-    const TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   return jit::insertConstant(
-      *this, std::move(val), result_type, std::move(loc), std::move(scope));
+      *this, std::move(val), std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString(bool print_source_locations) const {

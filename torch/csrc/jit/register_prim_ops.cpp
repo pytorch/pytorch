@@ -656,13 +656,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::set_grad_enabled(bool mode) -> ()",
-         [](Stack& stack) {
-           autograd::GradMode::set_enabled(pop(stack).toBool());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? keep_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor[]",
          [](Stack& stack) {
            bool allow_unused = pop(stack).toBool();
