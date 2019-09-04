@@ -27,20 +27,22 @@ namespace PythonRpcHandler {
     }
   }
 
-  std::vector<char> generatePythonUDFResult(const py::bytes& pickledPythonUDF) {
+  std::vector<char> generatePythonUDFResult(const Message& message) {
     AutoGIL ag;
+    auto pickledPythonUDF =
+        py::bytes(message.payload().data(), message.payload().size());
     py::bytes pres = runUDFFunction_(pickledPythonUDF);
     const auto& presStr = static_cast<std::string>(pres);
     std::vector<char> payload(presStr.begin(), presStr.end());
     return payload;
   }
 
-  py::object runPythonUDF(const py::bytes& pickledPythonUDF) {
+  py::object runPythonUDF(const std::string& pickledPythonUDF) {
     AutoGIL ag;
-    return runUDFFunction_(pickledPythonUDF, false);
+    return runUDFFunction_(py::bytes(pickledPythonUDF), false);
   }
 
-  std::string serialize(py::object obj) {
+  std::string serialize(const py::object& obj) {
     AutoGIL ag;
     return static_cast<std::string>((py::bytes)serializeFunction_(obj));
   }

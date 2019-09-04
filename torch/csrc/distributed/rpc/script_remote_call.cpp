@@ -26,8 +26,8 @@ at::IValue ScriptRemoteCall::retForkId() {
 Message ScriptRemoteCall::toMessage() const {
   std::vector<IValue> ivalues;
   ScriptCall::toIValues(ivalues);
-  ivalues.push_back(retRRefId_);
-  ivalues.push_back(retForkId_);
+  ivalues.emplace_back(retRRefId_);
+  ivalues.emplace_back(retForkId_);
 
   std::vector<torch::Tensor> tensor_table;
   auto payload =
@@ -35,7 +35,7 @@ Message ScriptRemoteCall::toMessage() const {
 
   return Message(std::move(payload),
                  std::move(tensor_table),
-                 MessageType::REMOTE_CALL);
+                 MessageType::SCRIPT_REMOTE_CALL);
 }
 
 ScriptRemoteCall ScriptRemoteCall::fromMessage(const Message& message) {

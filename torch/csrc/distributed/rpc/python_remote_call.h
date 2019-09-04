@@ -10,7 +10,7 @@ namespace rpc {
 
 class TORCH_API PythonRemoteCall final {
  public:
-  PythonRemoteCall(const std::string& pickledPythonUDF,
+  PythonRemoteCall(std::string pickledPythonUDF,
                    at::IValue retRRefId,
                    at::IValue retForkId);
 

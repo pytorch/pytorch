@@ -38,7 +38,8 @@ const std::shared_ptr<RpcAgent>& RRefContext::agent() const {
   return agent_;
 }
 
-RRefForkData RRefContext::forkTo(std::shared_ptr<RRef> rref, worker_id_t forkDst) {
+RRefForkData RRefContext::forkTo(
+    const std::shared_ptr<RRef>& rref, worker_id_t forkDst) {
   auto forkRequest = rref->fork();
   if (rref->owner() != forkDst) {
     // if fork destination if not owner, the forked UserRRef needs to be tracked
@@ -72,7 +73,7 @@ void RRefContext::acceptUserRRef(
   );
 }
 
-void RRefContext::acceptForkRequest(IValue value, worker_id_t forkDst) {
+void RRefContext::acceptForkRequest(IValue&& value, worker_id_t forkDst) {
   auto forkRequest = RRefForkData::fromIValue(std::move(value));
   auto& rrefId = forkRequest.rrefId_;
   auto& forkId = forkRequest.forkId_;
@@ -84,7 +85,7 @@ void RRefContext::acceptForkRequest(IValue value, worker_id_t forkDst) {
   );
 }
 
-void RRefContext::finishForkRequest(IValue value) {
+void RRefContext::finishForkRequest(IValue&& value) {
   auto forkRequest = RRefForkData::fromIValue(std::move(value));
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -95,7 +96,7 @@ void RRefContext::finishForkRequest(IValue value) {
   }
 }
 
-void RRefContext::finishUserRRef(IValue value) {
+void RRefContext::finishUserRRef(IValue&& value) {
   auto forkId = ForkId::fromIValue(std::move(value));
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -109,7 +110,7 @@ void RRefContext::finishUserRRef(IValue value) {
       pendingUsers_.erase(iter);
     } else {
       // RREF_USER_ACCEPT arrives before UserRRef is created, remove it
-      pendingAcceptedUsers_.insert(std::move(forkId));
+      pendingAcceptedUsers_.insert(forkId);
     }
   }
 }

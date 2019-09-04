@@ -14,7 +14,7 @@ at::IValue ScriptRRefBase::value() {
 
 Message ScriptRRefBase::toMessage() const {
   std::vector<at::IValue> ivalues;
-  ivalues.push_back(value_);
+  ivalues.emplace_back(value_);
   std::vector<torch::Tensor> tensor_table;
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
@@ -62,8 +62,8 @@ worker_id_t ScriptForkNotify::forkDst() const {
 
 Message ScriptForkNotify::toMessage() const {
   std::vector<at::IValue> ivalues;
-  ivalues.push_back(value_);
-  ivalues.push_back(forkDst_);
+  ivalues.emplace_back(value_);
+  ivalues.emplace_back(forkDst_);
   std::vector<torch::Tensor> tensor_table;
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);

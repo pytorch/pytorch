@@ -31,7 +31,8 @@ protected:
 class TORCH_API ScriptRRefFetch final : public ScriptRRefBase {
  public:
   ScriptRRefFetch(at::IValue rrefForkData)
-      : ScriptRRefBase(std::move(rrefForkData), MessageType::RREF_FETCH) {}
+      : ScriptRRefBase(std::move(rrefForkData),
+                       MessageType::SCRIPT_RREF_FETCH) {}
 
   static ScriptRRefFetch fromMessage(const Message& message);
 };

@@ -49,10 +49,7 @@ Message processRequestBlocking(Message&& request) {
     }
     case MessageType::PYTHON_CALL: {
       try {
-        auto pickledPythonUDF =
-            py::bytes(request.payload().data(), request.payload().size());
-        auto payload =
-            PythonRpcHandler::generatePythonUDFResult(pickledPythonUDF);
+        auto payload = PythonRpcHandler::generatePythonUDFResult(request);
         return Message(
             std::move(payload),
             std::vector<torch::Tensor>(),
@@ -63,14 +60,14 @@ Message processRequestBlocking(Message&& request) {
       }
       break;
     }
-    case MessageType::REMOTE_CALL: {
+    case MessageType::SCRIPT_REMOTE_CALL: {
       ScriptRemoteCall src = ScriptRemoteCall::fromMessage(request);
 
       auto rrefId = RRefId::fromIValue(src.retRRefId());
       auto forkId = ForkId::fromIValue(src.retForkId());
       auto& ctx = RRefContext::getInstance();
 
-      auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(std::move(rrefId));
+      auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(rrefId);
 
       if (forkId != rrefId) {
         ctx->acceptUserRRef(rrefId, forkId, rrefId.createdOn_);
@@ -93,17 +90,16 @@ Message processRequestBlocking(Message&& request) {
       auto forkId = ForkId::fromIValue(prc.retForkId());
       auto& ctx = RRefContext::getInstance();
 
-      auto ownerRRef = ctx->getOrCreateOwnerRRef<py::object>(std::move(rrefId));
+      auto ownerRRef = ctx->getOrCreateOwnerRRef<py::object>(rrefId);
 
       if (forkId != rrefId) {
         ctx->acceptUserRRef(rrefId, forkId, rrefId.createdOn_);
       }
 
-      auto pickledPythonUDF = py::bytes(prc.udf());
-      ownerRRef->setValue(PythonRpcHandler::runPythonUDF(pickledPythonUDF));
+      ownerRRef->setValue(PythonRpcHandler::runPythonUDF(prc.udf()));
       return Message();
     }
-    case MessageType::RREF_FETCH: {
+    case MessageType::SCRIPT_RREF_FETCH: {
       ScriptRRefFetch srf = ScriptRRefFetch::fromMessage(request);
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =

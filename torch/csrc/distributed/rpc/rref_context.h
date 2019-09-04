@@ -40,7 +40,7 @@ class RRefContext {
 
   template <typename T>
   std::shared_ptr<UserRRef<T>> createUserRRef(
-      worker_id_t ownerId, RRefId rrefId, ForkId forkId) {
+      worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId) {
     TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
     // RRefContext does not track user RRefs, it will be destructed when there is
     // no shared_ptrs pointing to it.
@@ -75,7 +75,7 @@ class RRefContext {
 
   template <typename T>
   std::shared_ptr<RRef> getOrCreateRRef(
-      worker_id_t ownerId, RRefId rrefId, ForkId forkId) {
+      worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId) {
     if (ownerId == getWorkerId()) {
       return getOrCreateOwnerRRef<T>(rrefId);
     } else {
@@ -84,7 +84,7 @@ class RRefContext {
   }
 
   template <typename T>
-  std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(RRefId rrefId) {
+  std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId) {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto iter = owners_.find(rrefId);
     if (iter == owners_.end()) {
@@ -107,14 +107,14 @@ class RRefContext {
   void acceptUserRRef(
       const RRefId& rrefId, const ForkId& forkId, worker_id_t user);
 
-  RRefForkData forkTo(std::shared_ptr<RRef>, worker_id_t forkDst);
-  void acceptForkRequest(IValue request, worker_id_t forkDst);
-  void finishForkRequest(IValue request);
-  void finishUserRRef(IValue forkId);
+  RRefForkData forkTo(const std::shared_ptr<RRef>&, worker_id_t forkDst);
+  void acceptForkRequest(IValue&& request, worker_id_t forkDst);
+  void finishForkRequest(IValue&& request);
+  void finishUserRRef(IValue&& forkId);
 
-  void addForkOfOwner(at::IValue&& value);
+  void addForkOfOwner(IValue&& value);
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
-  void delForkOfOwner(at::IValue&& value);
+  void delForkOfOwner(IValue&& value);
   void delForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
 
  private:

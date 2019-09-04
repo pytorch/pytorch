@@ -470,5 +470,6 @@ class RpcTest(MultiProcessTestCase):
                              args=(rref_a, rref_b))
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) * 7)
 
+
 if __name__ == '__main__':
     run_tests()

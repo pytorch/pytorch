@@ -7,10 +7,10 @@ namespace distributed {
 namespace rpc {
 
 PythonRemoteCall::PythonRemoteCall(
-    const std::string& pickledPythonUDF,
+    std::string pickledPythonUDF,
     at::IValue retRRefId,
     at::IValue retForkId)
-    : pickledPythonUDF_(pickledPythonUDF),
+    : pickledPythonUDF_(std::move(pickledPythonUDF)),
       retRRefId_(std::move(retRRefId)),
       retForkId_(std::move(retForkId)) {}
 
@@ -28,9 +28,9 @@ at::IValue PythonRemoteCall::retForkId() {
 
 Message PythonRemoteCall::toMessage() const {
   std::vector<IValue> ivalues;
-  ivalues.push_back(pickledPythonUDF_);
-  ivalues.push_back(retRRefId_);
-  ivalues.push_back(retForkId_);
+  ivalues.emplace_back(pickledPythonUDF_);
+  ivalues.emplace_back(retRRefId_);
+  ivalues.emplace_back(retForkId_);
 
   std::vector<torch::Tensor> tensor_table;
   auto payload =

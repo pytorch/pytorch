@@ -1,23 +1,11 @@
 #include <torch/csrc/distributed/rpc/py_rref.h>
 
-#include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/jit/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
-
-namespace {
-
-py::object toPyObj(const IValue&) {
-
-}
-
-IValue fromPyObj(const py::object& pyObj) {
-
-}
-
-}
 
 thread_local worker_id_t PyRRef::currentDst = -1;
 

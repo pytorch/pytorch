@@ -50,10 +50,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
            &PyRRef::localValue,
            py::call_guard<py::gil_scoped_release>())
       .def(py::pickle(
-           [](const PyRRef &self) { // __getstate__
+           [](const PyRRef &self) {
+             // __getstate__
              return self.pickle();
            },
-           [](py::tuple t) { // __setstate__
+           [](py::tuple t) {  // NOLINT
+             // __setstate__
              return PyRRef::unpickle(t);
            }));
 
