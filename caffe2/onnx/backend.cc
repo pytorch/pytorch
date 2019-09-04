@@ -712,17 +712,7 @@ Caffe2Ops Caffe2Backend::CreateGather(
   std::vector<std::string> outputs;
   outputs.emplace_back(node.output(0));
 
-  auto axis = onnx_node->attributes.get<int64_t>("axis", 0L);
-  if (axis == 0) {
-    BuildOperator(c2_op, "Gather", inputs, outputs);
-  } else if (axis == 1) {
-    BuildOperator(c2_op, "BatchGather", inputs, outputs);
-  } else {
-    CAFFE_THROW(
-        "Caffe2 only supports Gather with axis being 0 or 1, ",
-        "whereas axis is ",
-        axis);
-  }
+  BuildOperator(c2_op, "Gather", inputs, outputs);
 
   return ret;
 }
