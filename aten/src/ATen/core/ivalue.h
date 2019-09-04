@@ -2,7 +2,7 @@
 
 #include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/Tensor.h>
+#include <ATen/core/TensorBody.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
