@@ -395,12 +395,6 @@ class CAFFE2_API Tensor {
   Tensor any(int64_t dim, bool keepdim=false) const;
   Tensor argmax(c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false) const;
   Tensor argmin(c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false) const;
-  #ifdef BUILD_NAMEDTENSOR
-  Tensor argmax(Dimname dim, bool keepdim=false) const;
-  #endif
-  #ifdef BUILD_NAMEDTENSOR
-  Tensor argmin(Dimname dim, bool keepdim=false) const;
-  #endif
   Tensor as_strided(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset=c10::nullopt) const;
   Tensor & as_strided_(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset=c10::nullopt) const;
   Tensor asin() const;

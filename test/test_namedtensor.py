@@ -741,8 +741,6 @@ class TestNamedTensor(TestCase):
             Case('var_mean', True, True, False, True, None),
             Case('min', True, False, True, True, get_minmax_output),
             Case('max', True, False, True, True, get_minmax_output),
-            Case('argmax', True, False, False, True, None),
-            Case('argmin', True, False, False, True, None),
             Case('unbind', False, False, False, False, None),
         ]
 

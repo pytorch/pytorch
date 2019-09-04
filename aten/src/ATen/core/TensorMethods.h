@@ -280,26 +280,6 @@ inline Tensor Tensor::argmin(c10::optional<int64_t> dim, bool keepdim) const {
     return table->getOp<Tensor (const Tensor &, c10::optional<int64_t>, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
-#ifdef BUILD_NAMEDTENSOR
-inline Tensor Tensor::argmax(Dimname dim, bool keepdim) const {
-#ifdef USE_STATIC_DISPATCH
-    return TypeDefault::argmax(const_cast<Tensor&>(*this), dim, keepdim);
-#else
-    static auto table = globalATenDispatch().getOpTable("aten::argmax.names(Tensor self, Dimname dim, bool keepdim=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim);
-#endif
-}
-#endif
-#ifdef BUILD_NAMEDTENSOR
-inline Tensor Tensor::argmin(Dimname dim, bool keepdim) const {
-#ifdef USE_STATIC_DISPATCH
-    return TypeDefault::argmin(const_cast<Tensor&>(*this), dim, keepdim);
-#else
-    static auto table = globalATenDispatch().getOpTable("aten::argmin.names(Tensor self, Dimname dim, bool keepdim=False) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, Dimname, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim);
-#endif
-}
-#endif
 inline Tensor Tensor::as_strided(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(type_id())) {
