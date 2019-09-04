@@ -5936,6 +5936,11 @@ a")
 
         self.checkScript(tensor_test, (x, y))
 
+        def not_test(x):
+            return ~x
+
+        self.checkScript(not_test, (torch.tensor([2, 4]), ))
+
     def test_number_all(self):
         def int1():
             return all(torch.tensor([1, 2, 3], dtype=torch.uint8))
