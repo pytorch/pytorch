@@ -153,12 +153,16 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 """)
 C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals}) const {
+#ifdef USE_STATIC_DISPATCH
+    ${mobile_method_body}
+#else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${formals_types_with_return}>(op, ${method_actuals});
     } else {
         return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<${formals_types_with_return}>(${method_actuals});
     }
+#endif
 }
 """)
 # add a method declaration in Functions.h
@@ -201,12 +205,16 @@ case Backend::${backend}:
 
 C10_FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
+#ifdef USE_STATIC_DISPATCH
+    ${mobile_method_body}
+#else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
     if (${inferred_is_variable}) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${formals_types_with_return}>(op ${native_actuals_with_comma_prefix});
     } else {
         return c10::Dispatcher::singleton().lookup(op, backendToTensorTypeId(${inferred_backend})).callUnboxed<${formals_types_with_return}>(${native_actuals});
     }
+#endif
 }
 """)
 
