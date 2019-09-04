@@ -760,6 +760,14 @@ inline Tensor Tensor::new_empty(IntArrayRef size, const TensorOptions & options)
     return table->getOp<Tensor (const Tensor &, IntArrayRef, const TensorOptions &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), size, options);
 #endif
 }
+inline Tensor Tensor::new_full(IntArrayRef size, Scalar fill_value, const TensorOptions & options) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::new_full(const_cast<Tensor&>(*this), size, fill_value, options);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, IntArrayRef, Scalar, const TensorOptions &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), size, fill_value, options);
+#endif
+}
 inline Tensor & Tensor::resize_(IntArrayRef size) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(type_id())) {
