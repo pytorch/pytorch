@@ -26,21 +26,21 @@ __device__ __forceinline__ T digamma(T* in) {
       8.33333333333333333333E-2,
   };
 
-  auto x = scalar_cast<compute_type>(*in);
+  auto x = static_cast<compute_type>(*in);
   if (x == 0) {
-    return scalar_cast<T>(INFINITY);
+    return static_cast<T>(INFINITY);
   }
 
   bool x_is_integer = x == floor(x);
   compute_type result = 0;
   if (x < 0) {
     if (x_is_integer) {
-      return scalar_cast<T>(INFINITY);
+      return static_cast<T>(INFINITY);
     }
     // Rounding errors in tan's input can really affect the output
     // for extreme values, so we always perform this computation in double.
-    result = scalar_cast<compute_type>(
-        - PI_f64 / tan(PI_f64 * scalar_cast<double>(x)));
+    result = static_cast<compute_type>(
+        - PI_f64 / tan(PI_f64 * static_cast<double>(x)));
     x = 1 - x;
   }
 
@@ -49,7 +49,7 @@ __device__ __forceinline__ T digamma(T* in) {
     x += 1;
   }
   if (x == 10) {
-    return scalar_cast<T>(result + PSI_10);
+    return static_cast<T>(result + PSI_10);
   }
 
   compute_type y = 0;
@@ -63,14 +63,14 @@ __device__ __forceinline__ T digamma(T* in) {
     y = z * polevl_result;
   }
 
-  return scalar_cast<T>(log(x) - (0.5 / x) - y + result);
+  return static_cast<T>(log(x) - (0.5 / x) - y + result);
 }
 
 template <typename T, typename accreal>
 __device__ __forceinline__ T trigamma(T* in) {
   using compute_type = typename std::conditional<std::is_same<T, at::Half>::value, accreal, T>::type;
   const compute_type PI = 3.14159265358979323846;
-  compute_type x = ScalarConvert<T, compute_type>::to(*in);
+  compute_type x = static_cast<compute_type>(*in);
   compute_type sign = +1;
   compute_type result = 0;
   if (x < 0.5f) {
@@ -85,7 +85,7 @@ __device__ __forceinline__ T trigamma(T* in) {
   }
   const compute_type ixx = 1 / (x*x);
   result += (1 + 1 / (2*x) + ixx * (1.f/6 - ixx * (1.f/30 - ixx * (1.f/42)))) / x;
-  return ScalarConvert<compute_type, T>::to(sign * result);
+  return static_cast<T>(sign * result);
 }
 
 }
