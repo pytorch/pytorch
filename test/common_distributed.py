@@ -129,7 +129,8 @@ class MultiProcessTestCase(TestCase):
         super(MultiProcessTestCase, self).setUp()
         self.skip_return_code_checks = []
         self.rank = self.MAIN_PROCESS_RANK
-        self.file = tempfile.NamedTemporaryFile(delete=False)
+        # spawn can not pass file handle, so pass file name here
+        self.file_name = tempfile.NamedTemporaryFile(delete=False).name
         self.processes = [self._spawn_process(rank) for rank in range(int(self.world_size))]
 
     def tearDown(self):
@@ -137,18 +138,30 @@ class MultiProcessTestCase(TestCase):
         for p in self.processes:
             p.terminate()
 
+    def _current_test_name(self):
+        # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
+        return self.id().split(".")[-1]
+
     def _spawn_process(self, rank):
         name = 'process ' + str(rank)
-        process = multiprocessing.Process(target=self._run, name=name, args=(rank,))
+        test_name = self._current_test_name()
+        process = multiprocessing.Process(
+            target=self.__class__._run,
+            name=name,
+            args=(test_name, rank, self.file_name)
+        )
         process.start()
         return process
 
-    def _run(self, rank):
-        self.rank = rank
+    @classmethod
+    def _run(cls, test_name, rank, file_name):
+        self = cls(test_name)
 
-        # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
-        # We're retreiving a corresponding test and executing it.
-        getattr(self, self.id().split(".")[2])()
+        self.rank = rank
+        self.file_name = file_name
+
+        # We're retrieving a corresponding test and executing it.
+        getattr(self, test_name)()
         sys.exit(0)
 
     def _join_processes(self, fn):
