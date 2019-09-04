@@ -130,7 +130,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout);
 
-  py::class_<::c10d::AllreduceCoalescedOptions>(module, "AllreduceCoalescedOptions")
+  py::class_<::c10d::AllreduceCoalescedOptions>(
+      module, "AllreduceCoalescedOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceCoalescedOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::AllreduceCoalescedOptions::timeout);
