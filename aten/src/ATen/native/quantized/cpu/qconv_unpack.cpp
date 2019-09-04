@@ -64,7 +64,8 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
 
     packed_weights_p->unpack(unpacked_weights_p);
 
-    return std::tuple(unpacked_weights, pack_ptr.bias);
+    return std::tuple<at::Tensor, c10::optional<Tensor>>(
+        unpacked_weights, pack_ptr.bias);
   }
 #else // USE_FBGEMM
   std::tuple<at::Tensor, c10::optional<at::Tensor>> operator()(

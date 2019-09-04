@@ -50,7 +50,8 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
     // (QLinearUnpackWeightInt8): ");
     packB->unpack(weight_ptr_int8);
 
-    return std::tuple(weight_origin, pack_ptr.bias);
+    return std::tuple<at::Tensor, c10::optional<Tensor>>(
+        weight_origin, pack_ptr.bias);
   }
 #else // USE_FBGEMM
   std::tuple<at::Tensor, c10::optional<Tensor>> operator()(
