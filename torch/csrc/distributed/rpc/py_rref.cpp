@@ -97,6 +97,10 @@ PyRRef PyRRef::unpickle(const py::tuple& t) {
   }
 }
 
+void PyRRef::setCurrentDst(worker_id_t dst) {
+  currentDst = dst;
+}
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

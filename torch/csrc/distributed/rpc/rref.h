@@ -181,6 +181,8 @@ class RRef {
   const RRefId& id() const;
 
   virtual bool isOwner() const = 0;
+
+  // returns true if this RRef holds an py::object, false if IValue
   virtual bool isPyObj() = 0;
 
  protected:

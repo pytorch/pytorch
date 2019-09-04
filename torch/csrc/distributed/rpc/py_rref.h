@@ -8,6 +8,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+// Python wrapper of an RRef shared_ptr that supports Python
+// pickle and unpickle.
 class PyRRef {
  public:
   PyRRef(std::shared_ptr<RRef> rref);
@@ -18,9 +20,7 @@ class PyRRef {
   py::object localValue();
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
-  static void setCurrentDst(worker_id_t dst) {
-    currentDst = dst;
-  }
+  static void setCurrentDst(worker_id_t dst);
 
  private:
   std::shared_ptr<RRef> rref_;
