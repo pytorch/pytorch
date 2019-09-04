@@ -39,7 +39,8 @@ Message processRequestBlocking(Message&& request) {
     }
     case MessageType::PYTHON_CALL: {
       try {
-        auto payload = PythonRpcHandler::generatePythonUDFResult(request);
+        auto payload =
+            PythonRpcHandler::getInstance().generatePythonUDFResult(request);
         return Message(
             std::move(payload),
             std::vector<torch::Tensor>(),
