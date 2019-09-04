@@ -419,9 +419,9 @@ class TestNamedTensor(TestCase):
     def test_binary_ops(self):
         def test_basic(op):
             a = torch.empty(2, 3, names=('N', 'C'))
-            b = torch.empty(2, 3, names=('C', 'N'))
+            b = torch.empty(3, 2, names=('C', 'N'))
             c = torch.empty(3, names=('C',))
-            d = torch.empty(3, names=('W',))
+            d = torch.empty(5, names=('W',))
 
             self.assertEqual(op(a, a).names, ('N', 'C'))
             self.assertEqual(op(a, c).names, ('N', 'C'))
