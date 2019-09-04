@@ -214,12 +214,15 @@ public:
   }
 };
 
+
+// Can't put this directly into the macro function args because of commas
+#define AT_X GenericPackedTensorAccessor<T, N, PtrTraits, index_t>
+
 // Old name for `GenericPackedTensorAccessor`
 template <typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using PackedTensorAccessor C10_DEPRECATED_MESSAGE(
-    "PackedTensorAccessor is deprecated, use PackedTensorAccessor32"
-    " or PackedTensorAccessor64 instead.") =
-    GenericPackedTensorAccessor<T, N, PtrTraits, index_t>;
+C10_DEFINE_DEPRECATED_USING(PackedTensorAccessor, AT_X)
+
+#undef AT_X
 
 template <typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
 using PackedTensorAccessor32 = GenericPackedTensorAccessor<T, N, PtrTraits, int32_t>;
