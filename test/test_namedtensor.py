@@ -686,6 +686,39 @@ class TestNamedTensor(TestCase):
             torch.bernoulli(tensor, out=result)
             self.assertEqual(result.names, names)
 
+    def test_flatten(self):
+        tensor = torch.randn(2, 3, 5, 7, 11, names=('N', 'C', 'D', 'H', 'W'))
+
+        # basic
+        out = tensor.flatten('D', 'W', 'features')
+        self.assertEqual(out.names, ['N', 'C', 'features'])
+        self.assertEqual(out.view_names(None), tensor.view_names(None).view(2, 3, -1))
+
+        # int overload
+        out = tensor.flatten(2, 4, 'features')
+        self.assertEqual(out.names, ['N', 'C', 'features'])
+        self.assertEqual(out.view_names(None), tensor.view_names(None).view(2, 3, -1))
+
+        # list overload
+        out = tensor.flatten(['D', 'H', 'W'], 'features')
+        self.assertEqual(out.names, ['N', 'C', 'features'])
+        self.assertEqual(out.view_names(None), tensor.view_names(None).view(2, 3, -1))
+
+        # Non-contiguous flatten: N and H are not "adjacent" in memory.
+        sentences = torch.randn(2, 3, 5, 7, names=('N', 'T', 'H', 'D'))
+        sentences = sentences.transpose('T', 'H')
+        out = sentences.flatten('N', 'H', 'N_H')
+        self.assertEqual(out.names, ['N_H', 'T', 'D'])
+
+        with self.assertRaisesRegex(RuntimeError, "Name 'L' not found in"):
+            tensor.flatten(['D', 'L'], 'features')
+
+        with self.assertRaisesRegex(RuntimeError, "must be consecutive in"):
+            tensor.flatten(['D', 'W'], 'features')
+
+        with self.assertRaisesRegex(RuntimeError, "must be consecutive in"):
+            tensor.flatten(['H', 'D', 'W'], 'features')
+
     def test_unflatten(self):
         tensor = torch.randn(7, 2 * 3 * 5, 11, names=('N', 'D', 'K'))
 
