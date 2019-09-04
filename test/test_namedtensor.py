@@ -183,6 +183,14 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "NYI"):
             ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
 
+    def test_big_tensor_repr(self):
+        def check_repr(named_tensor):
+            unnamed_tensor = named_tensor.view_names(None)
+            expected = "{}, names={})".format(repr(unnamed_tensor)[:-1], named_tensor.names)
+            self.assertEqual(repr(named_tensor), expected)
+
+        check_repr(torch.randn(128, 3, 64, 64, names=('N', 'C', 'H', 'W')))
+
     def test_noncontig_contiguous(self):
         # This type of contiguous is special-cased and therefore needs its own test
         for device in torch.testing.get_all_device_types():
