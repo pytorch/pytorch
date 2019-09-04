@@ -72,17 +72,27 @@ void erfinv_kernel_cuda(TensorIterator& iter) {
 }
 
 void digamma_kernel_cuda(TensorIterator& iter) {
+  if (iter.dtype() == kHalf) {
+    gpu_kernel(iter, []GPU_LAMBDA(at::Half a) -> at::Half {
+        return calc_digamma<at::Half, float>(a);
+    });
+  }
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "digamma_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return digamma<scalar_t, scalar_t>(a);
+      return calc_digamma<scalar_t, scalar_t>(a);
     });
   });
 }
 
 void trigamma_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "trigamma_cuda", [&]() {
+  if (iter.dtype() == kHalf) {
+    gpu_kernel(iter, []GPU_LAMBDA(at::Half a) -> at::Half {
+        return calc_trigamma<at::Half, float>(a);
+    });
+  }
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "trigamma_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return trigamma<scalar_t, scalar_t>(a);
+      return calc_trigamma<scalar_t, scalar_t>(a);
     });
   });
 }
