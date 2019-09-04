@@ -12,15 +12,15 @@ import torch
 
 # Configs for PT Cat operator
 cat_short_configs = op_bench.cross_product_configs(
-    M=[64, 128],
-    N=[64],
+    M=[256, 512],
+    N=[512],
     tags=['short']
 )
 
 
 class CatBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N): 
-        self.input_one = torch.rand(M, N) 
+    def init(self, M, N):
+        self.input_one = torch.rand(M, N)
         self.set_module_name('cat')
 
     def forward(self):
