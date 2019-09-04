@@ -40,7 +40,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   ProcessGroupAgent(std::string workerName,
                     std::shared_ptr<c10d::ProcessGroup> pg,
-                    int numSendRecvThreads = 4);
+                    int numSendRecvThreads = 8);
 
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will

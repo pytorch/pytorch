@@ -81,7 +81,7 @@ Message processRequestBlocking(Message&& request) {
           "size ", stack.size());
 
       ownerRRef->setValue(std::move(stack.front()));
-      return Message();
+      break;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       PythonRemoteCall prc = PythonRemoteCall::fromMessage(request);
@@ -97,7 +97,7 @@ Message processRequestBlocking(Message&& request) {
       }
 
       ownerRRef->setValue(PythonRpcHandler::runPythonUDF(prc.udf()));
-      return Message();
+      break;
     }
     case MessageType::SCRIPT_RREF_FETCH: {
       ScriptRRefFetch srf = ScriptRRefFetch::fromMessage(request);
@@ -125,27 +125,28 @@ Message processRequestBlocking(Message&& request) {
     case MessageType::RREF_USER_ACCEPT: {
       ScriptUserAccept sua = ScriptUserAccept::fromMessage(request);
       RRefContext::getInstance()->finishUserRRef(sua.value());
-      return Message();
+      break;
     }
     case MessageType::RREF_USER_DELETE: {
       ScriptUserDelete srd = ScriptUserDelete::fromMessage(request);
       RRefContext::getInstance()->delForkOfOwner(srd.value());
-      return Message();
+      break;
     }
     case MessageType::RREF_FORK_NOTIFY: {
       ScriptForkNotify sfn = ScriptForkNotify::fromMessage(request);
       RRefContext::getInstance()->acceptForkRequest(sfn.value(), sfn.forkDst());
-      return Message();
+      break;
     }
     case MessageType::RREF_FORK_ACCEPT: {
       ScriptForkAccept sfa = ScriptForkAccept::fromMessage(request);
       RRefContext::getInstance()->finishForkRequest(sfa.value());
-      return Message();
+      break;
     }
     default: {
       AT_ERROR("Request type ", request.type(), " not supported.");
     }
   }
+  return Message();
 }
 
 } // namespace rpc

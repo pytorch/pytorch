@@ -21,7 +21,7 @@ def my_rref_function(rref_a, rref_b):
         if rref.is_owner():
             return rref.local_value();
         else:
-            return rref.toHere();
+            return rref.to_here();
 
     a = get_value(rref_a)
     b = get_value(rref_b)
@@ -462,13 +462,28 @@ class RpcTest(MultiProcessTestCase):
     def test_py_rref_args(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        rref_a = dist.remote('worker{}'.format(dst_rank), torch.add,
-                             args=(torch.ones(n, n), 2))
-        rref_b = dist.remote('worker{}'.format(dst_rank), torch.add,
-                             args=(torch.ones(n, n), 3))
-        rref_c = dist.remote('worker{}'.format(dst_rank), my_rref_function,
-                             args=(rref_a, rref_b))
-        self.assertEqual(rref_c.to_here(), torch.ones(n, n) * 7)
+        for i in range(20):
+            rref_a = dist.remote('worker{}'.format(dst_rank), torch.add,
+                                 args=(torch.ones(n, n), 2))
+            rref_b = dist.remote('worker{}'.format(dst_rank), torch.add,
+                                 args=(torch.ones(n, n), i))
+            rref_c = dist.remote('worker{}'.format(dst_rank), my_rref_function,
+                                 args=(rref_a, rref_b))
+            self.assertEqual(rref_c.to_here(), torch.ones(n, n) * 4 + i)
+
+    @_wrap_with_rpc
+    def test_py_rref_args_user_share(self):
+        n = self.rank + 1
+        owner_rank = n % self.world_size
+        user_rank = (n + 1) % self.world_size
+        for i in range(20):
+            rref_a = dist.remote('worker{}'.format(owner_rank), torch.add,
+                                 args=(torch.ones(n, n), 2))
+            rref_b = dist.remote('worker{}'.format(owner_rank), torch.add,
+                                 args=(torch.ones(n, n), i))
+            rref_c = dist.remote('worker{}'.format(user_rank), my_rref_function,
+                                 args=(rref_a, rref_b))
+            self.assertEqual(rref_c.to_here(), torch.ones(n, n) * 4 + i)
 
 
 if __name__ == '__main__':
