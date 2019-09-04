@@ -487,8 +487,6 @@ def gen_pyi(declarations_path, out):
                  'def size(self, _int) -> _int: ...'],
         'stride': ['def stride(self) -> Tuple[_int]: ...',
                    'def stride(self, _int) -> _int: ...'],
-        'new_empty': ['def new_empty(self, size: {}, {}) -> Tensor: ...'.
-                      format(type_to_python('IntArrayRef'), FACTORY_PARAMS)],
         'new_ones': ['def new_ones(self, size: {}, {}) -> Tensor: ...'.
                      format(type_to_python('IntArrayRef'), FACTORY_PARAMS)],
         'new_zeros': ['def new_zeros(self, size: {}, {}) -> Tensor: ...'.

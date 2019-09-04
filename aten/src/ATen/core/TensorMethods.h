@@ -752,6 +752,14 @@ inline Tensor Tensor::dot(const Tensor & tensor) const {
     return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), tensor);
 #endif
 }
+inline Tensor Tensor::new_empty(IntArrayRef size, const TensorOptions & options) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::new_empty(const_cast<Tensor&>(*this), size, options);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, IntArrayRef, const TensorOptions &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), size, options);
+#endif
+}
 inline Tensor & Tensor::resize_(IntArrayRef size) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(type_id())) {
