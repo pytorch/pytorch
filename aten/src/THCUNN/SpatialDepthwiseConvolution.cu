@@ -114,7 +114,7 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
     const int input_row_end = input_row_start + filter_height;
     const int input_col_end = input_col_start + filter_width;
 
-    AccT sum = ScalarConvert<int, AccT>::to(0);
+    AccT sum = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[out_channel]) : ScalarConvert<int, AccT>::to(0);
     if (input_row_start >= 0 && input_col_start >= 0 &&
         input_row_end < in_height && input_col_end < in_width) {
       // Loop that doesn't need to check for boundary conditions.
@@ -181,7 +181,7 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
       }
     }
 
-    output.data()[thread_id] = static_cast<T>(sum);
+    output.data()[thread_id] = ScalarConvert<AccT, T>::to(sum);
   }
 }
 
