@@ -190,18 +190,6 @@ class TestGetImplementingArgs(TestCase):
         self.assertEqual(get_overloaded_types_and_args([a, b, c]), ([type(a), type(b), type(c)], [b, c, a]))
         self.assertEqual(get_overloaded_types_and_args([a, c, b]), ([type(a), type(c), type(b)], [c, b, a]))
 
-    @unittest.expectedFailure
-    def test_too_many_duck_tensors(self):
-        namespace = dict(__torch_function__=_return_not_implemented)
-        types = [type('A' + str(i), (object,), namespace) for i in range(33)]
-        relevant_args = [t() for t in types]
-
-        actual = get_overloaded_types_and_args(relevant_args[:32])
-        self.assertEqual(actual, relevant_args[:32])
-
-        with self.assertRaisesRegex(TypeError, 'distinct argument types'):
-            get_overloaded_types_and_args(relevant_args)
-
 
 class TestTensorTorchFunction(TestCase):
 
@@ -410,18 +398,14 @@ class TestTensorFunctionImplementation(TestCase):
 
 class TestTensorMethods(TestCase):
 
-    @unittest.expectedFailure # Tensor.view() is different from ndarray.view()
     def test_repr(self):
-        # gh-12162: should still be defined even if __torch_function__ doesn't
-        # implement torch.tensor_repr()
-
         class MyTensor(torch.Tensor):
             def __torch_function__(*args, **kwargs):
                 return NotImplemented
 
-        tensor = torch.tensor(1).view(MyTensor)
-        self.assertEqual(repr(tensor), 'MyTensor(1)')
-        self.assertEqual(str(tensor), '1')
+        tensor = MyTensor([1])
+        self.assertEqual(repr(tensor), 'tensor([1.])')
+        self.assertEqual(str(tensor), 'tensor([1.])')
 
 
 class TestTorchFunctions(TestCase):
