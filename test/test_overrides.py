@@ -1,7 +1,5 @@
 import torch
 import numpy as np
-import warnings
-import math
 import unittest
 from torch._overrides import (
     get_overloaded_types_and_args, torch_function_dispatch,
@@ -17,11 +15,11 @@ from common_utils import TestCase
 HANDLED_FUNCTIONS = {}
 
 def implements(torch_function):
-   "Register an implementation of a torch function for a Tensor-like object."
-   def decorator(func):
-       HANDLED_FUNCTIONS[torch_function] = func
-       return func
-   return decorator
+    "Register an implementation of a torch function for a Tensor-like object."
+    def decorator(func):
+        HANDLED_FUNCTIONS[torch_function] = func
+        return func
+    return decorator
 
 
 class DiagonalTensor:
@@ -96,16 +94,16 @@ class TestGetImplementingArgs(TestCase):
         tensor = torch.tensor(1)
 
         args = get_overloaded_types_and_args([tensor])
-        self.assertEqual(list(args),[[type(tensor)], [tensor]])
+        self.assertEqual(list(args), [[type(tensor)], [tensor]])
 
         args = get_overloaded_types_and_args([tensor, tensor])
-        self.assertEqual(list(args),[[type(tensor)], [tensor]])
+        self.assertEqual(list(args), [[type(tensor)], [tensor]])
 
         args = get_overloaded_types_and_args([tensor, 1])
-        self.assertEqual(list(args),[[type(tensor)], [tensor]])
+        self.assertEqual(list(args), [[type(tensor)], [tensor]])
 
         args = get_overloaded_types_and_args([1, tensor])
-        self.assertEqual(list(args),[[type(tensor)], [tensor]])
+        self.assertEqual(list(args), [[type(tensor)], [tensor]])
 
     def test_tensor_subclasses(self):
         # Check order in which args are returned: subclasses before superclasses
@@ -180,7 +178,7 @@ class TestGetImplementingArgs(TestCase):
         c = C()
         d = D()
 
-        self.assertEqual(get_overloaded_types_and_args([1]), ([],[]))
+        self.assertEqual(get_overloaded_types_and_args([1]), ([], []))
         self.assertEqual(get_overloaded_types_and_args([a]), ([type(a)], [a]))
         self.assertEqual(get_overloaded_types_and_args([a, 1]), ([type(a)], [a]))
         self.assertEqual(get_overloaded_types_and_args([a, a, a]), ([type(a)], [a]))
@@ -210,54 +208,57 @@ class TestTensorTorchFunction(TestCase):
         override_sub = OverrideSub([1])
 
         result = tensor.__torch_function__(func=dispatched_two_arg,
-                                          types=(torch.Tensor,),
-                                          args=(tensor, 1.), kwargs={})
+                                           types=(torch.Tensor,),
+                                           args=(tensor, 1.), kwargs={})
         self.assertEqual(result, 'original')
 
         result = tensor.__torch_function__(func=dispatched_two_arg,
-                                          types=(torch.Tensor, Other),
-                                          args=(tensor, other), kwargs={})
+                                           types=(torch.Tensor, Other),
+                                           args=(tensor, other), kwargs={})
         assert result is NotImplemented
 
         result = tensor.__torch_function__(func=dispatched_two_arg,
-                                          types=(torch.Tensor, NoOverrideSub),
-                                          args=(tensor, no_override_sub),
-                                          kwargs={})
+                                           types=(torch.Tensor, NoOverrideSub),
+                                           args=(tensor, no_override_sub),
+                                           kwargs={})
         self.assertEqual(result, 'original')
 
         result = tensor.__torch_function__(func=dispatched_two_arg,
-                                          types=(torch.Tensor, OverrideSub),
-                                          args=(tensor, override_sub),
-                                          kwargs={})
+                                           types=(torch.Tensor, OverrideSub),
+                                           args=(tensor, override_sub),
+                                           kwargs={})
         self.assertEqual(result, 'original')
 
         # TODO: uncomment once `torch.cat` is overridable (and change use of view)
-        #with self.assertRaisesRegex(TypeError, 'no implementation found'):
-        #    torch.cat((tensor, other))
+        # with self.assertRaisesRegex(TypeError, 'no implementation found'):
+        #     torch.cat((tensor, other))
         #
-        #expected = torch.cat((tensor, tensor))
-        #result = torch.cat((tensor, no_override_sub))
-        #self.assertEqual(result, expected.view(NoOverrideSub))
-        #result = torch.cat((tensor, override_sub))
-        #self.assertEqual(result, expected.view(OverrideSub))
+        # expected = torch.cat((tensor, tensor))
+        # result = torch.cat((tensor, no_override_sub))
+        # self.assertEqual(result, expected.view(NoOverrideSub))
+        # result = torch.cat((tensor, override_sub))
+        # self.assertEqual(result, expected.view(OverrideSub))
 
     def test_no_wrapper(self):
         # This shouldn't happen unless a user intentionally calls
         # __torch_function__ with invalid arguments, but check that we raise
         # an appropriate error all the same.
         tensor = torch.tensor(1)
-        func = lambda x: x
+
+        def func(x):
+            return x
+
         with self.assertRaisesRegex(AttributeError, '_implementation'):
             tensor.__torch_function__(func=func, types=(torch.Tensor,),
-                                     args=(tensor,), kwargs={})
+                                      args=(tensor,), kwargs={})
 
 
 class TestTorchFunctionDispatch(TestCase):
 
     def test_pickle(self):
         for proto in range(2, pickle.HIGHEST_PROTOCOL + 1):
-            roundtripped = pickle.loads(
-                    pickle.dumps(dispatched_one_arg, protocol=proto))
+            roundtripped = pickle.loads(pickle.dumps(dispatched_one_arg,
+                                                     protocol=proto))
             assert roundtripped is dispatched_one_arg
 
     def test_name_and_docstring(self):
@@ -317,7 +318,7 @@ class TestVerifyMatchingSignatures(TestCase):
 
         # should not raise
         @torch_function_dispatch(lambda x: (x,), verify=False)
-        def f(y):
+        def f2(y):
             pass
 
 
@@ -412,7 +413,7 @@ class TestTorchFunctions(TestCase):
 
     def test_set_module(self):
         # TODO: add a few more in other namespaces once we have C++ overrides
-        #self.assertEqual(torch.sum.__module__, 'torch')
+        # self.assertEqual(torch.sum.__module__, 'torch')
         self.assertEqual(torch.unique.__module__, 'torch.functional')
 
     def test_inspect_unique(self):
@@ -435,8 +436,10 @@ class TestTorchFunctions(TestCase):
         class TensorProxy:
             def __init__(self, value):
                 self.value = value
+
             def __torch_function__(self, *args, **kwargs):
                 return self.value.__torch_function__(*args, **kwargs)
+
             def __tensor__(self, *args, **kwargs):
                 return self.value.__tensor__(*args, **kwargs)
 
@@ -446,7 +449,7 @@ class TestTorchFunctions(TestCase):
         self.assertEqual(result, 1)
 
         proxy.value.__torch_function__.assert_called_once_with(
-            torch.unique, [TensorProxy,], (proxy,), {})
+            torch.unique, [TensorProxy], (proxy,), {})
         proxy.value.__tensor__.assert_not_called()
 
 
