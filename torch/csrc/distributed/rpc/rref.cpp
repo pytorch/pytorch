@@ -103,6 +103,11 @@ bool UserRRef<T>::isOwner() const {
   return false;
 }
 
+template <typename T>
+bool UserRRef<T>::isPyObj() {
+  return std::is_same<T, py::object>::value;
+}
+
 template <>
 IValue UserRRef<IValue>::toHere() {
   auto& agent = RRefContext::getInstance()->agent();
@@ -129,6 +134,38 @@ py::object UserRRef<py::object>::toHere() {
 
 template class UserRRef<IValue>;
 template class UserRRef<py::object>;
+
+//////////////////////////  OwnerRRef  /////////////////////////////////////
+
+template <typename T>
+bool OwnerRRef<T>::isOwner() const {
+  return true;
+}
+
+template <typename T>
+T OwnerRRef<T>::getValue() const {
+  // TODO: use callback to make this non-blocking
+  std::unique_lock<std::mutex> lock(mutex_);
+  valueCV_.wait(lock, [this]{return value_.has_value();});
+  return value_.value();
+}
+
+template <typename T>
+void OwnerRRef<T>::setValue(T&& value) {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    value_ = std::move(value);
+  }
+  valueCV_.notify_all();
+}
+
+template <typename T>
+bool OwnerRRef<T>::isPyObj() {
+  return std::is_same<T, py::object>::value;
+}
+
+template class OwnerRRef<IValue>;
+template class OwnerRRef<py::object>;
 
 } // namespace rpc
 } // namespace distributed

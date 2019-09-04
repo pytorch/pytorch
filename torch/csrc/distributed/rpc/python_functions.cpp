@@ -58,6 +58,7 @@ py::object to_py_obj(const Message& message) {
       ScriptRet ret = ScriptRet::fromMessage(message);
       Stack stack;
       stack.push_back(ret.value());
+      AutoGIL ag;
       return torch::jit::createPyObjectForStack(std::move(stack));
     }
     case MessageType::PYTHON_RET: {

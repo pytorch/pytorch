@@ -91,9 +91,81 @@ struct RRefForkData {
 //       the owner (RREF_USER_ACCEPT). However, it cannot delete
 //       (RREF_USER_DELETE) its local RRef fork until owner's message arrives.
 //
+// NB: RREF_FORK_NOTIFY only registers the callee UserRRef on the owner, not the
+// caller. So, it is possible that the owner knows the callee UserRRef before
+// knowing the caller UserRRef. This design decision is made to simplify the
+// protocole. If RREF_FORK_NOTIFY registers both UserRRefs, RREF_USER_ACCEPT
+// might be sent to the caller UserRRef under two different situations, and will
+// lead to more states tracking and dedup complexities. As we will see below in
+// [RRef Reference Count], reference count can still work properly with this
+// simplification.
+//
+//
 // Note [RRef Reference Count]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
+// The right time to delete an RRef on owner is when there are no living forks
+// on any user and Python GC also agrees to delete the RRef instance on the
+// owner. The tricky part is to determine if there are any living forks.
+//
+// A user can get a fork in three situations:
+//
+// 1. Receiving a fork from the owner.
+// 2. Receiving a fork from another user.
+// 3. Creating a new RRef fork owned by another worker.
+//
+// #1 is the simplest case where the owner initiates the fork, and hence it can
+// easily increment local RC. The only requirement is that any fork must notify
+// the owner before destruction. Hence, we need the first guarantee:
+//
+// G1. The owner will be notified when any fork is deleted.*
+//
+// Note that the notification might come delayed or out-of-order.
+//
+// With #2 and #3, it is possible that the owner only partially knows the RRef
+// fork graph or not even knowing it at all. For example, the RRef could be
+// constructed on a user, and before the owner receives the RPC call, the
+// creator user might have already shared the RRef with other users, and those
+// users could further share the RRef. One invariant is that the fork graph of
+// any RRef is always a tree rooted at the owner, because forking an RRef always
+// creates a new RRef instance, and hence every RRef has a single parent. One
+// nasty detail is that when an RRef is created on a user, technically the owner
+// is not its parent but we still consider it that way and it does not break the
+// argument below.
+//
+// The owner's view on any node (fork) in the tree has three stages:
+//            1) unknown → 2) known → 3) deleted.
+// The owner's view on the entire tree keeps changing. The owner deletes its
+// RRef instance when it thinks there are no living forks, i.e., all the forks
+// could be either indeed deleted or unknown. Therefore, the dangerous case is
+// when some forks are unknown and others are deleted. We only need a simple
+// guarantee to prevent this situation:
+//
+// * G2. No fork x can be deleted if it has any unacknowledged fork requests.
+//
+// G2 trivially guarantees that no parent UserRRef Y can be deleted before the
+// owner knows all Y's children UserRRefs.
+//
+// However, it is possible that a child UserRRef Z is deleted before the owner
+// knows its Z's parent Y. More specifically, this can happen when Y's
+// RREF_FORK_NOTIFY was processed by the owner before any other messages from Y,
+// where Z can RREF_USER_ACCEPT and then send out RREF_USER_DELETE before the
+// owner leanrs about Y. Nevertheless, this does not cause any problem. Because,
+// at least one of Y's ancestor will be alive, preventing the owner from
+// deleting the OwnerRRef. Consider the following example:
+//
+//    OwnerRRef -> A -> B -> Y -> Z
+//
+// OwnerRRef forks to A, then A forks to B, B forks to Y, and Y forks to Z. Z
+// can be deleted without OwnerRRef knowing Y or even B. However, the OwnerRRef
+// will at least know A, and A won't die before the owner knows B, and B won't
+// die before the owner knows Y.
+//
+// In general, on any root-to-leaf path in the RRef sharing graph, when any
+// UserRRef leaves, the owner will always know its child. Therefore, for any
+// path formed by unknown and known RRefs, the first node on the path will
+// always be known. Hence, the OwnerRRef will not be deleted as long as there is
+// any living UserRRef.
 //
 // TODO: make RRef an IValue, and edit createStackForSchema accordingly
 class RRef {
@@ -125,13 +197,10 @@ class RRef {
 template <typename T>
 class UserRRef final: public RRef {
  public:
-  const ForkId& forkId() const;
   bool isOwner() const override;
+  bool isPyObj() override;
 
-  bool isPyObj() override {
-    return std::is_same<T, py::object>::value;
-  }
-
+  const ForkId& forkId() const;
   T toHere();
 
   ~UserRRef() override;
@@ -148,30 +217,11 @@ class UserRRef final: public RRef {
 template <typename T>
 class OwnerRRef final: public RRef {
  public:
-  bool isOwner() const override {
-    return true;
-  }
+  bool isOwner() const override;
+  bool isPyObj() override;
 
-  T getValue() const {
-    // TODO: use callback to make this non-blocking
-    std::unique_lock<std::mutex> lock(mutex_);
-    valueCV_.wait(lock, [this]{return value_.has_value();});
-    return value_.value();
-  }
-
-  void setValue(T&& value) {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      value_ = std::move(value);
-    }
-    valueCV_.notify_all();
-  }
-
-  bool isPyObj() override {
-    return std::is_same<T, py::object>::value;
-  }
-
-  // TODO: add setValue(py::object) and getPyObj() for Python UDF
+  T getValue() const;
+  void setValue(T&& value);
 
  private:
   friend class RRefContext;
