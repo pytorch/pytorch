@@ -460,6 +460,33 @@ void propagate_names_for_expand(Tensor& result, const Tensor& self) {
   propagate_names(result, std::move(outnames), /*validate_names=*/false);
 }
 
+optional<std::vector<Dimname>> compute_broadcast_outnames(
+    const Tensor& self,
+    const Tensor& other) {
+  if (!self.has_names() && !other.has_names()) {
+    return nullopt;
+  }
+  return unify_from_right(self.names(), other.names());
+}
+
+optional<std::vector<Dimname>> broadcast_to_outnames(
+    const Tensor& tensor,
+    const Tensor& reference_tensor,
+    const char* op_name) {
+  if (!tensor.has_names() && !reference_tensor.has_names()) {
+    return nullopt;
+  }
+  auto reference_names = reference_tensor.names();
+  auto tensor_names = tensor.names();
+  TORCH_CHECK(
+      reference_names.size() >= tensor_names.size(),
+      op_name, ": attempted to broadcast Tensor", tensor_names, " to Tensor",
+      reference_names, " but the number of dims (", tensor_names.size(),
+      ") must be less than or equal to the number of dims in the tensor (",
+      reference_names.size(), ")");
+  return unify_from_right(reference_names, tensor_names);
+}
+
 optional<std::vector<Dimname>> compute_matmul_outnames(
     const Tensor& self,
     const Tensor& other) {
