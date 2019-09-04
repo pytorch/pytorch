@@ -660,8 +660,6 @@ This subset is restricted:
 After a class is defined, it can be used in both TorchScript and Python interchangeably
 like any other TorchScript type:
 
-.. TODO [testcode]: can't get source code of a class in doctest
-
 ::
 
     # Declare a TorchScript class
