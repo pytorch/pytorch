@@ -7419,6 +7419,32 @@ class _TestTorchMixin(torchtest):
         self._test_cholesky_batched(self, lambda t: t)
 
     @staticmethod
+    def _test_cholesky_batched_many_batches(self, cast):
+        from common_utils import random_symmetric_pd_matrix
+
+        def cholesky_test_helper(n, batchsize, cast, upper):
+            A = cast(random_symmetric_pd_matrix(n, batchsize))
+            chol_fact = torch.cholesky(A, upper=upper)
+            if upper:
+                # Correctness check
+                self.assertEqual(A, chol_fact.transpose(-2, -1).matmul(chol_fact))
+                # Upper triangular check
+                self.assertEqual(chol_fact, chol_fact.triu())
+            else:
+                # Correctness check
+                self.assertEqual(A, chol_fact.matmul(chol_fact.transpose(-2, -1)))
+                # Lower triangular check
+                self.assertEqual(chol_fact, chol_fact.tril())
+
+        for upper, batchsize in product([True, False], [262144, 524288]):
+            cholesky_test_helper(2, batchsize, cast, upper)
+
+    @skipIfNoLapack
+    @slowTest
+    def test_cholesky_batched_many_batches(self):
+        self._test_cholesky_batched_many_batches(self, lambda t: t)
+
+    @staticmethod
     def _test_cholesky_solve(self, cast):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
