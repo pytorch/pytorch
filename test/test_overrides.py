@@ -43,7 +43,7 @@ class DiagonalTensor:
         if func not in HANDLED_FUNCTIONS:
             return NotImplemented
         # Note: this allows subclasses that don't override
-        # __torch_function__ to handle DiagonalArray objects.
+        # __torch_function__ to handle DiagonalTensor objects.
         if not all(issubclass(t, self.__class__) for t in types):
             return NotImplemented
         return HANDLED_FUNCTIONS[func](*args, **kwargs)
@@ -60,7 +60,7 @@ class DiagonalTensor:
 
 @implements(torch.unique)
 def unique_diag(mat1):
-    "Implementation of torch.unique for DiagonalArray objects"
+    "Implementation of torch.unique for DiagonalTensor objects"
     return torch.Tensor([0, mat1._i])
 
 
