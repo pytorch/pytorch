@@ -131,13 +131,12 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     if (pack_ptr.bias.has_value()) {
       at::Tensor bias = pack_ptr.bias.value();
       // Temporary: Quantize bias
-      qbias = bias;
       if (pack_ptr.q_scheme == kPerTensorAffine) {
         qbias = at::quantize_linear(
             at::dequantize(bias), pack_ptr.w_scale[0] * act_scale, 0, kQInt32);
       } else if (pack_ptr.q_scheme == kPerChannelAffine) {
-        std::vector<int64_t> vect(1, 0);
-        IntArrayRef axis(vect.data(), 1);
+        std::array<int64_t, 1> arr{0};
+        IntArrayRef axis(arr.data(), 1);
         at::Tensor bias_scale = at::ones({K}, at::dtype(at::kDouble));
         at::Tensor bias_zp = at::zeros({K}, at::dtype(at::kLong));
         for (int i = 0; i < K; ++i) {
@@ -145,6 +144,9 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         }
         qbias = quantize_linear_per_channel_cpu(
             at::dequantize(bias), bias_scale, bias_zp, axis, kQInt32);
+      } else {
+        qbias = bias;
+        TORCH_CHECK(false, "Unsupported quantization scheme.")
       }
       TORCH_CHECK(qbias.dim() == 1, "bias should be a vector (1D Tensor)");
       TORCH_CHECK(
