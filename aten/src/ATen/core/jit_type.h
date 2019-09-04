@@ -72,7 +72,7 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
 
   // subtyping relation. By default, we return true for the case
   // when the type is exactly equal or if this <: T where rhs = Optional[T]
-  
+
   // if this returns false and the why_not stream is non-null, it contains
   // additional details that describe why this is not a subtype of 'rhs'.
   // This additional information should only contain details that are not obvious
@@ -1472,7 +1472,6 @@ using ::torch::jit::Function;
 // Interfaces are a list of abstract methods that a class might meet.
 // If a class provides those methods, it implicitly meets the interface.
 struct CAFFE2_API InterfaceType : public NamedType {
-  friend struct ClassType; // for isSubclassOf
   static InterfaceTypePtr create(
       QualifiedName qualifiedName);
 
@@ -1490,7 +1489,7 @@ struct CAFFE2_API InterfaceType : public NamedType {
   std::string python_str() const override {
     return name()->qualifiedName();
   }
-  
+
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
 
   // try to find a method of this interface,
@@ -1505,7 +1504,7 @@ struct CAFFE2_API InterfaceType : public NamedType {
  private:
   InterfaceType(QualifiedName name);
 
-  // shared_ptr so that this header does not have to depend on 
+  // shared_ptr so that this header does not have to depend on
   // FunctionSchema.h
   std::shared_ptr<std::vector<FunctionSchema>> methods_;
 };
