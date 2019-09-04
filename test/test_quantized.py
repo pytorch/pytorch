@@ -147,6 +147,13 @@ class TestQuantizedOps(TestCase):
         add_scalar_relu = torch.ops.quantized.add_scalar_relu
 
         A, (scale, zero_point, dtype) = A
+        check_val = zero_point + b
+        if dtype == torch.qint8 and check_val < -128 or check_val > 127:
+            return
+        if dtype == torch.quint8 and check_val > 255 or check_val < 0:
+            return
+        if dtype == torch.quint8 and check_val > 2**31 - 1 or check_val < -(2**31):
+            return
         A = A.astype(np.float32)
         qA = torch.quantize_linear(torch.from_numpy(A), scale, zero_point, dtype)
 
@@ -154,18 +161,16 @@ class TestQuantizedOps(TestCase):
         C_relu = copy.deepcopy(C)
         C_relu[C_relu < 0] = 0
 
-        C_ref = torch.quantize_linear(C, scale, zero_point, dtype)
-        C_relu_ref = torch.quantize_linear(C_relu, scale, zero_point, dtype)
+        C_hat = add_scalar(qA, b)
+        C_relu_hat = add_scalar_relu(qA, b)
 
-        C_hat = add_scalar(qA, b, scale=scale, zero_point=zero_point)
-        C_relu_hat = add_scalar_relu(qA, b, scale=scale, zero_point=zero_point)
-
-        self.assertEqual(C_ref, C_hat,
+        self.assertEqual(C, C_hat.dequantize(), prec=1.0,
                          message="Scalar add results don't match:\
-                         {} vs {}".format(C_ref, C_hat))
-        self.assertEqual(C_relu_ref, C_relu_hat,
+                         {} vs {}".format(C, C_hat.dequantize()))
+
+        self.assertEqual(C, C_relu_hat.dequantize(), prec=1.0,
                          message="Scalar add relu results don't match:\
-                         {} vs {}".format(C_relu_ref, C_relu_hat))
+                         {} vs {}".format(C, C_relu_hat.dequantize()))
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
