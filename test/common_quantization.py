@@ -67,7 +67,6 @@ def convert_dynamic(module):
 
 def prepare_dynamic(model, qconfig_dict=None):
     propagate_qconfig(model, qconfig_dict)
-    return model
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
@@ -190,6 +189,16 @@ class SingleLayerLinearDynamicModel(torch.nn.Module):
 
     def forward(self, x):
         x = self.fc1(x)
+        return x
+
+class LSTMDynamicModel(torch.nn.Module):
+    def __init__(self):
+        super(LSTMDynamicModel, self).__init__()
+        self.qconfig = default_qconfig
+        self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.lstm(x)
         return x
 
 class TwoLayerLinearModel(torch.nn.Module):

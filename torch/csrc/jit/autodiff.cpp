@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/symbolic_script.h>
-#include <torch/csrc/jit/symbolic_variable.h>
 
 #include <c10/util/Exception.h>
 
@@ -193,22 +192,34 @@ class GradientHelper {
 
     // Definition not found in torchscript, look up in the buildSymbolicGradient
     // TODO: migrate all to using torchscript
-    auto sym_grads = buildSymbolicGradient(fmap<SymbolicVariable>(grad_values));
-    return fmap(sym_grads, [](const SymbolicVariable& v) { return v.value(); });
+    return buildSymbolicGradient(grad_values);
   }
 
  private:
   Node* node;
 
-  std::vector<SymbolicVariable> buildSymbolicGradient(const std::vector<SymbolicVariable>& grads) {
-    auto inputs = fmap<SymbolicVariable>(node->inputs());
-    auto outputs = fmap<SymbolicVariable>(node->outputs());
+  std::vector<Value*> buildSymbolicGradient(const ArrayRef<Value*>& grad_values) {
+    auto inputs = node->inputs();
+    auto outputs = node->outputs();
 
     if (node->kind() == prim::AutogradAdd) {
       // NB: AutogradAdds don't broadcast
-      return {grads.at(0), grads.at(0)};
+      return {grad_values.at(0), grad_values.at(0)};
     } else if (node->kind() == prim::ConstantChunk) {
-      return {SymbolicVariable::cat(grads, node->i(attr::dim))};
+      auto* g = node->owningGraph();
+
+      Value* input_list;
+      if (grad_values.size() == 1 && grad_values[0]->type()->isSubtypeOf(ListType::ofTensors())) {
+        input_list = grad_values[0];
+      } else {
+        input_list = g->insertNode(g->createList(TensorType::get(), grad_values))->output();
+      }
+
+      auto* cDim = g->insertConstant(node->i(attr::dim));
+      auto* cat_node = g->insertNode(g->create(aten::cat, 1));
+      cat_node->addInput(input_list);
+      cat_node->addInput(cDim);
+      return {cat_node->output()};
     }  else if (
         node->kind() == prim::Constant || node->kind() == prim::AutogradZero) {
       return {};
@@ -218,14 +229,14 @@ class GradientHelper {
       auto graph = node->owningGraph();
       auto backward_value = graph->insert(
           aten::thnn_conv2d_backward,
-          {grads.at(0).value(),
-           inputs.at(0).value(),
-           inputs.at(1).value(),
+          {grad_values.at(0),
+           inputs.at(0),
+           inputs.at(1),
            node->namedInput(attr::kernel_size),
            node->namedInput(attr::stride),
            node->namedInput(attr::padding),
-           outputs.at(1).value(),
-           outputs.at(2).value(),
+           outputs.at(1),
+           outputs.at(2),
            graph->insertConstant(c10::List<bool>({true, true, true}))});
       // graph->insert returns a tuple automatically if multiple outputs are
       // returned. So unpack them again.
@@ -246,15 +257,15 @@ class GradientHelper {
       auto graph = node->owningGraph();
       auto backward_value = graph->insert(
           aten::native_batch_norm_backward,
-          {grads.at(0).value(),
-           inputs.at(0).value(),
-           inputs.at(1).value(),
-           inputs.at(3).value(),
-           inputs.at(4).value(),
-           outputs.at(1).value(),
-           outputs.at(2).value(),
-           inputs.at(5).value(),
-           inputs.at(7).value(),
+          {grad_values.at(0),
+           inputs.at(0),
+           inputs.at(1),
+           inputs.at(3),
+           inputs.at(4),
+           outputs.at(1),
+           outputs.at(2),
+           inputs.at(5),
+           inputs.at(7),
            graph->insertConstant(c10::List<bool>({true, true, true}))});
       // graph->insert returns a tuple automatically if multiple outputs are
       // returned. So unpack them again.
@@ -519,7 +530,7 @@ static void deduplicateSizeCaptures(
     }
     if (usedOnlyInReverse(capture) && capture_set.count(node->input())) {
       WithInsertPoint insert_guard{*rev_info.reverse_block->nodes().begin()};
-      auto size = SymbolicVariable(node->input()).size();
+      auto* size = node->input()->owningGraph()->insert(aten::size, {node->input()});
       GRAPH_DEBUG(
           "deduplicateSizeCaptures: Replacing ",
           capture->debugName(),

@@ -291,18 +291,6 @@ void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src) {
                    *r_data = *t_data < *src_data ? *t_data : *src_data;);
 }
 
-void THTensor_(cmaxValue)(THTensor *r, THTensor *t, scalar_t value) {
-  THTensor_(resizeAs)(r, t);
-  TH_TENSOR_APPLY2(scalar_t, r, scalar_t, t,
-                   *r_data = *t_data < value ? value : *t_data;);  // this order propagates NaN
-}
-
-void THTensor_(cminValue)(THTensor *r, THTensor *t, scalar_t value) {
-  THTensor_(resizeAs)(r, t);
-  TH_TENSOR_APPLY2(scalar_t, r, scalar_t, t,
-                   *r_data = *t_data > value ? value : *t_data;);  // this order propagates NaN
-}
-
 void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
