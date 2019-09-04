@@ -68,7 +68,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
   Tensor operator()(
       Tensor act,
       Tensor packed_weight,
-      c10::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
@@ -124,19 +123,37 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 
     fbgemm::DoNothing<> NoOpObj{};
 
-    const int32_t* bias_ptr = nullptr;
-    if (bias.has_value()) {
-      Tensor bias_vec = bias.value();
-      TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
-      TORCH_CHECK(
-          bias_vec.size(0) == K,
-          "bias should have K elements: " + std::to_string(K));
-      auto bias_contig = bias_vec.contiguous();
-      bias_ptr = reinterpret_cast<int32_t*>(bias_contig.data_ptr<c10::qint32>());
-    }
-
     float act_scale = act.q_scale();
     int32_t act_zero_point = act.q_zero_point();
+
+    const int32_t* bias_ptr = nullptr;
+    at::Tensor qbias;
+    if (pack_ptr.bias.has_value()) {
+      at::Tensor bias = pack_ptr.bias.value();
+      // Temporary: Quantize bias
+      qbias = bias;
+      if (pack_ptr.q_scheme == kPerTensorAffine) {
+        qbias = at::quantize_linear(
+            at::dequantize(bias), pack_ptr.w_scale[0] * act_scale, 0, kQInt32);
+      } else if (pack_ptr.q_scheme == kPerChannelAffine) {
+        std::vector<int64_t> vect(1, 0);
+        IntArrayRef axis(vect.data(), 1);
+        at::Tensor bias_scale = at::ones({K}, at::dtype(at::kDouble));
+        at::Tensor bias_zp = at::zeros({K}, at::dtype(at::kLong));
+        for (int i = 0; i < K; ++i) {
+          bias_scale.data_ptr<double>()[i] = pack_ptr.w_scale[i] * act_scale;
+        }
+        qbias = quantize_linear_per_channel_cpu(
+            at::dequantize(bias), bias_scale, bias_zp, axis, kQInt32);
+      }
+      TORCH_CHECK(qbias.dim() == 1, "bias should be a vector (1D Tensor)");
+      TORCH_CHECK(
+          qbias.size(0) == K,
+          "bias should have K elements: " + std::to_string(K));
+      auto bias_contig = qbias.contiguous();
+      bias_ptr =
+          reinterpret_cast<int32_t*>(bias_contig.data_ptr<c10::qint32>());
+    }
 
     std::vector<float> output_multiplier_float(1, 0.0);
     auto qtype = kPerTensorAffine;
@@ -223,7 +240,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
   Tensor operator()(
       Tensor /* activation */,
       Tensor /* packed_weight */,
-      c10::optional<Tensor> /* bias */,
       torch::List<int64_t> /* stride */,
       torch::List<int64_t> /* padding */,
       torch::List<int64_t> /* dilation */,
