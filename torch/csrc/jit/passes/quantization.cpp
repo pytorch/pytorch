@@ -903,7 +903,7 @@ graph(%self, %scale, %zero_point, %dtype):
   auto method = module.get_method(method_name);
   auto graph = method.graph();
   auto matches = findPatternMatches(pattern_graph, *graph);
-  for (auto match: matches) {
+  for (const auto& match: matches) {
     auto match_vmap = match.values_map;
     auto* weight = match_vmap.at(vmap.at("weight"));
     TORCH_INTERNAL_ASSERT(
