@@ -1,3 +1,5 @@
+#include <ATen/native/sparse/SparseTensorMath.h>
+
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
