@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import collections
 
 from pyHIPIFY.constants import *
@@ -276,6 +277,13 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("cusparse.h", ("hipsparse.h", CONV_INCLUDE, API_RAND)),
     ("cufft.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
     ("cufftXt.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
+    ("thrust/system/cuda/", ("thrust/system/hip/", CONV_INCLUDE, API_BLAS)),
+    ("cub/util_allocator.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+    ("cub/block/block_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+    ("cub/cub.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+    ("cub/block/block_load.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+    ("cub/device/device_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+    ("cub/device/device_scan.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
 ])
 
 CUDA_IDENTIFIER_MAP = collections.OrderedDict([
@@ -2173,6 +2181,8 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cufftDestroy", ("hipfftDestroy", CONV_MATH_FUNC, API_FFT)),
     ("cufftGetVersion", ("hipfftGetVersion", CONV_MATH_FUNC, API_FFT)),
     ("cufftGetProperty", ("hipfftGetProperty", CONV_MATH_FUNC, API_FFT, HIP_UNSUPPORTED)),
+    ("thrust::cuda::", ("thrust::hip::", CONV_MATH_FUNC, API_BLAS)),
+    ("cub::", ("hipcub::", CONV_MATH_FUNC, API_BLAS)),
 ])
 
 CUDA_SPARSE_MAP = collections.OrderedDict([
@@ -2345,6 +2355,7 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/impl/CUDAGuardImpl.h", ("c10/hip/impl/HIPGuardImpl.h", API_C10)),
     ("c10/cuda/impl/cuda_cmake_macros.h", ("c10/hip/impl/hip_cmake_macros.h", API_C10)),
     ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
+    ("C10_CUDA_CHECK_WARN", ("C10_HIP_CHECK_WARN", API_C10)),
     ("c10::cuda", ("c10::hip", API_C10)),
     ("cuda::CUDAStream", ("hip::HIPStream", API_C10)),
     ("CUDAStream", ("HIPStream", API_C10)),
