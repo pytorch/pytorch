@@ -3017,7 +3017,7 @@ graph(%Ra, %Rb):
         warns = [str(w.message) for w in warns]
         self.assertEqual(len(warns), 0)
 
-    @unittest.skipIf(sys.platform == "win32", "temp file name on windows")
+    @unittest.skipIf(IS_WINDOWS, "temp file name on windows")
     def test_trace_save(self):
         def fn(x):
             return x + 2
@@ -3032,7 +3032,7 @@ graph(%Ra, %Rb):
         out = torch.jit.trace(fn, (torch.ones(2, 2),))
         check(out)
 
-    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_torch_load_error(self):
         class J(torch.jit.ScriptModule):
             def __init__(self):
@@ -3047,6 +3047,16 @@ graph(%Ra, %Rb):
             j.save(f.name)
             with self.assertRaisesRegex(RuntimeError, "is a zip"):
                 torch.load(f.name)
+
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
+    def test_torch_load_zipfile_check(self):
+        @torch.jit.script
+        def fn(x):
+            return x + 10
+
+        with tempfile.NamedTemporaryFile() as f:
+            fn.save(f.name)
+            self.assertTrue(torch.serialization._is_zipfile(f))
 
     def test_python_bindings(self):
         lstm_cell = torch.jit.script(LSTMCellS)
@@ -3578,6 +3588,25 @@ def foo(x):
         a = (torch.rand(3), torch.rand(3))
         self.checkScript(stuff, (a,))
 
+    def test_tuple_keyword(self):
+        def bar():
+            f = tuple((1, 2))  # noqa: C409
+            return f
+
+        self.checkScript(bar, ())
+
+        def foo():
+            return tuple(1, 2)
+
+        self.checkScriptRaisesRegex(foo, (), Exception,
+                                    "1 argument")
+
+        def cant_infer_size():
+            return tuple([1, 2, 3])  # noqa: C409
+
+        with self.assertRaisesRegex(Exception, "cannot statically infer the expected"):
+            torch.jit.script(cant_infer_size)
+
     def test_tuple_create_return(self):
         def stuff2(x):
             # type: (int) -> Tuple[Tensor, Tensor]
@@ -3642,7 +3671,6 @@ def foo(x):
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
-    @unittest.skipIf(IS_SANDCASTLE, "[serialization forward compat]")
     def test_file_line_save_load(self):
         class Scripted(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -3711,7 +3739,6 @@ def foo(xyz):
             loaded = self.getExportImportCopy(ft)
             loaded()
 
-    @unittest.skipIf(IS_SANDCASTLE, "[serialization forward compat]")
     def test_serialized_source_ranges_dont_jitter(self):
         class FooTest3(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -5906,6 +5933,11 @@ a")
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
+
+        def not_test(x):
+            return ~x
+
+        self.checkScript(not_test, (torch.tensor([2, 4]), ))
 
     def test_number_all(self):
         def int1():
@@ -14243,8 +14275,7 @@ a")
     def test_script_scope(self):
         scripted = torch.jit.script(torch.nn.functional.pad)
 
-    # [serialization forward compat]
-    @unittest.skipIf(IS_SANDCASTLE or IS_WINDOWS, "NYI: TemporaryFileName on Windows")
+    @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):

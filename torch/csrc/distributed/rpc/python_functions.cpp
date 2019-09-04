@@ -31,18 +31,26 @@ std::shared_ptr<FutureMessage> py_rpc_builtin(
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
-  if (opName.rfind("aten", 0) == 0) {
-    // builtin operators.
-    Symbol symbol = Symbol::fromQualString(opName);
+  // builtin operators.
+  Symbol symbol = Symbol::fromQualString(opName);
+  if (symbol.is_aten()) {
+    Stack stack;
     for (const auto& op : torch::jit::getAllOperatorsFor(symbol)) {
       try {
         // FIXME: This is temporary solution. We should at least refactor
         // ``createStackForSchema`` to avoid throwing an error.
-        Stack stack = torch::jit::createStackForSchema(
+        stack = torch::jit::createStackForSchema(
             op->schema(), args, kwargs, c10::nullopt);
 
-        return agent.send(dst, ScriptCall(op, std::move(stack)).toMessage());
-      } catch (std::runtime_error) {}
+      } catch (std::runtime_error& e) {
+        VLOG(1) << "Couldn't match schema: " << op->schema()
+                << " to args: " << args << " and kwargs: " << kwargs
+                << ", reason: " << e.what();
+        continue;
+      }
+
+      // Found the right op! Send it along...
+      return agent.send(dst, ScriptCall(op, std::move(stack)).toMessage());
     }
   }
 
@@ -64,10 +72,10 @@ std::shared_ptr<FutureMessage> py_rpc_python_udf(
   std::vector<char> data(pickledPythonUDF.begin(), pickledPythonUDF.end());
   std::vector<torch::Tensor> tensor_table;
 
-  return agent.send(dst,
-                    Message(std::move(data),
-                            std::move(tensor_table),
-                            MessageType::PYTHON_CALL));
+  return agent.send(
+      dst,
+      Message(
+          std::move(data), std::move(tensor_table), MessageType::PYTHON_CALL));
 }
 
 } // namespace rpc
