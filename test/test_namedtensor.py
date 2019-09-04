@@ -1,7 +1,7 @@
 import unittest
 from common_utils import TestCase, run_tests
 from common_cuda import TEST_CUDA
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 import itertools
 import functools
 import torch
@@ -685,6 +685,43 @@ class TestNamedTensor(TestCase):
 
             torch.bernoulli(tensor, out=result)
             self.assertEqual(result.names, names)
+
+    def test_unflatten(self):
+        tensor = torch.randn(7, 2 * 3 * 5, 11, names=('N', 'D', 'K'))
+
+        # accepts iterable of tuples
+        out = tensor.unflatten('D', (('C', 2), ('H', 3), ('W', 5)))
+        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
+        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+
+        # accepts OrderedDict
+        out = tensor.unflatten('D', OrderedDict((('C', 2), ('H', 3), ('W', 5))))
+        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
+        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+
+        # Unflatten left-most
+        out = tensor.unflatten('N', (('N', 7), ('H', 1)))
+        self.assertEqual(out.names, ('N', 'H', 'D', 'K'))
+        self.assertEqual(out.shape, (7, 1, 2 * 3 * 5, 11))
+
+        # Unflatten right-most
+        out = tensor.unflatten('K', (('K', 11), ('H', 1)))
+        self.assertEqual(out.names, ('N', 'D', 'K', 'H'))
+        self.assertEqual(out.shape, (7, 2 * 3 * 5, 11, 1))
+
+        # takes positional dim
+        out = tensor.unflatten(1, (('C', 2), ('H', 3), ('W', 5)))
+        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
+        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+
+        with self.assertRaisesRegex(RuntimeError, "don't multiply up to"):
+            tensor.unflatten('D', (('H', 3), ('W', 5)))
+
+        with self.assertRaisesRegex(RuntimeError, 'OrderedDict or iterable of tuples'):
+            tensor.unflatten('D', None)
+
+        with self.assertRaisesRegex(RuntimeError, 'non-empty'):
+            tensor.unflatten('D', OrderedDict())
 
     def test_reduction_fns(self):
         def check_output(output, expected_names):

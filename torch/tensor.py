@@ -1,7 +1,7 @@
 import sys
 import torch
 import torch._C as _C
-from torch.namedtensor import _update_names, _check_serializing_named_tensor
+from torch.namedtensor import _update_names, _check_serializing_named_tensor, _unzip_namedshape
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -480,6 +480,10 @@ class Tensor(torch._C._TensorBase):
         data = (self.data_ptr(), False)  # read-only is false
 
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
+
+    def unflatten(self, dim, namedshape):
+        names, sizes = _unzip_namedshape(namedshape)
+        return super(Tensor, self).unflatten(dim, sizes, names)
 
     def names_(self, *names, **rename_map):
         # Note [names_ / view_names API]
