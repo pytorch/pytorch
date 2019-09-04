@@ -46,3 +46,15 @@ def _unique2(g, self, sorted, return_inverse, return_counts):
 def unique_dim(g, self, dim, sorted, return_inverse, return_counts):
     u, indices, inverse_indices, counts = g.op("Unique", self, axis_i=dim, sorted_i=sorted, outputs=4)
     return u, inverse_indices, counts
+
+
+@parse_args('v', 'v', 'i', 'i', 'i', 'none')
+def topk(g, self, k, dim, largest, sorted, out=None):
+    if out is not None:
+        _unimplemented("TopK", "Out parameter is not supported for topk")
+    k = sym_help._maybe_get_const(k, 'i')
+    if not sym_help._is_value(k):
+        k = g.op("Constant", value_t=torch.tensor(k, dtype=torch.int64))
+    from torch.onnx.symbolic_opset9 import unsqueeze
+    k = unsqueeze(g, k, 0)
+    return g.op("TopK", self, k, axis_i=dim, largest_i=largest, sorted_i=sorted, outputs=2)
