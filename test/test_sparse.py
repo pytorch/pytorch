@@ -811,6 +811,61 @@ class TestSparse(TestCase):
         test_shape(3, 10, [5, 7, 11, 13, 17], -7, "Dimension out of range")
         test_shape(3, 10, [5, 7, 11, 13, 17], 6, "Dimension out of range")
 
+    def test_select(self):
+        def test_shape(sparse_dims, nnz, sizes, select_dim, select_index, fail_message=None):
+            x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
+            if fail_message:
+                with self.assertRaisesRegex(IndexError, fail_message):
+                    torch.select(x, select_dim, select_index)
+            else:
+                result = torch.select(x, select_dim, select_index)
+                if result.is_sparse:
+                    result = result.to_dense()
+                dense_result = torch.select(x.to_dense(), select_dim, select_index)
+                self.assertEqual(dense_result, result)
+
+
+        sizes = [5, 7, 11, 13, 17]
+        # hybrid sparse/dense, select sparse dim, result is dense
+        for i in range(sizes[0]):
+            test_shape(1, 10, sizes, 0, i)
+        test_shape(1, 10, sizes, 0, sizes[0] + 1, r'select[(][)][:] index \d out of range.*')
+
+        # hybrid sparse/dense, select sparse dim, result is sparse
+        for d in range(3):
+            for i in range(sizes[d]):
+                test_shape(3, 10, sizes, d, i)
+
+        # hybrid sparse/dense, select dense dim, result is sparse
+        for d in range(1, 3):
+            for i in range(sizes[d]):
+                test_shape(1, 10, sizes, d, i)
+
+
+    def test_index_select(self):
+        def test_shape(sparse_dims, nnz, sizes, select_dim, select_index, fail_message=None):
+            if isinstance(select_index, int):
+                select_index = [select_index]
+            if isinstance(select_index, list):
+                select_index = torch.tensor(select_index, device=self.device, dtype=torch.long)
+            x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
+            if fail_message:
+                with self.assertRaisesRegex(IndexError, fail_message):
+                    torch.index_select(x, select_dim, select_index)
+            else:
+                result = torch.index_select(x, select_dim, select_index)
+                if result.is_sparse:
+                    result = result.to_dense()
+                dense_result = torch.index_select(x.to_dense(), select_dim, select_index)
+                self.assertEqual(dense_result, result)
+
+        sizes = [5, 7, 11, 13, 17]
+        for d in range(len(sizes)):
+            for index in [0, sizes[d] - 1, [0, sizes[d] // 2, sizes[d] - 1]]:
+                test_shape(1, 10, sizes, d, index)
+                test_shape(len(sizes) // 2, 10, sizes, d, index)
+                test_shape(len(sizes), 10, sizes, d, index)
+
     @cpu_only
     def test_mm(self):
         def test_shape(di, dj, dk, nnz):
