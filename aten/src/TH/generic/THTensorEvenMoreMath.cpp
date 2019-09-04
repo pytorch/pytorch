@@ -154,6 +154,9 @@ void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scal
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 {
+#ifdef BUILD_NAMEDTENSOR
+  at::NoNamesGuard guard;
+#endif
   int64_t tensor_size = THTensor_(nElement)(tensor);
   int tensor_contig = THTensor_(isContiguous)(tensor);
   int mask_contig = THTensor_(isContiguous)(mask);
@@ -180,6 +183,9 @@ void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 
 void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t value)
 {
+#ifdef BUILD_NAMEDTENSOR
+  at::NoNamesGuard guard;
+#endif
   int64_t tensor_size = THTensor_(nElement)(tensor);
   int tensor_contig = THTensor_(isContiguous)(tensor);
   int mask_contig = THTensor_(isContiguous)(mask);
