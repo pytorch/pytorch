@@ -11,12 +11,11 @@ namespace native {
 * Cephes Math Library Release 2.8:  June, 2000
 * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
 */
-template <typename T, typename accreal>
-static inline __host__ __device__ T calc_digamma(T in) {
-  using compute_type = typename std::conditional<std::is_same<T, at::Half>::value, accreal, T>::type;
+template <typename scalar_t>
+static inline __host__ __device__ scalar_t calc_digamma(scalar_t x) {
   static const double PI_f64 = 3.14159265358979323846;
-  compute_type PSI_10 = 2.25175258906672110764;
-  compute_type A[] = {
+  const scalar_t PSI_10 = 2.25175258906672110764;
+  const scalar_t A[] = {
       8.33333333333333333333E-2,
       -2.10927960927960927961E-2,
       7.57575757575757575758E-3,
@@ -26,20 +25,19 @@ static inline __host__ __device__ T calc_digamma(T in) {
       8.33333333333333333333E-2,
   };
 
-  auto x = static_cast<compute_type>(in);
   if (x == 0) {
-    return static_cast<T>(INFINITY);
+    return static_cast<scalar_t>(INFINITY);
   }
 
   bool x_is_integer = x == ::floor(x);
-  compute_type result = 0;
+  scalar_t result = 0;
   if (x < 0) {
     if (x_is_integer) {
-      return static_cast<T>(INFINITY);
+      return static_cast<scalar_t>(INFINITY);
     }
     // Rounding errors in tan's input can really affect the output
     // for extreme values, so we always perform this computation in double.
-    result = static_cast<compute_type>(- PI_f64 / ::tan(PI_f64 * static_cast<double>(x)));
+    result = static_cast<scalar_t>(- PI_f64 / ::tan(PI_f64 * static_cast<double>(x)));
     x = 1 - x;
   }
 
@@ -48,33 +46,31 @@ static inline __host__ __device__ T calc_digamma(T in) {
     x += 1;
   }
   if (x == 10) {
-    return static_cast<T>(result + PSI_10);
+    return static_cast<scalar_t>(result + PSI_10);
   }
 
-  compute_type y = 0;
+  scalar_t y = 0;
   if (x < 1.0e17) {
-    compute_type z = 1.0 / (x * x);
+    scalar_t z = 1.0 / (x * x);
 
-    compute_type polevl_result = 0;
+    scalar_t polevl_result = 0;
     for (int i = 0; i <= 6; i++) {
       polevl_result = polevl_result * z + A[i];
     }
     y = z * polevl_result;
   }
 
-  return static_cast<T>(::log(x) - (0.5 / x) - y + result);
+  return static_cast<scalar_t>(::log(x) - (0.5 / x) - y + result);
 }
 
-template <typename T, typename accreal>
-static inline __host__ __device__ T calc_trigamma(T in) {
-  using compute_type = typename std::conditional<std::is_same<T, at::Half>::value, accreal, T>::type;
-  const compute_type PI = 3.14159265358979323846;
-  compute_type x = static_cast<compute_type>(in);
-  compute_type sign = +1;
-  compute_type result = 0;
+template <typename scalar_t>
+static inline __host__ __device__ scalar_t calc_trigamma(scalar_t x) {
+  const scalar_t PI = 3.14159265358979323846;
+  scalar_t sign = +1;
+  scalar_t result = 0;
   if (x < 0.5f) {
     sign = -1;
-    compute_type sin_pi_x = static_cast<compute_type>(::sin(PI * x));
+    scalar_t sin_pi_x = static_cast<scalar_t>(::sin(PI * x));
     result -= (PI * PI) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
@@ -82,9 +78,9 @@ static inline __host__ __device__ T calc_trigamma(T in) {
     result += 1 / (x * x);
     x += 1;
   }
-  const compute_type ixx = 1 / (x*x);
+  const scalar_t ixx = 1 / (x*x);
   result += (1 + 1 / (2*x) + ixx * (1.f/6 - ixx * (1.f/30 - ixx * (1.f/42)))) / x;
-  return static_cast<T>(sign * result);
+  return static_cast<scalar_t>(sign * result);
 }
 
 }
