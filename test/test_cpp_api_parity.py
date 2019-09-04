@@ -210,11 +210,15 @@ class TestCppApiParity(common.TestCase):
         init_kwargs_defaults = init_arg_spec.defaults
         python_default_constructor_arg_names = [x for x in init_arg_spec.args[1:-len(init_kwargs_defaults)] if x != 'has_parity']
         cpp_default_constructor_arg_values = cpp_default_constructor_args_str.strip('()').split(',')
-        self.assertEqual(len(cpp_default_constructor_arg_values), len(python_default_constructor_arg_names),
-            "The constructor of `torch::nn::{}` in C++ must take the exact same number of non-keyword arguments ".format(module_name) +
-            "as the constructor of `torch.nn.{}` in Python. However, currently the C++ constructor expects ".format(module_name) +
-            "{} non-keyword argument(s), while the Python constructor expects {} non-keyword argument(s): {}".format(
-                len(cpp_default_constructor_arg_values),
+        self.assertEqual(
+            len(cpp_default_constructor_arg_values),
+            len(python_default_constructor_arg_names),
+            "The constructor of `torch::nn::{}` in C++ ".format(module_name) +
+            "must take the exact same number of non-keyword arguments " +
+            "as the constructor of `torch.nn.{}` in Python. ".format(module_name) +
+            "However, currently the C++ constructor expects {} non-keyword argument(s) ".format(
+                len(cpp_default_constructor_arg_values)) +
+            "while the Python constructor expects {} non-keyword argument(s): {}".format(
                 len(python_default_constructor_arg_names),
                 python_default_constructor_arg_names))
 
