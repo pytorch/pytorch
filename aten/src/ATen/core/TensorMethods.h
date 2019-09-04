@@ -8,6 +8,9 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
+#include <ATen/core/dispatch/Dispatcher.h>
+#endif
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/NamedTensor.h>
 #endif
@@ -747,6 +750,22 @@ inline Tensor Tensor::dot(const Tensor & tensor) const {
 #else
     static auto table = globalATenDispatch().getOpTable("aten::dot(Tensor self, Tensor tensor) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), tensor);
+#endif
+}
+inline Tensor Tensor::new_empty(IntArrayRef size, const TensorOptions & options) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::new_empty(const_cast<Tensor&>(*this), size, options);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, IntArrayRef, const TensorOptions &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), size, options);
+#endif
+}
+inline Tensor Tensor::new_full(IntArrayRef size, Scalar fill_value, const TensorOptions & options) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::new_full(const_cast<Tensor&>(*this), size, fill_value, options);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, IntArrayRef, Scalar, const TensorOptions &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), size, fill_value, options);
 #endif
 }
 inline Tensor & Tensor::resize_(IntArrayRef size) const {
@@ -4913,10 +4932,6 @@ inline Tensor Tensor::alias() const {
     static auto table = globalATenDispatch().getOpTable("aten::alias(Tensor(a) self) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
 #endif
-}
-
-inline bool Tensor::is_variable() const noexcept {
-  return impl_->is_variable();
 }
 
 inline caffe2::TypeMeta Tensor::dtype() const noexcept {
