@@ -23,8 +23,8 @@ from test_torch import _TestTorchMixin
 from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_SCIPY, \
+    TEST_WITH_ROCM, load_tests, slowTest, skipCUDANonDefaultStreamIf
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -2247,14 +2247,20 @@ class TestCuda(TestCase):
     def test_solve_batched(self):
         _TestTorchMixin._test_solve_batched(self, lambda t: t.cuda())
 
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_solve_batched_non_contiguous(self):
+        _TestTorchMixin._test_solve_batched_non_contiguous(self, lambda t: t.cuda())
+
     @slowTest
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_solve_batched_many_batches(self):
         _TestTorchMixin._test_solve_batched_many_batches(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_solve_batched_dims(self):
-        _TestTorchMixin._test_solve_batched_dims(self, lambda t: t.cuda())
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_solve_batched_broadcasting(self):
+        _TestTorchMixin._test_solve_batched_broadcasting(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky_solve(self):
@@ -2264,14 +2270,20 @@ class TestCuda(TestCase):
     def test_cholesky_solve_batched(self):
         _TestTorchMixin._test_cholesky_solve_batched(self, lambda t: t.cuda())
 
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_cholesky_solve_batched_non_contiguous(self):
+        _TestTorchMixin._test_cholesky_solve_batched_non_contiguous(self, lambda t: t.cuda())
+
     @slowTest
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky_solve_batched_many_batches(self):
         _TestTorchMixin._test_cholesky_solve_batched_many_batches(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_cholesky_solve_batched_dims(self):
-        _TestTorchMixin._test_cholesky_solve_batched_dims(self, lambda t: t.cuda())
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_cholesky_solve_batched_broadcasting(self):
+        _TestTorchMixin._test_cholesky_solve_batched_broadcasting(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky_inverse(self):
@@ -2792,8 +2804,9 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_triangular_solve_batched_many_batches(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_triangular_solve_batched_dims(self):
-        _TestTorchMixin._test_triangular_solve_batched_dims(self, lambda t: t.cuda())
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_triangular_solve_batched_broadcasting(self):
+        _TestTorchMixin._test_triangular_solve_batched_broadcasting(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lstsq(self):
