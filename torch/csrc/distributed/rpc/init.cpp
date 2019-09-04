@@ -83,7 +83,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               int>(),
           py::arg("name"),
           py::arg("process_group"),
-          py::arg("num_send_recv_threads") = 8)
+          py::arg("num_send_recv_threads") = 4)
       .def("get_worker_id",
            (const WorkerId& (ProcessGroupAgent::*)(void) const)
                &RpcAgent::getWorkerId,

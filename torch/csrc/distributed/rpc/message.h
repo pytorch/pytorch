@@ -16,7 +16,7 @@ enum MessageType {
   PYTHON_REMOTE_CALL = 5,  // A remote call on a Python UDF
   SCRIPT_RREF_FETCH = 6,   // A UserRRef<IValue> fetches value from owner
   PYTHON_RREF_FETCH = 7,   // A UserRRef<py::object> fetches value from owner
-  RREF_VALUE = 8,          // An OwnerRRef sends value to user
+  RREF_VALUE = 8,          // An OwnerRRef sends value to user to answer toHere
   RREF_USER_ACCEPT = 9,    // An OwnerRRef accepts a user
   RREF_USER_DELETE = 10,   // A UserRRef tells the owner to deref
   RREF_FORK_NOTIFY = 11,   // A UserRRef tells the owner on fork

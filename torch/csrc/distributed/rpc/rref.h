@@ -47,6 +47,54 @@ struct RRefForkData {
   static RRefForkData fromIValue(at::IValue&&);
 };
 
+// Note [RRef Algorithm]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+// RRef stands for Remote REFerence. Each RRef is owned by a single worker
+// (i.e., owner) and can be used by multiple users. The owner stores the real
+// data referenced by its RRefs, and keeps track of the global reference counts
+// for its RRefs. Every RRef can be uniquely identified by a global id ref_id,
+// which is assigned at the time it is first created either on a user or on the
+// owner.
+//
+// The owner only keeps one RRef instance for each data object, while users can
+// fork as many RRef instances as necessary. All usage on the owner should
+// retrieve the unique RRef instance using the globally unique ``rrefId``. A
+// fork of RRef will be created when it is used as an argument in RPC or the
+// return value in a ``remote`` call, but users don't need to worry about
+// forking/forwarding and reference counting (RC) RRefs. These will be handled
+// transparently. Every fork will also have its own ``forkId``, which is
+// guaranteed to be globally unique.
+//
+// RRef needs to support fast and scalable RPC. Hence, in the RC design, we
+// avoid using a single global master to keep RRef states. Besides, when worker
+// X invokes RPC on worker Y, Y should be able to start immediately after
+// receiving the RPC request, without waiting for any third-party owner Z
+// (unless Y needs to pull real data from Z), even if neither X nor Y owns the
+// RRef. We propose the following algorithm:
+//
+// 1. If the owner is the RPC caller, the owner will update RC for the RRef
+//    accordingly.
+// 2. If the owner is the RPC callee, the owner will drop the new fork, and use
+//    the unique RRef id in the fork to access its singleton local RRef
+//    instance.
+// 3. If the RPC is between two users:
+//    a. The caller sends an RPC message to the callee, and also notifies the
+//       owner on the new fork (RREF_FORK_NOTIFY).
+//    b. The owner, upon receiving the notification, updates its local RC and
+//       then:
+//        (i). tells the caller the fork request was accept (RREF_FORK_ACCEPT)
+//       (ii). tells the callee the new fork is now known by the owner
+//             (RREF_USER_ACCEPT).
+//    c. The callee can starts executing the RPC as soon as it receives the RPC
+//       message from the caller, and does not need to wait for the message from
+//       the owner (RREF_USER_ACCEPT). However, it cannot delete
+//       (RREF_USER_DELETE) its local RRef fork until owner's message arrives.
+//
+// Note [RRef Reference Count]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+//
 // TODO: make RRef an IValue, and edit createStackForSchema accordingly
 class RRef {
  public:

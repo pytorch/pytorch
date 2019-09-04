@@ -7,6 +7,18 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+
+constexpr int RREF_TUPLE_SIZE = 6;
+constexpr int OWNER_IDX = 0;
+constexpr int RREFID_ON_IDX = 1;
+constexpr int RREFID_ID_IDX = 2;
+constexpr int FORKID_ON_IDX = 3;
+constexpr int FORKID_ID_IDX = 4;
+constexpr int TYPE_IDX = 5;
+
+} // namespace
+
 thread_local worker_id_t PyRRef::currentDst = -1;
 
 PyRRef::PyRRef(std::shared_ptr<RRef> rref) : rref_(std::move(rref)) {
@@ -67,12 +79,17 @@ py::tuple PyRRef::pickle() const {
 }
 
 PyRRef PyRRef::unpickle(const py::tuple& t) {
-  TORCH_INTERNAL_ASSERT(t.size() == 6, "Pickled RRef must contain 6 numbers.");
+  TORCH_INTERNAL_ASSERT(
+      t.size() == RREF_TUPLE_SIZE, "Pickled RRef must contain 6 numbers.");
   auto& ctx = RRefContext::getInstance();
-  worker_id_t ownerId = t[0].cast<worker_id_t>();
-  RRefId rrefId = RRefId(t[1].cast<worker_id_t>(), t[2].cast<local_id_t>());
-  RRefId forkId = RRefId(t[3].cast<worker_id_t>(), t[4].cast<local_id_t>());
-  bool isPyObj = t[5].cast<bool>();
+  worker_id_t ownerId = t[OWNER_IDX].cast<worker_id_t>();
+  RRefId rrefId = RRefId(
+      t[RREFID_ON_IDX].cast<worker_id_t>(),
+      t[RREFID_ID_IDX].cast<local_id_t>());
+  RRefId forkId = RRefId(
+      t[FORKID_ON_IDX].cast<worker_id_t>(),
+      t[FORKID_ID_IDX].cast<local_id_t>());
+  bool isPyObj = t[TYPE_IDX].cast<bool>();
   if (isPyObj) {
     return PyRRef(ctx->getOrCreateRRef<py::object>(ownerId, rrefId, forkId));
   } else {
