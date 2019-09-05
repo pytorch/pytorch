@@ -1,14 +1,29 @@
 #include <ATen/core/Dimname.h>
 #include <c10/util/Exception.h>
+#include <string>
 
 #ifdef BUILD_NAMEDTENSOR
 namespace at {
+
+#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
+static InternedString kWildcard = Symbol::dimname("*");
+#else
+static InternedString kWildcard = 0;
+#endif
+
+static std::string to_string(InternedString symbol) {
+#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
+  return symbol.toUnqualString();
+#else
+  return std::to_string(symbol);
+#endif
+}
 
 std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
   if (dimname.type() == NameType::WILDCARD) {
     out << "None";
   } else {
-    out << "'" << dimname.full_name().toUnqualString() << "'";
+    out << "'" << to_string(dimname.full_name()) << "'";
   }
   return out;
 }
@@ -54,7 +69,7 @@ Dimname Dimname::fromSymbol(Symbol full_name) {
     return Dimname::wildcard();
   }
   const std::string delimiter = ".";
-  const std::string str(full_name.toUnqualString());
+  const std::string str(to_string(full_name));
   auto it = str.find(delimiter);
 
   // Check for normal name
@@ -70,7 +85,7 @@ Dimname Dimname::fromSymbol(Symbol full_name) {
       "Invalid name '", str, "': A tagged name can only contain one '.'");
   auto untagged_name = str.substr(0, it);
   auto tag = str.substr(it + 1);
-  check_valid_identifier(untagged_name); 
+  check_valid_identifier(untagged_name);
   check_valid_identifier(tag);
   return Dimname(NameType::TAGGED, full_name, Symbol::dimname(untagged_name));
 }
