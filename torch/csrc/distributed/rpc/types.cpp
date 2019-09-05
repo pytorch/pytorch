@@ -21,7 +21,7 @@ at::IValue GloballyUniqueId::toIValue() const {
   return c10::ivalue::Tuple::create(std::move(ivalues));
 }
 
-GloballyUniqueId GloballyUniqueId::fromIValue(at::IValue&& ivalue) {
+GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
   auto ivalues = ivalue.toTuple()->elements();
   TORCH_CHECK(ivalues.size() == 2, "Constructing GloballyUniqueId from ivalue "
       "expects a GenericList of two elements, but got ", ivalues.size());

@@ -73,8 +73,8 @@ void RRefContext::acceptUserRRef(
   );
 }
 
-void RRefContext::acceptForkRequest(IValue&& value, worker_id_t forkDst) {
-  auto forkRequest = RRefForkData::fromIValue(std::move(value));
+void RRefContext::acceptForkRequest(const IValue& value, worker_id_t forkDst) {
+  auto forkRequest = RRefForkData::fromIValue(value);
   auto& rrefId = forkRequest.rrefId_;
   auto& forkId = forkRequest.forkId_;
   acceptUserRRef(rrefId, forkId, forkDst);
@@ -85,8 +85,8 @@ void RRefContext::acceptForkRequest(IValue&& value, worker_id_t forkDst) {
   );
 }
 
-void RRefContext::finishForkRequest(IValue&& value) {
-  auto forkRequest = RRefForkData::fromIValue(std::move(value));
+void RRefContext::finishForkRequest(const IValue& value) {
+  auto forkRequest = RRefForkData::fromIValue(value);
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto iter = pendingForkRequests_.find(forkRequest.forkId_);
@@ -96,8 +96,8 @@ void RRefContext::finishForkRequest(IValue&& value) {
   }
 }
 
-void RRefContext::finishUserRRef(IValue&& value) {
-  auto forkId = ForkId::fromIValue(std::move(value));
+void RRefContext::finishUserRRef(const IValue& value) {
+  auto forkId = ForkId::fromIValue(value);
   {
     std::lock_guard<std::mutex> lock(mutex_);
     TORCH_CHECK(
@@ -115,8 +115,8 @@ void RRefContext::finishUserRRef(IValue&& value) {
   }
 }
 
-void RRefContext::addForkOfOwner(at::IValue&& value) {
-  auto rfd = RRefForkData::fromIValue(std::move(value));
+void RRefContext::addForkOfOwner(const at::IValue& value) {
+  auto rfd = RRefForkData::fromIValue(value);
   AT_ASSERT(rfd.ownerId_ == getWorkerId(),
       "RRef user should never receive fork notification.");
   addForkOfOwner(rfd.rrefId_, rfd.forkId_);
@@ -130,8 +130,8 @@ void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   rrefForks.insert(forkId);
 }
 
-void RRefContext::delForkOfOwner(at::IValue&& value) {
-  auto rfd = RRefForkData::fromIValue(std::move(value));
+void RRefContext::delForkOfOwner(const at::IValue& value) {
+  auto rfd = RRefForkData::fromIValue(value);
   AT_ASSERT(rfd.ownerId_ == getWorkerId(),
       "RRef user should never receive delete notification.");
   delForkOfOwner(rfd.rrefId_, rfd.forkId_);

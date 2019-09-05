@@ -9,28 +9,28 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-py::object to_py_obj(const Message& message);
+py::object toPyObj(const Message& message);
 
-std::shared_ptr<FutureMessage> py_rpc_builtin(
+std::shared_ptr<FutureMessage> pyRpcBuiltin(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs);
 
-std::shared_ptr<FutureMessage> py_rpc_python_udf(
+std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& pickledPythonUDF);
 
-PyRRef py_remote_builtin(
+PyRRef pyRemoteBuiltin(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs);
 
-PyRRef py_remote_python_udf(
+PyRRef pyRemotePythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& pickledPythonUDF);

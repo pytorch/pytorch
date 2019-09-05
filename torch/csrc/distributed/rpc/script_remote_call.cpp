@@ -15,11 +15,11 @@ ScriptRemoteCall::ScriptRemoteCall(
       retRRefId_(std::move(retRRefId)),
       retForkId_(std::move(retForkId)) {}
 
-at::IValue ScriptRemoteCall::retRRefId() {
+const at::IValue& ScriptRemoteCall::retRRefId() {
   return retRRefId_;
 }
 
-at::IValue ScriptRemoteCall::retForkId() {
+const at::IValue& ScriptRemoteCall::retForkId() {
   return retForkId_;
 }
 

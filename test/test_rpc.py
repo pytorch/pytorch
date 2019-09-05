@@ -416,19 +416,8 @@ class RpcTest(MultiProcessTestCase):
             ))
             expected.append(fn(*args_fn(n), **kwargs_fn(n)))
 
-        def all_to_here(rrefs, values):
-            for i in range(m):
-                values.append(rrefs[i].to_here())
-
-        values = []
-        t = threading.Thread(target=all_to_here, args=(rrefs, values))
-        t.start()
-        t.join(int(get_timeout(self.id()) / 2))
-
-        self.assertEqual(m, len(values))
-
         for i in range(m):
-            self.assertEqual(values[i], expected[i])
+            self.assertEqual(rrefs[i].to_here(), expected[i])
 
     @_wrap_with_rpc
     def test_multi_builtin_remote_ret(self):

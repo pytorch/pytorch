@@ -27,7 +27,7 @@ at::IValue RRefForkData::toIValue() const {
   return c10::ivalue::Tuple::create(std::move(ivalues));
 }
 
-RRefForkData RRefForkData::fromIValue(at::IValue&& ivalue) {
+RRefForkData RRefForkData::fromIValue(const at::IValue& ivalue) {
   auto ivalues = ivalue.toTuple()->elements();
 
   TORCH_CHECK(ivalues.size() == 3, "Constructing RRefForkData from ivalue "
@@ -114,9 +114,9 @@ IValue UserRRef<IValue>::toHere() {
   std::shared_ptr<FutureMessage> fm =
       agent->send(
           agent->getWorkerId(ownerId_),
-          ScriptRRefFetch(id().toIValue()).toMessage()
+          ScriptRRefFetchCall(id().toIValue()).toMessage()
       );
-  auto srv = ScriptRRefValue::fromMessage(fm->wait());
+  auto srv = ScriptRRefFetchRet::fromMessage(fm->wait());
   return srv.value();
 }
 
@@ -126,9 +126,9 @@ py::object UserRRef<py::object>::toHere() {
   std::shared_ptr<FutureMessage> fm =
       agent->send(
           agent->getWorkerId(ownerId_),
-          PythonRRefFetch(id().toIValue()).toMessage()
+          PythonRRefFetchCall(id().toIValue()).toMessage()
       );
-  auto srv = ScriptRRefValue::fromMessage(fm->wait());
+  auto srv = ScriptRRefFetchRet::fromMessage(fm->wait());
   return PythonRpcHandler::deserialize(srv.value().toStringRef());
 }
 

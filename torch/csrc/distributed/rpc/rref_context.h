@@ -104,17 +104,18 @@ class RRefContext {
     }
   }
 
+
   void acceptUserRRef(
       const RRefId& rrefId, const ForkId& forkId, worker_id_t user);
 
   RRefForkData forkTo(const std::shared_ptr<RRef>&, worker_id_t forkDst);
-  void acceptForkRequest(IValue&& request, worker_id_t forkDst);
-  void finishForkRequest(IValue&& request);
-  void finishUserRRef(IValue&& forkId);
+  void acceptForkRequest(const IValue& request, worker_id_t forkDst);
+  void finishForkRequest(const IValue& request);
+  void finishUserRRef(const IValue& forkId);
 
-  void addForkOfOwner(IValue&& value);
+  void addForkOfOwner(const IValue& value);
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
-  void delForkOfOwner(IValue&& value);
+  void delForkOfOwner(const IValue& value);
   void delForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
 
  private:

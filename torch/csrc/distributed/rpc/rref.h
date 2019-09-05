@@ -44,7 +44,7 @@ struct RRefForkData {
                const RRefId& rrefId_,
                const ForkId& forkId_);
 
-  static RRefForkData fromIValue(at::IValue&&);
+  static RRefForkData fromIValue(const at::IValue&);
 };
 
 // Note [RRef Algorithm]

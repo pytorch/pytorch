@@ -28,10 +28,11 @@ Message processRequestBlocking(Message&& request) {
   switch (request.type()) {
     case MessageType::SCRIPT_CALL: {
       try {
-        ScriptCall op = ScriptCall::fromMessage(request);
+        ScriptCall sc = ScriptCall::fromMessage(request);
 
-        auto stack = op.stack();
-        op.op()->getOperation()(stack);
+        // sc is only alive within this block, use reference to avoid copy
+        auto& stack = sc.stackRef();
+        sc.op()->getOperation()(stack);
         AT_ASSERT(
             stack.size() == 1,
             "Return value of a builtin operator or a "
@@ -74,7 +75,8 @@ Message processRequestBlocking(Message&& request) {
       }
 
       // TODO: make this asynchronous
-      auto stack = src.stack();
+      // src is only alive within this block, use reference to avoid copy
+      auto& stack = src.stackRef();
       src.op()->getOperation()(stack);
       AT_ASSERT(stack.size() == 1, "Return value of a builtin operator or a "
           "TorchScript function should be a single IValue, got a vector of "
@@ -99,47 +101,48 @@ Message processRequestBlocking(Message&& request) {
       ownerRRef->setValue(PythonRpcHandler::runPythonUDF(prc.udf()));
       break;
     }
-    case MessageType::SCRIPT_RREF_FETCH: {
-      ScriptRRefFetch srf = ScriptRRefFetch::fromMessage(request);
+    case MessageType::SCRIPT_RREF_FETCH_CALL: {
+      ScriptRRefFetchCall srf = ScriptRRefFetchCall::fromMessage(request);
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
           RRefContext::getInstance()->getOrCreateOwnerRRef<IValue>(
               RRefId::fromIValue(srf.value())
           );
-      auto response = ScriptRRefValue(rref->getValue()).toMessage();
+      auto response = ScriptRRefFetchRet(rref->getValue()).toMessage();
       response.setId(request.id());
       return response;
     }
-    case MessageType::PYTHON_RREF_FETCH: {
-      PythonRRefFetch srf = PythonRRefFetch::fromMessage(request);
+    case MessageType::PYTHON_RREF_FETCH_CALL: {
+      PythonRRefFetchCall srf = PythonRRefFetchCall::fromMessage(request);
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<py::object>> rref =
           RRefContext::getInstance()->getOrCreateOwnerRRef<py::object>(
               RRefId::fromIValue(srf.value())
           );
-      auto response = ScriptRRefValue(
+      auto response = ScriptRRefFetchRet(
           PythonRpcHandler::serialize(rref->getValue())).toMessage();
       response.setId(request.id());
       return response;
     }
     case MessageType::RREF_USER_ACCEPT: {
       ScriptUserAccept sua = ScriptUserAccept::fromMessage(request);
-      RRefContext::getInstance()->finishUserRRef(sua.value());
+      RRefContext::getInstance()->finishUserRRef(sua.valueRef());
       break;
     }
     case MessageType::RREF_USER_DELETE: {
       ScriptUserDelete srd = ScriptUserDelete::fromMessage(request);
-      RRefContext::getInstance()->delForkOfOwner(srd.value());
+      RRefContext::getInstance()->delForkOfOwner(srd.valueRef());
       break;
     }
     case MessageType::RREF_FORK_NOTIFY: {
       ScriptForkNotify sfn = ScriptForkNotify::fromMessage(request);
-      RRefContext::getInstance()->acceptForkRequest(sfn.value(), sfn.forkDst());
+      RRefContext::getInstance()->acceptForkRequest(
+          sfn.valueRef(), sfn.forkDst());
       break;
     }
     case MessageType::RREF_FORK_ACCEPT: {
       ScriptForkAccept sfa = ScriptForkAccept::fromMessage(request);
-      RRefContext::getInstance()->finishForkRequest(sfa.value());
+      RRefContext::getInstance()->finishForkRequest(sfa.valueRef());
       break;
     }
     default: {

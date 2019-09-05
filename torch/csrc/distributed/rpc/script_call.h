@@ -22,6 +22,7 @@ class TORCH_API ScriptCall {
   std::shared_ptr<Operator> op() const;
   // return the argument stack of this builtin operator
   const std::vector<at::IValue>& stack() const;
+  std::vector<at::IValue>& stackRef();
 
   Message toMessage();
   static ScriptCall fromMessage(const Message& message);
@@ -42,7 +43,7 @@ class TORCH_API ScriptCall {
   // This field has value if this ScriptCall represents invocation of a builtin
   // operator.
   c10::optional<std::shared_ptr<Operator>> op_;
-  const std::vector<at::IValue> stack_;
+  std::vector<at::IValue> stack_;
 };
 
 }

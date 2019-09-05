@@ -12,14 +12,13 @@
 #include <torch/csrc/jit/pybind_utils.h>
 
 
-
 namespace torch {
 namespace distributed {
 namespace rpc {
 
 namespace {
 
-std::shared_ptr<Operator> match_builtin_op(
+std::shared_ptr<Operator> matchBuiltinOp(
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs,
@@ -52,7 +51,7 @@ std::shared_ptr<Operator> match_builtin_op(
 
 } // namespace
 
-py::object to_py_obj(const Message& message) {
+py::object toPyObj(const Message& message) {
   switch (message.type()) {
     case MessageType::SCRIPT_RET: {
       ScriptRet ret = ScriptRet::fromMessage(message);
@@ -74,26 +73,25 @@ py::object to_py_obj(const Message& message) {
   }
 }
 
-std::shared_ptr<FutureMessage> py_rpc_builtin(
+std::shared_ptr<FutureMessage> pyRpcBuiltin(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
-  auto op = match_builtin_op(opName, args, kwargs, stack);
+  auto op = matchBuiltinOp(opName, args, kwargs, stack);
   return agent.send(dst, ScriptCall(op, std::move(stack)).toMessage());
 }
 
-PyRRef py_remote_builtin(
+PyRRef pyRemoteBuiltin(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
-
   Stack stack;
-  auto op = match_builtin_op(opName, args, kwargs, stack);
+  auto op = matchBuiltinOp(opName, args, kwargs, stack);
 
   auto& ctx = RRefContext::getInstance();
   if (ctx->getWorkerId() == dst.id_) {
@@ -123,7 +121,7 @@ PyRRef py_remote_builtin(
   }
 }
 
-std::shared_ptr<FutureMessage> py_rpc_python_udf(
+std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& pickledPythonUDF) {
@@ -136,7 +134,7 @@ std::shared_ptr<FutureMessage> py_rpc_python_udf(
                             MessageType::PYTHON_CALL));
 }
 
-PyRRef py_remote_python_udf(
+PyRRef pyRemotePythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& pickledPythonUDF) {

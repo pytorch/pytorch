@@ -8,11 +8,15 @@ namespace distributed {
 namespace rpc {
 
 
-at::IValue ScriptRRefBase::value() {
+const at::IValue& RRefMessageBase::value() {
   return value_;
 }
 
-Message ScriptRRefBase::toMessage() const {
+at::IValue& RRefMessageBase::valueRef() {
+  return value_;
+}
+
+Message RRefMessageBase::toMessage() const {
   std::vector<at::IValue> ivalues;
   ivalues.emplace_back(value_);
   std::vector<torch::Tensor> tensor_table;
@@ -24,7 +28,7 @@ Message ScriptRRefBase::toMessage() const {
                  type_);
 }
 
-at::IValue ScriptRRefBase::fromMessage(const Message& message) {
+at::IValue RRefMessageBase::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
@@ -36,24 +40,25 @@ at::IValue ScriptRRefBase::fromMessage(const Message& message) {
   return std::move(values.front());
 }
 
-ScriptRRefFetch ScriptRRefFetch::fromMessage(const Message& message) {
-  return ScriptRRefFetch(ScriptRRefBase::fromMessage(message));
+ScriptRRefFetchCall ScriptRRefFetchCall::fromMessage(const Message& message) {
+  return ScriptRRefFetchCall(RRefMessageBase::fromMessage(message));
 }
 
-PythonRRefFetch PythonRRefFetch::fromMessage(const Message& message) {
-  return PythonRRefFetch(ScriptRRefBase::fromMessage(message));
+
+PythonRRefFetchCall PythonRRefFetchCall::fromMessage(const Message& message) {
+  return PythonRRefFetchCall(RRefMessageBase::fromMessage(message));
 }
 
-ScriptRRefValue ScriptRRefValue::fromMessage(const Message& message) {
-  return ScriptRRefValue(ScriptRRefBase::fromMessage(message));
+ScriptRRefFetchRet ScriptRRefFetchRet::fromMessage(const Message& message) {
+  return ScriptRRefFetchRet(RRefMessageBase::fromMessage(message));
 }
 
 ScriptUserDelete ScriptUserDelete::fromMessage(const Message& message) {
-  return ScriptUserDelete(ScriptRRefBase::fromMessage(message));
+  return ScriptUserDelete(RRefMessageBase::fromMessage(message));
 }
 
 ScriptUserAccept ScriptUserAccept::fromMessage(const Message& message) {
-  return ScriptUserAccept(ScriptRRefBase::fromMessage(message));
+  return ScriptUserAccept(RRefMessageBase::fromMessage(message));
 }
 
 worker_id_t ScriptForkNotify::forkDst() const {
@@ -89,7 +94,7 @@ ScriptForkNotify ScriptForkNotify::fromMessage(const Message& message) {
 }
 
 ScriptForkAccept ScriptForkAccept::fromMessage(const Message& message) {
-  return ScriptForkAccept(ScriptRRefBase::fromMessage(message));
+  return ScriptForkAccept(RRefMessageBase::fromMessage(message));
 }
 
 } // namespace rpc
