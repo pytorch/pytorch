@@ -40,20 +40,34 @@ namespace {
 #if defined(__AVX__) && !defined(_MSC_VER)
 
 template <typename T>
-__m256i pack_saturate_and_clamp(__m256i first, __m256i second, T min_val, T max_val);
+__m256i pack_saturate_and_clamp(
+    __m256i first,
+    __m256i second,
+    T min_val,
+    T max_val);
 
 template <>
-__m256i pack_saturate_and_clamp<int8_t>(__m256i first, __m256i second, int8_t min_val, int8_t max_val) {
-    __m256i packed_and_sat = _mm256_packs_epi16(first, second);
-    return _mm256_max_epi8(_mm256_set1_epi8(min_val),
-                _mm256_min_epi8(packed_and_sat, _mm256_set1_epi8(max_val)));
+__m256i pack_saturate_and_clamp<int8_t>(
+    __m256i first,
+    __m256i second,
+    int8_t min_val,
+    int8_t max_val) {
+  __m256i packed_and_sat = _mm256_packs_epi16(first, second);
+  return _mm256_max_epi8(
+      _mm256_set1_epi8(min_val),
+      _mm256_min_epi8(packed_and_sat, _mm256_set1_epi8(max_val)));
 }
 
 template <>
-__m256i pack_saturate_and_clamp<uint8_t>(__m256i first, __m256i second, uint8_t min_val, uint8_t max_val) {
-    __m256i packed_and_sat = _mm256_packus_epi16(first, second);
-    return _mm256_max_epu8(_mm256_set1_epi8(min_val),
-                _mm256_min_epu8(packed_and_sat, _mm256_set1_epi8(max_val)));
+__m256i pack_saturate_and_clamp<uint8_t>(
+    __m256i first,
+    __m256i second,
+    uint8_t min_val,
+    uint8_t max_val) {
+  __m256i packed_and_sat = _mm256_packus_epi16(first, second);
+  return _mm256_max_epu8(
+      _mm256_set1_epi8(min_val),
+      _mm256_min_epu8(packed_and_sat, _mm256_set1_epi8(max_val)));
 }
 
 template <typename T>
@@ -75,20 +89,20 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
   for (; i < len_aligned; i += 4 * VLEN) {
     // x
     __m256 x_vals = _mm256_load_ps(src + i);
-    __m256 x_transformed_v = _mm256_fmadd_ps(
-        x_vals, inverse_scale_v, _mm256_set1_ps(zero_point));
+    __m256 x_transformed_v =
+        _mm256_fmadd_ps(x_vals, inverse_scale_v, _mm256_set1_ps(zero_point));
     // y
     __m256 y_vals = _mm256_load_ps(src + i + VLEN);
-    __m256 y_transformed_v = _mm256_fmadd_ps(
-        y_vals, inverse_scale_v, _mm256_set1_ps(zero_point));
+    __m256 y_transformed_v =
+        _mm256_fmadd_ps(y_vals, inverse_scale_v, _mm256_set1_ps(zero_point));
     // z
     __m256 z_vals = _mm256_load_ps(src + i + 2 * VLEN);
-    __m256 z_transformed_v = _mm256_fmadd_ps(
-        z_vals, inverse_scale_v, _mm256_set1_ps(zero_point));
+    __m256 z_transformed_v =
+        _mm256_fmadd_ps(z_vals, inverse_scale_v, _mm256_set1_ps(zero_point));
     // w
     __m256 w_vals = _mm256_load_ps(src + i + 3 * VLEN);
-    __m256 w_transformed_v = _mm256_fmadd_ps(
-        w_vals, inverse_scale_v, _mm256_set1_ps(zero_point));
+    __m256 w_transformed_v =
+        _mm256_fmadd_ps(w_vals, inverse_scale_v, _mm256_set1_ps(zero_point));
 
     __m256i x_rounded_v = _mm256_cvtps_epi32(x_transformed_v);
     __m256i y_rounded_v = _mm256_cvtps_epi32(y_transformed_v);
@@ -97,7 +111,8 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
 
     __m256i xy_packed_v = _mm256_packs_epi32(x_rounded_v, y_rounded_v);
     __m256i zw_packed_v = _mm256_packs_epi32(z_rounded_v, w_rounded_v);
-    __m256i xyzw_clamped_v = pack_saturate_and_clamp<typename T::underlying>(xy_packed_v, zw_packed_v, min_val, max_val);
+    __m256i xyzw_clamped_v = pack_saturate_and_clamp<typename T::underlying>(
+        xy_packed_v, zw_packed_v, min_val, max_val);
 
     xyzw_clamped_v =
         _mm256_permutevar8x32_epi32(xyzw_clamped_v, permute_mask_v);
@@ -106,7 +121,8 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
 
   for (; i < len; ++i) {
     float transformed = zero_point + src[i] / scale;
-    float clipped = std::min(std::max(transformed, float(min_val)), float(max_val));
+    float clipped =
+        std::min(std::max(transformed, float(min_val)), float(max_val));
     // Not exactly the same behavior as the vectorized code.
     // The vectorized code above always rounds to even in halfway cases
     // (https://software.intel.com/en-us/node/523819), but std::nearbyint
