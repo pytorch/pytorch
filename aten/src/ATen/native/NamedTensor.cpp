@@ -10,7 +10,7 @@ Tensor& names_(Tensor& self, optional<DimnameList> names) {
   return at::internal_set_names_inplace(self, names);
 }
 
-Tensor view_names(const Tensor& self, optional<DimnameList> names) {
+Tensor renamed(const Tensor& self, optional<DimnameList> names) {
   auto result = self.alias();
   at::internal_set_names_inplace(result, names);
   return result;
@@ -104,7 +104,7 @@ static Tensor align(const Tensor& tensor, DimnameList names, bool is_aligning_tw
         tensor.names(),
         names,
         is_aligning_two_tensors);
-  auto result = tensor.view_names(nullopt).view(expanded_sizes);
+  auto result = tensor.renamed(nullopt).view(expanded_sizes);
   at::internal_set_names_inplace(result, names);
   return result;
 }

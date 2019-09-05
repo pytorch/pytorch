@@ -86,11 +86,11 @@ inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
 }
 #endif
 #ifdef BUILD_NAMEDTENSOR
-inline Tensor Tensor::view_names(c10::optional<DimnameList> names) const {
+inline Tensor Tensor::renamed(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::view_names(const_cast<Tensor&>(*this), names);
+    return TypeDefault::renamed(const_cast<Tensor&>(*this), names);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::view_names(Tensor(a) self, Dimname[]? names) -> Tensor(a)");
+    static auto table = globalATenDispatch().getOpTable("aten::renamed(Tensor(a) self, Dimname[]? names) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, c10::optional<DimnameList>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
 #endif
 }
