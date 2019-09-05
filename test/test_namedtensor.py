@@ -11,6 +11,7 @@ from multiprocessing.reduction import ForkingPickler
 import pickle
 import io
 import sys
+import warnings
 
 
 skipIfNamedTensorDisabled = \
@@ -182,6 +183,14 @@ class TestNamedTensor(TestCase):
         buf = io.BytesIO()
         with self.assertRaisesRegex(RuntimeError, "NYI"):
             ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
+
+    def test_big_tensor_repr(self):
+        def check_repr(named_tensor):
+            unnamed_tensor = named_tensor.view_names(None)
+            expected = "{}, names={})".format(repr(unnamed_tensor)[:-1], named_tensor.names)
+            self.assertEqual(repr(named_tensor), expected)
+
+        check_repr(torch.randn(128, 3, 64, 64, names=('N', 'C', 'H', 'W')))
 
     def test_noncontig_contiguous(self):
         # This type of contiguous is special-cased and therefore needs its own test
@@ -478,7 +487,7 @@ class TestNamedTensor(TestCase):
             out_fn = getattr(torch, name)
 
             def fn(a, b):
-                result = a.new_empty([0])
+                result = torch.empty([0], dtype=a.dtype, device=a.device)
                 out_fn(a, b, *args, out=result, **kwargs)
                 return result
 
@@ -555,7 +564,7 @@ class TestNamedTensor(TestCase):
             out_fn = getattr(torch, name)
 
             def fn(tensor):
-                result = tensor.new_empty([0])
+                result = torch.empty([0], dtype=tensor.dtype, device=tensor.device)
                 out_fn(tensor, *args, out=result, **kwargs)
                 return result
 
@@ -608,6 +617,8 @@ class TestNamedTensor(TestCase):
             method('random_', 0, 1),
             method('random_', 1),
             method('random_'),
+            method('relu_'),
+            method('relu'),
             fn_method_and_inplace('round'),
             fn_method_and_inplace('rsqrt'),
             fn_method_and_inplace('sigmoid'),
@@ -617,6 +628,9 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('sqrt'),
             fn_method_and_inplace('tan'),
             fn_method_and_inplace('tanh'),
+            fn('threshold', 0, 1),
+            fn('threshold_', 0, 1),
+            out_function('threshold', 0, 1),
             fn_method_and_inplace('trunc'),
             method('uniform_'),
             method('zero_'),
@@ -707,7 +721,7 @@ class TestNamedTensor(TestCase):
 
         def test_out_variant(op_name, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            out = t.new_empty([0])
+            out = torch.empty([0], device=device)
             getattr(torch, op_name)(t, 'C', out=out)
             check_output(out, ['N', 'L'])
 
@@ -1351,6 +1365,35 @@ class TestNamedTensor(TestCase):
                 torch.Tensor.addmv_, device=device,
                 args=(create('N:3'), create('N:3,C:2'), create('H:2')),
                 expected_names=('N',))
+
+    def test_autograd_ignores_names(self):
+        # sigmoid forward is supported by named tensors, but sigmoid_backward
+        # is not (see native_functions.yaml). Test that autograd ignores names
+        # and that the sigmoid_backward succeeds.
+        x = torch.randn(3, 3, names=('N', 'C'), requires_grad=True)
+        x.sigmoid().sum().backward()
+
+    def test_tensor_grad_is_unnamed(self):
+        x = torch.randn(3, 3, names=(None, None), requires_grad=True)
+        y = torch.randn(3, 3, names=('N', 'C'), requires_grad=True)
+        (x * y).sum().backward()
+
+        # Check that names weren't propagated
+        self.assertEqual(y.grad.names, [None, None])
+        self.assertEqual(x.grad.names, [None, None])
+
+    def test_autograd_warns_named_grad(self):
+        base = torch.randn(3, 3, names=('N', 'C'))
+        named_grad = base.clone()
+        base.requires_grad_()
+
+        with warnings.catch_warnings(record=True) as warns:
+            # Cause all warnings to always be triggered.
+            warnings.simplefilter("always")
+            base.clone().backward(named_grad)
+            self.assertEqual(len(warns), 1)
+            self.assertTrue(
+                str(warns[0].message).startswith('Autograd was passed a named grad tensor'))
 
     def test_dot(self):
         for device in torch.testing.get_all_device_types():

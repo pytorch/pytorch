@@ -12356,6 +12356,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         if torch.cuda.is_available():
             run_test(torch.device('cuda'))
 
+    @skipIfRocm
     def test_unique_dim(self):
         self.assertFalse(hasattr(torch, 'unique_dim'))
 
