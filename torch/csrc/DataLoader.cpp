@@ -131,6 +131,9 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
         std::ostringstream oss;
         oss << "DataLoader worker (pid " << worker_pid << ") is killed "
             << "by signal: " << strsignal(infop.si_status) << ". ";
+        if (infop.si_status == SIGBUS) {
+            oss << "Possibly because out of shared memory. ";
+        }
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
         pid_set->clear();
