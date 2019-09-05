@@ -2,7 +2,6 @@ import torch
 import torch.cuda
 import torch.jit
 import numpy as np
-import unittest
 from hypothesis import given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
