@@ -302,7 +302,7 @@ std::shared_ptr<SugaredValue> callClassMethod(
                            << desugared_name << " method";
   }
 
-  Value* self = inputs[0].value(*m.graph());
+  Value* self = inputs.at(0).value(*m.graph());
   return MethodValue(self, desugared_name)
       .call(loc, m, inputs.slice(1), attributes, n_binders);
 }
