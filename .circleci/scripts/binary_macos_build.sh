@@ -15,10 +15,10 @@ chmod +x "$build_script"
 cat >"$build_script" <<EOL
 export PATH="$workdir/miniconda/bin:$PATH"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
-  "$workdir/builder/conda/build_pytorch.sh"
+  bash -x "$workdir/builder/conda/build_pytorch.sh"
 else
   export TORCH_PACKAGE_NAME="$(echo $TORCH_PACKAGE_NAME | tr '-' '_')"
-  "$workdir/builder/wheel/build_wheel.sh"
+  bash -x "$workdir/builder/wheel/build_wheel.sh"
 fi
 EOL
 unbuffer "$build_script" | ts
