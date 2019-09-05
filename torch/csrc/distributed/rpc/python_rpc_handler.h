@@ -19,8 +19,8 @@ py::object deserialize(const std::string& serializedObj);
 // returned python UDF result is pickled binary string, so run python
 // function to unpickle the python UDF result and return pyObject to user
 py::object loadPythonUDFResult(const Message& message);
-}
+} // namespace PythonRpcHandler
 
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

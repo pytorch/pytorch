@@ -23,9 +23,8 @@ std::shared_ptr<Operator> matchBuiltinOp(
     const py::args& args,
     const py::kwargs& kwargs,
     Stack& stack) {
-  if (opName.rfind("aten", 0) == 0) {
-    // builtin operators.
-    Symbol symbol = Symbol::fromQualString(opName);
+  Symbol symbol = Symbol::fromQualString(opName);
+  if (symbol.is_aten()) {
     for (const auto& op : torch::jit::getAllOperatorsFor(symbol)) {
       try {
         // FIXME: This is temporary solution. We should at least refactor
@@ -33,8 +32,15 @@ std::shared_ptr<Operator> matchBuiltinOp(
         stack = torch::jit::createStackForSchema(
             op->schema(), args, kwargs, c10::nullopt);
 
-        return op;
-      } catch (std::runtime_error) {}
+      } catch (std::runtime_error& e) {
+        VLOG(1) << "Couldn't match schema: " << op->schema()
+                << " to args: " << args << " and kwargs: " << kwargs
+                << ", reason: " << e.what();
+        continue;
+      }
+
+      // Found the right op!
+      return op;
     }
   }
 
@@ -47,6 +53,8 @@ std::shared_ptr<Operator> matchBuiltinOp(
       ", kwargs: ",
       kwargs,
       ") to a builtin operator");
+
+  // builtin operators.
 }
 
 } // namespace
@@ -128,10 +136,10 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
   std::vector<char> data(pickledPythonUDF.begin(), pickledPythonUDF.end());
   std::vector<torch::Tensor> tensor_table;
 
-  return agent.send(dst,
-                    Message(std::move(data),
-                            std::move(tensor_table),
-                            MessageType::PYTHON_CALL));
+  return agent.send(
+      dst,
+      Message(
+          std::move(data), std::move(tensor_table), MessageType::PYTHON_CALL));
 }
 
 PyRRef pyRemotePythonUdf(

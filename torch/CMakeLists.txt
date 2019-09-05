@@ -221,7 +221,7 @@ endif()
 
 if (USE_DISTRIBUTED)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
-    if (NOT MSVC AND NOT APPLE)
+    if (NOT MSVC)
       list(APPEND TORCH_PYTHON_SRCS
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp

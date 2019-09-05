@@ -4,62 +4,65 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 namespace {
-  py::object module_;
-  py::object runUDFFunction_;
-  py::object loadResultFunction_;
-  py::object serializeFunction_;
+
+py::object module_;
+py::object runUDFFunction_;
+py::object loadResultFunction_;
+py::object serializeFunction_;
+
 } // anonymous namespace
 
 namespace PythonRpcHandler {
-  void init() {
-    AutoGIL ag;
-    if (module_ == nullptr) {
-      module_ = py::module::import("torch.distributed.internal_rpc_utils");
-    }
-    if (runUDFFunction_ == nullptr) {
-      runUDFFunction_ = module_.attr("run_python_udf_internal");
-    }
-    if (loadResultFunction_ == nullptr) {
-      loadResultFunction_ = module_.attr("load_python_udf_result_internal");
-    }
-    if (serializeFunction_ == nullptr) {
-      serializeFunction_ = module_.attr("serialize");
-    }
+
+void init() {
+  AutoGIL ag;
+  if (module_ == nullptr) {
+    module_ = py::module::import("torch.distributed.internal_rpc_utils");
   }
-
-  std::vector<char> generatePythonUDFResult(const Message& message) {
-    AutoGIL ag;
-    auto pickledPythonUDF =
-        py::bytes(message.payload().data(), message.payload().size());
-    py::bytes pres = runUDFFunction_(pickledPythonUDF);
-    const auto& presStr = static_cast<std::string>(pres);
-    std::vector<char> payload(presStr.begin(), presStr.end());
-    return payload;
+  if (runUDFFunction_ == nullptr) {
+    runUDFFunction_ = module_.attr("run_python_udf_internal");
   }
-
-  py::object runPythonUDF(const std::string& pickledPythonUDF) {
-    AutoGIL ag;
-    return runUDFFunction_(py::bytes(pickledPythonUDF), false);
+  if (loadResultFunction_ == nullptr) {
+    loadResultFunction_ = module_.attr("load_python_udf_result_internal");
   }
-
-  std::string serialize(const py::object& obj) {
-    AutoGIL ag;
-    return static_cast<std::string>((py::bytes)serializeFunction_(obj));
+  if (serializeFunction_ == nullptr) {
+    serializeFunction_ = module_.attr("serialize");
   }
+}
 
-  py::object deserialize(const std::string& serializedObj) {
-    AutoGIL ag;
-    return loadResultFunction_(py::bytes(serializedObj));
-  }
+std::vector<char> generatePythonUDFResult(const Message& message) {
+  AutoGIL ag;
+  auto pickledPythonUDF =
+      py::bytes(message.payload().data(), message.payload().size());
+  py::bytes pres = runUDFFunction_(pickledPythonUDF);
+  const auto& presStr = static_cast<std::string>(pres);
+  std::vector<char> payload(presStr.begin(), presStr.end());
+  return payload;
+}
 
-  py::object loadPythonUDFResult(const Message& message) {
-    AutoGIL ag;
-    auto pargs = py::bytes(message.payload().data(), message.payload().size());
-    return loadResultFunction_(pargs);
-  }
-} // PythonRpcHandler
+py::object runPythonUDF(const std::string& pickledPythonUDF) {
+  AutoGIL ag;
+  return runUDFFunction_(py::bytes(pickledPythonUDF), false);
+}
 
+std::string serialize(const py::object& obj) {
+  AutoGIL ag;
+  return static_cast<std::string>((py::bytes)serializeFunction_(obj));
+}
 
-} // rpc
-} // distributed
-} // torch
+py::object deserialize(const std::string& serializedObj) {
+  AutoGIL ag;
+  return loadResultFunction_(py::bytes(serializedObj));
+}
+
+py::object loadPythonUDFResult(const Message& message) {
+  AutoGIL ag;
+  auto pargs = py::bytes(message.payload().data(), message.payload().size());
+  return loadResultFunction_(pargs);
+}
+
+} // namespace PythonRpcHandler
+
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

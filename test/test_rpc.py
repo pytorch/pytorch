@@ -6,6 +6,7 @@ import unittest
 
 import torch
 import torch.distributed as dist
+
 from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
 
@@ -79,6 +80,12 @@ if not dist.is_available():
 
 
 def _wrap_with_rpc(func):
+    '''
+        We use this decorator for setting up and tearing down state since
+        MultiProcessTestCase runs each `test*` method in a separate process and
+        each process just runs the `test*` method without actually calling
+        'setUp' and 'tearDown' methods of unittest.
+    '''
     def wrapper(self):
         store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend='gloo', rank=self.rank,

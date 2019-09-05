@@ -33,14 +33,15 @@ Message processRequestBlocking(Message&& request) {
         // sc is only alive within this block, use reference to avoid copy
         auto& stack = sc.stackRef();
         sc.op()->getOperation()(stack);
+
         AT_ASSERT(
             stack.size() == 1,
             "Return value of a builtin operator or a "
             "TorchScript function should be a single IValue, got a vector of "
             "size ",
             stack.size());
-
         auto response = ScriptRet(std::move(stack.front())).toMessage();
+
         response.setId(request.id());
         return response;
       } catch (std::exception& e) {

@@ -14,25 +14,26 @@ namespace rpc {
 struct WorkerId {
   WorkerId(std::string name, int id)
       : WorkerId(std::move(name), (worker_id_t)id) {
-    TORCH_CHECK(id <= std::numeric_limits<worker_id_t>::max(),
-        "RPC worker id ", id, " out of bound of int16_t.");
+    TORCH_CHECK(
+        id <= std::numeric_limits<worker_id_t>::max(),
+        "RPC worker id ",
+        id,
+        " out of bound of int16_t.");
   }
 
-  WorkerId(std::string name, worker_id_t id)
-      : name_(std::move(name)), id_(id) {
+  WorkerId(std::string name, worker_id_t id) : name_(std::move(name)), id_(id) {
     bool validSize = name_.length() < MAX_NAME_LEN && name_.length() > 0;
-    bool validChar =
-        std::find_if(
-            name_.begin(),
-            name_.end(),
-            [](char c) {
-              return !(std::isalnum(c) || c == '-' || c == '_') ;
-            }
-        ) == name_.end();
-    TORCH_CHECK(validSize && validChar,
+    bool validChar = std::find_if(name_.begin(), name_.end(), [](char c) {
+                       return !(std::isalnum(c) || c == '-' || c == '_');
+                     }) == name_.end();
+    TORCH_CHECK(
+        validSize && validChar,
         "Worker name must match ^[A-Za-z0-9-_]*$, "
-        "and must be non-empty and shorter than ", MAX_NAME_LEN, " chars, "
-        "but got ", name_);
+        "and must be non-empty and shorter than ",
+        MAX_NAME_LEN,
+        " chars, "
+        "but got ",
+        name_);
   }
 
   static constexpr size_t MAX_NAME_LEN = 128;
@@ -80,8 +81,7 @@ class RpcAgent {
   // If ``message.isRequest()`` is true, the ``FutureMessage`` will be completed
   // when the response arrives. For other message types, the Future should be
   // ignored by the caller.
-  virtual std::shared_ptr<FutureMessage> send(
-      const WorkerId& to, Message&& message) = 0;
+  std::shared_ptr<FutureMessage> send(const WorkerId& to, Message&& message);
 
   // Return a reference to the ``WorkerId`` of this RpcAgent.
   // NB: not using ``c10::optional<const std::string&>`` here because we might
@@ -104,9 +104,17 @@ class RpcAgent {
 
  protected:
   const WorkerId workerId_;
+
+  // Method that needs to be overridden by all implementations of this
+  // interface. The public send() method is responsible for common
+  // pre-processing shared across all implementations.
+  virtual std::shared_ptr<FutureMessage> sendImpl(
+      const WorkerId& to,
+      Message&& message) = 0;
+  const std::string workerName_;
   const RequestCallback cb_;
 };
 
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
