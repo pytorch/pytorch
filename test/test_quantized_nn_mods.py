@@ -115,8 +115,8 @@ class DynamicModuleAPITest(QuantizationTestCase):
         qlinear.set_weight_bias(W_q, B)
 
         # Simple round-trip test to ensure weight()/set_weight() API
-        self.assertEqual(qlinear.weight()[0], W_q)
-        W_pack = qlinear._packed_weight
+        self.assertEqual(qlinear.weight_bias()[0], W_q)
+        W_pack = qlinear._packed_params
         qlinear.bias = B if use_bias else None
         Z_dq = qlinear(X)
 
@@ -140,18 +140,18 @@ class DynamicModuleAPITest(QuantizationTestCase):
         loaded_qlinear.load_state_dict(loaded_dict)
 
         linear_unpack = torch.ops.quantized.linear_unpack
-        self.assertEqual(linear_unpack(qlinear._packed_weight),
-                         linear_unpack(loaded_qlinear._packed_weight))
+        self.assertEqual(linear_unpack(qlinear._packed_params),
+                         linear_unpack(loaded_qlinear._packed_params))
         if use_bias:
-            self.assertEqual(qlinear.weight()[1], loaded_qlinear.weight()[1])
+            self.assertEqual(qlinear.weight_bias()[1], loaded_qlinear.weight_bias()[1])
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
-        self.assertTrue(hasattr(qlinear, '_packed_weight'))
-        self.assertTrue(hasattr(loaded_qlinear, '_packed_weight'))
-        self.assertTrue(hasattr(qlinear, 'weight'))
-        self.assertTrue(hasattr(loaded_qlinear, 'weight'))
+        self.assertTrue(hasattr(qlinear, '_packed_params'))
+        self.assertTrue(hasattr(loaded_qlinear, '_packed_params'))
+        self.assertTrue(hasattr(qlinear, 'weight_bias'))
+        self.assertTrue(hasattr(loaded_qlinear, 'weight_bias'))
 
-        self.assertEqual(qlinear.weight(), loaded_qlinear.weight())
-        self.assertEqual(qlinear.weight(), torch.ops.quantized.linear_unpack(qlinear._packed_weight))
+        self.assertEqual(qlinear.weight_bias(), loaded_qlinear.weight_bias())
+        self.assertEqual(qlinear.weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params))
         Z_dq2 = qlinear(X)
         self.assertEqual(Z_dq, Z_dq2)
 
@@ -236,8 +236,8 @@ class ModuleAPITest(QuantizationTestCase):
 
         qlinear.set_weight_bias(W_q, B_q)
         # Simple round-trip test to ensure weight()/set_weight() API
-        self.assertEqual(qlinear.weight()[0], W_q)
-        W_pack = qlinear._packed_weight
+        self.assertEqual(qlinear.weight_bias()[0], W_q)
+        W_pack = qlinear._packed_params
         qlinear.bias = B_q if use_bias else None
 
         qlinear.scale = float(scale)
@@ -270,19 +270,19 @@ class ModuleAPITest(QuantizationTestCase):
         loaded_qlinear.load_state_dict(loaded_dict)
 
         linear_unpack = torch.ops.quantized.linear_unpack
-        self.assertEqual(linear_unpack(qlinear._packed_weight),
-                         linear_unpack(loaded_qlinear._packed_weight))
+        self.assertEqual(linear_unpack(qlinear._packed_params),
+                         linear_unpack(loaded_qlinear._packed_params))
         if use_bias:
-            self.assertEqual(qlinear.weight()[1], loaded_qlinear.weight()[1])
+            self.assertEqual(qlinear.weight_bias()[1], loaded_qlinear.weight_bias()[1])
         self.assertEqual(qlinear.scale, loaded_qlinear.scale)
         self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
-        self.assertTrue(hasattr(qlinear, '_packed_weight'))
-        self.assertTrue(hasattr(loaded_qlinear, '_packed_weight'))
-        self.assertTrue(hasattr(qlinear, 'weight'))
-        self.assertTrue(hasattr(loaded_qlinear, 'weight'))
-        self.assertEqual(qlinear.weight(), loaded_qlinear.weight())
-        self.assertEqual(qlinear.weight(), torch.ops.quantized.linear_unpack(qlinear._packed_weight))
+        self.assertTrue(hasattr(qlinear, '_packed_params'))
+        self.assertTrue(hasattr(loaded_qlinear, '_packed_params'))
+        self.assertTrue(hasattr(qlinear, 'weight_bias'))
+        self.assertTrue(hasattr(loaded_qlinear, 'weight_bias'))
+        self.assertEqual(qlinear.weight_bias(), loaded_qlinear.weight_bias())
+        self.assertEqual(qlinear.weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params))
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 

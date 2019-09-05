@@ -53,8 +53,8 @@ def linear(input, weight, bias=None, scale=None, zero_point=None):
         scale = input.q_scale()
     if zero_point is None:
         zero_point = input.q_zero_point()
-    _packed_weight = torch.ops.quantized.linear_prepack(weight, bias)
-    return torch.ops.quantized.linear(input, _packed_weight, scale,
+    _packed_params = torch.ops.quantized.linear_prepack(weight, bias)
+    return torch.ops.quantized.linear(input, _packed_params, scale,
                                       zero_point)
 
 def conv2d(input, weight, bias,
