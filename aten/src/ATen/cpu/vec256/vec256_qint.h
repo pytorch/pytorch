@@ -294,8 +294,8 @@ struct Vec256<c10::quint8> {
         Vec256<c10::quint8> zero_point,
         Vec256<c10::quint8> q_six) {
 #ifdef __AVX2__
-      return _mm256_min_epi8(
-          _mm256_max_epi8(vals, zero_point.vals), q_six.vals);
+      return _mm256_min_epu8(
+          _mm256_max_epu8(vals, zero_point.vals), q_six.vals);
 #else
       // Pray the compiler can autovectorize this
       uint8_t int_vals[size()];
@@ -405,8 +405,8 @@ struct Vec256<c10::qint32> {
         Vec256<c10::qint32> zero_point,
         Vec256<c10::qint32> q_six) {
 #ifdef __AVX2__
-      return _mm256_min_epi8(
-          _mm256_max_epi8(vals, zero_point.vals), q_six.vals);
+      return _mm256_min_epi32(
+          _mm256_max_epi32(vals, zero_point.vals), q_six.vals);
 #else
       // Pray the compiler can autovectorize this
       int32_t int_vals[size()];

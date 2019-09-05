@@ -12,6 +12,8 @@ namespace c10 {
 inline at::Tensor scalar_to_tensor(Scalar s) {
   if (s.isFloatingPoint()) {
     return at::scalar_tensor(s, at::device(at::kCPU).dtype(at::kDouble));
+  } else if (s.isComplex()) {
+    return at::scalar_tensor(s, at::device(at::kCPU).dtype(at::kComplexDouble));
   } else {
     AT_ASSERT(s.isIntegral());
     return at::scalar_tensor(s, at::device(at::kCPU).dtype(at::kLong));

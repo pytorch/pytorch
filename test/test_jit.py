@@ -3564,11 +3564,7 @@ def foo(x):
         def annotate_none():
             return torch.jit.annotate(Optional[torch.Tensor], None)
 
-        def annotate_none_no_optional():
-            return torch.jit.annotate(torch.Tensor, None)
-
         self.checkScript(annotate_none, ())
-        self.checkScript(annotate_none_no_optional, ())
 
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
@@ -3671,7 +3667,6 @@ def foo(x):
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
-    @unittest.skipIf(IS_SANDCASTLE, "[serialization forward compat]")
     def test_file_line_save_load(self):
         class Scripted(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -3740,7 +3735,6 @@ def foo(xyz):
             loaded = self.getExportImportCopy(ft)
             loaded()
 
-    @unittest.skipIf(IS_SANDCASTLE, "[serialization forward compat]")
     def test_serialized_source_ranges_dont_jitter(self):
         class FooTest3(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -4485,8 +4479,6 @@ a")
                 print(typed_nones())
 
         graph_str = str(test.graph)
-        self.assertTrue(graph_str.count("bool? = prim::Constant") == 1)
-        self.assertTrue(graph_str.count("int? = prim::Constant") == 1)
         self.assertTrue(graph_str.count("None = prim::Constant") == 1)
 
     def test_literal(self):
@@ -5935,6 +5927,11 @@ a")
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
+
+        def not_test(x):
+            return ~x
+
+        self.checkScript(not_test, (torch.tensor([2, 4]), ))
 
     def test_number_all(self):
         def int1():
@@ -11469,7 +11466,7 @@ a")
         def test_test():
             return torch.jit._unwrap_optional(1)
 
-        with self.assertRaisesRegex(RuntimeError, r"Cannot match an Optional\[T\] to None"):
+        with self.assertRaisesRegex(RuntimeError, r"could not be inferred from actual type None"):
             @torch.jit.script
             def test_no_type():
                 # type: () -> int
@@ -14272,8 +14269,7 @@ a")
     def test_script_scope(self):
         scripted = torch.jit.script(torch.nn.functional.pad)
 
-    # [serialization forward compat]
-    @unittest.skipIf(IS_SANDCASTLE or IS_WINDOWS, "NYI: TemporaryFileName on Windows")
+    @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):

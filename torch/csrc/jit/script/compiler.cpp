@@ -502,7 +502,7 @@ static Value* materializeConstant(
   }
 
   WithInsertPoint guard(graph.block()->nodes().front());
-  auto new_constant = graph.insertConstant(val, nullptr, r);
+  auto new_constant = graph.insertConstant(val, r);
   map[val] = new_constant;
 
   return new_constant;
@@ -829,13 +829,15 @@ struct to_ir {
       if (!result_type) {
         result_type = result->type();
       }
-      if (!unifyTypes(result_type, result->type())) {
+      auto merged_result_type = unifyTypes(result_type, result->type());
+      if (!merged_result_type) {
         throw ErrorReport(stmt.range())
             << "Previous return statement returned a value of type "
             << result_type->python_str()
             << " but this return statement returns a value of type "
             << result->type()->python_str();
       }
+      result_type = merged_result_type.value();
     }
     AT_ASSERT(result_type);
     def_stack_.back().merged_return_type_ = result_type;
@@ -1020,11 +1022,11 @@ struct to_ir {
     // if it's an OR the first expr is emitted in the true branch
     // and the second expr in the false branch, if it's an AND the opposite
     if (is_or) {
-      first_value_returned = graph->insertConstant(true, nullptr, loc);
+      first_value_returned = graph->insertConstant(true, loc);
       first_expr_refinements = &first_bool_info.true_refinements_;
       second_expr_refinements = &first_bool_info.false_refinements_;
     } else {
-      first_value_returned = graph->insertConstant(false, nullptr, loc);
+      first_value_returned = graph->insertConstant(false, loc);
       first_expr_refinements = &first_bool_info.false_refinements_;
       second_expr_refinements = &first_bool_info.true_refinements_;
     }
@@ -1383,7 +1385,7 @@ struct to_ir {
         out = emitCond(cond.value());
       } else {
         WithInsertPoint insert(n);
-        out = graph->insertConstant(true, nullptr, range);
+        out = graph->insertConstant(true, range);
       }
       condition_block->registerOutput(out);
       popFrame();
@@ -1483,7 +1485,7 @@ struct to_ir {
   // We ignore the expression following raise
   void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, nullptr, loc);
+    auto string_input = insertConstant(*graph, exception, loc);
     graph->insert(prim::RaiseException, {string_input}, {}, loc);
     exit_blocks.insert(environment_stack->block());
   }
@@ -2050,6 +2052,8 @@ struct to_ir {
         return "__sub__";
       case TK_UNARY_MINUS:
         return "__neg__";
+      case '~':
+        return "__invert__";
       case '*':
         return "__mul__";
       case TK_POW:
@@ -2161,23 +2165,26 @@ struct to_ir {
           emitExpr(apply.inputs()[1], type),
           /*allow_conversions=*/true);
 
-      // This is to ensure even if user forgets to call annotate None with the
-      // Optional wrapper type, we still generate the correct value with the
-      // Optional type. e.g. it makes annoate(Tensor, None) to behave the same
-      // with annotate(Optional[Tensor], None). It also maintains the backward
-      // compatibility of exported model on Optional undefined tensor/None
-      auto opt_type = expr->type()->cast<OptionalType>();
-      bool forget_opt_annotate =
-          opt_type && *opt_type->getElementType() == *type;
-
       std::stringstream why_not;
-      if (!forget_opt_annotate &&
-          !expr->type()->isSubtypeOfExt(type, &why_not)) {
+      if (!expr->type()->isSubtypeOfExt(type, &why_not)) {
         throw ErrorReport(apply.inputs())
             << "expected an expression of type " << type->python_str()
             << " but found " << expr->type()->python_str() << "\n"
             << why_not.str();
       }
+
+      // None is a subtype of Optional[T], but we want to remember what T is,
+      // after annotation so that variables assigned to this None will still
+      // get the right type. To do this, we make a None constant that
+      // has the type Optional[T]
+      if (type->kind() == OptionalType::Kind &&
+          expr->type()->isSubtypeOf(NoneType::get())) {
+        Node* none = graph->createNone();
+        none->output()->setType(type);
+        graph->insertNode(none);
+        expr = none->output();
+      }
+
       return std::make_shared<SimpleValue>(expr);
     } else if (auto getattr = dynamic_cast<GetAttrValue*>(sv.get())) {
       checkApplyExpr(apply, loc);
@@ -2251,7 +2258,7 @@ struct to_ir {
       bool is_instance_val =
           isInstanceCheck(apply.inputs()[0], apply.inputs()[1]);
       return std::make_shared<SimpleValue>(
-          graph->insertConstant(is_instance_val, nullptr, loc));
+          graph->insertConstant(is_instance_val, loc));
     } else if (auto classNew = dynamic_cast<ClassNewMethod*>(sv.get())) {
       if (apply.inputs().size() != 1) {
         throw ErrorReport(loc) << "Only one argument to __new__ allowed";
@@ -2375,31 +2382,32 @@ struct to_ir {
     }
   }
 
-  Value* emitNegate(const TreeRef& tree) {
+  Value* emitUnaryOp(const TreeRef& tree, const std::string &magicMethod, const c10::Symbol &opSymbol) {
     const auto& inputs = tree->trees();
     auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-    auto neg_val =
+    auto val =
         asSimple(makeMagic(
-                     "__neg__",
-                     std::make_shared<BuiltinFunction>(aten::neg, at::nullopt))
+                     magicMethod,
+                     std::make_shared<BuiltinFunction>(opSymbol, at::nullopt))
                      ->call(tree->range(), method, named_values, {}, 0));
 
-    // if we emitted a aten::neg and not some other overloaded function,
+    // if we emitted the unary op and not some other overloaded function,
     // then try to constantfold
-    if (neg_val->node()->kind() != aten::neg) {
-      return neg_val;
+    if (val->node()->kind() != opSymbol) {
+      return val;
     }
-    auto maybe_constant_input = toIValue(neg_val->node()->input());
+    auto maybe_constant_input = toIValue(val->node()->input());
     if (!maybe_constant_input) {
-      return neg_val;
+      return val;
     }
-    auto op = getOperation(neg_val->node());
+    auto op = getOperation(val->node());
     Stack stack;
     stack.push_back(*maybe_constant_input);
     op(stack);
     AT_ASSERT(stack.size() == 1);
-    return graph->insertConstant(stack[0], nullptr, tree->range());
+    return graph->insertConstant(stack[0], tree->range());
   }
+
 
   // We construct the iterable tree here using the IterableTree SugaredValue,
   // The tree consists of SimpleValue, RangeValue or IterableValue:
@@ -2567,7 +2575,10 @@ struct to_ir {
       }
 
       case TK_UNARY_MINUS: {
-        return emitNegate(tree);
+        return emitUnaryOp(tree, "__neg__", aten::neg);
+      }
+      case '~': {
+        return emitUnaryOp(tree, "__invert__", aten::bitwise_not);
       }
       case TK_AND:
       case TK_OR: {
@@ -2583,21 +2594,13 @@ struct to_ir {
         return emitConst(Const(tree));
       } break;
       case TK_TRUE: {
-        return graph->insertConstant(true, nullptr, tree->range());
+        return graph->insertConstant(true, tree->range());
       } break;
       case TK_FALSE: {
-        return graph->insertConstant(false, nullptr, tree->range());
+        return graph->insertConstant(false, tree->range());
       } break;
       case TK_NONE: {
-        // A None can be inserted even if the type_hint is not an Optional or
-        // None (e.g. `torch.jit.annotate(Tensor, None)`)
-        TypePtr hint = type_hint;
-        if (hint != nullptr && !hint->isSubtypeOf(NoneType::get()) &&
-            hint->kind() != TypeKind::OptionalType) {
-          // Implicitly wrap in an Optional if necessary
-          hint = OptionalType::create(hint);
-        }
-        return graph->insertConstant(IValue(), hint, tree->range());
+        return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree));
@@ -2700,7 +2703,7 @@ struct to_ir {
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
-    return insertConstant(*graph, c.text(), nullptr, c.range());
+    return insertConstant(*graph, c.text(), c.range());
   }
 
   // Desugars select indexing: tensor[i] -> tensor.select(dim, i)
@@ -2806,7 +2809,7 @@ struct to_ir {
     std::vector<Value*> tensor_indices;
 
     auto insert_value_for_dim = [&](int64_t dim) {
-      return graph->insertConstant(dim, nullptr, loc);
+      return graph->insertConstant(dim, loc);
     };
     std::vector<int64_t> dims(subscript_exprs.size());
     std::vector<c10::optional<Value*>> exprs(
@@ -2907,8 +2910,7 @@ struct to_ir {
     // create None node with optional tensor output type and pass to at::index.
     for (auto& index : tensor_indices) {
       if (index == nullptr) {
-        index =
-            graph->insertNode(graph->createNone(TensorType::get()))->output();
+        index = graph->insertNode(graph->createNone())->output();
       }
     }
     return std::make_pair(sliceable, tensor_indices);
@@ -2966,7 +2968,7 @@ struct to_ir {
     Value* maybe_dim = nullptr;
     if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
-      maybe_dim = graph->insertConstant(0, nullptr, loc);
+      maybe_dim = graph->insertConstant(0, loc);
     }
     return emitSlice(loc, sliceable, maybe_dim, slice_exp);
   }
