@@ -195,7 +195,6 @@ class TestQuantizedOps(TestCase):
                 torch.qint32 : np.int32
             }
             qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
-            # print('C', qC)
             qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized addition failed.")
