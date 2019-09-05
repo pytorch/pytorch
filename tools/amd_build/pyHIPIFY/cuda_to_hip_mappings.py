@@ -278,7 +278,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("cufft.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
     ("cufftXt.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
     ("<nccl.h>", ("<rccl.h>", CONV_INCLUDE, API_RUNTIME)), #PyTorch also has a source file named "nccl.h", so we need to "<"">" to differentiate
-    ("thrust/system/cuda/", ("thrust/system/hip/", CONV_INCLUDE, API_BLAS)),
+    ("thrust/system/cuda", ("thrust/system/hip", CONV_INCLUDE, API_BLAS)),
     ("cub/util_allocator.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
     ("cub/block/block_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
     ("cub/cub.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
@@ -2182,7 +2182,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cufftDestroy", ("hipfftDestroy", CONV_MATH_FUNC, API_FFT)),
     ("cufftGetVersion", ("hipfftGetVersion", CONV_MATH_FUNC, API_FFT)),
     ("cufftGetProperty", ("hipfftGetProperty", CONV_MATH_FUNC, API_FFT, HIP_UNSUPPORTED)),
-    ("thrust::cuda::", ("thrust::hip::", CONV_MATH_FUNC, API_BLAS)),
+    ("thrust::cuda", ("thrust::hip", CONV_MATH_FUNC, API_BLAS)),
     ("cub::", ("hipcub::", CONV_MATH_FUNC, API_BLAS)),
 ])
 
