@@ -72,38 +72,26 @@ void erfinv_kernel_cuda(TensorIterator& iter) {
 }
 
 void digamma_kernel_cuda(TensorIterator& iter) {
-  if (iter.dtype() == kHalf) {
-    gpu_kernel(iter, []GPU_LAMBDA(at::Half a) -> at::Half {
-        return calc_digamma<float>(a);
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "digamma_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return calc_digamma(a);
     });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "digamma_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return calc_digamma(a);
-      });
-    });
-  }
+  });
 }
 
 void trigamma_kernel_cuda(TensorIterator& iter) {
-  if (iter.dtype() == kHalf) {
-    gpu_kernel(iter, []GPU_LAMBDA(at::Half a) -> at::Half {
-        return calc_trigamma<float>(a);
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "trigamma_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return calc_trigamma(a);
     });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "trigamma_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return calc_trigamma(a);
-      });
-    });
-  }
+  });
 }
 
 void polygamma_kernel_cuda(TensorIterator& iter, int64_t n) {
   switch (n) {
     case 0: digamma_kernel_cuda(iter); break;
     case 1: trigamma_kernel_cuda(iter); break;
-    default: TORCH_CHECK(false, "polygamma(n,x) is not implemented for n>=2");
+    default: TORCH_CHECK(false, "polygamma(n,x) is not implemented for n>=2, but was ", n);
   }
 }
 
