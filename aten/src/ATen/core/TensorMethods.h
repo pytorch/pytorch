@@ -1696,12 +1696,16 @@ inline Tensor Tensor::log_softmax(Dimname dim, c10::optional<ScalarType> dtype) 
 }
 #endif
 inline Tensor Tensor::logsumexp(IntArrayRef dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::logsumexp(const_cast<Tensor&>(*this), dim, keepdim);
+#else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::logsumexp", ""}).value();
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef, bool>(op, const_cast<Tensor&>(*this), dim, keepdim);
     } else {
         return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, IntArrayRef, bool>(const_cast<Tensor&>(*this), dim, keepdim);
     }
+#endif
 }
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor Tensor::logsumexp(DimnameList dim, bool keepdim) const {
@@ -1750,12 +1754,16 @@ inline std::tuple<Tensor,Tensor> Tensor::max(int64_t dim, bool keepdim) const {
 #endif
 }
 inline Tensor Tensor::max_values(IntArrayRef dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::max_values(const_cast<Tensor&>(*this), dim, keepdim);
+#else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::max_values", ""}).value();
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef, bool>(op, const_cast<Tensor&>(*this), dim, keepdim);
     } else {
         return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, IntArrayRef, bool>(const_cast<Tensor&>(*this), dim, keepdim);
     }
+#endif
 }
 #ifdef BUILD_NAMEDTENSOR
 inline std::tuple<Tensor,Tensor> Tensor::max(Dimname dim, bool keepdim) const {
@@ -1838,12 +1846,16 @@ inline std::tuple<Tensor,Tensor> Tensor::min(int64_t dim, bool keepdim) const {
 #endif
 }
 inline Tensor Tensor::min_values(IntArrayRef dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::min_values(const_cast<Tensor&>(*this), dim, keepdim);
+#else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::min_values", ""}).value();
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef, bool>(op, const_cast<Tensor&>(*this), dim, keepdim);
     } else {
         return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, IntArrayRef, bool>(const_cast<Tensor&>(*this), dim, keepdim);
     }
+#endif
 }
 #ifdef BUILD_NAMEDTENSOR
 inline std::tuple<Tensor,Tensor> Tensor::min(Dimname dim, bool keepdim) const {
@@ -2768,12 +2780,16 @@ inline Tensor Tensor::std(bool unbiased) const {
 #endif
 }
 inline Tensor Tensor::std(IntArrayRef dim, bool unbiased, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::std(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
+#else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::std", "dim"}).value();
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef, bool, bool>(op, const_cast<Tensor&>(*this), dim, unbiased, keepdim);
     } else {
         return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, IntArrayRef, bool, bool>(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
     }
+#endif
 }
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor Tensor::std(DimnameList dim, bool unbiased, bool keepdim) const {
@@ -2936,12 +2952,22 @@ inline Tensor Tensor::flip(IntArrayRef dims) const {
 #endif
 }
 inline Tensor Tensor::roll(IntArrayRef shifts, IntArrayRef dims) const {
+#ifdef USE_STATIC_DISPATCH
+    switch(tensorTypeIdToBackend(type_id())) {
+        case Backend::CPU:
+            return CPUType::roll(const_cast<Tensor&>(*this), shifts, dims);
+            break;
+        default:
+            AT_ERROR("roll not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
+    }
+#else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::roll", ""}).value();
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef, IntArrayRef>(op, const_cast<Tensor&>(*this), shifts, dims);
     } else {
         return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, IntArrayRef, IntArrayRef>(const_cast<Tensor&>(*this), shifts, dims);
     }
+#endif
 }
 inline Tensor Tensor::rot90(int64_t k, IntArrayRef dims) const {
 #ifdef USE_STATIC_DISPATCH
@@ -3030,12 +3056,16 @@ inline Tensor Tensor::var(bool unbiased) const {
 #endif
 }
 inline Tensor Tensor::var(IntArrayRef dim, bool unbiased, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::var(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
+#else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::var", "dim"}).value();
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, IntArrayRef, bool, bool>(op, const_cast<Tensor&>(*this), dim, unbiased, keepdim);
     } else {
         return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, IntArrayRef, bool, bool>(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
     }
+#endif
 }
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor Tensor::var(DimnameList dim, bool unbiased, bool keepdim) const {
@@ -3100,12 +3130,16 @@ inline Tensor Tensor::norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdi
 #endif
 }
 inline Tensor Tensor::norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::norm(const_cast<Tensor&>(*this), p, dim, keepdim);
+#else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::norm", "ScalarOpt_dim"}).value();
     if (is_variable()) {
         return c10::Dispatcher::singleton().callUnboxedAutogradKernel<Tensor, const Tensor &, c10::optional<Scalar>, IntArrayRef, bool>(op, const_cast<Tensor&>(*this), p, dim, keepdim);
     } else {
         return c10::Dispatcher::singleton().lookup(op, type_id()).callUnboxed<Tensor, const Tensor &, c10::optional<Scalar>, IntArrayRef, bool>(const_cast<Tensor&>(*this), p, dim, keepdim);
     }
+#endif
 }
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor Tensor::norm(c10::optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) const {
