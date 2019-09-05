@@ -275,8 +275,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   data_type << toString(tensor.scalar_type()) << "Storage";
   pushGlobal("torch", data_type.str());
   // root_key
-  std::string root_key = std::to_string(tensor_data_.size());
-  pushString(root_key);
+  pushString(std::to_string(tensor_data_.size()));
   // location
   std::stringstream ss;
   ss << tensor.device();
@@ -289,7 +288,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   push<PickleOpCode>(PickleOpCode::BINPERSID);
 
   memoized_storage_map_[addr] = pushNextBinPut();
-  tensor_data_.push_back(getWriteableStorageData(root_key, tensor));
+  tensor_data_.push_back(getWriteableTensorData(tensor));
 }
 
 void Pickler::pushBytes(const std::string& string) {
@@ -368,11 +367,33 @@ void Pickler::pushTensor(const IValue& ivalue) {
 
   // Call torch._utils._rebuild_tensor_v2
   push<PickleOpCode>(PickleOpCode::REDUCE);
+
+  // Store the tensor so it can be written later
+  TORCH_INTERNAL_ASSERT(
+      tensor_table_,
+      "Pickler tried to write a tensor but had no tensor table to write to");
+  tensor_table_->emplace_back(std::move(tensor));
 }
 
 void Pickler::pushClass(PicklerClass cls) {
   pushGlobal("torch.jit._pickle", getClassName(cls));
 }
+
+// void Pickler::pushTensor(const IValue& ivalue) {
+//   pushClass(PicklerClass::TENSOR);
+//   TORCH_INTERNAL_ASSERT(
+//       tensor_table_,
+//       "Pickler tried to write a tensor but had no tensor table to write to");
+//   tensor_table_->push_back(ivalue.toTensor());
+//   int64_t tensor_id = tensor_table_->size() - 1;
+//   // Reduce arguments are spread (e.g. `*args`) before calling the global,
+//   // so wrap in a tuple
+//   push<PickleOpCode>(PickleOpCode::MARK);
+//   pushIValue(tensor_id);
+//   push<PickleOpCode>(PickleOpCode::TUPLE);
+
+//   push<PickleOpCode>(PickleOpCode::REDUCE);
+// }
 
 void Pickler::pushSpecializedList(
     const IValue& ivalue,
@@ -979,10 +1000,9 @@ PickleOpCode Unpickler::readOpCode() {
   return static_cast<PickleOpCode>(read<uint8_t>());
 }
 
-WriteableStorageData getWriteableStorageData(const std::string& key, const at::Tensor& tensor) {
-  WriteableStorageData result;
+WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
+  WriteableTensorData result;
   result.tensor_ = tensor;
-  result.key_ = key;
   result.size_ = tensor.element_size() * tensor.storage().size();
   // TODO HIP support
   if (tensor.storage().device_type() == at::DeviceType::CUDA) {

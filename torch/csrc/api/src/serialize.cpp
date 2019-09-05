@@ -28,20 +28,39 @@ std::vector<char> save(const at::IValue& ivalue) {
   // one empty
   jit::unsafe_pickle(writer, jit::PickleOpCode::EMPTY_DICT, "");
 
-  auto storages = jit::pickle(writer, ivalue);
+  std::vector<at::Tensor> tensors;
+  jit::pickle(writer, ivalue, &tensors);
 
-  std::vector<TypePtr> types(storages.size(), StringType::get());
-  std::vector<at::IValue> keys = fmap(storages, [](const jit::WriteableStorageData& data) {
-    return IValue(data.key());
-  });
+  std::vector<at::IValue> keys;
+  keys.reserve(tensors.size());
+  std::vector<TypePtr> types(tensors.size(), StringType::get());
+
+  // TODO: Unify this with the version in the pickler
+  std::unordered_set<const void*> memoized_storages;
+
+  for (size_t i = 0; i < tensors.size(); i++) {
+    void* addr = tensors.at(i).storage().unsafeGetStorageImpl();
+    if (memoized_storages.count(addr) > 0) {
+      continue;
+    }
+    keys.push_back(std::to_string(i));
+    memoized_storages.insert(addr);
+  }
+  memoized_storages.clear();
 
   auto keys_tuple = at::ivalue::Tuple::create(keys, TupleType::create(types));
-  jit::pickle(writer, keys_tuple);
+  jit::pickle(writer, keys_tuple, &tensors);
 
-  for (auto data : storages) {
+  for (auto tensor : tensors) {
+    void* addr = tensor.storage().unsafeGetStorageImpl();
+    if (memoized_storages.count(addr) > 0) {
+      continue;
+    }
+    auto data = jit::getWriteableTensorData(tensor);
     size_t numel = data.numel();
     writer(reinterpret_cast<const char*>(&numel), sizeof(numel));
     writer(data.data(), data.sizeInBytes());
+    memoized_storages.insert(addr);
   }
 
   return data;

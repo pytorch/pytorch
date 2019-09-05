@@ -104,7 +104,7 @@ enum PicklerClass : uint8_t {
 
 using ::c10::IValue;
 
-struct WriteableStorageData {
+struct WriteableTensorData {
   const char* data() const {
     return static_cast<const char*>(tensor_.storage().data());
   }
@@ -114,19 +114,10 @@ struct WriteableStorageData {
   size_t numel() const {
     return tensor_.storage().numel();
   }
-  const std::string& key() const {
-    return key_;
-  }
-  const at::Tensor& tensor() const {
-    return tensor_;
-  }
 
  private:
-  friend WriteableStorageData getWriteableStorageData(
-      const std::string& key,
-      const at::Tensor& tensor);
+  friend WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
   at::Tensor tensor_;
-  std::string key_;
   uint64_t size_;
 };
 
@@ -134,7 +125,10 @@ class Pickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
  public:
-  Pickler(std::function<void(const char*, size_t)> writer) : writer_(writer) {}
+  Pickler(
+      std::function<void(const char*, size_t)> writer,
+      std::vector<at::Tensor>* tensor_table)
+      : writer_(writer), tensor_table_(tensor_table) {}
 
   // Push protocol onto the stack
   void protocol();
@@ -152,7 +146,7 @@ class Pickler {
   void startTuple();
   void endTuple();
 
-  const std::vector<WriteableStorageData>& tensorData() {
+  const std::vector<WriteableTensorData>& tensorData() {
     return tensor_data_;
   }
 
@@ -205,8 +199,9 @@ class Pickler {
   // Stack of opcodes/data
   std::vector<char> stack_;
 
-  // External table of tensors to serialize.
-  std::vector<WriteableStorageData> tensor_data_;
+  // External table of tensors to serialize. If this is missing, then tensors
+  // are serialized directly into the pickle
+  std::vector<at::Tensor>* tensor_table_;
 
   // TODO: only use this if necessary (add a pass to find all shared ivalues,
   // and only memoize those)
@@ -224,6 +219,7 @@ class Pickler {
 
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT
+  std::vector<WriteableTensorData> tensor_data_;
   std::unordered_map<const void*, uint32_t> memoized_storage_map_;
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
@@ -307,7 +303,7 @@ class Unpickler {
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
 // if necessary
-WriteableStorageData getWriteableStorageData(const std::string&, const at::Tensor& tensor);
+WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
 
 // return the value of the tensor's storage pointer
 uint64_t getStorageKey(const at::Tensor& tensor);

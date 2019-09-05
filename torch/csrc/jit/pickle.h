@@ -1,8 +1,9 @@
 #pragma once
 
-#include <ATen/core/ivalue.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/pickler.h>
+
 
 namespace torch {
 namespace jit {
@@ -13,9 +14,16 @@ namespace jit {
 /// size and consumes it.
 ///
 /// See `jit::pickle` for more details.
-TORCH_API std::vector<WriteableStorageData> pickle(
+template <typename PickleModule = Pickler>
+TORCH_API void pickle(
     std::function<void(const char* data_start, size_t data_len)> writer,
-    const IValue& ivalue);
+    const IValue& ivalue,
+    std::vector<at::Tensor>* tensor_table = nullptr) {
+  PickleModule pickler(std::move(writer), tensor_table);
+  pickler.protocol();
+  pickler.pushIValue(ivalue);
+  pickler.stop();
+}
 
 /// Save a `torch::IValue` in a format compatible with Python's `pickle` module
 ///
@@ -45,8 +53,21 @@ TORCH_API std::vector<WriteableStorageData> pickle(
 ///   print(values)
 ///
 /// \endrst
-TORCH_API std::pair<std::vector<char>, std::vector<WriteableStorageData>> pickle(
-    const IValue& ivalue);
+template <typename PickleModule = Pickler>
+TORCH_API std::vector<char> pickle(
+    const IValue& ivalue,
+    std::vector<at::Tensor>* tensor_table = nullptr) {
+  std::vector<char> data;
+
+  pickle<PickleModule>(
+      [&](const char* bytes, size_t len) {
+        data.insert(data.end(), bytes, bytes + len);
+      },
+      ivalue,
+      tensor_table);
+
+  return data;
+}
 
 // This lets you directly control the opcodes / data that is serialized. This is
 // will probably result in a pickle archive that cannot be unpickled. This
