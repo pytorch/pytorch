@@ -13,12 +13,11 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-
 // SendWork and RecvWork will be put into a task queue, and later picked up by
 // worker threads from the same ThreadPool.
 struct SendWork {
-  SendWork(const WorkerId& to, Message&& message) :
-    to_(to), message_(message) {}
+  SendWork(const WorkerId& to, Message&& message)
+      : to_(to), message_(message) {}
 
   const WorkerId& to_;
   Message message_;
@@ -37,16 +36,10 @@ struct RecvWork {
 
 class ProcessGroupAgent : public RpcAgent {
  public:
-
-  ProcessGroupAgent(std::string workerName,
-                    std::shared_ptr<c10d::ProcessGroup> pg,
-                    int numSendRecvThreads = 4);
-
-  // This method wraps the destination information and the message into a
-  // SendWork object, and put the SendWork into a queue. Another thread will
-  // consume SendWork from the queue and send it out.
-  std::shared_ptr<FutureMessage> send(
-      const WorkerId& to, Message&& message) override;
+  ProcessGroupAgent(
+      std::string workerName,
+      std::shared_ptr<c10d::ProcessGroup> pg,
+      int numSendRecvThreads = 4);
 
   const WorkerId& getWorkerId(const std::string& workerName) const override;
 
@@ -55,6 +48,13 @@ class ProcessGroupAgent : public RpcAgent {
   void sync() override;
 
   int16_t getWorkerId() override;
+
+ protected:
+  // This method wraps the destination information and the message into a
+  // SendWork object, and put the SendWork into a queue. Another thread will
+  // consume SendWork from the queue and send it out.
+  std::shared_ptr<FutureMessage> sendImpl(const WorkerId& to, Message&& message)
+      override;
 
  private:
   void collectNames();
@@ -92,6 +92,6 @@ class ProcessGroupAgent : public RpcAgent {
   std::mutex futureMutex_;
 };
 
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
