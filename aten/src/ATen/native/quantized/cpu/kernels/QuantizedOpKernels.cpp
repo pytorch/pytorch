@@ -133,8 +133,8 @@ void qmaxpool_2d_nhwc_kernel(const Tensor &qx,
                              int64_t dW, // dilation
                              Tensor &qy) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d_nhwc", [&]() {
-    scalar_t *idata = qx.data<scalar_t>();
-    scalar_t *odata = qy.data<scalar_t>();
+    scalar_t *idata = static_cast<scalar_t*>(qx.data_ptr());
+    scalar_t *odata = static_cast<scalar_t*>(qy.data_ptr());
 
     // Loop over N
     for (int64_t b = 0; b < qx.size(0); ++b) {
@@ -161,7 +161,7 @@ void qmaxpool_2d_nhwc_kernel(const Tensor &qx,
           // Interleaved vector loop 4x
           constexpr auto vec_width = Vec256<scalar_t>::size();
           for (; c + 4 * vec_width <= iC; c+= 4 * vec_width) {
-            Vec256<scalar_t> acc(scalar_t(std::numeric_limits<scalar_t::underlying>::lowest()));
+            Vec256<scalar_t> acc{scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
             Vec256<scalar_t> accs[4] = {acc, acc, acc, acc};
             int64_t tcntr = 0;
             int64_t x, y;
@@ -181,7 +181,7 @@ void qmaxpool_2d_nhwc_kernel(const Tensor &qx,
 
           // Vector loop
           for (; c + vec_width <= iC; c+= vec_width) {
-            Vec256<scalar_t> acc(scalar_t(std::numeric_limits<scalar_t::underlying>::lowest()));
+            Vec256<scalar_t> acc{scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
             int64_t tcntr = 0;
             int64_t x, y;
             for (y = h_start; y < h_end; y += dH) {
