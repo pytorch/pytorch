@@ -2572,6 +2572,11 @@
   variants: function
   named_guard: False
 
+# Functionally the same as addmm, but we give it a different derivative formula
+# that doesn't propagate gradients to non-present entries on sparse.
+- func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  named_guard: False
+
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_addmm_out

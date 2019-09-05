@@ -23,7 +23,7 @@ def addmm(mat, mat1, mat2, beta=1, alpha=1):
         beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
         alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
     """
-    return torch.addmm(mat, mat1, mat2, beta=beta, alpha=alpha)
+    return torch._sparse_addmm(mat, mat1, mat2, beta=beta, alpha=alpha)
 
 
 def mm(mat1, mat2):
@@ -65,7 +65,7 @@ def mm(mat1, mat2):
                values=tensor([ 0.1394, -0.6415, -2.1639,  0.1394, -0.6415, -2.1639]),
                size=(2, 3), nnz=6, layout=torch.sparse_coo)
     """
-    return torch.mm(mat1, mat2)
+    return torch._sparse_mm(mat1, mat2)
 
 
 def sum(input, dim=None, dtype=None):

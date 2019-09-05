@@ -680,14 +680,30 @@ Tensor& s_addmm_sparse_dense_cpu_(
 
 // NB: Purposely no broadcasting version of addmm inplace
 
+Tensor _sparse_addmm(
+  const Tensor& t,
+  const SparseTensor& sparse,
+  const Tensor& dense,
+  Scalar beta,
+  Scalar alpha
+) {
+  // _sparse_addmm forward is functionally equivalent to addmm; it's
+  // just the backward that is different.  This technically does an
+  // unnecessary redispatch, I was too lazy to make it not do that
+  return at::addmm(t, sparse, dense, beta, alpha);
+}
+
 Tensor _sparse_mm(
   const SparseTensor& sparse,
   const Tensor& dense
 ) {
   Tensor t = at::zeros({}, dense.options());
-  return at::addmm(t, sparse, dense, 0, 1);  // redispatch!
+  return at::_sparse_addmm(t, sparse, dense, 0, 1);  // redispatch!
 }
 
+// NB: Despite its suggestive name, this actually only exists so that
+// we can redispatch to addmm_out; this is NOT an implementation of
+// the sparse masking version of mm
 SparseTensor& _sparse_mm_out(
   SparseTensor& result,
   const SparseTensor& sparse,
