@@ -27,6 +27,8 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 
+// comment
+
 namespace torch {
 namespace distributed {
 namespace c10d {
@@ -89,7 +91,7 @@ PyObject* c10d_init(PyObject* _unused) {
               std::shared_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>>(),
           py::arg("replicas"),
-          py::arg("bucket_indices"),
+        py::arg("bucket_indices"),
           py::arg("process_group"),
           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>())
       .def(
