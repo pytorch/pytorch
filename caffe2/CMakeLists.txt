@@ -458,6 +458,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_ret.cpp
       ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
     )
     if (NOT WIN32)
       list(APPEND TORCH_SRCS
