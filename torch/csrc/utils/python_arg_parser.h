@@ -110,17 +110,22 @@ private:
 };
 
 struct PythonArgs {
-  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args)
+  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args, PyObject** overloaded_args)
     : idx(idx)
     , traceable(traceable)
     , signature(signature)
-    , args(args) {}
+    , args(args)
+    , overloaded_args(overloaded_args) {}
 
   int idx;
   bool traceable;
   const FunctionSignature& signature;
   PyObject** args;
+  PyObject** overloaded_args;
 
+  inline bool has_torch_function();
+  inline std::string get_func_name();
+  inline PyObject* get_overloaded_arg(int i);
   inline at::Tensor tensor(int i);
   inline at::Scalar scalar(int i);
   inline at::Scalar scalarWithDefault(int i, at::Scalar default_scalar);
@@ -168,7 +173,8 @@ private:
 struct FunctionSignature {
   explicit FunctionSignature(const std::string& fmt);
 
-  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
+  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], PyObject* overloaded_args[], bool raise_exception);
+
   std::string toString() const;
 
   std::string name;
@@ -184,6 +190,8 @@ struct FunctionParameter {
   FunctionParameter(const std::string& fmt, bool keyword_only);
 
   bool check(PyObject* obj);
+  bool check_has_torch_function(PyObject* obj);
+
   void set_default_str(const std::string& str);
   std::string type_name() const;
 
@@ -218,11 +226,30 @@ inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, Parse
   return raw_parse(args, kwargs, dst.args);
 }
 
+bool PythonArgs::has_torch_function(){
+  if(overloaded_args[0] != NULL){
+    return true;
+  }
+  return false;
+}
+
+inline std::string PythonArgs::get_func_name(){
+  return signature.name;
+}
+
+
 inline at::Tensor PythonArgs::tensor(int i) {
   if (args[i] && THPVariable_CheckExact(args[i])) {
     return reinterpret_cast<THPVariable*>(args[i])->cdata;
   }
   return tensor_slow(i);
+}
+
+inline PyObject* PythonArgs::get_overloaded_arg(int i) {
+  if (overloaded_args[i]) {
+    return overloaded_args[i];
+  }
+  return Py_None;
 }
 
 inline at::Scalar PythonArgs::scalar(int i) {

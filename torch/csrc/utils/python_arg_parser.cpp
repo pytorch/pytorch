@@ -130,7 +130,32 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 }
 
-bool FunctionParameter::check(PyObject* obj) {
+bool THPVariable_check_torch_function(PyObject *o, PyObject *attr_name){
+  int has_torch_function = PyObject_HasAttr(o, attr_name);
+  if(has_torch_function == 1){
+    return true;
+  }
+  return false;
+}
+
+static PyObject* get_tensor_torch_function(void)
+{
+  PyObject* method = PyObject_GetAttrString((PyObject*)THPVariableClass, "__torch_function__");
+  assert(method != NULL);
+  return method;
+}
+
+bool FunctionParameter::check_has_torch_function(PyObject* obj)
+{
+  PyObject* method = PyArray_LookupSpecial(obj, "__torch_function__");
+  if(method != NULL){
+    return true;
+  }
+  return false;
+}
+
+bool FunctionParameter::check(PyObject* obj)
+{
   switch (type_) {
     case ParameterType::TENSOR: {
       return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkDouble(obj));
@@ -472,8 +497,26 @@ static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, ssize_t
   throw TypeError("invalid keyword arguments");
 }
 
+/*
+ * Like list.insert(), but for C arrays of PyObject*. Skips error checking.
+ */
+static void
+pyobject_array_insert(PyObject **array, int length, int index, PyObject *item)
+{
+    int j;
+
+    for (j = length; j > index; j--) {
+        array[j] = array[j - 1];
+    }
+    array[index] = item;
+}
+
 bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
-                              bool raise_exception) {
+                               PyObject* overloaded_args[], bool raise_exception) {
+  int num_implementing_args = 0;
+  int arg_index = 0;
+  int j;
+  int new_class = 1;
   auto nargs = PyTuple_GET_SIZE(args);
   ssize_t remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
   ssize_t arg_pos = 0;
@@ -537,6 +580,34 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       dst[i++] = args;
       arg_pos = nargs;
       continue;
+    }
+    else if (param.check_has_torch_function(obj)) {
+      dst[i++] = obj;
+      for (j = 0; j < num_implementing_args; j++) {
+        if (Py_TYPE(obj) == Py_TYPE(overloaded_args[j])) {
+          new_class = 0;
+          break;
+        }
+      }
+      if (new_class) {
+        PyObject *method = get_torch_function(obj);
+
+        if (method != NULL) {
+          int arg_index;
+          arg_index = num_implementing_args;
+
+          for (j = 0; j < num_implementing_args; j++) {
+            PyObject *other_type;
+            other_type = (PyObject *)Py_TYPE(overloaded_args[j]);
+            if (PyObject_IsInstance(obj, other_type)) {
+              arg_index = j;
+              break;
+            }
+          }
+          pyobject_array_insert(overloaded_args, num_implementing_args, arg_index, obj);
+          ++num_implementing_args;
+        }
+      }
     } else if (raise_exception) {
       if (is_kwd) {
         // foo(): argument 'other' must be str, not int
@@ -567,7 +638,6 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     }
     return false;
   }
-
   return true;
 }
 
@@ -591,18 +661,19 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
 PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
-    signature.parse(args, kwargs, parsed_args, true);
-    return PythonArgs(0, traceable, signature, parsed_args);
+    PyObject* overloaded_args[32] = {0};
+    signature.parse(args, kwargs, parsed_args, overloaded_args, true);
+    return PythonArgs(0, traceable, signature, parsed_args, overloaded_args);
   }
 
   int i = 0;
   for (auto& signature : signatures_) {
-    if (signature.parse(args, kwargs, parsed_args, false)) {
-      return PythonArgs(i, traceable, signature, parsed_args);
+    PyObject* overloaded_args[32] = {0};
+    if (signature.parse(args, kwargs, parsed_args, overloaded_args, false)) {
+      return PythonArgs(i, traceable, signature, parsed_args, overloaded_args);
     }
     i++;
   }
-
   print_error(args, kwargs, parsed_args);
 }
 
@@ -619,7 +690,8 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
 
   if (plausible_idxs.size() == 1) {
     auto& signature = signatures_[plausible_idxs[0]];
-    signature.parse(args, kwargs, parsed_args, true);
+    PyObject* overloaded_args[32] = {0};
+    signature.parse(args, kwargs, parsed_args, overloaded_args, true);
   }
 
   std::vector<std::string> options;

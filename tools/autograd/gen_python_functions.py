@@ -57,8 +57,34 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   ${unpack_self}
   ParsedArgs<${max_args}> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+
   ${declare_namedtuple_return_types}
   ${dispatch}
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+""")
+
+PY_VARIABLE_FUNCTION_VARARGS  = CodeTemplate("""\
+static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    ${signatures}
+  }, /*traceable=*/${traceable});
+  ${unpack_self}
+  ParsedArgs<${max_args}> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if(r.has_torch_function()){
+    PyObject* torch_function = maybe_get_attr(r.get_overloaded_arg(0), "__torch_function__");
+    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
+  }
+  else{
+    ${declare_namedtuple_return_types}
+    ${dispatch}
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -734,6 +760,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['flags'] = 'METH_VARARGS | METH_KEYWORDS'
 
         if not is_module and not has_self:
+            tmpl = PY_VARIABLE_FUNCTION_VARARGS
             env['flags'] += ' | METH_STATIC'
 
         py_methods.append(tmpl.substitute(env))
