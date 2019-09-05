@@ -9,10 +9,10 @@ from torch.nn.modules.utils import _pair
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
+from hypothesis_utils import no_deadline
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams
-from common_quantization import no_deadline
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
@@ -80,13 +80,10 @@ def pool_output_shape(input_size, kernel_size, padding, stride,
 class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the quantized::relu op."""
-    @given(qparams=hu.qparams())
-    def test_qrelu(self, qparams):
-        X = np.array([[-3, -2, 1, 2],
-                      [0, 0, 0, 0],
-                      [-5, -4, -3, -2],
-                      [1, 2, 3, 4]], dtype=np.float32)
-        scale, zero_point, torch_type = qparams
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qrelu(self, X):
+        X, (scale, zero_point, torch_type) = X
 
         Y = X.copy()
         Y[Y < 0] = 0
