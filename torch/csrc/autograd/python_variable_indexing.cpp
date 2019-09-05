@@ -175,7 +175,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
     } else if (THPVariable_Check(obj)) {
       auto& var = THPVariable_Unpack(obj);
       auto scalar_type = var.scalar_type();
-      if (var.dim() == 0 && at::isIntegralType(scalar_type)) {
+      if (var.dim() == 0 && at::isIntegralType(scalar_type, /*includeBool=*/true)) {
         if (scalar_type != at::kByte && scalar_type != at::kBool) {
           result = applySelect(result, dim, THPUtils_unpackLong(obj), i);
         } else {
@@ -348,7 +348,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   OptionalDeviceGuard device_guard(device_of(self_));
   Variable value;
   if (isQIntType(self_.scalar_type())) {
-    value = valueToTensor(CPUTensorId(), kFloat, py_value);
+    value = valueToTensor(TensorTypeId::CPUTensorId, kFloat, py_value);
   } else {
     value = valueToTensor(self_.type_id(), self_.scalar_type(), py_value);
   }

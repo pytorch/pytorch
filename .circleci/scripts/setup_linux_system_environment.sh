@@ -37,9 +37,14 @@ sudo apt-get purge -y unattended-upgrades
 
 cat /etc/apt/sources.list
 
-# For the bestest luck, kill -9 now
-sudo pkill -9 apt-get || true
+# For the bestest luck, kill again now
+sudo pkill apt || true
+sudo pkill dpkg || true
 
-# Bail out early if we detect apt/dpkg is stuck
-ps auxfww | (! grep '[a]pt')
-ps auxfww | (! grep '[d]pkg')
+# Try to detect if apt/dpkg is stuck
+if ps auxfww | grep '[a]pt'; then
+  echo "WARNING: There are leftover apt processes; subsequent apt update will likely fail"
+fi
+if ps auxfww | grep '[d]pkg'; then
+  echo "WARNING: There are leftover dpkg processes; subsequent apt update will likely fail"
+fi

@@ -17,8 +17,8 @@
 #   CFLAGS
 #     flags to apply to both C and C++ files to be compiled (a quirk of setup.py
 #     which we have faithfully adhered to in our build system is that CFLAGS
-#     also applies to C++ files, in contrast to the default behavior of autogoo
-#     and cmake build systems.)
+#     also applies to C++ files (unless CXXFLAGS is set), in contrast to the
+#     default behavior of autogoo and cmake build systems.)
 #
 #   CC
 #     the C/C++ compiler to use (NB: the CXX flag has no effect for distutils
@@ -43,7 +43,7 @@
 #     disables use of MKLDNN
 #
 #   MKLDNN_THREADING
-#     MKL-DNN threading mode (https://github.com/intel/mkl-dnn/)
+#     MKL-DNN threading mode: TBB or OMP (default)
 #
 #   USE_NNPACK=0
 #     disables NNPACK build
@@ -103,7 +103,7 @@
 #     the BLAS will be chosen based on what is found on your system.
 #
 #   MKL_THREADING
-#     MKL flavor: SEQ, TBB or OMP (default)
+#     MKL threading mode: SEQ, TBB or OMP (default)
 #
 #   USE_FBGEMM
 #     Enables use of FBGEMM
@@ -150,15 +150,15 @@
 #   LD_LIBRARY_PATH
 #     we will search for libraries in these paths
 #
-#   PARALLEL_BACKEND
-#     parallel backend to use for intra- and inter-op parallelism
+#   ATEN_THREADING
+#     ATen parallel backend to use for intra- and inter-op parallelism
 #     possible values:
-#       OPENMP - use OpenMP for intra-op and native backend for inter-op tasks
+#       OMP - use OpenMP for intra-op and native backend for inter-op tasks
 #       NATIVE - use native thread pool for both intra- and inter-op tasks
-#       NATIVE_TBB - using TBB for intra- and native thread pool for inter-op parallelism
+#       TBB - using TBB for intra- and native thread pool for inter-op parallelism
 #
 #   USE_TBB
-#      use TBB for parallelization
+#      enable TBB support
 #
 
 from __future__ import print_function
@@ -181,7 +181,7 @@ import glob
 import importlib
 
 from tools.build_pytorch_libs import build_caffe2
-from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
+from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
@@ -258,7 +258,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '1.2.0a0'
+version = '1.3.0a0'
 sha = 'Unknown'
 
 try:
@@ -346,6 +346,15 @@ def build_deps():
 # Building dependent libraries
 ################################################################################
 
+# the list of runtime dependencies required by this built package
+install_requires = []
+
+if sys.version_info <= (2, 7):
+    install_requires += ['future']
+
+if sys.version_info[0] == 2:
+    install_requires += ['requests']
+
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
 Please install it via `conda install {module}` or `pip install {module}`
@@ -366,6 +375,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
         cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
         if cmake_cache_vars['USE_NUMPY']:
             report('-- Building with NumPy bindings')
+            global install_requires
+            install_requires += ['numpy']
         else:
             report('-- NumPy not found')
         if cmake_cache_vars['USE_CUDNN']:
@@ -392,10 +403,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Not using NCCL')
         if cmake_cache_vars['USE_DISTRIBUTED']:
-            if IS_LINUX:
-                report('-- Building with c10d distributed package ')
+            if IS_WINDOWS:
+                report('-- Building without distributed package')
             else:
-                report('-- Building without c10d distributed package')
+                report('-- Building with distributed package ')
         else:
             report('-- Building without distributed package')
 
@@ -758,6 +769,7 @@ if __name__ == '__main__':
         cmdclass=cmdclass,
         packages=packages,
         entry_points=entry_points,
+        install_requires=install_requires,
         package_data={
             'torch': [
                 'py.typed',
@@ -854,6 +866,34 @@ if __name__ == '__main__':
                 'python/serialized_test/data/operator_test/*.zip',
             ]
         },
+        url='https://pytorch.org/',
+        download_url='https://github.com/pytorch/pytorch/tags',
+        author='PyTorch Team',
+        author_email='packages@pytorch.org',
+        python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*',
+        # PyPI package information.
+        classifiers=[
+            'Development Status :: 5 - Production/Stable',
+            'Intended Audience :: Developers',
+            'Intended Audience :: Education',
+            'Intended Audience :: Science/Research',
+            'License :: OSI Approved :: BSD License',
+            'Programming Language :: C++',
+            'Programming Language :: Python :: 2',
+            'Programming Language :: Python :: 2.7',
+            'Programming Language :: Python :: 3',
+            'Programming Language :: Python :: 3.5',
+            'Programming Language :: Python :: 3.6',
+            'Programming Language :: Python :: 3.7',
+            'Topic :: Scientific/Engineering',
+            'Topic :: Scientific/Engineering :: Mathematics',
+            'Topic :: Scientific/Engineering :: Artificial Intelligence',
+            'Topic :: Software Development',
+            'Topic :: Software Development :: Libraries',
+            'Topic :: Software Development :: Libraries :: Python Modules',
+        ],
+        license='BSD-3',
+        keywords='pytorch machine learning',
     )
     if EMIT_BUILD_WARNING:
         print_box(build_update_message)

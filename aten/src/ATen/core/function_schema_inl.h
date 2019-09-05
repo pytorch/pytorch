@@ -10,6 +10,9 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   // it is simpler for now to work directly on this schema
 
   out << schema.name();
+  if (schema.overload_name() != "") {
+    out << "." << schema.overload_name();
+  }
   out << "(";
 
   bool seen_kwarg_only = false;
@@ -192,6 +195,40 @@ inline bool operator==(const OperatorName& lhs, const OperatorName& rhs) {
 
 inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
   return !operator==(lhs, rhs);
+}
+
+// covariant subtyping of list of Arguments
+inline bool isSubtypeOfList(
+    ArrayRef<Argument> child,
+    ArrayRef<Argument> parent,
+    std::ostream* why_not) {
+  if (child.size() != parent.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < child.size(); ++i) {
+    const Argument& c = child[i];
+    const Argument& p = parent[i];
+    if (c.name() != p.name()) {
+      return false;
+    }
+    if (!c.type()->isSubtypeOfExt(p.type(), why_not)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline bool FunctionSchema::isSubtypeOf(
+    const FunctionSchema& rhs,
+    bool as_method,
+    std::ostream* why_not) const {
+  size_t start = as_method ? 1 : 0;
+  // functions are covariant in arguments but contravariant in returns
+  return isSubtypeOfList(
+             ArrayRef<Argument>(arguments()).slice(start),
+             ArrayRef<Argument>(rhs.arguments()).slice(start),
+             why_not) &&
+      isSubtypeOfList(rhs.returns(), returns(), why_not);
 }
 
 } // namespace c10

@@ -1,6 +1,7 @@
 import threading
 import torch
 from torch.cuda._utils import _get_device_index
+from torch._utils import ExceptionWrapper
 
 
 def get_a_var(obj):
@@ -59,9 +60,10 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
                 output = module(*input, **kwargs)
             with lock:
                 results[i] = output
-        except Exception as e:
+        except Exception:
             with lock:
-                results[i] = e
+                results[i] = ExceptionWrapper(
+                    where="in replica {} on device {}".format(i, device))
 
     if len(modules) > 1:
         threads = [threading.Thread(target=_worker,
@@ -79,7 +81,7 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
     outputs = []
     for i in range(len(inputs)):
         output = results[i]
-        if isinstance(output, Exception):
-            raise output
+        if isinstance(output, ExceptionWrapper):
+            output.reraise()
         outputs.append(output)
     return outputs

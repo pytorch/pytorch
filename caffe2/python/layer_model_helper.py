@@ -636,7 +636,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         grad_map,
         blob_to_device=None,
     ):
-        logger.info("apply regulizer after optimizer")
+        logger.info("apply regularizer after optimizer")
         CPU = muji.OnCPU()
         # if given, blob_to_device is a map from blob to device_option
         blob_to_device = blob_to_device or {}

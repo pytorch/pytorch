@@ -97,7 +97,7 @@ static void im2col_out_cpu_template(
           output_n = output.select(0, elt);
 
           im2col<scalar_t>(
-              input_n.data<scalar_t>(),
+              input_n.data_ptr<scalar_t>(),
               n_input_plane,
               input_height,
               input_width,
@@ -111,7 +111,7 @@ static void im2col_out_cpu_template(
               stride_width,
               dilation_height,
               dilation_width,
-              output_n.data<scalar_t>());
+              output_n.data_ptr<scalar_t>());
         }
 
         if (!batched_input) {
