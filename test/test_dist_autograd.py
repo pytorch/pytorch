@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import sys
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
-from common_distributed import MultiProcessTestCase
+from multiprocessing_test_case import MultiProcessTestCase
 from functools import wraps
 import six
 import unittest

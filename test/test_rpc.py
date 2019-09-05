@@ -3,14 +3,13 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import sys
 import unittest
-import multiprocessing
-import caffe2.python._import_c_extension as C
 
 import torch
 import torch.distributed as dist
 
-from common_distributed import MultiProcessTestCase
+from multiprocessing_test_case import MultiProcessTestCase
 from common_utils import load_tests, run_tests
+import caffe2.python._import_c_extension as C
 
 
 # it is used to test python user defined function over rpc
@@ -92,17 +91,8 @@ def _wrap_with_rpc(func):
     sys.version_info < (3, 0),
     "Pytorch distributed rpc package " "does not support python2",
 )
-@unittest.skipIf(C.is_asan, "Skip ASAN since torch + multiprocessing + fbcode doesn't work with asan")
+@unittest.skipIf(C.is_asan, "Skip ASAN for buck build")
 class RpcTest(MultiProcessTestCase):
-    @classmethod
-    def setUpClass(cls):
-        super(RpcTest, cls). setUpClass()
-        try:
-            multiprocessing.set_start_method("spawn")
-        except Exception:
-            logging.warning("Failed to set start method to spawn")
-            pass
-
     @property
     def world_size(self):
         return 4
@@ -397,5 +387,33 @@ class RpcTest(MultiProcessTestCase):
     def test_stress_heavy_rpc(self):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
 
-if __name__ == "__main__":
+    @_wrap_with_rpc
+    def test_builtin_remote_ret(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref = dist.remote('worker{}'.format(dst_rank), torch.add,
+                           args=(torch.ones(n, n), torch.ones(n, n)))
+        self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
+
+    @_wrap_with_rpc
+    def test_multi_builtin_remote_ret(self):
+        m = 10
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rrefs = []
+        expected = []
+        for i in range(m):
+            n = n + i
+            rrefs.append(dist.remote(
+                'worker{}'.format(dst_rank),
+                torch.add,
+                args=(torch.ones(n, n), torch.ones(n, n))
+            ))
+            expected.append(torch.ones(n, n) * 2)
+
+        for i in range(m):
+            self.assertEqual(rrefs[i].to_here(), expected[i])
+
+
+if __name__ == '__main__':
     run_tests()
