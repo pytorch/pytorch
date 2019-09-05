@@ -139,12 +139,12 @@ void qmaxpool_2d_nhwc_kernel(const Tensor &qx,
     // Loop over N
     for (int64_t b = 0; b < qx.size(0); ++b) {
       // Loop over H
-      auto *i_p = reinterpret_cast<typename scalar_t::underlying*>(idata + b * iW * iH * iC);
+      auto *i_p = reinterpret_cast<scalar_t::underlying*>(idata + b * iW * iH * iC);
       for (int64_t row = 0; row < oH; ++row) {
         // Loop over W
         for (int64_t col = 0; col < oW; ++col) {
           // Pointer to output data for this specific N,H,W position
-          auto *o_p = reinterpret_cast<typename scalar_t::underlying*>(odata + b * oH * oW * iC + row * oW * iC + col * iC);
+          auto *o_p = reinterpret_cast<scalar_t::underlying*>(odata + b * oH * oW * iC + row * oW * iC + col * iC);
 
           // Loop over reduction block
           int64_t h_start = row * sH - pH;
