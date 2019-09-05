@@ -32,7 +32,7 @@ struct GloballyUniqueId final {
   const local_id_t localId_;
 };
 
-std::ostream &operator<<(std::ostream &os, const GloballyUniqueId &globalId);
+std::ostream& operator<<(std::ostream& os, const GloballyUniqueId& globalId);
 
 using RRefId = GloballyUniqueId;
 using ForkId = GloballyUniqueId;

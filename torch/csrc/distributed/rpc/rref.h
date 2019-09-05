@@ -11,7 +11,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-
 class RRef;
 class RRefContext;
 class UserRRef;
@@ -27,14 +26,16 @@ class UserRRef;
 // done within ``RRef`` and ``RRefContext``.
 struct RRefForkData {
   at::IValue toIValue() const;
+
  private:
   friend class RRef;
   friend class RRefContext;
   friend class UserRRef;
 
-  RRefForkData(worker_id_t ownerId,
-               const RRefId& rrefId_,
-               const ForkId& forkId_);
+  RRefForkData(
+      worker_id_t ownerId,
+      const RRefId& rrefId_,
+      const ForkId& forkId_);
 
   static RRefForkData fromIValue(const at::IValue&);
 
@@ -42,7 +43,6 @@ struct RRefForkData {
   const RRefId rrefId_;
   const ForkId forkId_;
 };
-
 
 // TODO: make RRef an IValue, and edit createStackForSchema accordingly
 class RRef {
@@ -68,13 +68,14 @@ class RRef {
   const RRefId rrefId_;
 };
 
-class UserRRef final: public RRef {
+class UserRRef final : public RRef {
  public:
   const ForkId& forkId() const;
   bool isOwner() const override;
   IValue toHere() override;
 
   ~UserRRef() override;
+
  private:
   friend class RRefContext;
 
@@ -86,7 +87,7 @@ class UserRRef final: public RRef {
 // Keep the template only on the derived class because ``RRefContext`` needs to
 // erase the type on ``RRef`` and keep them in one map.
 template <typename T>
-class OwnerRRef final: public RRef {
+class OwnerRRef final : public RRef {
  public:
   bool isOwner() const override {
     return true;
@@ -95,7 +96,7 @@ class OwnerRRef final: public RRef {
   T getValue() const {
     // TODO: use callback to make this non-blocking
     std::unique_lock<std::mutex> lock(mutex_);
-    valueCV_.wait(lock, [this]{return value_.has_value();});
+    valueCV_.wait(lock, [this] { return value_.has_value(); });
     return value_.value();
   }
 
@@ -129,7 +130,6 @@ class OwnerRRef final: public RRef {
   mutable std::mutex mutex_;
   mutable std::condition_variable valueCV_;
 };
-
 
 } // namespace rpc
 } // namespace distributed

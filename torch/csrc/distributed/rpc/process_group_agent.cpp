@@ -143,7 +143,6 @@ const WorkerId& ProcessGroupAgent::getWorkerId(worker_id_t id) const {
   return workerIds_[id];
 }
 
-
 void ProcessGroupAgent::join() {
   // Every process i sends a SHUTDOWN message to process i + 1. This is
   // necessary for now because:

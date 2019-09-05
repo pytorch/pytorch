@@ -1,11 +1,9 @@
 #include <torch/csrc/distributed/rpc/script_rref_proto.h>
 #include <torch/csrc/jit/pickle.h>
 
-
 namespace torch {
 namespace distributed {
 namespace rpc {
-
 
 const at::IValue& RRefMessageBase::value() {
   return value_;
@@ -22,17 +20,15 @@ Message RRefMessageBase::toMessage() const {
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
 
-  return Message(std::move(payload),
-                 std::move(tensor_table),
-                 type_);
+  return Message(std::move(payload), std::move(tensor_table), type_);
 }
 
 at::IValue RRefMessageBase::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
-  auto value = jit::unpickle(
-      payload, payload_size, nullptr, &message.tensors());
+  auto value =
+      jit::unpickle(payload, payload_size, nullptr, &message.tensors());
   auto values = value.toTuple()->elements();
 
   AT_ASSERT(values.size() == 1, "Expect a single IValue from message.");

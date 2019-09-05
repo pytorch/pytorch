@@ -1,7 +1,6 @@
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/jit/pickle.h>
 
-
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -33,17 +32,16 @@ Message ScriptRemoteCall::toMessage() const {
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
 
-  return Message(std::move(payload),
-                 std::move(tensor_table),
-                 MessageType::REMOTE_CALL);
+  return Message(
+      std::move(payload), std::move(tensor_table), MessageType::REMOTE_CALL);
 }
 
 ScriptRemoteCall ScriptRemoteCall::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
-  auto value = jit::unpickle(
-      payload, payload_size, nullptr, &message.tensors());
+  auto value =
+      jit::unpickle(payload, payload_size, nullptr, &message.tensors());
   auto values = value.toTuple()->elements();
 
   // remove the last element from values and convert it back to an RRef
@@ -57,6 +55,6 @@ ScriptRemoteCall ScriptRemoteCall::fromMessage(const Message& message) {
       op, std::move(values), std::move(retRRefId), std::move(retForkId));
 }
 
-}  // rpc
-}  // distributed
-}  // torch
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

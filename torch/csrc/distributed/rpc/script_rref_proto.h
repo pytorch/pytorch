@@ -23,16 +23,16 @@ class TORCH_API RRefMessageBase {
   static at::IValue fromMessage(const Message& message);
 
  private:
-   at::IValue value_;
-   const MessageType type_;
+  at::IValue value_;
+  const MessageType type_;
 };
 
 // UserRRef uses this message to fetch the remote RRef value from the owner.
 class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
  public:
   ScriptRRefFetchCall(at::IValue rrefForkData)
-      : RRefMessageBase(std::move(rrefForkData),
-                        MessageType::RREF_FETCH_CALL) {}
+      : RRefMessageBase(std::move(rrefForkData), MessageType::RREF_FETCH_CALL) {
+  }
 
   static ScriptRRefFetchCall fromMessage(const Message& message);
 };

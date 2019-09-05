@@ -18,8 +18,8 @@ class RRefContext {
   static void initInstance(std::shared_ptr<RpcAgent>);
   static std::unique_ptr<RRefContext>& getInstance();
 
-  RRefContext(const RRefContext &) = delete;
-  void operator=(const RRefContext &) = delete;
+  RRefContext(const RRefContext&) = delete;
+  void operator=(const RRefContext&) = delete;
 
   worker_id_t getWorkerId() const;
   RRefId genRRefId();
@@ -38,11 +38,14 @@ class RRefContext {
   }
 
   std::shared_ptr<UserRRef> createUserRRef(
-      worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId) {
-    TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
-    // RRefContext does not track user RRefs, it will be destructed when there is
-    // no shared_ptrs pointing to it.
-    // NB: cannot use make_shared here as the constructor of UserRRef is private
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      const ForkId& forkId) {
+    TORCH_CHECK(
+        ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
+    // RRefContext does not track user RRefs, it will be destructed when there
+    // is no shared_ptrs pointing to it. NB: cannot use make_shared here as the
+    // constructor of UserRRef is private
     return std::shared_ptr<UserRRef>(new UserRRef(ownerId, rrefId, forkId));
   }
 
@@ -56,7 +59,9 @@ class RRefContext {
 
   template <typename T>
   std::shared_ptr<RRef> getOrCreateRRef(
-      worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId) {
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      const ForkId& forkId) {
     if (ownerId == getWorkerId()) {
       return getOrCreateOwnerRRef<T>(rrefId);
     } else {
@@ -66,7 +71,6 @@ class RRefContext {
 
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId) {
-
     std::lock_guard<std::mutex> lock(mutex_);
     const auto iter = owners_.find(rrefId);
     if (iter == owners_.end()) {
@@ -100,9 +104,11 @@ class RRefContext {
   // Keep OwnerRRefs alive until there is no living UserRRefs.
   std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> owners_;
   // Tracks known living UserRRefs of an OwnerRRef
-  std::unordered_map<RRefId,
-                     std::unordered_set<ForkId, ForkId::Hash>,
-                     RRefId::Hash> forks_;
+  std::unordered_map<
+      RRefId,
+      std::unordered_set<ForkId, ForkId::Hash>,
+      RRefId::Hash>
+      forks_;
 };
 
 } // namespace rpc

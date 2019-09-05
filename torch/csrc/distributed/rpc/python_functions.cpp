@@ -96,9 +96,8 @@ std::shared_ptr<RRef> pyRemoteBuiltin(
           op,
           std::move(stack),
           userRRef->id().toIValue(),
-          userRRef->forkId().toIValue()
-      ).toMessage()
-  );
+          userRRef->forkId().toIValue())
+          .toMessage());
   return userRRef;
 }
 
