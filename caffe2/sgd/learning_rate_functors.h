@@ -92,7 +92,7 @@ class GateLearningRate : public LearningRateFunctor<T> {
         multiplier_2_(multiplier_2),
         num_iter_(num_iter) {}
   T operator()(const int64_t iter) const override {
-    if (iter >= num_iter_) {
+    if (iter >= int64_t(num_iter_)) {
       return T(multiplier_2_);
     }
     return T(multiplier_1_);
@@ -135,7 +135,7 @@ class LinearWarmupLearningRate : public LearningRateFunctor<T> {
   LinearWarmupLearningRate(const T start_multiplier, const int64_t num_iter)
       : start_multiplier_(start_multiplier), num_iter_(num_iter) {}
   T operator()(const int64_t iter) const override {
-    if (iter >= num_iter_) {
+    if (iter >= int64_t(num_iter_)) {
       return 1.;
     }
     return start_multiplier_ +
@@ -152,7 +152,7 @@ class ConstantWarmupLearningRate : public LearningRateFunctor<T> {
   ConstantWarmupLearningRate(const T multiplier, const int64_t num_iter)
       : multiplier_(multiplier), num_iter_(num_iter) {}
   T operator()(const int64_t iter) const override {
-    if (iter >= num_iter_) {
+    if (iter >= int64_t(num_iter_)) {
       return 1.;
     }
     return T(multiplier_);
@@ -174,9 +174,9 @@ class PieceWarmupLearningRate : public LearningRateFunctor<T> {
       : m1_(m1), m2_(m2), m3_(m3), n1_(n1), n2_(n2){};
 
   T operator()(const int64_t iter) const override {
-    if (iter < n1_) {
+    if (iter < int64_t(n1_)) {
       return m1_;
-    } else if (iter < n2_) {
+    } else if (iter < int64_t(n2_)) {
       return m2_;
     }
     return m3_;
@@ -248,6 +248,24 @@ class CompositeLearningRate : public LearningRateFunctor<T> {
 
  private:
   std::map<int64_t, std::unique_ptr<LearningRateFunctor<T>>> sub_policies_;
+};
+
+// Cyclical: return a learning rate with period 2 * stepsize and
+// lower bound base_lr, upper bound max_lr.
+// See https://arxiv.org/pdf/1506.01186.pdf
+template <typename T>
+class CyclicalLearningRate : public LearningRateFunctor<T> {
+ public:
+  CyclicalLearningRate(const T base_lr, const T max_lr, const int stepsize)
+      : base_lr_(base_lr), max_lr_(max_lr), stepsize_(stepsize) {}
+  T operator()(const int64_t iter) const override {
+    int cycle = static_cast<int>((iter / (2 * stepsize_)) + 1);
+    T x = abs(static_cast<T>(iter) / stepsize_ - 2 * cycle + 1);
+    return (1 + (T(max_lr_) / T(base_lr_) - 1) * std::max(T(0.0), (1 - x)));
+  }
+  T base_lr_;
+  T max_lr_;
+  int stepsize_;
 };
 
 } // namespace caffe2

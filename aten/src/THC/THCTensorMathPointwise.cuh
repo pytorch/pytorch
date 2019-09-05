@@ -12,13 +12,6 @@
 
 
 template <typename T>
-struct TensorATan2Op {
-  __device__ __forceinline__ void operator()(T* out, T* a, T* b) {
-    *out = THCNumerics<T>::atan2(*a, *b);
-  }
-};
-
-template <typename T>
 struct TensorSigmoidOp {
   __device__ __forceinline__ void operator()(T* out, T* in) const {
     T one = (T) 1.0;
@@ -28,32 +21,6 @@ struct TensorSigmoidOp {
   __device__ __forceinline__ void operator()(T* v) const {
     T one = (T) 1.0;
     *v = one / (one + THCNumerics<T>::exp(- *v));
-  }
-};
-
-template <typename T>
-struct TensorSignOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    T orig = *in;
-    *out = (orig > 0) - (orig < 0);
-  }
-
-  __device__ __forceinline__ void operator()(T* v) {
-    T orig = *v;
-    *v = (orig > 0) - (orig < 0);
-  }
-};
-
-template <>
-struct TensorSignOp<unsigned char> {
-  __device__ __forceinline__ void operator()(unsigned char* out, unsigned char* in) {
-    unsigned char orig = *in;
-    *out = (orig == 0) ? 0 : 1;
-  }
-
-  __device__ __forceinline__ void operator()(unsigned char* v) {
-    unsigned char orig = *v;
-    *v = (orig == 0) ? 0 : 1;
   }
 };
 
@@ -394,40 +361,6 @@ struct TensorMinValueOp {
 
   __device__ __forceinline__ void operator()(T* out, T* in) {
     *out = THCNumerics<T>::gt(*in, val) ? val : *in;  // this order propagates NaN
-  }
-
-  T val;
-};
-
-template <typename T>
-struct TensorAddCMulOp {
-  TensorAddCMulOp(T v) : val(v) {}
-
-  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = THCNumerics<T>::add(
-      *out,
-      THCNumerics<T>::mul(
-        val,
-        THCNumerics<T>::mul(*in1, *in2)
-      )
-    );
-  }
-
-  T val;
-};
-
-template <typename T>
-struct TensorAddCDivOp {
-  TensorAddCDivOp(T v) : val(v) {}
-
-  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = THCNumerics<T>::add(
-      *out,
-      THCNumerics<T>::mul(
-        val,
-        THCNumerics<T>::div(*in1, *in2)
-      )
-    );
   }
 
   T val;

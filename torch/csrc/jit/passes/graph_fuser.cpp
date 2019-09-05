@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/script/compiler.h>
-#include <torch/csrc/jit/symbolic_variable.h>
 
 #include <queue>
 #include <unordered_map>
@@ -175,13 +174,16 @@ struct GraphFuser {
   }
 
   bool isFusableDevice(Value *v) {
-    auto tensor_type = v->type()->cast<DimensionedTensorType>();
-    if (!tensor_type) {
+    if (!v->type()->isSubtypeOf(TensorType::get())) {
       return true;
     }
-    if (tensor_type->device().is_cpu()) {
+    auto device = v->type()->expect<TensorType>()->device();
+    if (!device) {
+      return true;
+    }
+    if ((*device).is_cpu()) {
       return canFuseOnCPU();
-    } else if (tensor_type->device().is_cuda()) {
+    } else if ((*device).is_cuda()) {
       return canFuseOnGPU();
     }
     throw std::runtime_error("Unknown device");
@@ -573,11 +575,21 @@ struct GraphFuser {
     return ++consumer->reverseIterator();
   }
 
+  at::ArrayRef<Value*> broadcast_tensors(value_list inputs) {
+    AT_ASSERT(inputs.size() > 0);
+    auto* g = inputs[0]->owningGraph();
+    auto* input_list =
+        g->insertNode(g->createList(TensorType::get(), inputs))->output();
+    auto* output_list = g->insert(aten::broadcast_tensors, {input_list});
+    auto* unpack_node = g->insertNode(
+        g->create(prim::ListUnpack, {output_list}, inputs.size()));
+    return unpack_node->outputs();
+  }
+
   void insertExplicitBroadcast(Node* node) {
     WithInsertPoint insert_guard{node};
     auto tensors = tensorInputs(node);
-    auto new_tensors =
-        SymbolicVariable::broadcast_tensors(fmap<SymbolicVariable>(tensors));
+    auto new_tensors = broadcast_tensors(tensors);
 
     // Replace tensors inputs with broadcasted values
     auto new_tensors_it = new_tensors.begin();

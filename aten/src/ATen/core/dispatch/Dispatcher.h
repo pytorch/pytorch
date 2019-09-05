@@ -11,44 +11,6 @@ namespace c10 {
 class CAFFE2_API OperatorHandle;
 
 /**
- * This class represents an operator kernel, i.e. an operator *after* it was
- * dispatched to a certain device. You can use it to call the kernel.
- *
- * You can keep this OpKernel instance around to avoid future dispatch
- * when you know it'd dispatch to the same kernel anyhow.
- *
- * Also, keeping around the OpKernel instance will keep around a local cache
- * that is used by some kernels to get better performance when they're called
- * multiple times (mostly Caffe2 kernels do that).
- *
- * OpKernel is only threadsafe if the kernel is threadsafe. There are no mutexes
- * protecting the kernel cache, so if the kernel uses the cache and doesn't have
- * mutexes for it, it will likely not be threadsafe.
- */
-class CAFFE2_API OpKernel final {
-public:
-  OpKernel(OpKernel&&) noexcept = default;
-  OpKernel& operator=(OpKernel&&) noexcept = default;
-  OpKernel(const OpKernel&) = delete;
-  OpKernel& operator=(const OpKernel&) = delete;
-
-  /**
-   * Call the operator kernel with the given arguments.
-   */
-  void call(Stack* stack) const {
-    return (*kernel_)(stack, cache_.get());
-  }
-
-private:
-  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator)
-  : kernel_(kernel), cache_(cache_creator()) {}
-  friend class Dispatcher;
-
-  KernelFunction* kernel_;
-  std::unique_ptr<c10::KernelCache> cache_;
-};
-
-/**
  * Implement this interface and register your instance with the dispatcher
  * to get notified when operators are registered or deregistered with
  * the dispatcher.
@@ -116,7 +78,7 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
+  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func, void* unboxed_kernel_func);
 
   /**
    * Register a fallback kernel for an operator.
@@ -126,12 +88,26 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
+  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func, void* unboxed_kernel_func);
+
+  RegistrationHandleRAII registerUnboxedAutogradKernel(const OperatorHandle& op, void* unboxed_autograd_kernel);
 
   /**
    * Perform a dynamic dispatch and get the kernel for an operator.
    */
   OpKernel lookup(const OperatorHandle& op, const Stack* stack) const;
+
+  /**
+   * Perform a dynamic dispatch and get the kernel for an operator.
+   */
+  // TODO Remove lookup(TensorTypeId) and instead have a lookup based on
+  // the (unboxed?) arguments the operator is to be called with.
+  OpKernel lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const;
+
+  // TODO Remove callUnboxedAutogradKernel() and instead figure out in a generic
+  // callKernel() wrapper if the autograd or the regular kernel need to be called.
+  template<class Result, class... Args>
+  Result callUnboxedAutogradKernel(const OperatorHandle& op, Args... args) const;
 
   /**
    * Add a listener that gets called whenever a new op is registered or an existing
@@ -199,8 +175,22 @@ private:
 
 inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(stack);
-  return OpKernel(kernel.kernel_func, kernel.cache_creator_func);
+  return op.operatorIterator_->op.lookupKernel(stack);
+}
+
+inline OpKernel Dispatcher::lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  return op.operatorIterator_->op.lookupKernel(dispatchKey);
+}
+
+template<class Result, class... Args>
+inline Result Dispatcher::callUnboxedAutogradKernel(const OperatorHandle& op, Args... args) const {
+  void* unboxed_autograd_kernel = op.operatorIterator_->op.lookupUnboxedAutogradKernel();
+  TORCH_CHECK(nullptr != unboxed_autograd_kernel, "Tried to call Dispatcher::callUnboxedAutogradKernel() for operator ", toString(op.schema()), " that doesn't have an autograd kernel.");
+
+  using OpSignature = Result (Args...);
+  OpSignature* kernel = reinterpret_cast<OpSignature*>(unboxed_autograd_kernel);
+  return (*kernel)(std::forward<Args>(args)...);
 }
 
 } // namespace c10

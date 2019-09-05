@@ -22,6 +22,8 @@ inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
     return rhs.isBool() && lhs.toBool() == rhs.toBool();
   } else if (lhs.isIntList()) {
     return rhs.isIntList() && lhs.toIntListRef() == rhs.toIntListRef();
+  } else if (lhs.isTensor()) {
+    return lhs.toTensor().is_same(rhs.toTensor());
   } else {
     AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
   }
@@ -54,6 +56,8 @@ inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
     return std::hash<double>()(ivalue.toDouble());
   } else if (ivalue.isBool()) {
     return std::hash<bool>()(ivalue.toBool());
+  } else if (ivalue.isTensor()) {
+    return std::hash<TensorImpl*>()(ivalue.toTensor().unsafeGetTensorImpl());
   } else {
     throw std::runtime_error("Can't hash IValues with this tag");
   }
@@ -187,6 +191,22 @@ bool Dict<Key, Value>::contains(const Key& key) const {
 template<class Key, class Value>
 void Dict<Key, Value>::reserve(size_type count) const {
   impl_->dict.reserve(count);
+}
+
+template<class Key, class Value>
+optional<TypePtr> Dict<Key, Value>::_keyType() const {
+  if (!impl_->elementTypes.has_value()) {
+    return c10::nullopt;
+  }
+  return impl_->elementTypes->keyType;
+}
+
+template<class Key, class Value>
+optional<TypePtr> Dict<Key, Value>::_valueType() const {
+  if (!impl_->elementTypes.has_value()) {
+    return c10::nullopt;
+  }
+  return impl_->elementTypes->valueType;
 }
 
 }

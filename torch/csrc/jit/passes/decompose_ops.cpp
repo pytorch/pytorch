@@ -37,9 +37,13 @@ bool isDecomposableNorm(Node* normalize_op) {
       "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor",
   };
   Value* input = normalize_op->namedInput(attr::input);
-  auto tensor_type = input->type()->cast<DimensionedTensorType>();
-  // As of now, we do the decomposition for batchnorm/layernorm on GPU device only
-  if (!tensor_type || tensor_type->device().is_cpu()) {
+  if (!input->type()->isSubtypeOf(TensorType::get())) {
+    return false;
+  }
+  auto device = input->type()->expect<TensorType>()->device();
+  // As of now, we do the decomposition for batchnorm/layernorm on GPU device
+  // only
+  if (!device || (*device).is_cpu()) {
     return false;
   }
 
@@ -107,11 +111,10 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
 
       decomposed = true;
       WithInsertPoint guard(*it);
-
       std::shared_ptr<Graph> d_graph =
           decompose_funcs.get_function("addmm").graph();
       Value* new_output =
-          inlineCallTo(*it->owningGraph(), *d_graph, it->inputs()).at(0);
+          insertGraph(*it->owningGraph(), *d_graph, it->inputs()).at(0);
       // Set the output of the decomposed graph to have the same output type as
       // the original op otherwise the canonicalized graph will have TensorType
       // as the output of this node which is incorrect
@@ -140,7 +143,7 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
       // inline the compiled decomposed batchnorm
       std::shared_ptr<Graph> d_graph =
           decompose_funcs.get_function("batch_norm").graph();
-      Value* new_output = inlineCallTo(*graph, *d_graph, inputs).at(0);
+      Value* new_output = insertGraph(*graph, *d_graph, inputs).at(0);
 
       // post processing the graph
       Value* weight = it->namedInput(attr::weight);
@@ -175,7 +178,7 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
       // inline the compiled decomposed layernorm
       std::shared_ptr<Graph> d_graph =
           decompose_funcs.get_function("layer_norm").graph();
-      Value* new_output = inlineCallTo(*graph, *d_graph, inputs).at(0);
+      Value* new_output = insertGraph(*graph, *d_graph, inputs).at(0);
 
       // post processing the graph
       Value* weight = it->namedInput(attr::weight);
