@@ -359,7 +359,7 @@ class TestFuser(JitTestCase):
     # lifetimes in Python.
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_lerp_cuda(self):
+    def test_lerp(self):
         start = torch.randn(4, 1, dtype=torch.float, device='cuda')
         end = torch.randn(1, 4, dtype=torch.float, device='cuda')
         weight = torch.tensor(0.5, dtype=torch.float, device='cuda')
