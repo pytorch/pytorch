@@ -5,6 +5,7 @@ from . import invoke_rpc_builtin, invoke_rpc_python_udf
 
 from . import ProcessGroupAgent
 from .internal_rpc_utils import serialize, PythonUDF
+from .rpc_handler import is_backend_registered, registered_init_rpc
 
 import sys
 import torch
@@ -21,6 +22,15 @@ def _require_initialized(func):
                                "Call init_rpc(name) first.")
         return func(*args, **kwargs)
     return wrapper
+
+
+def get_agent(agent):
+    return _agent
+
+
+def set_agent(agent):
+    global _agent
+    _agent = agent
 
 
 def join_rpc():
@@ -51,8 +61,9 @@ class RpcBackend(Enum):
     PROCESS_GROUP = 1
 
 
-# TODO: add a context manager to wrap _init_rpc and join_rpc
-def _init_rpc(name, backend=RpcBackend.PROCESS_GROUP):
+# TODO: add a context managet to wrap _init_rpc and join_rpc
+def _init_rpc(name, backend=RpcBackend.PROCESS_GROUP, world_size=-1,
+              rank=-1, store=None):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
 
@@ -62,10 +73,19 @@ def _init_rpc(name, backend=RpcBackend.PROCESS_GROUP):
         raise RuntimeError("RPC is already initialized")
 
     if backend == RpcBackend.PROCESS_GROUP:
-        from .distributed_c10d import _get_default_group
+        from .distributed_c10d import _get_default_group, init_process_group
+
+        init_process_group(
+            backend="gloo", rank=rank, world_size=world_size, store=store
+        )
         group = _get_default_group()
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(name, group)
+    elif is_backend_registered(backend):
+        _agent = registered_init_rpc(backend,
+                                     worker_id=rank,
+                                     worker_names=["worker{}".format(i) for i in range(world_size)],
+                                     )
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)
 

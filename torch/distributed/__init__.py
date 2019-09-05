@@ -23,7 +23,8 @@ if is_available():
         from .rpc import _init_rpc
         from .rpc import *  # noqa: F401
 
-        def init_model_parallel(worker_name, rpc_backend=RpcBackend.PROCESS_GROUP):
+        def init_model_parallel(worker_name, rpc_backend=RpcBackend.PROCESS_GROUP,
+                                rank=-1, world_size=-1, store=None):
             r"""
             Initializes model parallel primitives such as the local rpc agent
             and distributed autograd.
@@ -45,6 +46,6 @@ if is_available():
                             available backend implementation. (default:
                             ``RpcBackend.PROCESS_GROUP``).
             """
-            _init_rpc(worker_name, rpc_backend)
+            _init_rpc(worker_name, rpc_backend, world_size, rank, store)
             from .rpc import _agent
             autograd._init(_agent.get_worker_id().id)
