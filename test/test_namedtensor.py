@@ -721,7 +721,7 @@ class TestNamedTensor(TestCase):
 
         def test_out_variant(op_name, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            out = t.new_empty([0])
+            out = torch.empty([0], device=device)
             getattr(torch, op_name)(t, 'C', out=out)
             check_output(out, ['N', 'L'])
 
