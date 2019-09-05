@@ -1,7 +1,7 @@
   pytorch_short_perf_test_gpu:
     environment:
       BUILD_ENVIRONMENT: pytorch-short-perf-test-gpu
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:336"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -42,7 +42,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-python-doc-push
       # TODO: stop hardcoding this
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:336"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
@@ -92,7 +92,7 @@
   pytorch_cpp_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-cpp-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:336"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:339"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
@@ -265,3 +265,145 @@
             git submodule sync && git submodule update -q --init --recursive
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
+
+  pytorch_android_gradle_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:339"
+      PYTHON_VERSION: "3.6"
+    resource_class: large
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    - attach_workspace:
+        at: ~/workspace
+    - run:
+        <<: *should_run_job
+    - run:
+        <<: *setup_linux_system_environment
+    - checkout
+    - run:
+        <<: *setup_ci_environment
+    - run:
+        name: pytorch android gradle build
+        no_output_timeout: "1h"
+        command: |
+          set -eux
+          docker_image_commit=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+
+          docker_image_libtorch_android_x86_32=${docker_image_commit}-android-x86_32
+          docker_image_libtorch_android_x86_64=${docker_image_commit}-android-x86_64
+          docker_image_libtorch_android_arm_v7a=${docker_image_commit}-android-arm-v7a
+          docker_image_libtorch_android_arm_v8a=${docker_image_commit}-android-arm-v8a
+
+          echo "docker_image_commit: "${docker_image_commit}
+          echo "docker_image_libtorch_android_x86_32: "${docker_image_libtorch_android_x86_32}
+          echo "docker_image_libtorch_android_x86_64: "${docker_image_libtorch_android_x86_64}
+          echo "docker_image_libtorch_android_arm_v7a: "${docker_image_libtorch_android_arm_v7a}
+          echo "docker_image_libtorch_android_arm_v8a: "${docker_image_libtorch_android_arm_v8a}
+
+          # x86_32
+          docker pull ${docker_image_libtorch_android_x86_32} >/dev/null
+          export id_x86_32=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
+
+          export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_x86_32" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          # arm-v7a
+          docker pull ${docker_image_libtorch_android_arm_v7a} >/dev/null
+          export id_arm_v7a=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v7a})
+
+          export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v7a" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          mkdir ~/workspace/build_android_install_arm_v7a
+          docker cp $id_arm_v7a:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_arm_v7a
+
+          # x86_64
+          docker pull ${docker_image_libtorch_android_x86_64} >/dev/null
+          export id_x86_64=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_64})
+
+          export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_x86_64" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          mkdir ~/workspace/build_android_install_x86_64
+          docker cp $id_x86_64:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_x86_64
+
+          # arm-v8a
+          docker pull ${docker_image_libtorch_android_arm_v8a} >/dev/null
+          export id_arm_v8a=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v8a})
+
+          export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v8a" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          mkdir ~/workspace/build_android_install_arm_v8a
+          docker cp $id_arm_v8a:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_arm_v8a
+
+          docker cp ~/workspace/build_android_install_arm_v7a $id_x86_32:/var/lib/jenkins/workspace/build_android_install_arm_v7a
+          docker cp ~/workspace/build_android_install_x86_64 $id_x86_32:/var/lib/jenkins/workspace/build_android_install_x86_64
+          docker cp ~/workspace/build_android_install_arm_v8a $id_x86_32:/var/lib/jenkins/workspace/build_android_install_arm_v8a
+
+          # run gradle buildRelease
+          export COMMAND='((echo "source ./workspace/env" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id_x86_32" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          mkdir -p ~/workspace/build_android_artifacts
+          docker cp $id_x86_32:/var/lib/jenkins/workspace/android/artifacts.tgz ~/workspace/build_android_artifacts/
+
+          output_image=$docker_image_libtorch_android_x86_32-gradle
+          docker commit "$id_x86_32" ${output_image}
+          docker push ${output_image}
+    - store_artifacts:
+        path: ~/workspace/build_android_artifacts/artifacts.tgz
+        destination: artifacts.tgz
+
+  pytorch_android_gradle_build-x86_32:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:339"
+      PYTHON_VERSION: "3.6"
+    resource_class: large
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    - attach_workspace:
+        at: ~/workspace
+    - run:
+        <<: *should_run_job
+    - run:
+        name: filter out not PR runs
+        no_output_timeout: "5m"
+        command: |
+          echo "CIRCLE_PULL_REQUEST: ${CIRCLE_PULL_REQUEST:-}"
+          if [ -z "${CIRCLE_PULL_REQUEST:-}" ]; then
+            circleci step halt
+          fi
+    - run:
+        <<: *setup_linux_system_environment
+    - checkout
+    - run:
+        <<: *setup_ci_environment
+    - run:
+        name: pytorch android gradle build only x86_32 (for PR)
+        no_output_timeout: "1h"
+        command: |
+          set -e
+          docker_image_libtorch_android_x86_32=${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-x86_32
+          echo "docker_image_libtorch_android_x86_32: "${docker_image_libtorch_android_x86_32}
+
+          # x86
+          docker pull ${docker_image_libtorch_android_x86_32} >/dev/null
+          export id=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
+
+          export COMMAND='((echo "source ./workspace/env" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          mkdir -p ~/workspace/build_android_x86_32_artifacts
+          docker cp $id:/var/lib/jenkins/workspace/android/artifacts.tgz ~/workspace/build_android_x86_32_artifacts/
+
+          output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-gradle-x86_32
+          docker commit "$id" ${output_image}
+          docker push ${output_image}
+    - store_artifacts:
+        path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
+        destination: artifacts.tgz

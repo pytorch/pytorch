@@ -152,8 +152,3 @@ namespace std {
     }
   };
 } // namespace std
-
-namespace at {
-  using c10::StreamId;
-  using c10::Stream;
-}

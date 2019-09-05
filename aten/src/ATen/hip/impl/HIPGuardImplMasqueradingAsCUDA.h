@@ -8,6 +8,7 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/impl/InlineDeviceGuard.h>
 #include <c10/core/impl/InlineStreamGuard.h>
+#include <c10/util/Exception.h>
 
 #include <c10/hip/impl/HIPGuardImpl.h>
 
@@ -55,13 +56,13 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   static constexpr DeviceType static_type = DeviceType::CUDA;
   HIPGuardImplMasqueradingAsCUDA() {}
   HIPGuardImplMasqueradingAsCUDA(DeviceType t) {
-    AT_ASSERT(t == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(t == DeviceType::CUDA);
   }
   DeviceType type() const override {
     return DeviceType::CUDA;
   }
   Device exchangeDevice(Device d) const override {
-    AT_ASSERT(d.type() == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);
     Device old_device = getDevice();
     if (old_device.index() != d.index()) {
       C10_HIP_CHECK(hipSetDevice(d.index()));
@@ -74,11 +75,11 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     return Device(DeviceType::CUDA, device);
   }
   void setDevice(Device d) const override {
-    AT_ASSERT(d.type() == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);
     C10_HIP_CHECK(hipSetDevice(d.index()));
   }
   void uncheckedSetDevice(Device d) const noexcept override {
-    hipSetDevice(d.index());
+    C10_HIP_CHECK_WARN(hipSetDevice(d.index()));
   }
   Stream getStream(Device d) const noexcept override {
     return getCurrentHIPStreamMasqueradingAsCUDA().unwrap();
@@ -113,7 +114,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
         hip_flag = hipEventDefault;
         break;
       default:
-        AT_ERROR("HIP event received unknown flag");
+        TORCH_CHECK(false, "HIP event received unknown flag");
     }
 
     C10_HIP_CHECK(hipEventCreateWithFlags(hip_event, hip_flag));
@@ -125,14 +126,10 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     if (!event) return;
     auto hip_event = static_cast<hipEvent_t>(event);
     int orig_device;
-    try {
-      C10_HIP_CHECK(hipGetDevice(&orig_device));
-      C10_HIP_CHECK(hipSetDevice(device_index));
-      C10_HIP_CHECK(hipEventDestroy(hip_event));
-      C10_HIP_CHECK(hipSetDevice(orig_device));
-    } catch (...) {
-      // noexcept
-    }
+    C10_HIP_CHECK_WARN(hipGetDevice(&orig_device));
+    C10_HIP_CHECK_WARN(hipSetDevice(device_index));
+    C10_HIP_CHECK_WARN(hipEventDestroy(hip_event));
+    C10_HIP_CHECK_WARN(hipSetDevice(orig_device));
   }
 
   void record(void** event,

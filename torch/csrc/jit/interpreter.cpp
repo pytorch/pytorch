@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/instruction.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
@@ -195,6 +196,8 @@ void insertLastUses(Graph& g) {
 }
 } // namespace
 
+std::ostream& operator<<(std::ostream& out, Instruction inst);
+
 /*
 This is an optimization that reduces the number of store/load/move nodes needed
 by recognizing that parts of the graph are simple trees like a*x + b*y. When
@@ -292,88 +295,6 @@ struct PreprocessGraph {
   std::shared_ptr<Graph> graph;
   std::unordered_map<Node*, bool> can_emit_inline;
 };
-
-// instructs look like:
-// op_code X, N
-// meaning of X, N depend on the op:
-// O - index into operator table
-// R - index into register table
-// I - literal integer
-// C - index into constant table
-// P - jump offset relative to beginning of current instruction
-// F - index into function table
-// T - index into the type table, used for guard instructions
-
-#define FORALL_OPCODES(_)                                                   \
-  _(OP, "O") /* invoke operator X */                                        \
-  _(LOAD, "R") /* push a value from a register X */                         \
-  _(MOVE, "R") /* push a value from register X, clearing the register */    \
-  _(STOREN, "RI") /* store N values to registers [X, X+N) */                \
-  _(STORE, "R") /* store 1 value to registers X */                          \
-  _(DROP, "") /* drop 1 value from the top of the stack */                  \
-  _(DROPR, "R") /* clear register X */                                      \
-  _(LOADC, "C") /* push the constant X */                                   \
-  _(JF, "P") /* pop the top of the stack, if false, branch to P */          \
-  _(JMP, "P") /* unconditional branch to X */                               \
-  _(LOOP, "PI") /* perform a loop, X is where to branch if cond is false */ \
-  _(RET, "") /* exit execution */                                           \
-  _(WAIT, "") /* wait for a future to be complete */                        \
-  _(CALL, "F") /* call function X */                                        \
-  _(GUARD, "T") /* check guard against type_table, true if passes */        \
-  _(TAIL_CALL, "F") /* replace current frame with function F */             \
-  _(INTERFACE_CALL, "CI") /* call method X on the first argument (of N) */
-
-enum OpCode : uint8_t {
-#define DEFINE_OP(op, _) op,
-  FORALL_OPCODES(DEFINE_OP)
-#undef DEFINE_OP
-};
-
-std::ostream& operator<<(std::ostream& out, OpCode op) {
-  switch (op) {
-#define OP_STRING(x, _) \
-  case x:               \
-    return out << #x;
-    FORALL_OPCODES(OP_STRING)
-#undef OP_STRING
-  }
-  return out;
-}
-
-const char* OpInfo(OpCode op) {
-  switch (op) {
-#define OP_INFO(x, info) \
-  case x:                \
-    return info;
-    FORALL_OPCODES(OP_INFO)
-#undef OP_INFO
-  }
-  return nullptr;
-}
-
-struct Instruction {
-  OpCode op;
-  uint8_t padding; // currently unused
-  uint16_t N;
-  int32_t X;
-  // TODO: check for overflow
-  Instruction(OpCode op, int32_t X, uint16_t N)
-      : op(op), padding(0), N(N), X(X) {}
-};
-
-static_assert(sizeof(Instruction) == 8, "Instructions should be 8 bytes");
-std::ostream& operator<<(std::ostream& out, Instruction inst) {
-  // TODO: use op info to print out the op in a more user-friendly way
-  int nargs = strlen(OpInfo(inst.op));
-  out << inst.op;
-  if (nargs > 0) {
-    out << " " << inst.X;
-  }
-  if (nargs > 1) {
-    out << " " << inst.N;
-  }
-  return out;
-}
 
 // for keeping track of the current node
 struct WithCurrentNode {
@@ -665,6 +586,22 @@ struct CodeImpl {
     createBailoutBlock(jf_index);
   }
 
+  void emitGetAttr(Node* node) {
+    emitLoadInputs(node->inputs());
+    const auto type = node->input()->type()->expect<ClassType>();
+    const auto& field = node->s(attr::name);
+    uint64_t slot = type->getAttributeSlot(field);
+    insertInstruction(GET_ATTR, slot);
+  }
+
+  void emitSetAttr(Node* node) {
+    emitLoadInputs(node->inputs());
+    const auto type = node->inputs().at(0)->type()->expect<ClassType>();
+    const auto& field = node->s(attr::name);
+    const auto slot = type->getAttributeSlot(field);
+    insertInstruction(SET_ATTR, slot);
+  }
+
   void insertBailoutBlocks() {
     for(const BailoutBlock& block : bailout_blocks_) {
       TORCH_INTERNAL_ASSERT(instructions_[block.jf_instruction_index].op == JF)
@@ -724,6 +661,12 @@ struct CodeImpl {
         break;
       case prim::BailOut:
         emitBailOut(node);
+        break;
+      case prim::GetAttr:
+        emitGetAttr(node);
+        break;
+      case prim::SetAttr:
+        emitSetAttr(node);
         break;
     }
   }
@@ -912,6 +855,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             stack.emplace_back(af.constants[inst.X]);
             ++af.pc;
             break;
+          case GET_ATTR: {
+            auto userObj = pop(stack).toObject();
+            auto value = userObj->getSlot(inst.X);
+            push(stack, std::move(value));
+            ++af.pc;
+          } break;
+          case SET_ATTR: {
+            auto v = pop(stack);
+            auto userObj = pop(stack).toObject();
+            userObj->setSlot(inst.X, std::move(v));
+            ++af.pc;
+          } break;
           case JF:
             af.pc += (pop(stack).toBool()) ? 1 : inst.X;
             break;
