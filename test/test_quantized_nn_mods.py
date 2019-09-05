@@ -7,10 +7,11 @@ from torch.nn.quantized.modules import Conv2d
 from torch.nn._intrinsic.quantized import ConvReLU2d
 import torch.quantization
 from common_utils import run_tests, tempfile
-from common_quantization import QuantizationTestCase, no_deadline, prepare_dynamic
+from common_quantization import QuantizationTestCase, prepare_dynamic
 from common_quantized import _calculate_dynamic_qparams
 from hypothesis import given
 from hypothesis import strategies as st
+from hypothesis_utils import no_deadline
 import unittest
 
 '''
@@ -64,17 +65,17 @@ class FunctionalAPITest(QuantizationTestCase):
         b = torch.randn(oC, dtype=torch.float32) if use_bias else None
         q_bias = torch.quantize_linear(b, scale=1.0 / 1024, zero_point=0, dtype=torch.qint32) if use_bias else None
         q_filters_ref = torch.ops.quantized.conv_prepack(qw.permute([0, 2, 3, 1]),
-                                                                stride,
-                                                                i_padding,
-                                                                dilation,
-                                                                g)
+                                                         stride,
+                                                         i_padding,
+                                                         dilation,
+                                                         g)
 
 
         requantized_bias = torch.quantize_linear(q_bias.dequantize(), scale * scale, 0 , torch.qint32) if use_bias else None
         ref_result = torch.ops.quantized.conv2d(qX.permute([0, 2, 3, 1]), q_filters_ref,
-                                                       requantized_bias, stride,
-                                                       i_padding, dilation,
-                                                       g, scale, zero_point).permute([0, 3, 1, 2])
+                                                requantized_bias, stride,
+                                                i_padding, dilation,
+                                                g, scale, zero_point).permute([0, 3, 1, 2])
 
         q_result = torch.nn.quantized.functional.conv2d(qX,
                                                         qw,
