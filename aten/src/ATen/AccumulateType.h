@@ -2,7 +2,8 @@
 #include <ATen/Config.h>
 #include <c10/util/Half.h>
 
-// Defines the accumulation type for a scalar type.
+// Defines the accumulation type for a scalar type, which PyTorch deems as the best promoted type for accumulation
+// purposes, in consideration of compromising various factors such as accuracy and bandwidth.
 // Example:
 //   using accscalar_t = acc_type<scalar_t, true>;
 
