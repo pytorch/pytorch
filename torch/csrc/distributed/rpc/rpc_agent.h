@@ -2,14 +2,13 @@
 
 #include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/types.h>
 
 #include <algorithm>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
-
-using worker_id_t = int16_t;
 
 // A globally unique ID to identify an RpcAgent
 struct WorkerId {
@@ -93,8 +92,7 @@ class RpcAgent {
   // Return a reference to the ``WorkerId`` of the given ``workerName``.
   virtual const WorkerId& getWorkerId(const std::string& workerName) const = 0;
 
-  // Retrieves the worker_id for this node.
-  virtual int16_t getWorkerId() = 0;
+  virtual const WorkerId& getWorkerId(worker_id_t id) const = 0;
 
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
