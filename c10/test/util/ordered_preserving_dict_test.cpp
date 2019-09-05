@@ -50,17 +50,35 @@ dict_int_int test_dict(dict_int_int& dict) {
 
   i = 0;
   for (auto entry: dict) {
-    TORCH_INTERNAL_ASSERT(order[i++] == entry.first);
+    TORCH_INTERNAL_ASSERT(order[i] == entry.first);
+    TORCH_INTERNAL_ASSERT(dict[order[i]] == entry.second);
+    TORCH_INTERNAL_ASSERT(entry.second == order[i] + 1);
+    i++;
   }
+  TORCH_INTERNAL_ASSERT(dict.size() == order.size());
   return dict;
 }
 
-TEST(OrderedPreservingDictTest,
-    InsertAndDeleteBasic) {
+TEST(OrderedPreservingDictTest, InsertAndDeleteBasic) {
   dict_int_int dict;
   test_dict(dict);
   dict.clear();
   test_dict(dict);
+}
+
+TEST(OrderedPreservingDictTest, InsertExistingDoesntAffectOrder) {
+  dict_int_int dict;
+  dict[0] = 1;
+  dict[1] = 2;
+
+  TORCH_INTERNAL_ASSERT(dict.begin()->first == 0);
+  dict[0] = 1;
+  TORCH_INTERNAL_ASSERT(dict.begin()->first == 0);
+  dict[0] = 2;
+  TORCH_INTERNAL_ASSERT(dict.begin()->first == 0);
+
+  dict.erase(0);
+  TORCH_INTERNAL_ASSERT(dict.begin()->first == 1);
 }
 
 
@@ -89,34 +107,54 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
     };
   };
 
-  using bad_hash_dict = ska_ordered::order_preserving_flat_hash_map<int64_t, int64_t, BadHash>;
+  using bad_hash_dict =
+      ska_ordered::order_preserving_flat_hash_map<int64_t, int64_t, BadHash>;
 
-  bad_hash_dict dict;
-  for (int64_t i = 0; i < 10; ++i) {
-    dict[i] = i + 1;
-  }
-
-  int64_t i = 0;
-  for (auto entry: dict) {
-    TORCH_INTERNAL_ASSERT(entry.first == i && entry.second == i + 1);
-    ++i;
-  }
-
-  // erase a few entries;
-  std::unordered_set<int64_t> erase_set = {0, 2, 9};
-  for (auto erase: erase_set) {
-    dict.erase(erase);
-  }
-  std::vector<int64_t> order;
-  for (int64_t i = 0; i < 100; ++i) {
-    if (!erase_set.count(i)) {
-      order.push_back(i);
+  for (auto init_dict_size : {27, 34, 41}) {
+    bad_hash_dict dict;
+    for (int64_t i = 0; i < init_dict_size; ++i) {
+      dict[i] = i + 1;
     }
-  }
 
-  i = 0;
-  for (auto entry: dict) {
-    TORCH_INTERNAL_ASSERT(order[i++] == entry.first);
+    int64_t i = 0;
+    for (auto entry : dict) {
+      TORCH_INTERNAL_ASSERT(entry.first == i && entry.second == i + 1);
+      ++i;
+    }
+
+    // erase a few entries;
+    std::unordered_set<int64_t> erase_set = {0, 2, 9};
+    for (auto erase : erase_set) {
+      dict.erase(erase);
+    }
+
+    // erase a few entries via iterator
+    auto begin = dict.begin();
+    for (size_t i = 0; i < 10; ++i) {
+      begin++;
+    }
+    auto end = begin;
+    for (size_t i = 0; i < 7; ++i) {
+      erase_set.insert(end->first);
+      end++;
+    }
+    dict.erase(begin, end);
+
+    std::vector<int64_t> order;
+    for (int64_t i = 0; i < init_dict_size; ++i) {
+      if (!erase_set.count(i)) {
+        order.push_back(i);
+      }
+    }
+
+    i = 0;
+    for (auto entry : dict) {
+      TORCH_INTERNAL_ASSERT(dict[entry.first] == entry.second);
+      TORCH_INTERNAL_ASSERT(dict[entry.first] == order[i] + 1);
+      TORCH_INTERNAL_ASSERT(order[i] == entry.first);
+      i += 1;
+    }
+    TORCH_INTERNAL_ASSERT(dict.size() == order.size());
   }
 }
 

@@ -23,6 +23,8 @@
 #include <iterator>
 #include <utility>
 #include <type_traits>
+#include <assert.h>
+#include <c10/util/flat_hash_map.h>
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
@@ -37,6 +39,7 @@
 
 namespace ska_ordered
 {
+
 struct prime_number_hash_policy;
 struct power_of_two_hash_policy;
 struct fibonacci_hash_policy;
@@ -675,6 +678,12 @@ public:
             rehash(required_buckets);
     }
 
+    void replace_linked_list_position(EntryPointer to_be_replaced, EntryPointer new_node) {
+      remove_from_list(new_node);
+      insert_after(new_node, to_be_replaced->prev);
+      remove_from_list(to_be_replaced);
+    }
+
     // the return value is a type that can be converted to an iterator
     // the reason for doing this is that it's not free to find the
     // iterator pointing at the next element. if you care about the
@@ -692,12 +701,7 @@ public:
             // same hash, the other entries get moved to their desired position by
             // reinserting.
             current->emplace(next->distance_from_desired - 1, std::move(next->value));
-            // the value of "current" is now "next", so remove it from the list,
-            // insert it where "next" was, then remove the now-obsolete next entry
-            // from the list
-            remove_from_list(current);
-            insert_after(current, next->prev);
-            remove_from_list(next);
+            replace_linked_list_position(next, current);
             next->destroy_value();
         }
         return { to_erase.current };
@@ -708,32 +712,53 @@ public:
         if (begin_it == end_it)
             return { begin_it.current };
 
+        // whenever an entry is removed and there are other entries with the same
+        // hash, the other entries must get moved to their desired position.
+        // any reference to a moved entry is invalidated.
+        // here, we iterate through the range and collect all of the entries
+        // that we need to remove. if we invalidate an entry, we update it
+        // to its new location.
+
+        ska::flat_hash_map<EntryPointer,size_t> ptr_to_order;
+        std::vector<EntryPointer> removal_order;
+
+        size_t num_to_remove = 0;
         for (EntryPointer it = begin_it.current, end = end_it.current; it != end;) {
-          auto next = it->next;
-          remove_from_list(it);
-          it->destroy_value();
-          it = next;
+          ptr_to_order[it] = num_to_remove;
+          removal_order.push_back(it);
+          it = it->next;
+          num_to_remove++;
+        }
+        // since we return end, we need to make sure it gets updated if its invalidated
+        ptr_to_order[end_it.current] = num_to_remove + 1;
+        removal_order.push_back(end_it.current);
+
+        for (size_t index = 0; index < num_to_remove; ++index) {
+          EntryPointer current = removal_order[index];
+          remove_from_list(current);
+          current->destroy_value();
+          --num_elements;
+
+          for (EntryPointer next = current + ptrdiff_t(1); !next->is_at_desired_position(); ++current, ++next)
+            {
+              current->emplace(next->distance_from_desired - 1, std::move(next->value));
+              replace_linked_list_position(next, current);
+              next->destroy_value();
+
+              auto removal_index = ptr_to_order.find(next);
+              // we are invalidating an entry we haven't iterated over yet
+              if (removal_index != ptr_to_order.end() && removal_index->second > index) {
+                removal_order[removal_index->second] = current;
+                ptr_to_order[current] = removal_index->second;
+                ptr_to_order.erase(next);
+              }
+          }
         }
 
         if (end_it == this->end())
             return this->end();
-        ptrdiff_t num_to_move = std::min(static_cast<ptrdiff_t>(end_it.current->distance_from_desired), end_it.current - begin_it.current);
-        EntryPointer to_return = end_it.current - num_to_move;
 
-        for (EntryPointer it = end_it.current; !it->is_at_desired_position();)
-        {
-            // see description in erase above
-            auto position = it->prev;
-            EntryPointer target = it - num_to_move;
-            target->emplace(it->distance_from_desired - num_to_move, std::move(it->value));
-            remove_from_list(target);
-            insert_after(target, position);
-            remove_from_list(it);
-            it->destroy_value();
-            ++it;
-            num_to_move = std::min(static_cast<ptrdiff_t>(it->distance_from_desired), num_to_move);
-        }
-        return { to_return };
+        return { removal_order[num_to_remove] };
     }
 
     uint64_t erase(const FindKey & key)
@@ -750,8 +775,10 @@ public:
 
     void clear()
     {
-        for (EntryPointer it = sentinel->next; it != sentinel; it = it->next) {
-          it->destroy_value();
+        for (EntryPointer it = entries, end = it + static_cast<ptrdiff_t>(num_slots_minus_one + max_lookups); it != end; ++it)
+        {
+            if (it->has_value())
+                it->destroy_value();
         }
         reset_list();
         num_elements = 0;
