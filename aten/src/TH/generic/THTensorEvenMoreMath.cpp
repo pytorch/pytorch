@@ -78,6 +78,9 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 
 void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
 {
+#ifdef BUILD_NAMEDTENSOR
+  at::NoNamesGuard guard;
+#endif
   ptrdiff_t numel = THByteTensor_sumall(mask);
   scalar_t *tensor_data;
 
@@ -102,6 +105,9 @@ void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask
 
 void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *mask)
 {
+#ifdef BUILD_NAMEDTENSOR
+  at::NoNamesGuard guard;
+#endif
   ptrdiff_t numel = THBoolTensor_sumall(mask);
   scalar_t *tensor_data;
 
@@ -148,6 +154,9 @@ void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scal
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 {
+#ifdef BUILD_NAMEDTENSOR
+  at::NoNamesGuard guard;
+#endif
   int64_t tensor_size = THTensor_(nElement)(tensor);
   int tensor_contig = THTensor_(isContiguous)(tensor);
   int mask_contig = THTensor_(isContiguous)(mask);
@@ -174,6 +183,9 @@ void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 
 void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t value)
 {
+#ifdef BUILD_NAMEDTENSOR
+  at::NoNamesGuard guard;
+#endif
   int64_t tensor_size = THTensor_(nElement)(tensor);
   int tensor_contig = THTensor_(isContiguous)(tensor);
   int mask_contig = THTensor_(isContiguous)(mask);
@@ -769,34 +781,6 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
   at::namedinference::check_names_for_dot(tensor, src);
 #endif
   return sum;
-}
-
-void THTensor_(add)(THTensor *r_, THTensor *t, scalar_t value)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(adds)(r__data, t_data, value, r__len););
-  } else {
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data + value;, ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-  }
-}
-
-void THTensor_(sub)(THTensor *r_, THTensor *t, scalar_t value)
-{
-  THTensor_(add)(r_, t, -value);
-}
-
-void THTensor_(add_scaled)(THTensor *r_, THTensor *t, scalar_t value, scalar_t alpha)
-{
-  THTensor_(add)(r_, t, value * alpha);
-}
-
-void THTensor_(sub_scaled)(THTensor *r_, THTensor *t, scalar_t value, scalar_t alpha)
-{
-  THTensor_(add)(r_, t, -value * alpha);
 }
 
 void THTensor_(lshift)(THTensor *r_, THTensor *t, scalar_t value)

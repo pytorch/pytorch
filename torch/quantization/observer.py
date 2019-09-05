@@ -1,10 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import math
+import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
-import warnings
 
+import math
 import torch
 import torch.nn as nn
 from torch._jit_internal import Optional
@@ -47,9 +47,18 @@ class ObserverBase(ABC, nn.Module):
         pass
 
     def _calculate_qparams(self, min_val, max_val):
+        # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
         """
         Given min and max values, this function calculates quantization parameters
         """
+
+        if max_val is None or min_val is None:
+            warnings.warn(
+                "must run observer before calling calculate_qparams.\
+                                    Returning default scale and zero point "
+            )
+            return torch.tensor([1.0]), torch.tensor([0])
+
         assert min_val <= max_val, "min {} should be less than max {}".format(
             min_val, max_val
         )
@@ -58,15 +67,6 @@ class ObserverBase(ABC, nn.Module):
             qmin, qmax = -128, 127
         else:
             qmin, qmax = 0, 255
-        # We pull these out so that TorchScript optional type refinement works.
-        # We may be able to remove this in the future if TorchScript supports that
-        # feature on attributes
-        min_val = self.min_val
-        max_val = self.max_val
-        if max_val is None or min_val is None:
-            warnings.warn("must run observer before calling calculate_qparams.\
-                                    Returning default scale and zero point ")
-            return torch.tensor([1.0]), torch.tensor([0])
         max_val, min_val = float(max_val), float(min_val)
         min_val = min(0.0, min_val)
         max_val = max(0.0, max_val)
@@ -123,14 +123,7 @@ class MinMaxObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        # We pull these out so that TorchScript optional type refinement works.
-        # We may be able to remove this in the future if TorchScript supports that
-        # feature on attributes
-        min_val = self.min_val
-        max_val = self.max_val
-        if max_val is None or min_val is None:
-            raise Exception("must run observer before calling calculate_qparams!")
-        return self._calculate_qparams(min_val, max_val)
+        return self._calculate_qparams(self.min_val, self.max_val)
 
     @torch.jit.export
     def extra_repr(self):
@@ -143,12 +136,22 @@ class HistogramObserver(ObserverBase):
     min/max values. calculate_qparams will calculate scale and zero_point
     """
 
+    __annotations__ = {
+        "min_val": Optional[torch.Tensor],
+        "max_val": Optional[torch.Tensor],
+        "relaxed_min": torch.Tensor,
+        "relaxed_max": torch.Tensor,
+        "histogram": Optional[torch.Tensor],
+    }
+
     def __init__(self, bins=2048, **kwargs):
         super(HistogramObserver, self).__init__(**kwargs)
         self.bins = bins
         self.histogram = None
         self.min_val = None
         self.max_val = None
+        self.relaxed_min = torch.tensor([0])
+        self.relaxed_max = torch.tensor([0])
 
     @staticmethod
     def _get_norm(delta_begin, delta_end, density, norm_type):
@@ -358,21 +361,34 @@ class HistogramObserver(ObserverBase):
         if self.min_val is None or self.max_val is None or self.histogram is None:
             self.min_val = torch.min(x)
             self.max_val = torch.max(x)
-            range = self.max_val - self.min_val
-            self.relaxed_min = self.min_val - 0.5 * range
-            self.relaxed_max = self.max_val + 0.5 * range
-            self.histogram = torch.histc(
-                x, self.bins, min=self.relaxed_min, max=self.relaxed_max
-            )
-            self.min_val = self.relaxed_min
-            self.max_val = self.relaxed_max
+            self.histogram = torch.histc(x, self.bins)
         else:
             new_min = torch.min(x)
             new_max = torch.max(x)
-            new_histogram = torch.histc(
-                x, self.bins, min=self.relaxed_min, max=self.relaxed_max
+            new_histogram = torch.histc(x, self.bins)
+            # combine the existing histogram and new histogram into 1 histogram
+            combined_histogram = torch.zeros_like(self.histogram)
+            combined_min = torch.min(new_min, self.min_val)
+            combined_max = torch.max(new_max, self.max_val)
+            self._combine_histograms(
+                combined_histogram,
+                combined_min.item(),
+                combined_max.item(),
+                self.histogram,
+                self.min_val.item(),
+                self.max_val.item(),
             )
-            self.histogram = new_histogram + self.histogram
+            self._combine_histograms(
+                combined_histogram,
+                combined_min.item(),
+                combined_max.item(),
+                new_histogram,
+                new_min.item(),
+                new_max.item(),
+            )
+            self.histogram = combined_histogram
+            self.min_val = combined_min
+            self.max_val = combined_max
 
     def calculate_qparams(self, norm_type="L2", search_type="NonLinear", **kwargs):
         if self.histogram is None:
