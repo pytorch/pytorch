@@ -396,12 +396,6 @@ def get_selected_tests(options):
 
 def main():
     options = parse_args()
-    try:
-        from hypothesis import settings
-        settings.register_profile('ci', derandomize=True)
-        settings.load_profile('ci')
-    except ImportError:
-        print('Fail to import hypothesis in run_test, tests are not derandomized')
     executable = get_executable_command(options)  # this is a list
     print_to_stderr('Test executor: {}'.format(executable))
     test_directory = os.path.dirname(os.path.abspath(__file__))
