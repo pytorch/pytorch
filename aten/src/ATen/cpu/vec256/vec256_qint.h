@@ -39,6 +39,7 @@ namespace {
 
 #if defined(__AVX__) && !defined(_MSC_VER)
 
+#if defined(__AVX2__) && defined(__FMA__)
 template <typename T>
 __m256i pack_saturate_and_clamp(
     __m256i first,
@@ -69,6 +70,7 @@ __m256i pack_saturate_and_clamp<uint8_t>(
       _mm256_set1_epi8(min_val),
       _mm256_min_epu8(packed_and_sat, _mm256_set1_epi8(max_val)));
 }
+#endif
 
 template <typename T>
 inline void __attribute__((always_inline)) QuantizeAvx2(

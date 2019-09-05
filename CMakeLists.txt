@@ -83,25 +83,6 @@ else ()
   set(CPU_INTEL OFF)
 endif ()
 
-# For Windows, turn USE_DISTRIBUTED off by default.
-# It is not tested and likely won't work without additional changes.
-if(MSVC)
-  set(USE_DISTRIBUTED OFF CACHE STRING "Use distributed")
-endif()
-
-# For macOS, turn USE_DISTRIBUTED off by default.
-# Gloo depends on libuv, which has to be installed by the user first.
-# Therefore, the user should explicitly specify -DUSE_DISTRIBUTED=1
-# to build torch.distributed, after installing the dependency.
-if(APPLE)
-  set(USE_DISTRIBUTED OFF CACHE STRING "Use distributed")
-  # If USE_DISTRIBUTED is set, also set USE_LIBUV=1 for Gloo.
-  # It is the only transport that can be built on macOS.
-  if(USE_DISTRIBUTED)
-    set(USE_LIBUV ON CACHE STRING "")
-  endif()
-endif()
-
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
@@ -283,6 +264,9 @@ if (MSVC)
 
   # Try harder
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
+
+  # Turning off USE_DISTRIBUTED on default
+  set(USE_DISTRIBUTED OFF)
 endif(MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
