@@ -728,6 +728,12 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
                         opset_version=11)
 
+    def test_baddbmm(self):
+        x = torch.randn(10, 3, 5)
+        b1 = torch.randn(10, 3, 4)
+        b2 = torch.randn(10, 4, 5)
+        self.assertONNX(lambda x, b1, b2: torch.baddbmm(x, b1, b2), (x, b1, b2))
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

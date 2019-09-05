@@ -792,6 +792,16 @@ class TestONNXRuntime(unittest.TestCase):
         model = CumSum()
         self.run_test(model, x)
 
+    def test_baddbmm(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input, batch1, batch2):
+                return torch.baddbmm(input, batch1, batch2, alpha=torch.tensor(5), beta=3.5)
+        x = torch.randn(10, 3, 5)
+        batch1 = torch.randn(10, 3, 4)
+        batch2 = torch.randn(10, 4, 5)
+        model = MyModule()
+        self.run_test(model, (x, batch1, batch2))
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)

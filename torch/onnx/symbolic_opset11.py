@@ -11,7 +11,7 @@ from torch.onnx.symbolic_helper import _black_list_in_opset
 # This file exports ONNX ops for opset 11
 
 black_listed_operators = [
-    "eq", "ne", "scatter", "clamp", "clamp_min", "clamp_max", "sort", "topk", "hardtanh"
+    "scatter", "clamp", "clamp_min", "clamp_max", "sort", "topk", "hardtanh"
 ]
 
 for black_listed_op in black_listed_operators:
