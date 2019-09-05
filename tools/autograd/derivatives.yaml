@@ -387,7 +387,7 @@
   self: not_implemented("histc")
 
 - name: index(Tensor self, Tensor?[] indices) -> Tensor
-  self: index_backward(self, indices, grad)
+  self: index_backward(zeros_like(self), indices, grad)
   indices: TensorList()
 
 - name: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
