@@ -55,6 +55,7 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
   return out_impl(self, self);
 }
 
+// Ops use unary_op_impl and unary_op_impl_ need go through at:: dispatch instead of directly dispatch to at::native.
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
 Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not_out); }
