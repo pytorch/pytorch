@@ -43,11 +43,11 @@ class ProcessGroupAgent : public RpcAgent {
 
   const WorkerId& getWorkerId(const std::string& workerName) const override;
 
+  const WorkerId& getWorkerId(worker_id_t id) const override;
+
   void join() override;
 
   void sync() override;
-
-  int16_t getWorkerId() override;
 
  protected:
   // This method wraps the destination information and the message into a
