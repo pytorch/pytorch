@@ -741,7 +741,7 @@ RegisterOperators reg(
            auto ivalue = pop(stack);
 
            // Pickle the tensor
-           auto data = torch::save(ivalue);
+           auto data = torch::pickle_save(ivalue);
 
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);

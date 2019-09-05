@@ -432,13 +432,34 @@ void Pickler::pushDouble(double value) {
   }
 }
 
+void Pickler::pushLong(const std::string& data) {
+  uint64_t size = data.size();
+
+  if (size <= std::numeric_limits<uint8_t>::max()) {
+    push<PickleOpCode>(PickleOpCode::LONG1);
+    push<uint8_t>(size);
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        data.size() > std::numeric_limits<uint32_t>::max(),
+        "Cannot pickle a long with a size larger than 4 bytes")
+    push<PickleOpCode>(PickleOpCode::LONG1);
+    push<uint64_t>(size);
+  }
+  pushBytes(data);
+}
+
+
 void Pickler::pushDict(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
+
+  auto dict_items = iterationOrder(ivalue.toGenericDict());
+  if (dict_items.size() == 0) {
+    return;
+  }
 
   push<PickleOpCode>(PickleOpCode::MARK);
 
   // Sort the dict for deterministic keys
-  auto dict_items = iterationOrder(ivalue.toGenericDict());
   for (const auto& pair : dict_items) {
     pushIValue(pair.first);
     pushIValue(pair.second);

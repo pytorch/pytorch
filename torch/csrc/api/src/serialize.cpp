@@ -8,25 +8,35 @@ namespace torch {
 
 // These are both defined in `torch/serialization.py`
 const char* torch_save_magic_number =
-    "\x0a\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19";
-const char* protocol_version = "\xe9\x03";
+    "\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19";
+uint16_t protocol_version = 0x1001;
 
-std::vector<char> save(const at::IValue& ivalue) {
+std::vector<char> pickle_save(const at::IValue& ivalue) {
   std::vector<char> data;
 
   auto writer = [&](const char* bytes, size_t len) {
     data.insert(data.end(), bytes, bytes + len);
   };
 
+  jit::Pickler pickler(std::move(writer), /*tensor_table=*/nullptr);
   // Output data to match torch.save, see torch/serialization.py for details
   // Magic number (0x1950a86a20f9469cfc6c)
-  jit::unsafe_pickle(writer, jit::PickleOpCode::LONG1, torch_save_magic_number);
+  pickler.protocol();
+  pickler.pushLong(torch_save_magic_number);
+  pickler.stop();
 
   // Protocol Version (1001)
-  jit::unsafe_pickle(writer, jit::PickleOpCode::BININT2, protocol_version);
+  pickler.protocol();
+  pickler.pushInt(1001);
+  pickler.stop();
+
   // sys_info, this isn't actually used in de-serialization so we can leave this
   // one empty
-  jit::unsafe_pickle(writer, jit::PickleOpCode::EMPTY_DICT, "");
+  pickler.protocol();
+  IValue dict_ivalue =
+      c10::impl::GenericDict(c10::impl::deprecatedUntypedDict());
+  pickler.pushDict(dict_ivalue);
+  pickler.stop();
 
   std::vector<at::Tensor> tensors;
   jit::pickle(writer, ivalue, &tensors);
@@ -35,7 +45,7 @@ std::vector<char> save(const at::IValue& ivalue) {
   keys.reserve(tensors.size());
   std::vector<TypePtr> types(tensors.size(), StringType::get());
 
-  // TODO: Unify this with the version in the pickler
+  // Each unique storage should only be saved 1 time
   std::unordered_set<const void*> memoized_storages;
 
   for (size_t i = 0; i < tensors.size(); i++) {
