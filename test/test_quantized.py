@@ -9,10 +9,10 @@ from torch.nn.modules.utils import _pair
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
+from hypothesis_utils import no_deadline
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams
-from common_quantization import no_deadline
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction

@@ -128,10 +128,10 @@ class Conv2d(torch.nn.Module):
         if bias is not None:
             bias = torch.quantize_linear(bias.dequantize(), self.weight_scale * input.q_scale(), 0, torch.qint32)
         output = ops.quantized.conv2d(input.permute([0, 2, 3, 1]),
-                                             self._packed_weight, bias,
-                                             self.stride, self.padding,
-                                             self.dilation, self.groups,
-                                             self.scale, self.zero_point)
+                                      self._packed_weight, bias,
+                                      self.stride, self.padding,
+                                      self.dilation, self.groups,
+                                      self.scale, self.zero_point)
         return output.permute([0, 3, 1, 2])
 
     # ===== Serialization methods =====

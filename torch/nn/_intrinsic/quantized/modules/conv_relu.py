@@ -29,10 +29,10 @@ class ConvReLU2d(nnq.Conv2d):
 
     def set_weight(self, w):
         self._packed_weight = torch.ops.quantized.conv_prepack(w.permute([0, 2, 3, 1]),
-                                                                      self.stride,
-                                                                      self.padding,
-                                                                      self.dilation,
-                                                                      self.groups)
+                                                               self.stride,
+                                                               self.padding,
+                                                               self.dilation,
+                                                               self.groups)
         self.weight_scale = w.q_scale()
 
     def forward(self, input):
@@ -46,10 +46,10 @@ class ConvReLU2d(nnq.Conv2d):
         if bias is not None:
             bias = torch.quantize_linear(bias.dequantize(), float(self.weight_scale) * input.q_scale(), 0, torch.qint32)
         output = torch.ops.quantized.conv2d_relu(input.permute([0, 2, 3, 1]),
-                                                        self._packed_weight, bias,
-                                                        self.stride, self.padding,
-                                                        self.dilation, self.groups,
-                                                        float(self.scale), int(self.zero_point))
+                                                 self._packed_weight, bias,
+                                                 self.stride, self.padding,
+                                                 self.dilation, self.groups,
+                                                 float(self.scale), int(self.zero_point))
         return output.permute([0, 3, 1, 2])
 
     @classmethod
