@@ -4,7 +4,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 namespace {
-py::object module_;
 py::object runUDFFunction_;
 py::object loadResultFunction_;
 } // anonymous namespace
@@ -12,6 +11,7 @@ py::object loadResultFunction_;
 namespace PythonRpcHandler {
 void init() {
   AutoGIL ag;
+  py::object module_;
   if (module_ == nullptr) {
     module_ = py::module::import("torch.distributed.internal_rpc_utils");
   }
