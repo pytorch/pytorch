@@ -7,9 +7,9 @@ namespace at {
 
 namespace {
   DeviceType sparseTensorIdToDeviceType(TensorTypeId type_id) {
-    if (type_id == SparseCPUTensorId()) {
+    if (type_id == TensorTypeId::SparseCPUTensorId) {
       return kCPU;
-    } else if (type_id == SparseCUDATensorId()) {
+    } else if (type_id == TensorTypeId::SparseCUDATensorId) {
       return kCUDA;
     } else {
       AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", type_id);
@@ -90,7 +90,7 @@ int64_t SparseTensorImpl::storage_offset() const {
   AT_ERROR("sparse tensors do not have storage");
 }
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
-  TORCH_CHECK(allow_tensor_metadata_change(), "set_indices_and_values_unsafe is not allowed on Tensor created from .data or .detach()");
+  TORCH_CHECK(allow_tensor_metadata_change(), "set_indices_and_values_unsafe ", err_msg_tensor_metadata_change_not_allowed);
   AT_ASSERT(!indices.is_variable() && !values.is_variable());  // They should be plain tensors!  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
 
   TORCH_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());

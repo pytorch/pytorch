@@ -118,20 +118,25 @@ struct ControlFlowLoadStores {
     auto loop_vars = addControlFlowLoadStores(body_block);
 
     for (const auto& name : loop_vars->definedVariables()) {
-      // we require that the variable is defined outside the loop to be emitted,
-      // and we do not refine the type of the parent variable since the loop may
-      // not be entered.
+      // if the variable local to the loop body, then
+      // we do not need a loop carried variable for it
       auto parent_type = environment_stack->findInAnyFrame(name);
       if (!parent_type) {
         continue;
       }
 
+      // since the loop may execute 0 or many times, the output types
+      // of the loop and the input loop carried dependencies are conservatively
+      // the union of the output of the body and the input to the loop
+      auto block_type = loop_vars->findInThisFrame(name);
+      auto unified_type = unifyTypes(parent_type, block_type).value();
+
       // Insert a store at the beginning of the loop block, so that all
       // loads of the variable will use the loop carried value
       addNodeInput(n, parent_type, name);
-      addBlockInput(body_block, parent_type, name);
-      addBlockOutput(body_block, parent_type, name);
-      addNodeOutput(n, parent_type, name);
+      addBlockInput(body_block, unified_type, name);
+      addBlockOutput(body_block, block_type, name);
+      addNodeOutput(n, unified_type, name);
     }
   }
 

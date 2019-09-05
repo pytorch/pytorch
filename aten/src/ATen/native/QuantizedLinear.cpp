@@ -25,14 +25,14 @@ namespace caffe2 {
 CAFFE_KNOWN_TYPE(fbgemm::PackBMatrix<int8_t>);
 CAFFE_KNOWN_TYPE(fbgemm::PackedGemmMatrixFP16);
 #endif // USE_FBGEMM
-}
+} // namespace caffe2
 
 namespace at {
 namespace native {
 
 #ifdef USE_FBGEMM
 
-Tensor fbgemm_linear_int8_weight(
+Tensor fbgemm_linear_int8_weight_fp32_activation(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& packed,
@@ -46,7 +46,7 @@ Tensor fbgemm_linear_int8_weight(
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
 
   auto input_contig = input.contiguous();
-  auto* input_ptr = input_contig.data<float>();
+  auto* input_ptr = input_contig.data_ptr<float>();
 
   TORCH_CHECK(input.dim() >= 2);
   int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
@@ -70,13 +70,14 @@ Tensor fbgemm_linear_int8_weight(
   // Input tensor is quantized as 8-bit unsigned values
   static constexpr int precision = 8;
   static constexpr bool is_signed = false;
+  static constexpr int bound = (1 << (precision - 1));
 
   // Calculate scale and zero point for quantization of input tensor
   auto q_params = fbgemm::ChooseQuantizationParams(
       /*min=*/x_min,
       /*max=*/x_max,
-      /*qmin=*/is_signed ? -(1 << (precision - 1)) : 0,
-      /*qmax=*/is_signed ? ((1 << (precision - 1)) - 1) : (1 << precision) - 1,
+      /*qmin=*/is_signed ? -bound : 0,
+      /*qmax=*/is_signed ? (bound - 1) : (1 << precision) - 1,
       /*preserve_sparsity=*/false);
 
   q_params.precision = precision;
@@ -119,19 +120,20 @@ Tensor fbgemm_linear_int8_weight(
   //  1) Add in row and column offsets to the rows and columns, respectively
   //  2) Dequantize the results into floating point
   //  3) Add in the bias term
-  fbgemm::ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
+  fbgemm::ReQuantizeForFloat</*FUSE_RELU*/false> outputProcObj(
       /*nextop=*/doNothingObj,
       /*Aq_scale=*/q_params.scale,
       /*Bq_scale=*/&weight_scale_float,
       /*Aq_zero_point=*/q_params.zero_point,
       /*Bq_zero_point=*/&weight_zero_point_int32,
       /*row_offsets=*/packA.getRowOffsetBuffer(),
-      /*col_offsets=*/col_offsets.data<int32_t>(),
-      /*bias=*/bias_contig.data<float>(),
-      /*ncol=*/N);
+      /*col_offsets=*/col_offsets.data_ptr<int32_t>(),
+      /*bias=*/bias_contig.data_ptr<float>(),
+      /*nCol=*/N);
 
   // Allocate output Tensor and a buffer for fbgemmPacked to use
-  auto output = at::zeros({M, N}, bias.options().dtype(at::kFloat));
+  auto output = at::zeros(
+      {M, N}, bias.options().dtype(at::kFloat));
   auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
   // Pull out the PackBMatrix instance from the owning tensor
@@ -141,8 +143,8 @@ Tensor fbgemm_linear_int8_weight(
   fbgemm::fbgemmPacked(
       /*packA=*/packA,
       /*packB=*/packB,
-      /*C=*/output.data<float>(),
-      /*C_buffer=*/buffer.data<int32_t>(),
+      /*C=*/output.data_ptr<float>(),
+      /*C_buffer=*/buffer.data_ptr<int32_t>(),
       /*ldc=*/N,
       /*outProcess=*/outputProcObj,
       /*thread_id=*/0,
@@ -155,11 +157,34 @@ Tensor fbgemm_linear_int8_weight(
   return output.view(out_sizes);
 }
 
+Tensor fbgemm_linear_int8_weight(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& packed,
+    const Tensor& col_offsets,
+    Scalar weight_scale,
+    Scalar weight_zero_point,
+    const Tensor& bias) {
+  // Replace after https://github.com/pytorch/pytorch/issues/24354 is fixed
+  // TORCH_WARN(
+  //     "fbgemm_linear_int8_weight will be deprecated soon."
+  //     "Please use fbgemm_linear_int8_weight_fp32_activation instead.");
+
+  return at::native::fbgemm_linear_int8_weight_fp32_activation(
+      input,
+      weight,
+      packed,
+      col_offsets,
+      weight_scale,
+      weight_zero_point,
+      bias);
+}
+
 namespace {
 // Calculate the column offsets
 // Note this includes the sum of the columns as well as the scalar term
-// B_zero_point * K, whereas the row_offsets created by PackAWithQuantRowOffset
-// is only the sum of the A rows.
+// B_zero_point * K, whereas the row_offsets created by
+// PackAWithQuantRowOffset is only the sum of the A rows.
 void calc_col_offsets_transpose(
     int K,
     int N,
@@ -187,7 +212,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   // Calculate weight statistics
   float w_min, w_max;
   fbgemm::FindMinMax(
-      /*m=*/weight_contig.data<float>(),
+      /*m=*/weight_contig.data_ptr<float>(),
       /*min=*/&w_min,
       /*max=*/&w_max,
       /*len=*/weight_contig.numel());
@@ -195,19 +220,20 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   // Choose parameters for quantizing the weight as 8-bit signed integer
   static constexpr bool is_signed = true;
   static constexpr int precision = 8;
+  static constexpr int bound = (1 << (precision - 1));
   auto q_params = fbgemm::ChooseQuantizationParams(
       /*min=*/w_min,
       /*max=*/w_max,
-      /*qmin=*/is_signed ? -(1 << (precision - 1)) : 0,
-      /*qmax=*/is_signed ? ((1 << (precision - 1)) - 1) : (1 << precision) - 1,
+      /*qmin=*/is_signed ? -bound : 0,
+      /*qmax=*/is_signed ? (bound - 1) : (1 << precision) - 1,
       /*preserve_sparsity=*/false);
 
   q_params.precision = precision;
 
   auto quantized = at::zeros_like(weight_contig).to(at::kChar).contiguous();
   fbgemm::Quantize<int8_t>(
-      /*src=*/weight_contig.data<float>(),
-      /*dst=*/quantized.data<int8_t>(),
+      /*src=*/weight_contig.data_ptr<float>(),
+      /*dst=*/quantized.data_ptr<int8_t>(),
       /*len=*/weight_contig.numel(),
       /*qparams=*/q_params);
 
@@ -218,9 +244,9 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   calc_col_offsets_transpose(
       /*K=*/quantized.size(1),
       /*N=*/quantized.size(0),
-      /*Bint8=*/quantized.data<int8_t>(),
+      /*Bint8=*/quantized.data_ptr<int8_t>(),
       /*B_zero_point=*/q_params.zero_point,
-      /*col_offsets=*/col_offsets.data<int32_t>());
+      /*col_offsets=*/col_offsets.data_ptr<int32_t>());
 
   return std::make_tuple(
       quantized, col_offsets, q_params.scale, q_params.zero_point);
@@ -230,16 +256,15 @@ bool fbgemm_is_cpu_supported() {
   return fbgemm::fbgemmSupportedCPU();
 }
 
-Tensor fbgemm_pack_quantized_matrix(
-    const Tensor& weight,
-    int64_t K,
-    int64_t N) {
+Tensor fbgemm_pack_quantized_matrix(const Tensor& weight) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
+  int64_t K = weight.size(1);
+  int64_t N = weight.size(0);
   auto weight_contig = weight.contiguous();
-  auto contiguous_ptr = weight_contig.data<int8_t>();
+  auto contiguous_ptr = weight_contig.data_ptr<int8_t>();
   auto ptr = guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
       /*trans=*/fbgemm::matrix_op_t::Transpose,
       /*nRow=*/K,
@@ -251,8 +276,19 @@ Tensor fbgemm_pack_quantized_matrix(
   return cpp_custom_type_hack::create(std::move(ptr), weight.options());
 }
 
-float raw_uint16_to_fp16(unsigned short value)
-{
+Tensor fbgemm_pack_quantized_matrix(
+    const Tensor& weight,
+    int64_t K,
+    int64_t N) {
+  // Replace after https://github.com/pytorch/pytorch/issues/24354 is fixed
+  // TORCH_WARN(
+  //     "fbgemm_pack_quantized_matrix(weight, K, N) will be deprecated soon."
+  //     "Please use fbgemm_pack_quantized_matrix(weight) instead.");
+
+  return at::native::fbgemm_pack_quantized_matrix(weight);
+}
+
+float raw_uint16_to_fp16(unsigned short value) {
   // Convert raw 16 bits half precision floating point number
   // to single precision floating point number.
   unsigned short sign_bits = value >> 15;
@@ -284,7 +320,7 @@ bool check_and_saturate(T* element, T MAX) {
 // number will be saturated to max or min representable values by FP16.
 void handle_weights_saturation(float* weight, int64_t length) {
   float FP16_MAX = raw_uint16_to_fp16(0x7BFF);
-  bool  found_out_of_range = false;
+  bool found_out_of_range = false;
 
   for (int i = 0; i < length; ++i) {
     if (check_and_saturate<float>(&weight[i], FP16_MAX)) {
@@ -297,8 +333,7 @@ void handle_weights_saturation(float* weight, int64_t length) {
   }
 }
 
-Tensor fbgemm_pack_gemm_matrix_fp16(
-    const Tensor& weight ) {
+Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -307,9 +342,9 @@ Tensor fbgemm_pack_gemm_matrix_fp16(
   int64_t K = weight.size(1);
   int64_t N = weight.size(0);
   Tensor weight_contig = weight.contiguous();
-  auto weight_contig_ptr = weight_contig.data<float>();
+  auto weight_contig_ptr = weight_contig.data_ptr<float>();
 
-  handle_weights_saturation(weight_contig_ptr, K*N);
+  handle_weights_saturation(weight_contig_ptr, K * N);
 
   // TODO(mingzhe09088):
   // Consider using a functor here in PackedGemmMatrixFP16
@@ -319,15 +354,11 @@ Tensor fbgemm_pack_gemm_matrix_fp16(
   // within this translation unit. It might be very problematic if that tensor
   // flows across dll boundaries.
   auto ptr = guts::make_unique<fbgemm::PackedGemmMatrixFP16>(
-      fbgemm::matrix_op_t::Transpose,
-      K,
-      N,
-      1,
-      weight_contig_ptr);
+      fbgemm::matrix_op_t::Transpose, K, N, 1, weight_contig_ptr);
   return cpp_custom_type_hack::create(std::move(ptr), weight.options());
 }
 
-Tensor fbgemm_linear_fp16_weight(
+Tensor fbgemm_linear_fp16_weight_fp32_activation(
     const Tensor& input,
     const Tensor& packed_weight,
     const Tensor& bias) {
@@ -337,7 +368,7 @@ Tensor fbgemm_linear_fp16_weight(
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
 
   auto input_contig = input.contiguous();
-  auto* input_ptr = input_contig.data<float>();
+  auto* input_ptr = input_contig.data_ptr<float>();
 
   // Pull out the PackedGemmMatrixFP16 instance from the owning tensor
   const fbgemm::PackedGemmMatrixFP16& packed_weight_fp16 =
@@ -358,8 +389,8 @@ Tensor fbgemm_linear_fp16_weight(
       M,
       input_ptr,
       packed_weight_fp16,
-      0.f,
-      output.data<float>());
+      0.0f,
+      output.data_ptr<float>());
 
   // Add bias term
   output.add_(bias);
@@ -369,7 +400,35 @@ Tensor fbgemm_linear_fp16_weight(
   return output.view(out_sizes);
 }
 
+Tensor fbgemm_linear_fp16_weight(
+    const Tensor& input,
+    const Tensor& packed_weight,
+    const Tensor& bias) {
+  // Replace after https://github.com/pytorch/pytorch/issues/24354 is fixed
+  // TORCH_WARN(
+  //     "fbgemm_linear_fp16_weight will be deprecated soon."
+  //     "Please use fbgemm_linear_fp16_weight_fp32_activation instead.");
+
+  return at::native::fbgemm_linear_fp16_weight_fp32_activation(
+      input, packed_weight, bias);
+}
+
 #else // USE_FBGEMM
+
+Tensor fbgemm_linear_int8_weight_fp32_activation(
+    const Tensor& /*input*/,
+    const Tensor& /*weight*/,
+    const Tensor& /*packed*/,
+    const Tensor& /*col_offsets*/,
+    Scalar /*weight_scale*/,
+    Scalar /*weight_zero_point*/,
+    const Tensor& /*bias*/) {
+  // We make a strong guarantee that models using these operators will have the
+  // same numerics across different machines. Therefore, we do not provide a
+  // fallback path and rather fail loudly if we cannot run FBGEMM.
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+}
 
 Tensor fbgemm_linear_int8_weight(
     const Tensor& /*input*/,
@@ -379,6 +438,11 @@ Tensor fbgemm_linear_int8_weight(
     Scalar /*weight_scale*/,
     Scalar /*weight_zero_point*/,
     const Tensor& /*bias*/) {
+  // Replace after https://github.com/pytorch/pytorch/issues/24354 is fixed
+  // TORCH_WARN(
+  //     "fbgemm_linear_int8_weight will be deprecated soon."
+  //     "Please use fbgemm_linear_int8_weight_fp32_activation instead.");
+
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -395,10 +459,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
       false, "This PyTorch installation was not built with FBGEMM operators");
 }
 
-Tensor fbgemm_pack_quantized_matrix(
-    const Tensor& /*input*/,
-    int64_t /*K*/,
-    int64_t /*N*/) {
+Tensor fbgemm_pack_quantized_matrix(const Tensor& /*input*/) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -406,8 +467,34 @@ Tensor fbgemm_pack_quantized_matrix(
       false, "This PyTorch installation was not built with FBGEMM operators");
 }
 
-Tensor fbgemm_pack_gemm_matrix_fp16(
-    const Tensor& weight) {
+Tensor fbgemm_pack_quantized_matrix(
+    const Tensor& /*input*/,
+    int64_t /*K*/,
+    int64_t /*N*/) {
+  // Replace after https://github.com/pytorch/pytorch/issues/24354 is fixed
+  // TORCH_WARN(
+  //     "fbgemm_pack_quantized_matrix(weight, K, N) will be deprecated soon."
+  //     "Please use fbgemm_pack_quantized_matrix(weight) instead.");
+
+  // We make a strong guarantee that models using these operators will have the
+  // same numerics across different machines. Therefore, we do not provide a
+  // fallback path and rather fail loudly if we cannot run FBGEMM.
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+}
+
+Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
+  // We make a strong guarantee that models using these operators will have the
+  // same numerics across different machines. Therefore, we do not provide a
+  // fallback path and rather fail loudly if we cannot run FBGEMM.
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+}
+
+Tensor fbgemm_linear_fp16_weight_fp32_activation(
+    const Tensor& input,
+    const Tensor& packed_weight,
+    const Tensor& bias) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -419,6 +506,11 @@ Tensor fbgemm_linear_fp16_weight(
     const Tensor& input,
     const Tensor& packed_weight,
     const Tensor& bias) {
+  // Replace after https://github.com/pytorch/pytorch/issues/24354 is fixed
+  // TORCH_WARN(
+  //     "fbgemm_linear_fp16_weight will be deprecated soon."
+  //     "Please use fbgemm_linear_fp16_weight_fp32_activation instead.");
+
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -431,5 +523,5 @@ bool fbgemm_is_cpu_supported() {
 }
 
 #endif // USE_FBGEMM
-}
+} // namespace native
 } // namespace at

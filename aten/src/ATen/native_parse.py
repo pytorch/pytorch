@@ -92,6 +92,11 @@ def type_argument_translations(arg):
     elif re.match(r'std::array', t):
         raise RuntimeError("Please use array notation, e.g. bool[3] and not std::array."
                            "See [temp translations] for details.")
+    # Enables Dimname[x] by translating to DimnameList[x]. See [temp translations]
+    elif re.match(r'Dimname\[(\d+)\]', t):
+        match = re.match(r'Dimname\[(\d+)\]', t)
+        t = 'DimnameList'
+        size = int(match.group(1))
 
     # Legacy type sanitization. TODO: Do we really need this?
     if t == 'Generator*':
@@ -383,9 +388,14 @@ def run(paths):
                 else:
                     raise Exception('Expected return declaration')
                 fn_name, arguments = func_decl.split('(', 1)
+                if '.' in fn_name:
+                    fn_name, overload_name = fn_name.split('.', 1)
+                else:
+                    overload_name = ''
                 assert arguments[-1] == ")", "Expecting closing ) for {}".format(func['func'])
                 arguments = arguments[:-1]  # Expect closing )
                 declaration['name'] = func.get('name', fn_name)
+                declaration['overload_name'] = func.get('overload_name', overload_name)
                 declaration['inplace'] = re.search('(^__i|[^_]_$)', fn_name) is not None
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'], func)
                 arguments = parse_arguments(arguments, func.get('variants', []), declaration, return_arguments)

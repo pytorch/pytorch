@@ -474,6 +474,35 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
       } // for each output element
     } // for each row
 
+    // Expose the quantized X, W and Y for debugging if debug outputs are
+    // attached to the operator and caffe2_dnnlowp_force_slow_path flag is set
+    if (OutputSize() == 4) {
+      auto* X_q = OutputTensorCPU_(1);
+      auto* W_q = OutputTensorCPU_(2);
+      auto* Y_q = OutputTensorCPU_(3);
+
+      X_q->Resize(std::vector<std::int64_t>{M, K});
+      W_q->Resize(std::vector<std::int64_t>{N, K});
+      Y_q->Resize(std::vector<std::int64_t>{M, N});
+
+      float* X_q_data = X_q->template mutable_data<float>();
+      float* W_q_data = W_q->template mutable_data<float>();
+      float* Y_q_data = Y_q->template mutable_data<float>();
+
+      size_t X_size = M * K;
+      size_t W_size = N * K;
+      size_t Y_size = M * N;
+      for (int i = 0; i < X_size; i++) {
+        X_q_data[i] = Xdata[i];
+      }
+      for (int i = 0; i < W_size; i++) {
+        W_q_data[i] = Wdata[i];
+      }
+      for (int i = 0; i < Y_size; i++) {
+        Y_q_data[i] = Y_int32_[i];
+      }
+    }
+
 #ifdef DNNLOWP_DETAILED_LOG_IN_SLOW_PATH
     LOG(INFO) << "underflow_cnt " << underflow_cnt << " ("
               << static_cast<float>(underflow_cnt) / (M * N * K) * 100

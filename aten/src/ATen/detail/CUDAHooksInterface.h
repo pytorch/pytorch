@@ -3,7 +3,7 @@
 #include <c10/core/Allocator.h>
 #include <ATen/core/Generator.h>
 #include <c10/util/Exception.h>
-
+#include <c10/util/Optional.h>
 #include <c10/util/Registry.h>
 
 #include <cstddef>
@@ -71,6 +71,10 @@ struct CAFFE2_API CUDAHooksInterface {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
+  virtual bool isPinnedPtr(void* data) const {
+    return false;
+  }
+
   virtual bool hasCUDA() const {
     return false;
   }
@@ -93,6 +97,10 @@ struct CAFFE2_API CUDAHooksInterface {
 
   virtual bool hasPrimaryContext(int64_t device_index) const {
     TORCH_CHECK(false, "Cannot call hasPrimaryContext(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual c10::optional<int64_t> getDevceIndexWithPrimaryContext() const {
+    return c10::nullopt;
   }
 
   virtual Allocator* getPinnedMemoryAllocator() const {

@@ -25,9 +25,8 @@ Tensor quantized_and(Tensor qa, Tensor qb) {
   auto iter = TensorIterator::binary_op(qc, qa, qb);
 
   AT_DISPATCH_QINT_TYPES(qa.scalar_type(), "quantized_and", [&]() {
-    Tensor qc = at::_empty_affine_quantized(qa.sizes(),
-                                            at::device(kCPU).dtype(SCALAR_TYPE),
-                                            scale, zero_point);
+    Tensor qc = at::_empty_affine_quantized(
+        qa.sizes(), at::device(kCPU).dtype(SCALAR_TYPE), scale, zero_point);
     cpu_kernel(iter, [&](scalar_t a_value, scalar_t b_value) -> scalar_t {
       return scalar_t(a_value.val_ & b_value.val_);
     });
@@ -66,19 +65,20 @@ class QuantizedAnd final : public torch::OperatorKernel {
  public:
   Tensor operator(Tensor qa, Tensor qb) {
     return quantized_and(qa, qb);
-  }
-};
+}
+}
+;
 ```
 
-### Step 2a. Register the kernel
+    ## #Step 2a. Register the kernel
 
-The registration is done using the `torch::RegisterOperators().op(...)`.
+        The registration is done using the `torch::RegisterOperators()
+            .op(...)`.
 
-```c++
-static auto registry = torch::RegisterOperators().op(
+```c++ static auto registry = torch::RegisterOperators().op(
     "quantized::and(Tensor qa, Tensor qb) -> Tensor",
-    torch::RegisterOperators::options()
-      .kernel<QuantizedAnd>(QuantizedCPUTensorId()));
+    torch::RegisterOperators::options().kernel<QuantizedAnd>(
+        QuantizedCPUTensorId()));
 ```
 
 The registry takes two arguments:
@@ -124,33 +124,34 @@ The final file `ATen/native/quantized/cpu/qand.cpp` would look as follows
 
 ```c++
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>  // Need that for the `native_functions.yaml`
+#include <ATen/NativeFunctions.h> // Need that for the `native_functions.yaml`
 #include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 
-namespace at { namespace native {
-Tensor quantized_and(Tensor qa, Tensor qb) {
-  // The awesome op implementation...
-  return qc;
-}
-
-namespace {
-class QuantizedAnd final : public torch::OperatorKernel {
- public:
-  Tensor operator(Tensor qa, Tensor qb) {
-    return quantized_and(qa, qb);
+namespace at {
+  namespace native {
+  Tensor quantized_and(Tensor qa, Tensor qb) {
+    // The awesome op implementation...
+    return qc;
   }
-};
 
-static auto registry = torch::RegisterOperators().op(
-    "quantized::and(Tensor qa, Tensor qb) -> Tensor",
-    torch::RegisterOperators::options()
-      .kernel<QuantizedAnd>(QuantizedCPUTensorId()));
+  namespace {
+  class QuantizedAnd final : public torch::OperatorKernel {
+   public:
+    Tensor operator(Tensor qa, Tensor qb) {
+      return quantized_and(qa, qb);
+    }
+  };
 
-}  // namespace
-}}  // namespace at::native
+  static auto registry = torch::RegisterOperators().op(
+      "quantized::and(Tensor qa, Tensor qb) -> Tensor",
+      torch::RegisterOperators::options().kernel<QuantizedAnd>(
+          QuantizedCPUTensorId()));
+
+  } // namespace
+  }}  // namespace at::native
 ```
 
 Notice that we try to keep all the kernels in the anonymous namespace.
@@ -165,7 +166,7 @@ However, if the location is changed, two files must be notified:
 - *`caffe2/aten/TARGETS`* -- You can follow the same example, and add your path in somewhere in that file. Notice in this file we places the path to the quantized source files:
 ```bash
 ATEN_NATIVE_CPP = glob([
-  # ...
+#...
   "src/ATen/native/quantized/**/*.cpp",
 ])
 ```
@@ -190,7 +191,7 @@ To implement the python quantized function using our kernel, you can do the foll
 from torch._ops import ops
 
 def quantized_and(qa, qb):
-  # Notice the schema changed from `quantized::and` to `quantized.and`
+#Notice the schema changed from `quantized::and` to `quantized.and`
   return ops.quantized.and(qa, qb)
 ```
 
@@ -202,41 +203,44 @@ You should not need to use the registered kernels in C++.
 Although **officially not supported**, you can use the following
 
 ```c++
-namespace at { namespace native {
-namespace dispatch_tools {
-/* Creates a stack of inputs consumable by the dispatcher.*/
-template<class... Inputs>
-inline std::vector<torch::IValue> makeStack(Inputs&&... inputs) {
-  return {std::forward<Inputs>(inputs)...};
-}
+namespace at {
+  namespace native {
+  namespace dispatch_tools {
+  /* Creates a stack of inputs consumable by the dispatcher.*/
+  template <class... Inputs>
+  inline std::vector<torch::IValue> makeStack(Inputs&&... inputs) {
+    return {std::forward<Inputs>(inputs)...};
+  }
 
-/* Given an operator handle, calls it using some arguments.*/
-template<class... Args>
-inline std::vector<torch::IValue> callOp(const torch::OperatorHandle& op,
-                                       Args... args) {
-  auto stack = makeStack(std::forward<Args>(args)...);
-  auto kernel = torch::Dispatcher::singleton().lookup(op, &stack);
-  kernel.call(&stack);
-  return stack;
-}
+  /* Given an operator handle, calls it using some arguments.*/
+  template <class... Args>
+  inline std::vector<torch::IValue> callOp(
+      const torch::OperatorHandle& op,
+      Args... args) {
+    auto stack = makeStack(std::forward<Args>(args)...);
+    auto kernel = torch::Dispatcher::singleton().lookup(op, &stack);
+    kernel.call(&stack);
+    return stack;
+  }
 
-/* Finds the op and calls the callOp on it.*/
-template<class... Args>
-inline std::vector<torch::IValue> callOp(const char* func_name,
-                                       const char* overload_name,
-                                       Args... args) {
-  const torch::optional<torch::OperatorHandle> op_handle
-    = torch::Dispatcher::singleton().findSchema(func_name, overload_name);
-  assert(op_handle.has_value());
-  return callOp(op_handle.value(), args...);
-}
-}  // dispatch_tools
+  /* Finds the op and calls the callOp on it.*/
+  template <class... Args>
+  inline std::vector<torch::IValue> callOp(
+      const char* func_name,
+      const char* overload_name,
+      Args... args) {
+    const torch::optional<torch::OperatorHandle> op_handle =
+        torch::Dispatcher::singleton().findSchema(func_name, overload_name);
+    assert(op_handle.has_value());
+    return callOp(op_handle.value(), args...);
+  }
+  } // dispatch_tools
 
-// This is your new function
-Tensor quantized_and(Tensor qa, Tensor qb) {
-  return dispatch_tools::callOp("quantized::and", "", qa, qb);
-}
-}}  // namespace at::native
+  // This is your new function
+  Tensor quantized_and(Tensor qa, Tensor qb) {
+    return dispatch_tools::callOp("quantized::and", "", qa, qb);
+  }
+  }}  // namespace at::native
 ```
 
 The `dispatch_tools` is just a local namespace created for a sake of example.
