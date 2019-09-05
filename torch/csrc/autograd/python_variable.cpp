@@ -24,6 +24,9 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/tracer.h>
+#ifdef BUILD_NAMEDTENSOR
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <ATen/ATen.h>
 #include <pybind11/pybind11.h>
@@ -268,7 +271,9 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
       "can't assign Variable as its own grad");
 
   auto& grad = ((THPVariable*)py_grad)->cdata;
-  bool gradIsSparse = var.dtype() == grad.dtype() && toSparse(tensorTypeIdToBackend(var.type_id())) == tensorTypeIdToBackend(grad.type_id());
+  bool gradIsSparse = (var.dtype() == grad.dtype() &&
+                       var.device().type() == grad.device().type() &&
+                       layout_from_backend(tensorTypeIdToBackend(grad.type_id())) == kSparse);
   THPUtils_assertRet(-1, grad.type() == var.type() || gradIsSparse,
       "assigned grad has data of a different type");
   if (var.is_cuda()) {
@@ -327,14 +332,7 @@ PyObject *THPVariable_get_names(THPVariable *self)
   THPObjectPtr tuple(PyTuple_New(size));
   if (!tuple) throw python_error();
 
-  if (!self->cdata.is_named()) {
-    for (size_t i = 0; i < size; ++i) {
-      PyTuple_SET_ITEM(tuple.get(), i, Py_None);
-    }
-    return tuple.release();
-  }
-
-  const auto dimnames = self->cdata.names().value();
+  const auto dimnames = self->cdata.names();
   for (size_t i = 0; i < size; ++i) {
     PyObject* str = Py_None;
     if (dimnames[i].type() != at::NameType::WILDCARD) {
@@ -345,6 +343,21 @@ PyObject *THPVariable_get_names(THPVariable *self)
   }
   return tuple.release();
   END_HANDLE_TH_ERRORS
+}
+
+int THPVariable_set_names(THPVariable *self, PyObject *names) {
+  HANDLE_TH_ERRORS
+  auto& var = self->cdata;
+  if (names == Py_None) {
+    at::internal_set_names_inplace(var, at::nullopt);
+  } else {
+    THPUtils_assertRet(-1,
+        THPUtils_checkDimnameList(names),
+        "names must either be None or a tuple of dim names");
+    at::internal_set_names_inplace(var, torch::parseDimnameList(names));
+  }
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
 }
 #endif
 
@@ -499,7 +512,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
 #ifdef BUILD_NAMEDTENSOR
-  {"names", (getter)THPVariable_get_names, nullptr, nullptr, nullptr},
+  {"names", (getter)THPVariable_get_names, (setter)THPVariable_set_names, nullptr, nullptr},
 #endif
   {nullptr}
 };

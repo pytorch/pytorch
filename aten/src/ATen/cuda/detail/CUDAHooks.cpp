@@ -2,6 +2,7 @@
 
 #include <ATen/CUDAGenerator.h>
 #include <ATen/Context.h>
+#include <ATen/DeviceGuard.h>
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
@@ -64,6 +65,41 @@ Device CUDAHooks::getDeviceFromPtr(void* data) const {
   return at::cuda::getDeviceFromPtr(data);
 }
 
+bool CUDAHooks::isPinnedPtr(void* data) const {
+  // First check if driver is broken/missing, in which case PyTorch CPU
+  // functionalities should still work, we should report `false` here.
+  if (!CUDAHooks::hasCUDA()) {
+    return false;
+  }
+  // cudaPointerGetAttributes grabs context on the current device, so we set
+  // device to one that already has context, if exists.
+  at::OptionalDeviceGuard device_guard;
+  auto primary_ctx_device_index = CUDAHooks::getDevceIndexWithPrimaryContext();
+  if (primary_ctx_device_index.has_value()) {
+    device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
+  }
+  cudaPointerAttributes attr;
+  cudaError_t err = cudaPointerGetAttributes(&attr, data);
+#ifndef __HIP_PLATFORM_HCC__
+  if (err == cudaErrorInvalidValue) {
+    cudaGetLastError();
+    return false;
+  }
+  AT_CUDA_CHECK(err);
+#else
+  // HIP throws hipErrorUnknown here
+  if (err != cudaSuccess) {
+    cudaGetLastError();
+    return false;
+  }
+#endif
+#if CUDA_VERSION >= 10000
+  return attr.type == cudaMemoryTypeHost;
+#else
+  return attr.memoryType == cudaMemoryTypeHost;
+#endif
+}
+
 bool CUDAHooks::hasCUDA() const {
   return at::cuda::is_available();
 }
@@ -117,11 +153,28 @@ int64_t CUDAHooks::current_device() const {
 
 bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
-              "hasPrimaryContext expects valid device index, but got device_index=", device_index);
+              "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
   unsigned int ctx_flags;
   int ctx_is_active;
   AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
   return ctx_is_active == 1;
+}
+
+c10::optional<int64_t> CUDAHooks::getDevceIndexWithPrimaryContext() const {
+  // check current device first
+  int64_t current_device_index = CUDAHooks::current_device();
+  if (current_device_index >= 0) {
+    if (CUDAHooks::hasPrimaryContext(current_device_index)) {
+      return current_device_index;
+    }
+  }
+  for (int64_t device_index = 0; device_index < CUDAHooks::getNumGPUs(); device_index++) {
+    if (device_index == current_device_index) continue;
+    if (CUDAHooks::hasPrimaryContext(device_index)) {
+      return device_index;
+    }
+  }
+  return c10::nullopt;
 }
 
 Allocator* CUDAHooks::getPinnedMemoryAllocator() const {

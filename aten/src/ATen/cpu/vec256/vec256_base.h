@@ -45,7 +45,7 @@ using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 template <class T>
 struct Vec256 {
 private:
-  T values[32 / sizeof(T)] = {0};
+  T values[32 / sizeof(T)];
 public:
   using value_type = T;
   // Note [constexpr static function to avoid odr-usage compiler bug]
@@ -83,7 +83,7 @@ public:
   static constexpr int size() {
     return 32 / sizeof(T);
   }
-  Vec256() {}
+  Vec256() : values{0} {}
   Vec256(T val) {
     for (int i = 0; i != size(); i++) {
       values[i] = val;
@@ -182,6 +182,13 @@ public:
   }
   Vec256<T> atan() const {
     return map(std::atan);
+  }
+  Vec256<T> atan2(const Vec256<T> &exp) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = std::atan2(values[i], exp[i]);
+    }
+    return ret;
   }
   Vec256<T> erf() const {
     return map(std::erf);
@@ -375,6 +382,30 @@ inline T minimum(const T& a, const T& b) {
   return c;
 }
 
+// To save BC, it will not propagate NaN based on IEEE 754 201X
+template <class T> Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = a[i] < min_vec[i] ? min_vec[i] : (a[i] > max_vec[i] ? max_vec[i] : a[i]);
+  }
+  return c;
+}
+
+template <class T> Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = a[i] > max_vec[i] ? max_vec[i] : a[i];
+  }
+  return c;
+}
+
+template <class T> Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = a[i] < min_vec[i] ? min_vec[i] : a[i];
+  }
+  return c;
+}
 
 #define DEFINE_BITWISE_OP(op)                                               \
 template <class T>                                                          \
@@ -459,7 +490,7 @@ namespace {
   };
 }
 template<typename dst_t, typename src_t>
-Vec256<dst_t> cast(const Vec256<src_t>& src) {
+inline Vec256<dst_t> cast(const Vec256<src_t>& src) {
   return CastImpl<dst_t, src_t>::apply(src);
 }
 
@@ -527,7 +558,7 @@ interleave2(const Vec256<T>& a, const Vec256<T>& b) {
 }
 
 template <typename src_T, typename dst_T>
-void convert(const src_T *src, dst_T *dst, int64_t n) {
+inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 #ifndef _MSC_VER
 # pragma unroll
 #endif

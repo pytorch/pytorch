@@ -13,6 +13,8 @@ DEFINE_DISPATCH(add_stub);
 DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
+DEFINE_DISPATCH(atan2_stub);
+DEFINE_DISPATCH(logical_xor_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
@@ -25,8 +27,8 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   } else if (self.is_sparse()) {
     AT_ERROR("add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
   }
-  at::assert_no_internal_overlap(result, "add");
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
   add_stub(iter.device_type(), iter, alpha);
   return result;
 }
@@ -54,8 +56,8 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
     }
     return at::_sparse_div_zerodim_out(result, self, other);
   }
-  at::assert_no_internal_overlap(result, "div");
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
   div_stub(iter.device_type(), iter);
   return result;
 }
@@ -79,8 +81,8 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (self.is_sparse() || other.is_sparse()) {
     return at::_sparse_mul_out(result, self, other);
   }
-  at::assert_no_internal_overlap(result, "mul");
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
   mul_stub(iter.device_type(), iter);
   return result;
 }
@@ -100,7 +102,18 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
   return native::mul_out(self, self, other);
 }
 
+// Basic checking for all sub functions.
+static inline void sub_check(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(self.scalar_type() != kBool || other.scalar_type() != kBool,
+              "Subtraction, the `-` operator, with two bool tensors is not supported. "
+              "Use the `^` or `logical_xor()` operator instead.")
+  TORCH_CHECK(self.scalar_type() != kBool && other.scalar_type() != kBool,
+              "Subtraction, the `-` operator, with a bool tensor is not supported. "
+              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+}
+
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
+  sub_check(self, other);
   if (other.is_sparse()) {
     if (!self.sizes().equals(other.sizes())) {
       AT_ERROR("sizes do not match");
@@ -114,13 +127,14 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   } else if (self.is_sparse()) {
     AT_ERROR("sub(sparse, dense) is not supported. Use sub(dense, sparse) instead.");
   }
-  at::assert_no_internal_overlap(result, "sub");
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
   sub_stub(iter.device_type(), iter, alpha);
   return result;
 }
 
 Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
+  sub_check(self, other);
   Tensor result;
   if (other.is_sparse()) {
     result = at::empty({0}, self.options());
@@ -137,6 +151,21 @@ Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor rsub(const Tensor& self, const Tensor& other, Scalar alpha) {
   return native::sub(other, self, alpha);
+}
+
+Tensor& atan2_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  atan2_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor atan2(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty_like(self);
+  return native::atan2_out(result, self, other);
+}
+
+Tensor& atan2_(Tensor& self, const Tensor& other) {
+  return native::atan2_out(self, self, other);
 }
 
 // These are still needed because we don't have C++ conversions from number
@@ -183,6 +212,27 @@ Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
+}
+
+Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(self.scalar_type() == kBool && other.scalar_type() == kBool,
+              "logical_xor currently only supports bool tensors.");
+  TORCH_CHECK(result.scalar_type() == kBool,
+              "The output tensor of logical_xor must be a bool tensor.");
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_internal_overlap=*/true);
+  logical_xor_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor logical_xor(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  at::logical_xor_out(result, self, other);
+  return result;
+}
+
+Tensor& logical_xor_(Tensor& self, const Tensor& other) {
+  return native::logical_xor_out(self, self, other);
 }
 
 }

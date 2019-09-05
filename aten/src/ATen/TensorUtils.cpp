@@ -341,7 +341,7 @@ c10::optional<std::vector<int64_t>> computeStride(
   std::vector<int64_t> newstride(newshape.size());
   if (numel == 0) {
     for (int64_t view_d = newshape.size() - 1; view_d >= 0; view_d--) {
-      if (view_d == newshape.size() - 1) {
+      if (view_d == (int64_t)(newshape.size() - 1)) {
         newstride[view_d] = 1;
       } else {
         newstride[view_d] =

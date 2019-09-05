@@ -6,6 +6,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/Optional.h>
+#include <ATen/core/TensorBody.h>
 
 namespace c10 {
 struct IValue;
@@ -20,7 +21,8 @@ using valid_dict_key_types = guts::typelist::typelist<
   int64_t,
   std::string,
   double,
-  bool
+  bool,
+  at::Tensor
 >;
 }
 
@@ -348,6 +350,12 @@ public:
    * having to reallocate or rehash.
    */
   void reserve(size_type count) const;
+
+
+  // private API for now because the return type will change to TypePtr
+  // instead of optional<TypePtr> once types are mandatory.
+  optional<TypePtr> _keyType() const;
+  optional<TypePtr> _valueType() const;
 };
 
 namespace impl {
