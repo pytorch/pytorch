@@ -728,6 +728,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(SortModel(dim), x)
 
+    # TODO: enable for opset 11 when ONNXRuntime version will be updated
+    @skipIfUnsupportedOpsetVersion([11])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_sort_ascending(self):
+        class SortModel(torch.nn.Module):
+            def __init__(self, dim):
+                super(SortModel, self).__init__()
+                self.dim = dim
+
+            def forward(self, x):
+                return torch.sort(x, dim=self.dim, descending=False)
+
+        dim = 1
+        x = torch.randn(3, 4)
+        self.run_test(SortModel(dim), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):

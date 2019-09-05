@@ -58,3 +58,14 @@ def topk(g, self, k, dim, largest, sorted, out=None):
     from torch.onnx.symbolic_opset9 import unsqueeze
     k = unsqueeze(g, k, 0)
     return g.op("TopK", self, k, axis_i=dim, largest_i=largest, sorted_i=sorted, outputs=2)
+
+@parse_args('v', 'i', 'i', 'none')
+def sort(g, self, dim, decending, out=None):
+    if out is not None:
+        _unimplemented("Sort", "Out parameter is not supported for sort")
+    shape_ = g.op("Shape", self)
+    axis = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
+    start = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64))
+    end = g.op("Constant", value_t=torch.tensor(dim + 1, dtype=torch.int64))
+    slice_ = sym_help._slice_helper(g, shape_, axes=axis, starts=start, ends=end, steps=None, dynamic_slice=True)
+    return g.op("TopK", self, slice_, axis_i=dim, largest_i=decending, outputs=2)
