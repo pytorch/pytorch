@@ -39,6 +39,89 @@ namespace {
 
 #if defined(__AVX__) && !defined(_MSC_VER)
 
+template <typename T>
+void QuantizeAvx2(
+    const float* src,
+    typename T::underlying* dst,
+    int len,
+    float scale,
+    int64_t zero_point) {
+#if defined(__AVX2__) && defined(__FMA__)
+  constexpr int VLEN = 8;
+  constexpr float min_val = std::numeric_limits<typename T::underlying>::min();
+  constexpr float max_val = std::numeric_limits<typename T::underlying>::max();
+  std::size_t i = 0;
+  __m256 inverse_scale_v = _mm256_set1_ps(1.f / scale);
+  __m256i shuffle_mask_v = _mm256_set_epi8(
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0x0c,
+      0x08,
+      0x04,
+      0x00,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0x0c,
+      0x08,
+      0x04,
+      0x00);
+  __m256i permute_mask_v =
+      _mm256_set_epi32(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00);
+  for (; i < len / VLEN * VLEN; i += VLEN) {
+    __m256 src_v = _mm256_loadu_ps(src + i);
+    __m256 transformed_v = _mm256_fmadd_ps(
+        src_v, inverse_scale_v, _mm256_set1_ps(zero_point));
+    __m256 clipped_v = _mm256_min_ps(
+        _mm256_max_ps(transformed_v, _mm256_set1_ps(min_val)),
+        _mm256_set1_ps(max_val));
+    __m256i rounded_v = _mm256_cvtps_epi32(clipped_v);
+
+    // An instruction sequence to save 8 32-bit integers as 8 8-bit integers
+    rounded_v = _mm256_shuffle_epi8(rounded_v, shuffle_mask_v);
+    rounded_v = _mm256_permutevar8x32_epi32(rounded_v, permute_mask_v);
+    _mm_storel_epi64(
+        reinterpret_cast<__m128i*>(dst + i), _mm256_castsi256_si128(rounded_v));
+  }
+
+  for (; i < len; ++i) {
+    float transformed = zero_point + src[i] / scale;
+    float clipped = std::min(std::max(transformed, min_val), max_val);
+    // Not exactly the same behavior as the vectorized code.
+    // The vectorized code above always rounds to even in halfway cases
+    // (https://software.intel.com/en-us/node/523819), but std::nearbyint
+    // does the same only when the current rounding mode is FE_TONEAREST.
+    // However, in practice, this should not be a problem because most cases
+    // use the default rounding mode FE_TONEAREST.
+    // Note that we cannot implement the same behavior as the vectorized code
+    // using std::round because it does rounding away from zero in halfway
+    // cases.
+    dst[i] = nearbyint(clipped);
+  }
+#else
+  at::quantize_vec<T>(scale, zero_point, src, reinterpret_cast<T*>(dst), len);
+#endif
+}
+
 template<>
 struct Vec256<c10::qint8> {
     static constexpr int size() {
@@ -122,10 +205,10 @@ struct Vec256<c10::qint8> {
 
 
     static Vec256<c10::qint8> quantize(const float_vec_return_type& rhs, float scale, int32_t zero_point) {
-        Vec256<c10::qint8> retval;
         auto *rhs_data = (float*)rhs.data();
-        at::quantize_vec<c10::qint8>(scale, zero_point,rhs_data, (c10::qint8*)&retval.vals, 32);
-        return retval;
+        int8_t quantized_values[32];
+        QuantizeAvx2<c10::qint8>(rhs_data, quantized_values, 32, scale, zero_point);
+        return Vec256<c10::qint8>::loadu(quantized_values);
     }
 
     Vec256<c10::qint8> maximum(Vec256<c10::qint8> b) const {
@@ -275,10 +358,10 @@ struct Vec256<c10::quint8> {
     }
 
     static Vec256<c10::quint8> quantize(const float_vec_return_type& rhs, float scale, int32_t zero_point) {
-        Vec256<c10::quint8> retval;
         auto *rhs_data = (float*)rhs.data();
-        at::quantize_vec<c10::quint8>(scale, zero_point,rhs_data, (c10::quint8*)&retval.vals, 32);
-        return retval;
+        uint8_t quantized_values[32];
+        QuantizeAvx2<c10::quint8>(rhs_data, quantized_values, 32, scale, zero_point);
+        return Vec256<c10::quint8>::loadu(quantized_values);
     }
 
     Vec256<c10::quint8> maximum(Vec256<c10::quint8> b) const {
