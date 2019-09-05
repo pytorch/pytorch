@@ -345,7 +345,6 @@ jobs:
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"'&& echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
   caffe2_linux_build:
     <<: *caffe2_params
     machine:
@@ -806,7 +805,7 @@ jobs:
           cat "$script"
           source "$script"
 
-
+  
   setup:
     docker:
       - image: circleci/python:3.7.3
@@ -1249,7 +1248,7 @@ jobs:
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
-
+  
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
@@ -3903,3 +3902,4 @@ workflows:
           context: org-member
           requires:
             - setup
+
