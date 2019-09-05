@@ -71,7 +71,7 @@ void atan2_kernel_cuda(TensorIterator& iter) {
 }
 
 void fmod_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "fmod_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "fmod_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return THCNumerics<scalar_t>::fmod(a, b);
     });
