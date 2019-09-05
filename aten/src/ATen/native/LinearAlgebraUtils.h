@@ -197,7 +197,7 @@ static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
   }
 }
 
-static inline std::tuple<Tensor,Tensor> _linear_solve_broadcast_args(const Tensor& arg1, const Tensor& arg2, const char* name) {
+static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2, const char* name) {
   linearSolveCheckInputs(arg1, arg2, name);
 
   // broadcast the batch dimensions of arg1 and arg2.

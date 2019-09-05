@@ -160,9 +160,7 @@ static bool CompareKeys(const std::pair<IValue, IValue>& aWrap,
   } else if (a.isDouble() && b.isDouble()) {
     return a.toDouble() < b.toDouble();
   } else if (a.isTensor() && b.isTensor()) {
-    size_t a_hash = std::hash<at::TensorImpl*>()(a.toTensor().unsafeGetTensorImpl());
-    size_t b_hash = std::hash<at::TensorImpl*>()(b.toTensor().unsafeGetTensorImpl());
-    return a_hash < b_hash;
+    return a.toTensor().unsafeGetTensorImpl() < b.toTensor().unsafeGetTensorImpl();
   }
   AT_ERROR("Illegal dict key");
 }
