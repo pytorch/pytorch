@@ -6,7 +6,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/Optional.h>
-#include <ATen/core/Tensor.h>
+#include <ATen/core/TensorBody.h>
 
 namespace c10 {
 struct IValue;

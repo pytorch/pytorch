@@ -325,8 +325,8 @@ RangeValue::RangeValue(
     throw ErrorReport(loc) << "range expected at least 1 arguments, got 0";
   } else if (inputs.size() == 1) {
     end_ = inputs[0];
-    start_ = g.insertConstant(0, nullptr, loc);
-    step_ = g.insertConstant(1, nullptr, loc);
+    start_ = g.insertConstant(0, loc);
+    step_ = g.insertConstant(1, loc);
     // range() call only contains end, easier to calculate len() and getitem()
     has_only_end_ = true;
   } else if (inputs.size() <= 3) {
@@ -335,7 +335,7 @@ RangeValue::RangeValue(
     if (inputs.size() == 3) {
       step_ = inputs[2];
     } else {
-      step_ = g.insertConstant(1, nullptr, loc);
+      step_ = g.insertConstant(1, loc);
     }
     has_only_end_ = false;
   } else {
