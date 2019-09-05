@@ -169,7 +169,7 @@ class FunctionModifiers(object):
     Used to denote the behavior of a function in TorchScript. See export() and
     ignore() for details.
     """
-    IGNORE_AND_DROP = "ignore (leave as a call to Python, replace with a 'raise' on torch.jit.save)"
+    UNUSED = "unused (ignored and replaced with raising of an exception)"
     IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
     EXPORT = "export (compile this function even if nothing calls it)"
     DEFAULT = "default (compile if called from a exported function / forward)"
@@ -220,22 +220,52 @@ def export(fn):
     return fn
 
 
+def unused(fn):
+    """
+    This decorator indicates to the compiler that a function or method should
+    be ignored and replaced with the raising of an exception. This allows you
+    to leave code in your model that is not yet TorchScript compatible and still
+    export your model.
+
+        Example (using ``@torch.jit.unused`` on a method)::
+
+            import torch
+            import torch.nn as nn
+
+            class MyModule(nn.Module):
+                def __init__(self, use_memory_efficent):
+                    super(MyModule, self).__init__()
+                    self.use_memory_efficent = use_memory_efficent
+
+                @torch.jit.unused
+                def memory_efficient(self, x):
+                    import pdb
+                    pdb.set_trace()
+                    return x + 10
+
+                def forward(self, x):
+                    # Use not-yet-scriptable memory efficient mode
+                    if self.use_memory_efficient:
+                        return self.memory_efficient(x)
+                    else:
+                        return x + 10
+
+            m = torch.jit.script(MyModule(use_memory_efficent=False))
+            m.save("m.pt")
+
+            m = torch.jit.script(MyModule(use_memory_efficient=True))
+            # exception raised
+            m(torch.rand(100))
+    """
+    fn._torchscript_modifier = FunctionModifiers.UNUSED
+    return fn
+
 def ignore(drop=False, **kwargs):
     """
     This decorator indicates to the compiler that a function or method should
-    be ignored and left as a Python function.
-
-    Arguments:
-
-        drop (bool):    When ``False``, calls to this function will
-                        that will be run with ``example_inputs``.
-                        arguments and returns to ``func`` must be tensors
-                        or (possibly nested) tuples that
-                        contain tensors. When ``True``, any calls to
-                        this function from other TorchScript code will be replaced
-                        with a `raise`.
-                        This allows you to leave code in your model that is not
-                        yet TorchScript compatible.
+    be ignored and left as a Python function. This allows you to leave code in
+    your model that is not yet TorchScript compatible. Models with ignored
+    functions cannot be exported; use torch.jit.unused instead.
 
     Example (using ``@torch.jit.ignore`` on a method)::
 
@@ -307,13 +337,16 @@ def ignore(drop=False, **kwargs):
     drop_on_export = kwargs.pop("drop_on_export", None)
     if drop_on_export:
         warnings.warn("ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the drop "
-                      "call on compilation. Use drop=True now. {}", category=DeprecationWarning)
+                      "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
 
         drop = drop_on_export
+    elif drop:
+        warnings.warn("ignore(True) has been deprecated. TorchScript will now drop the drop "
+                      "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
 
     def decorator(fn):
         if drop:
-            fn._torchscript_modifier = FunctionModifiers.IGNORE_AND_DROP
+            fn._torchscript_modifier = FunctionModifiers.UNUSED
         else:
             fn._torchscript_modifier = FunctionModifiers.IGNORE
         return fn
@@ -332,12 +365,12 @@ def should_drop(fn):
     attr = get_torchscript_modifier(fn)
     if attr is None:
         return False
-    return attr is FunctionModifiers.IGNORE_AND_DROP
+    return attr is FunctionModifiers.UNUSED
 
 
 def is_ignored_fn(fn):
     mod = get_torchscript_modifier(fn)
-    return mod is FunctionModifiers.IGNORE_AND_DROP or mod is FunctionModifiers.IGNORE
+    return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
 
 def get_torchscript_modifier(fn):

@@ -13837,12 +13837,12 @@ a")
             def __init__(self):
                 super(Model, self).__init__()
 
-            @torch.jit.ignore(drop=True)
+            @torch.jit.unused
             def tuple_ignored(self, x):
                 # type: (Tensor) -> Tuple[Tensor, Tensor]
                 return x, x
 
-            @torch.jit.ignore(drop=True)
+            @torch.jit.unused
             def single_val_ignored(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor
                 return x
