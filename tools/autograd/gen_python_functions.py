@@ -627,7 +627,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             py_default_device = 'self.device()' if is_like_or_new_function_with_options else None
             device_arg = {
                 'default': 'None',
-                'default_init': 'None',
                 'dynamic_type': 'Device',
                 'kwarg_only': True,
                 'name': 'device',
