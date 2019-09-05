@@ -103,6 +103,10 @@ class CAFFE2_API Context {
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
+  bool userEnabledFBGEMM() const;
+  void setUserEnabledFBGEMM(bool e);
+  bool userEnabledQNNPACK() const;
+  void setUserEnabledQNNPACK(bool e);
 private:
   void initCUDAIfNeeded(DeviceType p) {
     if (p == DeviceType::CUDA) {
@@ -119,6 +123,8 @@ private:
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
+  bool enabled_fbgemm = true;
+  bool enabled_qnnpack = false;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
 };

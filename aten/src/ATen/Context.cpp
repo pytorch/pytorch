@@ -87,6 +87,22 @@ bool Context::hasLAPACK() const {
 #endif
 }
 
+bool Context::userEnabledFBGEMM() const {
+  return enabled_fbgemm;
+}
+
+void Context::setUserEnabledFBGEMM(bool e) {
+  enabled_fbgemm = e;
+}
+
+bool Context::userEnabledQNNPACK() const {
+  return enabled_qnnpack;
+}
+
+void Context::setUserEnabledQNNPACK(bool e) {
+  enabled_qnnpack = e;
+}
+
 bool Context::setFlushDenormal(bool on) {
   return at::cpu::set_flush_denormal(on);
 }

@@ -316,8 +316,10 @@ import torch.random
 import torch.distributions
 import torch.testing
 import torch.backends.cuda
+import torch.backends.fbgemm
 import torch.backends.mkl
 import torch.backends.openmp
+import torch.backends.qnnpack
 import torch.utils.data
 import torch.__config__
 import torch.__future__

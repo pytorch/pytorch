@@ -471,6 +471,34 @@ PyObject *THPModule_getDefaultDevice(PyObject *_unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPModule_setUserEnabledFBGEMM(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "set_enabled_fbgemm expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setUserEnabledFBGEMM(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_userEnabledFBGEMM(PyObject *_unused)
+{
+  if (at::globalContext().userEnabledFBGEMM()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
+PyObject *THPModule_setUserEnabledQNNPACK(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "set_enabled_qnnpack expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setUserEnabledQNNPACK(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_userEnabledQNNPACK(PyObject *_unused)
+{
+  if (at::globalContext().userEnabledQNNPACK()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       nullptr},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  nullptr},
@@ -500,6 +528,10 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_benchmark", (PyCFunction)THPModule_setBenchmarkCuDNN, METH_O,  nullptr},
   {"_get_cudnn_deterministic", (PyCFunction)THPModule_deterministicCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_deterministic", (PyCFunction)THPModule_setDeterministicCuDNN, METH_O,  nullptr},
+  {"_get_fbgemm_enabled", (PyCFunction)THPModule_userEnabledFBGEMM, METH_NOARGS,     nullptr},
+  {"_set_fbgemm_enabled", (PyCFunction)THPModule_setUserEnabledFBGEMM, METH_O,  nullptr},
+  {"_get_qnnpack_enabled", (PyCFunction)THPModule_userEnabledQNNPACK, METH_NOARGS,     nullptr},
+  {"_set_qnnpack_enabled", (PyCFunction)THPModule_setUserEnabledQNNPACK, METH_O,  nullptr},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       nullptr},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       nullptr},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     nullptr},
