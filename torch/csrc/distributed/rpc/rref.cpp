@@ -37,8 +37,8 @@ RRefForkData RRefForkData::fromIValue(const at::IValue& ivalue) {
   TORCH_CHECK(ownerId < std::numeric_limits<worker_id_t>::max(),
       "RRefId createdOn out of range, got ", ownerId);
 
-  RRefId rrefId = RRefId::fromIValue(std::move(ivalues[1]));
-  ForkId forkId = ForkId::fromIValue(std::move(ivalues[2]));
+  RRefId rrefId = RRefId::fromIValue(ivalues[1]);
+  ForkId forkId = ForkId::fromIValue(ivalues[2]);
 
   return RRefForkData(ownerId, rrefId, forkId);
 }

@@ -2,12 +2,11 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import sys
-import threading
 import unittest
 
 import torch
 import torch.distributed as dist
-from common_distributed import MultiProcessTestCase, get_timeout
+from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
 
 
