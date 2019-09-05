@@ -950,17 +950,22 @@ struct PythonPrintPass {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
-        if (enforce_importable_) {
+        if (enforce_importable_ && !value->ignore_on_export) {
           throw script::ErrorReport(node->sourceRange())
               << "Could not export Python function call '" << value->name()
               << "'. Remove calls to Python functions before export. "
               << "Did you forget add @script or @script_method annotation? "
               << "If this is a nn.ModuleList, add it to __constants__";
         }
-        std::stringstream scalars_stream;
-        stmt << "^" << value->name();
-        value->writeScalars(scalars_stream);
-        stmt << scalars_stream.str();
+
+        if (value->ignore_on_export) {
+          stmt << "ops.prim.IgnoredPythonOp";
+        } else {
+          std::stringstream scalars_stream;
+          stmt << "^" << value->name();
+          value->writeScalars(scalars_stream);
+          stmt << scalars_stream.str();
+        }
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
       case prim::Uninitialized: {
