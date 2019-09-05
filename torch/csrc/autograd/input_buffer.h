@@ -11,6 +11,9 @@
 #include <ATen/ATen.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <c10/util/Optional.h>
+#include <c10/core/Stream.h>
+#include <c10/core/Event.h>
 
 namespace torch { namespace autograd {
 
@@ -22,7 +25,13 @@ struct InputBuffer {
   InputBuffer& operator=(InputBuffer&& other) = default;
 
   // Accumulates the variable at a specified index.
-  void add(size_t pos, Variable var);
+  // Syncs the producer and consumer streams if they're both CUDA streams
+  // using the given event.
+  void add(size_t pos,
+           Variable var,
+           const c10::optional<c10::Stream>& opt_producer_stream,
+           c10::optional<c10::Event>& opt_event,
+           const c10::Stream& consumer_stream);
 
   at::Device device() const;
 

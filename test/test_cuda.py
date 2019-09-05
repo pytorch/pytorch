@@ -2953,6 +2953,65 @@ class TestCuda(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(y[0, 0, 0, 2**31 - 2], expected)
 
+    def test_streaming_backwards_sync(self):
+        default_stream = torch.cuda.current_stream()
+        stream = torch.cuda.Stream()
+
+        class MultiplyInStream(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                self.assertEqual(torch.cuda.current_stream(), stream)
+                # delays the operation in the the background stream
+                torch.cuda._sleep(1000 * 1000)
+                return grad * 2
+
+        x = torch.randn(5, 5, device='cuda', requires_grad=True)
+        with torch.cuda.stream(stream):
+            stream.wait_stream(default_stream)
+            output = MultiplyInStream.apply(x)
+            output.sum().backward()
+
+        self.assertEqual(x.grad, torch.ones_like(x) * 2)
+        self.assertEqual(torch.cuda.current_stream(), default_stream)
+
+    def test_streaming_backwards_multiple_streams(self):
+
+        class StreamModel(torch.nn.Module):
+            def __init__(self):
+                super(StreamModel, self).__init__()
+                self.event = torch.cuda.Event()
+                self.stream0 = torch.cuda.Stream()
+                self.stream1 = torch.cuda.Stream()
+
+            def forward(self, x):
+                x0 = x.clone()
+                torch._C._cuda_setStream(self.stream0._cdata)
+                y0 = x0 * 2
+                self.event.record(stream=torch.cuda.current_stream())
+
+                torch._C._cuda_setStream(self.stream1._cdata)
+                y1 = x * 3
+                self.stream1.wait_event(self.event)
+                return y0 + y1
+
+        stream = torch.cuda.Stream()
+
+        def accum_hook(grad):
+            self.assertEqual(torch.cuda.current_stream(), stream)
+
+        with torch.cuda.stream(stream):
+            x = torch.randn(5, 5, device='cuda', requires_grad=True)
+            x.register_hook(accum_hook)
+            torch.cuda.current_stream().wait_stream(stream)
+            model = StreamModel().cuda()
+            model(x).sum().backward()
+
+        self.assertEqual(x.grad, torch.ones_like(x) * 5)
+
 def load_ignore_file():
     from os.path import join, dirname
     global ignores

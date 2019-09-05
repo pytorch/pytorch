@@ -84,6 +84,9 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   Stream getStream(Device d) const noexcept override {
     return getCurrentHIPStreamMasqueradingAsCUDA().unwrap();
   }
+  Stream getDefaultStream(Device d) const override {
+    return getDefaultHIPStreamMasqueradingAsCUDA(d.index());
+  }
   Stream exchangeStream(Stream s) const noexcept override {
     HIPStreamMasqueradingAsCUDA cs(s);
     auto old_stream = getCurrentHIPStreamMasqueradingAsCUDA(s.device().index());

@@ -1,6 +1,8 @@
 #include <torch/csrc/autograd/input_buffer.h>
 
-#include <ATen/DeviceGuard.h>
+#include <c10/core/DeviceGuard.h>
+#include <c10/core/StreamGuard.h>
+
 
 #include <cstddef>
 #include <utility>
@@ -9,20 +11,36 @@
 namespace torch { namespace autograd {
 
 
-void InputBuffer::add(size_t pos, Variable var) {
+  void InputBuffer::add(size_t pos,
+                        Variable var,
+                        const c10::optional<c10::Stream>& opt_producer_stream,
+                        c10::optional<c10::Event>& opt_event,
+                        const c10::Stream& consumer_stream) {
   AT_ASSERT(pos < buffer.size());
   if (!var.defined()) {
     return;
   }
+
+  // Syncs (optional) producer stream with consumer stream
+  if (opt_producer_stream
+    && consumer_stream != *opt_producer_stream
+    && consumer_stream.device_type() == c10::DeviceType::CUDA) {
+    const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+    opt_event->recordOnce(*opt_producer_stream);
+    consumer_stream.wait(*opt_event);
+  }
+
   auto& old_var = buffer[pos];
   if (!old_var.defined()) {
     buffer[pos] = std::move(var);
   } else {
-    at::OptionalDeviceGuard device_guard(device_of(var));
+    // Switches to the consumer stream to accumulate
+    c10::OptionalStreamGuard stream_guard{consumer_stream};
+
     // ATen doesn't route sparse additions correctly...
     // do dense + sparse in-place if possible
     if (old_var.is_sparse()) {
-//storage use_count is a big hammer, but for anything lighter there's an adversarial example with unexpected inplace modification
+      //storage use_count is a big hammer, but for anything lighter there's an adversarial example with unexpected inplace modification
       if (!var.is_sparse() && var.is_contiguous() && var.storage().use_count() == 1) {
           buffer[pos] = var.add_(old_var);
       } else {

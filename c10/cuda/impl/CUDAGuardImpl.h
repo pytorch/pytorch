@@ -47,6 +47,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   Stream getStream(Device d) const noexcept override {
     return getCurrentCUDAStream().unwrap();
   }
+  Stream getDefaultStream(Device d) const override {
+    return getDefaultCUDAStream(d.index());
+  }
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
     CUDAStream cs(s);
