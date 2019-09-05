@@ -768,7 +768,7 @@ ENDIF()
     DESTINATION share/cmake/Torch)
 
   if (USE_DISTRIBUTED)
-    if (NOT MSVC)
+    if (NOT MSVC AND NOT APPLE)
       add_subdirectory(${TORCH_SRC_DIR}/lib/c10d lib_c10d)
     endif()
   endif()

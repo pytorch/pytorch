@@ -17,10 +17,6 @@ fi
 export PATH="${PYTORCH_ENV_DIR}/miniconda3/bin:$PATH"
 source ${PYTORCH_ENV_DIR}/miniconda3/bin/activate
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
-
-# Building with USE_DISTRIBUTED=1 requires libuv (for Gloo).
-conda install -y libuv pkg-config
-
 rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 
 git submodule sync --recursive
@@ -69,8 +65,6 @@ fi
 export MAX_JOBS=2
 
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
-
-export USE_DISTRIBUTED=1
 
 python setup.py install
 
