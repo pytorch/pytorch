@@ -6,7 +6,7 @@ namespace rpc {
 
 const Message& FutureMessage::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
-  finished_cv_.wait(lock, [this]{return completed_.load();});
+  finished_cv_.wait(lock, [this] { return completed_.load(); });
   return message_;
 }
 
@@ -57,6 +57,6 @@ void FutureMessage::fireCallbacks() {
   callbacks.clear();
 }
 
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
