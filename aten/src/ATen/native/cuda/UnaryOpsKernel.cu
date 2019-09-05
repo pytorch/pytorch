@@ -103,7 +103,7 @@ void polygamma_kernel_cuda(TensorIterator& iter, int64_t n) {
   switch (n) {
     case 0: digamma_kernel_cuda(iter); break;
     case 1: trigamma_kernel_cuda(iter); break;
-    default: AT_ERROR("polygamma(n,x) is not implemented for n>=2");
+    default: TORCH_CHECK(false, "polygamma(n,x) is not implemented for n>=2");
   }
 }
 
