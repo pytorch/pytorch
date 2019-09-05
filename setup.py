@@ -181,7 +181,7 @@ import glob
 import importlib
 
 from tools.build_pytorch_libs import build_caffe2
-from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN,
+from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
@@ -403,10 +403,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Not using NCCL')
         if cmake_cache_vars['USE_DISTRIBUTED']:
-            if IS_WINDOWS:
-                report('-- Building without distributed package')
+            if IS_LINUX:
+                report('-- Building with c10d distributed package ')
             else:
-                report('-- Building with distributed package ')
+                report('-- Building without c10d distributed package')
         else:
             report('-- Building without distributed package')
 
