@@ -22,7 +22,7 @@ import subprocess
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
-from functools import wraps, partial
+from functools import wraps
 from itertools import product
 from copy import deepcopy
 from numbers import Number

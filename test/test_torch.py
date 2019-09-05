@@ -5723,7 +5723,7 @@ class _TestTorchMixin(torchtest):
             x_exp = torch.stack(x_exp_list)  # Stacked output
             x_act = torch.solve(b, A)[0]  # Actual output
             self.assertEqual(x_exp, x_act)  # Equality check
-            self.assertLessEqual(b.dist(A @ x_act), 1e-12)  # Correctness check
+            self.assertLessEqual(b.dist(torch.matmul(A, x_act)), 1e-12)  # Correctness check
 
         for batchsize in [1, 3, 4]:
             solve_batch_helper((5, batchsize), (batchsize, 5, 10), cast)
@@ -5910,7 +5910,7 @@ class _TestTorchMixin(torchtest):
     def _test_triangular_solve(self, cast):
         from common_utils import triangular_solve_test_helper
         for (k, n), (upper, unitriangular, transpose) in product(zip([2, 3, 5], [3, 5, 7]),
-                                                               product([True, False], repeat=3)):
+                                                                 product([True, False], repeat=3)):
             b, A = triangular_solve_test_helper((n, n), (n, k), cast, upper, unitriangular)
             x = torch.triangular_solve(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
             if transpose:
@@ -5937,13 +5937,13 @@ class _TestTorchMixin(torchtest):
                                            unitriangular=unitriangular, transpose=transpose)[0]  # Actual output
             self.assertEqual(x_exp, x_act)  # Equality check
             if transpose:
-                self.assertLessEqual(b.dist(A.transpose(-2, -1) @ x_act), 2e-12)  # Correctness check
+                self.assertLessEqual(b.dist(torch.matmul(A.transpose(-2, -1), x_act)), 2e-12)  # Correctness check
             else:
-                self.assertLessEqual(b.dist(A @ x_act), 2e-12)  # Correctness check
+                self.assertLessEqual(b.dist(torch.matmul(A, x_act)), 2e-12)  # Correctness check
 
         for (upper, unitriangular, transpose), batchsize in product(product([True, False], repeat=3), [1, 3, 4]):
             triangular_solve_batch_helper((batchsize, 5, 5), (batchsize, 5, 10), cast,
-                                           upper, unitriangular, transpose)
+                                          upper, unitriangular, transpose)
 
     @skipIfNoLapack
     def test_triangular_solve_batched(self):
@@ -7313,10 +7313,10 @@ class _TestTorchMixin(torchtest):
     def _test_cholesky_solve(self, cast):
         from common_utils import cholesky_solve_test_helper
         for (k, n), upper in product(zip([2, 3, 5], [3, 5, 7]), [True, False]):
-                b, A, L = cholesky_solve_test_helper((n,), (n, k), cast, upper)
-                x = torch.cholesky_solve(b, L, upper=upper)
-                b_ = torch.matmul(A, x)
-                self.assertEqual(b_, b)
+            b, A, L = cholesky_solve_test_helper((n,), (n, k), cast, upper)
+            x = torch.cholesky_solve(b, L, upper=upper)
+            b_ = torch.matmul(A, x)
+            self.assertEqual(b_, b)
 
     @skipIfNoLapack
     def test_cholesky_solve(self):
