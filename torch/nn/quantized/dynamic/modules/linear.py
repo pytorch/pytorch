@@ -48,7 +48,7 @@ class Linear(nnq.Linear):
     def forward(self, x):
         # Note that we can handle self.bias == None case.
         Y = torch.ops.quantized.fbgemm_linear_dynamic(
-            x, self._packed_weight,
+            x, self._packed_params,
             self.bias)
         return Y.to(x.dtype)
 

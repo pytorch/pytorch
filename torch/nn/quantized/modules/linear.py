@@ -131,7 +131,7 @@ class Linear(torch.nn.Module):
 
     def forward(self, x):
         return torch.ops.quantized.linear(
-            x, self._packed_weight, self.scale, self.zero_point)
+            x, self._packed_params, self.scale, self.zero_point)
 
     # ===== Serialization methods =====
     # The special consideration here is that we have to unpack the weights into their
@@ -140,7 +140,7 @@ class Linear(torch.nn.Module):
     # from the QTensor weight.
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(Linear, self)._save_to_state_dict(destination, prefix, keep_vars)
-        (w, b) = self.weight()
+        (w, b) = self.weight_bias()
         destination[prefix + 'weight'] = w
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
@@ -148,7 +148,7 @@ class Linear(torch.nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
-        (w, b) = self.weight()
+        (w, b) = self.weight_bias()
         return (
             self.in_features,
             self.out_features,
@@ -187,12 +187,12 @@ class Linear(torch.nn.Module):
 
     # Function rather than property to make sure that JIT serialization doesn't
     # register this as an attribute
-    def weight(self):
-        return torch.ops.quantized.linear_unpack(self._packed_weight)
+    def weight_bias(self):
+        return torch.ops.quantized.linear_unpack(self._packed_params)
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        self._packed_weight = torch.ops.quantized.linear_prepack(w, b)
+        self._packed_params = torch.ops.quantized.linear_prepack(w, b)
         self.bias = b
         self.weight_scale = w.q_scale()
 

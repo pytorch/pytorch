@@ -110,12 +110,12 @@ class Conv2d(torch.nn.Module):
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        self._packed_weight = torch.ops.quantized.conv_prepack(
+        self._packed_params = torch.ops.quantized.conv_prepack(
             w.permute([0, 2, 3, 1]), b, self.stride, self.padding, self.dilation, self.groups)
         self.weight_scale = w.q_scale()
 
-    def weight(self):
-        (w, b) = torch.ops.quantized.conv_unpack(self._packed_weight)
+    def weight_bias(self):
+        (w, b) = torch.ops.quantized.conv_unpack(self._packed_params)
         return (w.permute([0, 3, 1, 2]), b)
 
     def forward(self, input):
@@ -124,7 +124,7 @@ class Conv2d(torch.nn.Module):
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
         output = ops.quantized.conv2d(input.permute([0, 2, 3, 1]),
-                                      self._packed_weight,
+                                      self._packed_params,
                                       self.stride, self.padding,
                                       self.dilation, self.groups,
                                       self.scale, self.zero_point)
@@ -137,7 +137,7 @@ class Conv2d(torch.nn.Module):
     # from the QTensor weight.
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(Conv2d, self)._save_to_state_dict(destination, prefix, keep_vars)
-        (w, b) = self.weight()
+        (w, b) = self.weight_bias()
         destination[prefix + 'weight'] = w
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
@@ -145,7 +145,7 @@ class Conv2d(torch.nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
-        (w, b) = self.weight()
+        (w, b) = self.weight_bias()
         return (
             self.in_channels,
             self.out_channels,
