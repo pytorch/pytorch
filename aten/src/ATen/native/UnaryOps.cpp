@@ -56,16 +56,16 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
 }
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
-Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, bitwise_not_out); }
-Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, bitwise_not_out); }
+Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
+Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not_out); }
 
 Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, ceil_stub); }
-Tensor ceil(const Tensor& self) { return unary_op_impl(self, ceil_out); }
-Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, ceil_out); }
+Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
+Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
 Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erfinv_stub); }
-Tensor erfinv(const Tensor& self) { return unary_op_impl(self, erfinv_out); }
-Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, erfinv_out); }
+Tensor erfinv(const Tensor& self) { return unary_op_impl(self, at::erfinv_out); }
+Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
 
 Tensor& neg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
@@ -73,8 +73,8 @@ Tensor& neg_out(Tensor& result, const Tensor& self) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
   return unary_op_impl_out(result, self, neg_stub);
 }
-Tensor neg(const Tensor& self) { return unary_op_impl(self, neg_out); }
-Tensor& neg_(Tensor& self) { return unary_op_impl_(self, neg_out); }
+Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
+Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
 
 Tensor logical_not(const Tensor& self) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
