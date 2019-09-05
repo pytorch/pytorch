@@ -30,7 +30,8 @@ def _export(*args, **kwargs):
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=False, example_outputs=None, strip_doc_string=True, dynamic_axes=None):
+           do_constant_folding=False, example_outputs=None, strip_doc_string=True, 
+           dynamic_axes=None, keep_initializers_as_inputs=True):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -122,6 +123,12 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
 
                 (c). MIXED MODE OF (a) and (b)
                     dynamic_axes = {'input_1':[0, 2, 3], 'input_2':{0:'batch'}, 'output':[0,1]}
+        keep_initializers_as_inputs (bool, default True): If True, all the initializers
+            (typically corresponding to parameters) in the exported graph will also be 
+            added as inputs to the graph. If False, then initializers are not added as
+            inputs to the graph, and only the non-parameter inputs are added as inputs.
+            This may allow for better optimizations (such as constant folding etc.) by
+            backends/runtimes that execute these graphs.
     """
 
     from torch.onnx import utils
@@ -129,7 +136,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
                         input_names, output_names, aten, export_raw_ir,
                         operator_export_type, opset_version, _retain_param_name,
                         do_constant_folding, example_outputs,
-                        strip_doc_string, dynamic_axes)
+                        strip_doc_string, dynamic_axes, keep_initializers_as_inputs)
 
 
 def export_to_pretty_string(*args, **kwargs):

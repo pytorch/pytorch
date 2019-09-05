@@ -9,7 +9,6 @@
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeId.h>
-#include <c10/core/TensorTypeIdRegistration.h>
 #include <c10/core/CopyBytes.h>
 
 #include <c10/util/Exception.h>
@@ -413,7 +412,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
-    return tid == SparseCPUTensorId() || tid == SparseCUDATensorId() || tid == SparseHIPTensorId();
+    return tid == TensorTypeId::SparseCPUTensorId || tid == TensorTypeId::SparseCUDATensorId || tid == TensorTypeId::SparseHIPTensorId;
   }
 
   bool is_quantized() const {
@@ -421,7 +420,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
-    return tid == QuantizedCPUTensorId();
+    return tid == TensorTypeId::QuantizedCPUTensorId;
   }
 
   bool is_cuda() const {
@@ -429,7 +428,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
-    return tid == CUDATensorId() || tid == SparseCUDATensorId();
+    return tid == TensorTypeId::CUDATensorId || tid == TensorTypeId::SparseCUDATensorId;
   }
 
   bool is_hip() const {
@@ -437,11 +436,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
-    return tid == HIPTensorId() || tid == SparseHIPTensorId();
+    return tid == TensorTypeId::HIPTensorId || tid == TensorTypeId::SparseHIPTensorId;
   }
 
   bool is_mkldnn() const {
-    return type_id() == MkldnnCPUTensorId();
+    return type_id() == TensorTypeId::MkldnnCPUTensorId;
   }
 
   int64_t get_device() const {
@@ -692,7 +691,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void resize_dim(int64_t ndim) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "resize_dim is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "resize_dim ", err_msg_tensor_metadata_change_not_allowed);
     sizes_.resize(ndim, 0);
     strides_.resize(ndim, 0);
     refresh_numel();
@@ -708,7 +707,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_size(int64_t dim, int64_t new_size) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_size is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_size ", err_msg_tensor_metadata_change_not_allowed);
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
@@ -721,7 +720,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_stride(int64_t dim, int64_t new_stride) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_stride is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_stride ", err_msg_tensor_metadata_change_not_allowed);
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
@@ -735,7 +734,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * (and resizing if necessary.)
    */
   virtual void set_storage_offset(int64_t storage_offset) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_storage_offset is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_storage_offset ", err_msg_tensor_metadata_change_not_allowed);
     storage_offset_ = storage_offset;
   }
 
@@ -747,7 +746,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * this is the responsibility of the caller
    */
   void set_sizes_contiguous(IntArrayRef new_size) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous ", err_msg_tensor_metadata_change_not_allowed);
     auto new_dim = new_size.size();
 
     sizes_.resize(new_dim);
@@ -767,7 +766,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * this is the responsibility of the caller
    */
   void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides ", err_msg_tensor_metadata_change_not_allowed);
     TORCH_CHECK(
         new_size.size() == new_stride.size(),
         "dimensionality of sizes (",
@@ -923,10 +922,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   inline bool has_compatible_shallow_copy_type(TensorTypeId from) {
     TensorTypeId self = type_id();
     return (self == from) ||
-        ((self == CPUTensorId() || self == CUDATensorId() || self == HIPTensorId()) &&
-        (from == CPUTensorId() || from == CUDATensorId() || from == HIPTensorId())) ||
-        ((self == SparseCPUTensorId() || self == SparseCUDATensorId() || self == SparseHIPTensorId()) &&
-        (from == SparseCPUTensorId() || from == SparseCUDATensorId() || from == SparseHIPTensorId()));
+        ((self == TensorTypeId::CPUTensorId || self == TensorTypeId::CUDATensorId || self == TensorTypeId::HIPTensorId) &&
+        (from == TensorTypeId::CPUTensorId || from == TensorTypeId::CUDATensorId || from == TensorTypeId::HIPTensorId)) ||
+        ((self == TensorTypeId::SparseCPUTensorId || self == TensorTypeId::SparseCUDATensorId || self == TensorTypeId::SparseHIPTensorId) &&
+        (from == TensorTypeId::SparseCPUTensorId || from == TensorTypeId::SparseCUDATensorId || from == TensorTypeId::SparseHIPTensorId));
   }
 
   /**
@@ -1370,7 +1369,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_storage(at::Storage storage) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_storage is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_storage ", err_msg_tensor_metadata_change_not_allowed);
     storage_ = std::move(storage);
     data_type_ = storage_.dtype();
     device_opt_ = storage_.device();
@@ -1384,6 +1383,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual void empty_tensor_restride(MemoryFormat memory_format) {
     is_contiguous_ = false;
+    is_channels_last_contiguous_ = false;
+    is_channels_last_ = false;
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
         strides_.resize(sizes_.size(), 0);
@@ -1402,11 +1403,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             dim() == 4,
             "required rank 4 tensor to use channels_last format");
         set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
+        is_channels_last_contiguous_ = true;
+        is_channels_last_ = true;
         return;
       }
       case MemoryFormat::Preserve:
         TORCH_CHECK(false, "unsupported memory format ", memory_format);
     }
+  }
+
+  bool is_strides_like_channels_last() const {
+    return is_channels_last_;
   }
 
 private:
@@ -1485,6 +1492,10 @@ private:
    */
   bool compute_contiguous() const;
 
+  bool compute_channels_last_contiguous() const;
+
+  bool compute_strides_like_channels_last() const;
+
 protected:
   /**
    * Recompute the cached numel of a tensor.  Call this if you modify sizes.
@@ -1499,6 +1510,8 @@ protected:
    */
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
+    is_channels_last_contiguous_ = compute_channels_last_contiguous();
+    is_channels_last_ = is_channels_last_contiguous_ || compute_strides_like_channels_last();
   }
 
   /**
@@ -1532,6 +1545,12 @@ protected:
   }
 
 protected:
+  // Error message to show when the user tries to change tensor metadata on
+  // Tensor created from .data or .detach().
+  //
+  // See NOTE [ Metadata Change for a Detached Tensor ] for details.
+  static const char * const err_msg_tensor_metadata_change_not_allowed;
+
   Storage storage_;
   // This pointer points to an AutogradMeta struct that stores autograd-specific fields
   // (such as grad_ / grad_fn_ / grad_accumulator_).
@@ -1595,6 +1614,17 @@ protected:
   // should pack this into a bitfield.
   TensorTypeId type_id_;
   bool is_contiguous_ = true;
+
+  // Tensor is stored in the channels last memory format, when dimensions
+  // order is NCHW and C-strides < W-strides < H-strides < N-strides
+  // (If size of any dimension is equal to 1, this dimension strides value
+  // is not taken into account).
+  bool is_channels_last_ = false;
+
+  // Channels last contiguous tensor is channel last tensor which occupies
+  // contiguous memory block.
+  bool is_channels_last_contiguous_ = false;
+
   bool is_wrapped_number_ = false;
 
   // NOTE [ Metadata Change for a Detached Tensor ]

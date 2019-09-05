@@ -8,6 +8,9 @@
 
 ## PyTorch
 
+.coverage
+.gradle
+.hypothesis
 .mypy_cache
 */*.pyc
 */*.so*
@@ -27,6 +30,7 @@ dist/
 docs/src/**/*
 docs/cpp/build
 docs/cpp/source/api
+log
 test/.coverage
 test/.hypothesis/
 test/cpp/api/mnist

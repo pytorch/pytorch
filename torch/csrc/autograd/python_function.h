@@ -3,6 +3,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/saved_variable.h>
@@ -17,18 +18,6 @@
 
 namespace torch { namespace jit { struct Graph; }}
 namespace torch { namespace autograd {
-
-struct VariableInfo {
-  explicit VariableInfo(const Variable& var);
-
-  Variable zeros(at::OptionalDeviceGuard& device_guard) const;
-
-  at::Backend backend = at::Backend::Undefined;
-  at::Device device = at::kCPU;
-  at::ScalarType scalar_type = at::kFloat;
-  std::vector<int64_t> size;
-  bool requires_grad;
-};
 
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.

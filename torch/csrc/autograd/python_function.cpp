@@ -8,7 +8,6 @@
 #include <ATen/ATen.h>
 
 #include <torch/csrc/THP.h>
-#include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
@@ -44,21 +43,6 @@ PyObject *THPFunctionClass = nullptr;
   if (!(condition)) { THPUtils_setError(__VA_ARGS__); throw python_error(); }
 
 namespace torch { namespace autograd {
-
-VariableInfo::VariableInfo(const Variable& var)
-  : backend(tensorTypeIdToBackend(var.type_id()))
-  , device(var.device())
-  , scalar_type(var.scalar_type())
-  , size(var.sizes().vec())
-  , requires_grad(var.requires_grad()) {
-}
-
-Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
-  // NB: This will NOT work if we ever get mixed device gradients
-  device_guard.reset_device(device);
-  return at::zeros(size,
-    at::TensorOptions(scalar_type).device(backendToDeviceType(backend)).layout(layout_from_backend(backend)).is_variable(true));
-}
 
 auto PyNode::legacy_apply(const variable_list& inputs) -> variable_list {
   AutoGIL gil;
