@@ -102,8 +102,7 @@ struct ConstantTableValue : public SugaredValue {
                              << " is out of bounds (constant table has "
                              << constants_.size() << " entries)";
     }
-    Value* value =
-        m.graph()->insertConstant(constants_.at(offset), nullptr, loc);
+    Value* value = m.graph()->insertConstant(constants_.at(offset), loc);
 
     // specializing tensor type on compilation messes up typing relations
     value->setType(unshapedType(value->type()));
