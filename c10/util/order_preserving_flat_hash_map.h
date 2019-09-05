@@ -720,21 +720,21 @@ public:
         // to its new location.
 
         ska::flat_hash_map<EntryPointer,size_t> ptr_to_order;
-        std::vector<EntryPointer> removal_order;
+        std::vector<EntryPointer> erase_list;
 
         size_t num_to_remove = 0;
         for (EntryPointer it = begin_it.current, end = end_it.current; it != end;) {
           ptr_to_order[it] = num_to_remove;
-          removal_order.push_back(it);
+          erase_list.push_back(it);
           it = it->next;
           num_to_remove++;
         }
         // since we return end, we need to make sure it gets updated if its invalidated
         ptr_to_order[end_it.current] = num_to_remove + 1;
-        removal_order.push_back(end_it.current);
+        erase_list.push_back(end_it.current);
 
         for (size_t index = 0; index < num_to_remove; ++index) {
-          EntryPointer current = removal_order[index];
+          EntryPointer current = erase_list[index];
           remove_from_list(current);
           current->destroy_value();
           --num_elements;
@@ -748,17 +748,14 @@ public:
               auto removal_index = ptr_to_order.find(next);
               // we are invalidating an entry we haven't iterated over yet
               if (removal_index != ptr_to_order.end() && removal_index->second > index) {
-                removal_order[removal_index->second] = current;
+                erase_list[removal_index->second] = current;
                 ptr_to_order[current] = removal_index->second;
                 ptr_to_order.erase(next);
               }
           }
         }
 
-        if (end_it == this->end())
-            return this->end();
-
-        return { removal_order[num_to_remove] };
+        return { erase_list[num_to_remove] };
     }
 
     uint64_t erase(const FindKey & key)
