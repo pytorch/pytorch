@@ -540,6 +540,9 @@ class CAFFE2_API Tensor {
   Tensor narrow_copy(int64_t dim, int64_t start, int64_t length) const;
   Tensor narrow(int64_t dim, int64_t start, int64_t length) const;
   Tensor permute(IntArrayRef dims) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor permute(DimnameList dims) const;
+  #endif
   Tensor numpy_T() const;
   bool is_pinned() const;
   Tensor pin_memory() const;

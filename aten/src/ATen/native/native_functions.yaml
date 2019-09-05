@@ -1678,6 +1678,11 @@
 
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  named_guard: False
+
+- func: permute(Tensor(a) self, DimnameList dims) -> Tensor(a)
+  variants: method
+  named_guard: False
 
 # Only exposed from C++ -- in Python,
 # we expose it as an attribute `T`, not a function.

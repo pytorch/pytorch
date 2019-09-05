@@ -428,8 +428,25 @@ Tensor permute(const Tensor& self, IntArrayRef dims) {
     newSizes[i] = oldSizes[dim];
     newStrides[i] = oldStrides[dim];
   }
-  return self.as_strided(newSizes, newStrides);
+  Tensor result;
+#ifdef BUILD_NAMEDTENSOR
+  {
+    NoNamesGuard guard;
+#endif
+    result = self.as_strided(newSizes, newStrides);
+#ifdef BUILD_NAMEDTENSOR
+  }
+  auto outnames = namedinference::compute_permute_outnames(self, dims);
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
+
+#ifdef BUILD_NAMEDTENSOR
+Tensor permute(const Tensor& self, DimnameList dims) {
+  return self.permute(dimnames_to_positions(self, dims));
+}
+#endif
 
 Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   TORCH_CHECK(repeats.size() >= (size_t)self.dim(),

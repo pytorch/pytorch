@@ -1,6 +1,7 @@
 #ifdef BUILD_NAMEDTENSOR
 
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/WrapDimUtils.h>
 #include <bitset>
 #include <sstream>
 
@@ -472,6 +473,20 @@ optional<std::vector<Dimname>> compute_broadcast_outnames(
     return nullopt;
   }
   return unify_from_right(self.names(), other.names());
+}
+
+optional<std::vector<Dimname>> compute_permute_outnames(const Tensor& self, IntArrayRef dims) {
+  if (!self.has_names()) {
+    return nullopt;
+  }
+  auto ndims = self.dim();
+  const auto self_names = self.names();
+  std::vector<Dimname> outnames(ndims, Dimname::wildcard());
+  for (int64_t i = 0; i < ndims; i++) {
+    auto dim = maybe_wrap_dim(dims[i], ndims);
+    outnames[i] = self_names[dim];
+  }
+  return outnames;
 }
 
 optional<std::vector<Dimname>> broadcast_to_outnames(
