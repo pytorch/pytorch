@@ -6,15 +6,29 @@
 namespace torch {
 namespace jit {
 
-void unsafe_pickle(
-    std::function<void(const char*, size_t)> writer,
-    jit::PickleOpCode op,
-    std::string data) {
-  // This is only supposed to be 1 op, so there are no tensors to write
-  Pickler pickler(std::move(writer), /*tensor_table=*/nullptr);
+void pickle(
+    std::function<void(const char* data_start, size_t data_len)> writer,
+    const IValue& ivalue,
+    std::vector<at::Tensor>* tensor_table = nullptr) {
+  Pickler pickler(std::move(writer), tensor_table);
   pickler.protocol();
-  pickler.pushOp(op, data);
+  pickler.pushIValue(ivalue);
   pickler.stop();
+}
+
+std::vector<char> pickle(
+    const IValue& ivalue,
+    std::vector<at::Tensor>* tensor_table = nullptr) {
+  std::vector<char> data;
+
+  pickle(
+      [&](const char* bytes, size_t len) {
+        data.insert(data.end(), bytes, bytes + len);
+      },
+      ivalue,
+      tensor_table);
+
+  return data;
 }
 
 IValue unpickle(

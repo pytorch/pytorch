@@ -14,16 +14,10 @@ namespace jit {
 /// size and consumes it.
 ///
 /// See `jit::pickle` for more details.
-template <typename PickleModule = Pickler>
 TORCH_API void pickle(
     std::function<void(const char* data_start, size_t data_len)> writer,
     const IValue& ivalue,
-    std::vector<at::Tensor>* tensor_table = nullptr) {
-  PickleModule pickler(std::move(writer), tensor_table);
-  pickler.protocol();
-  pickler.pushIValue(ivalue);
-  pickler.stop();
-}
+    std::vector<at::Tensor>* tensor_table = nullptr);
 
 /// Save a `torch::IValue` in a format compatible with Python's `pickle` module
 ///
@@ -53,29 +47,9 @@ TORCH_API void pickle(
 ///   print(values)
 ///
 /// \endrst
-template <typename PickleModule = Pickler>
 TORCH_API std::vector<char> pickle(
     const IValue& ivalue,
-    std::vector<at::Tensor>* tensor_table = nullptr) {
-  std::vector<char> data;
-
-  pickle<PickleModule>(
-      [&](const char* bytes, size_t len) {
-        data.insert(data.end(), bytes, bytes + len);
-      },
-      ivalue,
-      tensor_table);
-
-  return data;
-}
-
-// This lets you directly control the opcodes / data that is serialized. This is
-// will probably result in a pickle archive that cannot be unpickled. This
-// function is only indented to be used for implementing `torch::save()`
-void unsafe_pickle(
-    std::function<void(const char*, size_t)> writer,
-    jit::PickleOpCode op,
-    std::string data);
+    std::vector<at::Tensor>* tensor_table = nullptr);
 
 /// `reader` is a function that takes in a size to read from some pickled
 /// binary. `reader` should remember where it last read, and return

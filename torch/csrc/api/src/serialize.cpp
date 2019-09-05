@@ -9,7 +9,7 @@ namespace torch {
 // These are both defined in `torch/serialization.py`
 const char* torch_save_magic_number =
     "\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19";
-uint16_t protocol_version = 0x1001;
+uint16_t protocol_version = 1001;
 
 std::vector<char> pickle_save(const at::IValue& ivalue) {
   std::vector<char> data;
@@ -18,16 +18,16 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
     data.insert(data.end(), bytes, bytes + len);
   };
 
-  jit::Pickler pickler(std::move(writer), /*tensor_table=*/nullptr);
+  jit::Pickler pickler(writer, /*tensor_table=*/nullptr);
   // Output data to match torch.save, see torch/serialization.py for details
   // Magic number (0x1950a86a20f9469cfc6c)
   pickler.protocol();
   pickler.pushLong(torch_save_magic_number);
   pickler.stop();
 
-  // Protocol Version (1001)
+  // Protocol Version
   pickler.protocol();
-  pickler.pushInt(1001);
+  pickler.pushInt(protocol_version);
   pickler.stop();
 
   // sys_info, this isn't actually used in de-serialization so we can leave this
@@ -53,7 +53,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
     if (memoized_storages.count(addr) > 0) {
       continue;
     }
-    keys.push_back(std::to_string(i));
+    keys.emplace_back(std::to_string(i));
     memoized_storages.insert(addr);
   }
   memoized_storages.clear();
@@ -61,7 +61,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
   auto keys_tuple = at::ivalue::Tuple::create(keys, TupleType::create(types));
   jit::pickle(writer, keys_tuple, &tensors);
 
-  for (auto tensor : tensors) {
+  for (const auto& tensor : tensors) {
     void* addr = tensor.storage().unsafeGetStorageImpl();
     if (memoized_storages.count(addr) > 0) {
       continue;

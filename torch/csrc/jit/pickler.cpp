@@ -379,22 +379,6 @@ void Pickler::pushClass(PicklerClass cls) {
   pushGlobal("torch.jit._pickle", getClassName(cls));
 }
 
-// void Pickler::pushTensor(const IValue& ivalue) {
-//   pushClass(PicklerClass::TENSOR);
-//   TORCH_INTERNAL_ASSERT(
-//       tensor_table_,
-//       "Pickler tried to write a tensor but had no tensor table to write to");
-//   tensor_table_->push_back(ivalue.toTensor());
-//   int64_t tensor_id = tensor_table_->size() - 1;
-//   // Reduce arguments are spread (e.g. `*args`) before calling the global,
-//   // so wrap in a tuple
-//   push<PickleOpCode>(PickleOpCode::MARK);
-//   pushIValue(tensor_id);
-//   push<PickleOpCode>(PickleOpCode::TUPLE);
-
-//   push<PickleOpCode>(PickleOpCode::REDUCE);
-// }
-
 void Pickler::pushSpecializedList(
     const IValue& ivalue,
     PicklerClass cls,
