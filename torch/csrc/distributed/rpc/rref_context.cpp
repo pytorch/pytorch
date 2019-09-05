@@ -37,8 +37,8 @@ const std::shared_ptr<RpcAgent>& RRefContext::agent() const {
   return agent_;
 }
 
-void RRefContext::addFork(at::IValue&& value) {
-  auto rfd = RRefForkData::fromIValue(std::move(value));
+void RRefContext::addFork(const at::IValue& value) {
+  auto rfd = RRefForkData::fromIValue(value);
   AT_ASSERT(rfd.ownerId_ == getWorkerId(),
       "RRef user should never receive fork notification.");
   std::lock_guard<std::mutex> lock(mutex_);
@@ -48,8 +48,8 @@ void RRefContext::addFork(at::IValue&& value) {
   rrefForks.insert(rfd.forkId_);
 }
 
-void RRefContext::delFork(at::IValue&& value) {
-  auto rfd = RRefForkData::fromIValue(std::move(value));
+void RRefContext::delFork(const at::IValue& value) {
+  auto rfd = RRefForkData::fromIValue(value);
   AT_ASSERT(rfd.ownerId_ == getWorkerId(),
       "RRef user should never receive delete notification.");
   std::lock_guard<std::mutex> lock(mutex_);

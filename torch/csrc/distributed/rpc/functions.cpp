@@ -27,10 +27,11 @@ Message processRequestBlocking(Message&& request) {
   switch (request.type()) {
     case MessageType::SCRIPT_CALL: {
       try {
-        ScriptCall op = ScriptCall::fromMessage(request);
+        ScriptCall sc = ScriptCall::fromMessage(request);
 
-        auto stack = op.stack();
-        op.op()->getOperation()(stack);
+        // sc is only alive within this block, use reference to avoid copy
+        auto& stack = sc.stackRef();
+        sc.op()->getOperation()(stack);
         AT_ASSERT(
             stack.size() == 1,
             "Return value of a builtin operator or a "
@@ -70,7 +71,8 @@ Message processRequestBlocking(Message&& request) {
       auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(rrefId);
 
       // TODO: make this asynchronous
-      auto stack = src.stack();
+      // src is only alive within this block, use reference to avoid copy
+      auto& stack = src.stackRef();
       src.op()->getOperation()(stack);
       AT_ASSERT(stack.size() == 1, "Return value of a builtin operator or a "
           "TorchScript function should be a single IValue, got a vector of "
@@ -79,25 +81,25 @@ Message processRequestBlocking(Message&& request) {
       ownerRRef->setValue(std::move(stack.front()));
       return Message();
     }
-    case MessageType::RREF_FETCH: {
-      ScriptRRefFetch srf = ScriptRRefFetch::fromMessage(request);
+    case MessageType::RREF_FETCH_CALL: {
+      ScriptRRefFetchCall srf = ScriptRRefFetchCall::fromMessage(request);
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
           RRefContext::getInstance()->getOrCreateOwnerRRef<IValue>(
               RRefId::fromIValue(srf.value())
           );
-      auto response = ScriptRRefValue(rref->getValue()).toMessage();
+      auto response = ScriptRRefFetchRet(rref->getValue()).toMessage();
       response.setId(request.id());
       return response;
     }
     case MessageType::RREF_USER_CREATE: {
       ScriptRRefCreate sra = ScriptRRefCreate::fromMessage(request);
-      RRefContext::getInstance()->addFork(sra.value());
+      RRefContext::getInstance()->addFork(sra.valueRef());
       return Message();
     }
     case MessageType::RREF_USER_DELETE: {
       ScriptRRefDelete srd = ScriptRRefDelete::fromMessage(request);
-      RRefContext::getInstance()->delFork(srd.value());
+      RRefContext::getInstance()->delFork(srd.valueRef());
       return Message();
     }
     default: {

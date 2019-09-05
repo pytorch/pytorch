@@ -56,7 +56,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   auto futureMessage = shared_ptr_class_<FutureMessage>(module, "FutureMessage")
       .def("wait",
           [&](FutureMessage& fut) {
-            return to_py_obj(fut.wait());
+            return toPyObj(fut.wait());
           },
           py::call_guard<py::gil_scoped_release>());
 
@@ -99,7 +99,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       const std::string& opName,
       const py::args& args,
       const py::kwargs& kwargs) {
-    return py_rpc_builtin(agent, dst, opName, args, kwargs);
+    return pyRpcBuiltin(agent, dst, opName, args, kwargs);
   });
 
 
@@ -109,7 +109,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       const std::string& opName,
       const py::args& args,
       const py::kwargs& kwargs) {
-    return py_remote_builtin(agent, dst, opName, args, kwargs);
+    return pyRemoteBuiltin(agent, dst, opName, args, kwargs);
   });
 
 
@@ -117,7 +117,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       RpcAgent& agent,
       const WorkerId& dst,
       const std::string& pickledPythonUDF) {
-    return py_rpc_python_udf(agent, dst, pickledPythonUDF);
+    return pyRpcPythonUdf(agent, dst, pickledPythonUDF);
   });
 
   Py_RETURN_TRUE;

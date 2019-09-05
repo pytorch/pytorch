@@ -36,12 +36,13 @@ struct RRefForkData {
                const RRefId& rrefId_,
                const ForkId& forkId_);
 
-  static RRefForkData fromIValue(at::IValue&&);
+  static RRefForkData fromIValue(const at::IValue&);
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;
   const ForkId forkId_;
 };
+
 
 // TODO: make RRef an IValue, and edit createStackForSchema accordingly
 class RRef {
@@ -109,8 +110,6 @@ class OwnerRRef final: public RRef {
   IValue toHere() override {
     AT_ERROR("OwnerRRef does not support toHere(), use getValue() instead.");
   }
-
-  // TODO: add setValue(py::object) and getPyObj() for Python UDF
 
  private:
   friend class RRefContext;

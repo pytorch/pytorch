@@ -7,11 +7,15 @@ namespace distributed {
 namespace rpc {
 
 
-at::IValue ScriptRRefBase::value() {
+const at::IValue& RRefMessageBase::value() {
   return value_;
 }
 
-Message ScriptRRefBase::toMessage() const {
+at::IValue& RRefMessageBase::valueRef() {
+  return value_;
+}
+
+Message RRefMessageBase::toMessage() const {
   std::vector<at::IValue> ivalues;
   ivalues.push_back(value_);
   std::vector<torch::Tensor> tensor_table;
@@ -23,7 +27,7 @@ Message ScriptRRefBase::toMessage() const {
                  type_);
 }
 
-at::IValue ScriptRRefBase::fromMessage(const Message& message) {
+at::IValue RRefMessageBase::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
@@ -35,20 +39,20 @@ at::IValue ScriptRRefBase::fromMessage(const Message& message) {
   return std::move(values.front());
 }
 
-ScriptRRefFetch ScriptRRefFetch::fromMessage(const Message& message) {
-  return ScriptRRefFetch(ScriptRRefBase::fromMessage(message));
+ScriptRRefFetchCall ScriptRRefFetchCall::fromMessage(const Message& message) {
+  return ScriptRRefFetchCall(RRefMessageBase::fromMessage(message));
 }
 
-ScriptRRefValue ScriptRRefValue::fromMessage(const Message& message) {
-  return ScriptRRefValue(ScriptRRefBase::fromMessage(message));
+ScriptRRefFetchRet ScriptRRefFetchRet::fromMessage(const Message& message) {
+  return ScriptRRefFetchRet(RRefMessageBase::fromMessage(message));
 }
 
 ScriptRRefCreate ScriptRRefCreate::fromMessage(const Message& message) {
-  return ScriptRRefCreate(ScriptRRefBase::fromMessage(message));
+  return ScriptRRefCreate(RRefMessageBase::fromMessage(message));
 }
 
 ScriptRRefDelete ScriptRRefDelete::fromMessage(const Message& message) {
-  return ScriptRRefDelete(ScriptRRefBase::fromMessage(message));
+  return ScriptRRefDelete(RRefMessageBase::fromMessage(message));
 }
 
 } // namespace rpc

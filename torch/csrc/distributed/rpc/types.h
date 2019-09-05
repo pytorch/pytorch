@@ -18,7 +18,7 @@ struct GloballyUniqueId final {
   bool operator!=(const GloballyUniqueId& other) const;
 
   at::IValue toIValue() const;
-  static GloballyUniqueId fromIValue(at::IValue&&);
+  static GloballyUniqueId fromIValue(const at::IValue&);
 
   struct Hash {
     size_t operator()(const GloballyUniqueId& key) const {

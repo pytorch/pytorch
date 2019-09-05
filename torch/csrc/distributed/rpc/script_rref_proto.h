@@ -11,54 +11,56 @@ namespace rpc {
 
 // Temporary solution of RRef operations.
 // TODO: Remove all these messages and use rpc + registered functions instead.
-class TORCH_API ScriptRRefBase {
+class TORCH_API RRefMessageBase {
  public:
-  ScriptRRefBase(at::IValue value, MessageType type)
+  RRefMessageBase(at::IValue value, MessageType type)
       : value_(std::move(value)), type_(type) {}
 
-  at::IValue value();
+  const at::IValue& value();
+  at::IValue& valueRef();
 
   Message toMessage() const;
   static at::IValue fromMessage(const Message& message);
 
  private:
-   const at::IValue value_;
+   at::IValue value_;
    const MessageType type_;
 };
 
 // UserRRef uses this message to fetch the remote RRef value from the owner.
-class TORCH_API ScriptRRefFetch final : public ScriptRRefBase {
+class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
  public:
-  ScriptRRefFetch(at::IValue rrefForkData)
-      : ScriptRRefBase(std::move(rrefForkData), MessageType::RREF_FETCH) {}
+  ScriptRRefFetchCall(at::IValue rrefForkData)
+      : RRefMessageBase(std::move(rrefForkData),
+                        MessageType::RREF_FETCH_CALL) {}
 
-  static ScriptRRefFetch fromMessage(const Message& message);
+  static ScriptRRefFetchCall fromMessage(const Message& message);
 };
 
 // OwnerRRef uses this message to send the RRef value to a remote UserRRef
-class TORCH_API ScriptRRefValue final : public ScriptRRefBase {
+class TORCH_API ScriptRRefFetchRet final : public RRefMessageBase {
  public:
-  ScriptRRefValue(at::IValue value)
-      : ScriptRRefBase(std::move(value), MessageType::RREF_VALUE) {}
+  ScriptRRefFetchRet(at::IValue value)
+      : RRefMessageBase(std::move(value), MessageType::RREF_FETCH_RET) {}
 
-  static ScriptRRefValue fromMessage(const Message& message);
+  static ScriptRRefFetchRet fromMessage(const Message& message);
 };
 
 // Creator UserRRef uses this message to notify OwnerRRef on create.
-class TORCH_API ScriptRRefCreate final : public ScriptRRefBase {
+class TORCH_API ScriptRRefCreate final : public RRefMessageBase {
  public:
   ScriptRRefCreate(at::IValue value)
-      : ScriptRRefBase(std::move(value), MessageType::RREF_USER_CREATE) {}
+      : RRefMessageBase(std::move(value), MessageType::RREF_USER_CREATE) {}
 
   static ScriptRRefCreate fromMessage(const Message& message);
 };
 
-// UserRRef (regardless of it's the creator or not) uses this message to notiify
+// UserRRef (regardless of it's the creator or not) uses this message to notify
 // OwnerRRef on delete.
-class TORCH_API ScriptRRefDelete final : public ScriptRRefBase {
+class TORCH_API ScriptRRefDelete final : public RRefMessageBase {
  public:
   ScriptRRefDelete(at::IValue value)
-      : ScriptRRefBase(std::move(value), MessageType::RREF_USER_DELETE) {}
+      : RRefMessageBase(std::move(value), MessageType::RREF_USER_DELETE) {}
 
   static ScriptRRefDelete fromMessage(const Message& message);
 };

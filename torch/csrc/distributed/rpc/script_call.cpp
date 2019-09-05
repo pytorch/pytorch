@@ -20,6 +20,10 @@ const std::vector<at::IValue>& ScriptCall::stack() const {
   return stack_;
 }
 
+std::vector<at::IValue>& ScriptCall::stackRef() {
+  return stack_;
+}
+
 void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
   for (auto& value: stack_) {
     ivalues.push_back(value);

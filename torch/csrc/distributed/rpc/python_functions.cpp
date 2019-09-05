@@ -6,7 +6,7 @@ namespace rpc {
 
 namespace {
 
-std::shared_ptr<Operator> match_builtin_op(
+std::shared_ptr<Operator> matchBuiltinOp(
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs,
@@ -39,7 +39,7 @@ std::shared_ptr<Operator> match_builtin_op(
 
 } // namespace
 
-py::object to_py_obj(const Message& message) {
+py::object toPyObj(const Message& message) {
   switch (message.type()) {
     case MessageType::SCRIPT_RET: {
       ScriptRet ret = ScriptRet::fromMessage(message);
@@ -60,55 +60,41 @@ py::object to_py_obj(const Message& message) {
   }
 }
 
-std::shared_ptr<FutureMessage> py_rpc_builtin(
+std::shared_ptr<FutureMessage> pyRpcBuiltin(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
-  auto op = match_builtin_op(opName, args, kwargs, stack);
+  auto op = matchBuiltinOp(opName, args, kwargs, stack);
   return agent.send(dst, ScriptCall(op, std::move(stack)).toMessage());
 }
 
-std::shared_ptr<RRef> py_remote_builtin(
+std::shared_ptr<RRef> pyRemoteBuiltin(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
-  auto op = match_builtin_op(opName, args, kwargs, stack);
+  auto op = matchBuiltinOp(opName, args, kwargs, stack);
 
   auto& ctx = RRefContext::getInstance();
-  if (ctx->getWorkerId() == dst.id_) {
-    auto ownerRRef = ctx->createOwnerRRef<IValue>(dst.id_);
-    agent.send(
-        dst,
-        ScriptRemoteCall(
-            op,
-            std::move(stack),
-            ownerRRef->id().toIValue(),
-            ownerRRef->id().toIValue()
-        ).toMessage()
-    );
-    return ownerRRef;
-  } else {
-    auto userRRef = ctx->createUserRRef(dst.id_);
-    agent.send(
-        dst,
-        ScriptRemoteCall(
-            op,
-            std::move(stack),
-            userRRef->id().toIValue(),
-            userRRef->forkId().toIValue()
-        ).toMessage()
-    );
-    return userRRef;
-  }
+  auto userRRef = ctx->createUserRRef(dst.id_);
+  agent.send(
+      dst,
+      ScriptRemoteCall(
+          op,
+          std::move(stack),
+          userRRef->id().toIValue(),
+          userRRef->forkId().toIValue()
+      ).toMessage()
+  );
+  return userRRef;
 }
 
-std::shared_ptr<FutureMessage> py_rpc_python_udf(
+std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& pickledPythonUDF) {
