@@ -30,7 +30,7 @@ class LinearReLU(nnq.Linear):
         if bias is not None:
             bias = torch.quantize_linear(bias.dequantize(), float(self.weight_scale) * input.q_scale(), 0, torch.qint32)
 
-        Y_q = torch.ops.quantized.fbgemm_linear_relu(
+        Y_q = torch.ops.quantized.linear_relu(
             input, self._packed_weight,
             bias,
             float(self.scale),

@@ -79,17 +79,12 @@ class Conf:
         build_env_name = "-".join(map(str, build_job_name_pieces))
         parameters["build_environment"] = miniutils.quote(build_env_name)
         parameters["docker_image"] = self.gen_docker_image_path()
-        if self.pyver:
-            parameters["python_version"] = miniutils.quote(self.pyver)
         if phase == "test" and self.gpu_resource:
             parameters["use_cuda_docker_runtime"] = miniutils.quote("1")
         if phase == "test":
             resource_class = "large"
             if self.gpu_resource:
                 resource_class = "gpu." + self.gpu_resource
-
-                if self.gpu_resource == "large":
-                    parameters["multi_gpu"] = miniutils.quote("1")
             parameters["resource_class"] = resource_class
         return parameters
 

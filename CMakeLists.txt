@@ -83,12 +83,30 @@ else ()
   set(CPU_INTEL OFF)
 endif ()
 
+# For Windows, turn USE_DISTRIBUTED off by default.
+# It is not tested and likely won't work without additional changes.
+if(MSVC)
+  set(USE_DISTRIBUTED OFF CACHE STRING "Use distributed")
+endif()
+
+# For macOS, turn USE_DISTRIBUTED off by default.
+# Gloo depends on libuv, which has to be installed by the user first.
+# Therefore, the user should explicitly specify -DUSE_DISTRIBUTED=1
+# to build torch.distributed, after installing the dependency.
+if(APPLE)
+  set(USE_DISTRIBUTED OFF CACHE STRING "Use distributed")
+  # If USE_DISTRIBUTED is set, also set USE_LIBUV=1 for Gloo.
+  # It is the only transport that can be built on macOS.
+  if(USE_DISTRIBUTED)
+    set(USE_LIBUV ON CACHE STRING "")
+  endif()
+endif()
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
-option(BUILD_ATEN_ONLY "Build only a subset focused on ATen only" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
@@ -192,6 +210,13 @@ cmake_dependent_option(
 
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 
+# This is a fix for a rare build issue on Ubuntu:
+# symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
+# https://software.intel.com/en-us/articles/symbol-lookup-error-when-linking-intel-mkl-with-gcc-on-ubuntu
+if(LINUX)
+  set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed")
+endif()
+
 if (MSVC)
   foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
@@ -258,9 +283,6 @@ if (MSVC)
 
   # Try harder
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
-
-  # Turning off USE_DISTRIBUTED on default
-  set(USE_DISTRIBUTED OFF)
 endif(MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
@@ -288,22 +310,6 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(FEATURE_TORCH_MOBILE ON)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
-endif()
-
-if (BUILD_ATEN_ONLY)
-  set(BUILD_CAFFE2_OPS OFF)
-  set(BUILD_PYTHON OFF)
-  set(USE_NUMA OFF)
-  set(USE_LEVELDB OFF)
-  set(USE_GFLAGS OFF)
-  set(USE_GLOG OFF)
-  set(USE_NCCL OFF)
-  set(USE_NNPACK OFF)
-  set(USE_NUMPY OFF)
-  set(USE_OPENCV OFF)
-  set(USE_MKLDNN OFF)
-  set(USE_DISTRIBUTED OFF)
-  set(USE_LMDB OFF)
 endif()
 
 # ---[ Utils

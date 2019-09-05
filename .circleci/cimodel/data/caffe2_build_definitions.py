@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
 
-DOCKER_IMAGE_VERSION = 287
+DOCKER_IMAGE_VERSION = 301
 
 
 @dataclass
@@ -89,9 +89,7 @@ class Conf:
             if self.compiler.name == "cuda":
                 parameters["use_cuda_docker_runtime"] = miniutils.quote("1")
 
-        if self.distro.name == "macos":
-            parameters["python_version"] = miniutils.quote("2")
-        else:
+        if self.distro.name != "macos":
             parameters["docker_image"] = self.gen_docker_image()
             if self.build_only:
                 parameters["build_only"] = miniutils.quote("1")

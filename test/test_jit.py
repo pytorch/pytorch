@@ -1132,8 +1132,8 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %b_intrepr = aten::int_repr(%b_quant)
         # CHECK-NOT: aten::_dequantize_linear
         %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
-        # CHECK: quantized::fbgemm_conv_prepack
-        # CHECK: quantized::fbgemm_conv2d
+        # CHECK: quantized::conv_prepack
+        # CHECK: quantized::conv2d
         # CHECK-NOT: aten::conv2d
         %r = aten::conv2d(%a_dequant, %w_dequant, %b_dequant, %c, %d, %e, %f)
         # CHECK-NOT: aten::quantize_linear
@@ -3017,7 +3017,7 @@ graph(%Ra, %Rb):
         warns = [str(w.message) for w in warns]
         self.assertEqual(len(warns), 0)
 
-    @unittest.skipIf(sys.platform == "win32", "temp file name on windows")
+    @unittest.skipIf(IS_WINDOWS, "temp file name on windows")
     def test_trace_save(self):
         def fn(x):
             return x + 2
@@ -3032,7 +3032,7 @@ graph(%Ra, %Rb):
         out = torch.jit.trace(fn, (torch.ones(2, 2),))
         check(out)
 
-    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_torch_load_error(self):
         class J(torch.jit.ScriptModule):
             def __init__(self):
@@ -3047,6 +3047,16 @@ graph(%Ra, %Rb):
             j.save(f.name)
             with self.assertRaisesRegex(RuntimeError, "is a zip"):
                 torch.load(f.name)
+
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
+    def test_torch_load_zipfile_check(self):
+        @torch.jit.script
+        def fn(x):
+            return x + 10
+
+        with tempfile.NamedTemporaryFile() as f:
+            fn.save(f.name)
+            self.assertTrue(torch.serialization._is_zipfile(f))
 
     def test_python_bindings(self):
         lstm_cell = torch.jit.script(LSTMCellS)
@@ -3554,11 +3564,7 @@ def foo(x):
         def annotate_none():
             return torch.jit.annotate(Optional[torch.Tensor], None)
 
-        def annotate_none_no_optional():
-            return torch.jit.annotate(torch.Tensor, None)
-
         self.checkScript(annotate_none, ())
-        self.checkScript(annotate_none_no_optional, ())
 
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
@@ -3661,7 +3667,6 @@ def foo(x):
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
-    @unittest.skipIf(IS_SANDCASTLE, "[serialization forward compat]")
     def test_file_line_save_load(self):
         class Scripted(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -3730,7 +3735,6 @@ def foo(xyz):
             loaded = self.getExportImportCopy(ft)
             loaded()
 
-    @unittest.skipIf(IS_SANDCASTLE, "[serialization forward compat]")
     def test_serialized_source_ranges_dont_jitter(self):
         class FooTest3(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -4475,8 +4479,6 @@ a")
                 print(typed_nones())
 
         graph_str = str(test.graph)
-        self.assertTrue(graph_str.count("bool? = prim::Constant") == 1)
-        self.assertTrue(graph_str.count("int? = prim::Constant") == 1)
         self.assertTrue(graph_str.count("None = prim::Constant") == 1)
 
     def test_literal(self):
@@ -5925,6 +5927,11 @@ a")
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
+
+        def not_test(x):
+            return ~x
+
+        self.checkScript(not_test, (torch.tensor([2, 4]), ))
 
     def test_number_all(self):
         def int1():
@@ -11459,7 +11466,7 @@ a")
         def test_test():
             return torch.jit._unwrap_optional(1)
 
-        with self.assertRaisesRegex(RuntimeError, r"Cannot match an Optional\[T\] to None"):
+        with self.assertRaisesRegex(RuntimeError, r"could not be inferred from actual type None"):
             @torch.jit.script
             def test_no_type():
                 # type: () -> int
@@ -14262,8 +14269,7 @@ a")
     def test_script_scope(self):
         scripted = torch.jit.script(torch.nn.functional.pad)
 
-    # [serialization forward compat]
-    @unittest.skipIf(IS_SANDCASTLE or IS_WINDOWS, "NYI: TemporaryFileName on Windows")
+    @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -14609,11 +14615,11 @@ a")
                     [out_features, in_features], scale=1, zero_point=0,
                     dtype=torch.qint8)
                 self.register_buffer('_packed_weight',
-                                     torch.ops.quantized.fbgemm_linear_prepack(qweight))
+                                     torch.ops.quantized.linear_prepack(qweight))
 
             @torch.jit.export
             def __getstate__(self):
-                return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+                return torch.ops.quantized.linear_unpack(self._packed_weight)
 
             def forward(self):
                 return self._packed_weight
@@ -14621,15 +14627,15 @@ a")
             @torch.jit.export
             def __setstate__(self, state):
                 self._packed_weight.set_(
-                    torch.ops.quantized.fbgemm_linear_prepack(state))
+                    torch.ops.quantized.linear_prepack(state))
 
             @property
             def weight(self):
-                return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+                return torch.ops.quantized.linear_unpack(self._packed_weight)
 
             @weight.setter
             def weight(self, w):
-                self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
+                self._packed_weight = torch.ops.quantized.linear_prepack(w)
 
         with torch.jit._disable_emit_hooks():
             x = torch.jit.script(Linear(10, 10))

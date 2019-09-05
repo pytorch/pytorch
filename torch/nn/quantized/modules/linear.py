@@ -136,7 +136,7 @@ class Linear(torch.nn.Module):
         if bias is not None:
             bias = torch.quantize_linear(bias.dequantize(), float(self.weight_scale) * x.q_scale(), 0, torch.qint32)
 
-        return torch.ops.quantized.fbgemm_linear(
+        return torch.ops.quantized.linear(
             x, self._packed_weight, bias, self.scale, self.zero_point)
 
     # ===== Serialization methods =====
@@ -195,10 +195,10 @@ class Linear(torch.nn.Module):
     # Function rather than property to make sure that JIT serialization doesn't
     # register this as an attribute
     def weight(self):
-        return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+        return torch.ops.quantized.linear_unpack(self._packed_weight)
 
     def set_weight(self, w):
-        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
+        self._packed_weight = torch.ops.quantized.linear_prepack(w)
         self.weight_scale = w.q_scale()
 
     @classmethod
