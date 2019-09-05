@@ -19,8 +19,8 @@ class ModelNumerics(QuantizationTestCase):
         qModel(calib_data)
         torch.quantization.convert(qModel)
         out_q = qModel(eval_data)
-        SQNR = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_q))
-        self.assertGreater(SQNR, 30, msg='Quantized model numerics diverge from float, expect SQNR > 30 dB')
+        SQNRdB = 20 * torch.log10(torch.norm(out_ref) / torch.norm(out_ref - out_q))
+        self.assertGreater(SQNRdB, 30, msg='Quantized model numerics diverge from float, expect SQNR > 30 dB')
 
 if __name__ == "__main__":
     run_tests()

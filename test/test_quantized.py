@@ -9,10 +9,10 @@ from torch.nn.modules.utils import _pair
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
+from hypothesis_utils import no_deadline
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams
-from common_quantization import no_deadline
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
@@ -80,13 +80,10 @@ def pool_output_shape(input_size, kernel_size, padding, stride,
 class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the quantized::relu op."""
-    @given(qparams=hu.qparams())
-    def test_qrelu(self, qparams):
-        X = np.array([[-3, -2, 1, 2],
-                      [0, 0, 0, 0],
-                      [-5, -4, -3, -2],
-                      [1, 2, 3, 4]], dtype=np.float32)
-        scale, zero_point, torch_type = qparams
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qrelu(self, X):
+        X, (scale, zero_point, torch_type) = X
 
         Y = X.copy()
         Y[Y < 0] = 0
@@ -622,7 +619,7 @@ class TestDynamicQuantizedLinear(TestCase):
         use_channelwise=st.booleans())
     def test_qlinear(self, batch_size, input_channels, output_channels,
                      use_bias, use_relu, use_multi_dim_input, use_channelwise):
-        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qlinear_prepack = torch.ops.quantized.linear_prepack
         if use_relu:
             qlinear_dynamic = torch.ops.quantized.fbgemm_linear_relu_dynamic
         else:
@@ -739,11 +736,11 @@ class TestQuantizedLinear(unittest.TestCase):
            use_channelwise=st.booleans())
     def test_qlinear(self, batch_size, input_channels, output_channels, use_bias,
                      use_relu, use_multi_dim_input, use_channelwise):
-        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qlinear_prepack = torch.ops.quantized.linear_prepack
         if use_relu:
-            qlinear = torch.ops.quantized.fbgemm_linear_relu
+            qlinear = torch.ops.quantized.linear_relu
         else:
-            qlinear = torch.ops.quantized.fbgemm_linear
+            qlinear = torch.ops.quantized.linear
 
         if use_multi_dim_input:
             batch_size *= 3  # Test the multi-dim input tensor
@@ -867,8 +864,8 @@ class TestQuantizedLinear(unittest.TestCase):
             W_zps = torch.round(torch.rand(output_channels)
                                 * 100 - 50).to(torch.int64)
 
-        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
-        qlinear_unpack = torch.ops.quantized.fbgemm_linear_unpack
+        qlinear_prepack = torch.ops.quantized.linear_prepack
+        qlinear_unpack = torch.ops.quantized.linear_unpack
 
         W = torch.from_numpy(W)
 
@@ -955,10 +952,10 @@ class TestQuantizedConv(unittest.TestCase):
             use_channelwise
     ):
 
-        qconv = torch.ops.quantized.fbgemm_conv2d
+        qconv = torch.ops.quantized.conv2d
         if use_relu:
-            qconv = torch.ops.quantized.fbgemm_conv2d_relu
-        qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
+            qconv = torch.ops.quantized.conv2d_relu
+        qconv_prepack = torch.ops.quantized.conv_prepack
 
         # C
         input_channels = input_channels_per_group * groups
@@ -1119,8 +1116,8 @@ class TestQuantizedConv(unittest.TestCase):
             filters_scale = torch.tensor([filters_scale] * output_channels).to(torch.double)
             filters_zero_point = torch.tensor([filters_zero_point] * output_channels).to(torch.long)
 
-        qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
-        qconv_unpack = torch.ops.quantized.fbgemm_conv_unpack
+        qconv_prepack = torch.ops.quantized.conv_prepack
+        qconv_unpack = torch.ops.quantized.conv_unpack
 
         # Orig tensor is assumed to be in K(C/G)RS format
         W = torch.from_numpy(filters).to(torch.float)
