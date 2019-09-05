@@ -35,7 +35,7 @@ void TensorIterator::reorder_dimensions() {
       }
       int64_t stride0 = operands_[arg].stride_bytes[dim0];
       int64_t stride1 = operands_[arg].stride_bytes[dim1];
-      if (operands_[arg].is_output) {
+      if (is_reduction_ && operands_[arg].is_output) {
         // move reduced dimensions to the front
         if ((stride0 == 0) != (stride1 == 0)) {
           return stride1 == 0 ? 1 : -1;
@@ -212,6 +212,54 @@ void TensorIterator::allocate_outputs() {
     }
   }
 }
+
+#ifdef BUILD_NAMEDTENSOR
+void TensorIterator::compute_names() {
+  bool should_infer_names = std::any_of(
+      operands_.begin(),
+      operands_.end(),
+      [](const OperandInfo& op) {
+        return op.tensor.defined() && op.tensor.has_names();
+      });
+  if (!should_infer_names) {
+    return;
+  }
+
+  for (auto& op : operands_) {
+    if (!op.tensor.defined()) continue;
+    // don't include output tensors that are not also input tensors.
+    if (resize_outputs_ && op.is_output && !op.is_read_write) continue;
+    // perform name inference
+    if (names_.empty()) {
+      names_ = op.tensor.names();
+    } else {
+      names_ = NameVector(unify_from_right(names_, op.tensor.names()));
+    }
+  }
+}
+
+void TensorIterator::propagate_names_to_outputs() {
+  // names_ can be empty for two reasons:
+  // 1. We were performing ops on scalar tensors. Then there should be no names.
+  // 2. All of the defined inputs/outputs had no names. Then we shouldn't
+  //    run name inference.
+  if (names_.empty()) {
+    return;
+  }
+
+  // propagate names
+  for (int i = 0; i < num_outputs_; i++) {
+    auto& op = operands_[i];
+    // must call propagate_names_to_outputs after outputs have been allocated.
+    TORCH_INTERNAL_ASSERT(op.tensor.defined());
+    if (names_.empty()) {
+      namedinference::propagate_names(op.tensor, nullopt);
+    } else {
+      namedinference::propagate_names(op.tensor, names_);
+    }
+  }
+}
+#endif
 
 void TensorIterator::coalesce_dimensions() {
   if (ndim() <= 1) {
@@ -500,8 +548,10 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
   }
 }
 
-TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
+TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
+    const Tensor& b, bool check_mem_overlap) {
   auto iter = TensorIterator();
+  iter.set_check_mem_overlap(check_mem_overlap);
   iter.add_output(out);
   iter.add_input(a);
   iter.add_input(b);
@@ -510,8 +560,10 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Ten
   return iter;
 }
 
-TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
+TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
+    bool check_mem_overlap) {
   auto iter = TensorIterator();
+  iter.set_check_mem_overlap(check_mem_overlap);
   iter.add_output(out);
   iter.add_input(a);
   iter.num_outputs_ = 1;
@@ -566,15 +618,30 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
 void TensorIterator::mark_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
     operands_[i].is_output = true;
-    const auto &output = operands_[i].tensor;
+    const auto& output = operands_[i].tensor;
     if (!output.defined()) continue;
 
     // check if output is also an input
     for (int arg = num_outputs_; arg < ntensors(); arg++) {
-      const auto &input = operands_[arg].tensor;
+      const auto& input = operands_[arg].tensor;
       if (output.is_same(input)) {
         operands_[i].is_read_write = true;
       }
+    }
+  }
+}
+
+void TensorIterator::check_mem_overlaps() {
+  if (!check_mem_overlap_) {
+    return;
+  }
+  for (int i = 0; i < num_outputs_; i++) {
+    const auto& output = operands_[i].tensor;
+    if (!output.defined()) continue;
+    assert_no_internal_overlap(output);
+    for (int j = num_outputs_; j < ntensors(); j++) {
+      const auto& input = operands_[j].tensor;
+      assert_no_partial_overlap(output, input);
     }
   }
 }
@@ -690,6 +757,13 @@ int TensorIterator::get_dim_to_split() const {
 void TensorIterator::build() {
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
+  // Check that the outputs have no internal overlap
+  // and do not share memory with inputs.
+  check_mem_overlaps();
+#ifdef BUILD_NAMEDTENSOR
+  // Check that input dimensions are aligned correctly & compute outnames.
+  compute_names();
+#endif
   // compute the broadcasted shape
   compute_shape();
   // compute each tensor's stride after broadcasting
@@ -700,6 +774,10 @@ void TensorIterator::build() {
   compute_types();
   // allocate the output tensor if it's not provided
   allocate_outputs();
+#ifdef BUILD_NAMEDTENSOR
+  // perform name inference
+  propagate_names_to_outputs();
+#endif
   // coalesce adjacent dimensions when possible
   coalesce_dimensions();
 

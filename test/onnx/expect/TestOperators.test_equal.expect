@@ -8,16 +8,6 @@ graph {
     output: "2"
     op_type: "Equal"
   }
-  node {
-    input: "2"
-    output: "3"
-    op_type: "Cast"
-    attribute {
-      name: "to"
-      i: 2
-      type: INT
-    }
-  }
   name: "torch-jit-export"
   input {
     name: "0"
@@ -58,10 +48,10 @@ graph {
     }
   }
   output {
-    name: "3"
+    name: "2"
     type {
       tensor_type {
-        elem_type: 2
+        elem_type: 9
         shape {
           dim {
             dim_value: 1

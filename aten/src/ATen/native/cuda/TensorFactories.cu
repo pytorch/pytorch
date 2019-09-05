@@ -59,7 +59,7 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId());
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, TensorTypeId::CUDATensorId);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -102,18 +102,31 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
   AT_DISPATCH_ALL_TYPES(
     result.scalar_type(), "randperm_out_cuda", [&] {
       auto keys = at::empty(result.sizes(), result.options()).random_(generator);
+      auto keys_data = thrust::device_ptr<scalar_t>(keys.data_ptr<scalar_t>());
 
-      auto result_data = thrust::device_ptr<scalar_t>(result.data<scalar_t>());
-      auto keys_data = thrust::device_ptr<scalar_t>(keys.data<scalar_t>());
+      // shuffled_data points to the underlying data of the output tensor if the tensor is contiguous; otherwise it
+      // points to a new tensor.
+      Tensor shuffled;
+      thrust::device_ptr<scalar_t> shuffled_data;
+      if (result.is_contiguous()) {
+        shuffled_data = thrust::device_ptr<scalar_t>(result.data_ptr<scalar_t>());
+      } else {
+        shuffled = at::empty(n, result.options());
+        shuffled_data = thrust::device_ptr<scalar_t>(shuffled.data_ptr<scalar_t>());
+      }
 
       auto state = globalContext().getTHCState();
       THCThrustAllocator thrustAlloc(state);
       auto policy = thrust::cuda::par(thrustAlloc).on(at::cuda::getCurrentCUDAStream());
 
-      thrust::sequence(policy, result_data, result_data + n);
+      thrust::sequence(policy, shuffled_data, shuffled_data + n);
 
       // Use the sorted order of keys to rearrange the result array
-      thrust::sort_by_key(policy, keys_data, keys_data + n, result_data);
+      thrust::sort_by_key(policy, keys_data, keys_data + n, shuffled_data);
+
+      if (!result.is_contiguous()) {
+        result.copy_(shuffled);
+      }
     }
   );
 
@@ -336,7 +349,7 @@ Tensor tril_indices_cuda(
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
       tril_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data<scalar_t>(),
+        tensor.data_ptr<scalar_t>(),
         trapezoid_row_offset,
         m_first_row,
         col,
@@ -412,7 +425,7 @@ Tensor triu_indices_cuda(
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
       triu_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data<scalar_t>(),
+        tensor.data_ptr<scalar_t>(),
         std::max<int64_t>(0, offset),
         m_first_row,
         col,

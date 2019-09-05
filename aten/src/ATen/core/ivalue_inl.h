@@ -24,6 +24,21 @@ struct IValue;
 struct ClassType;
 struct TupleType;
 
+// For custom class __init__ registration, we need to pass in a function
+// that looks like this: [](IValue x, args...)
+
+// However, kernel_functor.h automatically sets the input types of the function
+// by introspecting the types of the functor (which is IValue in this case).
+// However, we need the type it binds to be Foo.
+
+// Instead, we pass in a lambda [](ivalue_holder<CurClass> x, args...) from
+// which getTypePtr can recover the original class pointer.
+
+template <typename TaggedCapsuleType>
+struct tagged_capsule {
+  IValue ivalue;
+};
+
 template<class T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::moveToIntrusivePtr() {
   auto t = c10::intrusive_ptr<T, NullType>::reclaim(static_cast<T*>(payload.as_intrusive_ptr));
@@ -36,6 +51,11 @@ c10::intrusive_ptr<T, NullType> IValue::toIntrusivePtr() const {
   auto p = r;
   r.release();
   return p;
+}
+
+template<class T, class U>
+intrusive_ptr<T> static_intrusive_pointer_cast(intrusive_ptr<U> r) {
+  return intrusive_ptr<T>::reclaim(static_cast<T*>(r.release()));
 }
 
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() && {
@@ -77,6 +97,14 @@ inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() && {
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() const & {
   AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
   return toIntrusivePtr<caffe2::Blob>();;
+}
+inline c10::intrusive_ptr<torch::jit::CustomClassHolder> IValue::toCapsule() && {
+  TORCH_INTERNAL_ASSERT(isCapsule());
+  return moveToIntrusivePtr<torch::jit::CustomClassHolder>();
+}
+inline c10::intrusive_ptr<torch::jit::CustomClassHolder> IValue::toCapsule() const & {
+  TORCH_INTERNAL_ASSERT(isCapsule());
+  return toIntrusivePtr<torch::jit::CustomClassHolder>();
 }
 
 namespace ivalue {
@@ -430,6 +458,23 @@ std::vector<Elem> generic_to(
   return result;
 }
 
+template <typename T>
+T generic_to(
+    IValue ivalue,
+    _fake_type<T>) {
+    using ElemType = typename std::remove_pointer<T>::type::element_type;
+    auto obj = ivalue.toObject();
+    auto capsule = obj->getSlot(0);
+    return c10::static_intrusive_pointer_cast<ElemType>(capsule.toCapsule());
+}
+
+template <typename T>
+tagged_capsule<T> generic_to(
+    IValue ivalue,
+    _fake_type<tagged_capsule<T>>) {
+    return tagged_capsule<T>{ivalue};
+}
+
 template <typename Elem>
 c10::List<Elem> generic_to(
     IValue ivalue,
@@ -640,6 +685,10 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
+inline IValue::IValue(c10::intrusive_ptr<torch::jit::CustomClassHolder> v)
+: tag(Tag::Capsule), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
 : tag(Tag::Future), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
@@ -687,4 +736,50 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   }
 }
 
+namespace ivalue {
+namespace detail {
+// This code allows us to template on a function based on whether IValue has a
+// constructor for it. Specifically, has_constructor<T>{} inherits from std::true_type if
+// IValue(T) compiles, and inherits from std::false_type if IValue(T) doesn't.
+// We use it for calling the IValue constructor for `from` if it exists, and otherwise
+// attempt to use our custom class code.
+template<class> struct type_sink { typedef void type; };
+template<class T> using type_sink_t = typename type_sink<T>::type;
+template<class T, class=void> struct has_constructor : std::false_type {}; \
+template<class T> struct has_constructor<
+  T,
+  type_sink_t< decltype( IValue(std::declval<T>())) >
+>: std::true_type {};
+
+template <typename T>
+IValue from_(T x, std::true_type) {
+  return IValue(x);
+}
+template <typename T>
+IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
+  using inputType = c10::intrusive_ptr<T>;
+  if (!isCustomClassRegistered<inputType>()) {
+    throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
+  }
+  auto res = getCustomClassType<inputType>();
+  auto retObject = ivalue::Object::create(res->second, 1);
+  auto objPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(x);
+
+  retObject->setSlot(0, IValue(objPtr));
+  auto resIVal = IValue(std::move(retObject));
+  return resIVal;
+}
+template <typename T>
+IValue from_(T x, std::false_type) {
+  static_assert(guts::false_t<T>::value, "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
+  return IValue();
+}
+}
+
+template <typename T>
+IValue from(T x) {
+  return detail::from_(x, detail::has_constructor<T>{});
+}
+
+}
 } // namespace c10

@@ -35,6 +35,7 @@ SKIP_PYTHON_BINDINGS = [
     'nonzero(_(out|numpy))?',
     'set_quantizer_',
     'set_data',
+    '.*_overrideable',  # overrideable functions for backend extension
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -369,6 +370,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 typename = 'IntArrayRef'
             if typename.startswith('LongTensor'):
                 typename = 'Tensor'
+            if typename == 'c10::optional<DimnameList>':
+                unpack_args = True
 
             if arg.get('python_default_init'):
                 assert typename in unpack_with_default_methods, \
@@ -490,7 +493,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['actuals'] = actuals
 
         if has_tensor_options:
-            env['initialize_cuda'] = 'maybe_initialize_cuda(options);'
+            env['initialize_cuda'] = 'torch::utils::maybe_initialize_cuda(options);'
         else:
             env['initialize_cuda'] = ''
 
@@ -551,7 +554,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['call_dispatch_out'] = emit_single_dispatch(dictionary['out'], out_idx, base_env)
             env['call_dispatch'] = emit_single_dispatch(dictionary['base'], out_idx, base_env)
 
-            has_dtype_bind = 'dtype' in [d['name'] for d in dictionary['out'].get('python_binding_arguments', [])]
+            has_dtype_bind = 'dtype' in (d['name'] for d in dictionary['out'].get('python_binding_arguments', []))
             if has_dtype_bind:
                 body = PY_VARIABLE_OUT_CHECK_TYPE.substitute(env, out_idx=out_idx, type_idx=out_idx + 1,
                                                              layout_idx=out_idx + 2, device_idx=out_idx + 3).split('\n')
@@ -590,12 +593,15 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         is_like_function = name.endswith('_like')
         is_like_function_with_options = is_like_function and has_options_arg
+        is_new_function = name.startswith('new_')
+        is_new_function_with_options = is_new_function and has_options_arg
         is_factory_function = has_tensor_return and not has_tensor_input_arg
-        is_factory_or_like_function = has_tensor_return and (not has_tensor_input_arg or is_like_function)
+        is_factory_or_like_or_new_function = has_tensor_return and (not has_tensor_input_arg or is_like_function or is_new_function)
+        is_like_or_new_function_with_options = is_like_function_with_options or is_new_function_with_options
 
         if (is_factory_function and not has_type_input_arg) or has_options_arg:
             default_type = get_type_default(declaration)
-            py_default_dtype = 'self.scalar_type()' if is_like_function_with_options else None
+            py_default_dtype = 'self.scalar_type()' if is_like_or_new_function_with_options else None
             dtype_arg = {
                 'default': default_type,
                 'dynamic_type': 'Type',
@@ -606,8 +612,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'python_default_init': py_default_dtype,
             }
             python_binding_arguments.append(dtype_arg)
-        if is_factory_function or is_like_function_with_options:
-            py_default_layout = '*torch::getLayout(self.type().backend())' if is_like_function_with_options else None
+        if is_factory_function or is_like_or_new_function_with_options:
+            py_default_layout = '*torch::getLayout(self.type().backend())' if is_like_or_new_function_with_options else None
             layout_arg = {
                 'default': 'torch.strided',
                 'dynamic_type': 'Layout',
@@ -618,7 +624,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'python_default_init': py_default_layout,
             }
             python_binding_arguments.append(layout_arg)
-            py_default_device = 'self.device()' if is_like_function_with_options else None
+            py_default_device = 'self.device()' if is_like_or_new_function_with_options else None
             device_arg = {
                 'default': 'None',
                 'default_init': 'None',
@@ -639,7 +645,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'simple_type': 'bool',
             }
             python_binding_arguments.append(pin_memory_arg)
-        if is_factory_or_like_function:
+        if is_factory_or_like_or_new_function:
             requires_grad_arg = {
                 'default': False,
                 'dynamic_type': 'bool',

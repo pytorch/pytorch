@@ -2,10 +2,12 @@
 
 #include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/Tensor.h>
+#include <ATen/core/TensorBody.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
+class CustomClassHolder : public c10::intrusive_ptr_target {};
 struct Function;
 namespace script {
 struct CompilationUnit;
@@ -49,8 +51,10 @@ struct Object;
   _(GenericDict) \
   _(Future) \
   _(Device) \
+  _(Object) \
   _(Uninitialized) \
-  _(Object)
+  _(Capsule) \
+
 
 struct CAFFE2_API IValue final {
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
@@ -102,6 +106,15 @@ struct CAFFE2_API IValue final {
     // Other types can be compared by their ptr value
     return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
   }
+
+  size_t use_count() const noexcept {
+    if (!is_intrusive_ptr) {
+      return 1;
+    }
+
+    return c10::raw::intrusive_ptr::use_count(payload.as_intrusive_ptr);
+  }
+
   void swap(IValue & rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
@@ -147,6 +160,14 @@ struct CAFFE2_API IValue final {
   }
   c10::intrusive_ptr<caffe2::Blob> toBlob() &&;
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
+
+  // Capsule
+  IValue(intrusive_ptr<torch::jit::CustomClassHolder> blob);
+  bool isCapsule() const {
+    return Tag::Capsule == tag;
+  }
+  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() &&;
+  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() const &;
 
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
@@ -564,6 +585,43 @@ struct StrongTypePtr {
   std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
   std::shared_ptr<ClassType> type_;
 };
+
+TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();
+
+#ifndef C10_MOBILE
+
+template<typename T>
+c10::StrongTypePtr getCustomClassType() {
+  auto tmap = c10::getCustomClassTypeMap();
+  auto res = tmap.find(typeid(T).name());
+  if (res == tmap.end()) {
+    throw c10::Error("Can't find class id in custom class type map", "");
+  }
+  return res->second;
+}
+
+template<typename T>
+inline bool isCustomClassRegistered() {
+  auto tmap = c10::getCustomClassTypeMap();
+  return tmap.find(typeid(T).name()) != tmap.end();
+}
+
+#else  // C10_MOBILE
+
+template<typename T>
+c10::StrongTypePtr getCustomClassType() {
+  throw c10::Error("Custom class is not supported on mobile.", "");
+}
+
+template<typename T>
+inline bool isCustomClassRegistered() {
+  return false;
+}
+
+#endif  // C10_MOBILE
+
+TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
+getClassConverter();
 }
 
 #include <ATen/core/ivalue_inl.h>

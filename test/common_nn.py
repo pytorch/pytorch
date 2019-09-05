@@ -105,6 +105,11 @@ module_tests = [
         input_size=(2, 3, 4, 5)
     ),
     dict(
+        module_name='Flatten',
+        input_size=(2, 3, 4, 5),
+        reference_fn=lambda i, *_: torch.flatten(i, 1)
+    ),
+    dict(
         module_name='Softmax',
         constructor_args=(1,),
         input_size=(10, 20),
@@ -3009,6 +3014,211 @@ criterion_tests = [
     ),
 ]
 
+new_criterion_tests = [
+    dict(
+        module_name='BCEWithLogitsLoss',
+        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.randn(15, 10).gt(0).double(),
+    ),
+    dict(
+        module_name='BCEWithLogitsLoss',
+        constructor_args=(torch.rand(10),),
+        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.randn(15, 10).gt(0).double(),
+        desc='weights',
+    ),
+    dict(
+        module_name='BCEWithLogitsLoss',
+        constructor_args=(torch.rand(()),),
+        input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.randn(()).gt(0).double(),
+        desc='scalar_weights'
+    ),
+    dict(
+        module_name='NLLLoss',
+        input_size=(2, 3, 5, 5),
+        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        desc='2d',
+    ),
+    dict(
+        module_name='NLLLoss',
+        constructor_args_fn=lambda: (torch.rand(3),),
+        input_size=(2, 3, 5, 5),
+        target=torch.rand(2, 5, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['NLLLossNd'](i, t, weight=get_weight(m)),
+        desc='2d_weights',
+    ),
+    dict(
+        module_name='NLLLoss',
+        constructor_args=(None, None, 1),
+        input_size=(2, 3, 5, 5),
+        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['NLLLossNd'](i, t, ignore_index=1),
+        desc='2d_ignore_index',
+    ),
+    dict(
+        module_name='NLLLoss',
+        input_size=(2, 3, 5, 5, 2, 2),
+        target_fn=lambda: torch.rand(2, 5, 5, 2, 2).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        desc='higher_dim',
+    ),
+    dict(
+        module_name='NLLLoss',
+        input_size=(2, 3, 5),
+        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        desc='dim_is_3',
+    ),
+    dict(
+        module_name='PoissonNLLLoss',
+        input_size=(2, 3, 4, 5),
+        target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
+        desc='no_full_loss',  # without sterling approx
+    ),
+    dict(
+        module_name='PoissonNLLLoss',
+        constructor_args=(False,),
+        input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
+        target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
+        desc='full_loss',  # with sterling approx
+    ),
+    dict(
+        module_name='L1Loss',
+        input_size=(),
+        target_size=(),
+        reference_fn=lambda i, t, _: 1. / i.numel() * (i - t).abs().sum(),
+        desc='scalar',
+    ),
+    dict(
+        module_name='KLDivLoss',
+        input_fn=lambda: torch.rand(()).log(),
+        target_fn=lambda: torch.rand(()),
+        reference_fn=lambda i, t, m:
+            kldivloss_reference(i, t, get_reduction(m)),
+        check_sum_reduction=True,
+        desc='scalar',
+    ),
+    dict(
+        module_name='MSELoss',
+        input_size=(),
+        target_size=(),
+        reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
+                                      (i.numel() if get_reduction(m) == 'mean' else 1)),
+        check_sum_reduction=True,
+        desc='scalar'
+    ),
+    dict(
+        module_name='MSELoss',
+        input_fn=lambda: torch.ones(5, 68, 64, 64, dtype=torch.float) / 10,
+        target_fn=lambda: torch.zeros(5, 68, 64, 64, dtype=torch.float),
+        reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
+                                      (i.numel() if get_reduction(m) == 'mean' else 1)),
+        check_forward_only=True,
+        desc='prec',
+    ),
+    dict(
+        module_name='BCELoss',
+        constructor_args_fn=lambda: (torch.rand(()),),
+        input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.rand(()).gt(0).double(),
+        reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
+            (i.numel() if get_reduction(m) == 'mean' else 1),
+        desc='scalar_weights',
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='HingeEmbeddingLoss',
+        constructor_args=(0.5,),
+        input_size=(),
+        target_fn=lambda: torch.randn(()).gt(0).double().mul_(2).sub(1),
+        desc='scalar_margin',
+        check_sum_reduction=True,
+    ),
+    dict(
+        module_name='SmoothL1Loss',
+        input_size=(),
+        target_size=(),
+        check_sum_reduction=True,
+        reference_fn=lambda i, t, m:
+            smoothl1loss_reference(i, t, reduction=get_reduction(m)),
+        desc='scalar',
+    ),
+    dict(
+        module_name='MultiLabelSoftMarginLoss',
+        constructor_args=(torch.rand(10),),
+        input_fn=lambda: torch.randn(5, 10),
+        target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
+        reference_fn=lambda i, t, m: -((t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * get_weight(m)).sum() /
+            (i.numel() if get_reduction(m) == 'mean' else i.size(1) if get_reduction(m) == 'sum' else 1),
+        desc='weights',
+        check_sum_reduction=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='CTCLoss',
+        constructor_args=(14,),  # blank=14
+        extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
+        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
+        target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
+        reference_fn=lambda i, t, il, tl, m:
+            ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        check_gradgrad=False,
+        check_half=False,
+    ),
+    dict(
+        module_name='CTCLoss',
+        desc='1d_target',
+        constructor_args=(14,),  # blank=14
+        extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
+        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
+        target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
+        reference_fn=lambda i, t, il, tl, m:
+            ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        check_gradgrad=False,
+        check_half=False,
+    ),
+    dict(
+        module_name='CTCLoss',
+        desc='2d_int_target',
+        constructor_args=(0,),  # blank=0
+        extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
+        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
+        target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
+        reference_fn=lambda i, t, il, tl, m:
+            ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        check_gradgrad=False,
+        check_half=False,
+        convert_target=False,
+    ),
+    dict(
+        module_name='CTCLoss',
+        desc='2d_lengths_tensors',
+        constructor_args=(0,),  # blank=0
+        extra_args=(torch.tensor([50, 50, 50]), torch.tensor([30, 25, 20])),  # input_lengths, target_lengths
+        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
+        target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
+        reference_fn=lambda i, t, il, tl, m:
+            ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        check_gradgrad=False,
+        check_half=False,
+        convert_target=False,
+    ),
+]
+
 
 class NNTestCase(TestCase):
 
@@ -3192,7 +3402,8 @@ class TestBase(object):
             elif fn_name in self._extra_kwargs:
                 self._arg_cache[name] = self._extra_kwargs[fn_name]()
             else:
-                assert size_name in self._extra_kwargs
+                assert size_name in self._extra_kwargs, \
+                    "Missing `{}`, `{}` or `{}` for {}".format(name, size_name, fn_name, self.get_name())
 
                 def map_tensor_sizes(sizes):
                     if isinstance(sizes, list):

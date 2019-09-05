@@ -1,16 +1,14 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 from collections import defaultdict
 import numpy as np
 import torch
 
+import hypothesis
 from hypothesis import assume
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as stnp
 from hypothesis.searchstrategy import SearchStrategy
+
+from common_quantized import _calculate_dynamic_qparams
 
 # Setup for the hypothesis tests.
 # The tuples are (torch_quantized_dtype, zero_point_enforce), where the last
@@ -160,16 +158,22 @@ def tensor(draw, shapes=None, elements=None, qparams=None):
         _shape = draw(st.sampled_from(shapes))
     if qparams is None:
         if elements is None:
-            elements = st.floats(-1e6, 1e6)
+            elements = st.floats(-1e6, 1e6, allow_nan=False)
         X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
         assume(not (np.isnan(X).any() or np.isinf(X).any()))
         return X, None
     qparams = draw(qparams)
     if elements is None:
         min_value, max_value = _get_valid_min_max(qparams)
-        elements = st.floats(min_value, max_value)
+        elements = st.floats(min_value, max_value, allow_infinity=False,
+                             allow_nan=False)
     X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
-    return X, qparams
+    # Recompute the scale and zero_points according to the X statistics.
+    scale, zp = _calculate_dynamic_qparams(X, qparams[2])
+    enforced_zp = _ENFORCED_ZERO_POINT.get(qparams[2], None)
+    if enforced_zp is not None:
+        zp = enforced_zp
+    return X, (scale, zp, qparams[2])
 
 """Strategy for generating test cases for tensors used in Conv2D.
 The resulting tensors is in float32 format.
@@ -247,3 +251,12 @@ def tensor_conv2d(draw,
     b = draw(tensor(shapes=(_out_channels,), elements=elements,
                     qparams=qparams[2]))
     return X, w, b, g
+
+
+# Disable deadline testing if this version of hypthesis supports it, otherwise
+# just return the original function
+def no_deadline(fn):
+    try:
+        return hypothesis.settings(deadline=None)(fn)
+    except hypothesis.errors.InvalidArgument:
+        return fn

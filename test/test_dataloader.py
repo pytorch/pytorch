@@ -12,11 +12,12 @@ import itertools
 import warnings
 from torch import multiprocessing as mp
 from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
-from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
+from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
+from torch._utils import ExceptionWrapper
 from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, PY3,
                           IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
-                          load_tests)
+                          load_tests, TEST_WITH_TSAN)
 
 try:
     import psutil
@@ -53,9 +54,21 @@ load_tests = load_tests
 # CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()
 
+
 if not NO_MULTIPROCESSING_SPAWN:
+    # We want to use `spawn` if able because some of our tests check that the
+    # data loader terminiates gracefully. To prevent hanging in the testing
+    # process, such data loaders are run in a separate subprocess.
+    #
+    # We also want to test the `pin_memory=True` configuration, thus `spawn` is
+    # required to launch such processes and they initialize the CUDA context.
+    #
+    # Mixing different start method is a recipe for disaster (e.g., using a fork
+    # `mp.Event` with a spawn `mp.Process` segfaults). So we set this globally
+    # to avoid bugs.
+    #
     # Get a multiprocessing context because some test / third party library will
-    # set start_method when imported, and setting again triggers RuntimeError.
+    # set start_method when imported, and setting again triggers `RuntimeError`.
     mp = mp.get_context(method='spawn')
 
 
@@ -70,6 +83,15 @@ if not NO_MULTIPROCESSING_SPAWN:
 JOIN_TIMEOUT = 60.0  # seconds
 
 
+supported_multiprocessing_contexts = [None]
+if torch.multiprocessing._supports_context:
+    supported_multiprocessing_contexts += list(torch.multiprocessing.get_all_start_methods())
+
+
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDatasetRandomSplit(TestCase):
     def test_lengths_must_equal_dataset_size(self):
         with self.assertRaises(ValueError):
@@ -115,6 +137,18 @@ class TestDatasetRandomSplit(TestCase):
             pass
 
 
+class CUDACountingDataset(Dataset):
+    def __init__(self, n):
+        super(CUDACountingDataset, self).__init__()
+        self.n = n
+
+    def __getitem__(self, i):
+        return torch.as_tensor(i, device='cuda')
+
+    def __len__(self):
+        return self.n
+
+
 class CountingDataset(Dataset):
     def __init__(self, n):
         super(CountingDataset, self).__init__()
@@ -139,6 +173,10 @@ class CountingIterableDataset(IterableDataset):
         return self.n
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestTensorDataset(TestCase):
 
     def test_len(self):
@@ -182,6 +220,10 @@ class TestTensorDataset(TestCase):
             self.assertEqual(t3[i], source[i][3])
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestConcatDataset(TestCase):
 
     def test_concat_two_singletons(self):
@@ -267,7 +309,8 @@ def print_traces_of_all_threads(pid):
     time.sleep(5)
 
 
-# Stores the first encountered exception in .exception.
+# The following `ErrorTrackingProcess` stores the first encountered exception in
+# its `.exception` attribute.
 # Inspired by https://stackoverflow.com/a/33599967
 class ErrorTrackingProcess(mp.Process):
 
@@ -529,7 +572,7 @@ def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
 
     it = iter(loader)
     if use_workers:
-        workers = it.workers
+        workers = it._workers
 
     def kill_pid(pid):
         psutil_p = psutil.Process(pid)
@@ -607,7 +650,7 @@ def _test_get_worker_info():
     data = []
     for d in it:
         data.append(d)
-    worker_pids = [w.pid for w in it.workers]
+    worker_pids = [w.pid for w in it._workers]
     data = torch.cat(data, 0)
     for d in data:
         # each `d` is a [worker_id, worker_pid] pair, which is set in
@@ -640,6 +683,10 @@ def error_worker_init_fn(_):
     raise RuntimeError("Error in worker_init_fn")
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDataLoader(TestCase):
 
     def setUp(self):
@@ -704,7 +751,7 @@ class TestDataLoader(TestCase):
 
     def test_invalid_assign_after_init(self):
         dl = DataLoader(self.dataset)
-        for attr in ('batch_size', 'sampler', 'drop_last'):
+        for attr in ('batch_size', 'sampler', 'batch_sampler', 'drop_last', 'dataset'):
             def fn():
                 setattr(dl, attr, {})
 
@@ -733,14 +780,15 @@ class TestDataLoader(TestCase):
             self.assertTrue(target.is_pinned())
 
     def test_multiple_dataloaders(self):
-        loader1_it = iter(DataLoader(self.dataset, num_workers=1))
-        loader2_it = iter(DataLoader(self.dataset, num_workers=2))
-        next(loader1_it)
-        next(loader1_it)
-        next(loader2_it)
-        next(loader2_it)
-        next(loader1_it)
-        next(loader2_it)
+        for multiprocessing_context in supported_multiprocessing_contexts:
+            loader1_it = iter(DataLoader(self.dataset, num_workers=1))
+            loader2_it = iter(DataLoader(self.dataset, num_workers=2, multiprocessing_context=multiprocessing_context))
+            next(loader1_it)
+            next(loader1_it)
+            next(loader2_it)
+            next(loader2_it)
+            next(loader1_it)
+            next(loader2_it)
 
     @unittest.skip("temporarily disable until flaky failures are fixed")
     def test_segfault(self):
@@ -761,6 +809,9 @@ class TestDataLoader(TestCase):
 
     def test_timeout(self):
         if TEST_CUDA and not NO_MULTIPROCESSING_SPAWN:
+            # This test runs in a subprocess, which can only initialize CUDA with spawn.
+            # _test_timeout_pin_memory with pin_memory=True initializes CUDA when the iterator is
+            # constructed.
             targets = (_test_timeout, _test_timeout_pin_memory)
         else:
             targets = (_test_timeout,)
@@ -782,6 +833,18 @@ class TestDataLoader(TestCase):
             DataLoader(self.dataset, num_workers=-1)
         with self.assertRaisesRegex(ValueError, "timeout option should be non-negative"):
             DataLoader(self.dataset, timeout=-1)
+
+        if torch.multiprocessing._supports_context:
+            valid_ctx = list(torch.multiprocessing.get_all_start_methods())[-1]
+            with self.assertRaisesRegex(ValueError, r"multi-process loading \(num_workers > 0\), but got"):
+                DataLoader(self.dataset, num_workers=0, multiprocessing_context=valid_ctx)
+            with self.assertRaisesRegex(ValueError, "should specify a valid start method in"):
+                DataLoader(self.dataset, num_workers=1, multiprocessing_context='bad')
+            with self.assertRaisesRegex(ValueError, "multiprocessing_context option should be a valid context "):
+                DataLoader(self.dataset, num_workers=1, multiprocessing_context=object())
+        else:
+            with self.assertRaisesRegex(ValueError, "multiprocessing_context relies on Python >= 3.4"):
+                DataLoader(self.dataset, num_workers=1, multiprocessing_context='fork')
 
         # map-style
         sampler = torch.utils.data.SequentialSampler(self.dataset)
@@ -872,7 +935,7 @@ class TestDataLoader(TestCase):
             len(dataloader)  # DataLoader with iterable-style dataset should error in __len__
 
         # [no auto-batching] test that workers exit gracefully
-        workers = dataloader_iter.workers
+        workers = dataloader_iter._workers
         del dataloader_iter
         try:
             for w in workers:
@@ -908,7 +971,7 @@ class TestDataLoader(TestCase):
         self.assertEqual(fetched, {tuple(range(4)), tuple(range(7)), tuple(range(7, 14)), tuple(range(14, 20))})
 
         # [auto-batching] test that workers exit gracefully
-        workers = dataloader_iter.workers
+        workers = dataloader_iter._workers
         del dataloader_iter
         try:
             for w in workers:
@@ -944,7 +1007,7 @@ class TestDataLoader(TestCase):
         self.assertEqual(fetched, {tuple(range(7)), tuple(range(7, 14))})
 
         # [auto-batching & drop_last] test that workers exit gracefully
-        workers = dataloader_iter.workers
+        workers = dataloader_iter._workers
         del dataloader_iter
         try:
             for w in workers:
@@ -973,6 +1036,28 @@ class TestDataLoader(TestCase):
 
         with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
             list(iter(ChainDataset([dataset1, self.dataset])))
+
+    def test_multiprocessing_contexts(self):
+        reference = [
+            torch.arange(3),
+            torch.arange(3, 6),
+            torch.arange(6, 9),
+            torch.arange(9, 11),
+        ]
+        counting_ds_n = 11
+        dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=(not TEST_CUDA))
+        for ctx in supported_multiprocessing_contexts:
+            if ctx in ['spawn', 'forkserver'] and TEST_CUDA and not IS_WINDOWS:  # windows doesn't support sharing cuda tensor
+                dl_cls = CUDACountingDataset
+            else:
+                ds_cls = CountingDataset
+            self.assertEqual(
+                reference, list(DataLoader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
+            if ctx is not None:
+                # test ctx object
+                ctx = mp.get_context(ctx)
+                self.assertEqual(
+                    reference, list(DataLoader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
 
     def test_worker_seed(self):
         num_workers = 6
@@ -1019,25 +1104,6 @@ class TestDataLoader(TestCase):
 
     def test_shuffle_batch_workers(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4))
-
-    def _test_batch_sampler(self, **kwargs):
-        # [(0, 1), (2, 3, 4), (5, 6), (7, 8, 9), ...]
-        batches = []
-        for i in range(0, 100, 5):
-            batches.append(tuple(range(i, i + 2)))
-            batches.append(tuple(range(i + 2, i + 5)))
-
-        dl = DataLoader(self.dataset, batch_sampler=batches, **kwargs)
-        self.assertEqual(len(dl), 40)
-        for i, (input, _target) in enumerate(dl):
-            if i % 2 == 0:
-                offset = i * 5 // 2
-                self.assertEqual(len(input), 2)
-                self.assertEqual(input, self.data[offset:offset + 2])
-            else:
-                offset = i * 5 // 2
-                self.assertEqual(len(input), 3)
-                self.assertEqual(input, self.data[offset:offset + 3])
 
     def test_RandomSampler(self):
 
@@ -1112,11 +1178,30 @@ class TestDataLoader(TestCase):
 
         self.assertEqual(scanned_data.size(), scanned_data.unique().size())
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
+    def _test_batch_sampler(self, **kwargs):
+        # [(0, 1), (2, 3, 4), (5, 6), (7, 8, 9), ...]
+        batches = []
+        for i in range(0, 20, 5):
+            batches.append(tuple(range(i, i + 2)))
+            batches.append(tuple(range(i + 2, i + 5)))
+
+        dl = DataLoader(self.dataset, batch_sampler=batches, **kwargs)
+        self.assertEqual(len(dl), 8)
+        for i, (input, _target) in enumerate(dl):
+            if i % 2 == 0:
+                offset = i * 5 // 2
+                self.assertEqual(len(input), 2)
+                self.assertEqual(input, self.data[offset:offset + 2])
+            else:
+                offset = i * 5 // 2
+                self.assertEqual(len(input), 3)
+                self.assertEqual(input, self.data[offset:offset + 3])
+
     def test_batch_sampler(self):
         self._test_batch_sampler()
         self._test_batch_sampler(num_workers=4)
+        if not NO_MULTIPROCESSING_SPAWN and torch.multiprocessing._supports_context:
+            self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_shuffle_pin_memory(self):
@@ -1144,8 +1229,6 @@ class TestDataLoader(TestCase):
     def test_error(self):
         self._test_error(DataLoader(ErrorDataset(100), batch_size=2, shuffle=True))
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
     def test_error_workers(self):
         self._test_error(DataLoader(ErrorDataset(41), batch_size=2, shuffle=True, num_workers=4))
 
@@ -1159,9 +1242,9 @@ class TestDataLoader(TestCase):
 
         for pin_memory in pin_memory_configs:
             loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=pin_memory))
-            workers = loader.workers
+            workers = loader._workers
             if pin_memory:
-                pin_memory_thread = loader.pin_memory_thread
+                pin_memory_thread = loader._pin_memory_thread
             for i, _ in enumerate(loader):
                 if i == 10:
                     break
@@ -1194,7 +1277,8 @@ class TestDataLoader(TestCase):
             # processes still exit in both cases.
 
             if pin_memory and (not TEST_CUDA or NO_MULTIPROCESSING_SPAWN or IS_WINDOWS):
-                # Can't use CUDA without spawn
+                # This test runs in a subprocess, which can only initialize CUDA with spawn.
+                # DataLoader with pin_memory=True initializes CUDA when its iterator is constructed.
                 # For windows, pin_memory sometimes causes CUDA oom.
                 continue
 
@@ -1454,6 +1538,10 @@ class StringDataset(Dataset):
         return (self.s[ndx], ndx)
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestStringDataLoader(TestCase):
     def setUp(self):
         super(TestStringDataLoader, self).setUp()
@@ -1480,6 +1568,10 @@ class DictDataset(Dataset):
         }
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDictDataLoader(TestCase):
     def setUp(self):
         super(TestDictDataLoader, self).setUp()
@@ -1524,6 +1616,10 @@ class NamedTupleDataset(Dataset):
                           label=str(ndx))
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestNamedTupleDataLoader(TestCase):
     def setUp(self):
         super(TestNamedTupleDataLoader, self).setUp()
@@ -1570,6 +1666,10 @@ def collate_into_packed_sequence_batch_first(batch):
     return torch.nn.utils.rnn.pack_padded_sequence(data, lengths, batch_first=True, enforce_sorted=False)
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestCustomPinFn(TestCase):
     def setUp(self):
         super(TestCustomPinFn, self).setUp()
@@ -1623,6 +1723,10 @@ class TestWorkerQueueDataset(Dataset):
         return len(self.data)
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
         super(TestIndividualWorkerQueue, self).setUp()

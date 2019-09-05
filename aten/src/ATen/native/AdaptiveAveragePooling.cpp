@@ -137,8 +137,8 @@ namespace {
         output.resize_({1, sizeD, osizeH, osizeW});
       }
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "adaptive_avg_pool2d_cpu", [&] {
-          auto input_data = input.data<scalar_t>();
-          auto output_data = output.data<scalar_t>();
+          auto input_data = input.data_ptr<scalar_t>();
+          auto output_data = output.data_ptr<scalar_t>();
           adaptive_avg_pool2d_single_out_frame<scalar_t>(
             input_data,
             output_data,
@@ -157,8 +157,8 @@ namespace {
       int64_t istrideB = input.stride(-4);
 
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "adaptive_avg_pool2d_cpu", [&] {
-        auto input_data = input.data<scalar_t>();
-        auto output_data = output.data<scalar_t>();
+        auto input_data = input.data_ptr<scalar_t>();
+        auto output_data = output.data_ptr<scalar_t>();
         adaptive_avg_pool2d_out_frame<scalar_t>(
           input_data,
           output_data,
@@ -268,8 +268,8 @@ namespace {
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(), "adaptive_avg_pool2d_backward_cpu", [&] {
           /* get raw pointers */
-          scalar_t *gradInput_data = gradInput.data<scalar_t>();
-          scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
+          scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
 
           adaptive_avg_pool2d_backward_single_out_frame<scalar_t>(
             gradInput_data, gradOutput_data,
@@ -284,8 +284,8 @@ namespace {
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(), "adaptive_avg_pool2d_backward_cpu", [&] {
           /* get raw pointers */
-          scalar_t *gradInput_data = gradInput.data<scalar_t>();
-          scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
+          scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
           int64_t sizeB = input.size(-4);
 
           adaptive_avg_pool2d_backward_out_frame<scalar_t>(
@@ -326,13 +326,15 @@ namespace {
       return at::mkldnn_adaptive_avg_pool2d(input, output_size);
     }
 
-    if (output_size[0] == 1 && output_size[1] == 1) {
-//in this case, adaptive pooling is just computing mean over hw dimensions, which can be done more efficiently
-       int64_t mean_size = input.size(-1) * input.size(-2);
-       Tensor out = input.contiguous().view({-1, mean_size}).mean(-1);
-       return input.ndimension() == 3 ? out.view({input.size(0), 1, 1}) : out.view({input.size(0), input.size(1), 1, 1});
+    if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
+      // in this case, adaptive pooling is just computing mean over hw
+      // dimensions, which can be done more efficiently
+      int64_t mean_size = input.size(-1) * input.size(-2);
+      Tensor out = input.contiguous().view({-1, mean_size}).mean(-1);
+      return input.dim() == 3 ? out.view({input.size(0), 1, 1})
+                              : out.view({input.size(0), input.size(1), 1, 1});
     } else {
-       return _adaptive_avg_pool2d(input, output_size);
+      return _adaptive_avg_pool2d(input, output_size);
     }
   }
 

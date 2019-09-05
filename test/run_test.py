@@ -16,19 +16,23 @@ import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
+PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'autograd',
+    'cpp_api_parity',
     'cpp_extensions',
     'c10d',
     'c10d_spawn',
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
+    'dist_autograd',
     'distributed',
     'distributions',
     'docs_coverage',
     'expecttest',
+    'fake_quant',
     'indexing',
     'indexing_cuda',
     'jit',
@@ -40,7 +44,13 @@ TESTS = [
     'nn',
     'numba_integration',
     'optim',
+    'qat',
+    'quantization',
     'quantized',
+    'quantized_tensor',
+    'quantized_nn_mods',
+    'quantizer',
+    'rpc',
     'sparse',
     'torch',
     'type_info',
@@ -50,7 +60,12 @@ TESTS = [
     'jit_fuser',
     'tensorboard',
     'namedtensor',
+    'jit_disabled',
 ]
+
+# skip < 3.6 b/c fstrings added in 3.6
+if PY36:
+    TESTS.append('jit_py3')
 
 WINDOWS_BLACKLIST = [
     'distributed',
@@ -58,6 +73,7 @@ WINDOWS_BLACKLIST = [
 
 ROCM_BLACKLIST = [
     'c10d',
+    'cpp_api_parity',
     'cpp_extensions',
     'distributed',
     'multiprocessing',
@@ -269,6 +285,15 @@ def parse_args():
         metavar='TESTS',
         help='select the last test to run (excludes following tests)')
     parser.add_argument(
+        '--bring-to-front',
+        nargs='+',
+        choices=TestChoices(TESTS),
+        default=[],
+        metavar='TESTS',
+        help='select a set of tests to run first. This can be used in situations'
+             ' where you want to run all tests, but care more about some set, '
+             'e.g. after making a change to a specific component')
+    parser.add_argument(
         '--ignore-win-blacklist',
         action='store_true',
         help='always run blacklisted windows tests')
@@ -286,7 +311,7 @@ def get_executable_command(options):
     else:
         executable = [sys.executable]
     if options.pytest:
-        executable += ['-m', 'pytest', '--durations=10']
+        executable += ['-m', 'pytest']
     return executable
 
 
@@ -340,6 +365,11 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 
 def get_selected_tests(options):
     selected_tests = options.include
+
+    if options.bring_to_front:
+        to_front = set(options.bring_to_front)
+        selected_tests = options.bring_to_front + list(filter(lambda name: name not in to_front,
+                                                              selected_tests))
 
     if options.first:
         first_index = find_test_index(options.first, selected_tests)
