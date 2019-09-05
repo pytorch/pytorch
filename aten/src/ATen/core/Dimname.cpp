@@ -8,14 +8,14 @@ namespace at {
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && (!defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE))
 static InternedString kWildcard = Symbol::dimname("*");
 #else
-static InternedString kWildcard = 0;
+static InternedString kWildcard = "None";
 #endif
 
 static std::string to_string(InternedString symbol) {
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && (!defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE))
   return symbol.toUnqualString();
 #else
-  return std::to_string(symbol);
+  return symbol;
 #endif
 }
 

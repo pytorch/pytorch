@@ -13,10 +13,17 @@ namespace at {
 
 enum class NameType: uint8_t { NORMAL, WILDCARD, TAGGED };
 
+// If we're building for build-size sensitive platforms, such as when
+// CAFFE2_IS_XPLAT_BUILD is turned on or C10_MOBILE standalone, then
+// we wish to avoid adding an extra dependency on ATen/core/interned_strings.h.
+// In particular, register_symbols.cpp (which is required by interned_strings.h)
+// adds around 6KiB on android.
+//
+// The solution to avoid the dependency is to use std::string as a fallback.
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && (!defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE))
 typedef Symbol InternedString;
 #else
-typedef uint32_t InternedString;
+typedef std::string InternedString;
 #endif
 
 struct CAFFE2_API Dimname {
