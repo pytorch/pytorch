@@ -104,3 +104,20 @@ jobs:
   - script: git branch master origin/master
   - script: pip install pyyaml
   - script: tools/run-clang-tidy-in-ci.sh
+
+- job: clang_format
+  displayName: "clang format"
+  pool:
+    vmImage: 'Ubuntu 16.04'
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "3.6"
+  - script: |
+      wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+      sudo apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-8 main"
+      sudo apt-get update
+      sudo apt-get install -y clang-format-8
+      sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-8 1000
+  - script: git branch master origin/master
+  - script: tools/run-clang-format-in-ci.sh

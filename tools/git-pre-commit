@@ -19,11 +19,11 @@ else
 fi
 
 echo "Running pre-commit clang-format"
-CLANG_FORMAT_DIFF=$(python tools/clang_format.py)
-
-if [[ ${CLANG_FORMAT_DIFF} ]]
+clang_format_tmp=$(mktemp)
+trap EXIT "rm -f $clang_format_tmp"
+if ! python tools/clang_format.py > "$clang_format_tmp"
 then
-  echo "${CLANG_FORMAT_DIFF}"
+  cat "${clang_format_tmp}"
   # Prompt user to accept clang-format changes
   # From: https://stackoverflow.com/a/10015707
   exec < /dev/tty
