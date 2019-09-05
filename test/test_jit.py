@@ -7323,6 +7323,58 @@ a")
             m = M()
             self.assertEqual(m(), 10)
 
+    def test_moduledict(self):
+        from collections import OrderedDict
+
+        class Inner(torch.nn.Module):
+            def forward(self, x):
+                return x + 10
+
+        class Inner2(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        class Inner3(torch.nn.Module):
+            def forward(self, x):
+                return (x - 4) * 3
+
+        class M(torch.nn.Module):
+            __constants__ = ['moduledict']
+
+            def __init__(self):
+                super(M, self).__init__()
+                modules = OrderedDict([
+                    ('one', Inner()),
+                    ('two', Inner2()),
+                    ('three', Inner3()),
+                ])
+                self.moduledict = nn.ModuleDict(modules)
+
+            def forward(self, x, skip_name):
+                # type: (Tensor, str)
+                names = torch.jit.annotate(List[str], [])
+                for name in self.moduledict:
+                    names.append(name)
+
+                for name, mod in self.moduledict.items():
+                    if name != skip_name:
+                        names.append(name)
+                        x = mod(x)
+
+                for mod in self.moduledict.values():
+                    x = mod(x)
+
+                for key in self.moduledict.keys():
+                    names.append(key)
+
+                return x, names
+
+        m = M()
+        script_m = torch.jit.script(M())
+        for name in ["", "one", "two", "three"]:
+            inp = torch.tensor(1)
+            self.assertEqual(script_m(inp, name), m(inp, name))
+
     def test_script_module_for2(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
