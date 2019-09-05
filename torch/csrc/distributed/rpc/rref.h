@@ -6,13 +6,11 @@
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/utils/pybind.h>
 
-
 #include <atomic>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
-
 
 class RRef;
 class RRefContext;
@@ -34,15 +32,17 @@ struct RRefForkData {
   const worker_id_t ownerId_;
   const RRefId rrefId_;
   const ForkId forkId_;
+
  private:
   friend class RRef;
   friend class RRefContext;
   template <typename T>
   friend class UserRRef;
 
-  RRefForkData(worker_id_t ownerId,
-               const RRefId& rrefId_,
-               const ForkId& forkId_);
+  RRefForkData(
+      worker_id_t ownerId,
+      const RRefId& rrefId_,
+      const ForkId& forkId_);
 
   static RRefForkData fromIValue(const at::IValue&);
 };
@@ -197,7 +197,7 @@ class RRef {
 };
 
 template <typename T>
-class UserRRef final: public RRef {
+class UserRRef final : public RRef {
  public:
   bool isOwner() const override;
   bool isPyObj() override;
@@ -206,6 +206,7 @@ class UserRRef final: public RRef {
   T toHere();
 
   ~UserRRef() override;
+
  private:
   friend class RRefContext;
 
@@ -217,7 +218,7 @@ class UserRRef final: public RRef {
 // Keep the template only on the derived class because ``RRefContext`` needs to
 // erase the type on ``RRef`` and keep them in one map.
 template <typename T>
-class OwnerRRef final: public RRef {
+class OwnerRRef final : public RRef {
  public:
   bool isOwner() const override;
   bool isPyObj() override;
@@ -243,7 +244,6 @@ class OwnerRRef final: public RRef {
   mutable std::mutex mutex_;
   mutable std::condition_variable valueCV_;
 };
-
 
 } // namespace rpc
 } // namespace distributed

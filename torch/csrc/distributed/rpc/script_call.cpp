@@ -26,7 +26,7 @@ std::vector<at::IValue>& ScriptCall::stackRef() {
 }
 
 void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
-  for (auto& value: stack_) {
+  for (auto& value : stack_) {
     ivalues.push_back(value);
   }
 
@@ -96,7 +96,7 @@ std::shared_ptr<Operator> ScriptCall::matchOperator(
   auto schema = torch::jit::parseSchema(str_schema);
   auto symbol = at::Symbol::fromQualString(schema.name());
 
-  for (auto op: torch::jit::getAllOperatorsFor(symbol)) {
+  for (auto op : torch::jit::getAllOperatorsFor(symbol)) {
     if (toString(op->schema()).compare(str_schema) == 0) {
       return op;
     }

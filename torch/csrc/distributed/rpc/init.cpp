@@ -6,8 +6,8 @@
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref.h>
+#include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -44,28 +44,31 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &RpcAgent::sync,
               py::call_guard<py::gil_scoped_release>());
 
-  auto pyRRef = shared_ptr_class_<PyRRef>(module, "RRef")
-      .def("is_owner",
-           &PyRRef::isOwner,
-           py::call_guard<py::gil_scoped_release>())
-      .def("owner",
-           &PyRRef::owner,
-           py::call_guard<py::gil_scoped_release>())
-      .def("to_here",
-           &PyRRef::toHere,
-           py::call_guard<py::gil_scoped_release>())
-      .def("local_value",
-           &PyRRef::localValue,
-           py::call_guard<py::gil_scoped_release>())
-      .def(py::pickle(
-           [](const PyRRef &self) {
-             // __getstate__
-             return self.pickle();
-           },
-           [](py::tuple t) {  // NOLINT
-             // __setstate__
-             return PyRRef::unpickle(t);
-           }));
+  auto pyRRef =
+      shared_ptr_class_<PyRRef>(module, "RRef")
+          .def(
+              "is_owner",
+              &PyRRef::isOwner,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "owner", &PyRRef::owner, py::call_guard<py::gil_scoped_release>())
+          .def(
+              "to_here",
+              &PyRRef::toHere,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "local_value",
+              &PyRRef::localValue,
+              py::call_guard<py::gil_scoped_release>())
+          .def(py::pickle(
+              [](const PyRRef& self) {
+                // __getstate__
+                return self.pickle();
+              },
+              [](py::tuple t) { // NOLINT
+                // __setstate__
+                return PyRRef::unpickle(t);
+              }));
 
   auto futureMessage =
       shared_ptr_class_<FutureMessage>(module, "FutureMessage")
@@ -82,8 +85,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
           py::arg("num_send_recv_threads") = 4)
       .def(
           "get_worker_id",
-          (const WorkerId& (ProcessGroupAgent::*)(void) const)
-              &RpcAgent::getWorkerId,
+          (const WorkerId& (ProcessGroupAgent::*)(void)const) &
+              RpcAgent::getWorkerId,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_id",
@@ -104,15 +107,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>());
 
-  module.def("init_rref_context", [](std::shared_ptr<RpcAgent> agent){
+  module.def("init_rref_context", [](std::shared_ptr<RpcAgent> agent) {
     RRefContext::initInstance(std::move(agent));
   });
 
-  module.def(
-      "set_current_rpc_dst",
-      [](const WorkerId& dst) {
-        PyRRef::setCurrentDst(dst.id_);
-      });
+  module.def("set_current_rpc_dst", [](const WorkerId& dst) {
+    PyRRef::setCurrentDst(dst.id_);
+  });
 
   module.def(
       "invoke_rpc_builtin",
@@ -142,7 +143,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
         return pyRemoteBuiltin(agent, dst, opName, args, kwargs);
       });
 
-  module.def("invoke_remote_python_udf",
+  module.def(
+      "invoke_remote_python_udf",
       [](RpcAgent& agent,
          const WorkerId& dst,
          const std::string& pickledPythonUDF) {

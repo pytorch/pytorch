@@ -24,16 +24,17 @@ class TORCH_API RRefMessageBase {
   static at::IValue fromMessage(const Message& message);
 
  protected:
-   at::IValue value_;
-   const MessageType type_;
+  at::IValue value_;
+  const MessageType type_;
 };
 
 // UserRRef uses this message to fetch the remote RRef value from the owner.
 class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
  public:
   ScriptRRefFetchCall(at::IValue rrefForkData)
-      : RRefMessageBase(std::move(rrefForkData),
-                        MessageType::SCRIPT_RREF_FETCH_CALL) {}
+      : RRefMessageBase(
+            std::move(rrefForkData),
+            MessageType::SCRIPT_RREF_FETCH_CALL) {}
 
   static ScriptRRefFetchCall fromMessage(const Message& message);
 };
@@ -41,8 +42,9 @@ class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
 class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
  public:
   PythonRRefFetchCall(at::IValue rrefForkData)
-      : RRefMessageBase(std::move(rrefForkData),
-                        MessageType::PYTHON_RREF_FETCH_CALL) {}
+      : RRefMessageBase(
+            std::move(rrefForkData),
+            MessageType::PYTHON_RREF_FETCH_CALL) {}
 
   static PythonRRefFetchCall fromMessage(const Message& message);
 };
@@ -65,7 +67,6 @@ class TORCH_API ScriptUserDelete final : public RRefMessageBase {
 
   static ScriptUserDelete fromMessage(const Message& message);
 };
-
 
 // The OwnerRRef uses this message to accept a UserRRef. A UserRRef cannot be
 // deleted before receiving this message.
@@ -90,17 +91,17 @@ class TORCH_API ScriptForkNotify final : public RRefMessageBase {
   static ScriptForkNotify fromMessage(const Message& message);
 
  private:
-   const worker_id_t forkDst_;
+  const worker_id_t forkDst_;
 };
 
 // The OwnerRRef uses this message to a UserRRef that its fork request has been
 // accepted. A UserRRef cannot be deleted if it has any pending fork requests.
 class TORCH_API ScriptForkAccept final : public RRefMessageBase {
  public:
-   ScriptForkAccept(at::IValue value)
-       : RRefMessageBase(std::move(value), MessageType::RREF_FORK_ACCEPT) {}
+  ScriptForkAccept(at::IValue value)
+      : RRefMessageBase(std::move(value), MessageType::RREF_FORK_ACCEPT) {}
 
-   static ScriptForkAccept fromMessage(const Message& message);
+  static ScriptForkAccept fromMessage(const Message& message);
 };
 
 } // namespace rpc

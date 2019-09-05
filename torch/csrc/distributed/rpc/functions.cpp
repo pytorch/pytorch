@@ -3,8 +3,8 @@
 #include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
-#include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref.h>
+#include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_ret.h>
@@ -79,9 +79,12 @@ Message processRequestBlocking(Message&& request) {
       // src is only alive within this block, use reference to avoid copy
       auto& stack = src.stackRef();
       src.op()->getOperation()(stack);
-      AT_ASSERT(stack.size() == 1, "Return value of a builtin operator or a "
+      AT_ASSERT(
+          stack.size() == 1,
+          "Return value of a builtin operator or a "
           "TorchScript function should be a single IValue, got a vector of "
-          "size ", stack.size());
+          "size ",
+          stack.size());
 
       ownerRRef->setValue(std::move(stack.front()));
       break;
@@ -107,8 +110,7 @@ Message processRequestBlocking(Message&& request) {
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
           RRefContext::getInstance()->getOrCreateOwnerRRef<IValue>(
-              RRefId::fromIValue(srf.value())
-          );
+              RRefId::fromIValue(srf.value()));
       auto response = ScriptRRefFetchRet(rref->getValue()).toMessage();
       response.setId(request.id());
       return response;
@@ -118,10 +120,10 @@ Message processRequestBlocking(Message&& request) {
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<py::object>> rref =
           RRefContext::getInstance()->getOrCreateOwnerRRef<py::object>(
-              RRefId::fromIValue(srf.value())
-          );
-      auto response = ScriptRRefFetchRet(
-          PythonRpcHandler::serialize(rref->getValue())).toMessage();
+              RRefId::fromIValue(srf.value()));
+      auto response =
+          ScriptRRefFetchRet(PythonRpcHandler::serialize(rref->getValue()))
+              .toMessage();
       response.setId(request.id());
       return response;
     }

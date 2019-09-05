@@ -17,14 +17,13 @@ void RRefContext::initInstance(std::shared_ptr<RpcAgent> agent) {
 }
 
 std::unique_ptr<RRefContext>& RRefContext::getInstance() {
-  TORCH_CHECK(RRefContext::context_,
-      "Have to initialize RRefContext before use.");
+  TORCH_CHECK(
+      RRefContext::context_, "Have to initialize RRefContext before use.");
   return RRefContext::context_;
 }
 
 RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
-    : agent_(std::move(agent)) {
-}
+    : agent_(std::move(agent)) {}
 
 worker_id_t RRefContext::getWorkerId() const {
   return agent_->getWorkerId().id_;
@@ -39,7 +38,8 @@ const std::shared_ptr<RpcAgent>& RRefContext::agent() const {
 }
 
 RRefForkData RRefContext::forkTo(
-    const std::shared_ptr<RRef>& rref, worker_id_t forkDst) {
+    const std::shared_ptr<RRef>& rref,
+    worker_id_t forkDst) {
   auto forkRequest = rref->fork();
   if (rref->owner() != forkDst) {
     // if fork destination if not owner, the forked UserRRef needs to be tracked
@@ -57,20 +57,20 @@ RRefForkData RRefContext::forkTo(
       // notify owner
       agent_->send(
           agent_->getWorkerId(rref->owner()),
-          ScriptForkNotify(forkRequest.toIValue(), forkDst).toMessage()
-      );
+          ScriptForkNotify(forkRequest.toIValue(), forkDst).toMessage());
     }
   }
   return forkRequest;
 }
 
 void RRefContext::acceptUserRRef(
-    const RRefId& rrefId, const ForkId& forkId, worker_id_t user) {
+    const RRefId& rrefId,
+    const ForkId& forkId,
+    worker_id_t user) {
   addForkOfOwner(rrefId, forkId);
   agent_->send(
       agent_->getWorkerId(user),
-      ScriptUserAccept(forkId.toIValue()).toMessage()
-  );
+      ScriptUserAccept(forkId.toIValue()).toMessage());
 }
 
 void RRefContext::acceptForkRequest(const IValue& value, worker_id_t forkDst) {
@@ -81,8 +81,7 @@ void RRefContext::acceptForkRequest(const IValue& value, worker_id_t forkDst) {
   // notify fork caller UserRRef
   agent_->send(
       agent_->getWorkerId(forkId.createdOn_),
-      ScriptForkAccept(forkId.toIValue()).toMessage()
-  );
+      ScriptForkAccept(forkId.toIValue()).toMessage());
 }
 
 void RRefContext::finishForkRequest(const IValue& value) {
@@ -90,7 +89,8 @@ void RRefContext::finishForkRequest(const IValue& value) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto iter = pendingForkRequests_.find(forkRequest.forkId_);
-    AT_ASSERT(iter != pendingForkRequests_.end(),
+    AT_ASSERT(
+        iter != pendingForkRequests_.end(),
         "Cannot finish a non-exist fork request.");
     pendingForkRequests_.erase(iter);
   }
@@ -117,7 +117,8 @@ void RRefContext::finishUserRRef(const IValue& value) {
 
 void RRefContext::addForkOfOwner(const at::IValue& value) {
   auto rfd = RRefForkData::fromIValue(value);
-  AT_ASSERT(rfd.ownerId_ == getWorkerId(),
+  AT_ASSERT(
+      rfd.ownerId_ == getWorkerId(),
       "RRef user should never receive fork notification.");
   addForkOfOwner(rfd.rrefId_, rfd.forkId_);
 }
@@ -125,14 +126,17 @@ void RRefContext::addForkOfOwner(const at::IValue& value) {
 void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto& rrefForks = forks_[rrefId];
-  AT_ASSERT(rrefForks.find(forkId) == rrefForks.end(),
-      "Got fork notification twice on the same RRef ", forkId);
+  AT_ASSERT(
+      rrefForks.find(forkId) == rrefForks.end(),
+      "Got fork notification twice on the same RRef ",
+      forkId);
   rrefForks.insert(forkId);
 }
 
 void RRefContext::delForkOfOwner(const at::IValue& value) {
   auto rfd = RRefForkData::fromIValue(value);
-  AT_ASSERT(rfd.ownerId_ == getWorkerId(),
+  AT_ASSERT(
+      rfd.ownerId_ == getWorkerId(),
       "RRef user should never receive delete notification.");
   delForkOfOwner(rfd.rrefId_, rfd.forkId_);
 }
@@ -140,9 +144,12 @@ void RRefContext::delForkOfOwner(const at::IValue& value) {
 void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto& rrefForks = forks_[rrefId];
-  AT_ASSERT(rrefForks.find(forkId) != rrefForks.end(),
-      "Attempt to delete a non-exist fork ", forkId);
+  AT_ASSERT(
+      rrefForks.find(forkId) != rrefForks.end(),
+      "Attempt to delete a non-exist fork ",
+      forkId);
   rrefForks.erase(rrefId);
+
   if (rrefForks.empty()) {
     owners_.erase(rrefId);
     forks_.erase(rrefId);

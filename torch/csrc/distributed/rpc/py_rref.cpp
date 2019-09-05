@@ -71,10 +71,11 @@ py::tuple PyRRef::pickle() const {
 
   auto t = py::make_tuple(
       ownerId,
-      rrefId.createdOn_, rrefId.localId_,
-      forkId.createdOn_, forkId.localId_,
-      isPyObj
-  );
+      rrefId.createdOn_,
+      rrefId.localId_,
+      forkId.createdOn_,
+      forkId.localId_,
+      isPyObj);
   return t;
 }
 

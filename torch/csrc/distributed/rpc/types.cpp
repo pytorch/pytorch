@@ -1,6 +1,5 @@
 #include <torch/csrc/distributed/rpc/types.h>
 
-
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -23,24 +22,31 @@ at::IValue GloballyUniqueId::toIValue() const {
 
 GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
   auto ivalues = ivalue.toTuple()->elements();
-  TORCH_CHECK(ivalues.size() == 2, "Constructing GloballyUniqueId from ivalue "
-      "expects a GenericList of two elements, but got ", ivalues.size());
+  TORCH_CHECK(
+      ivalues.size() == 2,
+      "Constructing GloballyUniqueId from ivalue "
+      "expects a GenericList of two elements, but got ",
+      ivalues.size());
 
   worker_id_t createdOn = ivalues[0].toInt();
   local_id_t localId = ivalues[1].toInt();
 
-  TORCH_CHECK(createdOn < std::numeric_limits<worker_id_t>::max(),
-      "GloballyUniqueId createdOn out of range, got ", createdOn);
+  TORCH_CHECK(
+      createdOn < std::numeric_limits<worker_id_t>::max(),
+      "GloballyUniqueId createdOn out of range, got ",
+      createdOn);
 
-  TORCH_CHECK(localId < std::numeric_limits<local_id_t>::max(),
-      "GloballyUniqueId localId out of range, got ", localId);
+  TORCH_CHECK(
+      localId < std::numeric_limits<local_id_t>::max(),
+      "GloballyUniqueId localId out of range, got ",
+      localId);
 
   return GloballyUniqueId(createdOn, localId);
 }
 
-std::ostream &operator<<(std::ostream &os, GloballyUniqueId const &globalId) {
-    return os << "GloballyUniqueId(" << globalId.createdOn_ << ", "
-              << globalId.localId_ << ")";
+std::ostream& operator<<(std::ostream& os, GloballyUniqueId const& globalId) {
+  return os << "GloballyUniqueId(" << globalId.createdOn_ << ", "
+            << globalId.localId_ << ")";
 }
 
 } // namespace rpc

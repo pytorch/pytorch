@@ -10,9 +10,10 @@ namespace rpc {
 
 class TORCH_API PythonRemoteCall final {
  public:
-  PythonRemoteCall(std::string pickledPythonUDF,
-                   at::IValue retRRefId,
-                   at::IValue retForkId);
+  PythonRemoteCall(
+      std::string pickledPythonUDF,
+      at::IValue retRRefId,
+      at::IValue retForkId);
 
   const std::string& udf();
   at::IValue retRRefId();
@@ -22,11 +23,11 @@ class TORCH_API PythonRemoteCall final {
   static PythonRemoteCall fromMessage(const Message& message);
 
  private:
-   const std::string pickledPythonUDF_;
-   const at::IValue retRRefId_;
-   const at::IValue retForkId_;
+  const std::string pickledPythonUDF_;
+  const at::IValue retRRefId_;
+  const at::IValue retForkId_;
 };
 
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

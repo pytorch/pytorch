@@ -18,8 +18,8 @@ class RRefContext {
   static void initInstance(std::shared_ptr<RpcAgent>);
   static std::unique_ptr<RRefContext>& getInstance();
 
-  RRefContext(const RRefContext &) = delete;
-  void operator=(const RRefContext &) = delete;
+  RRefContext(const RRefContext&) = delete;
+  void operator=(const RRefContext&) = delete;
 
   worker_id_t getWorkerId() const;
   RRefId genRRefId();
@@ -40,17 +40,21 @@ class RRefContext {
 
   template <typename T>
   std::shared_ptr<UserRRef<T>> createUserRRef(
-      worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId) {
-    TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
-    // RRefContext does not track user RRefs, it will be destructed when there is
-    // no shared_ptrs pointing to it.
-    // NB: cannot use make_shared here as the constructor of UserRRef is private
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      const ForkId& forkId) {
+    TORCH_CHECK(
+        ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
+    // RRefContext does not track user RRefs, it will be destructed when there
+    // is no shared_ptrs pointing to it. NB: cannot use make_shared here as the
+    // constructor of UserRRef is private
     auto userRRef =
         std::shared_ptr<UserRRef<T>>(new UserRRef<T>(ownerId, rrefId, forkId));
 
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      TORCH_CHECK(pendingUsers_.find(forkId) == pendingUsers_.end(),
+      TORCH_CHECK(
+          pendingUsers_.find(forkId) == pendingUsers_.end(),
           "Inconsistent state, attempt to create the same UserRRef twice.")
 
       auto iter = pendingAcceptedUsers_.find(forkId);
@@ -75,7 +79,9 @@ class RRefContext {
 
   template <typename T>
   std::shared_ptr<RRef> getOrCreateRRef(
-      worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId) {
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      const ForkId& forkId) {
     if (ownerId == getWorkerId()) {
       return getOrCreateOwnerRRef<T>(rrefId);
     } else {
@@ -104,9 +110,10 @@ class RRefContext {
     }
   }
 
-
   void acceptUserRRef(
-      const RRefId& rrefId, const ForkId& forkId, worker_id_t user);
+      const RRefId& rrefId,
+      const ForkId& forkId,
+      worker_id_t user);
 
   RRefForkData forkTo(const std::shared_ptr<RRef>&, worker_id_t forkDst);
   void acceptForkRequest(const IValue& request, worker_id_t forkDst);
@@ -129,9 +136,11 @@ class RRefContext {
   // Keep OwnerRRefs alive until there is no living UserRRefs.
   std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> owners_;
   // Tracks known living UserRRefs of an OwnerRRef
-  std::unordered_map<RRefId,
-                     std::unordered_set<ForkId, ForkId::Hash>,
-                     RRefId::Hash> forks_;
+  std::unordered_map<
+      RRefId,
+      std::unordered_set<ForkId, ForkId::Hash>,
+      RRefId::Hash>
+      forks_;
 
   // The follow two maps keep UserRRefs alive by holding a shared_ptr to the
   // RRef instances. A UserRRef must be added into this map if any of the
@@ -142,9 +151,7 @@ class RRefContext {
   //     It can be used or shared, but cannot be deleted, and hence in this map.
   //     A message of type RREF_USER_ACCEPT will remove the corresponding RRef
   //     from this map.
-  std::unordered_map<ForkId,
-                     std::shared_ptr<RRef>,
-                     ForkId::Hash> pendingUsers_;
+  std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash> pendingUsers_;
 
   // (2) A UserRRef has pending fork requests that are not accepted by the owner
   //     yet.
@@ -155,9 +162,8 @@ class RRefContext {
   //     implementations). As a result, RREF_USER_DELETE might be processed
   //     by the owner before previous RREF_FORK_NOTIFY messages, which would
   //     mess up RRef reference counts.
-  std::unordered_map<ForkId,
-                     std::shared_ptr<RRef>,
-                     ForkId::Hash> pendingForkRequests_;
+  std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash>
+      pendingForkRequests_;
 
   // RREF_USER_ACCEPT message arrives before the UserRRef was created. This may
   // occur as the RREF_USER_ACCEPT is sent from owner to the callee UserRRef,

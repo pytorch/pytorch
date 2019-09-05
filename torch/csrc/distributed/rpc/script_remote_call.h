@@ -16,10 +16,11 @@ using torch::jit::Operator;
 // contains a shared ptr to the `Operator` and a list of arguments.
 class TORCH_API ScriptRemoteCall final : public ScriptCall {
  public:
-  ScriptRemoteCall(std::shared_ptr<Operator> op,
-                   std::vector<at::IValue>&& args,
-                   at::IValue retRRefId,
-                   at::IValue retForkId);
+  ScriptRemoteCall(
+      std::shared_ptr<Operator> op,
+      std::vector<at::IValue>&& args,
+      at::IValue retRRefId,
+      at::IValue retForkId);
 
   const at::IValue& retRRefId();
   const at::IValue& retForkId();
@@ -28,10 +29,10 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
   static ScriptRemoteCall fromMessage(const Message& message);
 
  private:
-   const at::IValue retRRefId_;
-   const at::IValue retForkId_;
+  const at::IValue retRRefId_;
+  const at::IValue retForkId_;
 };
 
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

@@ -3,14 +3,13 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
-#include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref.h>
+#include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_ret.h>
 
 #include <torch/csrc/jit/pybind_utils.h>
-
 
 namespace torch {
 namespace distributed {
@@ -110,9 +109,8 @@ PyRRef pyRemoteBuiltin(
             op,
             std::move(stack),
             ownerRRef->id().toIValue(),
-            ownerRRef->id().toIValue()
-        ).toMessage()
-    );
+            ownerRRef->id().toIValue())
+            .toMessage());
     return PyRRef(ownerRRef);
   } else {
     auto userRRef = ctx->createUserRRef<IValue>(dst.id_);
@@ -122,9 +120,8 @@ PyRRef pyRemoteBuiltin(
             op,
             std::move(stack),
             userRRef->id().toIValue(),
-            userRRef->forkId().toIValue()
-        ).toMessage()
-    );
+            userRRef->forkId().toIValue())
+            .toMessage());
     return PyRRef(userRRef);
   }
 }
@@ -146,7 +143,6 @@ PyRRef pyRemotePythonUdf(
     RpcAgent& agent,
     const WorkerId& dst,
     const std::string& pickledPythonUDF) {
-
   auto& ctx = RRefContext::getInstance();
   if (ctx->getWorkerId() == dst.id_) {
     auto ownerRRef = ctx->createOwnerRRef<py::object>(dst.id_);
@@ -155,9 +151,8 @@ PyRRef pyRemotePythonUdf(
         PythonRemoteCall(
             pickledPythonUDF,
             ownerRRef->id().toIValue(),
-            ownerRRef->id().toIValue()
-        ).toMessage()
-    );
+            ownerRRef->id().toIValue())
+            .toMessage());
     return PyRRef(ownerRRef);
   } else {
     auto userRRef = ctx->createUserRRef<py::object>(dst.id_);
@@ -166,9 +161,8 @@ PyRRef pyRemotePythonUdf(
         PythonRemoteCall(
             pickledPythonUDF,
             userRRef->id().toIValue(),
-            userRRef->forkId().toIValue()
-        ).toMessage()
-    );
+            userRRef->forkId().toIValue())
+            .toMessage());
     return PyRRef(userRRef);
   }
 }
