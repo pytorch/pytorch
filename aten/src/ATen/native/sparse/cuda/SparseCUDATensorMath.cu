@@ -53,7 +53,7 @@ namespace {
 // --------------------------------------------------------------------
 
 Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseTensor& sparse_, const Tensor& dense, Scalar beta, Scalar alpha) {
-  AT_ASSERT(t.is_cuda()); // dispatch argument
+  TORCH_CHECK(t.is_cuda(), "addmm: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "addmm: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(sparse_.is_cuda(), "addmm: expected 'mat1' to be CUDA, but got CPU");
   TORCH_CHECK(dense.is_cuda(), "addmm: expected 'mat2' to be CUDA, but got CPU");
@@ -209,7 +209,7 @@ Tensor& s_addmm_sparse_dense_cuda_(
 // --------------------------------------------------------------------
 
 SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse_, const Tensor& dense/* , Scalar alpha */) {
-  AT_ASSERT(sparse_.is_cuda()); // dispatch argument
+  TORCH_CHECK(sparse_.is_cuda(), "hspmm: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "hspmm: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(dense.is_cuda(), "hspmm: expected 'mat2' to be CUDA, but got CPU");
 
@@ -278,9 +278,9 @@ SparseTensor hspmm_sparse_cuda(const SparseTensor& sparse, const Tensor& dense) 
 // --------------------------------------------------------------------
 
 Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseTensor& sparse, at::Scalar value) {
-  AT_ASSERT(dense.is_cuda()); // dispatch argument
-  TORCH_CHECK(sparse.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
-  TORCH_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
+  TORCH_CHECK(dense.is_cuda(), "add: expected 'self' to be a CUDA tensor, but got a CPU tensor");
+  TORCH_CHECK(sparse.is_cuda(), "add: expected 'other' to be a CUDA tensor, but got a CPU tensor");
+  TORCH_CHECK(r_.is_cuda(), "add: expected 'out' to be a CUDA tensor, but got a CPU tensor");
 
   TORCH_CHECK(cuda::check_device({sparse, r_, dense}));
 
@@ -389,7 +389,7 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   // TODO: This test seems a bit goofy
   TORCH_CHECK(src.is_sparse(), "add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
 
-  AT_ASSERT(t.is_cuda()); // dispatch argument
+  TORCH_CHECK(t.is_cuda(), "add: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(src.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
 
@@ -448,7 +448,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
     return mul_out_sparse_zerodim(r_, src_, t_);
   }
 
-  AT_ASSERT(t_.is_cuda()); // dispatch argument
+  TORCH_CHECK(t_.is_cuda(), "mul: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(cuda::check_device({r_, t_, src_}));
