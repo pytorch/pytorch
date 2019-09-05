@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import torch
 import torch.cuda
 import torch.jit
@@ -8,7 +6,7 @@ import unittest
 from hypothesis import given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
-from common_quantization import no_deadline
+from hypothesis_utils import no_deadline
 from common_utils import run_tests
 from torch.quantization import FakeQuantize
 

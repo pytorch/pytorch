@@ -124,7 +124,7 @@ class QNNPACKLinear final : public torch::OperatorKernel {
 static auto registry = torch::RegisterOperators().op(
     "quantized::qnnpack_linear(Tensor X, Tensor W, Tensor b, float Y_scale, int Y_zero_point) -> Tensor",
     torch::RegisterOperators::options().kernel<QNNPACKLinear>(
-        QuantizedCPUTensorId()));
+        TensorTypeId::QuantizedCPUTensorId));
 } // namespace
 } // namespace native
 } // namespace at

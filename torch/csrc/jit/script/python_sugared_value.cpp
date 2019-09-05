@@ -28,7 +28,8 @@ c10::optional<StrongFunctionPtr> as_function(const py::object& obj) {
 
 FunctionSchema PythonValue::getSchema(
     const size_t n_args,
-    const size_t n_binders) {
+    const size_t n_binders,
+    const SourceRange& loc) {
   auto annotations = py::module::import("torch.jit.annotations");
   auto signature = annotations.attr("get_signature")(self);
   std::vector<Argument> args, rets;
@@ -52,7 +53,7 @@ FunctionSchema PythonValue::getSchema(
 
     // First see if we can introspect the number of function parameters
     // irrespective of the presence of explicit type annotations
-    auto num_params = annotations.attr("get_num_params")(self);
+    auto num_params = annotations.attr("get_num_params")(self, loc);
     if (!num_params.is_none()) {
       // Return a signature with the correct number of params according to the
       // Python function. The error handling in call() will catch any mismatch
@@ -92,7 +93,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
   auto inputs = toValues(*m.graph(), inputs_);
-  auto schema = getSchema(inputs.size(), n_binders);
+  auto schema = getSchema(inputs.size(), n_binders, loc);
 
   std::stringstream failure_messages;
   c10::optional<MatchedSchema> matched_schema = tryMatchSchema(
@@ -476,31 +477,30 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   auto& g = *m.graph();
   if (is_constant) {
     if (py::isinstance<py::bool_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<bool>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<bool>(obj), loc));
     } else if (py::isinstance<py::int_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<int64_t>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<double>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<double>(obj), loc));
     } else if (py::isinstance<py::str>(obj)) {
-      return toSimple(
-          g.insertConstant(py::cast<std::string>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
     } else if (obj.is(py::none())) {
-      return toSimple(g.insertConstant(IValue(), nullptr, loc));
+      return toSimple(g.insertConstant(IValue(), loc));
     } else if (THPDevice_Check(obj.ptr())) {
       auto device = reinterpret_cast<THPDevice*>(obj.ptr());
       return toSimple(g.insertConstant(device->device));
     } else if (THPLayout_Check(obj.ptr())) {
       auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
       const auto v = static_cast<int64_t>(layout->layout);
-      return toSimple(g.insertConstant(v, nullptr, loc));
+      return toSimple(g.insertConstant(v, loc));
     } else if (THPDtype_Check(obj.ptr())) {
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return toSimple(g.insertConstant(v, nullptr, loc));
+      return toSimple(g.insertConstant(v, loc));
     } else if (THPQScheme_Check(obj.ptr())) {
       auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
       const auto v = static_cast<uint8_t>(qscheme->qscheme);
-      return toSimple(g.insertConstant(v, nullptr, loc));
+      return toSimple(g.insertConstant(v, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       return std::make_shared<ConstantPythonTupleValue>(obj);
     }

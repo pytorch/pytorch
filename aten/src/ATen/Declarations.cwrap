@@ -1524,20 +1524,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_ceil
-  cname: ceil
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_floor
   cname: floor
   types:
@@ -1744,20 +1730,6 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
-]]
-[[
-  name: _th_reciprocal_
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  options:
-    - cname: cinv
-      return: self
-      arguments:
-        - THTensor* self
         - THTensor* self
 ]]
 [[
@@ -1978,6 +1950,8 @@
   name: _th_clamp
   cname: clamp
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1990,6 +1964,8 @@
   name: _th_clamp_min
   cname: cmaxValue
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2001,6 +1977,8 @@
   name: _th_clamp_max
   cname: cminValue
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2512,7 +2490,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - function
