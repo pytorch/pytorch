@@ -172,7 +172,14 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         def box_with_nms_limit_ref():
             input_blobs = ["class_prob", "pred_bbox", "batch_splits"]
-            output_blobs = ["score_nms", "bbox_nms", "class_nms", "batch_splits_nms"]
+            output_blobs = [
+                "score_nms",
+                "bbox_nms",
+                "class_nms",
+                "batch_splits_nms",
+                "keeps_nms",
+                "keeps_size_nms",
+            ]
             ref_op = core.CreateOperator(
                 "BoxWithNMSLimit",
                 input_blobs,
@@ -446,6 +453,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             pooled_h=3,
             pooled_w=3,
             sampling_ratio=0,
+            aligned=False,
         )
         torch.testing.assert_allclose(roi_feature_ref, roi_feature.cpu())
 

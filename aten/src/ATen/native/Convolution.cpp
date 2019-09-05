@@ -1,3 +1,5 @@
+#include "ATen/native/Convolution.h"
+
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/utils/ParamUtils.h>
@@ -10,6 +12,8 @@
 static const int MIOPEN_DIM_MAX = 4;
 
 namespace at { namespace native {
+
+std::atomic<bool> disable_mkldnn_conv{false};
 
 struct ConvParams {
   std::vector<int64_t> stride;
@@ -149,6 +153,9 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #if AT_MKLDNN_ENABLED()
+  if (disable_mkldnn_conv.load()) {
+    return false;
+  }
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.type().backend() == at::Backend::CPU &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
@@ -215,7 +222,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
           return true;
         } else if (ch >= 64) {
           if (w >= 14) {
-            return true;  
+            return true;
           }
         } else if ((ch >= 32) && (w >=28)) {
           return true;
@@ -288,7 +295,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
           return true;
         } else if (w >= 56) {
           return true;
-        } 
+        }
       } else if (bs >= 1) {
         if ((ch >= 512) && (w >=112)) {
           return true;
@@ -495,6 +502,13 @@ at::Tensor convolution(
                           ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
 }
 
+at::Tensor convolution_overrideable(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+    bool transposed, IntArrayRef output_padding, int64_t groups) {
+  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use globalATenDispatch().registerOp to override this function ");
+}
+
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
@@ -549,7 +563,7 @@ at::Tensor _convolution(
         output = at::cudnn_convolution(
             input, weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
-        
+
       } else if (params.use_miopen(input)){
         output = at::miopen_depthwise_convolution(
             input, weight, bias,
@@ -608,7 +622,8 @@ at::Tensor _convolution(
                                       params.padding, params.stride, params.dilation, params.groups);
     }
 #endif
-  } else {
+  } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
+    // TH/native only covers CPU/CUDA implementation.
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
@@ -623,6 +638,9 @@ at::Tensor _convolution(
       }
       output = at::cat(outputs, 1);
     }
+  } else {
+    // Only reach here when input is backend with out-of-source implementation.
+    output = at::convolution_overrideable(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
   }
 
   if (k == 3) {
@@ -698,6 +716,17 @@ at::Tensor _convolution_nogroup(
   }
 
   AT_ERROR("unsupported ConvNd parameters");
+}
+
+std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
+        const Tensor& grad_output, const Tensor& input, const Tensor& weight,
+        IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+        bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
+  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use globalATenDispatch().registerOp to override this function ");
+  return std::tuple<Tensor, Tensor, Tensor>(
+          at::empty_like(input),
+          at::empty_like(weight),
+          at::empty({}));
 }
 
 static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {

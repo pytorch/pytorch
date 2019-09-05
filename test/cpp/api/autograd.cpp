@@ -22,12 +22,114 @@ std::string graph_desc(std::shared_ptr<Node> node) {
   return result+")";
 }
 
+Variable simple_fn(const Variable& x, const Variable& y) {
+  return x + 2 * y + x * y;
+}
+
+TEST(AutogradAPITests, BackwardSimpleTest) {
+  Variable x = torch::randn({2, 2}, torch::requires_grad());
+  Variable y = torch::randn({2, 2}, torch::requires_grad());
+  auto res = simple_fn(x, y);
+  backward({res.sum()}, {});
+
+  ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({2, 2}));
+  ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({2, 2})*2);
+}
+
+TEST(AutogradAPITests, BackwardTest) {
+  Variable x = torch::randn({2, 2}, torch::requires_grad());
+  Variable y = torch::randn({2, 2}, torch::requires_grad());
+  auto res = simple_fn(x, y);
+  backward({res}, {torch::ones({2, 2})}, {}, true);
+
+  backward({res}, {torch::ones({2, 2})});
+
+  ASSERT_VARIABLE_EQ(x.grad(), 2* (y + torch::ones({2, 2})));
+  ASSERT_VARIABLE_EQ(y.grad(), 2 * (x + torch::ones({2, 2})*2));
+}
+
+TEST(AutogradAPITests, GradSimpleTest) {
+  // basic grad
+  Variable x = torch::randn({2,2}, torch::requires_grad());
+  Variable y = torch::randn({2,2}, torch::requires_grad());
+  auto res = simple_fn(x, y);
+  auto grad_res = grad({res}, {x, y}, {torch::ones({2, 2})});
+
+  ASSERT_VARIABLE_EQ(grad_res[0], y + torch::ones({2, 2}));
+  ASSERT_VARIABLE_EQ(grad_res[1], x + torch::ones({2, 2}) * 2);
+}
+
+TEST(AutogradAPITests, GradTest) {
+  Variable x = torch::randn({2, 2}, torch::requires_grad());
+  Variable y = torch::randn({2, 2}, torch::requires_grad());
+  auto res = simple_fn(x, y);
+  res.backward(torch::ones({2, 2}), false, true);
+
+  Variable x_grad = y + torch::ones({2, 2});
+  Variable y_grad = x + torch::ones({2, 2}) * 2;
+  ASSERT_VARIABLE_EQ(x.grad(), x_grad);
+  ASSERT_VARIABLE_EQ(y.grad(), y_grad);
+
+  Variable grad_sum = 2 * x.grad() + y.grad();
+  auto x_hv = grad({grad_sum}, {x}, {torch::ones({2, 2})}, {}, true);
+
+  ASSERT_VARIABLE_EQ(x_hv[0], torch::ones({2, 2}));
+  ASSERT_VARIABLE_EQ(x.grad(), x_grad);
+  ASSERT_VARIABLE_EQ(y.grad(), y_grad);
+}
+
+TEST(AutogradAPITests, GradNonLeafTest) {
+  Variable x_init = torch::randn({2, 2}, torch::requires_grad());
+  Variable x = x_init;
+  Variable y = torch::randn({2, 2}, torch::requires_grad());
+  Variable grad_output = torch::ones({2, 2});
+
+  for (int i = 0; i < 5; ++ i) {
+    auto res = simple_fn(x, y);
+    auto input_grads = grad({res}, {x}, {grad_output}, {}, true);
+
+    Variable grad_x_expected = y + torch::ones({2, 2});
+    ASSERT_VARIABLE_EQ(input_grads[0], grad_x_expected);
+    ASSERT_FALSE(x.grad().defined());
+    ASSERT_FALSE(y.grad().defined());
+    x = x + 0.05 * input_grads[0];
+  }
+
+  float val_init = simple_fn(x_init, y).sum().item().toFloat();
+  float val_final = simple_fn(x, y).sum().item().toFloat();
+  ASSERT_TRUE(val_final > val_init);
+
+  x.backward(grad_output, false, true);
+  ASSERT_TRUE(x_init.grad().defined());
+  ASSERT_TRUE(y.grad().defined());
+}
+
+TEST(AutogradAPITests, GradUnreachableTest) {
+  Variable x = torch::ones({1}, torch::requires_grad());
+  Variable y = torch::ones({1}, torch::requires_grad());
+
+  Variable z = x * 2;
+  Variable w = y * 2;
+
+  auto grad_res = grad({x * 2}, {x, y}, {}, {}, false, true);
+  ASSERT_VARIABLE_EQ(grad_res[0], x * 2);
+  ASSERT_FALSE(grad_res[1].defined());
+
+  // This is slightly different than the case above, because z doesn't even
+  // have a grad accumulator allocated.
+  z = torch::ones({1}, torch::requires_grad());
+  grad_res = grad({x * 2}, {x, z}, {}, {}, false, true);
+
+  ASSERT_VARIABLE_EQ(grad_res[0], x * 2);
+  ASSERT_FALSE(grad_res[1].defined());
+}
+
 TEST(CustomAutogradTest, CustomFunction) {
   struct MyFunction : public Function<MyFunction> {
-    static variable_list forward(AutogradContext *ctx, Variable var1, int mul, Variable var2) {
+    static Variable forward(AutogradContext *ctx, Variable var1, int mul, Variable var2) {
       ctx->saved_data["mul"] = mul;
       ctx->save_for_backward({var1, var2});
-      return {var1 + mul*var2 + var1*var2};
+      return var1 + mul*var2 + var1*var2;
     }
 
     static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
@@ -42,7 +144,7 @@ TEST(CustomAutogradTest, CustomFunction) {
 
   Variable x = torch::randn({5,5}, torch::requires_grad());
   Variable y = torch::randn({5,5}, torch::requires_grad());
-  auto res = MyFunction::apply(x,2,y)[0];
+  auto res = MyFunction::apply(x,2,y);
   auto go = torch::ones({}, torch::requires_grad());
   res.sum().backward(go, false, true);
 
@@ -52,8 +154,8 @@ TEST(CustomAutogradTest, CustomFunction) {
 
 TEST(CustomAutogradTest, FunctionReturnsInput) {
   struct MyFunction : public Function<MyFunction> {
-    static variable_list forward(AutogradContext *ctx, Variable var1) {
-      return {var1};
+    static Variable forward(AutogradContext *ctx, Variable var1) {
+      return var1;
     }
 
     static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
@@ -62,15 +164,15 @@ TEST(CustomAutogradTest, FunctionReturnsInput) {
   };
 
   Variable x(torch::ones(1, torch::requires_grad()));
-  MyFunction::apply(x)[0].backward(torch::ones(1) , true, true);
+  MyFunction::apply(x).backward(torch::ones(1) , true, true);
   ASSERT_VARIABLE_EQ(x.grad(), torch::full(1,2));
 }
 
 TEST(CustomAutogradTest, NoGradCustomFunction) {
   // Custom Function should respect grad mode
  struct MyOp : public Function<MyOp> {
-   static variable_list forward(AutogradContext *ctx, Variable x) {
-     return {x+1};
+   static Variable forward(AutogradContext *ctx, Variable x) {
+     return x+1;
    }
 
    static variable_list backward(AutogradContext *ctx, variable_list dy) {
@@ -81,17 +183,17 @@ TEST(CustomAutogradTest, NoGradCustomFunction) {
  auto x = torch::ones({5,5}, torch::requires_grad());
  {
     at::NoGradGuard no_grad;
-    auto y = MyOp::apply(x)[0];
+    auto y = MyOp::apply(x);
     ASSERT_FALSE(y.requires_grad());
  }
 }
 
 TEST(CustomAutogradTest, MarkNonDifferentiable) {
   struct MyFunction : public Function<MyFunction> {
-    static variable_list forward(AutogradContext *ctx, Variable v) {
+    static Variable forward(AutogradContext *ctx, Variable v) {
       Variable output = v > 0;
       ctx->mark_non_differentiable({output});
-      return {output};
+      return output;
     }
 
     static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
@@ -100,7 +202,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiable) {
   };
 
   auto x = torch::randn({5,5}, torch::requires_grad());
-  auto mask = MyFunction::apply(x)[0];
+  auto mask = MyFunction::apply(x);
   ASSERT_FALSE(mask.requires_grad());
   auto y = x.masked_fill(mask, 0);
   y.sum().backward();
@@ -134,10 +236,10 @@ TEST(CustomAutogradTest, MarkNonDifferentiableMixed) {
 
 TEST(CustomAutogradTest, MarkNonDifferentiableNone) {
   struct MyFunction : public Function<MyFunction> {
-    static variable_list forward(AutogradContext *ctx, Variable input) {
+    static Variable forward(AutogradContext *ctx, Variable input) {
       auto output = input.clone();
       ctx->mark_non_differentiable({output});
-      return {output};
+      return output;
     }
 
     static variable_list backward(AutogradContext *ctx, variable_list grad_outputs) {
@@ -146,7 +248,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiableNone) {
   };
 
   auto x = torch::randn({5,5}, torch::requires_grad());
-  auto r = MyFunction::apply(x * x)[0];
+  auto r = MyFunction::apply(x * x);
   (r * x).sum().backward();
 }
 
@@ -214,9 +316,9 @@ TEST(CustomAutogradTest, ReturnDuplicate) {
 
 TEST(CustomAutogradTest, SaveEmptyForBackward) {
   struct MyFunction : public Function<MyFunction> {
-    static variable_list forward(AutogradContext *ctx, Variable input) {
+    static Variable forward(AutogradContext *ctx, Variable input) {
       ctx->save_for_backward({Variable(), input, Variable()});
-      return {input*input};
+      return input*input;
     }
 
     static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
@@ -228,15 +330,15 @@ TEST(CustomAutogradTest, SaveEmptyForBackward) {
   };
 
   Variable x = torch::randn({5,5}, torch::requires_grad());
-  auto y = MyFunction::apply(x)[0];
+  auto y = MyFunction::apply(x);
   y.sum().backward();
   ASSERT_VARIABLE_EQ(x.grad(), 2*x);
 }
 
 TEST(CustomAutogradTest, InvalidGradients) {
   struct MyFunction : public Function<MyFunction> {
-    static variable_list forward(AutogradContext *ctx, Variable x) {
-      return {x*2};
+    static Variable forward(AutogradContext *ctx, Variable x) {
+      return x*2;
     }
 
     static variable_list backward(AutogradContext *ctsx, variable_list grad_outputs) {
@@ -246,16 +348,16 @@ TEST(CustomAutogradTest, InvalidGradients) {
 
   auto input1 = torch::randn({5,5}, torch::dtype(torch::kFloat).requires_grad(true));
   ASSERT_THROWS_WITH(
-    MyFunction::apply(input1)[0].sum().backward(), "expected shape");
+    MyFunction::apply(input1).sum().backward(), "expected shape");
   auto input2 = torch::randn(10, torch::dtype(torch::kDouble).requires_grad(true));
   ASSERT_THROWS_WITH(
-    MyFunction::apply(input2)[0].sum().backward(), "expected type");
+    MyFunction::apply(input2).sum().backward(), "expected type");
 }
 
 TEST(CustomAutogradTest, NoGradInput) {
   struct MyFunction : public Function<MyFunction> {
-    static variable_list forward(AutogradContext*, Variable x) {
-      return {x};
+    static Variable forward(AutogradContext*, Variable x) {
+      return x;
     }
 
     static variable_list backward(AutogradContext*, variable_list grad_outputs) {
@@ -267,7 +369,7 @@ TEST(CustomAutogradTest, NoGradInput) {
   Variable y;
   {
     at::NoGradGuard no_grad;
-    y = MyFunction::apply(x)[0];
+    y = MyFunction::apply(x);
   }
 
   ASSERT_TRUE(x.requires_grad());
@@ -276,8 +378,8 @@ TEST(CustomAutogradTest, NoGradInput) {
 
 TEST(CustomAutogradTest, TooManyGrads) {
   struct MyFunction : public Function<MyFunction> {
-    static variable_list forward(AutogradContext*, Variable input) {
-      return {input};
+    static Variable forward(AutogradContext*, Variable input) {
+      return input;
     }
 
     static variable_list backward(AutogradContext*, variable_list grad_output) {
@@ -301,8 +403,8 @@ TEST(CustomAutogradTest, DepNoGrad) {
   };
 
   struct F2 : public Function<F2> {
-    static variable_list forward(AutogradContext*, Variable input, Variable ignore) {
-      return {input};
+    static Variable forward(AutogradContext*, Variable input, Variable ignore) {
+      return input;
     }
 
     static variable_list backward(AutogradContext*, variable_list grad_output) {
@@ -317,7 +419,7 @@ TEST(CustomAutogradTest, DepNoGrad) {
   ASSERT_TRUE(a.requires_grad());
   ASSERT_FALSE(b.requires_grad());
 
-  auto c = F2::apply(a,b)[0];
+  auto c = F2::apply(a,b);
   c.backward(torch::ones(c.sizes()), false, false);
   ASSERT_VARIABLE_EQ(x.grad(), torch::ones(x.sizes()));
 }
@@ -325,7 +427,7 @@ TEST(CustomAutogradTest, DepNoGrad) {
 TEST(CustomAutogradTest, Reentrant) {
   static Variable y_data = torch::randn({2, 2});
   struct Reenter : public Function<Reenter> {
-    static variable_list forward(AutogradContext *ctx, Variable input) {
+    static Variable forward(AutogradContext *ctx, Variable input) {
       Variable output;
       {
         at::AutoGradMode enable_grad(true);
@@ -337,7 +439,7 @@ TEST(CustomAutogradTest, Reentrant) {
         ctx->saved_data["y"] = y;
         ctx->saved_data["output_var"] = output;
       }
-      return {output.detach()};
+      return output.detach();
     }
 
     static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
@@ -351,19 +453,19 @@ TEST(CustomAutogradTest, Reentrant) {
   };
 
   auto x = torch::randn({2,2}, torch::requires_grad());
-  auto out = Reenter::apply(x)[0];
+  auto out = Reenter::apply(x);
   out.sum().backward();
   ASSERT_VARIABLE_EQ(x.grad(), y_data);
 }
 
 TEST(CustomAutogradTest, DeepReentrant) {
   struct DeepReenter : public Function<DeepReenter> {
-    static variable_list forward(AutogradContext *ctx, Variable x) {
+    static Variable forward(AutogradContext *ctx, Variable x) {
       {
         at::AutoGradMode enable_grad(true);
         ctx->saved_data["x"] = make_variable(x.tensor_data(), true) -1;
       }
-      return {ctx->saved_data["x"].toTensor().detach()};
+      return ctx->saved_data["x"].toTensor().detach();
     }
 
     static variable_list backward(AutogradContext*ctx, variable_list grad_output) {
@@ -380,15 +482,15 @@ TEST(CustomAutogradTest, DeepReentrant) {
 
   // This should not stack overflow
   auto v = torch::tensor(8193, torch::requires_grad());
-  DeepReenter::apply(v)[0].sum().backward();
+  DeepReenter::apply(v).sum().backward();
 }
 
 TEST(CustomAutogradTest, ReentrantPriority) {
   static std::vector<int> order;
 
   struct MyFunction : public Function<MyFunction> {
-    static variable_list forward(AutogradContext*, Variable x) {
-      return {x};
+    static Variable forward(AutogradContext*, Variable x) {
+      return x;
     }
 
     static variable_list backward(AutogradContext*, variable_list grad) {
@@ -398,12 +500,12 @@ TEST(CustomAutogradTest, ReentrantPriority) {
   };
 
   struct Reenter : public Function<Reenter> {
-    static variable_list forward(AutogradContext *ctx, Variable x) {
+    static Variable forward(AutogradContext *ctx, Variable x) {
       {
         at::AutoGradMode enable_grad(true);
         ctx->saved_data["x"] = make_variable(x.tensor_data(), true) -1;
       }
-      return {ctx->saved_data["x"].toTensor().detach()};
+      return ctx->saved_data["x"].toTensor().detach();
     }
 
     static variable_list backward(AutogradContext*ctx, variable_list grad_output) {
@@ -419,16 +521,96 @@ TEST(CustomAutogradTest, ReentrantPriority) {
     }
   };
 
-  auto a = MyFunction::apply(torch::tensor(6, torch::requires_grad()))[0];
-  auto b = Reenter::apply(torch::tensor(9, torch::requires_grad()))[0];
+  auto a = MyFunction::apply(torch::tensor(6, torch::requires_grad()));
+  auto b = Reenter::apply(torch::tensor(9, torch::requires_grad()));
   auto v = a*b;
   v.backward();
+
 
   // All the reentrant tasks should be prioritized over the MyFunction backward
   // task.
   ASSERT_EQ(order.size(), 10);
   ASSERT_EQ(std::count(order.begin(), order.end(), 1), 9);
   ASSERT_EQ(order.back(), 0);
+}
+
+TEST(CustomAutogradTest, Hooks) {
+  Variable x = torch::ones({5,5}, torch::requires_grad());
+  Variable y = torch::ones({5,5})*4;
+  y.set_requires_grad(true);
+
+  int counter = 0;
+
+  std::function<void(int, Variable)> bw_hook([&counter](int inc, Variable grad){
+    counter += inc;
+  });
+
+  Variable z = x * x + x * 2 + x * y + y;
+  x.register_hook([&bw_hook](Variable grad){
+    bw_hook(0, grad);
+  });
+  auto hook_1 = z.register_hook([&bw_hook](Variable grad){
+    bw_hook(1, grad);
+  });
+  z.backward(torch::ones({5,5}), true, true);
+  ASSERT_EQ(counter, 1);
+
+  auto hook_2 = z.register_hook([&bw_hook](Variable grad){
+    bw_hook(2, grad);
+  });
+  z.backward(torch::ones({5,5}), true, true);
+  ASSERT_EQ(counter, 4);
+
+  z.remove_hook(hook_2);
+  z.backward(torch::ones({5,5}), true, true);
+  ASSERT_EQ(counter, 5);
+
+  std::function<Variable(Variable)> bw_hook_modify([](Variable grad){
+    return grad.mul(2);
+  });
+
+  z.remove_hook(hook_1);
+  z.register_hook(bw_hook_modify);
+  y.grad().zero_();
+  z.backward(torch::ones({5,5}), true, false);
+  ASSERT_VARIABLE_EQ(y.grad(), (x+1)*2);
+
+  y.register_hook(bw_hook_modify);
+  y.grad().zero_();
+  z.backward(torch::ones({5,5}), false, false);
+  ASSERT_VARIABLE_EQ(y.grad(), (x+1)*4);
+
+  ASSERT_THROWS_WITH(y.remove_hook(3), "Invalid index");
+}
+
+TEST(CustomAutogradTest, HookNone) {
+  struct NoneGradientFunction : public Function<NoneGradientFunction> {
+    static variable_list forward(AutogradContext *ctx, Variable x, Variable y) {
+      return {x,y};
+    }
+
+    static variable_list backward(AutogradContext *ctx, variable_list grad) {
+      return {grad[0], Variable()};
+    }
+  };
+
+  bool was_called = false;
+
+  auto hook = ([&was_called](Variable grad){
+    ASSERT_TRUE(grad.defined());
+    was_called = true;
+  });
+
+  auto x = torch::randn({5,5}, torch::requires_grad());
+  auto y = torch::randn({5,5});
+
+  auto out = NoneGradientFunction::apply(x,y);
+  Variable rx = x[0], ry = x[1];
+
+  rx.register_hook(hook);
+  ry.register_hook(hook);
+  (rx+ry).sum().backward();
+  ASSERT_TRUE(was_called);
 }
 
 // TODO add these tests if needed

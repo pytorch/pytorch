@@ -2,6 +2,8 @@
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/throughput_benchmark.h>
 
+#include <ATen/native/Convolution.h>
+
 #include <pybind11/functional.h>
 
 namespace torch {
@@ -44,6 +46,14 @@ void initThroughputBenchmarkBindings(PyObject* module) {
         AutoNoGIL no_gil_guard;
         return self.benchmark(config);
       });
+
+
+  m.def("_enable_mkldnn_conv", []() {
+    at::native::disable_mkldnn_conv.exchange(false);
+  });
+  m.def("_disable_mkldnn_conv", []() {
+    at::native::disable_mkldnn_conv.exchange(true);
+  });
 }
 
 } // namespace throughput_benchmark
