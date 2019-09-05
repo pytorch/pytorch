@@ -44,6 +44,10 @@ struct RRefForkData {
   const ForkId forkId_;
 };
 
+static_assert(
+    C10_IS_TRIVIALLY_COPYABLE(RRefForkData),
+    "RRefForkData must be trivially copyable");
+
 // TODO: make RRef an IValue, and edit createStackForSchema accordingly
 class RRef {
  public:
