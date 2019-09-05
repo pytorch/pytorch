@@ -5,8 +5,11 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
+
+#ifndef C10_MOBILE
 #include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
+#endif
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -139,6 +142,7 @@ const std::shared_ptr<Node>& Variable::grad_fn() const {
     if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
       return diff_view_meta->grad_fn_;
     }
+#ifndef C10_MOBILE
     auto current_version = this->current_version();
     if (diff_view_meta->attr_version != current_version) {
       AT_ASSERT(diff_view_meta->output_nr_ == 0);
@@ -156,6 +160,9 @@ const std::shared_ptr<Node>& Variable::grad_fn() const {
       diff_view_meta->attr_version = current_version;
     }
     return diff_view_meta->grad_fn_;
+#else
+    AT_ERROR("Autograd on variable view is not supported on mobile.");
+#endif
   } else {
     return get_autograd_meta()->grad_fn_;
   }
