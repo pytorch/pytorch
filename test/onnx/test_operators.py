@@ -728,6 +728,16 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
                         opset_version=11)
 
+    def test_topk(self):
+        x = torch.arange(1., 6., requires_grad=True)
+        k = torch.tensor(3)
+        self.assertONNX(lambda x, k: torch.topk(x, k), (x, k), opset_version=10)
+
+    def test_topk_smallest_unsorted(self):
+        x = torch.arange(1., 6., requires_grad=True)
+        k = torch.tensor(3)
+        self.assertONNX(lambda x, k: torch.topk(x, k, largest=False,sorted=False), (x, k), opset_version=11)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
