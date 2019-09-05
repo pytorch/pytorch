@@ -1,6 +1,6 @@
 #pragma once
 
-#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && (!defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE))
 #include <ATen/core/interned_strings.h>
 #endif
 
@@ -13,7 +13,7 @@ namespace at {
 
 enum class NameType: uint8_t { NORMAL, WILDCARD, TAGGED };
 
-#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && (!defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE))
 typedef Symbol InternedString;
 #else
 typedef uint32_t InternedString;
