@@ -1132,8 +1132,8 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %b_intrepr = aten::int_repr(%b_quant)
         # CHECK-NOT: aten::_dequantize_linear
         %b_dequant = aten::_dequantize_linear(%b_intrepr, %b_scale, %b_zero_point, %b_dtype)
-        # CHECK: quantized::conv_prepack
-        # CHECK: quantized::conv2d
+        # CHECK: quantized::fbgemm_conv_prepack
+        # CHECK: quantized::fbgemm_conv2d
         # CHECK-NOT: aten::conv2d
         %r = aten::conv2d(%a_dequant, %w_dequant, %b_dequant, %c, %d, %e, %f)
         # CHECK-NOT: aten::quantize_linear
@@ -14003,69 +14003,36 @@ a")
         out = m(torch.ones(5, 5, 5).cuda())
         self.assertTrue(out[0].is_cuda)
 
+
     def test_ignore_decorator(self):
-        with warnings.catch_warnings(record=True) as warns:
-            class M(torch.jit.ScriptModule):
-                def __init__(self):
-                    super(M, self).__init__()
-                    tensor = torch.zeros(1, requires_grad=False)
-                    self.register_buffer('some_state', torch.nn.Parameter(tensor))
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                tensor = torch.zeros(1, requires_grad=False)
+                self.register_buffer('some_state', torch.nn.Parameter(tensor))
 
-                @torch.jit.script_method
-                def forward(self, x):
-                    self.ignored_code(x)
-                    return x
+            @torch.jit.script_method
+            def forward(self, x):
+                self.ignored_code(x)
+                return x
 
-                @torch.jit.ignore(drop_on_export=True)
-                def ignored_code(self, x):
-                    self.some_state = torch.tensor((100,))
-
-        FileCheck().check("TorchScript will now drop the drop call on compilation.").run(str(warns[0]))
+            @torch.jit.ignore(drop_on_export=True)
+            def ignored_code(self, x):
+                self.some_state = torch.tensor((100,))
 
         # Assert ignored code is run
         m = M()
+        self.assertEqual(m.some_state, torch.zeros(1))
+        m(torch.ones(1))
+        self.assertEqual(m.some_state, torch.zeros(1) + 100)
 
         m2 = self.getExportImportCopy(m)
         pp = str(m2.forward.code)
+        self.assertIn('IgnoredPythonOp', pp)
         self.assertNotIn('ignored_code', pp)
 
-        with self.assertRaisesRegex(torch.jit.Error, "annotated to be ignored and cannot be run"):
+        with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
             m2.forward(torch.ones(1))
-
-    def test_ignored_as_value(self):
-        class Model(nn.Module):
-            def __init__(self):
-                super(Model, self).__init__()
-
-            @torch.jit.unused
-            def tuple_ignored(self, x):
-                # type: (Tensor) -> Tuple[Tensor, Tensor]
-                return x, x
-
-            @torch.jit.unused
-            def single_val_ignored(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
-                return x
-
-            def forward(self, x, use_ignore_path):
-                # type: (Tensor, bool) -> Tuple[Tensor, Tensor]
-                if False:
-                    return self.tuple_ignored(x)
-                if use_ignore_path:
-                    return self.single_val_ignored(x, x), self.single_val_ignored(x, x)
-                return x, x
-
-        original = Model()
-        scripted = torch.jit.script(original)
-        self.assertEqual(scripted(torch.tensor(.5), False), (torch.tensor(.5), torch.tensor(.5)))
-
-        buffer = io.BytesIO()
-        torch.jit.save(scripted, buffer)
-        buffer.seek(0)
-        loaded = torch.jit.load(buffer)
-
-        with self.assertRaisesRegex(torch._C.JITException, "annotated to be ignored and cannot be run"):
-            loaded(torch.tensor(.5), True)
 
     def test_module_error(self):
         class MyModule(torch.nn.Module):
@@ -14648,11 +14615,11 @@ a")
                     [out_features, in_features], scale=1, zero_point=0,
                     dtype=torch.qint8)
                 self.register_buffer('_packed_weight',
-                                     torch.ops.quantized.linear_prepack(qweight))
+                                     torch.ops.quantized.fbgemm_linear_prepack(qweight))
 
             @torch.jit.export
             def __getstate__(self):
-                return torch.ops.quantized.linear_unpack(self._packed_weight)
+                return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
 
             def forward(self):
                 return self._packed_weight
@@ -14660,15 +14627,15 @@ a")
             @torch.jit.export
             def __setstate__(self, state):
                 self._packed_weight.set_(
-                    torch.ops.quantized.linear_prepack(state))
+                    torch.ops.quantized.fbgemm_linear_prepack(state))
 
             @property
             def weight(self):
-                return torch.ops.quantized.linear_unpack(self._packed_weight)
+                return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
 
             @weight.setter
             def weight(self, w):
-                self._packed_weight = torch.ops.quantized.linear_prepack(w)
+                self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
 
         with torch.jit._disable_emit_hooks():
             x = torch.jit.script(Linear(10, 10))

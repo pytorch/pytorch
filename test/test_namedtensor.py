@@ -487,7 +487,7 @@ class TestNamedTensor(TestCase):
             out_fn = getattr(torch, name)
 
             def fn(a, b):
-                result = torch.empty([0], dtype=a.dtype, device=a.device)
+                result = a.new_empty([0])
                 out_fn(a, b, *args, out=result, **kwargs)
                 return result
 
@@ -564,7 +564,7 @@ class TestNamedTensor(TestCase):
             out_fn = getattr(torch, name)
 
             def fn(tensor):
-                result = torch.empty([0], dtype=tensor.dtype, device=tensor.device)
+                result = tensor.new_empty([0])
                 out_fn(tensor, *args, out=result, **kwargs)
                 return result
 
@@ -721,7 +721,7 @@ class TestNamedTensor(TestCase):
 
         def test_out_variant(op_name, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            out = torch.empty([0], device=device)
+            out = t.new_empty([0])
             getattr(torch, op_name)(t, 'C', out=out)
             check_output(out, ['N', 'L'])
 
