@@ -919,36 +919,6 @@ struct PythonPrintPass {
     stmt << ss.str();
   }
 
-  void printNone(TaggedStringStream& stmt, const Node* node) {
-    if (node->output()->type()->isSubtypeOf(NoneType::get())) {
-      stmt << "None";
-      return;
-    }
-    // XXX - when None has an Optional[T] type, we must ensure that type
-    // can be recovered on parsing. It cannot be recovered if it will be
-    // matched to schema with free variables. If it is used only in places
-    // where there is schema and the scheme has no free variables, then we
-    // can recover it without annotation. Otherwise, we annotate None with
-    // the right optional type
-    const auto& uses = node->output()->uses();
-    bool all_usable_schema =
-        std::all_of(uses.begin(), uses.end(), [](const Use& u) {
-          if (auto schema = u.user->maybeSchema()) {
-            if (u.offset >= schema->arguments().size()) {
-              return false;
-            }
-            return !schema->arguments().at(u.offset).type()->hasFreeVariables();
-          }
-          return false;
-        });
-
-    if (all_usable_schema) {
-      stmt << "None";
-    } else {
-      stmt << "annotate(" << node->output()->type()->python_str() << ", None)";
-    }
-  }
-
   static bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
     if (elem_type->kind() == OptionalType::Kind) {
       // it is possible that we are constructing an optional list, but all
@@ -963,27 +933,34 @@ struct PythonPrintPass {
     return true;
   }
 
+  void printOpName(TaggedStringStream& stmt, Symbol kind) {
+    if (kind.is_aten()) {
+      // special case aten -> torch because we want to rename
+      // the aten namespace, but this change will take more time
+      // doing it here ensures we do not have fix up archives later
+      stmt << "torch." << kind.toUnqualString();
+    } else {
+      stmt << "ops." << kind.ns().toUnqualString() << "."
+           << kind.toUnqualString();
+    }
+  }
+
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
   void printRHS(TaggedStringStream& stmt, Node* node) {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
-        if (enforce_importable_ && !value->ignore_on_export) {
+        if (enforce_importable_) {
           throw script::ErrorReport(node->sourceRange())
               << "Could not export Python function call '" << value->name()
               << "'. Remove calls to Python functions before export. "
               << "Did you forget add @script or @script_method annotation? "
               << "If this is a nn.ModuleList, add it to __constants__";
         }
-
-        if (value->ignore_on_export) {
-          stmt << "ops.prim.IgnoredPythonOp";
-        } else {
-          std::stringstream scalars_stream;
-          stmt << "^" << value->name();
-          value->writeScalars(scalars_stream);
-          stmt << scalars_stream.str();
-        }
+        std::stringstream scalars_stream;
+        stmt << "^" << value->name();
+        value->writeScalars(scalars_stream);
+        stmt << scalars_stream.str();
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
       case prim::Uninitialized: {
@@ -999,7 +976,7 @@ struct PythonPrintPass {
           IValue v = toIValue(node->output()).value();
           printConstant(stmt, v);
         } else {
-          printNone(stmt, node);
+          stmt << "None";
         }
       } break;
       case prim::ImplicitTensorToNum: {
@@ -1125,18 +1102,27 @@ struct PythonPrintPass {
         }
 
       } break;
-      default: {
-        Symbol kind = node->kind();
-        if (kind.is_aten()) {
-          // special case aten -> torch because we want to rename
-          // the aten namespace, but this change will take more time
-          // doing it here ensures we do not have fix up archives later
-          stmt << "torch." << kind.toUnqualString() << "(";
+      case prim::unchecked_unwrap_optional:
+      case aten::_unwrap_optional: {
+        printOpName(stmt, node->kind());
+        stmt << "(";
+        // we cannot recover the type of unwrap_optional(None),
+        // using normal schema matching, so we route around this by rewriting
+        // the call to unwrap_optional(annotated(Optional[T], None))
+        if (node->input()->type()->isSubtypeOf(NoneType::get()) ||
+            node->input()->mustBeNone()) {
+          auto input_type = OptionalType::create(node->output()->type());
+          stmt << "annotate(" << input_type->python_str() << ", "
+               << useOf(node->input()) << ")";
         } else {
-          stmt << "ops." << kind.ns().toUnqualString() << "."
-               << kind.toUnqualString() << "(";
+          stmt << useOf(node->input());
         }
+        stmt << ")";
+      } break;
+      default: {
+        printOpName(stmt, node->kind());
         const FunctionSchema& schema = node->schema();
+        stmt << "(";
         for (size_t i = 0; i < node->inputs().size(); ++i) {
           if (i > 0) {
             stmt << ", ";
@@ -1243,7 +1229,7 @@ struct PythonPrintPass {
       assignValue(*param_it++, arg_name);
     }
 
-    body_ << ") -> " << resultType(graph)->python_str() << ":\n";
+    body_ << ") -> " << schema.returns().at(0).type()->python_str() << ":\n";
     printBody(graph.block());
   }
 
@@ -1276,17 +1262,6 @@ struct PythonPrintPass {
         enforce_importable_(enforce_importable),
         legacy_module_printing_(legacy_module_printing) {
     TORCH_INTERNAL_ASSERT(deps_table.empty());
-  }
-
-  // TODO: we should consider forcing functions to return a single value
-  // instead of handling this tuple logic both in the compiler and the printer
-  TypePtr resultType(const Graph& graph) {
-    if (graph.outputs().size() == 1) {
-      return graph.outputs().at(0)->type();
-    } else {
-      return TupleType::create(
-          fmap(graph.outputs(), [&](const Value* v) { return v->type(); }));
-    }
   }
 
   void printModuleMetadata(const ClassTypePtr& moduleType) {

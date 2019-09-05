@@ -458,6 +458,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_ret.cpp
       ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
     )
     if (NOT WIN32)
       list(APPEND TORCH_SRCS
@@ -768,7 +769,7 @@ ENDIF()
     DESTINATION share/cmake/Torch)
 
   if (USE_DISTRIBUTED)
-    if (NOT MSVC AND NOT APPLE)
+    if (NOT MSVC)
       add_subdirectory(${TORCH_SRC_DIR}/lib/c10d lib_c10d)
     endif()
   endif()
