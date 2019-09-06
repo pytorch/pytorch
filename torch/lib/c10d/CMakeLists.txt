@@ -43,6 +43,7 @@ endfunction()
 set(C10D_SRCS
   FileStore.cpp
   ProcessGroup.cpp
+  ProcessGroupRoundRobin.cpp
   Store.cpp
   PrefixStore.cpp
   TCPStore.cpp
