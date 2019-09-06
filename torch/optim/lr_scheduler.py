@@ -29,15 +29,27 @@ class _LRScheduler(object):
         # Following https://github.com/pytorch/pytorch/issues/20124
         # We would like to ensure that `lr_scheduler.step()` is called after
         # `optimizer.step()`
-        def with_counter(func, opt):
+        def with_counter(method):
+            import weakref
+            # Keep a weak reference to the optimizer instance to prevent
+            # cyclic references.
+            instance_ref = weakref.ref(method.__self__)
+            # Get the unbound method for the same purpose.
+            func = method.__func__
+            cls = instance_ref().__class__
+            del method
+
             @wraps(func)
             def wrapper(*args, **kwargs):
-                opt._step_count += 1
-                return func(*args, **kwargs)
+                instance = instance_ref()
+                instance._step_count += 1
+                wrapped = func.__get__(instance, cls)
+                return wrapped(*args, **kwargs)
+
             wrapper._with_counter = True
             return wrapper
 
-        self.optimizer.step = with_counter(self.optimizer.step, self.optimizer)
+        self.optimizer.step = with_counter(self.optimizer.step)
         self.optimizer._step_count = 0
         self._step_count = 0
         self.step(last_epoch)
