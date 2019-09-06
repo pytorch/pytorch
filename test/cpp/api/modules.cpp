@@ -405,13 +405,13 @@ TEST_F(ModulesTest, PrettyPrintConv) {
 TEST_F(ModulesTest, PrettyPrintMaxPool) {
   ASSERT_EQ(
       c10::str(MaxPool1d(5)),
-      "torch::nn::MaxPool1d(kernel_size=5, stride=1)");
+      "torch::nn::MaxPool1d(kernel_size=5, stride=5)");
   ASSERT_EQ(
       c10::str(MaxPool2d(5)),
-      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[1, 1])");
+      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[5, 5])");
   ASSERT_EQ(
-      c10::str(MaxPool3d(MaxPool3dOptions(5).stride(2))),
-      "torch::nn::MaxPool3d(kernel_size=[5, 5], stride=[2, 2])");
+      c10::str(MaxPool2d(MaxPool2dOptions(5).stride(2))),
+      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[2, 2])");
 
   const auto options =
       MaxPool2dOptions(torch::IntArrayRef{5, 6}).stride({1, 2});
