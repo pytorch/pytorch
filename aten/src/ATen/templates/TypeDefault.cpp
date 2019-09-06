@@ -5,9 +5,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 #include <ATen/NativeFunctions.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/Storage.h>
