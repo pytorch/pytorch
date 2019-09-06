@@ -10,9 +10,15 @@ namespace c10 {
 // for it.  Higher bit indexes get handled by dispatching first (because
 // we "count leading zeros")
 enum class TensorTypeId : uint8_t {
-  // This is not a "real" tensor id, but it exists to give us
-  // a "neutral" element we can return when a TensorTypeSet doesn't
-  // give us any valid dispatch.
+  // This is not a "real" tensor id, but it exists to give us a "nullopt"
+  // element we can return for cases when a TensorTypeSet contains no elements.
+  // You can think a more semantically accurate definition of TensorTypeId is:
+  //
+  //    using TensorTypeId = optional<RealTensorTypeId>
+  //
+  // and UndefinedTensorId == nullopt.  We didn't actually represent
+  // it this way because optional<RealTensorTypeId> would take two
+  // words, when TensorTypeId fits in eight bits.
   UndefinedTensorId = 0,
 
   // This pool of IDs is not really ordered, but it is merged into
@@ -35,6 +41,10 @@ enum class TensorTypeId : uint8_t {
   // Sparse has multi-dispatch with dense; handle it first
   SparseCPUTensorId, // PyTorch only
   SparseCUDATensorId, // PyTorch only
+
+  // WARNING! If you add more non-backend-like tensor ids (like tracing or
+  // profiling) here, you need to also adjust legacyExtractTypeId
+  // in c10/core/TensorTypeId.h to mask them out.
 
   VariableTensorId,
 
