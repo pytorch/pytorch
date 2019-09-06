@@ -91,7 +91,7 @@ def _wrap_with_rpc(func):
     sys.version_info < (3, 0),
     "Pytorch distributed rpc package " "does not support python2",
 )
-@unittest.skipIf(C.is_asan, "Skip ASAN for buck build")
+@unittest.skipIf(C.is_asan, "Skip ASAN as torch + multiprocessing spawn have known issues")
 class RpcTest(MultiProcessTestCase):
     @property
     def world_size(self):

@@ -1,7 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import logging
-import multiprocessing
 import sys
 import tempfile
 import time
@@ -124,7 +123,7 @@ class MultiProcessTestCase(TestCase):
     def setUpClass(cls):
         # python2 does not have spawn, use fork in default
         if not NO_MULTIPROCESSING_SPAWN:
-            multiprocessing.set_start_method("spawn")
+            torch.multiprocessing.set_start_method("spawn")
         for attr in dir(cls):
             if attr.startswith("test"):
                 fn = getattr(cls, attr)
