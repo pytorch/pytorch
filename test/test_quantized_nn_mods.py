@@ -111,18 +111,17 @@ class DynamicModuleAPITest(QuantizationTestCase):
         qlinear = nnqd.Linear(in_features, out_features)
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
-        qlinear(X)
         qlinear.set_weight_bias(W_q, B)
+        qlinear(X)
 
         # Simple round-trip test to ensure weight()/set_weight() API
-        self.assertEqual(qlinear.weight_bias()[0], W_q)
+        self.assertEqual(qlinear.weight(), W_q)
         W_pack = qlinear._packed_params
-        qlinear.bias = B if use_bias else None
         Z_dq = qlinear(X)
 
         # Check if the module implementation matches calling the
         # ops directly
-        Z_ref = torch.ops.quantized.fbgemm_linear_dynamic(X, W_pack, B)
+        Z_ref = torch.ops.quantized.linear_dynamic(X, W_pack)
         self.assertEqual(Z_ref, Z_dq)
 
         # Test serialization of dynamic quantized Linear Module using state_dict
@@ -143,15 +142,15 @@ class DynamicModuleAPITest(QuantizationTestCase):
         self.assertEqual(linear_unpack(qlinear._packed_params),
                          linear_unpack(loaded_qlinear._packed_params))
         if use_bias:
-            self.assertEqual(qlinear.weight_bias()[1], loaded_qlinear.weight_bias()[1])
+            self.assertEqual(qlinear.bias(), loaded_qlinear.bias())
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
         self.assertTrue(hasattr(qlinear, '_packed_params'))
         self.assertTrue(hasattr(loaded_qlinear, '_packed_params'))
-        self.assertTrue(hasattr(qlinear, 'weight_bias'))
-        self.assertTrue(hasattr(loaded_qlinear, 'weight_bias'))
+        self.assertTrue(hasattr(qlinear, '_weight_bias'))
+        self.assertTrue(hasattr(loaded_qlinear, '_weight_bias'))
 
-        self.assertEqual(qlinear.weight_bias(), loaded_qlinear.weight_bias())
-        self.assertEqual(qlinear.weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params))
+        self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
+        self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params))
         Z_dq2 = qlinear(X)
         self.assertEqual(Z_dq, Z_dq2)
 
@@ -236,9 +235,8 @@ class ModuleAPITest(QuantizationTestCase):
 
         qlinear.set_weight_bias(W_q, B_q)
         # Simple round-trip test to ensure weight()/set_weight() API
-        self.assertEqual(qlinear.weight_bias()[0], W_q)
+        self.assertEqual(qlinear.weight(), W_q)
         W_pack = qlinear._packed_params
-        qlinear.bias = B_q if use_bias else None
 
         qlinear.scale = float(scale)
         qlinear.zero_point = int(zero_point)
@@ -273,16 +271,16 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertEqual(linear_unpack(qlinear._packed_params),
                          linear_unpack(loaded_qlinear._packed_params))
         if use_bias:
-            self.assertEqual(qlinear.weight_bias()[1], loaded_qlinear.weight_bias()[1])
+            self.assertEqual(qlinear.bias(), loaded_qlinear.bias())
         self.assertEqual(qlinear.scale, loaded_qlinear.scale)
         self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
         self.assertTrue(hasattr(qlinear, '_packed_params'))
         self.assertTrue(hasattr(loaded_qlinear, '_packed_params'))
-        self.assertTrue(hasattr(qlinear, 'weight_bias'))
-        self.assertTrue(hasattr(loaded_qlinear, 'weight_bias'))
-        self.assertEqual(qlinear.weight_bias(), loaded_qlinear.weight_bias())
-        self.assertEqual(qlinear.weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params))
+        self.assertTrue(hasattr(qlinear, '_weight_bias'))
+        self.assertTrue(hasattr(loaded_qlinear, '_weight_bias'))
+        self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
+        self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params))
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
@@ -294,7 +292,6 @@ class ModuleAPITest(QuantizationTestCase):
         # This check is disabled pending an issue in PyTorch serialization:
         # https://github.com/pytorch/pytorch/issues/24045
         # self.assertEqual(qlinear.weight(), loaded.weight())
-        self.assertEqual(qlinear.bias, loaded.bias)
         self.assertEqual(qlinear.scale, loaded.scale)
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
@@ -383,10 +380,9 @@ class ModuleAPITest(QuantizationTestCase):
                                      padding_mode='zeros')
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
+        conv_under_test.set_weight_bias(qw, qb)
         conv_under_test(qX)
 
-        conv_under_test.set_weight_bias(qw, qb)
-        conv_under_test.bias = qb
         conv_under_test.scale = scale
         conv_under_test.zero_point = zero_point
 
@@ -396,8 +392,8 @@ class ModuleAPITest(QuantizationTestCase):
         self.assertTrue(hasattr(conv_under_test, 'zero_point'))
 
         # Test properties
-        self.assertEqual(qw, conv_under_test.weight_bias()[0])
-        self.assertEqual(qb, conv_under_test.bias)
+        self.assertEqual(qw, conv_under_test.weight())
+        self.assertEqual(qb, conv_under_test.bias())
         self.assertEqual(scale, conv_under_test.scale)
         self.assertEqual(zero_point, conv_under_test.zero_point)
 
@@ -455,18 +451,18 @@ class ModuleAPITest(QuantizationTestCase):
                                             bias=use_bias,
                                             padding_mode='zeros')
         loaded_conv_under_test.load_state_dict(loaded_dict)
-        self.assertEqual(loaded_conv_under_test.weight_bias(), conv_under_test.weight_bias())
+        self.assertEqual(loaded_conv_under_test._weight_bias(), conv_under_test._weight_bias())
         if use_bias:
-            self.assertEqual(loaded_conv_under_test.weight_bias()[1], conv_under_test.weight_bias()[1])
+            self.assertEqual(loaded_conv_under_test.bias(), conv_under_test.bias())
         self.assertEqual(loaded_conv_under_test.scale, conv_under_test.scale)
         self.assertEqual(loaded_conv_under_test.zero_point, conv_under_test.zero_point)
         self.assertTrue(dir(loaded_conv_under_test) == dir(conv_under_test))
         self.assertTrue(hasattr(conv_under_test, '_packed_params'))
         self.assertTrue(hasattr(loaded_conv_under_test, '_packed_params'))
-        self.assertTrue(hasattr(conv_under_test, 'weight_bias'))
-        self.assertTrue(hasattr(loaded_conv_under_test, 'weight_bias'))
-        self.assertEqual(loaded_conv_under_test.weight_bias(), conv_under_test.weight_bias())
-        self.assertEqual(loaded_conv_under_test.weight_bias()[0], qw)
+        self.assertTrue(hasattr(conv_under_test, '_weight_bias'))
+        self.assertTrue(hasattr(loaded_conv_under_test, '_weight_bias'))
+        self.assertEqual(loaded_conv_under_test._weight_bias(), conv_under_test._weight_bias())
+        self.assertEqual(loaded_conv_under_test.weight(), qw)
         loaded_result = loaded_conv_under_test(qX)
         self.assertEqual(loaded_result, result_reference)
 
@@ -475,7 +471,7 @@ class ModuleAPITest(QuantizationTestCase):
             f.seek(0)
             loaded_conv = torch.load(f)
 
-        self.assertEqual(conv_under_test.weight_bias()[1], loaded_conv.weight_bias()[1])
+        self.assertEqual(conv_under_test.bias(), loaded_conv.bias())
         self.assertEqual(conv_under_test.scale, loaded_conv.scale)
         self.assertEqual(conv_under_test.zero_point, loaded_conv.zero_point)
 
@@ -503,7 +499,7 @@ class ModuleAPITest(QuantizationTestCase):
         # Check that bias is quantized based on output scale
         if use_bias:
             qbias = torch.quantize_linear(float_conv.bias, quantized_float_conv[0].scale / 2**16, 0, torch.qint32)
-            self.assertEqual(quantized_float_conv[0].weight_bias()[1].dequantize(), qbias.dequantize())
+            self.assertEqual(quantized_float_conv[0].bias().dequantize(), qbias.dequantize())
         # Smoke test extra_repr
         str(quantized_float_conv)
 
