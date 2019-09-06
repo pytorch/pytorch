@@ -113,14 +113,6 @@ module_tests = [
 torch_nn_modules.module_metadata_map['SampleModule'] = TorchNNModuleMetadata(
     cpp_default_constructor_args='(true)',
     num_attrs_recursive=18,
-    options_args=[
-        'has_submodule',
-        'int_option',
-        'double_option',
-        'bool_option',
-        'string_option',
-        'tensor_option',
-    ],
     cpp_sources=SAMPLE_MODULE_CPP_SOURCE,
 )
 
