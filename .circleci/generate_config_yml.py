@@ -80,7 +80,7 @@ YAML_SOURCES = [
     File("caffe2-build-params.yml"),
     File("binary-build-params.yml"),
     Header("Job specs"),
-    # File("pytorch-job-specs.yml"),
+    File("pytorch-job-specs.yml"),
     # File("caffe2-job-specs.yml"),
     # File("binary-job-specs.yml"),
     File("job-specs-setup.yml"),
