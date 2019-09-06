@@ -22,12 +22,7 @@ bool is_floating_point(const Tensor& self) {
 }
 
 bool is_signed(const Tensor &self) {
-  if (self.scalar_type() == ScalarType::Half) {
-    return true;
-  }
-  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "is_signed", [&]() -> bool {
-    return std::is_signed<scalar_t>();
-  });
+  return at::isSignedType(self.scalar_type());
 }
 
 bool is_sparse(const Tensor& self) {
