@@ -767,6 +767,13 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True).to(dtype=torch.float64)
         self.run_test(RsqrtModel(), x)
 
+    def test_rsqrt_zeros(self):
+        class RsqrtModel(torch.nn.Module):
+            def forward(self, x):
+                return x.rsqrt()
+        x = torch.zeros(4, 2, 3, requires_grad=True).to(dtype=torch.float64)
+        self.run_test(RsqrtModel(), x)
+
     # TODO: enable opset 11 test once ORT support for unique is in
     @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
