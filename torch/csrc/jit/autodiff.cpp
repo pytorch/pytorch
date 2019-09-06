@@ -476,39 +476,53 @@ static value_list getReverseCaptures(Gradient& grad_desc) {
 // nodes we have in our graphs are simply constants, which are cheap to execute
 // and replicate, and so it's better to just copy them into the reverse graph,
 // without polluting the output lists unnecessarily.
-static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
+static void liftConstants(Block* block, Block* move_to_this_block);
+
+// is node defined inside container?
+static bool inBlock(Node* node, Block* container) {
+  Block* b = node->owningBlock();
+  while (b) {
+    if (b == container) {
+      return true;
+    }
+    b = b->owningNode() ? b->owningNode()->owningBlock() : nullptr;
+  }
+  return false;
+}
+
+static void liftConstants(Node* node, Block* move_to_this_block) {
   static const auto err = [](Value*) -> Value* {
     throw std::runtime_error("unexpected input");
   };
-  auto& graph = *grad_desc.f;
-  Block* reverse_block = rev_info.reverse_block;
-
-  for (Node* top_node : reverse_block->nodes()) {
-    AT_ASSERT(
-        top_node->kind() == prim::GradOf ||
-        top_node->kind() == prim::AutogradAdd ||
-        top_node->kind() == prim::AutogradZero);
-    if (top_node->kind() != prim::GradOf)
+  auto& graph = *node->owningGraph();
+  for (Value* input : node->inputs()) {
+    if (input->node()->kind() != prim::Constant)
       continue;
-    Block* grad_body = top_node->blocks().at(0);
-    for (Node* node : grad_body->nodes()) {
-      for (Value* input : node->inputs()) {
-        if (input->node()->kind() != prim::Constant)
-          continue;
-        if (input->node()->owningBlock() == grad_body)
-          continue;
-        Node* lifted_constant = graph.createClone(input->node(), err);
-        reverse_block->prependNode(lifted_constant);
-        GRAPH_DEBUG(
-            "Lifting constant ",
-            input->debugName(),
-            " from GradOf's block and adding ",
-            lifted_constant->output()->debugName(),
-            " to the backprop block");
-        node->replaceInputWith(input, lifted_constant->output());
-      }
-    }
+    // if this constant is _already_ defined in the backward pass
+    // block, we do not need to duplicate and move it because
+    // it already won't be part of the capture set
+    if (inBlock(input->node(), move_to_this_block))
+      continue;
+    Node* lifted_constant = graph.createClone(input->node(), err);
+    move_to_this_block->prependNode(lifted_constant);
+    GRAPH_DEBUG(
+        "Lifting constant ",
+        input->debugName(),
+        " from GradOf's block and adding ",
+        lifted_constant->output()->debugName(),
+        " to the backprop block");
+    node->replaceInputWith(input, lifted_constant->output());
   }
+  for (Block* sub : node->blocks()) {
+    liftConstants(sub, move_to_this_block);
+  }
+}
+
+static void liftConstants(Block* block, Block* move_to_this_block) {
+  for (Node* node : block->nodes()) {
+    liftConstants(node, move_to_this_block);
+  }
+  liftConstants(block->return_node(), move_to_this_block);
 }
 
 static void deduplicateSizeCaptures(
@@ -577,7 +591,7 @@ static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
   // derivative. I guess a smart analysis could implement this, but I didn't
   // have time before the 1.0 release, so I put this only as a peephole
   // optimization.
-  liftConstants(grad_desc, rev_info);
+  liftConstants(rev_info.reverse_block, rev_info.reverse_block);
   // We generally add a lot of aten::size calls (for derivatives of broadcasting
   // operators), and they often end up duplicated, and would get captured
   // multiple times. Make sure we deduplicate them before lifting.

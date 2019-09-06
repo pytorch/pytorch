@@ -40,7 +40,7 @@ void window_function_checks(
       " is not implemented for sparse types, got: ",
       options);
   TORCH_CHECK(
-      at::isFloatingType(typeMetaToScalarType(options.dtype())),
+      at::isFloatingType(typeMetaToScalarType(options.dtype())) || at::isComplexType(typeMetaToScalarType(options.dtype())),
       function_name,
       " expects floating point dtypes, got: ",
       options);
@@ -86,7 +86,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  AT_ASSERT(options.backend() == Backend::CPU);
+  AT_ASSERT(options.device().type() == DeviceType::CPU);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
 
@@ -128,7 +128,7 @@ Tensor empty(
   }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
-  TORCH_CHECK(options.backend() == Backend::CPU || options.backend() == Backend::CUDA,
+  TORCH_CHECK(options.device().type() == DeviceType::CPU || options.device().type() == DeviceType::CUDA,
       "NYI: named tensors only support CPU and CUDA tensors");
   auto result = at::empty(size, options, optional_memory_format);
   internal_set_names_inplace(result, names);
@@ -236,6 +236,14 @@ Tensor empty_like(
 #endif
 }
 
+Tensor new_empty(
+    const Tensor& self,
+    IntArrayRef size,
+    const TensorOptions& options
+    ) {
+  return at::empty(size, self.options().merge_in(options));
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor eye(int64_t n, const TensorOptions& options) {
@@ -298,6 +306,16 @@ Tensor full_like(const Tensor& self, Scalar fill_value) {
 Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& options) {
   return native::full(self.sizes(), fill_value, options);
 }
+
+Tensor new_full(
+    const Tensor& self,
+    IntArrayRef size,
+    Scalar fill_value,
+    const TensorOptions& options
+    ) {
+  return at::full(size, fill_value, self.options().merge_in(options));
+}
+
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

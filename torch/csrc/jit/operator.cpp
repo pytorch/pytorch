@@ -210,12 +210,20 @@ bool Operator::matches(const Node* node) const {
 
   TypeEnv type_env;
   for (size_t i = 0; i < formals.size(); ++i) {
+    auto formal = formals[i].type();
     const MatchTypeReturn matched_type =
-        matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
-    if (!matched_type.type) {
+        matchTypeVariables(formal, actuals[i]->type(), type_env);
+    if (!matched_type.success()) {
       return false;
     }
-    TypePtr formal = *matched_type.type;
+    TypePtr resolved = tryEvalTypeVariables(formal, type_env);
+    if (resolved) {
+      formal = resolved;
+    }
+    // note: it is possible at this point that type variable matching has
+    // not resolved all type variables, e.g. if None was matched to Optional[T]
+    // we will not succeed at matching T. However None <: Optional[T] so this
+    // check can still succeed.
     if (!actuals[i]->type()->isSubtypeOf(formal)) {
       return false;
     }
