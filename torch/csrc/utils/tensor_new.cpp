@@ -115,7 +115,7 @@ Tensor new_with_storage(c10::TensorTypeId type_id, at::ScalarType scalar_type, S
 }
 
 Tensor new_with_tensor(c10::TensorTypeId type_id, at::ScalarType scalar_type, const Tensor& other) {
-  if (legacyExtractTypeId(other.type_set()) == type_id) {
+  if (legacyExtractTypeId(other.type_set()) != type_id) {
     // In temporary expression lifetime we trust
     throw TypeError("expected %s (got %s)", type_id, toString(other.type_set()).c_str());
   }
