@@ -84,18 +84,17 @@ TORCH_MODULE(SampleModule);
 module_tests = [
     dict(
         module_name='SampleModule',
+        desc='has_parity',
         constructor_args=(True, True),
         cpp_constructor_args='(true)',
         input_size=(3, 4),
-        desc='has_parity',
         has_parity=True,
     ),
     dict(
-        module_name='SampleModule',
-        constructor_args=(False, True),
+        fullname='SampleModule_no_parity',
+        constructor=lambda: SampleModule(False, True),
         cpp_constructor_args='(true)',
         input_size=(3, 4),
-        desc='no_parity',
         has_parity=False,
     ),
 ]
