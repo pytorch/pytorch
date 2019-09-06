@@ -33,7 +33,7 @@ namespace impl {
 // question is whether or not we have access to all the relevant TLS at this
 // point.
 static inline TensorTypeId dispatchTypeId(TensorTypeSet ts) {
-  return (ts - c10::impl::tls_excluded_tensor_type_set()).firstTypeId();
+  return (ts - c10::impl::tls_excluded_tensor_type_set()).highestPriorityTypeId();
 }
 
 }
