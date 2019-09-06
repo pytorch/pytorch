@@ -1,9 +1,9 @@
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/NamedTensorUtils.h>
 
+#ifdef BUILD_NAMEDTENSOR
 namespace at { namespace native {
 
 Tensor& names_(Tensor& self, optional<DimnameList> names) {
