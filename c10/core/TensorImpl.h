@@ -17,6 +17,8 @@
 #include <c10/util/Logging.h>
 #include <c10/util/python_stub.h>
 
+#include <c10/core/EnableNamedTensor.h>
+
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
 // keep the memory allocated for its maximum capacity reshaped to so far.
