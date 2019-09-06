@@ -13,7 +13,7 @@ TEST(TensorTypeSet, Empty) {
   ASSERT_TRUE(empty_set.empty());
   TensorTypeSet empty_set2;
   ASSERT_TRUE(empty_set == empty_set2);
-  ASSERT_EQ(empty_set.firstTypeId(), TensorTypeId::UndefinedTensorId);
+  ASSERT_EQ(empty_set.highestPriorityTypeId(), TensorTypeId::UndefinedTensorId);
 }
 
 TEST(TensorTypeSet, Singleton) {
@@ -26,7 +26,7 @@ TEST(TensorTypeSet, Singleton) {
     ASSERT_EQ(sing, sing | sing);
     ASSERT_FALSE(sing.empty());
     ASSERT_TRUE(sing.has(tid));
-    ASSERT_EQ(sing.firstTypeId(), tid);
+    ASSERT_EQ(sing.highestPriorityTypeId(), tid);
     ASSERT_EQ(sing.remove(tid), TensorTypeSet());
   }
 }
@@ -41,7 +41,7 @@ TEST(TensorTypeSet, Doubleton) {
       ASSERT_EQ(doub, TensorTypeSet(tid1) | TensorTypeSet(tid2));
       ASSERT_TRUE(doub.has(tid1));
       ASSERT_TRUE(doub.has(tid2));
-      ASSERT_EQ(doub.firstTypeId(), tid2);  // relies on i < j
+      ASSERT_EQ(doub.highestPriorityTypeId(), tid2);  // relies on i < j
     }
   }
 }

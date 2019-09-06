@@ -85,7 +85,7 @@ static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
     //
     // TODO: Actually, this might be bad.  Because Variable-ness
     // XXXX THIS IS BAD
-    if (var.type_set().firstTypeId() == self->get_type_id() &&
+    if (var.type_set().highestPriorityTypeId() == self->get_type_id() &&
         var.scalar_type() == static_cast<ScalarType>(self->scalar_type)) {
       Py_RETURN_TRUE;
     }

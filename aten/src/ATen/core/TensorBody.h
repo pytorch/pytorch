@@ -222,7 +222,7 @@ class CAFFE2_API Tensor {
         // TODO: When we build in Variable here, we need to change the
         // signature of getDeprecatedTypeProperties to collapse backend
         // and is_variable into TensorTypeSet
-        tensorTypeIdToBackend(type_set().firstTypeId()),
+        tensorTypeIdToBackend(type_set().highestPriorityTypeId()),
         scalar_type(),
         is_variable());
   }

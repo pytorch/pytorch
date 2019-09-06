@@ -31,7 +31,7 @@ namespace impl {
 // point.
 static inline TensorTypeId dispatchTypeId(TensorTypeSet ts) {
   // TODO: Account for TLS!
-  return ts.firstTypeId();
+  return ts.highestPriorityTypeId();
 }
 
 }
