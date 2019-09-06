@@ -376,7 +376,7 @@ class CAFFE2_API Tensor {
   Tensor & names_(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
-  Tensor view_names(c10::optional<DimnameList> names) const;
+  Tensor renamed(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor align_to(DimnameList names) const;
