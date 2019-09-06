@@ -2,6 +2,5 @@
 
       # Pytorch iOS builds
       - pytorch_ios_build:
-          - name: pytorch_ios_build_arm64
-          - build_environment: "pytorch_ios_build_arm64"
+          - build_environment: "pytorch_ios_build"
   
