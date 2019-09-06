@@ -122,9 +122,6 @@ class MultiProcessTestCase(TestCase):
     # or run the underlying test function.
     @classmethod
     def setUpClass(cls):
-        # python2 does not have spawn, use fork in default
-        if not NO_MULTIPROCESSING_SPAWN:
-            multiprocessing.set_start_method("spawn")
         for attr in dir(cls):
             if attr.startswith("test"):
                 fn = getattr(cls, attr)
@@ -135,11 +132,12 @@ class MultiProcessTestCase(TestCase):
         self.skip_return_code_checks = []
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
-        self.spawncontext = self._spawn_process()
-        self.processes = self.spawncontext.processes
+        self._spawn_process()
 
     def tearDown(self):
         super(MultiProcessTestCase, self).tearDown()
+        for p in self.processes:
+            p.terminate()
 
     def _current_test_name(self):
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
@@ -147,13 +145,25 @@ class MultiProcessTestCase(TestCase):
 
     def _spawn_process(self):
         test_name = self._current_test_name()
-        spawncontext = torch.multiprocessing.spawn(
-            self.__class__._run,
-            (test_name, self.file_name),
-            nprocs=int(self.world_size),
-            join=False,
-        )
-        return spawncontext
+        # torch.multiprocessing.spawn does not support python2
+        if sys.version_info >= (3, 0):
+            self.spawncontext = torch.multiprocessing.spawn(
+                self.__class__._run,
+                (test_name, self.file_name),
+                nprocs=int(self.world_size),
+                join=False,
+            )
+            self.processes = self.spawncontext.processes
+        else:
+            self.processes = []
+            for rank in range(int(self.world_size)):
+                name = 'process ' + str(rank)
+                process = multiprocessing.Process(
+                    target=self.__class__._run,
+                    name=name,
+                    args=(rank, test_name, self.file_name))
+                process.start()
+            self.processes.append(process)
 
     @classmethod
     def _run(cls, rank, test_name, file_name):
@@ -164,6 +174,9 @@ class MultiProcessTestCase(TestCase):
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retreiving a corresponding test and executing it.
         getattr(self, test_name)()
+        # python2 uses fork, exit to avoid run teardown()
+        if sys.version_info < (3, 0):
+            sys.exit(0)
 
     def _join_processes(self, fn):
         timeout = get_timeout(self.id())
@@ -207,3 +220,7 @@ class MultiProcessTestCase(TestCase):
             if first_process.exitcode == skip.exit_code:
                 raise unittest.SkipTest(skip.message)
         self.assertEqual(first_process.exitcode, 0)
+
+    @property
+    def is_master(self):
+        return self.rank == 0

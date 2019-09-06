@@ -24,11 +24,13 @@ import torch.distributed as c10d
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 
-from multiprocessing_test_case import MultiProcessTestCase, \
+from common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, \
     skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues, get_timeout
 from common_utils import TestCase, load_tests, run_tests
 from common_utils import retry_on_address_already_in_use_error
+
+import caffe2.python._import_c_extension as C
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -515,18 +517,19 @@ class TimeoutTest(TestCase):
 
 
 @requires_gloo()
+@unittest.skipIf(C.is_asan, "Skip ASAN as torch + multiprocessing spawn have known issues")
 class ProcessGroupGlooTest(MultiProcessTestCase):
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
         opts.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
-        opts.timeout = 5.0
+        opts.timeout = 15.0
         opts.threads = threads
         return opts
 
     def test_multi_device_constructor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         opts = c10d.ProcessGroupGloo.Options()
-        opts.timeout = 5.0
+        opts.timeout = 15.0
         opts.devices = [
             c10d.ProcessGroupGloo.create_device(interface=LOOPBACK),
             c10d.ProcessGroupGloo.create_device(interface=LOOPBACK),
@@ -1377,14 +1380,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             store,
             self.rank,
             self.world_size,
-            timeout=timedelta(seconds=0.5))
+            timeout=timedelta(seconds=8.0))
 
         # Wait on barrier
         pg.barrier().wait()
 
         # Sleep on one of the processes to trigger barrier timeout
         if self.rank == 0:
-            time.sleep(1.0)
+            time.sleep(9.0)
 
         # The barrier will now time out
         with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
@@ -1734,7 +1737,7 @@ class QuadraGpuNet(nn.Module):
         x = self.fc4(x.to(dev3))
         return F.softmax(x, dim=1).to(dev0)
 
-
+@unittest.skipIf(C.is_asan, "Skip ASAN as torch + multiprocessing spawn have known issues")
 class DistributedDataParallelTest(MultiProcessTestCase):
 
     def tearDown(self):
@@ -2900,7 +2903,7 @@ class ComputeBucketAssignmentTest(TestCase):
         result = dist._compute_bucket_assignment_by_size(tensors, [200, 400])
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
 
-
+@unittest.skipIf(C.is_asan, "Skip ASAN as torch + multiprocessing spawn have known issues")
 class CommTest(MultiProcessTestCase):
 
     def setUp(self):
@@ -2932,7 +2935,7 @@ class CommTest(MultiProcessTestCase):
 
     @property
     def op_timeout_sec(self):
-        return 1
+        return 5
 
     @property
     def world_size(self):
@@ -2987,7 +2990,7 @@ class CommTest(MultiProcessTestCase):
             t = threading.Thread(target=self._run_all_reduce, args=(process_group,))
             t.daemon = True
             t.start()
-            t.join(int(get_timeout(self.id()) / 5))
+            t.join(int(get_timeout(self.id()) / 10))
             self.assertTrue(t.is_alive())
 
     def _test_nccl_errors_blocking(self, func):

@@ -7,7 +7,7 @@ import unittest
 import torch
 import torch.distributed as dist
 
-from multiprocessing_test_case import MultiProcessTestCase
+from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
 import caffe2.python._import_c_extension as C
 
@@ -91,7 +91,7 @@ def _wrap_with_rpc(func):
     sys.version_info < (3, 0),
     "Pytorch distributed rpc package " "does not support python2",
 )
-@unittest.skipIf(C.is_asan, "Skip ASAN for buck build")
+@unittest.skipIf(C.is_asan, "Skip ASAN as torch + multiprocessing spawn have known issues")
 class RpcTest(MultiProcessTestCase):
     @property
     def world_size(self):
