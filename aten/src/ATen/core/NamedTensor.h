@@ -1,10 +1,10 @@
 #pragma once
-#ifdef BUILD_NAMEDTENSOR
 
 #include <ATen/core/Dimname.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/C++17.h>
 
+#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 // XXX: This file exists because TensorImpl is in c10, but Dimname is in ATen.
