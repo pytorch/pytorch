@@ -14,8 +14,6 @@ from torch.nn.utils import fuse_conv_bn_weights
 from torch._ops import ops
 from torch.nn.modules.utils import _pair
 
-from torch._jit_internal import Optional
-
 class Conv2d(torch.nn.Module):
     r"""Applies a 2D convolution over a quantized input signal composed of
     several quantized input planes.
@@ -86,8 +84,8 @@ class Conv2d(torch.nn.Module):
         qbias = None
         if bias:
             qbias = torch._empty_affine_quantized([out_channels],
-                                                      scale=1.0, zero_point=0,
-                                                      dtype=torch.qint32)
+                                                  scale=1.0, zero_point=0,
+                                                  dtype=torch.qint32)
 
         self.set_weight_bias(qweight, qbias)
         self.scale = 1.0
