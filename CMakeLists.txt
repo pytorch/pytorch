@@ -192,9 +192,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
-cmake_dependent_option(
-    USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed. Only available if USE_GLOO is on." OFF
-    "USE_GLOO" OFF)
 option(USE_TBB "Use TBB" OFF)
 
 # Used when building Caffe2 through setup.py
@@ -310,6 +307,7 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(FEATURE_TORCH_MOBILE ON)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
+  set(USE_STATIC_DISPATCH ON)
 endif()
 
 # ---[ Utils
