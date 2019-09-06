@@ -1106,8 +1106,8 @@ jobs:
 workflows:
   build:
     jobs:
-      # Warning: indentation here matters!
-
       # Pytorch iOS builds
-      - pytorch_ios_build
+      - pytorch_ios_build:
+          requires: 
+            - setup
   
