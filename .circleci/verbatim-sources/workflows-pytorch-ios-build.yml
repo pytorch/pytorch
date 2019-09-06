@@ -2,7 +2,6 @@
 
       # Pytorch iOS builds
       - pytorch_ios_build:
-          filters:
-            branches:
-              only: master
+          - name: pytorch_ios_build_arm64
+          - build_environment: "pytorch_ios_build_arm64"
   
