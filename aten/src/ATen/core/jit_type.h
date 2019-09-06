@@ -1132,13 +1132,13 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
   } else if (typ->isSubtypeOf(BoolType::get())) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
   }
-  AT_ERROR("unknown number type", typ->str());
+  TORCH_CHECK(false, "Unknown number type: ", typ->str());
 }
 inline TypePtr TensorType::fromBoolType() {
   return TensorType::createContiguous(at::kLong, at::kCPU, {});
 }
 
-inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
+inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
   if (type == FloatType::get()) {
     return at::ScalarType::Double;
   } else if (type == IntType::get()) {
@@ -1146,10 +1146,16 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   } else if (type == BoolType::get()) {
     return at::ScalarType::Bool;
   }
+  return c10::nullopt;
+}
+
+inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
+  auto result = tryScalarTypeFromJitType(type);
   AT_ASSERTM(
-      0,
+      result,
       "Add new condition, expected Float, Int, or Bool but got",
       type->str());
+  return *result;
 }
 
 // Attempt to find the correct supertype of t1 and t2. If none is found then

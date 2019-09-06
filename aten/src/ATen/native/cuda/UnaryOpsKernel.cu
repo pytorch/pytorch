@@ -3,9 +3,9 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/Math.cuh>
 
 namespace at { namespace native {
 
@@ -71,10 +71,36 @@ void erfinv_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void digamma_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "digamma_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return calc_digamma(a);
+    });
+  });
+}
+
+void trigamma_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "trigamma_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return calc_trigamma(a);
+    });
+  });
+}
+
+void polygamma_kernel_cuda(TensorIterator& iter, int64_t n) {
+  switch (n) {
+    case 0: digamma_kernel_cuda(iter); break;
+    case 1: trigamma_kernel_cuda(iter); break;
+    default: TORCH_CHECK(false, "polygamma(n,x) is not implemented for n>=2, but was ", n);
+  }
+}
+
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);
 REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda);
 REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
+REGISTER_DISPATCH(digamma_stub, &digamma_kernel_cuda);
+REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel_cuda);
 }}
