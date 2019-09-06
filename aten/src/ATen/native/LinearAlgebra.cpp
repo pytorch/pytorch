@@ -10,9 +10,7 @@
 #include <numeric>
 #include <vector>
 #include <limits>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 namespace at {
 namespace native {

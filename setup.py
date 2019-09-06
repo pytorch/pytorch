@@ -181,11 +181,10 @@ import glob
 import importlib
 
 from tools.build_pytorch_libs import build_caffe2
-from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
+from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
-from tools.setup_helpers.cudnn import CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
 
 try:
     FileNotFoundError
@@ -380,7 +379,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- NumPy not found')
         if cmake_cache_vars['USE_CUDNN']:
-            report('-- Detected cuDNN at ' + CUDNN_LIBRARY + ', ' + CUDNN_INCLUDE_DIR)
+            report('-- Detected cuDNN at ' +
+                   cmake_cache_vars['CUDNN_LIBRARY'] + ', ' + cmake_cache_vars['CUDNN_INCLUDE_DIR'])
         else:
             report('-- Not using cuDNN')
         if cmake_cache_vars['USE_CUDA']:
@@ -403,10 +403,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Not using NCCL')
         if cmake_cache_vars['USE_DISTRIBUTED']:
-            if IS_LINUX:
-                report('-- Building with c10d distributed package ')
+            if IS_WINDOWS:
+                report('-- Building without distributed package')
             else:
-                report('-- Building without c10d distributed package')
+                report('-- Building with distributed package ')
         else:
             report('-- Building without distributed package')
 
