@@ -47,7 +47,7 @@ default_set = set([
     # PyTorch Android gradle
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32',
     # PyTorch iOS build
-    'pytorch-ios-build'
+    'pytorch-ios-build',
 
     # XLA
     'pytorch-xla-linux-xenial-py3.6-clang7',
