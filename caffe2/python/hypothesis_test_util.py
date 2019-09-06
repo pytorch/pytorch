@@ -270,6 +270,21 @@ def tensors(n, min_dim=1, max_dim=4, dtype=np.float32, elements=None, **kwargs):
             max_size=n))
 
 
+def ntensors(min_n, max_n, min_dim=1, max_dim=4, dtype=np.float32, elements=None, **kwargs):
+    """
+    Create between min_n to max_n tensors, all of them with the same dimensions.
+    The dimension of these tensors will be between [min_dim, max_dim].
+    The data type is dtype.
+    Optionally take strategy elements to create elements in these arrays.
+    """
+    dims_ = st.lists(dims(**kwargs), min_size=min_dim, max_size=max_dim)
+    return dims_.flatmap(
+        lambda dims: st.lists(
+            arrays(dims, dtype, elements),
+            min_size=min_n,
+            max_size=max_n))
+
+
 def tensors1d(n, min_len=1, max_len=64, dtype=np.float32, elements=None):
     return tensors(
         n, 1, 1, dtype, elements, min_value=min_len, max_value=max_len
