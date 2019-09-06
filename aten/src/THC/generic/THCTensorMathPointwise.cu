@@ -3,9 +3,7 @@
 #else
 
 #include <ATen/MemoryOverlap.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 void THCTensor_(cbitand)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {

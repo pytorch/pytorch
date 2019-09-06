@@ -7,9 +7,7 @@
 #include <bitset>
 #include <c10/util/Optional.h>
 #include <ATen/MemoryOverlap.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 // TensorIterator is a helper class for element-wise operations, such as
 // arithmetic, comparisions, and trigonometric functions. It handles
