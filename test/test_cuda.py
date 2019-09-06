@@ -2855,12 +2855,6 @@ class TestCuda(TestCase):
         counted = t.bincount(minlength=65536)
         self.assertEqual(T.sum(counted), 10)
 
-        t = torch.zeros()
-        t = torch.randint(2000, input_size, dtype=torch.int32, device='cuda')
-        self.assertEqual(t.cpu().bincount(), t.bincount())
-        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
-
-
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000
