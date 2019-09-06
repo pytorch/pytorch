@@ -92,7 +92,7 @@ module_tests = [
     ),
     dict(
         module_name='SampleModule',
-        constructor_args=(False, True),
+        constructor=lambda: SampleModule(False, True),
         cpp_constructor_args='(true)',
         input_size=(3, 4),
         desc='no_parity',
