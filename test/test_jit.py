@@ -1580,16 +1580,30 @@ graph(%Ra, %Rb):
         self.do_trace_size(True)
 
     def do_trace_arange(self, requires_grad):
-        def fn(x):
+        def arange(x):
             return torch.arange(x.shape[0])
+
+        def arange_scalar(x):
+            return torch.arange(12)
+
+        def arange_start_end(x):
+            return torch.arange(start=x.shape[0], end=x.shape[0] + 5)
 
         x = torch.randn(5, 3, 2, requires_grad=requires_grad)
         y = torch.randn(8, 2, 4, requires_grad=requires_grad)
 
         # Check that it behaves as expected
-        traced_fn = torch.jit.trace(fn, x)
-        self.assertEqual(traced_fn(y), fn(y))
-        self.assertEqual(traced_fn(x), fn(x))
+        traced_arange = torch.jit.trace(arange, x)
+        self.assertEqual(traced_arange(y), arange(y))
+        self.assertEqual(traced_arange(x), arange(x))
+
+        traced_arange_scalar = torch.jit.trace(arange_scalar, x)
+        self.assertEqual(traced_arange_scalar(y), arange_scalar(y))
+        self.assertEqual(traced_arange_scalar(x), arange_scalar(x))
+
+        traced_arange_start_end = torch.jit.trace(arange_start_end, x)
+        self.assertEqual(traced_arange_start_end(y), arange_start_end(y))
+        self.assertEqual(traced_arange_start_end(x), arange_start_end(x))
 
     def test_trace_arange(self):
         self.do_trace_arange(False)
