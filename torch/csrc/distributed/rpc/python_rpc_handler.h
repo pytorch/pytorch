@@ -31,8 +31,6 @@ class PythonRpcHandler {
   PythonRpcHandler(PythonRpcHandler&&) = delete;
   PythonRpcHandler& operator=(PythonRpcHandler&&) = delete;
 
-  py::bytes runUDFFunction(const py::object& pargs);
-
   py::object runUDFFunction_;
   py::object loadResultFunction_;
 };
