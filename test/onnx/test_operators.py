@@ -736,7 +736,7 @@ class TestOperators(TestCase):
     def test_topk_smallest_unsorted(self):
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
-        self.assertONNX(lambda x, k: torch.topk(x, k, largest=False,sorted=False), (x, k), opset_version=11)
+        self.assertONNX(lambda x, k: torch.topk(x, k, largest=False, sorted=False), (x, k), opset_version=11)
 
 
 if __name__ == '__main__':
