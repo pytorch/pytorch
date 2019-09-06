@@ -2853,7 +2853,7 @@ class TestCuda(TestCase):
         # giving negative bin offset
         t[0] = 35488
         counted = t.bincount(minlength=65536)
-        self.assertEqual(T.sum(counted), 10)
+        self.assertEqual(torch.sum(counted), 10)
 
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
