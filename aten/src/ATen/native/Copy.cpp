@@ -7,9 +7,7 @@
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/MemoryOverlap.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 namespace {
 
@@ -74,12 +72,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
     }
   });
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = unify_from_right(self.opt_names(), src.opt_names());
-  if (outnames.has_value()) {
-    namedinference::propagate_names(self, *outnames);
-  } else {
-    namedinference::propagate_names(self, nullopt);
-  }
+  namedinference::propagate_names_for_copy(self, src);
 #endif
 }
 
