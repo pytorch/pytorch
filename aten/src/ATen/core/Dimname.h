@@ -1,17 +1,8 @@
 #pragma once
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && (!defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE))
-#include <ATen/core/interned_strings.h>
-#endif
-
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 #include <ostream>
-
-#ifdef BUILD_NAMEDTENSOR
-namespace at {
-
-enum class NameType: uint8_t { NORMAL, WILDCARD, TAGGED };
 
 // If we're building for build-size sensitive platforms, such as when
 // CAFFE2_IS_XPLAT_BUILD is turned on or C10_MOBILE standalone, then
@@ -19,8 +10,25 @@ enum class NameType: uint8_t { NORMAL, WILDCARD, TAGGED };
 // In particular, register_symbols.cpp (which is required by interned_strings.h)
 // adds around 6KiB on android.
 //
-// The solution to avoid the dependency is to use std::string as a fallback.
+// The solution to avoid the dependency is to use std::string as a compilation(!)
+// fallback. This is a hack!
+// Note that if one tries to include more of ATen in one of said builds,
+// compilation will straight up fail due to ATen not being guarded with this flag.
+// At that point, we'll have to take the bullet and include interned_strings.h.
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && (!defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE))
+#define DIMNAME_USE_SYMBOL
+#endif
+
+#ifdef DIMNAME_USE_SYMBOL
+#include <ATen/core/interned_strings.h>
+#endif
+
+#ifdef BUILD_NAMEDTENSOR
+namespace at {
+
+enum class NameType: uint8_t { NORMAL, WILDCARD, TAGGED };
+
+#ifdef DIMNAME_USE_SYMBOL
 typedef Symbol InternedString;
 #else
 typedef std::string InternedString;

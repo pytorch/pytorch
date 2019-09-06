@@ -33,6 +33,11 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
   bool has_names() const;
   DimnameList names() const { return names_; }
 
+  // Used for an assertion in TensorImpl.h
+  int64_t slow_dim() const override {
+    return names_.size();
+  }
+
   void set_names(DimnameList new_names) {
     TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
     std::copy(new_names.begin(), new_names.end(), names_.begin());

@@ -6,25 +6,21 @@
 #ifdef BUILD_NAMEDTENSOR
 namespace at {
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && (!defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE))
-static InternedString kWildcard = Symbol::dimname("*");
+#ifdef DIMNAME_USE_SYMBOL
+static InternedString kDimnameWildcard = Symbol::dimname("*");
+static std::string interned_to_string(InternedString symbol) { return symbol.toUnqualString(); }
+static InternedString string_to_interned(const std::string& str) { return Symbol::dimname(str); }
 #else
-static InternedString kWildcard = "None";
+static InternedString kDimnameWildcard = "*";
+static std::string interned_to_string(InternedString symbol) { return symbol; }
+static InternedString string_to_interned(const std::string& str) { return str; }
 #endif
-
-static std::string to_string(InternedString symbol) {
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && (!defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE))
-  return symbol.toUnqualString();
-#else
-  return symbol;
-#endif
-}
 
 std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
   if (dimname.type() == NameType::WILDCARD) {
     out << "None";
   } else {
-    out << "'" << to_string(dimname.full_name()) << "'";
+    out << "'" << interned_to_string(dimname.full_name()) << "'";
   }
   return out;
 }
@@ -65,11 +61,11 @@ static void check_valid_identifier(const std::string& name) {
 
 Dimname Dimname::fromSymbol(Symbol full_name) {
   TORCH_INTERNAL_ASSERT(full_name.is_dimname());
-  if (full_name == kWildcard) {
+  if (full_name == kDimnameWildcard) {
     return Dimname::wildcard();
   }
   const std::string delimiter = ".";
-  const std::string str(to_string(full_name));
+  const std::string str(interned_to_string(full_name));
   auto it = str.find(delimiter);
 
   // Check for normal name
@@ -87,11 +83,11 @@ Dimname Dimname::fromSymbol(Symbol full_name) {
   auto tag = str.substr(it + 1);
   check_valid_identifier(untagged_name);
   check_valid_identifier(tag);
-  return Dimname(NameType::TAGGED, full_name, Symbol::dimname(untagged_name));
+  return Dimname(NameType::TAGGED, full_name, string_to_interned(untagged_name));
 }
 
 Dimname Dimname::wildcard() {
-  static Dimname result(NameType::WILDCARD, kWildcard, kWildcard);
+  static Dimname result(NameType::WILDCARD, kDimnameWildcard, kDimnameWildcard);
   return result;
 }
 
