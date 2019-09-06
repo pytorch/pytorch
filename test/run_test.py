@@ -60,6 +60,7 @@ TESTS = [
     'jit_fuser',
     'tensorboard',
     'namedtensor',
+    'type_promotion',
     'jit_disabled',
 ]
 
