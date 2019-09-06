@@ -167,7 +167,6 @@ struct TORCH_API Operator {
 
 TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
 
-TORCH_API const std::vector<std::shared_ptr<Operator>> getAllOperators();
 TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(
     Symbol name);
 

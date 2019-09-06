@@ -447,13 +447,6 @@ void initJITBindings(PyObject* module) {
         IValue v = *self.default_value();
         return toPyObject(std::move(v));
       });
-  m.def(
-      "_jit_get_all_schemas", []() {
-    const std::vector<std::shared_ptr<Operator>>& operations = getAllOperators();
-    return fmap(operations, [](const std::shared_ptr<Operator>& op) {
-      return op->schema();
-    });
-  });
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
     auto operations = getAllOperatorsFor(symbol);
