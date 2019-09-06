@@ -192,9 +192,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
-cmake_dependent_option(
-    USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed. Only available if USE_GLOO is on." OFF
-    "USE_GLOO" OFF)
 option(USE_TBB "Use TBB" OFF)
 
 # Used when building Caffe2 through setup.py

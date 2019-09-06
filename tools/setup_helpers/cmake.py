@@ -287,7 +287,7 @@ class CMake:
                       **build_options)
 
         if USE_GLOO_IBVERBS:
-            CMake.defines(args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
+            CMake.defines(args, USE_IBVERBS="1")
 
         expected_wrapper = '/usr/local/opt/ccache/libexec'
         if IS_DARWIN and os.path.exists(expected_wrapper):
