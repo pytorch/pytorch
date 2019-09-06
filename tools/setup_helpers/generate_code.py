@@ -61,7 +61,8 @@ def main():
         '--subset',
         help='Subset of source files to generate. Can be "libtorch" or "pybindings". Generates both when omitted.'
     )
-    parser.add_argument('--disable-autograd',
+    parser.add_argument(
+        '--disable-autograd',
         default=False,
         action='store_true',
         help='It can skip generating autograd related code when the flag is set',
