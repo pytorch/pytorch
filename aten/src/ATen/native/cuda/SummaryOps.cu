@@ -18,7 +18,7 @@ enum class CUDAHistogramMemoryType { SHARED, MULTI_BLOCK, GLOBAL };
 namespace {
   template<typename input_t, typename IndexType>
   __device__ static IndexType getBin(input_t bVal, input_t minvalue, input_t maxvalue, int nbins) {
-    IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
+    IndexType bin = (int)(int64_t(bVal - minvalue) * nbins / (maxvalue - minvalue));
     // (only applicable for histc)
     // while each bin is inclusive at the lower end and exclusive at the higher, i.e. [start, end)
     // the last bin is inclusive at both, i.e. [start, end], in order to include maxvalue if exists
