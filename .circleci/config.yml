@@ -877,3 +877,24 @@ jobs:
       - store_artifacts:
           path: ~/workspace/artifact
           destination: libtorch.zip
+
+##############################################################################
+##############################################################################
+# Workflows
+##############################################################################
+##############################################################################
+
+# PR jobs pr builds
+workflows:
+  build:
+    jobs:
+      # Warning: indentation here matters!
+
+      # Pytorch iOS builds
+      - pytorch_ios_build:
+          requires:
+            - setup
+          filters:
+            branches:
+              only: master
+  
