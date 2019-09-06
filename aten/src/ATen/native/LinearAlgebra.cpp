@@ -299,7 +299,7 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
   }
   namedinference::propagate_names(
       result,
-      std::move(namedinference::compute_bmm_outnames(result, batch1, batch2)),
+      namedinference::compute_bmm_outnames(result, batch1, batch2),
       /*validate_names=*/false);
 #endif
   return result;

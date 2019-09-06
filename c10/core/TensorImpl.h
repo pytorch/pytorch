@@ -147,6 +147,7 @@ struct C10_API NonVariableTypeMode {
 struct C10_API NamedTensorMetaInterface {
   virtual ~NamedTensorMetaInterface();
   virtual std::unique_ptr<NamedTensorMetaInterface> clone() const;
+  virtual int64_t slow_dim() const;
 };
 #endif
 
@@ -866,7 +867,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_named_tensor_meta(std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta) {
 #ifdef DEBUG
     if (named_tensor_meta) {
-      TORCH_INTERNAL_ASSERT(dim() == named_tensor_meta->names.size());
+      TORCH_INTERNAL_ASSERT(named_tensor_meta->slow_dim() == dim());
     }
 #endif
     named_tensor_meta_ = std::move(named_tensor_meta);
