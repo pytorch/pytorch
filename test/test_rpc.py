@@ -7,9 +7,8 @@ import unittest
 import torch
 import torch.distributed as dist
 
-from multiprocessing_test_case import MultiProcessTestCase
+from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
-import caffe2.python._import_c_extension as C
 
 
 # it is used to test python user defined function over rpc
@@ -77,7 +76,7 @@ def _wrap_with_rpc(func):
         'setUp' and 'tearDown' methods of unittest.
     '''
     def wrapper(self):
-        store = dist.FileStore(self.file_name, self.world_size)
+        store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend='gloo', rank=self.rank,
                                 world_size=self.world_size, store=store)
         dist.init_model_parallel('worker%d' % self.rank)
@@ -91,7 +90,6 @@ def _wrap_with_rpc(func):
     sys.version_info < (3, 0),
     "Pytorch distributed rpc package " "does not support python2",
 )
-@unittest.skipIf(C.is_asan, "Skip ASAN for buck build")
 class RpcTest(MultiProcessTestCase):
     @property
     def world_size(self):
@@ -126,7 +124,7 @@ class RpcTest(MultiProcessTestCase):
             dist.rpc(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
 
     def test_duplicated_names(self):
-        store = dist.FileStore(self.file_name, self.world_size)
+        store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend="gloo", rank=self.rank,
                                 world_size=self.world_size, store=store)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
@@ -134,7 +132,7 @@ class RpcTest(MultiProcessTestCase):
         dist.join_rpc()
 
     def test_invalid_names(self):
-        store = dist.FileStore(self.file_name, self.world_size)
+        store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend="gloo", rank=self.rank,
                                 world_size=self.world_size, store=store)
 

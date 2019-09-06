@@ -17,20 +17,24 @@ PythonRpcHandler& PythonRpcHandler::getInstance() {
   return handler;
 }
 
+py::bytes PythonRpcHandler::runUDFFunction(const py::object& pargs) {
+  AutoGIL ag;
+  TORCH_CHECK(runUDFFunction_ != nullptr, "runUDFFunction_ is nullptr");
+  return runUDFFunction_(pargs);
+}
+
 std::vector<char> PythonRpcHandler::generatePythonUDFResult(
     const Message& request) {
-  AutoGIL ag;
   auto pargs = py::bytes(request.payload().data(), request.payload().size());
-  TORCH_CHECK(runUDFFunction_ != nullptr, "runUDFFunction_ is nullptr");
-  py::bytes pres = runUDFFunction_(pargs);
+  auto pres = runUDFFunction(pargs);
   const auto& presStr = static_cast<std::string>(pres);
   std::vector<char> payload(presStr.begin(), presStr.end());
   return payload;
 }
 
 py::object PythonRpcHandler::loadPythonUDFResult(const Message& message) {
-  AutoGIL ag;
   auto pargs = py::bytes(message.payload().data(), message.payload().size());
+  AutoGIL ag;
   TORCH_CHECK(loadResultFunction_ != nullptr, "loadResultFunction_ is nullptr");
   return loadResultFunction_(pargs);
 }
