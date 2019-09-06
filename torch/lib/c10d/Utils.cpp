@@ -228,7 +228,7 @@ int connect(
 
       // We have tried all addresses but could not connect to any of them.
       if (!nextAddr) {
-        if (!wait || !anyRefused || !anyReset) {
+        if (!wait || (!anyRefused && !anyReset)) {
           throw;
         }
         std::this_thread::sleep_for(std::chrono::seconds(1));
