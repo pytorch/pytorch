@@ -164,10 +164,7 @@ def sqrt(g, self):
 
 
 def rsqrt(g, self):
-    dtype = self.type().scalarType()
-    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-    dtype = sym_help.scalar_type_to_pytorch_type[dtype]
-    return div(g, g.op("Constant", value_t=torch.tensor(1., dtype=dtype)), sqrt(g, self))
+    return div(g, sym_help._if_scalar_type_as(g, torch.ones(1), self), sqrt(g, self))
 
 
 def tanh(g, self):
