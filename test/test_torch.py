@@ -1661,6 +1661,9 @@ class _TestTorchMixin(torchtest):
     def test_addcdiv(self):
         def _test_addcdiv(a, alpha, b, c):
             actual = torch.addcdiv(a, alpha, b, c)
+            # implementation of addcdiv downcasts alpha. arithmetic ops don't.
+            if not actual.dtype.is_floating_point:
+                alpha = int(alpha)
             expected = a + (alpha * b) / c
             self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
 
