@@ -13,9 +13,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <algorithm>
 #include <vector>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 namespace at {
 namespace native {
@@ -1054,6 +1052,12 @@ std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {
   }
   return tensors;
 }
+
+#ifdef BUILD_NAMEDTENSOR
+std::vector<Tensor> unbind(const Tensor& self, Dimname dim) {
+  return at::unbind(self, dimname_to_position(self, dim));
+}
+#endif
 
 std::vector<Tensor> meshgrid(TensorList tensors) {
   int64_t size = tensors.size();

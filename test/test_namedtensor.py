@@ -487,7 +487,7 @@ class TestNamedTensor(TestCase):
             out_fn = getattr(torch, name)
 
             def fn(a, b):
-                result = a.new_empty([0])
+                result = torch.empty([0], dtype=a.dtype, device=a.device)
                 out_fn(a, b, *args, out=result, **kwargs)
                 return result
 
@@ -564,7 +564,7 @@ class TestNamedTensor(TestCase):
             out_fn = getattr(torch, name)
 
             def fn(tensor):
-                result = tensor.new_empty([0])
+                result = torch.empty([0], dtype=tensor.dtype, device=tensor.device)
                 out_fn(tensor, *args, out=result, **kwargs)
                 return result
 
@@ -724,7 +724,7 @@ class TestNamedTensor(TestCase):
             if output_lambda:
                 out = output_lambda(t)
             else:
-                out = t.new_empty([0])
+                out = torch.empty([0], device=device)
             getattr(torch, op_name)(t, 'C', out=out)
             check_output(out, ['N', 'L'])
 
@@ -734,33 +734,37 @@ class TestNamedTensor(TestCase):
             check_output(op(t, 'C', keepdim=True), ['N', 'C', 'L'])
 
         def get_minmax_output(t):
-            return (t.new_empty([0]), t.new_empty([0], dtype=torch.long))
+            return (torch.empty([0], device=t.device),
+                    torch.empty([0], device=t.device, dtype=torch.long))
 
         Case = namedtuple('Case', [
             'op_name',
             'supports_complete_reduce',
             'supports_multidim_reduce',
             'supports_out_variant',
+            'supports_keepdim',
             'output_lambda',
         ])
 
         tests = [
-            Case('sum', True, True, True, None),
-            Case('prod', True, False, True, None),
-            Case('mean', True, True, True, None),
-            Case('var', True, True, True, None),
-            Case('std', True, True, True, None),
-            Case('std_mean', True, True, False, None),
-            Case('var_mean', True, True, False, None),
-            Case('min', True, False, True, get_minmax_output),
-            Case('max', True, False, True, get_minmax_output),
+            Case('sum', True, True, True, True, None),
+            Case('prod', True, False, True, True, None),
+            Case('mean', True, True, True, True, None),
+            Case('var', True, True, True, True, None),
+            Case('std', True, True, True, True, None),
+            Case('std_mean', True, True, False, True, None),
+            Case('var_mean', True, True, False, True, None),
+            Case('min', True, False, True, True, get_minmax_output),
+            Case('max', True, False, True, True, get_minmax_output),
+            Case('unbind', False, False, False, False, None),
         ]
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             op_name = testcase.op_name
             test_simple_reduce(op_name, device)
-            test_keepdim(op_name, device)
 
+            if testcase.supports_keepdim:
+                test_keepdim(op_name, device)
             if testcase.supports_out_variant:
                 test_out_variant(op_name, testcase.output_lambda, device)
             if testcase.supports_complete_reduce:

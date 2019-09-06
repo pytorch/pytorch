@@ -752,6 +752,22 @@ inline Tensor Tensor::dot(const Tensor & tensor) const {
     return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), tensor);
 #endif
 }
+inline Tensor Tensor::new_empty(IntArrayRef size, const TensorOptions & options) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::new_empty(const_cast<Tensor&>(*this), size, options);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, IntArrayRef, const TensorOptions &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), size, options);
+#endif
+}
+inline Tensor Tensor::new_full(IntArrayRef size, Scalar fill_value, const TensorOptions & options) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::new_full(const_cast<Tensor&>(*this), size, fill_value, options);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, IntArrayRef, Scalar, const TensorOptions &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), size, fill_value, options);
+#endif
+}
 inline Tensor & Tensor::resize_(IntArrayRef size) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(type_id())) {
@@ -2722,6 +2738,16 @@ inline std::vector<Tensor> Tensor::unbind(int64_t dim) const {
     return table->getOp<std::vector<Tensor> (const Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline std::vector<Tensor> Tensor::unbind(Dimname dim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::unbind(const_cast<Tensor&>(*this), dim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::unbind(Tensor(a) self, Dimname dim) -> Tensor(a)[]");
+    return table->getOp<std::vector<Tensor> (const Tensor &, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim);
+#endif
+}
+#endif
 inline Tensor Tensor::to_sparse(int64_t sparse_dim) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(type_id())) {
@@ -3718,13 +3744,7 @@ inline Tensor & Tensor::triu_(int64_t diagonal) const {
 }
 inline Tensor & Tensor::digamma_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::digamma_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("digamma_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::digamma_(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::digamma_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
@@ -3732,13 +3752,7 @@ inline Tensor & Tensor::digamma_() const {
 }
 inline Tensor & Tensor::polygamma_(int64_t n) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::polygamma_(const_cast<Tensor&>(*this), n);
-            break;
-        default:
-            AT_ERROR("polygamma_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::polygamma_(const_cast<Tensor&>(*this), n);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::polygamma_(Tensor(a!) self, int n) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), n);
@@ -4571,13 +4585,7 @@ inline Tensor Tensor::lgamma() const {
 }
 inline Tensor Tensor::digamma() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::digamma(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("digamma not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::digamma(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::digamma(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
@@ -4585,13 +4593,7 @@ inline Tensor Tensor::digamma() const {
 }
 inline Tensor Tensor::polygamma(int64_t n) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::polygamma(n, const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("polygamma not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::polygamma(n, const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::polygamma(int n, Tensor self) -> Tensor");
     return table->getOp<Tensor (int64_t, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(n, const_cast<Tensor&>(*this));

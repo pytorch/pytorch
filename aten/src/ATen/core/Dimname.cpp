@@ -1,7 +1,7 @@
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/Dimname.h>
 #include <c10/util/Exception.h>
 
+#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
