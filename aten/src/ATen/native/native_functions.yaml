@@ -39,7 +39,7 @@
   variants: method
   named_guard: False
 
-- func: view_names(Tensor(a) self, Dimname[]? names) -> Tensor(a)
+- func: renamed(Tensor(a) self, Dimname[]? names) -> Tensor(a)
   variants: method
   named_guard: False
 
