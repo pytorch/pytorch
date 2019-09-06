@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/nn/modules/any.h>
+#include <torch/nn/modules/avgpool.h>
 #include <torch/nn/modules/batchnorm.h>
 #include <torch/nn/modules/conv.h>
 #include <torch/nn/modules/dropout.h>
