@@ -106,19 +106,16 @@ class QuantizationTestCase(TestCase):
             has Quantize and DeQuantize submodules
         """
         self.assertEqual(type(mod.module), nnq.Linear)
-        self.assertEqual(mod.module.bias.dtype, torch.qint32)
         self.checkQuantDequant(mod)
 
     def checkQuantizedLinear(self, mod):
         self.assertEqual(type(mod), nnq.Linear)
-        self.assertEqual(mod.bias.dtype, torch.qint32)
 
     def checkDynamicQuantizedLinear(self, mod):
         r"""Checks that mod has been swapped for an nnqd.Linear
             module, the bias is float.
         """
         self.assertEqual(type(mod), nnqd.Linear)
-        self.assertEqual(mod.bias.dtype, torch.float)
 
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)

@@ -63,13 +63,13 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
 // Note: Addition is only supported when self, other, out are of the same dtype.
 template <bool ReLUFused = false>
 void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
-  const int64_t zero_point = out.q_zero_point();
-  const float scale = out.q_scale();
-  const float inv_scale = 1.0f / scale;
-  const int64_t self_zero_point = self.q_zero_point();
-  const float self_scale = self.q_scale();
-  const int64_t other_zero_point = other.q_zero_point();
-  const float other_scale = other.q_scale();
+  int64_t zero_point = out.q_zero_point();
+  float scale = out.q_scale();
+  float inv_scale = 1.0f / scale;
+  int64_t self_zero_point = self.q_zero_point();
+  float self_scale = self.q_scale();
+  int64_t other_zero_point = other.q_zero_point();
+  float other_scale = other.q_scale();
 
   // Broadcast out the parameters here to amortize out that cost across
   // loop iterations.
