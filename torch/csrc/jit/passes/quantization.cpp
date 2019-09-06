@@ -18,7 +18,7 @@ namespace {
 void findValuesInPattern(
     Graph& graph,
     const std::string& pattern,
-    std::unordered_set<Value*>& values) {
+    std::unordered_set<Value*>& values_to_skip) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
   script::parseIR(pattern, &pattern_graph, vmap);
@@ -29,13 +29,14 @@ void findValuesInPattern(
     TORCH_INTERNAL_ASSERT(
         match.values_map.find(output_value) != match.values_map.end(),
         "Didn't find Value output in match result.");
-    values.emplace(match.values_map[output_value]);
+    values_to_skip.emplace(match.values_map[output_value]);
   }
 }
 
-std::unordered_set<Value*> valuesToSkipObserver(
+void intermediateValuesToSkipObserver(
     const script::Module& module,
-    const std::string& method_name) {
+    const std::string& method_name,
+    std::unordered_set<Value*>& values_to_skip) {
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
 
@@ -57,12 +58,33 @@ graph(%self, %input):
     return (%r))";
   std::vector<std::string> patterns = {conv_functional_relu, conv_relu_module};
 
-  std::unordered_set<Value*> values;
   for (const auto& pattern : patterns) {
-    findValuesInPattern(*graph, pattern, values);
+    findValuesInPattern(*graph, pattern, values_to_skip);
+  }
+}
+
+// Propagate current values_to_skip through module hierarchy,
+// adding values to skip in child method graph
+void inputOutputValuesToSkipObserver(
+    Value* v,
+    const script::Module& module,
+    const std::string& module_method_name,
+    std::unordered_set<Value*>& values_to_skip) {
+  auto method = module.get_method(module_method_name);
+  auto graph = method.graph();
+  auto inputs = v->node()->inputs();
+  for (auto i = 1; i < inputs.size(); ++i) {
+    if (values_to_skip.count(inputs[i]) > 0) {
+      // propagate input values
+      values_to_skip.insert(graph->inputs()[i]);
+    }
   }
 
-  return values;
+  // propagate output value, right now only works with 1 output Value
+  // TODO: extend to support multiple output Value if needed
+  if (values_to_skip.count(v) > 0) {
+    values_to_skip.insert(graph->outputs()[0]);
+  }
 }
 
 c10::optional<script::Module> findChildModule(
@@ -76,35 +98,40 @@ c10::optional<script::Module> findChildModule(
   return c10::nullopt;
 }
 
-bool valueObserved(
+// Calling a method of a module with same qconfig
+// as current module, there are two cases,
+// 1. calling a method of self
+// 2. calling a method of child module that has the same
+// qconfig as the current module
+bool callMethodOfModuleWithSameQConfig(
     Node* n,
     Value* self,
     const script::Module& module,
     const ModulePtrSet& child_module_set) {
-  if (n->kind() == prim::CallMethod) {
-    auto* module_instance = n->inputs()[0];
-    if (module_instance == self) {
-      // Calling a method of current module
-      return true;
-    } else {
-      // calling a method of child module
-      auto child_module = findChildModule(module_instance, module);
-      if ((child_module &&
-           child_module_set.count(child_module.value().module_object()) > 0)) {
-        return true;
-      }
-    }
+  if (n->kind() != prim::CallMethod) {
+    return false;
+  }
+  auto* module_instance = n->inputs()[0];
+  if (module_instance == self) {
+    // Calling a method of current module
+    return true;
+  }
+  // calling a method of child module
+  auto child_module = findChildModule(module_instance, module);
+  if ((child_module &&
+       child_module_set.count(child_module.value().module_object()) > 0)) {
+    return true;
   }
   return false;
 }
 
-bool valueObservedInOtherMethod(
+bool valueObservedInAnotherMethod(
     Value* v,
     Value* self,
     const script::Module& module,
     const ModulePtrSet& child_module_set) {
   // Case 1. Value is produced by forward call of a child module
-  if (valueObserved(v->node(), self, module, child_module_set)) {
+  if (callMethodOfModuleWithSameQConfig(v->node(), self, module, child_module_set)) {
     return true;
   }
 
@@ -116,7 +143,7 @@ bool valueObservedInOtherMethod(
   // if it is used in parent module, this case is not handled here, we can do
   // it in a separate PR if this is needed.
   for (const Use& u : v->uses()) {
-    if (valueObserved(u.user, self, module, child_module_set)) {
+    if (callMethodOfModuleWithSameQConfig(u.user, self, module, child_module_set)) {
       if (v->uses().size() > 1) {
         TORCH_WARN("Value has multiple uses, but we only support skipping observer for \
                    one use right now.");
@@ -220,13 +247,13 @@ Node* insertObserver(
   return call;
 }
 
-void getQConfigMap(
+void fillQConfigMap(
     const script::Module& module,
     const QConfigDict& qconfig_dict,
-    const std::string& key,
-    const c10::optional<QConfig>& parent_qconfig,
     ModuleQConfigMap& map,
-    ModulePtrSet& child_module_set) {
+    ModulePtrSet& child_module_set,
+    const std::string& key = "",
+    const c10::optional<QConfig>& parent_qconfig = c10::nullopt) {
   c10::optional<QConfig> qconfig;
   if (qconfig_dict.find(key) != qconfig_dict.end()) {
     qconfig = qconfig_dict.at(key);
@@ -243,7 +270,7 @@ void getQConfigMap(
     } else {
       child_key = key + "." + s.name();
     }
-    getQConfigMap(s.to_module(), qconfig_dict, child_key, qconfig, map, child_module_set);
+    fillQConfigMap(s.to_module(), qconfig_dict, map, child_module_set, child_key, qconfig);
   }
 }
 
@@ -251,9 +278,11 @@ void InsertObserversImpl(
     script::Module& module,
     const std::string& method_name,
     const ModuleQConfigMap& module_qconfig_map,
-    const ModulePtrSet& child_module_set) {
+    const ModulePtrSet& child_module_set,
+    std::unordered_set<Value*>& values_to_skip) {
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
+  intermediateValuesToSkipObserver(module, method_name, values_to_skip);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -275,7 +304,12 @@ void InsertObserversImpl(
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get()) &&
-        !valueObservedInOtherMethod(v, self, module, child_module_set)) {
+        values_to_skip.count(v) == 0 &&
+        !valueObservedInAnotherMethod(v, self, module, child_module_set)) {
+      if (module_qconfig_map.count(module.module_object()) <= 0) {
+        // the module is added by us, it's an observer module
+        continue;
+      }
       auto qconfig = module_qconfig_map.at(module.module_object());
       if (qconfig) {
         auto observer_node =
@@ -286,8 +320,6 @@ void InsertObserversImpl(
       }
     }
   }
-
-  auto values_to_skip = valuesToSkipObserver(module, method_name);
 
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
@@ -304,7 +336,7 @@ void InsertObserversImpl(
       // for all values from it.
       for (Value* v : n->outputs()) {
         if (values_to_skip.count(v) == 0 &&
-            !valueObservedInOtherMethod(v, self, module, child_module_set)) {
+            !valueObservedInAnotherMethod(v, self, module, child_module_set)) {
           values_to_observe.push_back(v);
         }
         if (v->node()->kind() == prim::CallMethod) {
@@ -312,20 +344,31 @@ void InsertObserversImpl(
           // we'll recursively insert observers for the forward function to
           // the child module.
           auto module_instance = v->node()->inputs()[0];
+          auto module_method_name = v->node()->s(attr::name);
           if (module_instance->node()->kind() == prim::GetAttr) {
             auto child_module_name = module_instance->node()->s(attr::name);
             auto child_module = module.find_module(child_module_name);
             TORCH_INTERNAL_ASSERT(
                 child_module,
                 "Child module " + child_module_name + " does not exist");
+            // update values_to_skip
+            inputOutputValuesToSkipObserver(v,
+                                            child_module.value(),
+                                            module_method_name,
+                                            values_to_skip);
             // Recursively insert observer for the forward function of child module
-            InsertObserversImpl(child_module.value(), v->node()->s(attr::name), module_qconfig_map, child_module_set);
+            InsertObserversImpl(child_module.value(), module_method_name, module_qconfig_map, child_module_set, values_to_skip);
           } else {
             TORCH_INTERNAL_ASSERT(
                 module_instance == graph->inputs()[0],
                 "We only support call method either on %self"
                 "or child instance in insert_observers_pass right now");
-            InsertObserversImpl(module, v->node()->s(attr::name), module_qconfig_map, child_module_set);
+            // update values_to_skip
+            inputOutputValuesToSkipObserver(v,
+                                            module,
+                                            module_method_name,
+                                            values_to_skip);
+            InsertObserversImpl(module, module_method_name, module_qconfig_map, child_module_set, values_to_skip);
           }
         }
       }
@@ -631,13 +674,16 @@ TORCH_API void InsertObservers(
   // and produced by the child module if that module has
   // the same qconfig as the parent module.
   ModulePtrSet child_module_set;
-  getQConfigMap(module,
-                qconfig_dict,
-                "",
-                c10::nullopt,
-                module_qconfig_map,
-                child_module_set);
-  InsertObserversImpl(module, method_name, module_qconfig_map, child_module_set);
+  fillQConfigMap(module,
+                 qconfig_dict,
+                 module_qconfig_map,
+                 child_module_set);
+  std::unordered_set<Value*> values_to_skip;
+  InsertObserversImpl(module,
+                      method_name,
+                      module_qconfig_map,
+                      child_module_set,
+                      values_to_skip);
 }
 
 script::Module InsertQuantDeQuant(
@@ -690,8 +736,8 @@ graph(%a_quant, %w_quant, %b_quant, %a_scale, %a_zero_point, %a_dtype, %w_scale,
         %in_param : int[] = prim::ListConstruct(%0, %2, %3, %1)
         %a_perm : Tensor = aten::permute(%a_quant, %in_param)
         %w_perm : Tensor = aten::permute(%w_quant, %in_param)
-        %w_packed = quantized::fbgemm_conv_prepack(%w_perm, %stride, %padding, %dilation, %groups)
-        %r = quantized::fbgemm_conv2d(%a_perm, %w_packed, %b_quant, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
+        %w_packed = quantized::conv_prepack(%w_perm, %stride, %padding, %dilation, %groups)
+        %r = quantized::conv2d(%a_perm, %w_packed, %b_quant, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
         %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
         %r_perm = aten::permute(%r, %out_param)
         return (%r_perm))"},
