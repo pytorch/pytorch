@@ -1106,6 +1106,7 @@ jobs:
 workflows:
   build:
     jobs:
+      - setup
       # Pytorch iOS builds
       - pytorch_ios_build:
           requires: 
