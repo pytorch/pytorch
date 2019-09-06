@@ -23,8 +23,6 @@
 #include <iterator>
 #include <utility>
 #include <type_traits>
-#include <assert.h>
-#include <c10/util/flat_hash_map.h>
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
@@ -709,53 +707,40 @@ public:
 
     iterator erase(const_iterator begin_it, const_iterator end_it)
     {
-        if (begin_it == end_it)
-            return { begin_it.current };
-
         // whenever an entry is removed and there are other entries with the same
         // hash, the other entries must get moved to their desired position.
         // any reference to a moved entry is invalidated.
-        // here, we iterate through the range and collect all of the entries
-        // that we need to remove. if we invalidate an entry, we update it
-        // to its new location.
+        // here, we iterate through the range, and make sure that we update
+        // the pointer to our next entry in the list or the end of the iterator
+        // when it is invalidated.
 
-        ska::flat_hash_map<EntryPointer,size_t> ptr_to_order;
-        std::vector<EntryPointer> erase_list;
+        auto curr_iter = begin_it.current;
+        auto next_iter = curr_iter->next;
+        auto end_iter = end_it.current;
 
-        size_t num_to_remove = 0;
-        for (EntryPointer it = begin_it.current, end = end_it.current; it != end;) {
-          ptr_to_order[it] = num_to_remove;
-          erase_list.push_back(it);
-          it = it->next;
-          num_to_remove++;
-        }
-        // since we return end, we need to make sure it gets updated if its invalidated
-        ptr_to_order[end_it.current] = num_to_remove + 1;
-        erase_list.push_back(end_it.current);
-
-        for (size_t index = 0; index < num_to_remove; ++index) {
-          EntryPointer current = erase_list[index];
-          remove_from_list(current);
-          current->destroy_value();
+        while (curr_iter != end_iter) {
+          remove_from_list(curr_iter);
+          curr_iter->destroy_value();
           --num_elements;
 
-          for (EntryPointer next = current + ptrdiff_t(1); !next->is_at_desired_position(); ++current, ++next)
+          for (EntryPointer next_hash_slot = curr_iter + ptrdiff_t(1); !next_hash_slot->is_at_desired_position(); ++curr_iter, ++next_hash_slot)
             {
-              current->emplace(next->distance_from_desired - 1, std::move(next->value));
-              replace_linked_list_position(next, current);
-              next->destroy_value();
+              curr_iter->emplace(next_hash_slot->distance_from_desired - 1, std::move(next_hash_slot->value));
+              replace_linked_list_position(next_hash_slot, curr_iter);
+              next_hash_slot->destroy_value();
 
-              auto removal_index = ptr_to_order.find(next);
-              // we are invalidating an entry we haven't iterated over yet
-              if (removal_index != ptr_to_order.end() && removal_index->second > index) {
-                erase_list[removal_index->second] = current;
-                ptr_to_order[current] = removal_index->second;
-                ptr_to_order.erase(next);
+              // we are invalidating next_iter or end_iter
+              if (next_hash_slot == end_iter) {
+                end_iter = curr_iter;
+              } else if (next_hash_slot == next_iter) {
+                next_iter = curr_iter;
               }
           }
+          curr_iter = next_iter;
+          next_iter = curr_iter->next;
         }
 
-        return { erase_list[num_to_remove] };
+        return { end_iter };
     }
 
     uint64_t erase(const FindKey & key)
