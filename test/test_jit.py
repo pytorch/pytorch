@@ -18979,6 +18979,10 @@ class TestClassType(JitTestCase):
                 # type: (int) -> int
                 return self.x ^ other
 
+            def __getitem__(self, other):
+                # type: (int) -> int
+                return other + 1
+
         def add():
             return BinOps(4) + 3
         def sub():  # noqa: E306
@@ -19007,8 +19011,10 @@ class TestClassType(JitTestCase):
             return BinOps(4) | 3
         def _xor():  # noqa: E306
             return BinOps(4) ^ 3
+        def getitem():  # noqa: E306
+            return BinOps(4)[1]
 
-        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor]
+        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem]
         if not PY2:
             ops.append(truediv)
         for func in ops:
