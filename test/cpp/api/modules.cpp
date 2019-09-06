@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/nn/module.h>
+#include <torch/nn/modules/avgpool.h>
 #include <torch/nn/modules/batchnorm.h>
 #include <torch/nn/modules/conv.h>
 #include <torch/nn/modules/dropout.h>
@@ -101,6 +102,58 @@ TEST_F(ModulesTest, Conv3d) {
   }
 
   ASSERT_TRUE(model->weight.grad().numel() == 3 * 2 * 3 * 3 * 3);
+}
+
+TEST_F(ModulesTest, AvgPool1d) {
+  AvgPool1d model(AvgPool1dOptions(3).stride(2));
+  auto x = torch::ones({1, 1, 5}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1 ,2})));
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+}
+
+TEST_F(ModulesTest, AvgPool2dEven) {
+  AvgPool2d model(AvgPool2dOptions(3).stride(2));
+  auto x = torch::ones({2, 5, 5}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+}
+
+TEST_F(ModulesTest, AvgPool2dUneven) {
+  AvgPool2d model(AvgPool2dOptions({3, 2}).stride({2, 2}));
+  auto x = torch::ones({2, 5, 4}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+}
+
+TEST_F(ModulesTest, AvgPool3d) {
+  AvgPool3d model(AvgPool3dOptions(3).stride(2));
+  auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
 }
 
 TEST_F(ModulesTest, Linear) {
@@ -346,6 +399,24 @@ TEST_F(ModulesTest, PrettyPrintConv) {
   ASSERT_EQ(
       c10::str(Conv2d(options)),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
+}
+
+TEST_F(ModulesTest, PrettyPrintAvgPool) {
+  ASSERT_EQ(
+      c10::str(AvgPool1d(5)),
+      "torch::nn::AvgxPool1d(kernel_size=5, stride=5)");
+  ASSERT_EQ(
+      c10::str(AvgPool2d(5)),
+      "torch::nn::AvgPool2d(kernel_size=[5, 5], stride=[5, 5])");
+  ASSERT_EQ(
+      c10::str(AvgPool2d(AvgPool2dOptions(5).stride(2))),
+      "torch::nn::AvgPool2d(kernel_size=[5, 5], stride=[2, 2])");
+
+  const auto options =
+      AvgPool2dOptions(torch::IntArrayRef{5, 6}).stride({1, 2});
+  ASSERT_EQ(
+      c10::str(AvgPool2d(options)),
+      "torch::nn::AvgPool2d(kernel_size=[5, 6], stride=[1, 2])");
 }
 
 TEST_F(ModulesTest, PrettyPrintDropout) {

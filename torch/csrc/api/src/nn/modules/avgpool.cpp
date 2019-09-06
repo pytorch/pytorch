@@ -14,8 +14,8 @@ void AvgPoolImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
 void AvgPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Conv" << D << "d"
-         << ", kernel_size=" << options.kernel_size_
+  stream << "torch::nn::AvgPool" << D << "d"
+         << "(kernel_size=" << options.kernel_size_
          << ", stride=" << options.stride_ << ")";
 }
 
