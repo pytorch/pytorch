@@ -91,6 +91,35 @@ def createResolutionCallbackFromClosure(fn):
     return env
 
 
+jit_script = None
+
+def delayed_script(fn):
+    """
+    Compiles `fn` when it is first called during tracing.
+    """
+    # You can't modify closed-over variables in Python 2, so make this a dict and
+    # mutate it
+    compiled_fn = {}
+
+    print("Delaying...")
+    def wrapper(*args):
+        if not torch._C._is_tracing():
+            # Not tracing, don't do anything
+            return fn(*args)
+
+        if jit_script is None:
+            raise RuntimeError("Called too early")
+
+        if 'fn' not in compiled_fn:
+            print(fn)
+            compiled_fn['fn'] = jit_script(fn, _frames_up=1)
+        return compiled_fn['fn'](*args)
+
+    wrapper.__original_fn__ = fn
+
+    return wrapper
+
+
 def can_compile_class(cls):
     # If any of the functions on a type don't have a code object, this type can't
     # be compiled and is probably a builtin / bound from C
