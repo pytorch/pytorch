@@ -84,7 +84,7 @@ if (INTERN_BUILD_ATEN_OPS)
     SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/THAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
   ENDIF()
 
-  FILE(GLOB cpu_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cpu/*.cpp")
+  FILE(GLOB cpu_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cpu/*.cpp" "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
 
   LIST(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
   LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}")

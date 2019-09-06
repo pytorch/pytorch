@@ -1,16 +1,16 @@
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/NamedTensorUtils.h>
 
+#ifdef BUILD_NAMEDTENSOR
 namespace at { namespace native {
 
 Tensor& names_(Tensor& self, optional<DimnameList> names) {
   return at::internal_set_names_inplace(self, names);
 }
 
-Tensor view_names(const Tensor& self, optional<DimnameList> names) {
+Tensor renamed(const Tensor& self, optional<DimnameList> names) {
   auto result = self.alias();
   at::internal_set_names_inplace(result, names);
   return result;
@@ -104,7 +104,7 @@ static Tensor align(const Tensor& tensor, DimnameList names, bool is_aligning_tw
         tensor.names(),
         names,
         is_aligning_two_tensors);
-  auto result = tensor.view_names(nullopt).view(expanded_sizes);
+  auto result = tensor.renamed(nullopt).view(expanded_sizes);
   at::internal_set_names_inplace(result, names);
   return result;
 }
@@ -134,46 +134,6 @@ std::vector<Tensor> align_tensors(TensorList tensors) {
         return a.dim() < b.dim();
       });
   return align_tensors_to(tensors, longest_dim->names());
-}
-
-static int64_t cumprod(IntArrayRef sizes) {
-  int64_t result = 1;
-  for (auto size : sizes) {
-    result *= size;
-  }
-  return result;
-}
-
-Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, DimnameList names) {
-  // unflatten is implemented only as a python method on tensor right now.
-  // The following asserts should be checked by the python method.
-  TORCH_INTERNAL_ASSERT(names.size() == sizes.size());
-  TORCH_INTERNAL_ASSERT(sizes.size() > 0);
-  TORCH_CHECK(
-      cumprod(sizes) == self.size(dim),
-      "unflatten: Provided names ", names, " and sizes ", sizes, " but sizes don't multiply "
-      "up to the size of dim ", dim, " (", self.names()[dim], ": ", self.size(dim),
-      ") in Tensor", self.names());
-
-  auto outnames = self.names().vec();
-  outnames.erase(outnames.begin() + dim);
-  outnames.insert(outnames.begin() + dim, names.begin(), names.end());
-
-  auto new_sizes = self.sizes().vec();
-  new_sizes.erase(new_sizes.begin() + dim);
-  new_sizes.insert(new_sizes.begin() + dim, sizes.begin(), sizes.end());
-
-  Tensor result;
-  {
-    NoNamesGuard guard;
-    result = self.view(new_sizes);
-  }
-  at::internal_set_names_inplace(result, outnames);
-  return result;
-}
-
-Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
-  return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
 }
 
 }}  // namespace at::native

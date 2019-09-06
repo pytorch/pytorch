@@ -376,16 +376,10 @@ class CAFFE2_API Tensor {
   Tensor & names_(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
-  Tensor view_names(c10::optional<DimnameList> names) const;
+  Tensor renamed(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor align_to(DimnameList names) const;
-  #endif
-  #ifdef BUILD_NAMEDTENSOR
-  Tensor unflatten(Dimname dim, IntArrayRef sizes, DimnameList names) const;
-  #endif
-  #ifdef BUILD_NAMEDTENSOR
-  Tensor unflatten(int64_t dim, IntArrayRef sizes, DimnameList names) const;
   #endif
   Tensor abs() const;
   Tensor & abs_() const;
@@ -451,6 +445,8 @@ class CAFFE2_API Tensor {
   Tensor div(Scalar other) const;
   Tensor & div_(Scalar other) const;
   Tensor dot(const Tensor & tensor) const;
+  Tensor new_empty(IntArrayRef size, const TensorOptions & options={}) const;
+  Tensor new_full(IntArrayRef size, Scalar fill_value, const TensorOptions & options={}) const;
   Tensor & resize_(IntArrayRef size) const;
   Tensor erf() const;
   Tensor & erf_() const;

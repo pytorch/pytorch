@@ -1,7 +1,7 @@
 #pragma once
-#ifdef BUILD_NAMEDTENSOR
-
 #include <ATen/NamedTensor.h>
+
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/Tensor.h>
 #include <ATen/core/DimVector.h>
 #include <functional>
