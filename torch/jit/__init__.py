@@ -1186,10 +1186,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         fn.__doc__ = obj.__doc__
         return fn
 
-
-torch._jit_internal.jit_script = script
-
-
 def _gen_rcb(obj, _frames_up):
     _frames_up = _frames_up + 1  # for invoking _gen_rcb()
 

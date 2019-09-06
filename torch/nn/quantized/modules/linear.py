@@ -72,12 +72,6 @@ class DeQuantize(Module):
     def from_float(mod):
         return DeQuantize()
 
-@torch._jit_internal.delayed_script
-def get_bias(packed_params):
-    # type: (Tensor) -> Optional[Tensor]
-    return torch.ops.quantized.linear_unpack(packed_params)[1]
-
-
 class Linear(torch.nn.Module):
     r"""
     A quantized linear module with quantized tensor as inputs and outputs.
@@ -199,7 +193,8 @@ class Linear(torch.nn.Module):
 
     def bias(self):
         # type: () -> Optional[torch.Tensor]
-        return get_bias(self._packed_params)
+        (w, b) = torch.ops.quantized.linear_unpack(self._packed_params)
+        return b
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
