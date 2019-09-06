@@ -192,7 +192,7 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         from torch.onnx.symbolic_opset10 import _slice
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
 
-def _interpolate_warning(interpolate_mode, align_corners):
+def _interpolate_warning(interpolate_mode):
     onnx_op = "onnx:Resize" if _export_onnx_opset_version >= 10 else "onnx:Upsample"
     warnings.warn("You are trying to export the model with " + onnx_op + " for ONNX opset version "
                   "" + str(_export_onnx_opset_version) + ". "
@@ -206,7 +206,7 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
     output_size = _maybe_get_const(output_size, 'is')
     if _is_value(output_size):
         offset = 2
-        offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
+        offsets = g.op("Constant", value_t=torch.ones(offset))
         dividend = g.op("Cast", output_size, to_i=cast_pytorch_to_onnx["Float"])
         divisor = _slice_helper(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
         divisor = g.op("Cast", divisor, to_i=cast_pytorch_to_onnx["Float"])

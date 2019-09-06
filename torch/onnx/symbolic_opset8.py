@@ -48,7 +48,8 @@ for black_listed_op in black_listed_operators:
 
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, align_corners=None):
-        sym_help._interpolate_warning(interpolate_mode, align_corners)
+        sym_help._interpolate_warning(interpolate_mode)
+        align_corners = sym_help._maybe_get_scalar(align_corners)
         if align_corners:
             return _unimplemented(name, "align_corners == True")
         output_size = sym_help._maybe_get_const(output_size, 'is')
