@@ -5914,9 +5914,9 @@ class _TestTorchMixin(torchtest):
             b, A = triangular_solve_test_helper((n, n), (n, k), cast, upper, unitriangular)
             x = torch.triangular_solve(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
             if transpose:
-                self.assertLessEqual(b.dist(A.t().mm(x)), 3e-12)
+                self.assertLessEqual(b.dist(A.t().mm(x)), 4e-12)
             else:
-                self.assertLessEqual(b.dist(A.mm(x)), 3e-12)
+                self.assertLessEqual(b.dist(A.mm(x)), 4e-12)
 
     @skipIfNoLapack
     def test_triangular_solve(self):
@@ -5961,7 +5961,7 @@ class _TestTorchMixin(torchtest):
                 A = A.transpose(-2, -1)
             self.assertEqual(torch.matmul(A, x), b.expand(A.shape[:-2] + (5, 1)))
 
-            A, b = triangular_solve_test_helper((3, 3), (512, 512, 3, 1), cast, upper, unitriangular)
+            b, A = triangular_solve_test_helper((3, 3), (512, 512, 3, 1), cast, upper, unitriangular)
             x, _ = torch.triangular_solve(b, A,
                                           upper=upper, transpose=transpose, unitriangular=unitriangular)
             if transpose:
