@@ -13820,7 +13820,8 @@ a")
                 def ignored_code(self, x):
                     self.some_state = torch.tensor((100,))
 
-        FileCheck().check("TorchScript will now drop the drop call on compilation.").run(str(warns[0]))
+        if not PY2:
+            FileCheck().check("TorchScript will now drop the function.").run(str(warns[0]))
 
         # Assert ignored code is run
         m = M()
