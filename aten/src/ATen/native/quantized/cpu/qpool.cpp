@@ -6,6 +6,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/cpu/quantized_ops.h>
 
 #include <algorithm>
 #include <vector>
@@ -13,6 +14,8 @@
 namespace at {
 namespace native {
 namespace {
+
+DEFINE_DISPATCH(qmaxpool_2d_nhwc_stub);
 
 /* Computes the spatial 2D max pooling with dilation.
 
@@ -135,58 +138,73 @@ Tensor q_maxpool_2d(
     oSizes = {nbatch, oC, oH, oW};
   }
 
-  Tensor qy = at::_empty_affine_quantized(
-      oSizes,
-      qx.options().dtype(toQIntType(qx.scalar_type())),
-      qx.q_scale(),
-      qx.q_zero_point());
-  auto qx_contig = qx.contiguous();
-  auto qxd = qx_contig.data_ptr<Q>();
-  auto qyd = qy.data_ptr<Q>();
-  if (ndim == 3 || nbatch == 1) {
-    auto* iData = qxd;
-    auto* oData = qyd;
-    spatial_dilated_max_pooling<Q>(
-        iData,
-        iC,
-        iH,
-        iW,
-        oH,
-        oW,
-        kH,
-        kW,
-        sH,
-        sW,
-        pH,
-        pW,
-        dH,
-        dW,
-        oData);
+  if (qx.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
+    // Fast path case for channels-last case.
+    // In this case, we can preserve the data layout in memory
+    // as well as use a loop nest that is more amenable to
+    // vectorization.
+    Tensor qy = at::_empty_affine_quantized(
+        oSizes,
+        qx.options().dtype(toQIntType(qx.scalar_type())),
+        qx.q_scale(),
+        qx.q_zero_point(),
+        qx.suggest_memory_format());
+    qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
+    return qy;
   } else {
-    at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-      for (auto p = start; p < end; ++p) {
-        auto* iData = qxd + p * iC * iW * iH;
-        auto* oData = qyd + p * oC * oW * oH;
-        spatial_dilated_max_pooling<Q>(
-            iData,
-            iC,
-            iH,
-            iW,
-            oH,
-            oW,
-            kH,
-            kW,
-            sH,
-            sW,
-            pH,
-            pW,
-            dH,
-            dW,
-            oData);
-      }
-    });
+    Tensor qy = at::_empty_affine_quantized(
+        oSizes,
+        qx.options().dtype(toQIntType(qx.scalar_type())),
+        qx.q_scale(),
+        qx.q_zero_point());
+    auto qx_contig = qx.contiguous();
+    auto qxd = qx_contig.data_ptr<Q>();
+    auto qyd = qy.data_ptr<Q>();
+    if (ndim == 3 || nbatch == 1) {
+      auto* iData = qxd;
+      auto* oData = qyd;
+      spatial_dilated_max_pooling<Q>(
+          iData,
+          iC,
+          iH,
+          iW,
+          oH,
+          oW,
+          kH,
+          kW,
+          sH,
+          sW,
+          pH,
+          pW,
+          dH,
+          dW,
+          oData);
+    } else {
+      at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+        for (auto p = start; p < end; ++p) {
+          auto* iData = qxd + p * iC * iW * iH;
+          auto* oData = qyd + p * oC * oW * oH;
+          spatial_dilated_max_pooling<Q>(
+              iData,
+              iC,
+              iH,
+              iW,
+              oH,
+              oW,
+              kH,
+              kW,
+              sH,
+              sW,
+              pH,
+              pW,
+              dH,
+              dW,
+              oData);
+        }
+      });
+    }
+    return qy;
   }
-  return qy;
 }
 } // namespace
 
