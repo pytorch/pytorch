@@ -518,6 +518,8 @@ void initJITBindings(PyObject* module) {
     }
   });
 
+  m.def("_is_tracing", []() { return jit::tracer::isTracing(); });
+
   m.def("wait", [](PythonFutureWrapper& fut) {
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;

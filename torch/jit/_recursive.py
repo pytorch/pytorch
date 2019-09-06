@@ -195,6 +195,10 @@ def make_strong_submodule(field, module, parent):
 
 
 def try_compile_fn(fn, loc):
+    # Un-wrap @delayed_script functions
+    if hasattr(fn, '__original_fn__'):
+        fn = fn.__original_fn__
+
     if _jit_internal.is_ignored_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
