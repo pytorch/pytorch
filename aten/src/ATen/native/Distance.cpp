@@ -24,6 +24,20 @@ Tensor pdist(const Tensor& self, const double p) {
   return at::_pdist_forward(self.contiguous(), p);
 }
 
+Tensor euclidean_dist_out(const Tensor& x1, const Tensor& x2) {
+  Tensor x1_norm = x1.pow(2).sum(-1, true);
+  Tensor x2_norm = x2.pow(2).sum(-1, true);
+  Tensor result;
+  if (x1.dim() == 2) {
+    result = at::addmm(x2_norm.transpose(-2, -1), x1, x2.transpose(-2, -1), 1, -2);
+  } else {
+    result = at::baddbmm(x2_norm.transpose(-2, -1), x1, x2.transpose(-2, -1), 1, -2);
+  }
+  result.add_(x1_norm);
+  result.sqrt_();
+  return result;
+}
+
 Tensor cdist(const Tensor& x1, const Tensor& x2, const double p) {
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
@@ -64,13 +78,19 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p) {
 
   std::vector<int64_t> output_shape(expand_batch_portion);
   output_shape.insert(output_shape.end(), {r1, r2});
-  Tensor result = at::empty(output_shape, x1.options());
-  if (r1 > 0 && r2 > 0) {
-    if (c1 == 0) {
-      result.fill_(0);
-    } else {
-      cdist_stub(device1, result, tensor1_expanded, tensor2_expanded, p);
-    }
+
+  Tensor result;
+  if (r1 == 0 || r2 == 0) {
+    result = at::empty(output_shape, x1.options());
+  } else if (c1 == 0) {
+    result = at::zeros(output_shape, x1.options());
+  } else if (p == 2) {
+    Tensor dist = (expand_batch_product == 1) ? euclidean_dist_out(x1, x2) :
+                  euclidean_dist_out(tensor1_expanded, tensor2_expanded);
+    result = dist.view(output_shape);
+  } else {
+    result = at::empty(output_shape, x1.options());
+    cdist_stub(device1, result, tensor1_expanded, tensor2_expanded, p);
   }
   return result;
 }

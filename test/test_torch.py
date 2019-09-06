@@ -1416,6 +1416,11 @@ class _TestTorchMixin(torchtest):
                             actual = torch.cdist(x, y, p=p)
                             expected = brute_cdist(x, y, p=p)
                             self.assertTrue(torch.allclose(expected, actual))
+                            x = torch.randn(3, r1, m, device=device)
+                            y = torch.randn(3, r2, m, device=device)
+                            actual = torch.cdist(x, y, p=p)
+                            expected = brute_cdist(x, y, p=p)
+                            self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_large(self):
         for device in torch.testing.get_all_device_types():
@@ -1429,6 +1434,11 @@ class _TestTorchMixin(torchtest):
         for device in torch.testing.get_all_device_types():
             x = torch.randn(4, 3, 1000, 10, device=device)
             y = torch.randn(4, 3, 1000, 10, device=device)
+            actual = torch.cdist(x, y, p=2)
+            expected = brute_cdist(x, y, p=2)
+            self.assertTrue(torch.allclose(expected, actual))
+            x = torch.randn(3, 1000, 10, device=device)
+            y = torch.randn(3, 1000, 10, device=device)
             actual = torch.cdist(x, y, p=2)
             expected = brute_cdist(x, y, p=2)
             self.assertTrue(torch.allclose(expected, actual))
