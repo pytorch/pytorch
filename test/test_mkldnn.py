@@ -388,6 +388,19 @@ class TestMkldnn(TestCase):
             x1.zero_(),
             x2.zero_().to_dense(),
         )
+        # mkldnn has block format, make sure mkldnn zero_ also work for a
+        # mkldnn tensor which has block format
+        conv2d = torch.nn.Conv2d(3, 7, 2, 3).float()
+        mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
+        with TemporaryFileName() as fname:
+            torch.jit.save(mkldnn_conv2d, fname)
+            loaded = torch.jit.load(fname)
+            conv2d.weight.data.zero_()
+            loaded.weight.data.zero_()
+            self.assertEqual(
+                conv2d.weight,
+                loaded.weight.to_dense(),
+            )
 
     def test_is_mkldnn(self):
         x = torch.randn(1, dtype=torch.float32)
