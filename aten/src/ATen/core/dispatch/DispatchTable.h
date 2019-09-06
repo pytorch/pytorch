@@ -5,6 +5,7 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/either.h>
+#include <c10/core/TensorTypeId.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/dispatch/KernelFunction.h>
 
@@ -113,7 +114,7 @@ class DispatchTable final {
   void setKernel(
       TensorTypeId dispatch_key,
       const DispatchTableEntry& kernel) {
-    TORCH_INTERNAL_ASSERT(dispatch_key != TensorTypeIds::undefined());
+    TORCH_INTERNAL_ASSERT(dispatch_key != TensorTypeId::UndefinedTensorId);
     TORCH_CHECK(dispatch_strategy_.is_valid_, "Tried to register a kernel with dispatch key ", toString(dispatch_key), " for operator ", operator_name_, " that doesn't have tensor arguments.");
     TORCH_CHECK(kernels_.is_left(), "Tried to register a kernel with dispatch key ", toString(dispatch_key)," for operator ", operator_name_, ", which already has a catch-all kernel registered. An operator can only have either a catch-all kernel or kernels with dispatch keys.");
     kernels_.left().set(dispatch_key, kernel, operator_name_);

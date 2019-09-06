@@ -1239,68 +1239,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_digamma
-  cname: digamma
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_digamma_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  cname: digamma
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: _th_polygamma
-  cname: polygamma
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - int64_t n
-    - THTensor* self
-]]
-[[
-  name: _th_polygamma_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  cname: polygamma
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - int64_t n
-    - THTensor* self
-]]
-[[
   name: _th_exp
   cname: exp
   types:
@@ -1483,34 +1421,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_erfinv_
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  cname: erfinv
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: _th_erfinv
-  cname: erfinv
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_sqrt
   cname: sqrt
   types:
@@ -1527,20 +1437,6 @@
 [[
   name: _th_rsqrt
   cname: rsqrt
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_ceil
-  cname: ceil
   types:
     - floating_point
   backends:
@@ -1762,21 +1658,9 @@
         - THTensor* self
 ]]
 [[
-  name: _th_reciprocal_
-  types:
-    - floating_point
+  name: _th_pow
   backends:
     - CUDA
-  variants: function
-  options:
-    - cname: cinv
-      return: self
-      arguments:
-        - THTensor* self
-        - THTensor* self
-]]
-[[
-  name: _th_pow
   cname: pow
   variants:
     - function
@@ -1791,6 +1675,8 @@
 ]]
 [[
   name: _th_pow
+  backends:
+    - CUDA
   variants:
     - function
   return: argument 0
@@ -1805,6 +1691,8 @@
 ]]
 [[
   name: _th_pow
+  backends:
+    - CUDA
   variants:
     - function
   return: argument 0
@@ -1818,6 +1706,8 @@
 ]]
 [[
   name: _th_pow_
+  backends:
+    - CUDA
   return: argument 0
   cname: pow
   variants: function
@@ -1897,28 +1787,6 @@
     - THTensor* self
     - arg: long dim
       wrap_dim: self
-]]
-[[
-  name: _th_sign
-  cname: sign
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_sign_
-  cname: sign
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
 ]]
 [[
   name: _th_trace
@@ -2007,6 +1875,8 @@
   name: _th_clamp
   cname: clamp
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2019,6 +1889,8 @@
   name: _th_clamp_min
   cname: cmaxValue
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2030,6 +1902,8 @@
   name: _th_clamp_max
   cname: cminValue
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2541,7 +2415,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - function

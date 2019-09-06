@@ -7,9 +7,8 @@ namespace c10 {
 // This file exists because we need to reference module.h, which we can't from
 // c10. Sigh...
 FunctionType::FunctionType(Function* function)
-    : NamedType(TypeKind::FunctionType),
-      function_(function),
-      name_(function->qualname()) {}
+    : NamedType(TypeKind::FunctionType, function->qualname()),
+      function_(function) {}
 
 Function* ClassType::getMethod(const std::string& name) const {
   for (auto method : methods_) {
@@ -39,7 +38,7 @@ ClassTypePtr ClassType::create(
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
-  auto ptr = ClassType::create(name_, compilation_unit_);
+  auto ptr = ClassType::create(name(), compilation_unit_);
   AT_ASSERT(numAttributes() == refined_slots.size());
   for(size_t i = 0; i < attributeNames_.size(); ++i) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
@@ -87,12 +86,41 @@ ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module)
-    : NamedType(TypeKind::ClassType),
-      compilation_unit_(std::move(cu)),
-      name_(std::move(name)) {
+    : NamedType(TypeKind::ClassType, std::move(name)),
+      compilation_unit_(std::move(cu)) {
   if (is_module) {
     parameterSlots_ = std::make_shared<std::vector<bool>>();
   }
+}
+
+bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+  // to improve performance, this check can be cached
+  if (auto iface = rhs->cast<InterfaceType>()) {
+    for (const FunctionSchema& schema : iface->methods()) {
+      auto self_method = getMethod(schema.name());
+      if (!self_method) {
+        if (why_not) {
+          *why_not << "Class '" << python_str() << "' does not have method '"
+                   << schema.name() << "' but '" << rhs->python_str()
+                   << "' does.\n";
+        }
+        return false;
+      }
+      if (!self_method->getSchema().isSubtypeOf(
+              schema, /*is_method=*/true, why_not)) {
+        if (why_not) {
+          *why_not << "Method on class '" << python_str()
+                   << "' (1) is not compatible with interface '"
+                   << rhs->python_str() << "' (2)\n"
+                   << "  (1) " << self_method->getSchema() << "\n"
+                   << "  (2) " << schema << "\n";
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  return Type::isSubtypeOfExt(rhs, why_not);
 }
 
 } // namespace c10

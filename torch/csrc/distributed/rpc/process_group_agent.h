@@ -13,47 +13,51 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-
 // SendWork and RecvWork will be put into a task queue, and later picked up by
 // worker threads from the same ThreadPool.
 struct SendWork {
-  SendWork(const int to, Message&& message) :
-    to_(to), message_(message) {}
+  SendWork(const WorkerId& to, Message&& message)
+      : to_(to), message_(message) {}
 
-  const int to_;
+  const WorkerId& to_;
   Message message_;
 };
 
 // SendWork wraps a Message and RecvWork wraps a Tensor. The difference here is
 // to allow us to run serialization/deserialization in the worker threads.
 struct RecvWork {
-  RecvWork(const int from, MessageType type, torch::Tensor&& payload)
+  RecvWork(const WorkerId& from, MessageType type, torch::Tensor&& payload)
       : from_(from), type_(type), payload_(payload) {}
 
-  const int from_;
+  const WorkerId& from_;
   const MessageType type_;
   torch::Tensor payload_;
 };
 
 class ProcessGroupAgent : public RpcAgent {
  public:
+  ProcessGroupAgent(
+      std::string workerName,
+      std::shared_ptr<c10d::ProcessGroup> pg,
+      int numSendRecvThreads = 4);
 
-  ProcessGroupAgent(std::string workerName,
-                    std::unordered_map<std::string, int> nameMap,
-                    std::shared_ptr<c10d::ProcessGroup> pg,
-                    int numSendRecvThreads = 4);
+  const WorkerId& getWorkerId(const std::string& workerName) const override;
 
-  // This method wraps the destination information and the message into a
-  // SendWork object, and put the SendWork into a queue. Another thread will
-  // consume SendWork from the queue and send it out.
-  std::shared_ptr<FutureMessage> send(
-      const std::string& to, Message&& message) override;
+  const WorkerId& getWorkerId(worker_id_t id) const override;
 
   void join() override;
 
   void sync() override;
 
+ protected:
+  // This method wraps the destination information and the message into a
+  // SendWork object, and put the SendWork into a queue. Another thread will
+  // consume SendWork from the queue and send it out.
+  std::shared_ptr<FutureMessage> sendImpl(const WorkerId& to, Message&& message)
+      override;
+
  private:
+  void collectNames();
   // put SendWork into a queue and notify the worker thread
   void enqueueSend(SendWork work);
   // put RecvWork into a queue and notify the worker thread
@@ -65,14 +69,11 @@ class ProcessGroupAgent : public RpcAgent {
     return nextId_++;
   }
 
+  std::shared_ptr<c10d::ProcessGroup> pg_;
   // worker name -> rank
   std::unordered_map<std::string, int> nameMap_;
-  bool stop_;
-  std::shared_ptr<c10d::ProcessGroup> pg_;
+  std::vector<WorkerId> workerIds_;
   std::atomic<int64_t> nextId_;
-  // names_[rank] stores the name of the corresponding worker, use this vector
-  // to get worker name from rank and pass it to the RequestCallback.
-  std::vector<std::string> names_;
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
   std::vector<std::mutex> sendMutexes_;
@@ -91,6 +92,6 @@ class ProcessGroupAgent : public RpcAgent {
   std::mutex futureMutex_;
 };
 
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

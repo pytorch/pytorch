@@ -5,9 +5,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/SoftmaxKernel.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 namespace at {
 namespace native {

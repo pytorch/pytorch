@@ -90,9 +90,6 @@ rocm_ignore_test=()
 if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # Currently these tests are failing on ROCM platform:
 
-  # Unknown reasons, need to debug
-  rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/piecewise_linear_transform_test.py")
-
   # On ROCm, RCCL (distributed) development isn't complete.
   # https://github.com/ROCmSoftwarePlatform/rccl
   rocm_ignore_test+=("--ignore $caffe2_pypath/python/data_parallel_model_test.py")
@@ -106,6 +103,11 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
   export LC_ALL=C.UTF-8
   export LANG=C.UTF-8
 fi
+
+if [[ "$BUILD_ENVIRONMENT" == *py2* ]]; then
+  pip install --user requests
+fi
+
 pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \
@@ -137,3 +139,4 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
+

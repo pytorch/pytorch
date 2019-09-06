@@ -8,10 +8,10 @@ from torch.nn import Conv2d, BatchNorm2d, ReLU
 from torch.nn._intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.quantization.QConfig import default_qat_qconfig
 from torch.utils.mkldnn import disable_mkldnn_conv
-from common_quantization import no_deadline
 from common_utils import TestCase, run_tests
 from hypothesis import given
 from hypothesis import strategies as st
+from hypothesis_utils import no_deadline
 from functools import reduce
 
 
@@ -74,8 +74,8 @@ class IntrinsicQATModuleTest(TestCase):
                 groups,
                 False,  # No bias
                 padding_mode
-            ).to(dtype=torch.float)
-            bn_op = BatchNorm2d(output_channels, eps, momentum).to(dtype=torch.float)
+            ).to(dtype=torch.double)
+            bn_op = BatchNorm2d(output_channels, eps, momentum).to(dtype=torch.double)
             relu_op = ReLU()
 
             cls = ConvBnReLU2d if use_relu else ConvBn2d
@@ -92,10 +92,10 @@ class IntrinsicQATModuleTest(TestCase):
                 momentum,
                 freeze_bn,
                 default_qat_qconfig
-            ).to(dtype=torch.float).disable_fake_quant()
+            ).to(dtype=torch.double).disable_fake_quant()
 
             # align inputs and internal parameters
-            input = torch.randn(batch_size, input_channels, height, width, dtype=torch.float, requires_grad=True)
+            input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
             conv_op.weight = torch.nn.Parameter(qat_op.weight.detach())
             bn_op.running_mean = qat_op.running_mean.clone()
             bn_op.running_var = qat_op.running_var.clone()
@@ -128,7 +128,7 @@ class IntrinsicQATModuleTest(TestCase):
                 self.assertEqual(result_ref, result_actual)
 
                 # backward
-                dout = torch.randn(result_ref.size(), dtype=torch.float)
+                dout = torch.randn(result_ref.size(), dtype=torch.double)
                 loss = (result_ref - dout).sum()
                 loss.backward()
                 input_grad_ref = input.grad.cpu()
@@ -147,13 +147,14 @@ class IntrinsicQATModuleTest(TestCase):
                 running_mean_actual = qat_op.running_mean
                 running_var_actual = qat_op.running_var
                 num_batches_tracked_actual = qat_op.num_batches_tracked
-                self.assertEqual(input_grad_ref, input_grad_actual)
-                self.assertEqual(weight_grad_ref, weight_grad_actual, prec=5e-4)
-                self.assertEqual(gamma_grad_ref, gamma_grad_actual, prec=1e-4)
-                self.assertEqual(beta_grad_ref, beta_grad_actual)
-                self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual)
-                self.assertEqual(running_mean_ref, running_mean_actual)
-                self.assertEqual(running_var_ref, running_var_actual)
+                precision = 1e-10
+                self.assertEqual(input_grad_ref, input_grad_actual, prec=precision)
+                self.assertEqual(weight_grad_ref, weight_grad_actual, prec=precision)
+                self.assertEqual(gamma_grad_ref, gamma_grad_actual, prec=precision)
+                self.assertEqual(beta_grad_ref, beta_grad_actual, prec=precision)
+                self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual, prec=precision)
+                self.assertEqual(running_mean_ref, running_mean_actual, prec=precision)
+                self.assertEqual(running_var_ref, running_var_actual, prec=precision)
 
 
 if __name__ == '__main__':

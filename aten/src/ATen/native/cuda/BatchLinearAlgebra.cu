@@ -553,11 +553,12 @@ AT_ERROR("solve: MAGMA library not found in "
 
     MAGMAQueue magma_queue(b.get_device());
 
+    constexpr int64_t batch_limit = 65535;
     // Compute as many batches of 65535 possible
-    // The number of "mini"-batches are floor(batch_size / 65535)
-    // and these cover floor(batch_size / 65535) * 65535 matrix solves
-    int64_t mini_batches = batch_size / 65535, mini_idx;
-    for (mini_idx = 0; mini_idx < mini_batches * 65535; mini_idx += 65535) {
+    // The number of "mini"-batches are floor(batch_size / batch_limit)
+    // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
+    int64_t mini_batches = batch_size / batch_limit, mini_idx;
+    for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
       scalar_t** A_array_cur = &A_array[mini_idx];
       scalar_t** b_array_cur = &b_array[mini_idx];
       magma_int_t** ipiv_array_cur = &ipiv_array[mini_idx];
@@ -565,15 +566,15 @@ AT_ERROR("solve: MAGMA library not found in "
 
       magmaSolveBatched<scalar_t>(
           n, nrhs, A_array_cur, n, ipiv_array_cur, b_array_cur, n,
-          info_array_cur, 65535, magma_queue);
+          info_array_cur, batch_limit, magma_queue);
     }
 
-    // Compute whatever is left = batch_size - floor(batch_size / 65535) * 65535
-    // which concisely is equal to batch_size % 65535
-    if (batch_size % 65535 != 0) {
+    // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
+    // which concisely is equal to batch_size % batch_limit
+    if (batch_size % batch_limit != 0) {
       magmaSolveBatched<scalar_t>(
           n, nrhs, &A_array[mini_idx], n, &ipiv_array[mini_idx], &b_array[mini_idx], n,
-          &info_array[mini_idx], batch_size % 65535, magma_queue);
+          &info_array[mini_idx], batch_size % batch_limit, magma_queue);
     }
 
     for (int64_t i = 0; i < batch_size; i++) {
@@ -638,11 +639,12 @@ AT_ERROR("inverse: MAGMA library not found in "
     n, n, self_array, n, ipiv_array, info_array,
     batch_size, magma_queue);
 
+  constexpr int64_t batch_limit = 65535;
   // Compute as many batches of 65535 possible
-  // The number of "mini"-batches are floor(batch_size / 65535)
-  // and these cover floor(batch_size / 65535) * 65535 matrix solves
-  int64_t mini_batches = batch_size / 65535, mini_idx;
-  for (mini_idx = 0; mini_idx < mini_batches * 65535; mini_idx += 65535) {
+  // The number of "mini"-batches are floor(batch_size / batch_limit)
+  // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
+  int64_t mini_batches = batch_size / batch_limit, mini_idx;
+  for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
     scalar_t** self_array_cur = &self_array[mini_idx];
     scalar_t** self_inv_array_cur = &self_inv_array[mini_idx];
     magma_int_t** ipiv_array_cur = &ipiv_array[mini_idx];
@@ -650,15 +652,15 @@ AT_ERROR("inverse: MAGMA library not found in "
 
     magmaGetriBatched<scalar_t>(
       n, self_array_cur, n, ipiv_array_cur, self_inv_array_cur,
-      n, info_array_cur, 65535, magma_queue);
+      n, info_array_cur, batch_limit, magma_queue);
   }
 
-  // Compute whatever is left = batch_size - floor(batch_size / 65535) * 65535
-  // which concisely is equal to batch_size % 65535
-  if (batch_size % 65535 != 0) {
+  // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
+  // which concisely is equal to batch_size % batch_limit
+  if (batch_size % batch_limit != 0) {
     magmaGetriBatched<scalar_t>(
       n, &self_array[mini_idx], n, &ipiv_array[mini_idx], &self_inv_array[mini_idx],
-      n, &info_array[mini_idx], batch_size % 65535, magma_queue);
+      n, &info_array[mini_idx], batch_size % batch_limit, magma_queue);
   }
 
   for (int64_t i = 0; i < batch_size; i++) {
@@ -750,29 +752,30 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
 
     MAGMAQueue magma_queue(b.get_device());
 
+    constexpr int64_t batch_limit = 65535;
     // Compute as many batches of 65535 possible
-    // The number of "mini"-batches are floor(batch_size / 65535)
-    // and these cover floor(batch_size / 65535) * 65535 matrix solves
-    int64_t mini_batches = batch_size / 65535, mini_idx;
-    for (mini_idx = 0; mini_idx < mini_batches * 65535; mini_idx += 65535) {
+    // The number of "mini"-batches are floor(batch_size / batch_limit)
+    // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
+    int64_t mini_batches = batch_size / batch_limit, mini_idx;
+    for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
       scalar_t** A_array_cur = &A_array[mini_idx];
       scalar_t** b_array_cur = &b_array[mini_idx];
 
       magmaCholeskySolveBatched<scalar_t>(
           uplo, n, nrhs, A_array_cur, n, b_array_cur, n,
-          info_tmp, 65535, magma_queue);
+          info_tmp, batch_limit, magma_queue);
 
       if (info_tmp != 0) {
         break;
       }
     }
 
-    // Compute whatever is left = batch_size - floor(batch_size / 65535) * 65535
-    // which concisely is equal to batch_size % 65535
-    if (batch_size % 65535 != 0 && info_tmp == 0) {
+    // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
+    // which concisely is equal to batch_size % batch_limit
+    if (batch_size % batch_limit != 0 && info_tmp == 0) {
       magmaCholeskySolveBatched<scalar_t>(
           uplo, n, nrhs, &A_array[mini_idx], n, &b_array[mini_idx], n,
-          info_tmp, batch_size % 65535, magma_queue);
+          info_tmp, batch_size % batch_limit, magma_queue);
     }
 
     info = info_tmp;
@@ -824,9 +827,28 @@ AT_ERROR("cholesky: MAGMA library not found in "
     }
 
     MAGMAQueue magma_queue(self.get_device());
-    magmaCholeskyBatched<scalar_t>(
-      uplo, n, self_array, n, info_array,
-      batch_size, magma_queue);
+
+    constexpr int64_t batch_limit = 262140;
+    // Compute as many batches of 262140 possible
+    // 262140 is the size of the largest batch of matrices that can be run with
+    // violating maximum kernel configuration
+    // The number of "mini"-batches are floor(batch_size / batch_limit)
+    // and these cover floor(batch_size / batch_limit) * batch_limit cholesky calls
+    int64_t mini_batches = batch_size / batch_limit, mini_idx;
+    for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
+      scalar_t** self_array_cur = &self_array[mini_idx];
+      magma_int_t* info_array_cur = &info_array[mini_idx];
+
+      magmaCholeskyBatched<scalar_t>(
+        uplo, n, self_array_cur, n, info_array_cur, batch_limit, magma_queue);
+    }
+
+    // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
+    // which concisely is equal to batch_size % batch_limit
+    if (batch_size % batch_limit != 0) {
+      magmaCholeskyBatched<scalar_t>(
+        uplo, n, &self_array[mini_idx], n, &info_array[mini_idx], batch_size % batch_limit, magma_queue);
+    }
 
     for (int64_t i = 0; i < batch_size; i++) {
       infos[i] = info_array[i];
@@ -1089,25 +1111,26 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
 
     MAGMAQueue magma_queue(b.get_device());
 
+    constexpr int64_t batch_limit = 65535;
     // Compute as many batches of 65535 possible
-    // The number of "mini"-batches are floor(batch_size / 65535)
-    // and these cover floor(batch_size / 65535) * 65535 matrix solves
-    int64_t mini_batches = batch_size / 65535, mini_idx;
-    for (mini_idx = 0; mini_idx < mini_batches * 65535; mini_idx += 65535) {
+    // The number of "mini"-batches are floor(batch_size / batch_limit)
+    // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
+    int64_t mini_batches = batch_size / batch_limit, mini_idx;
+    for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
       scalar_t** A_array_cur = &A_array[mini_idx];
       scalar_t** b_array_cur = &b_array[mini_idx];
 
       magmaTriangularSolveBatched<scalar_t>(
           uplo, trans, diag, n, nrhs, A_array_cur,
-          n, b_array_cur, n, 65535, magma_queue);
+          n, b_array_cur, n, batch_limit, magma_queue);
     }
 
-    // Compute whatever is left = batch_size - floor(batch_size / 65535) * 65535
-    // which concisely is equal to batch_size % 65535
-    if (batch_size % 65535 != 0) {
+    // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
+    // which concisely is equal to batch_size % batch_limit
+    if (batch_size % batch_limit != 0) {
       magmaTriangularSolveBatched<scalar_t>(
           uplo, trans, diag, n, nrhs, &A_array[mini_idx],
-          n, &b_array[mini_idx], n, batch_size % 65535, magma_queue);
+          n, &b_array[mini_idx], n, batch_size % batch_limit, magma_queue);
     }
   }
 #endif
@@ -1465,30 +1488,31 @@ AT_ERROR("lu_solve: MAGMA library not found in "
 
     MAGMAQueue magma_queue(b.get_device());
 
+    constexpr int64_t batch_limit = 65535;
     // Compute as many batches of 65535 possible
-    // The number of "mini"-batches are floor(batch_size / 65535)
-    // and these cover floor(batch_size / 65535) * 65535 matrix solves
-    int64_t mini_batches = batch_size / 65535, mini_idx;
-    for (mini_idx = 0; mini_idx < mini_batches * 65535; mini_idx += 65535) {
+    // The number of "mini"-batches are floor(batch_size / batch_limit)
+    // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
+    int64_t mini_batches = batch_size / batch_limit, mini_idx;
+    for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
       scalar_t** lu_array_cur = &lu_array[mini_idx];
       scalar_t** b_array_cur = &b_array[mini_idx];
       magma_int_t** pivots_array_cur = &pivots_array[mini_idx];
 
       magmaLuSolveBatched<scalar_t>(
           n, nrhs, lu_array_cur, n, pivots_array_cur, b_array_cur, n,
-          info_tmp, 65535, magma_queue);
+          info_tmp, batch_limit, magma_queue);
 
       if (info_tmp != 0) {
         break;
       }
     }
 
-    // Compute whatever is left = batch_size - floor(batch_size / 65535) * 65535
-    // which concisely is equal to batch_size % 65535
-    if (batch_size % 65535 != 0 && info_tmp == 0) {
+    // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
+    // which concisely is equal to batch_size % batch_limit
+    if (batch_size % batch_limit != 0 && info_tmp == 0) {
       magmaLuSolveBatched<scalar_t>(
           n, nrhs, &lu_array[mini_idx], n, &pivots_array[mini_idx], &b_array[mini_idx], n,
-          info_tmp, batch_size % 65535, magma_queue);
+          info_tmp, batch_size % batch_limit, magma_queue);
     }
 
     info = info_tmp;
@@ -1501,6 +1525,10 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto LU_data_working_copy = cloneBatchedColumnMajor(LU_data);
   auto LU_pivots_working_copy = LU_pivots.is_contiguous() ? LU_pivots : LU_pivots.contiguous();
+
+  if (self.numel() == 0 || LU_data.numel() == 0) {
+    return at::zeros_like(self);
+  }
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cuda", [&]{
     apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, info);
   });
