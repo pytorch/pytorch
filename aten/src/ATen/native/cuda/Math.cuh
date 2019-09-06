@@ -31,7 +31,7 @@ static inline __host__ __device__ scalar_t calc_digamma(scalar_t in) {
     return static_cast<scalar_t>(INFINITY);
   }
 
-  bool x_is_integer = x == ::floor(x);
+  bool x_is_integer = x == std::floor(x);
   accscalar_t result = 0;
   if (x < 0) {
     if (x_is_integer) {
@@ -52,8 +52,8 @@ static inline __host__ __device__ scalar_t calc_digamma(scalar_t in) {
   }
 
   accscalar_t y = 0;
-  if (x < 1.0e17) {
-    accscalar_t z = 1.0 / (x * x);
+  if (x < static_cast<accscalar_t>(1.0e17)) {
+    accscalar_t z = 1 / (x * x);
 
     accscalar_t polevl_result = 0;
     for (int i = 0; i <= 6; i++) {
@@ -62,7 +62,7 @@ static inline __host__ __device__ scalar_t calc_digamma(scalar_t in) {
     y = z * polevl_result;
   }
 
-  return static_cast<scalar_t>(::log(x) - (0.5 / x) - y + result);
+  return static_cast<scalar_t>(std::log(x) - (static_cast<accscalar_t>(0.5) / x) - y + result);
 }
 
 template <typename scalar_t>
@@ -74,7 +74,7 @@ static inline __host__ __device__ scalar_t calc_trigamma(scalar_t in) {
   accscalar_t result = 0;
   if (x < 0.5f) {
     sign = -1;
-    accscalar_t sin_pi_x = ::sin(PI * x);
+    accscalar_t sin_pi_x = std::sin(PI * x);
     result -= (PI * PI) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
@@ -82,7 +82,7 @@ static inline __host__ __device__ scalar_t calc_trigamma(scalar_t in) {
     result += 1 / (x * x);
     x += 1;
   }
-  const accscalar_t one = static_cast<scalar_t>(1);
+  const accscalar_t one = 1;
   const accscalar_t ixx = 1 / (x*x);
   result += (1 + 1 / (2*x) + ixx * (one/6 - ixx * (one/30 - ixx * (one/42)))) / x;
   return static_cast<scalar_t>(sign * result);
