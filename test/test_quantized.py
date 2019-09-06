@@ -619,7 +619,7 @@ class TestDynamicQuantizedLinear(TestCase):
         use_channelwise=st.booleans())
     def test_qlinear(self, batch_size, input_channels, output_channels,
                      use_bias, use_relu, use_multi_dim_input, use_channelwise):
-        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qlinear_prepack = torch.ops.quantized.linear_prepack
         if use_relu:
             qlinear_dynamic = torch.ops.quantized.fbgemm_linear_relu_dynamic
         else:
@@ -736,11 +736,11 @@ class TestQuantizedLinear(unittest.TestCase):
            use_channelwise=st.booleans())
     def test_qlinear(self, batch_size, input_channels, output_channels, use_bias,
                      use_relu, use_multi_dim_input, use_channelwise):
-        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qlinear_prepack = torch.ops.quantized.linear_prepack
         if use_relu:
-            qlinear = torch.ops.quantized.fbgemm_linear_relu
+            qlinear = torch.ops.quantized.linear_relu
         else:
-            qlinear = torch.ops.quantized.fbgemm_linear
+            qlinear = torch.ops.quantized.linear
 
         if use_multi_dim_input:
             batch_size *= 3  # Test the multi-dim input tensor
@@ -864,8 +864,8 @@ class TestQuantizedLinear(unittest.TestCase):
             W_zps = torch.round(torch.rand(output_channels)
                                 * 100 - 50).to(torch.int64)
 
-        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
-        qlinear_unpack = torch.ops.quantized.fbgemm_linear_unpack
+        qlinear_prepack = torch.ops.quantized.linear_prepack
+        qlinear_unpack = torch.ops.quantized.linear_unpack
 
         W = torch.from_numpy(W)
 
@@ -952,10 +952,10 @@ class TestQuantizedConv(unittest.TestCase):
             use_channelwise
     ):
 
-        qconv = torch.ops.quantized.fbgemm_conv2d
+        qconv = torch.ops.quantized.conv2d
         if use_relu:
-            qconv = torch.ops.quantized.fbgemm_conv2d_relu
-        qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
+            qconv = torch.ops.quantized.conv2d_relu
+        qconv_prepack = torch.ops.quantized.conv_prepack
 
         # C
         input_channels = input_channels_per_group * groups
@@ -1116,8 +1116,8 @@ class TestQuantizedConv(unittest.TestCase):
             filters_scale = torch.tensor([filters_scale] * output_channels).to(torch.double)
             filters_zero_point = torch.tensor([filters_zero_point] * output_channels).to(torch.long)
 
-        qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
-        qconv_unpack = torch.ops.quantized.fbgemm_conv_unpack
+        qconv_prepack = torch.ops.quantized.conv_prepack
+        qconv_unpack = torch.ops.quantized.conv_unpack
 
         # Orig tensor is assumed to be in K(C/G)RS format
         W = torch.from_numpy(filters).to(torch.float)
