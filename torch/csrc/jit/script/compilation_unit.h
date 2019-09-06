@@ -26,6 +26,7 @@ namespace jit {
 namespace script {
 
 struct Def;
+struct ClassDef;
 struct SugaredValue;
 struct Resolver;
 
@@ -103,6 +104,11 @@ struct TORCH_API CompilationUnit {
       const ResolverPtr& resolver,
       const Self* self);
 
+  void define_interface(
+      const c10::QualifiedName& qualifiedName,
+      const ClassDef& classDef,
+      ResolverPtr rcb);
+
   Function* create_function(
       c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
@@ -149,32 +155,30 @@ struct TORCH_API CompilationUnit {
   /**
    * Register a class as being owned by this compilation unit.
    */
-  void register_class(c10::NamedTypePtr namedType) {
-    if (auto classType = namedType->cast<c10::ClassType>()) {
-      // TODO: class types cannot be redefined because we have no way right now
-      // of invalidating their methods. NamedTuples are fine though, since they
-      // don't have methods.
-      TORCH_CHECK(
-          0 == classDict_.count(*classType->qualified_name_obj()),
-          "class '",
-          classType->qualname(),
-          "' already defined.");
-    }
+  void register_type(c10::NamedTypePtr namedType) {
+    // TODO: class types cannot be redefined because we have no way right now
+    // of invalidating their methods. NamedTuples are fine though, since they
+    // don't have methods.
+    TORCH_CHECK(
+        0 == classDict_.count(*namedType->name()),
+        "class '",
+        namedType->name()->qualifiedName(),
+        "' already defined.");
     classes_.push_back(std::move(namedType));
-    classDict_[*classes_.back()->qualified_name_obj()] = classes_.size() - 1;
+    classDict_[*classes_.back()->name()] = classes_.size() - 1;
   };
 
   c10::ClassTypePtr get_class(const c10::QualifiedName& name) const {
-    auto it = classDict_.find(name);
-    if (it == classDict_.end()) {
+    auto type = get_type(name);
+    if (!type) {
       return nullptr;
     }
-    return classes_[it->second]->cast<c10::ClassType>();
+    return type->cast<c10::ClassType>();
   }
 
   c10::TupleTypePtr get_named_tuple(const c10::QualifiedName& name) const {
     for (const auto& cls : classes_) {
-      if (cls->qualname() == name.qualifiedName()) {
+      if (cls->name()->qualifiedName() == name.qualifiedName()) {
         return cls->expect<TupleType>();
       }
     }

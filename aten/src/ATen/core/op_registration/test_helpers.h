@@ -34,6 +34,12 @@ inline std::vector<c10::IValue> callOp(const c10::OperatorHandle& op, Args... ar
   return stack;
 }
 
+template<class Result, class... Args>
+inline Result callOpUnboxed(const c10::OperatorHandle& op, c10::TensorTypeId dispatchKey, Args... args) {
+  auto kernel = c10::Dispatcher::singleton().lookup(op, dispatchKey);
+  return kernel.template callUnboxed<Result, Args...>(std::forward<Args>(args)...);
+}
+
 inline void expectDoesntFindKernel(const char* op_name, c10::TensorTypeId dispatch_key) {
   auto op = c10::Dispatcher::singleton().findSchema({op_name, ""});
   EXPECT_ANY_THROW(

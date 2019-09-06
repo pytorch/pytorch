@@ -141,7 +141,7 @@ def is_hip_clang():
     try:
         hip_path = os.getenv('HIP_PATH', '/opt/rocm/hip')
         return 'HIP_COMPILER=clang' in open(hip_path + '/lib/.hipInfo').read()
-    except:
+    except IOError:
         return False
 
 hipify_python.hipify(

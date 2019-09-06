@@ -204,13 +204,15 @@ std::shared_ptr<FusedKernel> compileKernel(
   for (size_t i = 0; i < input_desc.size(); i++) {
     const auto& desc = input_desc[i];
 
-    // TODO: can't get rid of this use of DimensionedTensorType yet
+    // TODO: can't get rid of this use of TensorType
     // until we switch to ProfilingGraphExecutor, so we don't have to
     // run PropagateInputShapes below
-    graph->inputs()[i]->setType(DimensionedTensorType::create(
+    graph->inputs()[i]->setType(TensorType::create(
         desc.scalar_type,
         device,
-        desc.nDim())); // TODO: nDim is bad, as it is collapsed
+        c10::VaryingShape(desc.nDim()),
+        c10::VaryingShape(desc.nDim()),
+        false)); // TODO: nDim is bad, as it is collapsed
   }
 
   PropagateInputShapes(graph);
@@ -252,9 +254,9 @@ std::shared_ptr<FusedKernel> compileKernel(
       sizes.at(o->node()->i(attr::dim)) *= o->node()->inputs().size();
     }
 
-    auto scalar_type = ProfiledTensorType::create(o->type())->scalarType();
+    auto scalar_type = o->type()->expect<TensorType>()->scalarType();
     TORCH_INTERNAL_ASSERT(scalar_type);
-    auto type = CompleteTensorType::create(*scalar_type, device, sizes);
+    auto type = TensorType::createContiguous(*scalar_type, device, sizes);
     output_desc.emplace_back(type);
     const auto& desc = output_desc.back();
 

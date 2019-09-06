@@ -17,8 +17,8 @@
 #   CFLAGS
 #     flags to apply to both C and C++ files to be compiled (a quirk of setup.py
 #     which we have faithfully adhered to in our build system is that CFLAGS
-#     also applies to C++ files, in contrast to the default behavior of autogoo
-#     and cmake build systems.)
+#     also applies to C++ files (unless CXXFLAGS is set), in contrast to the
+#     default behavior of autogoo and cmake build systems.)
 #
 #   CC
 #     the C/C++ compiler to use (NB: the CXX flag has no effect for distutils
@@ -181,11 +181,10 @@ import glob
 import importlib
 
 from tools.build_pytorch_libs import build_caffe2
-from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
+from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
-from tools.setup_helpers.cudnn import CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
 
 try:
     FileNotFoundError
@@ -258,7 +257,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '1.2.0a0'
+version = '1.3.0a0'
 sha = 'Unknown'
 
 try:
@@ -352,6 +351,9 @@ install_requires = []
 if sys.version_info <= (2, 7):
     install_requires += ['future']
 
+if sys.version_info[0] == 2:
+    install_requires += ['requests']
+
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
 Please install it via `conda install {module}` or `pip install {module}`
@@ -377,7 +379,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- NumPy not found')
         if cmake_cache_vars['USE_CUDNN']:
-            report('-- Detected cuDNN at ' + CUDNN_LIBRARY + ', ' + CUDNN_INCLUDE_DIR)
+            report('-- Detected cuDNN at ' +
+                   cmake_cache_vars['CUDNN_LIBRARY'] + ', ' + cmake_cache_vars['CUDNN_INCLUDE_DIR'])
         else:
             report('-- Not using cuDNN')
         if cmake_cache_vars['USE_CUDA']:
@@ -400,10 +403,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Not using NCCL')
         if cmake_cache_vars['USE_DISTRIBUTED']:
-            if IS_LINUX:
-                report('-- Building with c10d distributed package ')
+            if IS_WINDOWS:
+                report('-- Building without distributed package')
             else:
-                report('-- Building without c10d distributed package')
+                report('-- Building with distributed package ')
         else:
             report('-- Building without distributed package')
 
@@ -867,6 +870,7 @@ if __name__ == '__main__':
         download_url='https://github.com/pytorch/pytorch/tags',
         author='PyTorch Team',
         author_email='packages@pytorch.org',
+        python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*',
         # PyPI package information.
         classifiers=[
             'Development Status :: 5 - Production/Stable',

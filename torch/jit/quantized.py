@@ -1,11 +1,12 @@
 import torch
-from typing import Tuple, Optional, List  # noqa: F401
 
-from torch import Tensor  # noqa
+from torch._jit_internal import Tuple, Optional, List  # noqa: F401
+
+from torch import Tensor  # noqa: F401
 from torch.nn import _VF
 
 from torch._jit_internal import _parameter_list
-from torch.nn.utils.rnn import PackedSequence, get_packed_sequence
+from torch.nn.utils.rnn import PackedSequence
 
 class QuantizedLinear(torch.jit.ScriptModule):
     __constants__ = ['scale', 'zero_point']
@@ -24,13 +25,12 @@ class QuantizedLinear(torch.jit.ScriptModule):
 
         self.register_buffer(
             'packed_tensor_ptr',
-            torch.fbgemm_pack_quantized_matrix(self.weight.clone(), self.weight.size(1), self.weight.size(0)))
+            torch.fbgemm_pack_quantized_matrix(self.weight.clone()))
 
     @torch.jit.script_method
     def _unpack(self):
         self.packed_tensor_ptr.set_(
-            torch.fbgemm_pack_quantized_matrix(
-                self.weight, self.weight.size(1), self.weight.size(0)))
+            torch.fbgemm_pack_quantized_matrix(self.weight))
 
     @torch.jit.script_method
     def _pack(self):
@@ -39,7 +39,7 @@ class QuantizedLinear(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, input):
-        out = torch.fbgemm_linear_int8_weight(
+        out = torch.fbgemm_linear_int8_weight_fp32_activation(
             input.float(), self.weight, self.packed_tensor_ptr, self.col_offsets,
             self.scale, self.zero_point, self.bias)
         return out.to(input.dtype)
@@ -76,7 +76,7 @@ class QuantizedLinearFP16(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, input):
-        out = torch.fbgemm_linear_fp16_weight(
+        out = torch.fbgemm_linear_fp16_weight_fp32_activation(
             input.float(), self.packed_weight, self.bias)
         return out
 
@@ -106,11 +106,9 @@ class QuantizedRNNCellBase(torch.jit.ScriptModule):
         self.register_buffer('weight_hh', weight_hh)
         self.register_buffer('col_offsets_hh', col_offsets_hh)
 
-        packed_ih = torch.fbgemm_pack_quantized_matrix(
-            self.weight_ih, self.weight_ih.size(1), self.weight_ih.size(0))
+        packed_ih = torch.fbgemm_pack_quantized_matrix(self.weight_ih)
         self.register_buffer('packed_ih', packed_ih)
-        packed_hh = torch.fbgemm_pack_quantized_matrix(
-            self.weight_hh, self.weight_hh.size(1), self.weight_hh.size(0))
+        packed_hh = torch.fbgemm_pack_quantized_matrix(self.weight_hh)
         self.register_buffer('packed_hh', packed_hh)
 
         self.bias_ih = torch.nn.Parameter(other.bias_ih.clone().float(), requires_grad=False)
@@ -150,11 +148,8 @@ class QuantizedRNNCellBase(torch.jit.ScriptModule):
     # @torch._jit_internal.weak_script_method
     @torch.jit.script_method
     def _unpack(self):
-        self.packed_ih.set_(torch.fbgemm_pack_quantized_matrix(
-            self.weight_ih, self.weight_ih.size(1), self.weight_ih.size(0)))
-        self.packed_hh.set_(
-            torch.fbgemm_pack_quantized_matrix(
-                self.weight_hh, self.weight_hh.size(1), self.weight_hh.size(0)))
+        self.packed_ih.set_(torch.fbgemm_pack_quantized_matrix(self.weight_ih))
+        self.packed_hh.set_(torch.fbgemm_pack_quantized_matrix(self.weight_hh))
 
     # @torch._jit_internal.weak_script_method
     @torch.jit.script_method
@@ -298,8 +293,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                         #   col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh
                         qweight, col_offsets, scale, zero_point = \
                             torch.fbgemm_linear_quantize_weight(weight.clone().float())
-                        packed_weight = torch.fbgemm_pack_quantized_matrix(
-                            qweight, weight.size(1), weight.size(0))
+                        packed_weight = torch.fbgemm_pack_quantized_matrix(qweight)
 
                         params = [qweight, bias, packed_weight, col_offsets, scale, zero_point]
                         pos_names = ['w', 'b', 'packed', 'col_offsets', 'scale', 'zero_point']
@@ -371,8 +365,8 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
-        # type: (Optional[Tensor], Tuple[int, int, int], str) -> None
-        if hx is not None and hx.size() != expected_hidden_size:
+        # type: (Tensor, Tuple[int, int, int], str) -> None
+        if hx.size() != expected_hidden_size:
             raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
 
     @torch.jit.script_method
@@ -434,8 +428,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
             for i in range(len(packed_weights)):
                 packed = packed_weights[i]
                 quantized = quantized_weights[i]
-                packed.set_(torch.fbgemm_pack_quantized_matrix(
-                    quantized, quantized.size(1), quantized.size(0)))
+                packed.set_(torch.fbgemm_pack_quantized_matrix(quantized))
         else: 
             packed_weights = self._get_packed_weights()
             orig_weights = self._get_orig_weights()
@@ -497,14 +490,14 @@ class QuantizedLSTM(QuantizedRNNBase):
 
     @torch.jit.script_method
     def forward_packed(self, input, hx=None):
-        # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
+        # type: (PackedSequence, Optional[Tuple[Tensor, Tensor]]) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]  # noqa
         input, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
         max_batch_size = int(max_batch_size)
 
         output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
 
-        output = get_packed_sequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
 
@@ -576,14 +569,14 @@ class QuantizedGRU(QuantizedRNNBase):
 
     @torch.jit.script_method
     def forward_packed(self, input, hx=None):
-        # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tensor]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tensor]  # noqa
+        # type: (PackedSequence, Optional[Tensor]) -> Tuple[PackedSequence, Tensor]
         input, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
         max_batch_size = int(max_batch_size)
 
         output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
 
-        output = get_packed_sequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
     def forward(self, input, hx=None):
