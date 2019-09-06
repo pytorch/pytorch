@@ -132,8 +132,6 @@ TEST_F(ModulesTest, Fold) {
   ASSERT_EQ(y.size(1), 3);
   ASSERT_EQ(y.size(2), 4);
   ASSERT_EQ(y.size(3), 5);
-
-  // TODO check numel of grad
 }
 
 TEST_F(ModulesTest, SimpleContainer) {
