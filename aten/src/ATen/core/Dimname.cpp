@@ -10,10 +10,12 @@ namespace at {
 static InternedString kDimnameWildcard = Symbol::dimname("*");
 static std::string interned_to_string(InternedString symbol) { return symbol.toUnqualString(); }
 static InternedString string_to_interned(const std::string& str) { return Symbol::dimname(str); }
+static bool is_dimname(InternedString symbol) { return symbol.is_dimname(); }
 #else
 static InternedString kDimnameWildcard = "*";
 static std::string interned_to_string(InternedString symbol) { return symbol; }
 static InternedString string_to_interned(const std::string& str) { return str; }
+static bool is_dimname(const std::string& symbol) { return true; }
 #endif
 
 std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
@@ -60,7 +62,7 @@ static void check_valid_identifier(const std::string& name) {
 }
 
 Dimname Dimname::fromSymbol(InternedString full_name) {
-  TORCH_INTERNAL_ASSERT(full_name.is_dimname());
+  TORCH_INTERNAL_ASSERT(is_dimname(full_name));
   if (full_name == kDimnameWildcard) {
     return Dimname::wildcard();
   }
