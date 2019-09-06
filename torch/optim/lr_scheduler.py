@@ -3,6 +3,7 @@ import math
 from torch._six import inf
 from functools import partial, wraps
 import warnings
+import weakref
 from bisect import bisect_right
 
 from .optimizer import Optimizer
@@ -30,7 +31,10 @@ class _LRScheduler(object):
         # We would like to ensure that `lr_scheduler.step()` is called after
         # `optimizer.step()`
         def with_counter(method):
-            import weakref
+            if getattr(method, '_with_counter', False):
+                # `optimizer.step()` has already been replaced, return.
+                return method
+
             # Keep a weak reference to the optimizer instance to prevent
             # cyclic references.
             instance_ref = weakref.ref(method.__self__)
@@ -46,6 +50,8 @@ class _LRScheduler(object):
                 wrapped = func.__get__(instance, cls)
                 return wrapped(*args, **kwargs)
 
+            # Note that the returned function here is no longer a bound method,
+            # so attributes like `__func__` and `__self__` no longer exist.
             wrapper._with_counter = True
             return wrapper
 
