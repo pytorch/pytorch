@@ -17501,6 +17501,30 @@ class TestDataParallel(JitTestCase):
 
 
 class TestList(JitTestCase):
+    def test_in_check(self):
+        def int_in(x):
+            # type: (List[int]) -> bool
+            return 2 in x
+
+        self.checkScript(int_in, ([1, 2, 3],))
+        self.checkScript(int_in, ([1, 3, 3],))
+
+        def float_in(x):
+            # type: (List[float]) -> bool
+            return 2. in x
+
+        self.checkScript(float_in, ([1., 2., 3.],))
+        self.checkScript(float_in, ([1., 3., 3.],))
+
+        def str_in(x):
+            # type: (List[str]) -> bool
+            return 'hi' in x
+
+        self.checkScript(str_in, (['not', 'here'],))
+        self.checkScript(str_in, (['hi', 'bye'],))
+        self.checkScript(str_in, ([],))
+
+
     def test_list_literal(self):
         def reassign():
             x = [1]
