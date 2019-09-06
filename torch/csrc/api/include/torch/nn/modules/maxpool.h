@@ -66,7 +66,7 @@ class TORCH_API MaxPool1dImpl : public MaxPoolImpl<1, MaxPool1dImpl> {
 using MaxPool1dOptions = MaxPoolOptions<1>;
 
 /// A `ModuleHolder` subclass for `MaxPool1dImpl`.
-/// See the documentation for `Conv1dImpl` class to learn what methods it
+/// See the documentation for `MaxPool1dImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(MaxPool1d);
@@ -86,7 +86,7 @@ class TORCH_API MaxPool2dImpl : public MaxPoolImpl<2, MaxPool2dImpl> {
 using MaxPool2dOptions = MaxPoolOptions<2>;
 
 /// A `ModuleHolder` subclass for `MaxPool2dImpl`.
-/// See the documentation for `Conv1dImpl` class to learn what methods it
+/// See the documentation for `MaxPool2dImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(MaxPool2d);
@@ -106,7 +106,7 @@ class TORCH_API MaxPool3dImpl : public MaxPoolImpl<3, MaxPool3dImpl> {
 using MaxPool3dOptions = MaxPoolOptions<3>;
 
 /// A `ModuleHolder` subclass for `MaxPool3dImpl`.
-/// See the documentation for `Conv1dImpl` class to learn what methods it
+/// See the documentation for `MaxPool3dImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(MaxPool3d);
