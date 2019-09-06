@@ -662,7 +662,10 @@ def emit_body(declaration):
                     assert not is_output
                 if inplace and is_output:
                     var = 'self'
-                expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
+                    is_inplace_view = "as_variable_ref({}).is_view()".format(var)
+                    expr = 'SavedVariable({}, {}, {})'.format(var, str(is_output).lower(), is_inplace_view)
+                else:
+                    expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
             elif arg['type'] == 'TensorList':
                 name += '_'
                 expr = 'make_saved_variable_list({})'.format(arg['name'])
