@@ -59,7 +59,7 @@ static void check_valid_identifier(const std::string& name) {
       name, "'.");
 }
 
-Dimname Dimname::fromSymbol(Symbol full_name) {
+Dimname Dimname::fromSymbol(InternedString full_name) {
   TORCH_INTERNAL_ASSERT(full_name.is_dimname());
   if (full_name == kDimnameWildcard) {
     return Dimname::wildcard();
