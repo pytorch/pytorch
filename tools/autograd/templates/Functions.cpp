@@ -65,7 +65,7 @@ Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
   bool is_one = false;
   if (s.isFloatingPoint()) {
     is_one = s.toDouble() == 1;
-  } else if(s.isIntegral()) {
+  } else if(s.isIntegral(true)) {
     is_one = s.toLong() == 1;
   }
 

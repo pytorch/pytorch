@@ -58,7 +58,7 @@ static void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
     Scalar p) {
   float val;
-  if (p.isIntegral()) {
+  if (p.isIntegral(false)) {
     val = p.to<int64_t>();
   } else if (p.isFloatingPoint()) {
     val = p.to<float>();
