@@ -1527,7 +1527,10 @@ protected:
     dest_impl->storage_offset_ = src_impl->storage_offset_;
     dest_impl->data_type_ = src_impl->data_type_;
     dest_impl->device_opt_ = src_impl->device_opt_;
-    dest_impl->type_set_ = src_impl->type_set_;
+    // We do NOT set autograd_meta_ in this function, so we must
+    // also strip variable tensor id from here.  This never
+    // gets exercised in PyTorch but it is exercised in XLA
+    dest_impl->type_set_ = src_impl->type_set_.remove(TensorTypeId::VariableTensorId);
     dest_impl->is_contiguous_ = src_impl->is_contiguous_;
     dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
     dest_impl->reserved_ = src_impl->reserved_;
