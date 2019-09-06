@@ -284,12 +284,12 @@ class TestCppApiParity(common.TestCase):
                 return stmts
 
             device = test_params.device
-            python_module_class = test_params.python_module_class
+            python_constructor = test_params.python_constructor
             python_constructor_args = test_params.python_constructor_args
             example_inputs = test_params.example_inputs
 
             torch.manual_seed(2)
-            module = python_module_class(*python_constructor_args).to(device)
+            module = python_constructor(*python_constructor_args).to(device)
 
             extra_stmts = generate_attr_equality_checks(module)
             assert len(extra_stmts) == test_params.num_attrs_recursive
@@ -300,12 +300,12 @@ class TestCppApiParity(common.TestCase):
 
         def setup_forward_test(test_params):
             device = test_params.device
-            python_module_class = test_params.python_module_class
+            python_constructor = test_params.python_constructor
             python_constructor_args = test_params.python_constructor_args
             example_inputs = test_params.example_inputs
 
             torch.manual_seed(2)
-            module = python_module_class(*python_constructor_args).to(device)
+            module = python_constructor(*python_constructor_args).to(device)
             python_output = module(*example_inputs)
 
             return (([module], device, python_output, example_inputs),
@@ -314,12 +314,12 @@ class TestCppApiParity(common.TestCase):
 
         def setup_backward_test(test_params):
             device = test_params.device
-            python_module_class = test_params.python_module_class
+            python_constructor = test_params.python_constructor
             python_constructor_args = test_params.python_constructor_args
             example_inputs = test_params.example_inputs
 
             torch.manual_seed(2)
-            module = python_module_class(*python_constructor_args).to(device)
+            module = python_constructor(*python_constructor_args).to(device)
             python_output = module(*example_inputs)
             python_output.sum().backward()
             # JIT tracing does not save a module's parameters' gradients into ScriptModule.
@@ -361,9 +361,6 @@ class TestCppApiParity(common.TestCase):
             return module_file.name
 
         def test_methods(test_params):
-            device = test_params.device
-            python_module_class = test_params.python_module_class
-            python_constructor_args = test_params.python_constructor_args
             module_variant_name = test_params.module_variant_name
             example_inputs = test_params.example_inputs
 
@@ -435,10 +432,7 @@ def _compute_module_name(test_params_dict):
 
 def _process_test_params(test_params_dict, module_metadata, device):
     module_name = _compute_module_name(test_params_dict)
-    desc = test_params_dict.get('desc', None)
-    python_module_class = getattr(torch.nn, module_name)
-
-    test_params_dict['constructor'] = test_params_dict.get('constructor', python_module_class)
+    test_params_dict['constructor'] = test_params_dict.get('constructor', getattr(torch.nn, module_name))
     test = common_nn.TestBase(**test_params_dict)
     module_variant_name = test.get_name()[5:] + (('_' + device) if device != 'cpu' else '')
     example_inputs = test._get_input()
@@ -455,11 +449,11 @@ def _process_test_params(test_params_dict, module_metadata, device):
     return TorchNNTestParams(
         module_name=module_name,
         module_variant_name=module_variant_name,
+        python_constructor=test.constructor,
         python_constructor_args=test.constructor_args,
         cpp_constructor_args=test_params_dict.get('cpp_constructor_args'),
         example_inputs=example_inputs,
         has_parity=test_params_dict.get('has_parity', True),
-        python_module_class=python_module_class,
         cpp_sources=module_metadata.cpp_sources,
         num_attrs_recursive=module_metadata.num_attrs_recursive,
         device=device,
