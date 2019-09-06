@@ -69,12 +69,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           auto type = args[i].type();
           if (type->kind() == TypeKind::OptionalType) {
             if (iter->isNone()) {
-              Value* none =
-                  graph
-                      ->insertNode(graph->createNone(
-                          reinterpret_cast<OptionalType*>(args[i].type().get())
-                              ->getElementType()))
-                      ->output();
+              Value* none = graph->insertNode(graph->createNone())->output();
               node->addInput(none);
               continue;
             } else {

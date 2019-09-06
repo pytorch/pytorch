@@ -8,10 +8,10 @@ from torch.nn import Conv2d, BatchNorm2d, ReLU
 from torch.nn._intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.quantization.QConfig import default_qat_qconfig
 from torch.utils.mkldnn import disable_mkldnn_conv
-from common_quantization import no_deadline
 from common_utils import TestCase, run_tests
 from hypothesis import given
 from hypothesis import strategies as st
+from hypothesis_utils import no_deadline
 from functools import reduce
 
 
