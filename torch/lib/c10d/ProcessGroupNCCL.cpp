@@ -113,8 +113,7 @@ void syncStreams(
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 100;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
-const int64_t ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis =
-    10 * 1000;
+const int64_t ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis = 10 * 1000;
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
     : devices_(devices), workStartTime_(std::chrono::steady_clock::now()) {
@@ -244,8 +243,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
         blockingWait_ = true;
       } else if (val != 0) {
         throw std::runtime_error(
-          "Invalid value for environment variable: " +
-          std::string(NCCL_BLOCKING_WAIT));
+            "Invalid value for environment variable: " +
+            std::string(NCCL_BLOCKING_WAIT));
       }
     }
   } catch (std::exception& e) {
@@ -637,6 +636,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
             comm,
             stream.stream());
       });
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceCoalescedOptions& opts) {
+  throw std::runtime_error(
+      "allreduce_coalesced is currently not supported with NCCL");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
