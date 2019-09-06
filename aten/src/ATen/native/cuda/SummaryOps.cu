@@ -2,6 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
+
 namespace at {
 namespace cuda {
 #define THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM 100
@@ -17,8 +18,8 @@ namespace cuda {
 enum class CUDAHistogramMemoryType { SHARED, MULTI_BLOCK, GLOBAL };
 namespace {
   template<typename input_t, typename IndexType>
-  __device__ static IndexType getBin(input_t bVal, input_t minvalue, input_t maxvalue, int nbins) {
-    IndexType bin = (int)(int64_t(bVal - minvalue) * nbins / (maxvalue - minvalue));
+  __device__ static IndexType getBin(input_t bVal, input_t minvalue, input_t maxvalue, int64_t nbins) {
+    IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
     // (only applicable for histc)
     // while each bin is inclusive at the lower end and exclusive at the higher, i.e. [start, end)
     // the last bin is inclusive at both, i.e. [start, end], in order to include maxvalue if exists
@@ -47,7 +48,7 @@ __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> a, /* output */
     detail::TensorInfo<output_t, IndexType> p, /* partial output */
     detail::TensorInfo<input_t, IndexType> b, /* input */
-    int nbins,
+    int64_t nbins,
     input_t minvalue,
     input_t maxvalue,
     IndexType totalElements,
