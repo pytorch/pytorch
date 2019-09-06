@@ -202,8 +202,8 @@ Modules
     The :func:`@torch.jit.ignore <torch.jit.ignore>` annotation's behavior changes in
     PyTorch 1.2. Before PyTorch 1.2 the @ignore decorator was used to make a function
     or method callable from code that is exported. To get this functionality back,
-    use ``@torch.jit.ignore(drop_on_export=True)``. ``@torch.jit.ignore`` is now equivalent
-    to ``@torch.jit.ignore(drop_on_export=False)``. See :func:`@torch.jit.ignore <torch.jit.ignore>`
+    use ``@torch.jit.ignore(drop=True)``. ``@torch.jit.ignore`` is now equivalent
+    to ``@torch.jit.ignore(drop=False)``. See :func:`@torch.jit.ignore <torch.jit.ignore>`
     for details.
 
 When passed to the :func:`torch.jit.script <torch.jit.script>` function, a ``torch.nn.Module``\'s data is

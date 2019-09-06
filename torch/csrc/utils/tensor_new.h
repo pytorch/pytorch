@@ -17,8 +17,6 @@ at::Tensor sparse_coo_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scal
 at::Tensor tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 at::Tensor as_tensor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 at::Tensor new_tensor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
-at::Tensor new_empty(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
-at::Tensor new_full(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 at::Tensor new_ones(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 at::Tensor new_zeros(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 
