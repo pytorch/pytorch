@@ -8,6 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: flake8
+        uses: actions/checkout@master
         uses: suo/flake8-github-action@releases/v0.0.2
         env: 
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
