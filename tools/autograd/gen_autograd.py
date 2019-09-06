@@ -197,7 +197,8 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
 
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_lib
-    gen_autograd_functions_lib(out, autograd_functions, template_path)
+    gen_autograd_functions_lib(
+        out, autograd_functions, template_path)
 
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
