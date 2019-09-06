@@ -10,13 +10,20 @@ import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
 import io
+import os
 import sys
 import warnings
 
 
-skipIfNamedTensorDisabled = \
-    unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
-                    'PyTorch not compiled with namedtensor support')
+def check_env_flag(name, default=''):
+    return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
+
+TEST_NAMEDTENSOR = check_env_flag('TEST_NAMEDTENSOR')
+
+
+skipIfNotTestingNamedTensor = \
+    unittest.skipIf(not TEST_NAMEDTENSOR,
+                    'TEST_NAMEDTENSOR=0; set it to 1 to enable named tensor tests')
 
 def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
@@ -1406,7 +1413,7 @@ class TestNamedTensor(TestCase):
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
     if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
+        new_test = skipIfNotTestingNamedTensor(getattr(TestNamedTensor, attr))
         setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':

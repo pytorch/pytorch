@@ -4,6 +4,7 @@
 #include <ATen/core/interned_strings.h>
 #endif
 
+#include <c10/core/EnableNamedTensor.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 #include <ostream>
