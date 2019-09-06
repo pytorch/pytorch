@@ -6,8 +6,12 @@ import io
 import pickle
 import traceback
 
+from . import set_current_rpc_dst
 
-def serialize(obj):
+
+def serialize(obj, to=None):
+    if to:
+        set_current_rpc_dst(to)
     f = io.BytesIO()
     p = pickle.Pickler(f)
     p.dispatch_table = copyreg.dispatch_table.copy()
@@ -28,10 +32,6 @@ def run_python_udf_internal(pickled_python_udf, pickle_result=True):
     else:
         return result
 
-
-def run_remote_python_udf_internal(pickled_python_udf, ret_rref):
-    ret = run_python_udf_internal(pickled_python_udf)
-    ret_rref.set_value(ret)
 
 def load_python_udf_result_internal(pickled_python_result):
     result = pickle.loads(pickled_python_result)

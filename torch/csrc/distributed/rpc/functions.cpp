@@ -24,7 +24,7 @@ Message createException(const Message& request, const std::exception& e) {
       request.id());
 }
 
-Message processRequestBlocking(Message&& request) {
+Message processRequestBlocking(const WorkerId& from, Message&& request) {
   switch (request.type()) {
     case MessageType::SCRIPT_CALL: {
       try {
@@ -71,10 +71,6 @@ Message processRequestBlocking(Message&& request) {
 
       auto ownerRRef = ctx->getOrCreateOwnerRRef<IValue>(rrefId);
 
-      if (forkId != rrefId) {
-        ctx->acceptUserRRef(rrefId, forkId, rrefId.createdOn_);
-      }
-
       // TODO: make this asynchronous
       // src is only alive within this block, use reference to avoid copy
       auto& stack = src.stackRef();
@@ -87,7 +83,7 @@ Message processRequestBlocking(Message&& request) {
           stack.size());
 
       ownerRRef->setValue(std::move(stack.front()));
-      break;
+      return ctx->acceptUserRRef(rrefId, forkId);
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       PythonRemoteCall prc = PythonRemoteCall::fromMessage(request);
@@ -97,13 +93,9 @@ Message processRequestBlocking(Message&& request) {
       auto& ctx = RRefContext::getInstance();
 
       auto ownerRRef = ctx->getOrCreateOwnerRRef<py::object>(rrefId);
-
-      if (forkId != rrefId) {
-        ctx->acceptUserRRef(rrefId, forkId, rrefId.createdOn_);
-      }
-
       ownerRRef->setValue(PythonRpcHandler::runPythonUDF(prc.udf()));
-      break;
+
+      return ctx->acceptUserRRef(rrefId, forkId);
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       ScriptRRefFetchCall srf = ScriptRRefFetchCall::fromMessage(request);
@@ -122,8 +114,9 @@ Message processRequestBlocking(Message&& request) {
           RRefContext::getInstance()->getOrCreateOwnerRRef<py::object>(
               RRefId::fromIValue(srf.value()));
       auto response =
-          ScriptRRefFetchRet(PythonRpcHandler::serialize(rref->getValue()))
-              .toMessage();
+          ScriptRRefFetchRet(
+              PythonRpcHandler::serialize(rref->getValue(), from.id_)
+          ).toMessage();
       response.setId(request.id());
       return response;
     }
@@ -139,9 +132,8 @@ Message processRequestBlocking(Message&& request) {
     }
     case MessageType::RREF_FORK_NOTIFY: {
       ScriptForkNotify sfn = ScriptForkNotify::fromMessage(request);
-      RRefContext::getInstance()->acceptForkRequest(
+      return RRefContext::getInstance()->acceptForkRequest(
           sfn.valueRef(), sfn.forkDst());
-      break;
     }
     case MessageType::RREF_FORK_ACCEPT: {
       ScriptForkAccept sfa = ScriptForkAccept::fromMessage(request);

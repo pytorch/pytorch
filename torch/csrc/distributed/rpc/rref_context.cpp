@@ -29,6 +29,10 @@ worker_id_t RRefContext::getWorkerId() const {
   return agent_->getWorkerId().id_;
 }
 
+const std::string& RRefContext::getWorkerName() const {
+  return agent_->getWorkerId().name_;
+}
+
 RRefId RRefContext::genRRefId() {
   return RRefId(getWorkerId(), nextLocalId_++);
 }
@@ -46,7 +50,9 @@ RRefForkData RRefContext::forkTo(
     // properly
     if (rref->isOwner()) {
       // fork from owner
-      acceptUserRRef(forkRequest.rrefId_, forkRequest.forkId_, forkDst);
+      agent_->send(
+          agent_->getWorkerId(forkDst),
+          acceptUserRRef(forkRequest.rrefId_, forkRequest.forkId_));
     } else {
       // fork from user, rref cannot be destructed until the fork request is
       // accepted by the owner
@@ -63,25 +69,20 @@ RRefForkData RRefContext::forkTo(
   return forkRequest;
 }
 
-void RRefContext::acceptUserRRef(
-    const RRefId& rrefId,
-    const ForkId& forkId,
-    worker_id_t user) {
+Message RRefContext::acceptUserRRef(const RRefId& rrefId, const ForkId& forkId) {
   addForkOfOwner(rrefId, forkId);
-  agent_->send(
-      agent_->getWorkerId(user),
-      ScriptUserAccept(forkId.toIValue()).toMessage());
+  return ScriptUserAccept(forkId.toIValue()).toMessage();
 }
 
-void RRefContext::acceptForkRequest(const IValue& value, worker_id_t forkDst) {
+Message RRefContext::acceptForkRequest(const IValue& value, worker_id_t forkDst) {
   auto forkRequest = RRefForkData::fromIValue(value);
   auto& rrefId = forkRequest.rrefId_;
   auto& forkId = forkRequest.forkId_;
-  acceptUserRRef(rrefId, forkId, forkDst);
-  // notify fork caller UserRRef
   agent_->send(
-      agent_->getWorkerId(forkId.createdOn_),
-      ScriptForkAccept(forkId.toIValue()).toMessage());
+      agent_->getWorkerId(forkDst),
+      acceptUserRRef(rrefId, forkId));
+  // notify fork caller UserRRef
+  return ScriptForkAccept(forkId.toIValue()).toMessage();
 }
 
 void RRefContext::finishForkRequest(const IValue& value) {

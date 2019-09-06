@@ -22,6 +22,7 @@ class RRefContext {
   void operator=(const RRefContext&) = delete;
 
   worker_id_t getWorkerId() const;
+  const std::string& getWorkerName() const;
   RRefId genRRefId();
   const std::shared_ptr<RpcAgent>& agent() const;
 
@@ -110,13 +111,12 @@ class RRefContext {
     }
   }
 
-  void acceptUserRRef(
-      const RRefId& rrefId,
-      const ForkId& forkId,
-      worker_id_t user);
+
 
   RRefForkData forkTo(const std::shared_ptr<RRef>&, worker_id_t forkDst);
-  void acceptForkRequest(const IValue& request, worker_id_t forkDst);
+
+  Message acceptUserRRef(const RRefId& rrefId, const ForkId& forkId);
+  Message acceptForkRequest(const IValue& request, worker_id_t forkDst);
   void finishForkRequest(const IValue& request);
   void finishUserRRef(const IValue& forkId);
 

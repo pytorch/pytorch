@@ -7,7 +7,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-Message processRequestBlocking(Message&& message);
+Message processRequestBlocking(const WorkerId& from, Message&& request);
 
 Message createException(const Message& request, const std::exception& e);
 

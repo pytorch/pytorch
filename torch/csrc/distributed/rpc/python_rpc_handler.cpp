@@ -45,9 +45,9 @@ py::object runPythonUDF(const std::string& pickledPythonUDF) {
   return runUDFFunction_(py::bytes(pickledPythonUDF), false);
 }
 
-std::string serialize(const py::object& obj) {
+std::string serialize(const py::object& obj, worker_id_t dst) {
   AutoGIL ag;
-  return static_cast<std::string>((py::bytes)serializeFunction_(obj));
+  return static_cast<std::string>((py::bytes)serializeFunction_(obj, dst));
 }
 
 py::object deserialize(const std::string& serializedObj) {

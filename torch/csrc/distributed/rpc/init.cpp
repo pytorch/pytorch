@@ -111,8 +111,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
     RRefContext::initInstance(std::move(agent));
   });
 
-  module.def("set_current_rpc_dst", [](const WorkerId& dst) {
-    PyRRef::setCurrentDst(dst.id_);
+  module.def("set_current_rpc_dst", [](worker_id_t dst) {
+    PyRRef::setCurrentDst(dst);
   });
 
   module.def(

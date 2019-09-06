@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -14,7 +15,7 @@ void init();
 // execute python UDF, result is pickled to binary string
 std::vector<char> generatePythonUDFResult(const Message& message);
 py::object runPythonUDF(const std::string& pickledPythonUDF);
-std::string serialize(const py::object& obj);
+std::string serialize(const py::object& obj, worker_id_t dst);
 py::object deserialize(const std::string& serializedObj);
 // returned python UDF result is pickled binary string, so run python
 // function to unpickle the python UDF result and return pyObject to user

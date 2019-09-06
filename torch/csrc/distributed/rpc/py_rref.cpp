@@ -9,13 +9,16 @@ namespace rpc {
 
 namespace {
 
-constexpr int RREF_TUPLE_SIZE = 6;
-constexpr int OWNER_IDX = 0;
-constexpr int RREFID_ON_IDX = 1;
-constexpr int RREFID_ID_IDX = 2;
-constexpr int FORKID_ON_IDX = 3;
-constexpr int FORKID_ID_IDX = 4;
-constexpr int TYPE_IDX = 5;
+// Constants below are used in PyRRef pickling and unpickling. PyRRef is
+// converted into a py::tuple in pickling, and reconstructed from the py::tuple
+// in pickling.
+constexpr int RREF_TUPLE_SIZE = 6;  // number of data fields in the py::tuple
+constexpr int OWNER_IDX = 0;        // index of ownerId in the tuple
+constexpr int RREFID_ON_IDX = 1;    // index of RRefId.createdOn_ in the tuple
+constexpr int RREFID_ID_IDX = 2;    // index of RRefId.localId_ in the tuple
+constexpr int FORKID_ON_IDX = 3;    // index of ForkId.createdOn_ in the tuple
+constexpr int FORKID_ID_IDX = 4;    // index of ForkId.localId_ in the tuple
+constexpr int TYPE_IDX = 5;         // index of type (py::object or IValue)
 
 } // namespace
 
@@ -34,13 +37,19 @@ worker_id_t PyRRef::owner() const {
 }
 
 py::object PyRRef::toHere() {
-  if (rref_->isOwner()) {
-    AT_ERROR("Cannot call toHere() on OwnerRRef, use localValue() instead.");
-  }
   if (rref_->isPyObj()) {
-    return std::dynamic_pointer_cast<UserRRef<py::object>>(rref_)->toHere();
+    if (rref_->isOwner()) {
+      return std::static_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
+    } else {
+      return std::static_pointer_cast<UserRRef<py::object>>(rref_)->toHere();
+    }
   } else {
-    auto value = std::dynamic_pointer_cast<UserRRef<IValue>>(rref_)->toHere();
+    IValue value;
+    if (rref_->isOwner()) {
+      value = std::static_pointer_cast<OwnerRRef<IValue>>(rref_)->getValue();
+    } else {
+      value = std::static_pointer_cast<UserRRef<IValue>>(rref_)->toHere();
+    }
     AutoGIL ag;
     return torch::jit::toPyObject(std::move(value));
   }
@@ -48,7 +57,11 @@ py::object PyRRef::toHere() {
 
 py::object PyRRef::localValue() {
   if (!rref_->isOwner()) {
-    AT_ERROR("Cannot call localValue() on UserRRef");
+    auto& ctx = RRefContext::getInstance();
+    AT_ERROR(
+        "Cannot call localValue() on a non-local reference. Call it on ",
+        ctx->getWorkerName()
+    );
   }
 
   if (rref_->isPyObj()) {

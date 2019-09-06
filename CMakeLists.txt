@@ -83,21 +83,13 @@ else ()
   set(CPU_INTEL OFF)
 endif ()
 
-# For Windows, turn USE_DISTRIBUTED off by default.
+# For non-supported platforms, turn USE_DISTRIBUTED off by default.
 # It is not tested and likely won't work without additional changes.
-if(MSVC)
+if(NOT LINUX)
   set(USE_DISTRIBUTED OFF CACHE STRING "Use distributed")
-endif()
-
-# For macOS, turn USE_DISTRIBUTED off by default.
-# Gloo depends on libuv, which has to be installed by the user first.
-# Therefore, the user should explicitly specify -DUSE_DISTRIBUTED=1
-# to build torch.distributed, after installing the dependency.
-if(APPLE)
-  set(USE_DISTRIBUTED OFF CACHE STRING "Use distributed")
-  # If USE_DISTRIBUTED is set, also set USE_LIBUV=1 for Gloo.
-  # It is the only transport that can be built on macOS.
-  if(USE_DISTRIBUTED)
+  # On macOS, if USE_DISTRIBUTED is enabled (specified by the user),
+  # then make Gloo build with the libuv transport.
+  if(APPLE AND USE_DISTRIBUTED)
     set(USE_LIBUV ON CACHE STRING "")
   endif()
 endif()
@@ -192,9 +184,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
-cmake_dependent_option(
-    USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed. Only available if USE_GLOO is on." OFF
-    "USE_GLOO" OFF)
 option(USE_TBB "Use TBB" OFF)
 
 # Used when building Caffe2 through setup.py
@@ -310,6 +299,7 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(FEATURE_TORCH_MOBILE ON)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
+  set(USE_STATIC_DISPATCH ON)
 endif()
 
 # ---[ Utils

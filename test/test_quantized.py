@@ -432,6 +432,63 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          message="ops.quantized.max_pool2d results are off")
 
+    """Tests max pool operation on NHWC quantized tensors."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           kernel=st.sampled_from((3, 5, 7)),
+           stride=st.sampled_from((None, 1, 2)),
+           dilation=st.integers(1, 2),
+           padding=st.integers(0, 2))
+    def test_max_pool2d_nhwc(self, X, kernel, stride, dilation, padding):
+        X, (scale, zero_point, torch_type) = X
+        # Ensure we hit the vectorized paths
+        # 176 = 128 + 32 + 16
+        # 128 hits the interleaved path
+        # 32 hits the non-interleaved path
+        # 16 hits the scalar path
+        if X.shape[1] < 176:
+            X = np.repeat(X, 176 / X.shape[1], 1)
+        # Check constraints
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iH, iW = X.shape[-2:]
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation)
+        assume(oW > 0)
+
+        X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
+        a = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
+        a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
+                                                stride=stride,
+                                                padding=padding, dilation=dilation)
+        a_ref = torch.quantize_linear(a_pool, scale=scale,
+                                      zero_point=zero_point, dtype=torch_type)
+        a_ref = a_ref.dequantize()
+        qa = torch.quantize_linear(torch.from_numpy(X_nchw), scale=scale, zero_point=zero_point,
+                                   dtype=torch_type).permute([0, 3, 1, 2])
+        self.assertTrue(qa.stride() != sorted(qa.stride()))
+
+        ops_under_test = {
+            "torch": torch.max_pool2d,
+            "nn.functional": torch.nn.functional.max_pool2d,
+            "nn.quantized.functional": torch.nn.quantized.functional.max_pool2d
+        }
+
+        for name, op in ops_under_test.items():
+            a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
+                       dilation=dilation)
+            self.assertTrue(a_hat.stride() != sorted(a_hat.stride()))
+            self.assertEqual(a_ref, a_hat.dequantize(),
+                             message="{} results are off".format(name))
+        # Test the ops.quantized separately, because None is not treated.
+        a_hat = torch.ops.quantized.max_pool2d(
+            qa, kernel_size=_pair(kernel),
+            stride=_pair(kernel if stride is None else stride),
+            padding=_pair(padding), dilation=_pair(dilation))
+        self.assertEqual(a_ref, a_hat.dequantize(),
+                         message="ops.quantized.max_pool2d results are off")
+
     @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
@@ -619,7 +676,7 @@ class TestDynamicQuantizedLinear(TestCase):
         use_channelwise=st.booleans())
     def test_qlinear(self, batch_size, input_channels, output_channels,
                      use_bias, use_relu, use_multi_dim_input, use_channelwise):
-        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qlinear_prepack = torch.ops.quantized.linear_prepack
         if use_relu:
             qlinear_dynamic = torch.ops.quantized.fbgemm_linear_relu_dynamic
         else:
@@ -736,11 +793,11 @@ class TestQuantizedLinear(unittest.TestCase):
            use_channelwise=st.booleans())
     def test_qlinear(self, batch_size, input_channels, output_channels, use_bias,
                      use_relu, use_multi_dim_input, use_channelwise):
-        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qlinear_prepack = torch.ops.quantized.linear_prepack
         if use_relu:
-            qlinear = torch.ops.quantized.fbgemm_linear_relu
+            qlinear = torch.ops.quantized.linear_relu
         else:
-            qlinear = torch.ops.quantized.fbgemm_linear
+            qlinear = torch.ops.quantized.linear
 
         if use_multi_dim_input:
             batch_size *= 3  # Test the multi-dim input tensor
@@ -864,8 +921,8 @@ class TestQuantizedLinear(unittest.TestCase):
             W_zps = torch.round(torch.rand(output_channels)
                                 * 100 - 50).to(torch.int64)
 
-        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
-        qlinear_unpack = torch.ops.quantized.fbgemm_linear_unpack
+        qlinear_prepack = torch.ops.quantized.linear_prepack
+        qlinear_unpack = torch.ops.quantized.linear_unpack
 
         W = torch.from_numpy(W)
 
@@ -952,10 +1009,10 @@ class TestQuantizedConv(unittest.TestCase):
             use_channelwise
     ):
 
-        qconv = torch.ops.quantized.fbgemm_conv2d
+        qconv = torch.ops.quantized.conv2d
         if use_relu:
-            qconv = torch.ops.quantized.fbgemm_conv2d_relu
-        qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
+            qconv = torch.ops.quantized.conv2d_relu
+        qconv_prepack = torch.ops.quantized.conv_prepack
 
         # C
         input_channels = input_channels_per_group * groups
@@ -1116,8 +1173,8 @@ class TestQuantizedConv(unittest.TestCase):
             filters_scale = torch.tensor([filters_scale] * output_channels).to(torch.double)
             filters_zero_point = torch.tensor([filters_zero_point] * output_channels).to(torch.long)
 
-        qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
-        qconv_unpack = torch.ops.quantized.fbgemm_conv_unpack
+        qconv_prepack = torch.ops.quantized.conv_prepack
+        qconv_unpack = torch.ops.quantized.conv_unpack
 
         # Orig tensor is assumed to be in K(C/G)RS format
         W = torch.from_numpy(filters).to(torch.float)
