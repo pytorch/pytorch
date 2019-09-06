@@ -31,25 +31,17 @@ class Linear(nnq.Linear):
         torch.Size([128, 30])
     """
 
-    __annotations__ = {'bias' : Optional[torch.Tensor]}
-
     def __init__(self, in_features, out_features, bias_=True):
         super(Linear, self).__init__(in_features, out_features, bias_)
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
         # Serialization logic is explicitly handled in the below serialization and
         # deserialization modules
-        if bias_:
-            del self.bias
-            self.bias = torch.Tensor(out_features).float()
-        else:
-            self.bias = None
 
     def forward(self, x):
         # Note that we can handle self.bias == None case.
-        Y = torch.ops.quantized.fbgemm_linear_dynamic(
-            x, self._packed_params,
-            self.bias)
+        Y = torch.ops.quantized.linear_dynamic(
+            x, self._packed_params)
         return Y.to(x.dtype)
 
     @classmethod
@@ -76,5 +68,4 @@ class Linear(nnq.Linear):
         qweight = torch.quantize_linear(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
         qlinear = Linear(mod.in_features, mod.out_features)
         qlinear.set_weight_bias(qweight, mod.bias)
-        qlinear.bias = mod.bias
         return qlinear

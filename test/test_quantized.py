@@ -621,9 +621,9 @@ class TestDynamicQuantizedLinear(TestCase):
                      use_bias, use_relu, use_multi_dim_input, use_channelwise):
         qlinear_prepack = torch.ops.quantized.linear_prepack
         if use_relu:
-            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_relu_dynamic
+            qlinear_dynamic = torch.ops.quantized.linear_relu_dynamic
         else:
-            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_dynamic
+            qlinear_dynamic = torch.ops.quantized.linear_dynamic
 
         if use_multi_dim_input:
             batch_size *= 3  # Test the multi-dim input tensor
@@ -704,9 +704,9 @@ class TestDynamicQuantizedLinear(TestCase):
         X_q = torch.quantize_linear(X_fp32, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
 
         # Weight prepacking operator for dynamic quantized Linear
-        W_prepack = qlinear_prepack(W_q)
+        W_prepack = qlinear_prepack(W_q, b_fp32)
         # Dynamic quantized Linear operator with prepacked weight
-        Y_fp32 = qlinear_dynamic(X_q.dequantize(), W_prepack, b_fp32)
+        Y_fp32 = qlinear_dynamic(X_q.dequantize(), W_prepack)
         # Y_fp32 = qlinear_dynamic(X_fp32, W_prepack, b_fp32)
 
         Y_fp32_ref = F.linear(X_q.dequantize(), W_q.dequantize(), b_fp32)
