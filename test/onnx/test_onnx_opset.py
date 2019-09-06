@@ -186,7 +186,7 @@ class TestONNXOpset(TestCase):
                    "attributes" : []}]
         ops = {9 : ops_9, 10 : ops_10}
         x = torch.randn(3)
-        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9])
 
         class DynamicSliceModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -196,6 +196,7 @@ class TestONNXOpset(TestCase):
         ops_9 = [{"op_name" : "Constant"},
                  {"op_name" : "Constant"},
                  {"op_name" : "Shape"},
+                 {"op_name": "Constant"},
                  {"op_name" : "Gather",
                  "attributes" : [{"name" : "axis", "i" : 0, "type" : 2}]},
                  {"op_name" : "Unsqueeze",
@@ -208,6 +209,7 @@ class TestONNXOpset(TestCase):
         ops_10 = [{"op_name" : "Constant"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Shape"},
+                  {"op_name": "Constant"},
                   {"op_name" : "Gather",
                    "attributes" : [{"name" : "axis", "i" : 0, "type" : 2}]},
                   {"op_name" : "Unsqueeze",
@@ -283,11 +285,11 @@ class TestONNXOpset(TestCase):
                 return torch.nn.functional.interpolate(x,
                                                        size=size,
                                                        mode='nearest')
-        ops_9 = [{"op_name" : "Constant"},
-                 {"op_name" : "Shape"},
-                 {"op_name" : "Gather"},
+        ops_9 = [{"op_name" : "Shape"},
                  {"op_name" : "Constant"},
+                 {"op_name" : "Gather"},
                  {"op_name" : "Shape"},
+                 {"op_name" : "Constant"},
                  {"op_name" : "Gather"},
                  {"op_name" : "Constant"},
                  {"op_name" : "Mul"},
@@ -306,11 +308,11 @@ class TestONNXOpset(TestCase):
                  {"op_name" : "Upsample",
                   "attributes" :
                   [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
-        ops_10 = [{"op_name" : "Constant"},
-                  {"op_name" : "Shape"},
-                  {"op_name" : "Gather"},
+        ops_10 = [{"op_name" : "Shape"},
                   {"op_name" : "Constant"},
+                  {"op_name" : "Gather"},
                   {"op_name" : "Shape"},
+                  {"op_name" : "Constant"},
                   {"op_name" : "Gather"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Mul"},
