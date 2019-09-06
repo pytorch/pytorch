@@ -393,6 +393,7 @@ class TestMkldnn(TestCase):
         conv2d = torch.nn.Conv2d(3, 7, 2, 3).float()
         mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
         with TemporaryFileName() as fname:
+            # get mkldnn tensor which has block format
             torch.jit.save(mkldnn_conv2d, fname)
             loaded = torch.jit.load(fname)
             conv2d.weight.data.zero_()
