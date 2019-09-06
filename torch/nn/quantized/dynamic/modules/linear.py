@@ -3,8 +3,6 @@ import torch
 from ....modules.linear import Linear as NNLinear
 import torch.nn.quantized as nnq
 
-from torch._jit_internal import Optional
-
 class Linear(nnq.Linear):
     r"""
     A dynamic quantized linear module with quantized tensor as inputs and outputs.
