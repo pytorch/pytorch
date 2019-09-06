@@ -17,7 +17,6 @@ class QLinearInt8 final : public torch::OperatorKernel {
   at::Tensor operator()(
       at::Tensor input,
       at::Tensor packed_weight,
-      c10::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point) {
     // uint8 * int8 -> uint8 (no quantization/dequantization)
@@ -108,14 +107,37 @@ class QLinearInt8 final : public torch::OperatorKernel {
     fbgemm::DoNothing<> doNothingObj{};
 
     const int32_t* bias_ptr = nullptr;
-    if (bias.has_value()) {
-      Tensor bias_vec = bias.value();
-      TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
+    at::Tensor qbias;
+    if (pack_ptr.bias.has_value()) {
+      at::Tensor bias = pack_ptr.bias.value();
+      // Temporary: Quantize bias
+      if (pack_ptr.q_scheme == kPerTensorAffine) {
+        qbias = at::quantize_linear(
+            at::dequantize(bias),
+            pack_ptr.w_scale[0] * input_scale_float,
+            0,
+            kQInt32);
+      } else if (pack_ptr.q_scheme == kPerChannelAffine) {
+        std::array<int64_t, 1> arr{0};
+        IntArrayRef axis(arr.data(), 1);
+        at::Tensor bias_scale = at::ones({N}, at::dtype(at::kDouble));
+        at::Tensor bias_zp = at::zeros({N}, at::dtype(at::kLong));
+        for (int i = 0; i < N; ++i) {
+          bias_scale.data_ptr<double>()[i] =
+              pack_ptr.w_scale[i] * input_scale_float;
+        }
+        qbias = quantize_linear_per_channel_cpu(
+            at::dequantize(bias), bias_scale, bias_zp, axis, kQInt32);
+      } else {
+        qbias = bias;
+        TORCH_CHECK(false, "Unsupported quantization scheme.")
+      }
+
+      TORCH_CHECK(qbias.dim() == 1, "bias should be a vector (1D Tensor)");
       TORCH_CHECK(
-          bias_vec.size(0) == N,
+          qbias.size(0) == N,
           "bias should have N elements: " + std::to_string(N));
-      // TODO: contiguous is called for further jit optimizations.
-      auto bias_contig = bias_vec.contiguous();
+      auto bias_contig = qbias.contiguous();
       bias_ptr =
           reinterpret_cast<int32_t*>(bias_contig.data_ptr<c10::qint32>());
     }
@@ -197,14 +219,12 @@ class QLinearInt8 final : public torch::OperatorKernel {
           /*thread_id=*/0,
           /*num_threads=*/1);
     }
-
     return output;
   }
 #else // USE_FBGEMM
   at::Tensor operator()(
       at::Tensor /* input */,
       at::Tensor /* packed_weight */,
-      c10::optional<Tensor> /* bias */,
       double /* output_scale */,
       int64_t /* output_zero_point */) {
     // We make a strong guarantee that models using these operators will have
@@ -218,10 +238,10 @@ class QLinearInt8 final : public torch::OperatorKernel {
 
 static auto registry =
     torch::RegisterOperators()
-        .op("quantized::fbgemm_linear(Tensor X, Tensor W_prepack, Tensor? b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+        .op("quantized::linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
                 TensorTypeId::QuantizedCPUTensorId))
-        .op("quantized::fbgemm_linear_relu(Tensor X, Tensor W_prepack, Tensor? b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+        .op("quantized::linear_relu(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<true>>(
                 TensorTypeId::QuantizedCPUTensorId));
 } // namespace

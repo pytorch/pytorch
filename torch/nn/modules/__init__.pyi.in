@@ -17,7 +17,7 @@ from .dropout import AlphaDropout as AlphaDropout, Dropout as Dropout, Dropout2d
 from .fold import Fold as Fold, Unfold as Unfold
 from .instancenorm import InstanceNorm1d as InstanceNorm1d, InstanceNorm2d as InstanceNorm2d, \
     InstanceNorm3d as InstanceNorm3d
-from .linear import Bilinear as Bilinear, Linear as Linear
+from .linear import Bilinear as Bilinear, Identity as Identity, Linear as Linear
 from .loss import BCELoss as BCELoss, BCEWithLogitsLoss as BCEWithLogitsLoss, CTCLoss as CTCLoss, \
     CosineEmbeddingLoss as CosineEmbeddingLoss, CrossEntropyLoss as CrossEntropyLoss, \
     HingeEmbeddingLoss as HingeEmbeddingLoss, KLDivLoss as KLDivLoss, L1Loss as L1Loss, MSELoss as MSELoss, \
