@@ -1,5 +1,6 @@
 #include <ATen/core/Dimname.h>
 #include <c10/util/Exception.h>
+#include <cctype>
 #include <string>
 
 #ifdef BUILD_NAMEDTENSOR
@@ -29,12 +30,11 @@ std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
 }
 
 bool is_valid_identifier(const std::string& name) {
-  std::locale loc;
   if (name.length() == 0) {
     return false;
   }
   for (auto it = name.begin(); it != name.end(); ++it) {
-    if (std::isalpha(*it, loc) || *it == '_') {
+    if (std::isalpha(*it) || *it == '_') {
       continue;
     }
     return false;

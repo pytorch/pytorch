@@ -893,7 +893,7 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES})
+      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB})
 
     # Note [rocblas & rocfft cmake bug]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
