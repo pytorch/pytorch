@@ -20,25 +20,22 @@ namespace torch { namespace autograd {
   if (!var.defined()) {
     return;
   }
-    
-  // Sets consumer stream if CUDA
-  if (consumer_stream.device_type() == c10::DeviceType::CUDA) {
-    const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-    guard.exchangeStream(consumer_stream);
-    
-    // Syncs (optional) producer stream with consumer stream if necessary
-    if (opt_producer_stream && consumer_stream != *opt_producer_stream) {
-      opt_event->recordOnce(*opt_producer_stream);
-      consumer_stream.wait(*opt_event);
-    }
+
+  // Switches to consumer's stream (old_var's stream)
+  c10::OptionalStreamGuard stream_guard{consumer_stream};
+
+  // Syncs (optional) producer stream with consumer stream, if necessary
+  if (consumer_stream.device_type() == c10::DeviceType::CUDA
+   && opt_producer_stream
+   && consumer_stream != *opt_producer_stream) {
+    opt_event->recordOnce(*opt_producer_stream);
+    consumer_stream.wait(*opt_event);
   }
 
   auto& old_var = buffer[pos];
   if (!old_var.defined()) {
     buffer[pos] = std::move(var);
   } else {
-    at::OptionalDeviceGuard device_guard(device_of(var));
-
     // ATen doesn't route sparse additions correctly...
     // do dense + sparse in-place if possible
     if (old_var.is_sparse()) {
