@@ -1808,7 +1808,6 @@
     CUDA: batch_norm_backward_cuda
 
 - func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
-  use_c10_dispatcher: True
   dispatch:
     CUDA: batch_norm_backward_reduce_cuda
 
