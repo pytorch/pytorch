@@ -9,7 +9,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <ATen/NamedTensorUtils.h>
+#include <ATen/Dimname.h>
 
 namespace c10 {
 struct Storage;
