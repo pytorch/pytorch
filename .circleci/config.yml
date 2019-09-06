@@ -892,8 +892,6 @@ workflows:
 
       # Pytorch iOS builds
       - pytorch_ios_build:
-          requires:
-            - setup
           filters:
             branches:
               only: master
