@@ -1,6 +1,5 @@
       # Warning: indentation here matters!
 
       # Pytorch iOS builds
-      - pytorch_ios_build:
-          - build_environment: "pytorch_ios_build"
+      - pytorch_ios_build
   
