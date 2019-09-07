@@ -1,9 +1,7 @@
 name: Lint
 
 on:
-  push:
-    paths:
-      - '*.py'
+  push
 
 jobs:
   flake8_py3:
@@ -16,11 +14,17 @@ jobs:
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@master
-      - name: Install flake8
-        run: pip install flake8
       - name: Run flake8
-        uses: suo/flake8-github-action@releases/v1
+        run: |
+          set -eux
+          pip install flake8
+          flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8_output.txt
+          cat ${GITHUB_WORKSPACE}/flake8_output.txt
+      - name: Add annotations
+        uses: suo/add-annotations-github-action@master
         with:
           checkName: 'flake8_py3'
+          fileLocation: 'flake8_output.txt'
+          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>[\s|\w]*)'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
