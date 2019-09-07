@@ -70,11 +70,12 @@ ios_brew_update: &ios_brew_update
   command: |
     set -ex
     brew update
-    brew outdated
     brew unlink parallel
     brew install moreutils
     brew link parallel --overwrite
+    brew install expect
     brew install libtool
+    brew install cocoapods
 
 
 
