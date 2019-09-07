@@ -31,6 +31,15 @@
 // file and in a particular order. See gen_jit_dispatch.py for
 // details.
 
+namespace at {
+std::unordered_set<c10::OperatorName> aten_ops_already_moved_to_c10_${num_shard}() {
+  return {
+    ${op_names}
+    {"", ""}
+  };
+}
+}
+
 namespace torch { namespace jit {
 
 using autograd::Variable;
@@ -44,13 +53,6 @@ using at::MemoryFormat;
 
 using ::c10::fmap;
 using ::c10::filter;
-
-std::unordered_set<c10::OperatorName> ops_blacklisted_from_c10_to_jit_export_${num_shard}() {
-  return {
-    ${op_names}
-    {"", ""}
-  };
-}
 
 namespace {
 

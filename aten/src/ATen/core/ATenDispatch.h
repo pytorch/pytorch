@@ -2,6 +2,8 @@
 
 #include <c10/core/Backend.h>
 #include <unordered_map>
+#include <unordered_set>
+#include <ATen/core/function_schema.h>
 #include <c10/util/C++17.h>
 #include <memory>
 #include <mutex>
@@ -14,6 +16,9 @@
 // This implementation opts to store implementations in a table of void*.
 
 namespace at {
+
+// list of ATen ops that got already moved to the c10 dispatcher
+const std::unordered_set<c10::OperatorName>& aten_ops_already_moved_to_c10();
 
 // ATenOpTable stores the implementations for each backend, in addition to
 // an implementation for variables.
