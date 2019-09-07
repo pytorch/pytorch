@@ -239,7 +239,7 @@ class _TestTorchMixin(torchtest):
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
                        'align_to',  # BUILD_NAMEDTENSOR only
-                       'view_names',  # BUILD_NAMEDTENSOR only
+                       'renamed',  # BUILD_NAMEDTENSOR only
                        'names_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
                        'rename',  # BUILD_NAMEDTENSOR only
@@ -1661,6 +1661,9 @@ class _TestTorchMixin(torchtest):
     def test_addcdiv(self):
         def _test_addcdiv(a, alpha, b, c):
             actual = torch.addcdiv(a, alpha, b, c)
+            # implementation of addcdiv downcasts alpha. arithmetic ops don't.
+            if not actual.dtype.is_floating_point:
+                alpha = int(alpha)
             expected = a + (alpha * b) / c
             self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
 

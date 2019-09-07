@@ -46,7 +46,7 @@ bool check_ivalue_equality(const c10::IValue& ivalue1, const c10::IValue& ivalue
   } else if (ivalue1.isBool()) {
     return ivalue1.toBool() == ivalue2.toBool();
   } else if (ivalue1.isString()) {
-    return ivalue1.toString() == ivalue2.toString();
+    return ivalue1.toStringRef() == ivalue2.toStringRef();
   } else if (ivalue1.isTensor()) {
     return check_tensor_equality(ivalue1.toTensor(), ivalue2.toTensor());
   } else {
@@ -82,11 +82,11 @@ TORCH_CHECK(
 CHECK_MODULE_ATTR_EQUALITY = Template("""\
 TORCH_CHECK(
   check_ivalue_equality(
-    ${script_module_prefix}.get_attribute("${attr_name}"), c10::IValue(${cpp_module_prefix}->${attr_name})),
+    ${script_module_prefix}.get_attribute("${python_attr_name}"), c10::IValue(${cpp_module_prefix}->${cpp_attr_name})),
   GENERATE_PARITY_TEST_ERROR_MSG(
-    "`${cpp_module_prefix}->${attr_name}`",
-    ${cpp_module_prefix}->${attr_name},
-    ${script_module_prefix}.get_attribute("${attr_name}")));
+    "`${cpp_module_prefix}->${cpp_attr_name}`",
+    ${cpp_module_prefix}->${cpp_attr_name},
+    ${script_module_prefix}.get_attribute("${python_attr_name}")));
 """)
 
 TORCH_NN_MODULE_TEST_CTOR_ARGS = Template("""\n
@@ -275,21 +275,27 @@ class TestCppApiParity(common.TestCase):
                         script_module_prefix=script_module_prefix,
                         cpp_module_prefix=cpp_module_prefix,
                         buffer_name=name))
+                module_metadata = torch_nn_modules.module_metadata_map[module.__class__.__name__]
                 for name, attr in module.__dict__.items():
                     if name not in TORCH_NN_MODULE_IGNORED_ATTRS:
+                        if name in module_metadata.options_args:
+                            cpp_attr_name = 'options.{}()'.format(name)
+                        else:
+                            cpp_attr_name = name
                         stmts.append(CHECK_MODULE_ATTR_EQUALITY.substitute(
                             script_module_prefix=script_module_prefix,
                             cpp_module_prefix=cpp_module_prefix,
-                            attr_name=name))
+                            python_attr_name=name,
+                            cpp_attr_name=cpp_attr_name))
                 return stmts
 
             device = test_params.device
-            python_module_class = test_params.python_module_class
+            python_constructor = test_params.python_constructor
             python_constructor_args = test_params.python_constructor_args
             example_inputs = test_params.example_inputs
 
             torch.manual_seed(2)
-            module = python_module_class(*python_constructor_args).to(device)
+            module = python_constructor(*python_constructor_args).to(device)
 
             extra_stmts = generate_attr_equality_checks(module)
             assert len(extra_stmts) == test_params.num_attrs_recursive
@@ -300,12 +306,12 @@ class TestCppApiParity(common.TestCase):
 
         def setup_forward_test(test_params):
             device = test_params.device
-            python_module_class = test_params.python_module_class
+            python_constructor = test_params.python_constructor
             python_constructor_args = test_params.python_constructor_args
             example_inputs = test_params.example_inputs
 
             torch.manual_seed(2)
-            module = python_module_class(*python_constructor_args).to(device)
+            module = python_constructor(*python_constructor_args).to(device)
             python_output = module(*example_inputs)
 
             return (([module], device, python_output, example_inputs),
@@ -314,12 +320,12 @@ class TestCppApiParity(common.TestCase):
 
         def setup_backward_test(test_params):
             device = test_params.device
-            python_module_class = test_params.python_module_class
+            python_constructor = test_params.python_constructor
             python_constructor_args = test_params.python_constructor_args
             example_inputs = test_params.example_inputs
 
             torch.manual_seed(2)
-            module = python_module_class(*python_constructor_args).to(device)
+            module = python_constructor(*python_constructor_args).to(device)
             python_output = module(*example_inputs)
             python_output.sum().backward()
             # JIT tracing does not save a module's parameters' gradients into ScriptModule.
@@ -361,9 +367,6 @@ class TestCppApiParity(common.TestCase):
             return module_file.name
 
         def test_methods(test_params):
-            device = test_params.device
-            python_module_class = test_params.python_module_class
-            python_constructor_args = test_params.python_constructor_args
             module_variant_name = test_params.module_variant_name
             example_inputs = test_params.example_inputs
 
@@ -435,10 +438,7 @@ def _compute_module_name(test_params_dict):
 
 def _process_test_params(test_params_dict, module_metadata, device):
     module_name = _compute_module_name(test_params_dict)
-    desc = test_params_dict.get('desc', None)
-    python_module_class = getattr(torch.nn, module_name)
-
-    test_params_dict['constructor'] = test_params_dict.get('constructor', python_module_class)
+    test_params_dict['constructor'] = test_params_dict.get('constructor', getattr(torch.nn, module_name))
     test = common_nn.TestBase(**test_params_dict)
     module_variant_name = test.get_name()[5:] + (('_' + device) if device != 'cpu' else '')
     example_inputs = test._get_input()
@@ -455,13 +455,14 @@ def _process_test_params(test_params_dict, module_metadata, device):
     return TorchNNTestParams(
         module_name=module_name,
         module_variant_name=module_variant_name,
+        python_constructor=test.constructor,
         python_constructor_args=test.constructor_args,
         cpp_constructor_args=test_params_dict.get('cpp_constructor_args'),
         example_inputs=example_inputs,
         has_parity=test_params_dict.get('has_parity', True),
-        python_module_class=python_module_class,
         cpp_sources=module_metadata.cpp_sources,
         num_attrs_recursive=module_metadata.num_attrs_recursive,
+        options_args=module_metadata.options_args,
         device=device,
     )
 
