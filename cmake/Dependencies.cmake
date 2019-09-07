@@ -107,7 +107,7 @@ else()
   set(AT_MKLDNN_ENABLED 0)
   set(AT_MKL_ENABLED 0)
 endif()
-set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL;vecLib")
+set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL;vecLib;FLAME")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
 
 if(BLAS STREQUAL "Eigen")
@@ -893,7 +893,7 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES})
+      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB})
 
     # Note [rocblas & rocfft cmake bug]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -941,8 +941,8 @@ if(USE_CUDA)
 endif()
 
 if(USE_GLOO)
-  if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
-    message(WARNING "Gloo can only be used on Linux.")
+  if(MSVC)
+    message(WARNING "Gloo can not be used on Windows.")
     caffe2_update_option(USE_GLOO OFF)
   elseif(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(WARNING "Gloo can only be used on 64-bit systems.")
@@ -1035,7 +1035,7 @@ if (USE_ZSTD)
 endif()
 
 # ---[ Onnx
-if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
   endif()
