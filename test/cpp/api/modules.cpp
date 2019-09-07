@@ -404,7 +404,7 @@ TEST_F(ModulesTest, PrettyPrintConv) {
 TEST_F(ModulesTest, PrettyPrintAvgPool) {
   ASSERT_EQ(
       c10::str(AvgPool1d(5)),
-      "torch::nn::AvgxPool1d(kernel_size=5, stride=5)");
+      "torch::nn::AvgPool1d(kernel_size=5, stride=5)");
   ASSERT_EQ(
       c10::str(AvgPool2d(5)),
       "torch::nn::AvgPool2d(kernel_size=[5, 5], stride=[5, 5])");
