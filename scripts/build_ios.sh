@@ -17,7 +17,7 @@ cd $BUILD_ROOT
 
 CMAKE_ARGS=()
 
-if [ -n "${BUILD_PYTORCH_MOBILE}" ]; then 
+if [ -n "${BUILD_PYTORCH_MOBILE:-}" ]; then 
   CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
   CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
   CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
