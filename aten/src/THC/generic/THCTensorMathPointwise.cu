@@ -3,9 +3,7 @@
 #else
 
 #include <ATen/MemoryOverlap.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 void THCTensor_(cbitand)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {
@@ -284,47 +282,6 @@ void THCTensor_(sigmoid)(THCState* state, THCTensor* self_, THCTensor* src) {
     if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src, TensorSigmoidOp<scalar_t>())) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
-  }
-
-  THCudaCheck(cudaGetLastError());
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(self_, src);
-#endif
-}
-
-void THCTensor_(digamma)(THCState* state, THCTensor* self_, THCTensor* src) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  if (self_ != src) {
-    THCTensor_(resizeAs)(state, self_, src);
-  }
-  if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src, TensorDigammaOp<scalar_t, accreal>())) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(self_, src);
-#endif
-}
-
-void THCTensor_(polygamma)(THCState* state, THCTensor* self_, int64_t n, THCTensor* src) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  if (self_ != src) {
-    THCTensor_(resizeAs)(state, self_, src);
-  }
-  switch (n) {
-    case 0:
-      if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src, TensorDigammaOp<scalar_t, accreal>())) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-      break;
-    case 1:
-      if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src, TensorTrigammaOp<scalar_t, accreal>())) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-      break;
-    default:
-      THError("polygamma(n,x) is not implemented for n>=2");
   }
 
   THCudaCheck(cudaGetLastError());
