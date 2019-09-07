@@ -3623,9 +3623,15 @@
 
 - func: fmod_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: fmod_
+    CUDA: fmod_
 
 - func: fmod_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: fmod_
+    CUDA: fmod_
 
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
@@ -4284,14 +4290,26 @@
     CUDA: _histc_cuda
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: fmod_out
+    CUDA: fmod_out
 
 - func: fmod.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: fmod
+    CUDA: fmod
 
 - func: fmod.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: fmod_out
+    CUDA: fmod_out
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: fmod
+    CUDA: fmod
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
