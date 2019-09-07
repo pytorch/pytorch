@@ -1082,6 +1082,11 @@ jobs:
 
             #archive the static libraries
             cd ${PROJ_ROOT}/build_ios/install/lib
+            
+            #for testing
+            rm -rf libprotobuf-lite.a
+            rm -rf libpthreadpool.a
+
             libtool -static *.a -o libtorch_arm64.a
 
             #store the binary
