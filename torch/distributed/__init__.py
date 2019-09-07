@@ -14,14 +14,14 @@ if is_available() and not (torch._C._c10d_init() and torch._C._rpc_init() and to
 
 
 if is_available():
-    from .distributed_c10d import *  # noqa: F401
+    from .distributed_c10d import *
     # Variables prefixed with underscore are not auto imported
     # See the comment in `distributed_c10d.py` above `_backend` on why we expose
     # this.
-    from .distributed_c10d import _backend  # noqa: F401
+    from .distributed_c10d import _backend
     if sys.version_info >= (3, 0):
         from .rpc import _init_rpc
-        from .rpc import *  # noqa: F401
+        from .rpc import *
 
         def init_model_parallel(worker_name, rpc_backend=RpcBackend.PROCESS_GROUP):
             r"""

@@ -31,8 +31,8 @@ import warnings
 from collections import OrderedDict, namedtuple
 
 # These are imported so users can access them from the `torch.jit` module
-from torch._jit_internal import Final, _overload, _overload_method  # noqa: F401
-from torch._jit_internal import ignore, export, unused  # noqa: F401
+from torch._jit_internal import Final, _overload, _overload_method
+from torch._jit_internal import ignore, export, unused
 
 if sys.version_info[0] > 2:
     import pathlib

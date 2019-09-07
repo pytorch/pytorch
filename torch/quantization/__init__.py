@@ -1,9 +1,9 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-from .quantize import *  # noqa: F401
-from .observer import *  # noqa: F401
-from .QConfig import *  # noqa: F401
-from .fake_quantize import *  # noqa: F401
-from .fuse_modules import fuse_modules  # noqa: F401
+from .quantize import *
+from .observer import *
+from .QConfig import *
+from .fake_quantize import *
+from .fuse_modules import fuse_modules
 
 def default_eval_fn(model, calib_data):
     r"""
