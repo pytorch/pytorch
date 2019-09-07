@@ -870,6 +870,43 @@ Example::
              -0.5790,  0.1497]])
 """.format(**common_args))
 
+add_docstr(torch.cdist,
+           r"""
+cdist(x1, x2, p=2) -> Tensor
+
+Computes the p-norm distance between each pair of the two collections of row vectors.
+
+If x1 has shape :math:`P \times M` and x2 has shape :math:`R \times M` then the 
+output will have shape :math:`P \times R`.
+
+This function is equivalent to `scipy.spatial.distance.cdist(input,'minkowski', p=p)` 
+if :math:`p \in (0, \infty)`. When :math:`p = 0` it is equivalent to 
+`scipy.spatial.distance.cdist(input, 'hamming') * M`. When :math:`p = \infty`, the closest 
+scipy function is `scipy.spatial.distance.cdist(xn, lambda x, y: np.abs(x - y).max())`.
+
+Args:
+    x1 (Tensor): input tensor of shape :math:`P \times M`.
+    x2 (Tensor): input tensor of shape :math:`R \times M`.
+    p: p value for the p-norm distance to calculate between each vector pair
+        :math:`\in [0, \infty]`.
+
+Example::
+
+    >>> a = torch.tensor([[0.9041,  0.0196], [-0.3108, -2.4423], [-0.4821,  1.059]])
+    >>> a
+    tensor([[ 0.9041,  0.0196],
+            [-0.3108, -2.4423],
+            [-0.4821,  1.0590]])
+    >>> b = torch.tensor([[-2.1763, -0.4713], [-0.6986,  1.3702]])
+    >>> b
+    tensor([[-2.1763, -0.4713],
+            [-0.6986,  1.3702]])
+    >>> torch.cdist(a, b, p=2)
+    tensor([[3.1193, 2.0959],
+            [2.7138, 3.8322],
+            [2.2830, 0.3791]])
+""".format(**common_args))
+
 add_docstr(torch.ceil,
            r"""
 ceil(input, out=None) -> Tensor
@@ -2566,8 +2603,7 @@ add_docstr(torch.logical_xor,
            r"""
 logical_xor(input, other, out=None) -> Tensor
 
-Computes the element-wise logical XOR of the given input tensors. Zeros are treated as ``False`` and nonzeros are
-treated as ``True``.
+Computes the element-wise logical XOR of the given input tensors. Both input tensors must have the bool dtype.
 
 Args:
     {input}
@@ -2578,16 +2614,6 @@ Example::
 
     >>> torch.logical_xor(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
     tensor([ False, False,  True])
-    >>> a = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
-    >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
-    >>> torch.logical_xor(a, b)
-    tensor([ True,  True, False, False])
-    >>> torch.logical_xor(a.double(), b.double())
-    tensor([ True,  True, False, False])
-    >>> torch.logical_xor(a.double(), b)
-    tensor([ True,  True, False, False])
-    >>> torch.logical_xor(a, b, out=torch.empty(4, dtype=torch.int8))
-    tensor([1, 1, 0, 0], dtype=torch.int8)
 """.format(**common_args))
 
 add_docstr(torch.logspace,
@@ -2753,9 +2779,14 @@ Returns the LU solve of the linear system :math:`Ax = b` using the partially piv
 LU factorization of A from :meth:`torch.lu`.
 
 Arguments:
-    input (Tensor): the RHS tensor of size :math:`(b, m, k)`
-    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu` of size :math:`(b, m, m)`
-    LU_pivots (IntTensor): the pivots of the LU factorization from :meth:`torch.lu` of size :math:`(b, m)`
+    b (Tensor): the RHS tensor of size :math:`(*, m, k)`, where :math:`*`
+                is zero or more batch dimensions.
+    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu` of size :math:`(*, m, m)`,
+                       where :math:`*` is zero or more batch dimensions.
+    LU_pivots (IntTensor): the pivots of the LU factorization from :meth:`torch.lu` of size :math:`(*, m)`,
+                           where :math:`*` is zero or more batch dimensions.
+                           The batch dimensions of :attr:`LU_pivots` must be equal to the batch dimensions of
+                           :attr:`LU_data`.
     {out}
 
 Example::
@@ -4683,8 +4714,7 @@ Args:
         Default: if None, uses the current device for the default tensor type
         (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
         for CPU tensor types and the current CUDA device for CUDA tensor types.
-    requires_grad (bool, optional): If autograd should record operations on the
-        returned tensor. Default: ``False``.
+    {requires_grad}
 
 
 Example::
@@ -4733,7 +4763,7 @@ Example::
            size=(1, 2), nnz=0, layout=torch.sparse_coo)
 
 .. _torch.sparse: https://pytorch.org/docs/stable/sparse.html
-""")
+""".format(**factory_common_args))
 
 add_docstr(torch.sqrt,
            r"""
@@ -6017,20 +6047,20 @@ Example::
 
 add_docstr(torch.where,
            r"""
-.. function:: where(condition, input, other) -> Tensor
+.. function:: where(condition, x, y) -> Tensor
 
-Return a tensor of elements selected from either :attr:`input` or :attr:`other`, depending on :attr:`condition`.
+Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
 
 The operation is defined as:
 
 .. math::
     \text{out}_i = \begin{cases}
-        \text{input}_i & \text{if } \text{condition}_i \\
-        \text{other}_i & \text{otherwise} \\
+        \text{x}_i & \text{if } \text{condition}_i \\
+        \text{y}_i & \text{otherwise} \\
     \end{cases}
 
 .. note::
-    The tensors :attr:`condition`, :attr:`input`, :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+    The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Arguments:
     condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
@@ -6038,7 +6068,7 @@ Arguments:
     y (Tensor): values selected at indices where :attr:`condition` is ``False``
 
 Returns:
-    Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`input`, :attr:`other`
+    Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
 
 Example::
 

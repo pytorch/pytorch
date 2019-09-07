@@ -17,6 +17,9 @@ DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(fmod_stub);
 DEFINE_DISPATCH(logical_xor_stub);
 
+static constexpr char alpha_mismatch_err[] =
+  "For integral input tensors, argument alpha must not be a floating point number.";
+
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
     if (self.is_sparse()) {
@@ -29,8 +32,11 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     AT_ERROR("add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
   }
   auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_internal_overlap=*/true);
+    /*check_mem_overlap=*/true);
+  TORCH_CHECK(! alpha.isBoolean() || iter.dtype() == ScalarType::Bool, "Boolean alpha only supported for boolean results");
+  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(true), alpha_mismatch_err);
   add_stub(iter.device_type(), iter, alpha);
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
 }
 
@@ -41,6 +47,8 @@ Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
     return native::add_out(result, self, other, alpha);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
+  TORCH_CHECK(! alpha.isBoolean() || iter.dtype() == ScalarType::Bool, "Boolean alpha only supported for boolean results");
+  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(true), alpha_mismatch_err);
   add_stub(iter.device_type(), iter, alpha);
   return iter.output();
 }
@@ -58,7 +66,7 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
     return at::_sparse_div_zerodim_out(result, self, other);
   }
   auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_internal_overlap=*/true);
+    /*check_mem_overlap=*/true);
   div_stub(iter.device_type(), iter);
   return result;
 }
@@ -83,7 +91,7 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
     return at::_sparse_mul_out(result, self, other);
   }
   auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_internal_overlap=*/true);
+    /*check_mem_overlap=*/true);
   mul_stub(iter.device_type(), iter);
   return result;
 }
@@ -129,8 +137,10 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     AT_ERROR("sub(sparse, dense) is not supported. Use sub(dense, sparse) instead.");
   }
   auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_internal_overlap=*/true);
+    /*check_mem_overlap=*/true);
+  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(false), alpha_mismatch_err);
   sub_stub(iter.device_type(), iter, alpha);
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
 }
 
@@ -142,6 +152,7 @@ Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
     return native::sub_out(result, self, other, alpha);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
+  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(false), alpha_mismatch_err);
   sub_stub(iter.device_type(), iter, alpha);
   return iter.output();
 }
@@ -243,24 +254,24 @@ Tensor& fmod_out(Tensor& result, const Tensor& self, Scalar other) {
 }
 
 Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TensorIterator iter;
-  iter.dont_compute_common_dtype();
-  iter.check_and_add_output(result);
-  iter.add_input(self);
-  iter.add_input(other);
-  iter.build();
+  TORCH_CHECK(self.scalar_type() == kBool && other.scalar_type() == kBool,
+              "logical_xor currently only supports bool tensors.");
+  TORCH_CHECK(result.scalar_type() == kBool,
+              "The output tensor of logical_xor must be a bool tensor.");
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_internal_overlap=*/true);
   logical_xor_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor logical_xor(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options().dtype(kBool));
+  Tensor result = at::empty({0}, self.options());
   at::logical_xor_out(result, self, other);
   return result;
 }
 
 Tensor& logical_xor_(Tensor& self, const Tensor& other) {
-  return at::logical_xor_out(self, self, other);
+  return native::logical_xor_out(self, self, other);
 }
 
 }

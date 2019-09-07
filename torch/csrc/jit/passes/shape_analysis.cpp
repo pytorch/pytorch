@@ -38,7 +38,7 @@ bool isValidArgumentForRunning(Value* v) {
   // allow constants
   if (toIValue(v))
     return true;
-  if (ProfiledTensorTypePtr tt = v->type()->cast<ProfiledTensorType>()) {
+  if (TensorTypePtr tt = v->type()->cast<TensorType>()) {
     if (!tt->scalarType()) {
       return false;
     }
@@ -158,7 +158,7 @@ class ShapePropagator {
     if (auto iv = toIValue(v)) {
       return *iv;
     }
-    if (ProfiledTensorTypePtr type = type_->cast<ProfiledTensorType>()) {
+    if (TensorTypePtr type = type_->cast<TensorType>()) {
       if (type->isComplete()) {
         auto attype = type->device()->is_cpu() ? at::CPU(*type->scalarType())
                                                : at::CUDA(*type->scalarType());
@@ -185,10 +185,10 @@ class ShapePropagator {
   // for each node in the schema with type Tensor, extract the T type
   // returns c10::nullopt if any Tensor in the schema does not have a known
   // shape ignores non-tensor in the list of inputs
-  c10::optional<std::vector<ProfiledTensorTypePtr>> gatherTensorTypes(
+  c10::optional<std::vector<TensorTypePtr>> gatherTensorTypes(
       Node* node,
       bool complete = false) {
-    std::vector<ProfiledTensorTypePtr> tensor_types;
+    std::vector<TensorTypePtr> tensor_types;
 
     auto& schema = node->schema();
     auto& args = schema.arguments();
@@ -201,7 +201,7 @@ class ShapePropagator {
       if (args[i].type()->isSubtypeOf(ListType::ofTensors())) {
         return c10::nullopt;
       } else if (args[i].type()->isSubtypeOf(TensorType::get())) {
-        if (auto type = node->input(i)->type()->cast<ProfiledTensorType>()) {
+        if (auto type = node->input(i)->type()->cast<TensorType>()) {
           if (complete && !type->isComplete()) {
             return c10::nullopt;
           }
@@ -213,8 +213,60 @@ class ShapePropagator {
         continue;
       }
     }
-
     return tensor_types;
+  }
+
+  c10::ScalarType unionScalarTypes(c10::ScalarType original, c10::ScalarType next) {
+    if (original == c10::ScalarType::Undefined) {
+      return next;
+    } else {
+      return c10::promoteTypes(original, next);
+    }
+  }
+
+  // Promotes result types for arithmetic operations on Tensor operands using
+  // new type promotion logic. See tensor_attributes.rst for details.
+  // This doesn't handle the case of arithmetic ops with Scalar arguments (when
+  // `Tensor.getUnsafeTensorImpl()->is_wrapped_nubmer()` would return true)
+  c10::optional<c10::ScalarType> getPromotedTypeForArithmeticOp(Node *node) {
+    c10::ScalarType dimmed = c10::ScalarType::Undefined;
+    c10::ScalarType zerodim = c10::ScalarType::Undefined;
+    // binary arithmetic ops, more than 2 args is alpha.
+    for (size_t i = 0 ; i < 2 ; i++ ) {
+      auto dtt = node->inputs()[i]->type()->expect<TensorType>();
+      auto inputDtype = dtt->scalarType();
+      if (!dtt || !inputDtype) {
+        return c10::nullopt;
+      }
+      if (dtt->dim() && *dtt->dim() > 0) {
+        dimmed = unionScalarTypes(dimmed, *inputDtype);
+      } else if (!isFloatingType(dimmed)) {
+        // if no dimensions
+        zerodim = unionScalarTypes(zerodim, *inputDtype);
+      }
+    }
+    // if a tensor with dimensions is already of the highest category, don't
+    // need to check zero-dim tensors.
+    if (isFloatingType(dimmed)) {
+      return dimmed;
+    }
+    // int_tensor * zero_dim_floating -> floating_tensor
+    if (isIntegralType(dimmed, false) && isFloatingType(zerodim) ) {
+      return zerodim;
+    }
+    // bool_tensor * non_bool_scalar -> non_bool_tensor
+    if (c10::ScalarType::Bool == dimmed && c10::ScalarType::Undefined != zerodim) {
+      return zerodim;
+    }
+    // types of dimensioned tensors generally take precedence over zero-dim
+    // tensors if not promoting due to category. e.g.:
+    // int_tensor * long -> int_tensor
+    if (c10::ScalarType::Undefined != dimmed) {
+      return dimmed;
+    }
+
+    // no dimmed tensors. e.g. zero_dim_tensor + zero_dim_tensor.
+    return zerodim;
   }
 
   bool mergeTypes(
@@ -236,14 +288,14 @@ class ShapePropagator {
 
   void broadcastBinary(
       Node* node,
-      std::vector<ProfiledTensorTypePtr>& types,
+      std::vector<TensorTypePtr>& types,
       size_t idx1,
       size_t idx2) {
     auto expected_size = at::infer_size(
         *types[idx1]->sizes().concrete_sizes(),
         *types[idx2]->sizes().concrete_sizes());
     auto broadcast = [&](size_t input_idx) {
-      ProfiledTensorTypePtr input_type = types.at(input_idx);
+      TensorTypePtr input_type = types.at(input_idx);
       if (input_type->sizes() == expected_size)
         return;
       auto graph = node->owningGraph();
@@ -260,8 +312,8 @@ class ShapePropagator {
     };
     broadcast(idx1);
     broadcast(idx2);
-    types[0] = node->inputs().at(idx1)->type()->expect<ProfiledTensorType>();
-    types[1] = node->inputs().at(idx2)->type()->expect<ProfiledTensorType>();
+    types[0] = node->inputs().at(idx1)->type()->expect<TensorType>();
+    types[1] = node->inputs().at(idx2)->type()->expect<TensorType>();
   }
 
   OperatorSet cannot_propagate_shape_by_running_it = {
@@ -369,13 +421,12 @@ class ShapePropagator {
   void PropagateCatShape(Node* cat_node) {
     static const auto propagate_complete =
         [this](Node* node, at::ArrayRef<Value*> tensors) -> bool {
-      auto input_types = fmap(tensors, [](Value* v) {
-        return v->type()->cast<ProfiledTensorType>();
-      });
+      auto input_types =
+          fmap(tensors, [](Value* v) { return v->type()->cast<TensorType>(); });
       if (!std::all_of(
               input_types.begin(),
               input_types.end(),
-              [](const ProfiledTensorTypePtr& tp) {
+              [](const TensorTypePtr& tp) {
                 return tp != nullptr && tp->isComplete();
               })) {
         return false;
@@ -407,7 +458,7 @@ class ShapePropagator {
     static const auto propagate = [](Node* node,
                                      at::ArrayRef<Value*> tensors) -> bool {
       for (Value* v : tensors) {
-        if (auto type = v->type()->cast<ProfiledTensorType>()) {
+        if (auto type = v->type()->cast<TensorType>()) {
           node->output()->setType(type->dimensionedOnly());
           return true;
         }
@@ -463,7 +514,7 @@ class ShapePropagator {
         default_device = inp->toDevice();
       }
     }
-    node->output()->setType(ProfiledTensorType::create(
+    node->output()->setType(TensorType::create(
         default_type, default_device, dims, /*requires_grad=*/c10::nullopt));
   }
 
@@ -535,10 +586,10 @@ class ShapePropagator {
         TypePtr typ = node->input()->type();
         if (typ->isSubtypeOf(IntType::get()) ||
             typ->isSubtypeOf(BoolType::get())) {
-          node->output()->setType(ProfiledTensorType::create(
+          node->output()->setType(TensorType::create(
               at::kLong, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
         } else if (node->input()->type()->isSubtypeOf(FloatType::get())) {
-          node->output()->setType(ProfiledTensorType::create(
+          node->output()->setType(TensorType::create(
               at::kDouble, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
         }
         return;
@@ -591,7 +642,7 @@ class ShapePropagator {
       }
       case prim::ConstantChunk: {
         Value* tensor = node->input();
-        if (auto type = tensor->type()->cast<ProfiledTensorType>()) {
+        if (auto type = tensor->type()->cast<TensorType>()) {
           type = type->dimensionedOnly();
           for (Value* output : node->outputs()) {
             output->setType(type);
@@ -684,13 +735,13 @@ class ShapePropagator {
 
   bool PropagateTensorShapeOnNode(Node* node, bool insert_expands) {
     static const auto broadcast =
-        [](std::vector<ProfiledTensorTypePtr>& tensor_types,
-           size_t arg_for_type) -> ProfiledTensorTypePtr {
+        [](std::vector<TensorTypePtr>& tensor_types,
+           c10::optional<at::ScalarType> t) -> TensorTypePtr {
       if (tensor_types.size() == 1) {
-        return tensor_types[0]->dimensionedOnly();
+        return tensor_types[0]->dimensionedOnly()->withScalarType(t);
       }
       AT_ASSERT(!tensor_types.empty());
-      auto any_type = tensor_types[arg_for_type];
+      auto any_type = tensor_types[0];
       auto max_dims = any_type->dim();
       for (auto& type : tensor_types) {
         if (!max_dims || !type->dim()) {
@@ -699,14 +750,14 @@ class ShapePropagator {
           max_dims = std::max(*max_dims, *type->dim());
         }
       }
-      return ProfiledTensorType::create(
-          any_type->scalarType(),
+      return TensorType::create(
+          t,
           any_type->device(),
           max_dims,
           /*requires_grad=*/c10::nullopt);
     };
 
-    using type_vec_t = std::vector<ProfiledTensorTypePtr>;
+    using type_vec_t = std::vector<TensorTypePtr>;
     // Formula is expected to return a vector of length equal to the number of
     // tensor outputs of the node, or an empty vector which implies that it
     // failed to propagate.
@@ -815,9 +866,32 @@ class ShapePropagator {
             "aten::zeros_like(Tensor self) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          auto input_type =
-              node->input(0)->type()->cast<ProfiledTensorType>();
-          return input_type ? type_vec_t{input_type->dimensionedOnly()} : type_vec_t{};
+          auto input_type = node->input(0)->type()->cast<TensorType>();
+          return input_type ? type_vec_t{input_type->dimensionedOnly()}
+                            : type_vec_t{};
+        }};
+
+    // Requirements:
+    //   dims           : broadcast all tensor args
+    //   scalar type    : promoted from input dtypes
+    //   device         : always matching and preserved
+    //   tensor inputs  : *
+    //   tensor outputs : 1
+    static const register_formula_for broadcasting_ops_arithmetic{
+        {
+            // Tensor-Tensor operators
+            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+            "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+            "aten::mul(Tensor self, Tensor other) -> Tensor",
+            "aten::div(Tensor self, Tensor other) -> Tensor",
+        },
+        [this](Node* node) -> type_vec_t {
+          if (auto maybe_tensor_types = gatherTensorTypes(node)) {
+            AT_ASSERT(maybe_tensor_types->size() >= 2);
+            auto dtype = getPromotedTypeForArithmeticOp(node);
+            return {broadcast(*maybe_tensor_types, dtype)};
+          }
+          return {};
         }};
 
     // Requirements:
@@ -828,11 +902,6 @@ class ShapePropagator {
     //   tensor outputs : 1
     static const register_formula_for broadcasting_ops{
         {
-            // Tensor-Tensor operators
-            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-            "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-            "aten::mul(Tensor self, Tensor other) -> Tensor",
-            "aten::div(Tensor self, Tensor other) -> Tensor",
             "aten::pow(Tensor self, Tensor exponent) -> Tensor",
             "aten::fmod(Tensor self, Tensor other) -> Tensor",
             "aten::remainder(Tensor self, Tensor other) -> Tensor",
@@ -867,7 +936,8 @@ class ShapePropagator {
                 first_scalar_type) {
               arg_for_type = 1;
             }
-            return {broadcast(*maybe_tensor_types, arg_for_type)};
+            auto t = (*maybe_tensor_types)[arg_for_type]->scalarType();
+            return {broadcast(*maybe_tensor_types, *t)};
           }
           return {};
         }};
@@ -880,20 +950,50 @@ class ShapePropagator {
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
-            return {broadcast(*maybe_tensor_types, 0)};
+            auto dtype = (*maybe_tensor_types)[0]->scalarType();
+            if (!dtype) {
+              return {};
+            }
+            return {broadcast(*maybe_tensor_types, *dtype)};
           }
           return {};
         }};
 
-    // NB: we always take the scalar type of the Tensor
-    static const register_formula_for broadcasting_tensor_scalar_ops{
+    static const register_formula_for broadcasting_tensor_scalar_ops_arithmetic{
         {
-
             // Tensor-Scalar operators
             "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
             "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
             "aten::mul(Tensor self, Scalar other) -> Tensor",
             "aten::div(Tensor self, Scalar other) -> Tensor",
+          },
+          [this](Node* node) -> type_vec_t {
+            if (auto maybe_tensor_types = gatherTensorTypes(node)) {
+              auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
+              auto second_scalar_type = tryScalarTypeFromJitType(node->inputs()[1]->type());
+              if (!first_scalar_type || !second_scalar_type) {
+                return {};
+              }
+              if (isIntegralType(*first_scalar_type, false) && isFloatingType(*second_scalar_type) )
+              {
+                auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
+                return {broadcast(*maybe_tensor_types, default_dtype)};
+              }
+              if (c10::ScalarType::Bool == *first_scalar_type &&
+                  c10::ScalarType::Bool != *second_scalar_type)
+              {
+                  auto result_type = c10::promoteTypes(*first_scalar_type, *second_scalar_type);
+                  return {broadcast(*maybe_tensor_types, result_type)};
+              }
+              return {broadcast(*maybe_tensor_types, first_scalar_type)};
+            }
+            return {};
+          }};
+
+    // NB: we always take the scalar type of the Tensor
+    static const register_formula_for broadcasting_tensor_scalar_ops{
+        {
+
             "aten::pow(Tensor self, Scalar exponent) -> Tensor",
             "aten::fmod(Tensor self, Scalar other) -> Tensor",
             "aten::remainder(Tensor self, Scalar other) -> Tensor",
@@ -911,7 +1011,7 @@ class ShapePropagator {
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
-            return {broadcast(*maybe_tensor_types, 0)};
+            return {broadcast(*maybe_tensor_types, (*maybe_tensor_types)[0]->scalarType())};
           }
           return {};
         }};
@@ -924,15 +1024,14 @@ class ShapePropagator {
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
-            return {broadcast(*maybe_tensor_types, 1)};
+            return {broadcast(*maybe_tensor_types, (*maybe_tensor_types)[1]->scalarType())};
           }
           return {};
         }};
 
-    static const auto any_tensor_type =
-        [](Node* node) -> ProfiledTensorTypePtr {
+    static const auto any_tensor_type = [](Node* node) -> TensorTypePtr {
       for (Value* input : node->inputs()) {
-        if (auto type = input->type()->cast<ProfiledTensorType>()) {
+        if (auto type = input->type()->cast<TensorType>()) {
           if (type->dim().has_value()) {
             return type;
           }
@@ -983,8 +1082,7 @@ class ShapePropagator {
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
-            return {
-                broadcast(*maybe_tensor_types, 0)->withScalarType(at::kBool)};
+            return {broadcast(*maybe_tensor_types, at::kBool)};
           }
           return {};
         }};
@@ -1035,8 +1133,7 @@ class ShapePropagator {
             "aten::prelu(Tensor self, Tensor weight) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto type =
-                  node->input(0)->type()->cast<ProfiledTensorType>()) {
+          if (auto type = node->input(0)->type()->cast<TensorType>()) {
             return {type->dimensionedOnly()};
           }
           return {};
@@ -1065,8 +1162,7 @@ class ShapePropagator {
             "aten::any(Tensor self) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto type =
-                  node->input(0)->type()->cast<ProfiledTensorType>()) {
+          if (auto type = node->input(0)->type()->cast<TensorType>()) {
             return {type->withDim(0)};
           }
           return {};
@@ -1086,7 +1182,7 @@ class ShapePropagator {
       },
       [](Node* node) -> type_vec_t {
         at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
-        if (auto type = node->input(0)->type()->cast<ProfiledTensorType>()) {
+        if (auto type = node->input(0)->type()->cast<TensorType>()) {
           auto ret = type->withDim(0);
           if(maybe_dtype_option && !maybe_dtype_option->isNone()) {
             return {ret->withScalarType(maybe_dtype_option->toScalarType())};
@@ -1105,51 +1201,53 @@ class ShapePropagator {
     //   tensor outputs : 1
     // Additionally:
     //   - First input should be the only tensor input
-    static const register_formula_for all_reduce_ops_with_integer_upcast_and_dtype{
-        {
-            "aten::sum(Tensor self, *, int? dtype) -> Tensor",
-            "aten::prod(Tensor self, *, int? dtype) -> Tensor",
-        },
-        [](Node* node) -> type_vec_t {
-          if (auto type =
-                  node->input(0)->type()->cast<ProfiledTensorType>()) {
-            type = type->withDim(0);
-            at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
-            if( maybe_dtype_option && ! maybe_dtype_option->isNone() ) {
-              return {type->withScalarType(maybe_dtype_option->toScalarType())};
-            }
-            if (type->scalarType()) {
-              return { at::isFloatingType(*type->scalarType())
-                        ? type
-                        : type->withScalarType(at::kLong)};
-            } else {
-              return { type };
-            }
-          }
-          return {};
-        }};
-
-    static const auto reduce_op_handler =
-      [](Node* node,
-        int64_t num_reduced_dim = 0,
-        bool upcast_integer = false,
-        c10::optional<IValue> opt_dtype = c10::nullopt) -> type_vec_t {
-          if(auto type = node->input(0)->type()->cast<ProfiledTensorType>()) {
-            if (!type->scalarType() || !type->dim()) {
+    static const register_formula_for
+        all_reduce_ops_with_integer_upcast_and_dtype{
+            {
+                "aten::sum(Tensor self, *, int? dtype) -> Tensor",
+                "aten::prod(Tensor self, *, int? dtype) -> Tensor",
+            },
+            [](Node* node) -> type_vec_t {
+              if (auto type = node->input(0)->type()->cast<TensorType>()) {
+                type = type->withDim(0);
+                at::optional<IValue> maybe_dtype_option =
+                    node->get(attr::dtype);
+                if (maybe_dtype_option && !maybe_dtype_option->isNone()) {
+                  return {
+                      type->withScalarType(maybe_dtype_option->toScalarType())};
+                }
+                if (type->scalarType()) {
+                  return {at::isFloatingType(*type->scalarType())
+                              ? type
+                              : type->withScalarType(at::kLong)};
+                } else {
+                  return {type};
+                }
+              }
               return {};
-            }
-            if( opt_dtype && ! opt_dtype->isNone() ) {
-              type = type->withScalarType(opt_dtype->toScalarType());
-            } else if(upcast_integer && !at::isFloatingType(*type->scalarType())) {
-              type = type->withScalarType(at::kLong);
-            }
-            if (*type->dim() >= num_reduced_dim && num_reduced_dim > 0) {
-              return {type->withDim(*type->dim() - num_reduced_dim)};
-            } else {
-              return {type};
-            }
-          }
+            }};
+
+    static const auto reduce_op_handler = [](Node* node,
+                                             int64_t num_reduced_dim = 0,
+                                             bool upcast_integer = false,
+                                             c10::optional<IValue> opt_dtype =
+                                                 c10::nullopt) -> type_vec_t {
+      if (auto type = node->input(0)->type()->cast<TensorType>()) {
+        if (!type->scalarType() || !type->dim()) {
           return {};
+        }
+        if (opt_dtype && !opt_dtype->isNone()) {
+          type = type->withScalarType(opt_dtype->toScalarType());
+        } else if (upcast_integer && !at::isFloatingType(*type->scalarType())) {
+          type = type->withScalarType(at::kLong);
+        }
+        if (*type->dim() >= num_reduced_dim && num_reduced_dim > 0) {
+          return {type->withDim(*type->dim() - num_reduced_dim)};
+        } else {
+          return {type};
+        }
+      }
+      return {};
     };
 
     static const auto multidim_reduce_with_keepdim =
@@ -1175,8 +1273,7 @@ class ShapePropagator {
             "aten::argmin(Tensor self, int? dim, bool keepdim) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto type =
-                  node->input(0)->type()->cast<ProfiledTensorType>()) {
+          if (auto type = node->input(0)->type()->cast<TensorType>()) {
             if (node->input(1)->type()->kind() == c10::TypeKind::NoneType) {
               return {type->withDim(0)};
             } else {
@@ -1300,7 +1397,7 @@ class ShapePropagator {
           (maybe_dtype_option->isNone() ? at::kDouble
                                         : maybe_dtype_option->toScalarType());
 
-      return {ProfiledTensorType::create(
+      return {TensorType::create(
           dtype, device, dim, /*requires_grad=*/c10::nullopt)};
     };
 
@@ -1324,9 +1421,8 @@ class ShapePropagator {
             "aten::zeros_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto type = node->namedInput(attr::self)
-                              ->type()
-                              ->cast<ProfiledTensorType>()) {
+          if (auto type =
+                  node->namedInput(attr::self)->type()->cast<TensorType>()) {
             if (type->dim()) {
               return factory_with_ndim(node, *type->dim());
             }
@@ -1398,9 +1494,8 @@ class ShapePropagator {
             "aten::_cast_Short(Tensor self, bool non_blocking) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto type = node->namedInput(attr::self)
-                              ->type()
-                              ->cast<ProfiledTensorType>()) {
+          if (auto type =
+                  node->namedInput(attr::self)->type()->cast<TensorType>()) {
             return {type->withScalarType(get_cast_scalar_type(node))};
           }
           return {};
@@ -1428,7 +1523,7 @@ class ShapePropagator {
     // This section implements shape prop for an assorted set of nodes that only
     // need partial information about their input types.
     const auto input_type = [node](size_t index) {
-      auto result = node->input(index)->type()->cast<ProfiledTensorType>();
+      auto result = node->input(index)->type()->cast<TensorType>();
       if (result) {
         result = result->dimensionedOnly();
       }
@@ -1562,12 +1657,11 @@ class ShapePropagator {
 
     // The code below implements formulas that need type information for all
     // their tensor inputs, and have exactly one output.
-    std::vector<ProfiledTensorTypePtr> tensor_types;
+    std::vector<TensorTypePtr> tensor_types;
     static const auto reshape_prop =
         [](Node* node,
            Symbol shape_input,
-           const std::vector<ProfiledTensorTypePtr>& tensor_types)
-        -> ProfiledTensorTypePtr {
+           const std::vector<TensorTypePtr>& tensor_types) -> TensorTypePtr {
       if (auto list_size = determineListSize(node->namedInput(shape_input))) {
         return tensor_types.at(0)->withDim(*list_size);
       }
@@ -1593,7 +1687,7 @@ class ShapePropagator {
         return reshape_prop(node, attr::size, tensor_types);
       } else if (node->matches("aten::as_tensor(Tensor data, *, ScalarType? dtype, Device? device) -> Tensor")) {
         TypePtr input_type = node->inputs().at(0)->type();
-        if (auto type = input_type->cast<ProfiledTensorType>()) {
+        if (auto type = input_type->cast<TensorType>()) {
           if (type->scalarType() && type->device()) {
             at::ScalarType default_type = *type->scalarType();
             c10::Device default_device = *type->device();
@@ -1615,7 +1709,7 @@ class ShapePropagator {
                 default_device = inp->toDevice();
               }
             }
-            node->output()->setType(ProfiledTensorType::create(
+            node->output()->setType(TensorType::create(
                 default_type,
                 default_device,
                 type->dim(),
@@ -1665,7 +1759,7 @@ class ShapePropagator {
         } else {
           // Batched matrix multiply (possibly with squeeze + unsqueeze if one
           // argument is 1D)
-          auto type = broadcast(tensor_types, 0);
+          auto type = broadcast(tensor_types, tensor_types[0]->scalarType());
           if (dim1 == 1 ||
               dim2 == 1) {
             type = type->withDim(type->dim().value() - 1);
@@ -1722,7 +1816,7 @@ class ShapePropagator {
   bool PropagateCompleteShapeOnNode(
       Node* node,
       bool insert_expands,
-      std::vector<ProfiledTensorTypePtr> tensor_types) {
+      std::vector<TensorTypePtr> tensor_types) {
     // For expensive ops we can directly encode their shape propagation
     // here, otherwise we fallback to running a fake version of the op
     // to get a quick and dirty propagation.
@@ -1736,14 +1830,37 @@ class ShapePropagator {
       // handled by the fallthrough because it's not always safe to run it due
       // to integer divide-by-zero.
       return PropagateShapeOnNodeByRunningIt(node);
+    } else if (node->matches("aten::pow(Tensor self, Scalar exponent) -> Tensor")) {
+      node->output()->setType(tensor_types.at(0));
+      return true;
     } else if (
         node->matches(
             "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
         node->matches(
             "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
-        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor") ||
-        node->matches("aten::pow(Tensor self, Scalar exponent) -> Tensor")) {
-      node->output()->setType(tensor_types.at(0));
+        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor")) {
+      auto first_scalar_type = (tensor_types)[0]->scalarType();
+      auto second_scalar_type = tryScalarTypeFromJitType(node->inputs()[1]->type());
+      if (!first_scalar_type || !second_scalar_type) {
+        return false;
+      }
+      if (isIntegralType(*first_scalar_type, false) && isFloatingType(*second_scalar_type) )
+      {
+        auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
+        auto type = tensor_types[0]->withScalarType(default_dtype);
+        node->output()->setType(type);
+        return true;
+      }
+      if (c10::ScalarType::Bool == *first_scalar_type &&
+          c10::ScalarType::Bool != *second_scalar_type)
+      {
+          auto result_type = c10::promoteTypes(*first_scalar_type, *second_scalar_type);
+          auto type = tensor_types[0]->withScalarType(result_type);
+          node->output()->setType(type);
+          return true;
+      }
+      auto type = tensor_types[0]->withScalarType(first_scalar_type);
+      node->output()->setType(type);
       return true;
     } else if (
         insert_expands &&
@@ -1775,7 +1892,7 @@ class ShapePropagator {
       auto rhs_sizes = rhs_type->sizes().concrete_sizes().value();
       SHAPE_ASSERT(
           *lhs_type->sizes().size() == 2 && *rhs_type->sizes().size() == 2);
-      node->output()->setType(ProfiledTensorType::createContiguous(
+      node->output()->setType(TensorType::createContiguous(
           *lhs_type->scalarType(),
           *lhs_type->device(),
           at::IntArrayRef{lhs_sizes[0], rhs_sizes[1]}));
@@ -1941,7 +2058,7 @@ class ShapePropagator {
           (int64_t)*tensor_types.at(0)->sizes().size()};
       at::IntArrayRef dims(dim_vec);
       node->output()->setType(
-          ProfiledTensorType::createContiguous(at::kLong, at::kCPU, dims));
+          TensorType::createContiguous(at::kLong, at::kCPU, dims));
       return true;
     } else if (node->kind() == ::c10::onnx::Reshape) {
       setUnshapedType(node);

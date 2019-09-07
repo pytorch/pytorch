@@ -31,7 +31,7 @@ import warnings
 from collections import OrderedDict, namedtuple
 
 # These are imported so users can access them from the `torch.jit` module
-from torch._jit_internal import Final, _overload  # noqa: F401
+from torch._jit_internal import Final, _overload, _overload_method  # noqa: F401
 from torch._jit_internal import ignore, export  # noqa: F401
 
 if sys.version_info[0] > 2:
@@ -97,32 +97,95 @@ def optimized_execution(should_optimize):
 DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
 
 
+def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
+    """
+        Save an offline version of this module for use in a separate process. The saved
+        module serializes all of the methods, submodules, parameters, and attributes of this
+        module. It can be loaded into the C++ API using ``torch::jit::load(filename)`` or into the Python
+        API with :func:`torch.jit.load <torch.jit.load>`.
+
+        To be able to save a module, it must not make any calls to native Python functions.
+        This means that all submodules must be subclasses of ``torch.jit.ScriptModule`` as well.
+
+        .. DANGER::
+           All modules, no matter their device, are always loaded onto the CPU during loading.
+           This is different from :func:`load <torch.jit.load>`'s semantics and may change in the future.
+
+        Arguments:
+            m: a ScriptModule to save
+            f: a file-like object (has to implement write and flush) or a string
+               containing a file name
+            _extra_files: Map from filename to contents which will be stored as part of 'f'
+
+        .. warning::
+            If you are using Python 2, ``torch.jit.save`` does NOT support ``StringIO.StringIO``
+            as a valid file-like object. This is because the write method should return
+            the number of bytes written; ``StringIO.write()`` does not do this.
+
+            Please use something like ``io.BytesIO`` instead.
+
+        Example:
+
+        .. testcode::
+
+            import torch
+            import io
+
+            class MyModule(torch.nn.Module):
+                def forward(self, x):
+                    return x + 10
+
+            m = torch.jit.script(MyModule())
+
+            # Save to file
+            torch.jit.save(m, 'scriptmodule.pt')
+            # This line is equivalent to the previous
+            m.save("scriptmodule.pt")
+
+            # Save to io.BytesIO buffer
+            buffer = io.BytesIO()
+            torch.jit.save(m, buffer)
+
+            # Save with extra files
+            extra_files = torch._C.ExtraFilesMap()
+            extra_files['foo.txt'] = 'bar'
+            torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
+    """
+    if isinstance(f, str) or \
+            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
+            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+        m.save(f, _extra_files=_extra_files)
+    else:
+        ret = m.save_to_buffer(_extra_files=_extra_files)
+        f.write(ret)
+
+
 def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     r"""
-        Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.save>`
+        Load a ``ScriptModule`` previously saved with :func:`torch.jit.save <torch.jit.save>`
 
         All previously saved modules, no matter their device, are first loaded onto CPU,
         and then are moved to the devices they were saved from. If this fails (e.g. because
         the run time system doesn't have certain devices), an exception is raised.
-        However, storages can be dynamically remapped to an alternative set of devices
-        using the `map_location` argument. Comparing to :func:`torch.load`, `map_location`
-        in this function is simplified, which only accepts a string (e.g., 'cpu', 'cuda:0'),
-        or torch.device (e.g., torch.device('cpu'))
 
         Arguments:
             f: a file-like object (has to implement read, readline, tell, and seek),
                 or a string containing a file name
-            map_location: can a string (e.g., 'cpu', 'cuda:0'), a device (e.g.,
-                torch.device('cpu'))
-            _extra_files: map from filename to content. The extra
+            map_location (string or torch.device): A simplified version of ``map_location`` in
+                ``torch.save`` used to dynamically remap storages to an alternative set of devices.
+            _extra_files (dictionary of filename to content): The extra
                 filenames given in the map would be loaded and their content
                 would be stored in the provided map.
-
 
         Returns:
             A ``ScriptModule`` object.
 
-        Example: ::
+        Example:
+
+        .. testcode::
+
+            import torch
+            import io
 
             torch.jit.load('scriptmodule.pt')
 
@@ -134,15 +197,28 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             torch.jit.load(buffer)
 
             # Load all tensors onto CPU, using a device
+            buffer.seek(0)
             torch.jit.load(buffer, map_location=torch.device('cpu'))
 
             # Load all tensors onto CPU, using a string
+            buffer.seek(0)
             torch.jit.load(buffer, map_location='cpu')
 
             # Load with extra files.
-            files = {'metadata.json' : ''}
-            torch.jit.load('scriptmodule.pt', _extra_files = files)
-            print (files['metadata.json'])
+            extra_files = torch._C.ExtraFilesMap()
+            extra_files['foo.txt'] = 'bar'
+            torch.jit.load('scriptmodule.pt', _extra_files=extra_files)
+            print(extra_files['foo.txt'])
+
+        .. testoutput::
+            :hide:
+
+            ...
+
+        .. testcleanup::
+
+            import os
+            os.remove("scriptmodule.pt")
     """
     if isinstance(f, string_classes):
         if not os.path.exists(f):
@@ -167,66 +243,6 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     return ScriptModule(_cpp_module=cpp_module)
 
 
-def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
-    """
-        Save an offline version of this module for use in a separate process. The saved
-        module serializes all of the methods, submodules, parameters, and attributes of this
-        module. It can be loaded into the C++ API using ``torch::jit::load(filename)`` or into the Python
-        API with :func:`load <torch.jit.load>`.
-
-        To be able to save a module, it must not make any calls to native Python functions.
-        This means that all submodules must be subclasses of ``torch.jit.ScriptModule`` as well.
-
-        .. DANGER::
-           All modules, no matter their device, are always loaded onto the CPU during loading.
-           This is different from :func:`load <torch.jit.load>`'s semantics and may change in the future.
-
-        Arguments:
-            m: a ScriptModule to save
-            f: a file-like object (has to implement write and flush) or a string
-               containing a file name
-            _extra_files: Map from filename to contents which will be stored as part of 'f'
-
-        .. warning::
-            If you are using Python 2, ``torch.save`` does NOT support ``StringIO.StringIO``
-            as a valid file-like object. This is because the write method should return
-            the number of bytes written; ``StringIO.write()`` does not do this.
-
-            Please use something like ``io.BytesIO`` instead.
-
-        Example: ::
-
-            import torch
-            import io
-
-
-            class MyModule(torch.nn.Module):
-                def forward(self, x):
-                    return x + 10
-
-            m = torch.jit.script(MyModule())
-
-            # Save to file
-            torch.jit.save(m, 'scriptmodule.pt')
-
-            # Save to io.BytesIO buffer
-            buffer = io.BytesIO()
-            torch.jit.save(m, buffer)
-
-            # Save with extra files
-            extra_files = torch._C.ExtraFilesMap()
-            extra_files['foo.txt'] = 'bar'
-            torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
-    """
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        m.save(f, _extra_files=_extra_files)
-    else:
-        ret = m.save_to_buffer(_extra_files=_extra_files)
-        f.write(ret)
-
-
 def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_inputs=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
@@ -245,10 +261,11 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_input
         kwargs (dict): the keyword arguments to pass to the function/module
             to be traced.
 
-    Example: Trace a cell.
+    Example (trace a cell):
 
-        >>> trace, out = jit.trace(nn.LSTMCell(), (input, hidden))
-        >>> print(trace)
+    .. testcode::
+
+        trace = torch.jit.trace(nn.LSTMCell(), (input, hidden))
     """
     if kwargs is None:
         kwargs = {}
@@ -567,6 +584,8 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
                     break  # Graphs have already diverged
 
                 if n_mod.kind() == 'prim::Constant' and not (n_mod.mustBeNone() or n_check.mustBeNone()):
+                    if not n_mod.hasAttribute('value'):
+                        continue
                     if n_mod.kindOf('value') != 't' or n_check.kindOf('value') != 't':
                         continue
 
@@ -767,9 +786,12 @@ def trace(func,
         original ``nn.Module``.
         If ``callable`` is a standalone function, ``trace`` returns ``torch._C.Function``
 
-    Example (tracing a function)::
+    Example (tracing a function):
+
+    .. testcode::
 
         import torch
+
         def foo(x, y):
             return 2 * x + y
 
@@ -841,8 +863,6 @@ def trace(func,
                              "Please use trace_module")
 
     name = _qualified_name(func)
-    if name == '<lambda>':
-        name = '_lambda'  # make name a valid identifier
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                   var_lookup_fn,
                                                   _force_outplace)
@@ -872,7 +892,7 @@ def trace_module(mod,
     the ``forward`` method is run and traced. With ``trace_module``, you can specify a dictionary of
     method names to example inputs to trace (see the ``example_inputs``) argument below.
 
-    See :func:`torch.jit.trace <torch.jit.trace>` for more information on tracing
+    See :func:`torch.jit.trace <torch.jit.trace>` for more information on tracing.
 
     Arguments:
         mod (torch.nn.Module):           a ``torch.nn.Module`` containing methods whose names are
@@ -1036,7 +1056,6 @@ def whichmodule(obj):
             pass
     return '__main__'
 
-
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
     _jit_script_class_compile(qualified_name, ast, rcb)
@@ -1058,9 +1077,12 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         The ``@torch.jit.script`` decorator will construct a ``torch._C.Function``
         by compiling the body of the function.
 
-        Example (scripting a function)::
+        Example (scripting a function):
+
+        .. testcode::
 
             import torch
+
             @torch.jit.script
             def foo(x, y):
                 if x.max() > y.max():
@@ -1076,7 +1098,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         will construct ``torch.jit.ScriptModule`` that has copies of the attributes, parameters, and methods of
         the original module.
 
-        Example (scripting a simple module with a Parameter)::
+        Example (scripting a simple module with a Parameter):
+
+        .. testcode::
 
             import torch
 
@@ -1097,9 +1121,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                     output = self.linear(output)
                     return output
 
-            scripted_module = torch.jit.script(MyModule())
+            scripted_module = torch.jit.script(MyModule(2, 3))
 
-        Example (scripting a module with traced submodules)::
+        Example (scripting a module with traced submodules):
+
+        .. testcode::
 
             import torch
             import torch.nn as nn
@@ -1120,7 +1146,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             scripted_module = torch.jit.script(MyModule())
 
         To compile a method other than ``forward`` (and recursively compile anything it calls), add
-        the ``@torch.jit.export`` decorator to the method. To opt out of compilation use ``@torch.jit.ignore``.
+        the :func:`@torch.jit.export <torch.jit.export>` decorator to the method. To opt out of compilation
+        use :func:`@torch.jit.ignore <torch.jit.ignore>`.
 
         Example (an exported and ignored method in a module)::
 
@@ -1137,8 +1164,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
                 @torch.jit.ignore
                 def python_only_fn(self, input):
-                    # This function won't be compiled, so any Python APIs can be
-                    # used
+                    # This function won't be compiled, so any
+                    # Python APIs can be used
                     import pdb
                     pdb.set_trace()
 
@@ -1202,6 +1229,18 @@ def _gen_rcb(obj, _frames_up):
         return stack_rcb(name)
 
     return _rcb
+
+
+def interface(obj):
+    if not inspect.isclass(obj):
+        raise RuntimeError("interface must be applied to a class")
+    if not _is_new_style_class(obj):
+        raise RuntimeError("TorchScript interfaces must inherit from 'object'")
+    qualified_name = _qualified_name(obj)
+    ast = get_jit_class_def(obj, obj.__name__)
+    rcb = _jit_internal.createResolutionCallback(1)
+    torch._C._jit_script_interface_compile(qualified_name, ast, rcb)
+    return obj
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
@@ -1799,6 +1838,8 @@ _builtin_ops = [
     (math.degrees, "aten::degrees"),
     (math.radians, "aten::radians"),
     (math.ldexp, "aten::ldexp"),
+    (torch.autograd.grad, "aten::grad"),
+    (torch.autograd.backward, "aten::backward"),
     (torch._C._infer_size, "aten::_infer_size"),
     (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
     (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
@@ -1878,10 +1919,14 @@ def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
 
-def _get_overload_decl_and_defaults(func):
+def _check_no_signature(func):
     signature = torch.jit.annotations.get_signature(func)
     if signature is None:
-        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {obj}").format(func)
+        qual_name = _qualified_name(func)
+        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
+
+def _get_overload_decl_and_defaults(func):
+    _check_no_signature(func)
     return (torch.jit.get_jit_def(func).decl(), get_default_args(func))
 
 def _get_overloads(obj):
@@ -1955,7 +2000,11 @@ def annotate(the_type, the_value):
     return the_value
 
 
-Attribute = collections.namedtuple('Attribute', ['value', 'type'])
+if _enabled:
+    Attribute = collections.namedtuple('Attribute', ['value', 'type'])
+else:
+    def Attribute(value, type):
+        return value
 
 last_executed_optimized_graph = torch._C._last_executed_optimized_graph
 

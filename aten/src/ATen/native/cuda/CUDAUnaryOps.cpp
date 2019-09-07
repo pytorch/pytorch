@@ -1,8 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 namespace at { namespace native {
 
@@ -69,7 +67,6 @@ IMPLEMENT_UNARY_OP_PREQUEL(abs)
 IMPLEMENT_UNARY_OP_PREQUEL(acos)
 IMPLEMENT_UNARY_OP_PREQUEL(asin)
 IMPLEMENT_UNARY_OP_PREQUEL(atan)
-IMPLEMENT_UNARY_OP_PREQUEL(ceil)
 IMPLEMENT_UNARY_OP_PREQUEL(cos)
 IMPLEMENT_UNARY_OP_PREQUEL(cosh)
 IMPLEMENT_UNARY_OP_PREQUEL(erf)

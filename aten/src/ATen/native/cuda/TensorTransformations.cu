@@ -113,7 +113,7 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
   // stride_contiguous is the stride of non-contiguous tensor after calling contiguous(),
   // it is used to compute indices for each element in non-contiguous tensor
   Tensor stride_contiguous = at::zeros({total_dims}, kLong);
-  int64_t* stride_contiguous_d = stride_contiguous.data<int64_t>();
+  int64_t* stride_contiguous_d = stride_contiguous.data_ptr<int64_t>();
   for (int64_t i = total_dims - 1; i >= 0; i--) {
     if (i == total_dims - 1) {
       stride_contiguous_d[i] = 1;
@@ -124,8 +124,13 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
 
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, in_tensor.scalar_type(), "flip_cuda", [&] {
     flip_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-      in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N, flip_dims_t.toType(CUDA(kLong)).data<int64_t>(), flip_dims_size,
-      strides_t.toType(CUDA(kLong)).data<int64_t>(), stride_contiguous.toType(CUDA(kLong)).data<int64_t>(), shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
+      in_tensor.data_ptr<scalar_t>(), out_tensor.data_ptr<scalar_t>(), N,
+      flip_dims_t.cuda().data_ptr<int64_t>(),
+      flip_dims_size,
+      strides_t.cuda().data_ptr<int64_t>(),
+      stride_contiguous.cuda().data_ptr<int64_t>(),
+      shape_t.cuda().data_ptr<int64_t>(),
+      total_dims);
   });
 
   return out_tensor;
@@ -185,7 +190,7 @@ Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
 
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, in_tensor.scalar_type(), "roll_cuda", [&] {
     roll_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-      in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N,
+      in_tensor.data_ptr<scalar_t>(), out_tensor.data_ptr<scalar_t>(), N,
       dim, start,
       size,
       in_tensor.stride(dim),

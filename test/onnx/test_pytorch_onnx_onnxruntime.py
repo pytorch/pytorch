@@ -72,6 +72,12 @@ class TestONNXRuntime(unittest.TestCase):
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
 
+    def setUp(self):
+        torch.manual_seed(0)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(0)
+        np.random.seed(seed=0)
+
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True, batch_size=2, use_gpu=True):
         run_model_test(self, model, batch_size=batch_size,
                        input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
@@ -759,6 +765,39 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    # TODO: enable opset 11 test once ORT support for unique is in
+    @skipIfUnsupportedOpsetVersion([11])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_unique(self):
+        class UniqueModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.unique(x, sorted=True, return_inverse=False, return_counts=True)
+
+        x = torch.tensor([1, 3, 2, 3], dtype=torch.long)
+        self.run_test(UniqueModel(), x)
+
+    # TODO: enable opset 11 test once ORT support for unique is in
+    @skipIfUnsupportedOpsetVersion([11])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_unique_along_dim(self):
+        class UniqueModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.unique(x, dim=0, sorted=True, return_inverse=True, return_counts=False)
+
+        x = torch.tensor([1, 3, 2, 3], dtype=torch.long)
+        self.run_test(UniqueModel(), x)
+
+    # TODO: enable opset 11 test once ORT support for cumsum is in
+    @skipIfUnsupportedOpsetVersion([11])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_cumsum(self):
+        class CumSum(torch.nn.Module):
+            def forward(self, input):
+                return torch.cumsum(input, dim=0)
+        x = torch.randn(2, 3, 4)
+        model = CumSum()
+        self.run_test(model, x)
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)
@@ -799,7 +838,7 @@ class TestONNXRuntime(unittest.TestCase):
             return input
 
         input = make_input(RNN_BATCH_SIZE)
-        self.run_test(model, input, batch_size=RNN_BATCH_SIZE, atol=1e-7)
+        self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
 
         # test that the model still runs with a different batch size
         other_input = make_input(RNN_BATCH_SIZE + 1)
@@ -875,11 +914,11 @@ class TestONNXRuntime(unittest.TestCase):
             return input
 
         input = make_input(RNN_BATCH_SIZE)
-        self.run_test(model, input, batch_size=RNN_BATCH_SIZE, atol=1e-5)
+        self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
 
         # test that the model still runs with a different batch size
         other_input = make_input(RNN_BATCH_SIZE + 1)
-        self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1, atol=1e-5)
+        self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
 
 
 def make_test(name, base, layer, bidirectional, initial_state,

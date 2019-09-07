@@ -663,6 +663,10 @@ class TestOperators(TestCase):
         y = torch.randn(2, 3, 4).float()
         self.assertONNX(lambda x: torch.std(x, dim=(0, 1), unbiased=True, keepdim=True), x)
 
+    def test_cumsum(self):
+        x = torch.randn(2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.cumsum(x, dim=1), x, opset_version=11)
+
     def test_retain_param_name_disabled(self):
         class MyModule(Module):
             def __init__(self):
@@ -718,6 +722,11 @@ class TestOperators(TestCase):
     def test_frobenius_norm(self):
         x = torch.randn(2, 3, 4).float()
         self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
+
+    def test_unique(self):
+        x = torch.randint(3, (2, 3, 4, 5)).float()
+        self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
+                        opset_version=11)
 
 
 if __name__ == '__main__':
