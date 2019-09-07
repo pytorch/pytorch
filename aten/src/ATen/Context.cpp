@@ -87,20 +87,12 @@ bool Context::hasLAPACK() const {
 #endif
 }
 
-bool Context::userEnabledFBGEMM() const {
-  return enabled_fbgemm;
+at::QBackend Context::preferredQuantizedEngine() const {
+  return quantized_engine;
 }
 
-void Context::setUserEnabledFBGEMM(bool e) {
-  enabled_fbgemm = e;
-}
-
-bool Context::userEnabledQNNPACK() const {
-  return enabled_qnnpack;
-}
-
-void Context::setUserEnabledQNNPACK(bool e) {
-  enabled_qnnpack = e;
+void Context::setPreferredQuantizedEngine(at::QBackend e) {
+  quantized_engine = e;
 }
 
 bool Context::setFlushDenormal(bool on) {

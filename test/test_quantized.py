@@ -857,7 +857,7 @@ class TestQuantizedLinear(unittest.TestCase):
            use_channelwise=st.booleans())
     def test_qlinear_unpack(self, W, use_channelwise):
         W, (W_scale, W_zp, torch_type) = W
-
+        torch.backends.quantized.engine = torch.fbgemm
         if use_channelwise:
             output_channels = W.shape[0]
             W_scales = torch.rand(output_channels).to(torch.double)
