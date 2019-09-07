@@ -428,7 +428,7 @@
           command: |
             set -e
             export IN_CIRCLECI=1
-            export WORKSPACE= /Users/distiller/workspace
+            export WORKSPACE=/Users/distiller/workspace
             export PROJ_ROOT=/Users/distiller/project
 
             # Install conda
