@@ -7,6 +7,7 @@ import warnings
 import inspect
 
 import torch
+from torch._C import ListType
 from torch._six import PY2
 import common_utils as common
 import common_nn
@@ -35,22 +36,37 @@ bool check_tensor_equality(const torch::Tensor& tensor1, const torch::Tensor& te
     tensor1.allclose(tensor2);
 }
 
-bool check_ivalue_equality(const c10::IValue& ivalue1, const c10::IValue& ivalue2) {
-  if (ivalue1.tagKind() != ivalue2.tagKind()) {
-    AT_ERROR("Value type mismatch: ", "ivalue1: ", ivalue1.tagKind(), ", ivalue2: ", ivalue2.tagKind());
+bool check_ivalue_equality(const c10::IValue& ivalue_python, const c10::IValue& ivalue_cpp) {
+  // For Python modules, we allow the use of `int` to represent attributes that
+  // are multidimensional but have the same value in all dimensions. The corresponding
+  // data type for C++ modules is `ExpandingArray` (which is converted to `IntList` by the
+  // `IValue` constructor), and here we check that all elements in the `ExpandingArray`
+  // equal to the Python `int` attribute.
+  if (ivalue_python.isInt() && ivalue_cpp.isIntList()) {
+    auto ivalue_cpp_list = ivalue_cpp.toIntListRef();
+    std::vector<int64_t> ivalue_python_vec(ivalue_cpp_list.size());
+    std::fill(ivalue_python_vec.begin(), ivalue_python_vec.end(), ivalue_python.toInt());
+    return ivalue_python_vec == ivalue_cpp_list;
   }
-  if (ivalue1.isInt()) {
-    return ivalue1.toInt() == ivalue2.toInt();
-  } else if (ivalue1.isDouble()) {
-    return ivalue1.toDouble() == ivalue2.toDouble();
-  } else if (ivalue1.isBool()) {
-    return ivalue1.toBool() == ivalue2.toBool();
-  } else if (ivalue1.isString()) {
-    return ivalue1.toStringRef() == ivalue2.toStringRef();
-  } else if (ivalue1.isTensor()) {
-    return check_tensor_equality(ivalue1.toTensor(), ivalue2.toTensor());
+
+  if (ivalue_python.tagKind() != ivalue_cpp.tagKind()) {
+    AT_ERROR("Value type mismatch: ", "from Python: ", ivalue_python.tagKind(), ", from C++: ", ivalue_cpp.tagKind());
+  }
+
+  if (ivalue_python.isInt()) {
+    return ivalue_python.toInt() == ivalue_cpp.toInt();
+  } else if (ivalue_python.isDouble()) {
+    return ivalue_python.toDouble() == ivalue_cpp.toDouble();
+  } else if (ivalue_python.isBool()) {
+    return ivalue_python.toBool() == ivalue_cpp.toBool();
+  } else if (ivalue_python.isString()) {
+    return ivalue_python.toStringRef() == ivalue_cpp.toStringRef();
+  } else if (ivalue_python.isTensor()) {
+    return check_tensor_equality(ivalue_python.toTensor(), ivalue_cpp.toTensor());
+  } else if (ivalue_python.isIntList()) {
+    return ivalue_python.toIntListRef() == ivalue_cpp.toIntListRef();
   } else {
-    AT_ERROR("Unsupported value type: ", ivalue1.tagKind());
+    AT_ERROR("Unsupported value type: ", ivalue_python.tagKind());
   }
 }
 """
@@ -360,8 +376,18 @@ class TestCppApiParity(common.TestCase):
                     register_attrs(sub_module, sub_script_module)
                 for key, value in module.__dict__.items():
                     if key not in TORCH_NN_MODULE_IGNORED_ATTRS:
+                        if type(value) == tuple:
+                            assert all(isinstance(x, type(value[0])) for x in value), \
+                                "All elements in a tuple attribute of a Python torch.nn module must have the same type."
+                            # Here, we set the Python attribute's type to `ListType` in the ScriptModule,
+                            # which will automatically be converted to `IntList` later and match the type
+                            # of the corresponding attribute in C++ module (which is initially an `ExpandingArray`
+                            # and is converted to `IntList` by the `IValue` constructor).
+                            value_type = ListType(torch.jit.annotations.ann_to_type(type(value[0])))
+                        else:
+                            value_type = torch.jit.annotations.ann_to_type(type(value))
                         script_module._c._register_attribute(
-                            key, torch.jit.annotations.ann_to_type(type(value)), value)
+                            key, value_type, value)
 
             # We use JIT tracing to serialize Python module state, so that we can load it into C++
             traced_script_module = torch.jit.trace(module, example_inputs)
@@ -457,6 +483,9 @@ def _process_test_params(test_params_dict, module_metadata, device):
         example_inputs = [example_inputs]
     else:
         raise RuntimeError("Unexpected input type: {}".format(type(example_inputs)))
+
+    if module_name not in ["Embedding", "Embedding_sparse", "EmbeddingBag", "EmbeddingBag_sparse"]:
+        example_inputs = [x.requires_grad_() for x in example_inputs]
 
     if device != 'cuda' or TEST_CUDA:
         example_inputs = [x.to(device) for x in example_inputs]
