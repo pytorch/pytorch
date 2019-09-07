@@ -15,7 +15,7 @@ def canonical(graph):
 def _quantize(x, scale, zero_point, qmin=0, qmax=255, qtype=np.uint8):
     """Quantizes a numpy array."""
     qx = np.round(x/scale + zero_point)
-    qx = np.clip(qx, qmin, qmax).astype(qtype)
+    qx = np.clip(qx,qmin, qmax).astype(qtype)
     return qx
 
 
