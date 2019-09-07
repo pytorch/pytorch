@@ -22,6 +22,11 @@ static inline __host__ __device__ T powi(T a, T b) {
   return result;
 }
 
+template <typename T>
+static inline __host__ __device__ T sqrt(T x) {
+  return std::sqrt(x);
+}
+
 void pow_tensor_tensor_kernel(TensorIterator& iter) {
   if (isFloatingType(iter.dtype())) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "pow_cuda", [&]() {
@@ -43,7 +48,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "pow_cuda", [&]() {
     if (exp == 0.5) {
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-        return std::sqrt(base);
+        return ::sqrt(base);
       });
     } else if (exp == 2) {
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
@@ -55,7 +60,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
       });
     } else if (exp == -0.5) {
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-        return 1.0 / std::sqrt(base);
+        return 1.0 / ::sqrt(base);
       });
     } else if (exp == -1) {
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
