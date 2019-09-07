@@ -14,7 +14,7 @@ def canonical(graph):
 
 def _quantize(x, scale, zero_point, qmin=0, qmax=255, qtype=np.uint8):
     """Quantizes a numpy array."""
-    qx = np.round(x / scale + zero_point)
+    qx = np.round(x/scale + zero_point)
     qx = np.clip(qx, qmin, qmax).astype(qtype)
     return qx
 
@@ -38,7 +38,7 @@ def avoid_vpmaddubsw_overflow_fc(
         for k in range(0, input_channels // 2 * 2, 2):
             x0 = X[i, k] - X_min
             x1 = X[i, k + 1] - X_min
-            w0 = W[j, k] - 128 - W_min
+            w0 = W[j,k] - 128 - W_min
             w1 = W[j, k + 1] - 128 - W_min
             if x0 * w0 + x1 * w1 < -(1 << 15):
                 w1_adjusted = (-(1 << 15) - float(x0) * w0) / x1
