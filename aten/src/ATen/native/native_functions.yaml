@@ -48,7 +48,7 @@
   variants: method
   named_guard: False
 
-- func: view_names(Tensor(a) self, Dimname[]? names) -> Tensor(a)
+- func: renamed(Tensor(a) self, Dimname[]? names) -> Tensor(a)
   variants: method
   named_guard: False
 
@@ -914,6 +914,12 @@
     SparseCPU: empty_sparse
     SparseCUDA: empty_sparse
 
+- func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  variants: method
+
+- func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  variants: method
+
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
   dispatch:
     QuantizedCPU: empty_affine_quantized_cpu
@@ -1047,6 +1053,19 @@
 - func: flatten(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor
   use_c10_dispatcher: True
   variants: function, method
+  named_guard: False
+
+- func: flatten(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: flatten(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor
+  variants: function, method
+  named_guard: False
+
+- func: flatten(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor
+  variants: function, method
+  named_guard: False
 
 - func: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   use_c10_dispatcher: True
@@ -3999,17 +4018,11 @@
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
   named_guard: False
   variants: method
-  dispatch:
-    CPU: _digamma__cpu
-    CUDA: legacy::cuda::_th_digamma_
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   use_c10_dispatcher: True
   named_guard: False
   variants: method
-  dispatch:
-    CPU: polygamma_
-    CUDA: legacy::cuda::_th_polygamma_
 
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
   use_c10_dispatcher: True
@@ -4689,31 +4702,19 @@
 
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
-  dispatch:
-    CPU: _digamma_out_cpu
-    CUDA: legacy::cuda::_th_digamma_out
 
 - func: digamma(Tensor self) -> Tensor
   use_c10_dispatcher: True
   named_guard: False
   variants: method, function
-  dispatch:
-    CPU: digamma
-    CUDA: legacy::cuda::_th_digamma
 
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   named_guard: False
-  dispatch:
-    CPU: polygamma_out
-    CUDA: legacy::cuda::_th_polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
   use_c10_dispatcher: True
   named_guard: False
   variants: method, function
-  dispatch:
-    CPU: polygamma
-    CUDA: legacy::cuda::_th_polygamma
 
 - func: erfinv(Tensor self) -> Tensor
   use_c10_dispatcher: True

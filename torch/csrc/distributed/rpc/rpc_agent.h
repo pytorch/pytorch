@@ -2,6 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/types.h>
 
 #include <algorithm>
 
@@ -9,31 +10,31 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-using worker_id_t = int16_t;
-
 // A globally unique ID to identify an RpcAgent
 struct WorkerId {
   WorkerId(std::string name, int id)
       : WorkerId(std::move(name), (worker_id_t)id) {
-    TORCH_CHECK(id <= std::numeric_limits<worker_id_t>::max(),
-        "RPC worker id ", id, " out of bound of int16_t.");
+    TORCH_CHECK(
+        id <= std::numeric_limits<worker_id_t>::max(),
+        "RPC worker id ",
+        id,
+        " out of bound of int16_t.");
   }
 
-  WorkerId(std::string name, worker_id_t id)
-      : name_(std::move(name)), id_(id) {
+  WorkerId(std::string name, worker_id_t id) : name_(std::move(name)), id_(id) {
     bool validSize = name_.length() < MAX_NAME_LEN && name_.length() > 0;
     bool validChar =
-        std::find_if(
-            name_.begin(),
-            name_.end(),
-            [](char c) {
-              return !(std::isalnum(c) || c == '-' || c == '_') ;
-            }
-        ) == name_.end();
-    TORCH_CHECK(validSize && validChar,
-        "Worker name must match ^[A-Za-z0-9-_]*$, "
-        "and must be non-empty and shorter than ", MAX_NAME_LEN, " chars, "
-        "but got ", name_);
+        std::find_if(name_.begin(), name_.end(), [](char c) {
+          return !(std::isalnum(c) || c == '-' || c == '_' || c == ':');
+        }) == name_.end();
+    TORCH_CHECK(
+        validSize && validChar,
+        "Worker name must match ^[A-Za-z0-9-_:]*$, "
+        "and must be non-empty and shorter than ",
+        MAX_NAME_LEN,
+        " chars, "
+        "but got ",
+        name_);
   }
 
   static constexpr size_t MAX_NAME_LEN = 128;
@@ -92,8 +93,7 @@ class RpcAgent {
   // Return a reference to the ``WorkerId`` of the given ``workerName``.
   virtual const WorkerId& getWorkerId(const std::string& workerName) const = 0;
 
-  // Retrieves the worker_id for this node.
-  virtual int16_t getWorkerId() = 0;
+  virtual const WorkerId& getWorkerId(worker_id_t id) const = 0;
 
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
@@ -116,6 +116,6 @@ class RpcAgent {
   const RequestCallback cb_;
 };
 
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

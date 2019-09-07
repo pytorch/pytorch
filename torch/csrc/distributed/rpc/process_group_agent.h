@@ -13,12 +13,11 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-
 // SendWork and RecvWork will be put into a task queue, and later picked up by
 // worker threads from the same ThreadPool.
 struct SendWork {
-  SendWork(const WorkerId& to, Message&& message) :
-    to_(to), message_(message) {}
+  SendWork(const WorkerId& to, Message&& message)
+      : to_(to), message_(message) {}
 
   const WorkerId& to_;
   Message message_;
@@ -37,18 +36,18 @@ struct RecvWork {
 
 class ProcessGroupAgent : public RpcAgent {
  public:
-
-  ProcessGroupAgent(std::string workerName,
-                    std::shared_ptr<c10d::ProcessGroup> pg,
-                    int numSendRecvThreads = 4);
+  ProcessGroupAgent(
+      std::string workerName,
+      std::shared_ptr<c10d::ProcessGroup> pg,
+      int numSendRecvThreads = 4);
 
   const WorkerId& getWorkerId(const std::string& workerName) const override;
+
+  const WorkerId& getWorkerId(worker_id_t id) const override;
 
   void join() override;
 
   void sync() override;
-
-  int16_t getWorkerId() override;
 
  protected:
   // This method wraps the destination information and the message into a
@@ -93,6 +92,6 @@ class ProcessGroupAgent : public RpcAgent {
   std::mutex futureMutex_;
 };
 
-}
-}
-}
+} // namespace rpc
+} // namespace distributed
+} // namespace torch
