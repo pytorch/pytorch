@@ -75,7 +75,6 @@ ios_brew_update: &ios_brew_update
     brew link parallel --overwrite
     brew install expect
     brew install libtool
-    brew install cocoapods
 
 
 
