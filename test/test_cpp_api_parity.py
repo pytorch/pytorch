@@ -5,6 +5,7 @@ import copy
 import unittest
 import warnings
 import inspect
+import re
 
 import torch
 from torch._C import ListType
@@ -202,7 +203,7 @@ class TestCppApiParity(common.TestCase):
                 value='torch::empty({})'.format(str(list(python_arg.shape)).replace('[', '{').replace(']', '}')))
         else:
             raise RuntimeError(
-                "{} is not a supported arg type for C++ module methods".format(type(python_default_value)))
+                "{} is not a supported arg type for C++ module methods".format(type(python_arg)))
 
     def _compile_cpp_code_inline(self, name, cpp_sources, functions):
         # Just-in-time compile the C++ test code
@@ -229,7 +230,7 @@ class TestCppApiParity(common.TestCase):
         init_arg_spec = self._get_python_module_init_arg_spec(module_name)
         init_kwargs_defaults = init_arg_spec.defaults
         python_default_constructor_arg_names = [x for x in init_arg_spec.args[1:-len(init_kwargs_defaults)] if x != 'has_parity']
-        cpp_default_constructor_arg_values = cpp_default_constructor_args_str.strip('()').split(',')
+        cpp_default_constructor_arg_values = re.findall(r'{[^}]*}|[^,\s]+', cpp_default_constructor_args_str.strip('()'))
         self.assertEqual(
             len(cpp_default_constructor_arg_values),
             len(python_default_constructor_arg_names),
@@ -245,7 +246,8 @@ class TestCppApiParity(common.TestCase):
         cpp_module_option = 'torch::nn::{}Options{}'.format(module_name, cpp_default_constructor_args_str)
         init_kwargs = init_arg_spec.args[-len(init_kwargs_defaults):]
         for arg_name, python_default_value in zip(init_kwargs, init_kwargs_defaults):
-            cpp_module_option += '.{}({})'.format(arg_name, self._python_arg_to_cpp_arg(python_default_value).value)
+            if python_default_value is not None:
+                cpp_module_option += '.{}({})'.format(arg_name, self._python_arg_to_cpp_arg(python_default_value).value)
 
         cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + module_metadata.cpp_sources
         cpp_sources += TORCH_NN_MODULE_TEST_CTOR_ARGS.substitute(
