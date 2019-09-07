@@ -428,53 +428,48 @@
           command: |
             set -e
             export IN_CIRCLECI=1
+            export WORKSPACE= /Users/distiller/workspace
+            export PROJ_ROOT=/Users/distiller/project
 
             # Install conda
-            TMPDIR=~/workspace
-            if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
-              rm -rf ${TMPDIR}/anaconda
-              curl -o ${TMPDIR}/conda.sh https://repo.continuum.io/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
-              chmod +x ${TMPDIR}/conda.sh
-              /bin/bash ${TMPDIR}/conda.sh -b -p ${TMPDIR}/anaconda
-              rm -f ${TMPDIR}/conda.sh
-              export PATH="${TMPDIR}/anaconda/bin:${PATH}"
-              source ${TMPDIR}/anaconda/bin/activate
-            fi
-
+            curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+            chmod +x ~/Downloads/conda.sh
+            /bin/bash ~/Downloads/conda.sh -b -p ~/anaconda
+            export PATH="~/anaconda/bin:${PATH}"
+            source ~/anaconda/bin/activate
             # Install dependencies
-            # conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
-            brew install libtool
-
+            conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
+            
             # sync submodules
-            cd $PYTORCH_ROOT
+            cd ${PROJ_ROOT}
             git submodule sync
             git submodule update --init --recursive
 
             # export 
-            # export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+            export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
             
             # run build script
-            chmod a+x $PYTORCH_ROOT/scripts/build_ios.sh
+            chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
             BUILD_PYTORCH_IOS=1
             IOS_ARCH=arm64
-            unbuffer $PYTORCH_ROOT/scripts/build_ios.sh 2>&1 | ts
+            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
 
-            #archive the binary
-            cd $PYTORCH_ROOT/build_ios/install/lib
+            #archive the static libraries
+            cd ${PROJ_ROOT}/build_ios/install/lib
             libtool -static *.a -o libtorch_arm64.a
 
             #store the binary
-            mkdir -p ~/workspace/install
-            cp $PYTORCH_ROOT/build_ios/install/include ~/workspace/install
-            cp $PYTORCH_ROOT/build_ios/install/lib/libtorch_arm64.a  ~/workspace/install
+            mkdir -p ${WORKSPACE}/install
+            cp ${PROJ_ROOT}/build_ios/install/include ${WORKSPACE}/install
+            cp ${PROJ_ROOT}/build_ios/install/lib/libtorch_arm64.a  ${WORKSPACE}/install
 
             # zip the library
-            cd ~/workspace/install
-            zip libtorch.zip include libtorch_arm64.a
+            cd ${WORKSPACE}/install
+            zip libtorch.zip ./include ./libtorch_arm64.a
             
             # store the artifact
-            mkdir ~/workspace/artifact
-            cp libtorch.zip ~/workspace/artifact
+            mkdir ${WORKSPACE}/artifact
+            cp libtorch.zip ${WORKSPACE}/artifact
           
             # Install sccache
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
