@@ -430,6 +430,7 @@
             export IN_CIRCLECI=1
             export WORKSPACE=/Users/distiller/workspace
             export PROJ_ROOT=/Users/distiller/project
+            export TCLLIBPATH="/usr/local/lib" 
 
             # Install conda
             curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
@@ -449,10 +450,15 @@
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
             
             # run build script
+            echo "Begin running build script"
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
             BUILD_PYTORCH_IOS=1
             IOS_ARCH=arm64
-            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
+            unbuffer ${PROJ_ROOT}/./scripts/build_ios.sh \
+            -DIOS_ARCH=arm64 \
+            -DBUILD_CAFFE2_MOBILE=OFF \
+            -DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())') \
+            -DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)') 2>&1 | ts
 
             #archive the static libraries
             cd ${PROJ_ROOT}/build_ios/install/lib
@@ -471,17 +477,6 @@
             mkdir ${WORKSPACE}/artifact
             cp libtorch.zip ${WORKSPACE}/artifact
           
-            # Install sccache
-            sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
-            sudo chmod +x /usr/local/bin/sccache
-
-            export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
-            # This IAM user allows write access to S3 bucket for sccache
-            set +x
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            set -x
-
       - store_artifacts:
           path: ~/workspace/artifact
           destination: libtorch.zip
