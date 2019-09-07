@@ -47,7 +47,7 @@ fi
 if [ -n "${IOS_PLATFORM:-}" ]; then
   CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
   if [ "${IOS_PLATFORM}" == "SIMULATOR" ]; then
-      # iOS Simulator build is not suppored by NNPACK
+      # iOS Simulator build is not supported by NNPACK
       CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
   fi
 else
