@@ -27,6 +27,7 @@ TESTS = [
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
+    'dist_autograd',
     'distributed',
     'distributions',
     'docs_coverage',
@@ -45,7 +46,6 @@ TESTS = [
     'optim',
     'qat',
     'quantization',
-    'quantized_conv',
     'quantized',
     'quantized_tensor',
     'quantized_nn_mods',
@@ -60,7 +60,9 @@ TESTS = [
     'jit_fuser',
     'tensorboard',
     'namedtensor',
+    'type_promotion',
     'jit_disabled',
+    'function_schema',
 ]
 
 # skip < 3.6 b/c fstrings added in 3.6

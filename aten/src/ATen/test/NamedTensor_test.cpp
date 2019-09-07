@@ -1,16 +1,16 @@
-#ifdef BUILD_NAMEDTENSOR
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/utils/memory.h>
+#include <c10/util/C++17.h>
 
+#ifdef BUILD_NAMEDTENSOR
 using at::Dimname;
 using at::DimnameList;
 using at::NamedTensorMeta;
 using at::Symbol;
-using torch::make_unique;
+using c10::guts::make_unique;
 
 TEST(NamedTensorTest, defaultMetadata) {
   int num_names = 4;

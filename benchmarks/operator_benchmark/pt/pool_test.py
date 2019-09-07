@@ -20,7 +20,7 @@ pool_1d_configs_short = op_bench.config_list(
         'kernel', 'stride', 'N', 'C', 'L'
     ],
     attrs=[
-        [3, 1, 1, 3, 32],
+        [3, 1, 8, 256, 256],
     ],
     tags=['short']
 )
@@ -47,7 +47,7 @@ pool_1d_ops_list = op_bench.op_list(
 
 class Pool1dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, kernel, stride, N, C, L, op_func):
-        self.input = torch.rand(N, C, L) 
+        self.input = torch.rand(N, C, L)
         self.kernel = kernel
         self.stride = stride
         self.op_func = op_func(self.kernel, stride=self.stride)
@@ -56,8 +56,8 @@ class Pool1dBenchmark(op_bench.TorchBenchmarkBase):
         return self.op_func(self.input)
 
 
-op_bench.generate_pt_tests_from_op_list(pool_1d_ops_list, 
-                                        pool_1d_configs_short + pool_1d_configs_long, 
+op_bench.generate_pt_tests_from_op_list(pool_1d_ops_list,
+                                        pool_1d_configs_short + pool_1d_configs_long,
                                         Pool1dBenchmark)
 
 
@@ -99,7 +99,7 @@ pool_2d_ops_list = op_bench.op_list(
 
 class Pool2dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, kernel, stride, N, C, H, W, op_func):
-        self.input = torch.rand(N, C, H, W) 
+        self.input = torch.rand(N, C, H, W)
         self.kernel = kernel
         self.stride = stride
         self.op_func = op_func(self.kernel, stride=self.stride)
@@ -108,8 +108,8 @@ class Pool2dBenchmark(op_bench.TorchBenchmarkBase):
         return self.op_func(self.input)
 
 
-op_bench.generate_pt_tests_from_op_list(pool_2d_ops_list, 
-                                        pool_2d_configs_short + pool_2d_configs_long, 
+op_bench.generate_pt_tests_from_op_list(pool_2d_ops_list,
+                                        pool_2d_configs_short + pool_2d_configs_long,
                                         Pool2dBenchmark)
 
 
@@ -152,7 +152,7 @@ pool_3d_ops_list = op_bench.op_list(
 
 class Pool3dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, kernel, stride, N, C, D, H, W, op_func):
-        self.input = torch.rand(N, C, D, H, W) 
+        self.input = torch.rand(N, C, D, H, W)
         self.kernel = kernel
         self.stride = stride
         self.op_func = op_func(self.kernel, stride=self.stride)
@@ -161,7 +161,7 @@ class Pool3dBenchmark(op_bench.TorchBenchmarkBase):
         return self.op_func(self.input)
 
 
-op_bench.generate_pt_tests_from_op_list(pool_3d_ops_list, 
+op_bench.generate_pt_tests_from_op_list(pool_3d_ops_list,
                                         pool_3d_configs_short + pool_3d_configs_long,
                                         Pool3dBenchmark)
 

@@ -805,7 +805,7 @@ void initJitScriptBindings(PyObject* module) {
          const ClassDef& classDef,
          ResolutionCallback rcb) {
         get_python_cu()->define_interface(
-            qualifiedName, classDef, pythonResolver(rcb));
+            c10::QualifiedName(qualifiedName), classDef, pythonResolver(rcb));
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {
