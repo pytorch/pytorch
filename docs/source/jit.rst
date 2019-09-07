@@ -354,7 +354,7 @@ Containers are assumed to have type ``Tensor`` and be non-optional (see
 tell the TorchScript compiler what the type should be. Python 3 style type hints are
 now supported.
 
-::
+.. testcode::
 
     import torch
     from typing import Dict, Optional
@@ -422,9 +422,9 @@ net models. In particular, TorchScript supports:
 Unlike Python, each variable in TorchScript function must have a single static type.
 This makes it easier to optimize TorchScript functions.
 
-.. TODO: test this code with `testcode`, but it looks like that doesn't support exceptions
+Example (a type mismatch)
 
-Example (a type mismatch)::
+.. testcode::
 
     import torch
 
@@ -434,8 +434,25 @@ Example (a type mismatch)::
             r = torch.rand(1)
         else:
             r = 4
-        return r # Type mismatch: r is set to type Tensor in the true branch
-                 # and type int in the false branch
+        return r
+
+
+.. testoutput::
+
+     Traceback (most recent call last):
+       ...
+     RuntimeError: ...
+
+     Type mismatch: r is set to type Tensor in the true branch and type int in the false branch:
+     @torch.jit.script
+     def an_error(x):
+         if x:
+         ~~~~~...  <--- HERE
+             r = torch.rand(1)
+         else:
+             r = 4
+         return r
+     ...
 
 
 Default Types
@@ -493,7 +510,7 @@ use `Python 3 type hints`_. If you are on Python 2, you can use ``torch.jit.anno
 
 Example (type annotations for Python 3):
 
-::
+.. testcode::
 
     import torch
     import torch.nn as nn
@@ -908,9 +925,9 @@ Pattern Matching Assignments
     a, b, *c = a_tuple
 
 Multiple Assignments
-    ::
+::
 
-        a = b, c = tup
+    a = b, c = tup
 
 Print Statements
 ^^^^^^^^^^^^^^^^
@@ -970,9 +987,7 @@ constant by adding the name of the attribute to the ``__constants__``
 list for the type. For loops over a ``nn.ModuleList`` will unroll the body of the
 loop at compile time, with each member of the constant module list.
 
-.. TODO: enable testcode when https://github.com/pytorch/pytorch/pull/24412 lands
-
-::
+.. testcode::
 
     class SubModule(torch.nn.Module):
         def __init__(self):
@@ -1028,15 +1043,30 @@ is an error to use it after the end of the if statement.
 Similarly, a variable is not allowed to be used if it is only *defined* along some
 paths through the function.
 
-.. TODO: Test this code and catch the exception
+Example:
 
-Example::
+.. testcode::
 
     @torch.jit.script
     def foo(x):
         if x < 0:
             y = 4
-        print(y) # Error: undefined value y
+        print(y)
+
+.. testoutput::
+
+     Traceback (most recent call last):
+       ...
+     RuntimeError: ...
+
+     y is not defined in the false branch...
+     @torch.jit.script...
+     def foo(x):
+         if x < 0:
+         ~~~~~~~~~...  <--- HERE
+             y = 4
+         print(y)
+     ...
 
 Non-local variables are resolved to Python values at compile time when the
 function is defined. These values are then converted into TorchScript values using
