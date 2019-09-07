@@ -763,7 +763,7 @@ class ScriptModuleSerializer2 {
       for (const auto& ins : code.instructions()) {
         std::stringstream ss;
         ss << ins.op;
-        std::vector<IValue> insv{ss.str(), ins.N, ins.X};
+        std::vector<IValue> insv{ss.str(), ins.X, ins.N};
         inss.emplace_back(c10::ivalue::Tuple::create(std::move(insv)));
       }
       auto instructions = c10::ivalue::Tuple::create(std::move(inss));
@@ -781,7 +781,10 @@ class ScriptModuleSerializer2 {
       auto constants = c10::ivalue::Tuple::create(code.constant_table());
       auto named_consts = c10::ivalue::Tuple::create({"constants", constants});
 
-      auto element = c10::ivalue::Tuple::create({named_ins, named_ops, named_consts});
+      // since the register location is embedded into the bytecode, pass the register size
+      auto named_aggsize = c10::ivalue::Tuple::create({"agg_output_size", code.agg_output_size()});
+
+      auto element = c10::ivalue::Tuple::create({named_ins, named_ops, named_consts, named_aggsize});
       elements.push_back(c10::ivalue::Tuple::create({func.name(), element}));
     }
     auto telements = c10::ivalue::Tuple::create(elements);

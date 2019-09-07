@@ -116,6 +116,8 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
 struct OperatorName final {
   std::string name;
   std::string overload_name;
+  OperatorName(const std::string& name, const std::string& overload_name)
+      : name(name), overload_name(overload_name) {}
 };
 
 struct FunctionSchema {

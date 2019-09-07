@@ -2,12 +2,11 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/core ATen_core)
 
 set(LITE_EXECUTOR_SRCS
     ${PROJECT_SOURCE_DIR}/torch/csrc/jit/lite_interpreter/import_bytecode.cpp
+    ${PROJECT_SOURCE_DIR}/torch/csrc/jit/lite_interpreter/bytecode.cpp
     ${PROJECT_SOURCE_DIR}/aten/src/ATen/core/ivalue.cpp
     ${PROJECT_SOURCE_DIR}/torch/csrc/jit/pickler.cpp
-#    ${PROJECT_SOURCE_DIR}/torch/csrc/jit/function.cpp
-#    ${ATen_CORE_SRCS}
-#    ${PROJECT_SOURCE_DIR}/torch/csrc/jit/lite_interpreter/bytecode_executor.cpp
-#    ${PROJECT_SOURCE_DIR}/torch/csrc/jit/lite_interpreter/register_ins_ops.cpp
+    ${PROJECT_SOURCE_DIR}/torch/csrc/jit/instruction.cpp
+    ${PROJECT_SOURCE_DIR}/torch/csrc/jit/lite_interpreter/register_ins_ops.cpp
     )
 
 add_library(lite_interpreter ${LITE_EXECUTOR_SRCS})

@@ -1117,6 +1117,10 @@ const std::vector<c10::OperatorName>& Code::opname_table() const {
   return pImpl->opname_table();
 }
 
+int Code::agg_output_size() const {
+  return pImpl->register_size_;
+}
+
 InterpreterState::InterpreterState(const Code& code)
     : pImpl(c10::make_intrusive<InterpreterStateImpl>(code)) {}
 InterpreterState::~InterpreterState() = default;

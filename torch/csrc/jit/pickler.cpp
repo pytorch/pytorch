@@ -876,15 +876,31 @@ PickleOpCode Unpickler::readInstruction() {
             stack_.emplace_back(std::move(obj));
           });
         } else {
-          globals_.emplace_back([this, type, cls, n] {
-            auto dict = std::move(stack_.back()).toGenericDict();
-            stack_.pop_back();
-            auto obj = c10::ivalue::Object::create(type, n);
-            for (size_t i = 0; i < n; ++i) {
-              obj->setSlot(i, dict.at(cls->getAttributeName(i)));
-            }
-            stack_.emplace_back(std::move(obj));
-          });
+          if (data_only_) {
+            globals_.emplace_back([this, type] {
+              auto dict = std::move(stack_.back()).toGenericDict();
+              stack_.pop_back();
+              size_t ndict = dict.size();
+              auto obj = c10::ivalue::Object::create(type, ndict);
+              auto it = dict.begin();
+              for (size_t i = 0; i < ndict; ++i) {
+                obj->setSlot(i, (*it).value());
+                ++it;
+              }
+              stack_.emplace_back(std::move(obj));
+            });
+          }
+          else {
+            globals_.emplace_back([this, type, cls, n] {
+              auto dict = std::move(stack_.back()).toGenericDict();
+              stack_.pop_back();
+              auto obj = c10::ivalue::Object::create(type, n);
+              for (size_t i = 0; i < n; ++i) {
+                obj->setSlot(i, dict.at(cls->getAttributeName(i)));
+              }
+              stack_.emplace_back(std::move(obj));
+            });
+          }
         }
       }
       stack_.emplace_back(int64_t(globals_.size() - 1));

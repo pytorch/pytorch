@@ -40,5 +40,21 @@ std::ostream& operator<<(std::ostream& out, Instruction inst) {
   }
   return out;
 }
+
+static constexpr char *strOpCode[] = {
+#define STR_OP(x, _) #x,
+    FORALL_OPCODES(STR_OP)
+#undef STR_OP
+};
+
+OpCode str2OpCode(const char *str) {
+  const int n = sizeof(strOpCode) / sizeof(strOpCode[0]);
+  for (int i = 0; i < n; ++i)
+  {
+    if (strcmp(strOpCode[i], str) == 0)
+      return (OpCode) i;
+  }
+  return OP;
+}
 }
 }

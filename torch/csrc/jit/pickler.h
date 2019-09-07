@@ -241,10 +241,12 @@ class Unpickler {
   Unpickler(
       std::function<bool(char*, size_t)> reader,
       ClassResolver class_resolver,
-      const std::vector<at::Tensor>* tensor_table)
+      const std::vector<at::Tensor>* tensor_table,
+      bool data_only = false)
       : reader_(reader),
         tensor_table_(tensor_table),
-        class_resolver_(std::move(class_resolver)) {}
+        class_resolver_(std::move(class_resolver)),
+        data_only_(data_only) {}
 
   // tensors inside the pickle contain meta-data, the raw tensor
   // dead is retrieved by calling `read_record`.
@@ -252,12 +254,14 @@ class Unpickler {
       std::function<bool(char*, size_t)> reader,
       ClassResolver class_resolver,
       std::function<at::DataPtr(const std::string&)> read_record,
-      c10::optional<at::Device> device)
+      c10::optional<at::Device> device,
+      bool data_only = false)
       : reader_(reader),
         tensor_table_(nullptr),
         class_resolver_(std::move(class_resolver)),
         read_record_(std::move(read_record)),
-        device_(std::move(device)) {}
+        device_(std::move(device)),
+        data_only_(data_only) {}
 
   IValue parse_ivalue();
 
@@ -302,6 +306,7 @@ class Unpickler {
 
   std::function<at::DataPtr(const std::string&)> read_record_;
   c10::optional<at::Device> device_;
+  bool data_only_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
