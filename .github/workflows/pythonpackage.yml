@@ -1,7 +1,7 @@
 name: Python package
 
 on: 
-  pull_request
+  push
 
 jobs:
   lint:
