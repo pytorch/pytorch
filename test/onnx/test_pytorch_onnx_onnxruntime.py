@@ -792,6 +792,22 @@ class TestONNXRuntime(unittest.TestCase):
         model = CumSum()
         self.run_test(model, x)
 
+    def test_log(self):
+        class Log(torch.nn.Module):
+            def forward(self, input):
+                return torch.log(input)
+        x = torch.rand(2, 3, 4)
+        model = Log()
+        self.run_test(model, x)
+
+    def test_log1p(self):
+        class Log1p(torch.nn.Module):
+            def forward(self, input):
+                return torch.log1p(input)
+        x = torch.rand(2, 3, 4)
+        model = Log1p()
+        self.run_test(model, x)
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)
