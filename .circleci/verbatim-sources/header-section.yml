@@ -71,7 +71,9 @@ ios_brew_update: &ios_brew_update
     set -ex
     brew update
     brew outdated
+    brew unlink parallel
     brew install moreutils
+    brew link parallel --overwrite
     brew install libtool
 
 
