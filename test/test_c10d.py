@@ -13,7 +13,7 @@ import unittest
 from datetime import timedelta
 from sys import platform
 
-from itertools import groupby
+from itertools import groupby, combinations
 from functools import partial, reduce
 
 import torch
@@ -756,18 +756,22 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         with self.assertRaisesRegex(ValueError, "requires non-empty tensor list"):
             opts = c10d.AllreduceCoalescedOptions()
+            opts.checkShapes = False
             pg.allreduce_coalesced([], opts)
 
         with self.assertRaisesRegex(ValueError, "tensors must all have the same type"):
             opts = c10d.AllreduceCoalescedOptions()
+            opts.checkShapes = False
             pg.allreduce_coalesced([t1, t2], opts)
 
         with self.assertRaisesRegex(ValueError, "invalid tensor layout at index"):
             opts = c10d.AllreduceCoalescedOptions()
+            opts.checkShapes = False
             pg.allreduce_coalesced([t1, t3], opts)
 
         with self.assertRaisesRegex(ValueError, "unsupported layout"):
             opts = c10d.AllreduceCoalescedOptions()
+            opts.checkShapes = False
             pg.allreduce_coalesced([t3, t3.clone()], opts)
 
     @skip_if_lt_x_gpu(1)
@@ -779,7 +783,91 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         with self.assertRaisesRegex(ValueError, "unsupported device type"):
             opts = c10d.AllreduceCoalescedOptions()
+            opts.checkShapes = False
             pg.allreduce_coalesced([t1.cuda(), t1.cuda()], opts)
+
+    def _test_allreduce_coalesced_checks_shapes_runner(self, pg, input):
+        opts = c10d.AllreduceCoalescedOptions()
+        opts.checkShapes = True
+        work = pg.allreduce_coalesced(input, opts)
+        work.wait()
+
+    def _test_allreduce_coalesced_checks_shapes_helper(
+        self, correct_shapes, possible_wrong_shapes, threads
+    ):
+        # cross-node shape checks
+
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads))
+
+        for n_wrong in range(self.world_size + 1):
+            for wrong_ranks in combinations(range(self.world_size), n_wrong):
+                for wrong_shapes in possible_wrong_shapes:
+                    rank_input = [
+                        torch.zeros(s) for s in
+                        (wrong_shapes if self.rank in wrong_ranks else correct_shapes)
+                    ]
+
+                    # maybe in the future can add a noop context manager to clean this up
+                    if n_wrong in {0, self.world_size}:
+                        self._test_allreduce_coalesced_checks_shapes_runner(
+                            pg, rank_input
+                        )
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "cross-node shape mismatch"):
+                            self._test_allreduce_coalesced_checks_shapes_runner(
+                                pg, rank_input
+                            )
+
+    def test_allreduce_coalesced_checks_shapes(self):
+        correct_shapes = [(2, 2), (4,)]
+        possible_wrong_shapes = [
+            [(2, 2), (4, 1)],
+            [(2, 2), (4,), (0,)],
+            [(4,), (2, 2)],
+            [(8,)],
+            [(1,)] * 8,
+            [(2, 2), (5,)]
+        ]
+        self._test_allreduce_coalesced_checks_shapes_helper(
+            correct_shapes, possible_wrong_shapes, threads=2
+        )
+
+    def test_allreduce_coalesced_checks_shapes_stress(self):
+        # can stress along 3 dimensions:
+        # - increasing dimensionality of tensors
+        # - increasing number of tensors
+        # - increasing sizes of those tensors (not done because causes actual
+        #       allreduce operation to run out of memory when done in combination
+        #       with other two and won't result in increased stress on shape checking).
+        dim_multiplier = 3
+        tensor_multiplier = 5
+        size_multiplier = 1
+
+        def scale_dims(shapes):
+            return [shape * dim_multiplier for shape in shapes]
+
+        def scale_tensors(shapes):
+            return tensor_multiplier * shapes
+
+        def scale_sizes(shapes):
+            return [tuple(map(lambda x: x * size_multiplier, shape)) for shape in shapes]
+
+        def scale(shapes):
+            return scale_tensors(scale_dims(scale_sizes(shapes)))
+
+        correct_shapes = scale([(2, 2), (4,)])
+        possible_wrong_shapes = [
+            scale(shapes) for shapes in
+            [
+                [(8,)],
+                [(4,), (2, 2)],
+                [(2, 2), (5,)],
+            ]
+        ]
+        self._test_allreduce_coalesced_checks_shapes_helper(
+            correct_shapes, possible_wrong_shapes, threads=8
+        )
 
     def _test_allreduce_coalesced_basics(self, fn):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -789,6 +877,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for op, inputs, outputs in test_cases:
             opts = c10d.AllreduceCoalescedOptions()
             opts.reduceOp = op
+            opts.checkShapes = False
             tensors = [fn(x) for x in inputs]
             work = pg.allreduce_coalesced(tensors, opts)
             work.wait()
@@ -801,7 +890,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def _test_allreduce_coalesced_stress(self, inputs):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
-        work_handles = [pg.allreduce_coalesced(input) for input in inputs]
+        opts = c10d.AllreduceCoalescedOptions()
+        opts.checkShapes = False
+        work_handles = [pg.allreduce_coalesced(input, opts) for input in inputs]
         for i, work_handle in enumerate(work_handles):
             work_handle.wait()
             self.assertEqual(
