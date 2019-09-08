@@ -1391,6 +1391,9 @@ jobs:
             if [ -n "${IOS_PLATFORM:-}" ]; then
               CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
             fi
+            if [ -n "${USE_NNPACK:-}" ]; then 
+              CMAKE_ARGS+=("-DUSE_NNPACK=${USE_NNPACK}")
+            fi
             CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
             CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
             CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
