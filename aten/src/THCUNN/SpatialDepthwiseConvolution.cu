@@ -70,12 +70,6 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
 
     const int in_depth = outputChannels;
 
-
-    const int input_row_start = -padHeight + h * strideHeight;
-    const int input_col_start = -padWidth + w * strideWidth;
-    const int input_row_end = input_row_start + KH_LIMIT;
-    const int input_col_end = input_col_start + KW_LIMIT;
-
     AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[c]) : ScalarConvert<int, AccT>::to(0);
     const IndexType offset0 = (n * in_depth + in_channel) * inputHeight * inputWidth;
 
@@ -90,8 +84,7 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
       for (int kW = 0; kW < KW_LIMIT; ++kW) {
         const int h_in = -padHeight + h * strideHeight + kH * dilationHeight;
         const int w_in = -padWidth + w * strideWidth + kW * dilationWidth;
-        if (h_in >= 0 && h_in < inputHeight && w_in >= 0 &&
-            w_in < inputWidth) {
+        if ((h_in >= 0) && (h_in < inputHeight) && (w_in >= 0) && (w_in < inputWidth)) {
           const int offset = offset0 + h_in * inputWidth + w_in;
           const int weightOffset = multiplier + depthwiseMultiplier * (in_channel + in_depth * (kW + filter_offset_temp));
           value = THCNumerics<AccT>::add(
