@@ -229,6 +229,10 @@ if (${name}.defined()) {
 
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
+OPERATOR_NAME = CodeTemplate("""\
+    {"aten::${name}", "${overload_name}"},
+""")
+
 NAMEDTENSOR_CHECK = CodeTemplate("""\
 #ifdef BUILD_NAMEDTENSOR
 ${code}
@@ -445,6 +449,7 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'type_headers': List[str],
     'function_registrations': List[str],
     'c10_function_registrations': List[str],
+    'c10_ops_already_moved_from_aten_to_c10': List[str],
     'type_method_declarations': List[str],
     'type_method_definitions': List[str],
     'tensor_method_declarations': List[str],
@@ -1244,6 +1249,9 @@ def create_generic(top_env, declarations):
             if option['use_c10_dispatcher']:
                 top_env['c10_function_registrations'].append(
                     check_namedtensor_enabled(C10_DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
+                top_env['c10_ops_already_moved_from_aten_to_c10'].append(
+                    check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
+                )
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):

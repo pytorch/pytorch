@@ -177,10 +177,6 @@ Operator(
 ),
 """)
 
-OPERATOR_NAME = CodeTemplate("""\
-    {"aten::${name}", "${overload_name}"},
-""")
-
 
 blacklisted_types = {
     'Storage',
@@ -423,20 +419,18 @@ def gen_jit_dispatch(declarations, out, template_path):
     # modify generate_code.py, torch/CMakeLists.txt, and the TARGETS
     # files.
     num_shards = 3
-    shards = [{'constructors': [], 'op_names': []} for _ in range(num_shards)]
+    shards = [[] for _ in range(num_shards)]
 
     # ops are assigned arbitrarily but stably to a file based on hash
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            shards[x]['constructors'].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
+            shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
                                              op=emit_decl_variant(decl)))
-            shards[x]['op_names'].append(OPERATOR_NAME.substitute(name=decl['name'], overload_name=decl['overload_name']))
 
     for i, shard in enumerate(shards):
         env = {
-            'constructors': shard['constructors'],
-            'op_names': shard['op_names'],
+            'constructors': shard,
             'num_shard': i,
         }
         write(out, 'register_aten_ops_%d.cpp' % i, REGISTER_ATEN_OPS_CPP, env)
