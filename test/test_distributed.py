@@ -11,6 +11,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import reduce, wraps
+from itertools import combinations
 
 import torch
 import torch.cuda
@@ -1008,6 +1009,83 @@ class _DistTestBase(object):
 
     # ALL REDUCE - COALESCED
     @staticmethod
+    def _all_reduce_coalesced_shape_check_test_cases(group):
+        correct_shapes = [(2, 1), (4,)]
+        possible_wrong_shapes = [
+            [(2,), (4,)],
+            [(2, 1), (4, 1)],
+            [(2, 1), (4,), (0,)],
+            [(4,), (2, 1)],
+            [(6,)]
+        ]
+
+        for n_incorrect in range(len(group) + 1):
+            for incorrect_ranks in combinations(group, n_incorrect):
+                for incorrect_shapes in possible_wrong_shapes:
+                    yield (correct_shapes, incorrect_shapes, incorrect_ranks)
+
+    def _test_all_reduce_coalesced_shape_check_helper(
+        self,
+        group,
+        group_id,
+        rank,
+        cuda=False,
+        rank_to_GPU=None
+    ):
+        if rank in group:
+            test_cases = self._all_reduce_coalesced_shape_check_test_cases(group)
+            for correct_shapes, incorrect_shapes, incorrect_ranks in test_cases:
+                tensors = [
+                    torch.full(shape, rank) for shape in
+                    (incorrect_shapes if rank in incorrect_ranks else correct_shapes)
+                ]
+                if cuda:
+                    tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
+
+                # maybe can add a noop context manager later to clean this up
+                if not incorrect_ranks or len(incorrect_ranks) == len(group):
+                    dist.all_reduce_coalesced(
+                        tensors,
+                        dist.ReduceOp.SUM,
+                        check_shapes=True,
+                        group=group_id,
+                        async_op=False
+                    )
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "cross-node shape mismatch"):
+                        dist.all_reduce_coalesced(
+                            tensors,
+                            dist.ReduceOp.SUM,
+                            check_shapes=True,
+                            group=group_id,
+                            async_op=False
+                        )
+
+        self._barrier()
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_shape_check(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_reduce_coalesced_shape_check_helper(
+            group, group_id, rank, cuda=False, rank_to_GPU=None
+        )
+
+    @skip_if_small_worldsize
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_shape_check_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_reduce_coalesced_shape_check_helper(
+            group, group_id, rank, cuda=False, rank_to_GPU=None
+        )
+
+    @require_backend({"gloo"})
+    def test_all_reduce_coalesced_shape_check_full_group(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_reduce_coalesced_shape_check_helper(
+            group, group_id, rank, cuda=False, rank_to_GPU=None
+        )
+
+    @staticmethod
     def _all_reduce_coalesced_sum_test_cases(group_size):
         return (
             [2, 3],
@@ -1064,7 +1142,7 @@ class _DistTestBase(object):
             ]
             if cuda:
                 tensors = list(map(tensors, lambda t: t.cuda(rank_to_GPU[rank][0])))
-            dist.all_reduce_coalesced(tensors, op, group_id)
+            dist.all_reduce_coalesced(tensors, op, check_shapes=False, group=group_id)
             self.assertEqual(
                 tensors,
                 [
