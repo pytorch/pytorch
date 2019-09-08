@@ -244,9 +244,9 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
     return at::op##_out(self, self);                                   \
   }                                                                    \
   Tensor& _##op##_out_##prefix(Tensor& result, const Tensor& self) {   \
-    checkBackend(#op, result, Backend::device);                        \
     auto iter = TensorIterator::unary_op(result, self,                 \
       /*check_mem_overlap=*/true);                                     \
+    AT_ASSERT(iter.device_type() == DeviceType::CPU);                  \
     op##_stub(iter.device_type(), iter);                               \
     return result;                                                     \
   }
@@ -260,6 +260,8 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
 IMPLEMENT_UNARY_OP_VEC(abs)
+IMPLEMENT_UNARY_OP_VEC(real)
+IMPLEMENT_UNARY_OP_VEC(imag)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
@@ -288,6 +290,8 @@ IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
 
 DEFINE_DISPATCH(abs_stub);
+DEFINE_DISPATCH(real_stub);
+DEFINE_DISPATCH(imag_stub);
 DEFINE_DISPATCH(acos_stub);
 DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);
