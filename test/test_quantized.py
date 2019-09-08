@@ -24,7 +24,7 @@ def avoid_vpmaddubsw_overflow_linear(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
 ):
     for i, j in np.ndindex((batch_size, output_channels)):
-        for k in range(0, input_channels // 2 * 2, 2):
+        for k in range(0,input_channels // 2 * 2, 2):
             x0 = X[i, k] - X_min
             x1 = X[i, k + 1] - X_min
             w0 = W[j, k] - 128 - W_min
