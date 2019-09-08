@@ -11,7 +11,6 @@ namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
-
 template <> class Vec256<std::complex<double>> {
 private:
   std::complex<double> values[2] = {0};
@@ -117,6 +116,7 @@ public:
     }
     return ret;
   }
+  #if 0
   Vec256<std::complex<double>> acos() const {
     return map(std::acos);
   }
@@ -243,8 +243,12 @@ public:
   Vec256<std::complex<double>> operator>=(const Vec256<std::complex<double>>& other) const {
     AT_ERROR("not supported for complex numbers");
   }
+
+  #endif
+
 };
 
+#if 0
 template <>
 Vec256<std::complex<double>> inline operator+(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b) {
   Vec256<std::complex<double>> ret;
@@ -325,5 +329,7 @@ template <>
 inline void convert(const std::complex<double>* src, std::complex<double>* dst, int64_t n) {
   AT_ERROR("not supported for complex numbers");
 }
+
+#endif
 
 }}}
