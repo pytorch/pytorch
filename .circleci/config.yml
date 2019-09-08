@@ -1048,8 +1048,8 @@ jobs:
           command: |
             set -e
             export IN_CIRCLECI=1
-            export WORKSPACE=/Users/distiller/workspace
-            export PROJ_ROOT=/Users/distiller/project
+            WORKSPACE=/Users/distiller/workspace
+            PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib" 
 
             # Install conda
@@ -1086,21 +1086,34 @@ jobs:
             #for testing
             rm -rf libprotobuf-lite.a
             rm -rf libpthreadpool.a
-
             libtool -static *.a -o libtorch_arm64.a
 
             #store the binary
-            mkdir -p ${WORKSPACE}/install
-            cp ${PROJ_ROOT}/build_ios/install/include ${WORKSPACE}/install
-            cp ${PROJ_ROOT}/build_ios/install/lib/libtorch_arm64.a  ${WORKSPACE}/install
+            mkdir -p ${WORKSPACE}/zip/install
+            cp -R ${PROJ_ROOT}/build_ios/install/include ${WORKSPACE}/zip/install
+            mkdir -p ${WORKSPACE}/zip/install/lib
+            cp ${PROJ_ROOT}/build_ios/install/lib/libtorch_arm64.a  ${WORKSPACE}/zip/install/lib
 
+            #create the unmbrella header
+            mkdir -p ${WORKSPACE}/zip/src
+            cd ${WORKSPACE}/zip/src
+            touch LibTorch.h
+            echo "#import <script/torch.h>" > LibTorch.h
+        
             # zip the library
-            cd ${WORKSPACE}/install
-            zip libtorch.zip ./include ./libtorch_arm64.a
+            cd   ${WORKSPACE}/zip/
+            zip -R libtorch.zip install src
             
             # store the artifact
             mkdir ${WORKSPACE}/artifact
             cp libtorch.zip ${WORKSPACE}/artifact
+
+            # upload to aws
+            set +x
+            export AWS_ACCESS_KEY_ID="${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
+            export AWS_SECRET_ACCESS_KEY="${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
+            cat >/Users/distiller/project/login_to_anaconda.sh <<EOL
+            set +x
           
       - store_artifacts:
           path: ~/workspace/artifact
