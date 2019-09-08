@@ -39,10 +39,10 @@ void div_kernel_cuda(TensorIterator& iter) {
       });
     });
   } else {
+    auto isInt = isIntegralType(iter.dtype(), /*includeBool* false);
     AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "div_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, [&iter]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        TORCH_CHECK(b != 0 || !isIntegralType(iter.dtype(), /*includeBool*/ false),
-        "ZeroDivisionError: integer division by zero");
+      gpu_kernel_with_scalars(iter, [isInt]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        TORCH_CHECK(b != 0 || !isInt, "ZeroDivisionError: integer division by zero");
         return a / b;
       });
     });
