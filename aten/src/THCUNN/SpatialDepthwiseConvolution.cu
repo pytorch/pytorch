@@ -86,6 +86,7 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
       for (int kW = 0; kW < KW_LIMIT; ++kW) {
         const int h_in = -padHeight + h * strideHeight + kH * dilationHeight;
         const int w_in = -padWidth + w * strideWidth + kW * dilationWidth;
+
         if ((h_in >= 0) && (h_in < inputHeight) && (w_in >= 0) && (w_in < inputWidth)) {
           const IndexType offset = offset0 + h_in * inputWidth + w_in;
           const int weightOffset = multiplier + depthwiseMultiplier * (inputChannel + outputChannels * (kW + KW_LIMIT * kH));
