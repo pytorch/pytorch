@@ -13,7 +13,7 @@ namespace rpc {
 // The singleton object is constructed at first when RPC agent is
 // constructed, where the python function in
 // torch/distributed/internal_rpc_utils.py are imported only once.
-class PythonRpcHandler {
+class PYBIND11_EXPORT PythonRpcHandler {
  public:
   static PythonRpcHandler& getInstance();
   // Execute python UDF, result is pickled to binary string
