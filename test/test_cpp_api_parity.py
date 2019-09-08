@@ -235,7 +235,8 @@ class TestCppApiParity(common.TestCase):
         init_arg_spec = self._get_python_module_init_arg_spec(module_name)
         init_kwargs_defaults = init_arg_spec.defaults
         python_default_constructor_arg_names = [x for x in init_arg_spec.args[1:-len(init_kwargs_defaults)] if x != 'has_parity']
-        cpp_default_constructor_arg_values = re.findall(r'{[^}]*}|[^,\s]+', cpp_default_constructor_args_str.strip('()'))
+        # NOTE: the regex is used here to split up e.g. `(1, {2, 3}, 4)` into `['1', '{2, 3}', '4']`
+        cpp_default_constructor_arg_values = re.findall(r'{[^}]*}|[^,\s()]+', cpp_default_constructor_args_str)
         self.assertEqual(
             len(cpp_default_constructor_arg_values),
             len(python_default_constructor_arg_names),
