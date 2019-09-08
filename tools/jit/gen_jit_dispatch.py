@@ -426,12 +426,11 @@ def gen_jit_dispatch(declarations, out, template_path):
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
             shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
-                             op=emit_decl_variant(decl)))
+                                                 op=emit_decl_variant(decl)))
 
     for i, shard in enumerate(shards):
         env = {
             'constructors': shard,
-            'num_shard': i,
         }
         write(out, 'register_aten_ops_%d.cpp' % i, REGISTER_ATEN_OPS_CPP, env)
 
