@@ -65,19 +65,23 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
     const int c = indtmp1 - indtmp2 * outputChannels;
     const int n = indtmp2;
 
+    int inputChannel = c;
+    int inputChannels = outputChannels;
+    if (depthwiseMultiplier !=1) {
+      inputChannel /= depthwiseMultiplier;
+      inputChannels /= depthwiseMultiplier;
+    }
+
     const int in_channel = c / depthwiseMultiplier;
     const int multiplier = c % depthwiseMultiplier;
 
-    const int in_depth = outputChannels;
-
     AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[c]) : ScalarConvert<int, AccT>::to(0);
-    const IndexType offset0 = (n * in_depth + in_channel) * inputHeight * inputWidth;
+    const IndexType offset0 = (n * inputChannels + inputChannel) * inputHeight * inputWidth;
 
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
     for (int kH = 0; kH < KH_LIMIT; ++kH) {
-      const int filter_offset_temp = KW_LIMIT * kH;
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
@@ -86,7 +90,7 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
         const int w_in = -padWidth + w * strideWidth + kW * dilationWidth;
         if ((h_in >= 0) && (h_in < inputHeight) && (w_in >= 0) && (w_in < inputWidth)) {
           const int offset = offset0 + h_in * inputWidth + w_in;
-          const int weightOffset = multiplier + depthwiseMultiplier * (in_channel + in_depth * (kW + filter_offset_temp));
+          const int weightOffset = multiplier + depthwiseMultiplier * (in_channel + outputChannels * (kW + KW_LIMIT * kH));
           value = THCNumerics<AccT>::add(
             value,
             THCNumerics<AccT>::mul(
