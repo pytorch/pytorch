@@ -137,7 +137,7 @@ static void reciprocal_kernel(TensorIterator& iter) {
 }
 
 static void neg_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "neg_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "neg_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return -a; },
@@ -212,7 +212,7 @@ static void polygamma_kernel(TensorIterator& iter, int64_t n) {
   switch (n) {
     case 0: digamma_kernel(iter); break;
     case 1: trigamma_kernel(iter); break;
-    default: AT_ERROR("polygamma(n,x) is not implemented for n>=2");
+    default: TORCH_CHECK("polygamma(n,x) is not implemented for n>=2, but was ", n);
   }
 }
 

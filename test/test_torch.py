@@ -239,7 +239,7 @@ class _TestTorchMixin(torchtest):
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
                        'align_to',  # BUILD_NAMEDTENSOR only
-                       'view_names',  # BUILD_NAMEDTENSOR only
+                       'renamed',  # BUILD_NAMEDTENSOR only
                        'names_',  # BUILD_NAMEDTENSOR only
                        'has_names',  # BUILD_NAMEDTENSOR only
                        'rename',  # BUILD_NAMEDTENSOR only
@@ -1661,6 +1661,9 @@ class _TestTorchMixin(torchtest):
     def test_addcdiv(self):
         def _test_addcdiv(a, alpha, b, c):
             actual = torch.addcdiv(a, alpha, b, c)
+            # implementation of addcdiv downcasts alpha. arithmetic ops don't.
+            if not actual.dtype.is_floating_point:
+                alpha = int(alpha)
             expected = a + (alpha * b) / c
             self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
 
@@ -7419,6 +7422,32 @@ class _TestTorchMixin(torchtest):
         self._test_cholesky_batched(self, lambda t: t)
 
     @staticmethod
+    def _test_cholesky_batched_many_batches(self, cast):
+        from common_utils import random_symmetric_pd_matrix
+
+        def cholesky_test_helper(n, batchsize, cast, upper):
+            A = cast(random_symmetric_pd_matrix(n, batchsize))
+            chol_fact = torch.cholesky(A, upper=upper)
+            if upper:
+                # Correctness check
+                self.assertEqual(A, chol_fact.transpose(-2, -1).matmul(chol_fact))
+                # Upper triangular check
+                self.assertEqual(chol_fact, chol_fact.triu())
+            else:
+                # Correctness check
+                self.assertEqual(A, chol_fact.matmul(chol_fact.transpose(-2, -1)))
+                # Lower triangular check
+                self.assertEqual(chol_fact, chol_fact.tril())
+
+        for upper, batchsize in product([True, False], [262144, 524288]):
+            cholesky_test_helper(2, batchsize, cast, upper)
+
+    @skipIfNoLapack
+    @slowTest
+    def test_cholesky_batched_many_batches(self):
+        self._test_cholesky_batched_many_batches(self, lambda t: t)
+
+    @staticmethod
     def _test_cholesky_solve(self, cast):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
@@ -12342,6 +12371,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         if torch.cuda.is_available():
             run_test(torch.device('cuda'))
 
+    @skipIfRocm
     def test_unique_dim(self):
         self.assertFalse(hasattr(torch, 'unique_dim'))
 

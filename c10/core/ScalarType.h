@@ -307,8 +307,44 @@ static inline ScalarType toUnderlying(ScalarType t) {
   }
 }
 
+static inline bool isSignedType(ScalarType t) {
+  #define CASE_SIGNED(ctype, name) \
+    case ScalarType::name:                       \
+      return std::numeric_limits<ctype>::is_signed;
+
+    switch (t) {
+      AT_FORALL_SCALAR_TYPES_AND(Half, CASE_SIGNED)
+      default:
+        AT_ERROR("Unknown ScalarType");
+    }
+  #undef CASE_SIGNED
+}
+
 static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
   return type == toUnderlying(qtype);
+}
+
+// see tensor_attributes.rst for detailed explanation and examples
+// of casting rules.
+static inline bool canCast(const ScalarType from, const ScalarType to) {
+  // We disallow float -> integral, e.g., int_tensor *= float is disallowed.
+  if (isFloatingType(from) && isIntegralType(to, false)) {
+    return false;
+  }
+
+  // Treat bool as a distinct "category," to be consistent with type promotion
+  // rules (e.g. `bool_tensor + 5 -> int64_tensor`). If `5` was in the same category
+  // as `bool_tensor`, we would not promote.
+  // Differing categories implies `bool_tensor += 5` is disallowed.
+  //
+  // NB: numpy distinguishes "unsigned" as a category to get the desired
+  // `bool_tensor + 5 -> int64_tensor` behavior. We don't, because:
+  // * We don't want the performance hit of checking the runtime sign of Scalars.
+  // * `uint8_tensor + 5 -> int64_tensor` would be undesirable.
+  if (from != ScalarType::Bool && to == ScalarType::Bool) {
+    return false;
+  }
+  return true;
 }
 
 static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {

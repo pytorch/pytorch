@@ -13,9 +13,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <algorithm>
 #include <vector>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 namespace at {
 namespace native {
@@ -50,8 +48,30 @@ static void check_cat_no_zero_dim(TensorList tensors) {
 Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat_out(result, tensors, dim);
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_cat_outnames(tensors);
+  {
+    NoNamesGuard guard;
+#endif
+    at::_cat_out(result, tensors, dim);
+#ifdef BUILD_NAMEDTENSOR
+  }
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
+
+#ifdef BUILD_NAMEDTENSOR
+Tensor& cat_out(Tensor& result, TensorList tensors, Dimname dim) {
+  TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
+  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
+}
+
+Tensor cat(TensorList tensors, Dimname dim) {
+  TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
+  return at::cat(tensors, dimname_to_position(tensors[0], dim));
+}
+#endif
 
 static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_except /* should already be wrapped */) {
   if (s1.size() != s2.size()) {
@@ -180,7 +200,20 @@ Tensor cat(TensorList tensors, int64_t dim) {
   }
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat(tensors, dim);
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_cat_outnames(tensors);
+#endif
+  Tensor result;
+  {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    result = at::_cat(tensors, dim);
+  }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
@@ -1001,6 +1034,39 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
 
   return self.reshape(shape);
 }
+
+#ifdef BUILD_NAMEDTENSOR
+Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
+  auto outnames = self.names().vec();
+  outnames.erase(outnames.begin() + start_dim, outnames.begin() + end_dim + 1);
+  outnames.insert(outnames.begin() + start_dim, out_dim);
+
+  Tensor result;
+  {
+    NoNamesGuard guard;
+    result = native::flatten(self, start_dim, end_dim);
+  }
+  internal_set_names_inplace(result, outnames);
+  return result;
+}
+
+Tensor flatten(const Tensor& self, Dimname start_dim, Dimname end_dim, Dimname out_dim) {
+  auto start_pos = dimname_to_position(self, start_dim);
+  auto end_pos  = dimname_to_position(self, end_dim);
+  return native::flatten(self, start_pos, end_pos, out_dim);
+}
+
+Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
+  auto positions = dimnames_to_positions(self, dims);
+  for (size_t i = 0; i < positions.size() - 1; i++) {
+    if (positions[i] + 1 == positions[i + 1]) continue;
+    TORCH_CHECK(positions[i] + 1 == positions[i + 1],
+        "flatten(tensor, dims, out_dim): dims ", dims, " must be consecutive ",
+        "in Tensor", self.names());
+  }
+  return native::flatten(self, *dims.begin(), *(dims.end() - 1), out_dim);
+}
+#endif
 
 Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view(other.sizes());
