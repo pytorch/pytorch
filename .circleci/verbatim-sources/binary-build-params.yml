@@ -59,7 +59,7 @@ binary_ios_params: &binary_ios_params
     ios_arch:
       type: string
       default: ""
-    ios_platform: ""
+    ios_platform:
       type: string
       default: ""
   environment:
