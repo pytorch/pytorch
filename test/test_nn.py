@@ -943,7 +943,7 @@ class TestNN(NNTestCase):
                                     r'Expected 4-dimensional input for 4-dimensional weight 6 1 5 5,' +
                                     r' but got 5-dimensional input of size \[1, 10, 1, 28, 28\] instead'):
 
-            F.conv2d(x,w)
+            F.conv2d(x, w)
 
     def test_invalid_conv2d(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
