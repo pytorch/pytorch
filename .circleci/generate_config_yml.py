@@ -102,7 +102,7 @@ YAML_SOURCES = [
     # Listgen(binary_build_definitions.get_nightly_tests, 3),
     # File("workflows-nightly-uploads-header.yml"),
     # Listgen(binary_build_definitions.get_nightly_uploads, 3),
-    File("workflows-s3-html.yml"),
+    # File("workflows-s3-html.yml"),
 ]
 
 
