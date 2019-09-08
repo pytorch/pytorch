@@ -229,6 +229,10 @@ if (${name}.defined()) {
 
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
+OPERATOR_NAME = CodeTemplate("""\
+    {"aten::${name}", "${overload_name}"},
+""")
+
 NAMEDTENSOR_CHECK = CodeTemplate("""\
 #ifdef BUILD_NAMEDTENSOR
 ${code}
@@ -445,6 +449,7 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'type_headers': List[str],
     'function_registrations': List[str],
     'c10_function_registrations': List[str],
+    'c10_ops_already_moved_from_aten_to_c10': List[str],
     'type_method_declarations': List[str],
     'type_method_definitions': List[str],
     'tensor_method_declarations': List[str],
@@ -1221,6 +1226,10 @@ def create_generic(top_env, declarations):
         if BUILD_NAMEDTENSOR or not is_named_tensor_only:
             top_env['registration_declarations'].append(
                 REGISTRATION_DECLARATION.substitute(option))
+        if option['use_c10_dispatcher']:
+            top_env['c10_ops_already_moved_from_aten_to_c10'].append(
+                check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
+            )
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
