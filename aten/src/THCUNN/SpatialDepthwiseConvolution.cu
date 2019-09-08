@@ -83,17 +83,15 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
 #pragma unroll
 #endif
     for (int kH = 0; kH < KH_LIMIT; ++kH) {
-      const int h_in = input_row_start + kH * dilationHeight;
       const int filter_offset_temp = KW_LIMIT * kH;
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
       for (int kW = 0; kW < KW_LIMIT; ++kW) {
-        const int w_in = input_col_start + kW * dilationWidth;
+        const int h_in = -padHeight + h * strideHeight + kH * dilationHeight;
+        const int w_in = -padWidth + w * strideWidth + kW * dilationWidth;
         if (h_in >= 0 && h_in < inputHeight && w_in >= 0 &&
             w_in < inputWidth) {
-          const int w_in = input_col_start + kW * dilationWidth;
-
           const int offset = offset0 + h_in * inputWidth + w_in;
           const int weightOffset = multiplier + depthwiseMultiplier * (in_channel + in_depth * (kW + filter_offset_temp));
           value = THCNumerics<AccT>::add(
