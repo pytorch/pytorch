@@ -19,7 +19,6 @@ jobs:
           set -eux
           pip install flake8
           flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8_output.txt
-          cat ${GITHUB_WORKSPACE}/flake8_output.txt
       - name: Add annotations
         uses: suo/add-annotations-github-action@master
         with:
