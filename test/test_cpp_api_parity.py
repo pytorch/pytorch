@@ -272,7 +272,6 @@ class TestCppApiParity(common.TestCase):
             module_option=cpp_module_option,
             extra_stmts=''.join(extra_stmts))
         cpp_test_name = module_name + '_test_ctor_args'
-        print(cpp_sources)
         cpp_module = self._compile_cpp_code_inline(
             name=cpp_test_name, cpp_sources=cpp_sources, functions=cpp_test_name)
 
