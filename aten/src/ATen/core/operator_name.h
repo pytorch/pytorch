@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 
 namespace c10 {
 
@@ -17,4 +18,13 @@ inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
   return !operator==(lhs, rhs);
 }
 
+}
+
+namespace std {
+  template <>
+  struct hash<::c10::OperatorName> {
+    size_t operator()(const ::c10::OperatorName& x) const {
+      return std::hash<std::string>()(x.name) ^ (~ std::hash<std::string>()(x.overload_name));
+    }
+  };
 }

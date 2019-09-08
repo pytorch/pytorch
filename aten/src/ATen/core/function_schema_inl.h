@@ -224,12 +224,3 @@ inline bool FunctionSchema::isSubtypeOf(
 }
 
 } // namespace c10
-
-namespace std {
-  template <>
-  struct hash<::c10::OperatorName> {
-    size_t operator()(const ::c10::OperatorName& x) const {
-      return std::hash<std::string>()(x.name) ^ (~ std::hash<std::string>()(x.overload_name));
-    }
-  };
-}
