@@ -42,7 +42,7 @@ bool check_ivalue_equality(const c10::IValue& ivalue_python, const c10::IValue& 
   // are multidimensional but have the same value in all dimensions. The corresponding
   // data type for C++ modules is `ExpandingArray` (which is converted to `IntList` by the
   // `IValue` constructor), and here we check that all elements in the `ExpandingArray`
-  // equal to the Python `int` attribute.
+  // are equal to the Python `int` attribute.
   if (ivalue_python.isInt() && ivalue_cpp.isIntList()) {
     auto ivalue_cpp_list = ivalue_cpp.toIntListRef();
     std::vector<int64_t> ivalue_python_vec(ivalue_cpp_list.size());
@@ -381,7 +381,7 @@ class TestCppApiParity(common.TestCase):
                         if type(value) == tuple:
                             assert all(isinstance(x, type(value[0])) for x in value), \
                                 "All elements in a tuple attribute of a Python torch.nn module must have the same type."
-                            # Here, we set the Python attribute's type to `ListType` in the ScriptModule,
+                            # Here, we set the Python tuple attribute's type to `ListType` in the ScriptModule,
                             # which will automatically be converted to `IntList` later and match the type
                             # of the corresponding attribute in C++ module (which is initially an `ExpandingArray`
                             # and is converted to `IntList` by the `IValue` constructor).
@@ -486,6 +486,9 @@ def _process_test_params(test_params_dict, module_metadata, device):
     else:
         raise RuntimeError("Unexpected input type: {}".format(type(example_inputs)))
 
+    # We set all inputs to torch.nn module to requires grad, so that the backward test can always be run.
+    # However, we skip embedding layers for now, becuase they only accept LongTensor as inputs,
+    # And LongTensor cannot require grad.
     if module_name not in ["Embedding", "Embedding_sparse", "EmbeddingBag", "EmbeddingBag_sparse"]:
         example_inputs = [x.requires_grad_() for x in example_inputs]
 
