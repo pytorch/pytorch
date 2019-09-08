@@ -51,3 +51,14 @@ binary_mac_params: &binary_mac_params
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
 
+binary_ios_params: &binary_ios_params
+  parameters:
+    build_environment:
+      type: string
+      default: ""
+    ios_arch:
+      type: string
+      default: ""
+  environment:
+    BUILD_ENVIRONMENT: << parameters.build_environment >>
+    IOS_ARC: << parameters.arch >>

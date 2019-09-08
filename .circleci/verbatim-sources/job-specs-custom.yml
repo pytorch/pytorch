@@ -482,11 +482,14 @@
         
             # zip the library
             cd   ${WORKSPACE}/zip/
-            zip -R libtorch.zip install src
+            zip -r libtorch.zip install src
             
             # store the artifact
             mkdir ${WORKSPACE}/artifact
             cp libtorch.zip ${WORKSPACE}/artifact
+
+            # upload to aws
+            aws s3 cp libtorch.zip s3://ossci-ios-build/libtorch.zip --acl public-read
 
          
       - store_artifacts:
