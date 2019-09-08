@@ -139,6 +139,23 @@ class MinMaxObserver(ObserverBase):
     def extra_repr(self):
         return 'min_val={}, max_val={}'.format(self.min_val, self.max_val)
 
+
+class TensorObserver(ObserverBase):
+    r"""
+    The module is mainly for debug and records the tensor values during runtime
+    """
+    def __init__(self, **kwargs):
+        super(TensorObserver, self).__init__(**kwargs)
+        self.tensor_val = []
+
+    def forward(self, x):
+        self.tensor_val.append(x.clone())
+        return x
+
+    def calculate_qparams(self):
+        raise Exception("calculate_qparams should not be called for TensorObserver")
+
+
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
 
@@ -146,6 +163,9 @@ def default_observer(**kwargs):
     # Restrict activations to be in the range (0,127)
     kwargs.setdefault("reduce_range", True)
     return observer(MinMaxObserver, **kwargs)
+
+def default_tensor_observer(**kwargs):
+    return observer(TensorObserver, **kwargs)
 
 def default_weight_observer(**kwargs):
     kwargs.setdefault("dtype", torch.qint8)
