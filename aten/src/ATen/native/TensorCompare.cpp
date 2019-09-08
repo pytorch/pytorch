@@ -7,6 +7,7 @@
 #include <c10/util/Exception.h>
 #include <ATen/native/cpu/TensorCompareKernel.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/NamedTensorUtils.h>
 
 namespace {
 template <typename scalar_t>
@@ -50,8 +51,22 @@ bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol,
 
 Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   // TODO: use bitwise operator overloads once we add them
+
+  TORCH_CHECK(self.scalar_type() == other.scalar_type(), self.scalar_type(), " did not match ", other.scalar_type())
+
   auto actual_error = (self - other).abs();
   auto max_error = atol + rtol * other.abs();
+
+  // `max_error` could be a float or double depending on the type of the input
+  // tensors.
+  // Specifically, if other is an int tensor, multiplying by rtol results in
+  // float tensor.
+  // It is also possible for parameters to be 'wrapped_number's, in which case
+  // max_error could be promoted to double when actual error is still a float.
+  if (actual_error.scalar_type() != max_error.scalar_type()) {
+    actual_error = actual_error.to(max_error.scalar_type());
+  }
+
   auto close = actual_error <= max_error;
 
   if (isFloatingType(self.scalar_type()) && isFloatingType(other.scalar_type())) {
@@ -83,8 +98,10 @@ bool is_nonzero(const Tensor& self) {
   Scalar localScalar = self.item();
   if (localScalar.isFloatingPoint()) {
     return localScalar.to<double>() != 0;
-  } else if (localScalar.isIntegral()){
+  } else if (localScalar.isIntegral(false)){
     return localScalar.to<int64_t>() != 0;
+  } else if (localScalar.isBoolean()) {
+    return localScalar.to<bool>();
   }
   AT_ERROR("expected non-Tensor backed scalar");
 }
@@ -235,5 +252,28 @@ Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
     return std::get<1>(self.min(dim.value(), keepdim));
   return std::get<1>(self.reshape({-1}).min(/*dim=*/0));
 }
+
+#ifdef BUILD_NAMEDTENSOR
+// Named tensor overloads
+
+std::tuple<Tensor, Tensor> min(const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: min with names");
+  return at::min(self, dimname_to_position(self, dim), keepdim);
+}
+std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
+                                      const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: min with names");
+  return at::min_out(min, min_indices, self, dimname_to_position(self, dim), keepdim);
+}
+std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: max with names");
+  return at::max(self, dimname_to_position(self, dim), keepdim);
+}
+std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
+                                      const Tensor& self, Dimname dim, bool keepdim) {
+  TORCH_CHECK(false, "NYI: max with names");
+  return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
+}
+#endif
 
 }} // namespace at::native
