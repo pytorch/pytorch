@@ -43,9 +43,15 @@ public:
     return IntArrayRef(strides_,N);
   }
   C10_HOST_DEVICE index_t stride(index_t i) const {
+    if (i < 0) {
+      i += N;
+    }
     return strides_[i];
   }
   C10_HOST_DEVICE index_t size(index_t i) const {
+    if (i < 0) {
+      i += N;
+    }
     return sizes_[i];
   }
   C10_HOST_DEVICE PtrType data() {
@@ -76,10 +82,18 @@ public:
       : TensorAccessorBase<T, N, PtrTraits, index_t>(data_,sizes_,strides_) {}
 
   C10_HOST_DEVICE TensorAccessor<T, N - 1, PtrTraits, index_t> operator[](index_t i) {
+    auto s = this->size(0);
+    if (i < 0) {
+      i += s;
+    }
     return TensorAccessor<T,N-1,PtrTraits,index_t>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
   }
 
-  C10_HOST_DEVICE const TensorAccessor<T, N-1, PtrTraits, index_t> operator[](index_t i) const {
+  C10_HOST_DEVICE const TensorAccessor<T, N - 1, PtrTraits, index_t> operator[](index_t i) const {
+    auto s = this->size(0);
+    if (i < 0) {
+      i += s;
+    }
     return TensorAccessor<T,N-1,PtrTraits,index_t>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
   }
 };
@@ -95,9 +109,17 @@ public:
       const index_t* strides_)
       : TensorAccessorBase<T, 1, PtrTraits, index_t>(data_,sizes_,strides_) {}
   C10_HOST_DEVICE T & operator[](index_t i) {
+    auto s = this->size(0);
+    if (i < 0) {
+      i += s;
+    }
     return this->data_[this->strides_[0]*i];
   }
   C10_HOST_DEVICE const T & operator[](index_t i) const {
+    auto s = this->size(0);
+    if (i < 0) {
+      i += s;
+    }
     return this->data_[this->strides_[0]*i];
   }
 };
@@ -138,9 +160,15 @@ public:
   }
 
   C10_HOST_DEVICE index_t stride(index_t i) const {
+    if (i < 0) {
+      i += N;
+    }
     return strides_[i];
   }
   C10_HOST_DEVICE index_t size(index_t i) const {
+    if (i < 0) {
+      i += N;
+    }
     return sizes_[i];
   }
   C10_HOST_DEVICE PtrType data() {
@@ -175,12 +203,20 @@ public:
       : PackedTensorAccessorBase<T, N, PtrTraits, index_t>(data_, sizes_, strides_) {}
 
   C10_DEVICE TensorAccessor<T, N - 1, PtrTraits, index_t> operator[](index_t i) {
+    auto s = this->size(0);
+    if (i < 0) {
+      i += s;
+    }
     index_t* new_sizes = this->sizes_ + 1;
     index_t* new_strides = this->strides_ + 1;
     return TensorAccessor<T,N-1,PtrTraits,index_t>(this->data_ + this->strides_[0]*i, new_sizes, new_strides);
   }
 
   C10_DEVICE const TensorAccessor<T, N - 1, PtrTraits, index_t> operator[](index_t i) const {
+    auto s = this->size(0);
+    if (i < 0) {
+      i += s;
+    }
     const index_t* new_sizes = this->sizes_ + 1;
     const index_t* new_strides = this->strides_ + 1;
     return TensorAccessor<T,N-1,PtrTraits,index_t>(this->data_ + this->strides_[0]*i, new_sizes, new_strides);
@@ -206,9 +242,17 @@ public:
       : PackedTensorAccessorBase<T, 1, PtrTraits, index_t>(data_, sizes_, strides_) {}
 
   C10_DEVICE T & operator[](index_t i) {
+    auto s = this->size(0);
+    if (i < 0) {
+      i += s;
+    }
     return this->data_[this->strides_[0] * i];
   }
   C10_DEVICE const T& operator[](index_t i) const {
+    auto s = this->size(0);
+    if (i < 0) {
+      i += s;
+    }
     return this->data_[this->strides_[0]*i];
   }
 };
