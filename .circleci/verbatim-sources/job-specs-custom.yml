@@ -433,11 +433,11 @@
             export TCLLIBPATH="/usr/local/lib" 
 
             set +x
-            export AWS_ACCESS_KEY_ID="${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
-            export AWS_SECRET_ACCESS_KEY="${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
             set +x
-            echo ${AWS_ACCESS_KEY_ID}
-            echo ${AWS_SECRET_ACCESS_KEY}
+            echo "KEY: ${AWS_ACCESS_KEY_ID}"
+            echo "SECRET: ${AWS_SECRET_ACCESS_KEY}"
 
             # Install conda
             curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
