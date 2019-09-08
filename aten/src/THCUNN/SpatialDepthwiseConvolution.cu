@@ -49,10 +49,21 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
-    const int w = linearIndex % outputWidth; // w
-    const int h = (linearIndex / outputWidth) % outputHeight; // h
-    const int c = (linearIndex / outputWidth / outputHeight) % outputChannels; // c?
-    const int n = linearIndex / outputWidth / outputHeight / outputChannels; // n?
+    //calculate n,c,h,w indices, replacing modulos by divide and multiply add,
+    //result is same as would be in the code below
+    //const int n = linearIndex / batchStride; //batchStride = outputChannels * outputHeight * outputWidth
+    //const int c = (linearIndex / channelStride) % outputChannels; //channelStride = outputHeight * outputWidth
+    //const int h = (linearIndex / outputWidth) % outputHeight;
+    //const int w = linearIndex % outputWidth;
+
+    int indtmp1 = linearIndex/outputWidth;
+    const int w = linearIndex - indtmp1 * outputWidth;
+    int indtmp2 = indtmp1/outputHeight;
+    const int h = indtmp1 - indtmp2 * outputHeight;
+    indtmp1 = indtmp2;
+    indtmp2 = indtmp1/outputChannels;
+    const int c = indtmp1 - indtmp2 * outputChannels;
+    const int n = indtmp2;
 
     const int in_channel = c / depthwiseMultiplier;
     const int multiplier = c % depthwiseMultiplier;
@@ -68,53 +79,28 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
     AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[c]) : ScalarConvert<int, AccT>::to(0);
     const IndexType offset0 = (n * in_depth + in_channel) * inputHeight * inputWidth;
 
-    if (input_row_start >= 0 && input_col_start >= 0 &&
-        input_row_end < inputHeight && input_col_end < inputWidth) {
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
-      for (int kH = 0; kH < KH_LIMIT; ++kH) {
-        const int h_in = input_row_start + kH * dilationHeight;
-        const int filter_offset_temp = KW_LIMIT * kH;
+    for (int kH = 0; kH < KH_LIMIT; ++kH) {
+      const int h_in = input_row_start + kH * dilationHeight;
+      const int filter_offset_temp = KW_LIMIT * kH;
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
 #endif
-        for (int kW = 0; kW < KW_LIMIT; ++kW) {
+      for (int kW = 0; kW < KW_LIMIT; ++kW) {
+        const int w_in = input_col_start + kW * dilationWidth;
+        if (h_in >= 0 && h_in < inputHeight && w_in >= 0 &&
+            w_in < inputWidth) {
           const int w_in = input_col_start + kW * dilationWidth;
 
-          const IndexType offset = offset0 + h_in * inputWidth + w_in;
+          const int offset = offset0 + h_in * inputWidth + w_in;
           const int weightOffset = multiplier + depthwiseMultiplier * (in_channel + in_depth * (kW + filter_offset_temp));
           value = THCNumerics<AccT>::add(
             value,
             THCNumerics<AccT>::mul(
               ScalarConvert<T, AccT>::to(weight.data()[weightOffset]),
               ScalarConvert<T, AccT>::to(input.data()[offset])));
-        }
-      }
-    } else {
-#ifndef __HIP_PLATFORM_HCC__
-#pragma unroll
-#endif
-      for (int kH = 0; kH < KH_LIMIT; ++kH) {
-        const int h_in = input_row_start + kH * dilationHeight;
-        const int filter_offset_temp = KW_LIMIT * kH;
-#ifndef __HIP_PLATFORM_HCC__
-#pragma unroll
-#endif
-        for (int kW = 0; kW < KW_LIMIT; ++kW) {
-          const int w_in = input_col_start + kW * dilationWidth;
-          if (h_in >= 0 && h_in < inputHeight && w_in >= 0 &&
-              w_in < inputWidth) {
-            const int w_in = input_col_start + kW * dilationWidth;
-
-            const int offset = offset0 + h_in * inputWidth + w_in;
-            const int weightOffset = multiplier + depthwiseMultiplier * (in_channel + in_depth * (kW + filter_offset_temp));
-            value = THCNumerics<AccT>::add(
-              value,
-              THCNumerics<AccT>::mul(
-                ScalarConvert<T, AccT>::to(weight.data()[weightOffset]),
-                ScalarConvert<T, AccT>::to(input.data()[offset])));
-          }
         }
       }
     }
