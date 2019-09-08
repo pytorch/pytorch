@@ -20,10 +20,12 @@ class ObserverBase(ABC, nn.Module):
     the collected statistics.
     """
 
-    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine):
+    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False):
         super(ObserverBase, self).__init__()
         self.dtype = dtype
         self.qscheme = qscheme
+        self.reduce_range = reduce_range
+
         self.eps = torch.finfo(torch.float32).eps
         assert self.qscheme in (
             torch.per_tensor_affine,
@@ -44,26 +46,31 @@ class ObserverBase(ABC, nn.Module):
         pass
 
     def _calculate_qparams(self, min_val, max_val):
+        # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
         """
         Given min and max values, this function calculates quantization parameters
         """
+
+        if max_val is None or min_val is None:
+            warnings.warn("must run observer before calling calculate_qparams.\
+                                    Returning default scale and zero point ")
+            return torch.tensor([1.0]), torch.tensor([0])
+
         assert min_val <= max_val, "min {} should be less than max {}".format(
             min_val, max_val
         )
 
         if self.dtype == torch.qint8:
-            qmin, qmax = -128, 127
+            if self.reduce_range:
+                qmin, qmax = -64, 63
+            else:
+                qmin, qmax = -128, 127
         else:
-            qmin, qmax = 0, 255
-        # We pull these out so that TorchScript optional type refinement works.
-        # We may be able to remove this in the future if TorchScript supports that
-        # feature on attributes
-        min_val = self.min_val
-        max_val = self.max_val
-        if max_val is None or min_val is None:
-            warnings.warn("must run observer before calling calculate_qparams.\
-                                    Returning default scale and zero point ")
-            return torch.tensor([1.0]), torch.tensor([0])
+            if self.reduce_range:
+                qmin, qmax = 0, 127
+            else:
+                qmin, qmax = 0, 255
+
         max_val, min_val = float(max_val), float(min_val)
         min_val = min(0.0, min_val)
         max_val = max(0.0, max_val)
@@ -98,9 +105,18 @@ class MinMaxObserver(ObserverBase):
     __annotations__ = {'min_val' : Optional[torch.Tensor], 'max_val' : Optional[torch.Tensor]}
 
     def __init__(self, **kwargs):
+        #  For x86 quantized kernels, we need to ensure that the vpmaddubsw instruction
+        #  does not overflow. We allow for a reduce_range argument to observers that
+        #  reduces the quantized range to (0,127) or (-64, 63). For more details see
+        #  aten/src/ATen/native/quantized/cpu/qconv.cpp
+        #  This is not the optimal choice for non x86 backends as
+        #  lose a bit of precision for activations.
+        #
         super(MinMaxObserver, self).__init__(**kwargs)
         self.min_val = None
         self.max_val = None
+        if self.qscheme == torch.per_tensor_symmetric and self.reduce_range and self.dtype == torch.quint8:
+            raise NotImplementedError("Cannot reduce range for symmetric quantization for quint8")
 
     def forward(self, x):
         min_val = self.min_val
@@ -117,14 +133,7 @@ class MinMaxObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        # We pull these out so that TorchScript optional type refinement works.
-        # We may be able to remove this in the future if TorchScript supports that
-        # feature on attributes
-        min_val = self.min_val
-        max_val = self.max_val
-        if max_val is None or min_val is None:
-            raise Exception('must run observer before calling calculate_qparams!')
-        return self._calculate_qparams(min_val, max_val)
+        return self._calculate_qparams(self.min_val, self.max_val)
 
     @torch.jit.export
     def extra_repr(self):
@@ -134,6 +143,8 @@ def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
 
 def default_observer(**kwargs):
+    # Restrict activations to be in the range (0,127)
+    kwargs.setdefault("reduce_range", True)
     return observer(MinMaxObserver, **kwargs)
 
 def default_weight_observer(**kwargs):

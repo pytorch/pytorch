@@ -58,7 +58,6 @@ namespace jit {
   _(ProfiledTensorTypeHashing)         \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
-  _(InsertConstant)                    \
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
   _(ImportTooNew)                      \

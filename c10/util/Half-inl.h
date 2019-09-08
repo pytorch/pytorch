@@ -70,7 +70,7 @@ inline C10_HOST_DEVICE Half operator/(const Half& a, const Half& b) {
 }
 
 inline C10_HOST_DEVICE Half operator-(const Half& a) {
-#if __CUDA_ARCH__ >= 530 || defined(__HIP_DEVICE_COMPILE__)
+#if (defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530) || defined(__HIP_DEVICE_COMPILE__)
   return __hneg(a);
 #else
   return -static_cast<float>(a);

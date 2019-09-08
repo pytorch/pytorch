@@ -384,23 +384,7 @@ struct TORCH_API MagicMethod : public SugaredValue {
       Function& m,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) override {
-    if (inputs.size() > 0) {
-      Value* self = inputs[0].value(*m.graph());
-
-      if (auto class_ptr = self->type()->cast<ClassType>()) {
-        if (!class_ptr->getMethod(desugared_name_)) {
-          throw ErrorReport(loc)
-              << class_ptr->python_str() << " does not define a "
-              << desugared_name_ << " method";
-        }
-
-        return MethodValue(self, desugared_name_)
-            .call(loc, m, inputs.slice(1), attributes, n_binders);
-      }
-    }
-    return base_value_->call(loc, m, inputs, attributes, n_binders);
-  }
+      size_t n_binders) override;
 
  private:
   SugaredValuePtr base_value_;
@@ -445,6 +429,14 @@ struct TORCH_API IsInstanceValue : SugaredValue {
   IsInstanceValue() = default;
   std::string kind() const override {
     return "isinstance";
+  }
+};
+
+// matched against for special handling of tuple() call
+struct TORCH_API TupleCallValue : SugaredValue {
+  TupleCallValue() = default;
+  std::string kind() const override {
+    return "tuple";
   }
 };
 

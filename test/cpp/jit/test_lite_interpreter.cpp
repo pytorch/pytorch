@@ -41,9 +41,6 @@ void testLiteInterpreter() {
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
     res = bc.run_method("add_it", bcinputs);
-    std::cout << "output: " << std::endl;
-    std::cout << res.toTensor().item<float>();
-    std::cout << std::endl;
   }
 
   auto resd = res.toTensor().item<float>();
