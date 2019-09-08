@@ -6,9 +6,9 @@ import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
 import torch.nn._intrinsic.qat as nniqat
 from torch.quantization import \
-    QConfig_dynamic, default_weight_observer, \
+    QConfig_dynamic, default_weight_observer, dump_tensor,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
-    quantize_dynamic, default_qconfig, default_qat_qconfig, \
+    quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
     default_dynamic_qconfig, MinMaxObserver, QuantWrapper
 
 from common_utils import run_tests, tempfile
@@ -758,6 +758,27 @@ class ObserverTest(QuantizationTestCase):
         buf.seek(0)
         loaded = torch.jit.load(buf)
         self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
+
+@unittest.skipIf(not torch.fbgemm_is_cpu_supported(),
+                 'Quantization requires FBGEMM. FBGEMM does not play'
+                 ' well with UBSAN at the moment, so we skip the test if'
+                 ' we are in a UBSAN environment.')
+class QuantizationDebugTest(QuantizationTestCase):
+    def test_debug_observer(self):
+        model = SingleLayerLinearModel()
+        model.qconfig = default_debug_qconfig
+        prepare(model)
+        test_only_eval_fn(model, self.calib_data)
+        convert(model)
+        # run the evaluation and dump all tensors
+        test_only_eval_fn(model, self.calib_data)
+        test_only_eval_fn(model, self.calib_data)
+        tensor_dict = {}
+        dump_tensor(model, "$", tensor_dict)
+        # we can torch,save() and torch_load() in bento for further analysis
+        self.assertTrue('$.fc1.activation' in tensor_dict.keys(),
+                        'activation is not recorded in the dict')
+        self.assertEqual(len(tensor_dict['$.fc1.activation']), 2*len(self.calib_data))
 
 if __name__ == '__main__':
     run_tests()

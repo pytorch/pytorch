@@ -3,11 +3,18 @@ from collections import namedtuple
 from .observer import *
 from .fake_quantize import *
 
-QConfig = namedtuple('QConfig',
-                     ['weight', 'activation'])
+QConfigT = namedtuple('QConfig',
+                     ['weight', 'activation', 'debug'])
+
+def QConfig(weight, activation, debug=None):
+    return QConfigT(weight, activation, debug)
 
 default_qconfig = QConfig(default_weight_observer(),
                           default_observer())
+
+default_debug_qconfig = QConfig(default_weight_observer(),
+                          default_observer(),
+                          default_debug_observer())
 
 QConfig_dynamic = namedtuple('QConfig_dynamic', ['weight'])
 

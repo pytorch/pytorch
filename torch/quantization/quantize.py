@@ -330,4 +330,28 @@ def swap_module(mod, mapping):
     if hasattr(mod, 'qconfig') and mod.qconfig is not None:
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)
+        # for debug supportt, maybe qconfig with debug setting
+        if mod.qconfig.debug is not None:
+            new_mod.add_module('observer', mod.qconfig.debug())
+            new_mod.register_forward_hook(_observer_forward_hook)
     return new_mod
+
+def dump_tensor(mod, prefix, target_dict):
+    r"""Traverse the modules and save the weight and stored activation to given dict.
+    This is mainly used for quantization accuracy debug
+    Args:
+        mod: the top module we want to save all tensors
+        prefix: the prefix for the current module
+        target_dict: the dictionary used to save the tensors
+    """
+    weight_unpack = getattr(mod, "weight", None)
+    if callable(weight_unpack):
+        target_dict[prefix + '.' + 'weight'] = mod.weight()
+    elif hasattr(mod, 'weight'):
+        target_dict[prefix + '.' + 'weight'] = mod.weight
+
+    if hasattr(mod, 'observer'):
+        target_dict[prefix + '.' + 'activation'] = mod.observer.tensor_val
+    for name, child in mod.named_children():
+        module_prefix = prefix + '.' + name if prefix else name
+        dump_tensor(child, module_prefix, target_dict)
