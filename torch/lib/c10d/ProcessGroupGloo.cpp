@@ -676,14 +676,79 @@ class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
+      bool checkShapes,
       uint32_t tag)
-      : AsyncAllreduceWork(context, inputs, reduceOp, tag) {}
+      : AsyncAllreduceWork(context, inputs, reduceOp, tag),
+        checkShapes(checkShapes),
+        rootRank(0) {}
 
   void run() override {
+    if (checkShapes) {
+      shapeCheck(inputs);
+    }
     allreduceCoalesced(inputs);
   }
 
  private:
+  const bool checkShapes;
+  const int rootRank;  // only used if checkShapes is true.
+
+  // cross-node shape checking.
+  // Assumes each node sends non-empty tensor list.
+  void shapeCheck(const std::vector<at::Tensor>& tensors) const {
+    // broadcast 1: get number of shapes (# of tensors) and max ndims at root.
+    // this information is needed for nodes to allocate correctly sized buffer
+    // for incoming shapes from root.
+    const size_t nodeNShapes = tensors.size();
+    size_t nodeMaxDims = 0;
+    for (const at::Tensor& tensor : tensors) {
+      nodeMaxDims = std::max({nodeMaxDims, tensor.sizes().size()});
+    }
+    std::vector<int64_t> nodeBufferShape = {
+      (int64_t) nodeNShapes, (int64_t) nodeMaxDims};
+    std::vector<int64_t> rootBufferShape(2);
+    gloo::BroadcastOptions bufferShapeOpts(context);
+    bufferShapeOpts.setRoot(rootRank);
+    bufferShapeOpts.setTag(tag);
+    bufferShapeOpts.setOutput(rootBufferShape.data(), 2);
+    if (context->rank == rootRank) {
+      bufferShapeOpts.setInput(nodeBufferShape.data(), 2);
+    }
+    gloo::broadcast(bufferShapeOpts);
+
+    // broadcast 2: get shapes at root and compare to shapes at node to determine
+    // if there is a shape mismatch.
+    const ::c10::TensorOptions shapeOpts(::c10::ScalarType::Long);
+    at::Tensor nodeShapes = at::full(nodeBufferShape, -1, shapeOpts);
+    at::Tensor rootShapes = at::full(rootBufferShape, -1, shapeOpts);
+    for (size_t i = 0; i < tensors.size(); ++i) {
+      const ::c10::IntArrayRef tensorShape = tensors[i].sizes();
+      for (size_t j = 0; j < tensorShape.size(); ++j) {
+        nodeShapes[i][j] = tensorShape[j];
+      }
+    }
+    gloo::BroadcastOptions shapesOpts(context);
+    shapesOpts.setRoot(rootRank);
+    shapesOpts.setTag(tag);
+    setOutput<int64_t>(shapesOpts, rootShapes);
+    if (context->rank == rootRank) {
+      setInput<int64_t>(shapesOpts, nodeShapes);
+    }
+    gloo::broadcast(shapesOpts);
+    bool shapeMatch = nodeShapes.equal(rootShapes);
+
+    // allreduce: if each node does not recieve confirmed shapeMatches from all other
+    // nodes, raise an exception.
+    gloo::AllreduceOptions redOpts(context);
+    redOpts.setTag(tag);
+    redOpts.setReduceFunction(toFunction<bool>(ReduceOp::PRODUCT));
+    redOpts.setInput(&shapeMatch, 1);
+    redOpts.setOutput(&shapeMatch, 1);
+    gloo::allreduce(redOpts);
+
+    GLOO_ENFORCE(shapeMatch, "cross-node shape mismatch");
+  }
+
   void allreduceCoalesced(std::vector<at::Tensor>& tensors) {
     // reduce coalesced, flattened tensors.
     at::Tensor coalescedTensor = flattenDenseTensors(tensors);
@@ -1171,7 +1236,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
   if (device.type() == c10::kCPU) {
     if (layout == c10::kStrided) {
       work = std::make_shared<AsyncAllreduceCoalescedWork>(
-          std::move(context), tensors, opts.reduceOp, tag);
+          std::move(context), tensors, opts.reduceOp, opts.checkShapes, tag);
     } else {
       invalidArgument("unsupported layout");
     }

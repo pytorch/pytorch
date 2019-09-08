@@ -111,6 +111,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       module, "AllreduceCoalescedOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceCoalescedOptions::reduceOp)
+      .def_readwrite("checkShapes", &::c10d::AllreduceCoalescedOptions::checkShapes)
       .def_readwrite("timeout", &::c10d::AllreduceCoalescedOptions::timeout);
 
   py::class_<::c10d::ReduceOptions>(module, "ReduceOptions")

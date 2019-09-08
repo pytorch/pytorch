@@ -903,17 +903,10 @@ def all_reduce(tensor,
 
 def all_reduce_coalesced(tensors,
                          op=ReduceOp.SUM,
+                         check_shapes=True,
                          group=group.WORLD,
                          async_op=False):
     """
-    WARNING: at this time individual shape checking is not implemented across nodes.
-    For example, if the rank 0 node passes [torch.rand(4), torch.rand(2)] and the
-    rank 1 node passes [torch.rand(2), torch.rand(2), torch.rand(2)], the allreduce
-    operation will proceed without complaint and return erroneous outputs. This lack
-    of shape checking results in significant performance improvements but users of this
-    function should take extra care to ensure that each node passes in tensors whose
-    shapes match across nodes.
-
     Reduces each tensor in tensors (residing on the same device) across all machines
     in such a way that all get the final result.
 
@@ -926,6 +919,9 @@ def all_reduce_coalesced(tensors,
         op (Optional[ReduceOp]): One of the values from
             ``torch.distributed.ReduceOp`` enum. Specifies an operation used for
             element-wise reductions.
+        check_shapes (Optional[bool]): if set to ``True`` performs cross-node shape
+            checking before proceeding with allreduce_coalesced operation. Raises
+            ``RuntimeError`` if there is a cross-node shape mismatch.
         group (Optional[ProcessGroup]): The process group to work on.
         async_op (Optional[bool]): Whether this op should be an async op.
 
@@ -940,6 +936,8 @@ def all_reduce_coalesced(tensors,
 
     opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
+    opts.checkShapes = check_shapes
+
     if group == GroupMember.WORLD:
         _check_default_pg()
         work = _default_pg.allreduce_coalesced(tensors, opts)
