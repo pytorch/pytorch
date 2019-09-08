@@ -877,6 +877,9 @@ PickleOpCode Unpickler::readInstruction() {
           });
         } else {
           if (data_only_) {
+            // There's no class definitions available in mobile bytecode format.
+            // We add slots directly from the dict, assuming that the order
+            // of the slots is reserved.
             globals_.emplace_back([this, type] {
               auto dict = std::move(stack_.back()).toGenericDict();
               stack_.pop_back();

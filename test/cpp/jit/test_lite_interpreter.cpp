@@ -29,11 +29,6 @@ void testLiteInterpreter() {
   inputs.emplace_back(minput);
   auto ref = m.run_method("add_it", minput);
 
-//  std::stringstream s_script;
-//  m.save(s_script);
-//  auto m_load = load(s_script);
-
-//  script::Module m = load("/Users/myuan/data/lenet/lenet_traced.pt");
   std::stringstream ss;
   m.save_for_mobile(ss);
   auto bc = load_bytecode(ss);
@@ -45,21 +40,8 @@ void testLiteInterpreter() {
 
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
-
   AT_ASSERT(resd == refd);
 }
 
-void testLiteWithFile() {
-//  // Deserialize the ScriptModule from a file using torch::jit::load().
-//  torch::jit::script::Module module = torch::jit::load(argv[1]);
-
-//  // Save in new format with code and pkl files.
-//  std::string nfile(argv[1]);
-//  nfile += "1.pt";
-//  module.save(nfile);
-
-//  // Save in bytecode format.
-//  module.save(argv[2], torch::jit::script::ExtraFilesMap(), true /*bytecode_format*/);
-}
-}
-}
+} // namespace torch
+} // namespace jit

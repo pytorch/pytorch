@@ -8,7 +8,6 @@ add_executable(test_jit
   ${JIT_TEST_ROOT}/gtest.cpp
   ${JIT_TEST_SRCS})
 
-#target_link_libraries(test_jit PRIVATE torch gtest)
 target_link_libraries(test_jit PRIVATE torch lite_interpreter gtest)
 target_include_directories(test_jit PRIVATE ${ATen_CPU_INCLUDE})
 

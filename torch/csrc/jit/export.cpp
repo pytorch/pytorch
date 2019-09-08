@@ -692,7 +692,7 @@ class ScriptModuleSerializer {
       auto constants = c10::ivalue::Tuple::create(code.constant_table());
       auto named_consts = c10::ivalue::Tuple::create({"constants", constants});
 
-      // since the register location is embedded into the bytecode, pass the register size
+      // since the register location is embedded into the bytecode, pass the aggregated output size
       auto named_aggsize = c10::ivalue::Tuple::create({"agg_output_size", code.agg_output_size()});
 
       auto element = c10::ivalue::Tuple::create({named_ins, named_ops, named_consts, named_aggsize});

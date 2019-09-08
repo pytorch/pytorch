@@ -306,6 +306,8 @@ class Unpickler {
 
   std::function<at::DataPtr(const std::string&)> read_record_;
   c10::optional<at::Device> device_;
+  // data_only_ is set true when loading bytecode in mobile, where there is only
+  // data without class definitions.
   bool data_only_;
 };
 

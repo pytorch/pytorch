@@ -1,10 +1,8 @@
-//#include <torch/csrc/autograd/variable.h>
 #include "import_bytecode.h"
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/pickler.h>
 #include <caffe2/serialize/inline_container.h>
-//#include <caffe2/serialize/istream_adapter.h>
 
 
 #include <fstream>
@@ -19,9 +17,6 @@ using caffe2::serialize::ReadAdapterInterface;
 
 OpCode str2OpCode(const char *str);
 namespace {
-// The deserializer class which loads the bytecode package from bc files.
-//
-
 void parseMethods(const std::vector<IValue>& vals, mobile::Bytecode& bc) {
   for (const auto& element : vals) {
     mobile::Method method;
@@ -77,6 +72,7 @@ void parseMethods(const std::vector<IValue>& vals, mobile::Bytecode& bc) {
   }
 }
 
+// The deserializer class which loads the bytecode package from bc files.
 class BytecodeDeserializer final {
  public:
   explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);

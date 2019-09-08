@@ -19,9 +19,6 @@ else()
   target_link_libraries(lite_interpreter PRIVATE -Wl,--whole-archive,torch -Wl,--no-whole-archive)
 endif()
 
-#target_link_libraries(lite_interpreter PRIVATE torch)
-#target_compile_options(lite_interpreter PUBLIC
-#    -std=c++11)
 target_include_directories(lite_interpreter
     PUBLIC
     ${PROJECT_SOURCE_DIR}/caffe2/serialize/
