@@ -1299,11 +1299,12 @@ def create_generic(top_env, declarations):
                 check_namedtensor_enabled(NATIVE_DISPATCH_DECLARATION.substitute(option)))
             top_env['type_method_definitions'].append(
                 check_namedtensor_enabled(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option)))
-            top_env['function_registrations'].append(
-                check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
             if option['use_c10_dispatcher']:
                 top_env['c10_function_registrations'].append(
                     check_namedtensor_enabled(C10_DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
+            else:
+                top_env['function_registrations'].append(
+                    check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1783,11 +1784,12 @@ def create_derived(backend_type_env, declarations):
                     option['native_type_method_dispatch'] = native_dispatch
                     type_object_definitions.append(
                         NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
-                    function_registrations.append(
-                        BACKEND_FUNCTION_REGISTRATION.substitute(env))
                     if option['use_c10_dispatcher']:
                         c10_function_registrations.append(
                             C10_BACKEND_FUNCTION_REGISTRATION.substitute(env))
+                    else:
+                        function_registrations.append(
+                            BACKEND_FUNCTION_REGISTRATION.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:
