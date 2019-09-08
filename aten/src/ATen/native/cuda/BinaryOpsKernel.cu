@@ -6,7 +6,6 @@
 #include <ATen/native/BinaryOps.h>
 #include <THC/THCNumerics.cuh>
 #include <limits>
-#include <stdexcept>
 
 
 // NOTE: CUDA on Windows requires that the enclosing function
@@ -42,9 +41,8 @@ void div_kernel_cuda(TensorIterator& iter) {
   } else {
     AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "div_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        if (b == 0 && isIntegralType(iter.dtype(), /*includeBool*/ false)) {
-            throw std::runtime_error("ZeroDivisionError: integer division by zero");
-        }
+        TORCH_CHECK(b != 0 || !isIntegralType(iter.dtype(), /*includeBool*/ false),
+        "ZeroDivisionError: integer division by zero");
         return a / b;
       });
     });
