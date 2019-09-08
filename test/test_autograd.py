@@ -201,9 +201,6 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'expected shape'):
             input = torch.randn(5, 5, dtype=torch.float, requires_grad=True)
             MyFunction.apply(input).sum().backward()
-        with self.assertRaisesRegex(RuntimeError, 'expected type'):
-            input = torch.randn(10, dtype=torch.double, requires_grad=True)
-            MyFunction.apply(input).sum().backward()
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
@@ -322,6 +319,18 @@ class TestAutograd(TestCase):
         self.assertEqual(x_hv[0].data, expected_x_hv)
         self.assertEqual(x.grad.data, x_grad)
         self.assertEqual(y.grad.data, y_grad)
+
+        # Test that grad_outputs and outputs have the same shape
+        grad_out = torch.ones(2)
+        try:
+            torch.autograd.grad(
+                outputs=[grad_sum], grad_outputs=[grad_out],
+                inputs=[x], create_graph=True)
+            self.assertFail()
+        except RuntimeError as error:
+            self.assertEqual(str(error), "Mismatch in shape: grad_output[0] has a shape of "
+                             + str(grad_out.shape) + " and output[0] has a shape of "
+                             + str(grad_sum.shape) + ".")
 
     def test_grad_nonleaf(self):
         x_init = torch.randn(2, 2, requires_grad=True)
@@ -888,7 +897,10 @@ class TestAutograd(TestCase):
         for i in range(3):
             x.detach_()
             x.copy_(mu + i)
-            loss += (x * torch.tensor([float(i)])).sum()
+            ft = torch.tensor([float(i)])
+            multiplied = x * ft
+            s = multiplied.sum()
+            loss += s
         loss.backward()
 
     def test_no_grad(self):
@@ -964,7 +976,7 @@ class TestAutograd(TestCase):
         check_index(x, y, (1, slice(2, None)))
         check_index(x, y, (slice(None, None), slice(2, None)))
         check_index(x, y, torch.LongTensor([0, 2]))
-        check_index(x, y, torch.rand(4, 4).bernoulli().byte())
+        check_index(x, y, torch.rand(4, 4).bernoulli().bool())
         check_index(x, y, (Ellipsis, slice(2, None)))
         check_index(x, y, ([0], [0]))
         check_index(x, y, ([1, 2, 3], [0]))
@@ -1054,6 +1066,18 @@ class TestAutograd(TestCase):
         expected_grad = torch.Tensor(4, 4, 4).zero_()
         expected_grad[1].fill_(3)
         self.assertEqual(y.grad.data, expected_grad)
+
+    def test_index_backward_does_not_save_tensor(self):
+        # Example from https://github.com/pytorch/pytorch/issues/24853.
+        # if `index(tensor, indices)` saves `tensor` for backwards, then it will
+        # trigger a version check on `tensor` during the backward pass, which
+        # will cause the following code to error because `tensor` gets modified
+        # by the indexing line.
+        a = torch.tensor([1., 0, 0])
+        b = torch.zeros(3, requires_grad=True)
+        tensor = b + 0
+        tensor[a != 0] = tensor[a != 0]
+        tensor.backward(torch.zeros_like(tensor))
 
     def test_volatile_deprecated(self):
         v = torch.autograd.torch.randn(3, 3)
@@ -1504,7 +1528,7 @@ class TestAutograd(TestCase):
                                               3]), requires_grad=False), [2, 4], slice(None)])
 
     def test_setitem_mask(self):
-        mask = torch.ByteTensor(5, 5).bernoulli_()
+        mask = torch.BoolTensor(5, 5).bernoulli_()
         self._test_setitem((5, 5), Variable(mask))
         self._test_setitem((5,), Variable(mask[0]))
         self._test_setitem((1,), Variable(mask[0, 0:1]))

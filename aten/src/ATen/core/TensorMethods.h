@@ -8,8 +8,11 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
+#include <ATen/core/dispatch/Dispatcher.h>
+#endif
 #ifdef BUILD_NAMEDTENSOR
-#include <ATen/NamedTensor.h>
+#include <ATen/core/NamedTensor.h>
 #endif
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
@@ -26,33 +29,26 @@ struct Quantizer;
 // to frontend
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
-inline Tensor Tensor::toType(const DeprecatedTypeProperties & t, bool non_blocking) const {
-  if(type() == t)
-    return *this;
-  return to(
-      at::device(t.device_type()).layout(t.layout()).dtype(t.scalarType()),
-      non_blocking,
-      /*copy=*/ true);
-}
-
 inline Tensor Tensor::cpu() const {
-  return toType(type().cpu());
+  return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
 }
 
+// TODO: The Python version also accepts arguments
 inline Tensor Tensor::cuda() const {
-  return toType(type().cuda());
+  return to(options().device(DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline Tensor Tensor::hip() const {
-  return toType(type().hip());
+  return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
-  return toType(type().toScalarType(t));
+  return to(options().dtype(t), /*non_blocking*/ false, /*copy*/ false);
 }
 
+// TODO: Deprecate me
 inline Tensor Tensor::toBackend(Backend b) const {
-  return toType(type().toBackend(b));
+  return to(options().device(backendToDeviceType(b)).layout(layout_from_backend(b)), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline TensorOptions Tensor::options() const {
@@ -90,11 +86,11 @@ inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
 }
 #endif
 #ifdef BUILD_NAMEDTENSOR
-inline Tensor Tensor::view_names(c10::optional<DimnameList> names) const {
+inline Tensor Tensor::renamed(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::view_names(const_cast<Tensor&>(*this), names);
+    return TypeDefault::renamed(const_cast<Tensor&>(*this), names);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::view_names(Tensor(a) self, Dimname[]? names) -> Tensor(a)");
+    static auto table = globalATenDispatch().getOpTable("aten::renamed(Tensor(a) self, Dimname[]? names) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, c10::optional<DimnameList>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
 #endif
 }
@@ -514,13 +510,7 @@ inline Tensor Tensor::ceil() const {
 }
 inline Tensor & Tensor::ceil_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::ceil_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("ceil_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::ceil_(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::ceil_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
@@ -762,6 +752,22 @@ inline Tensor Tensor::dot(const Tensor & tensor) const {
     return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), tensor);
 #endif
 }
+inline Tensor Tensor::new_empty(IntArrayRef size, const TensorOptions & options) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::new_empty(const_cast<Tensor&>(*this), size, options);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, IntArrayRef, const TensorOptions &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), size, options);
+#endif
+}
+inline Tensor Tensor::new_full(IntArrayRef size, Scalar fill_value, const TensorOptions & options) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::new_full(const_cast<Tensor&>(*this), size, fill_value, options);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, IntArrayRef, Scalar, const TensorOptions &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), size, fill_value, options);
+#endif
+}
 inline Tensor & Tensor::resize_(IntArrayRef size) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(type_id())) {
@@ -888,6 +894,36 @@ inline Tensor Tensor::flatten(int64_t start_dim, int64_t end_dim) const {
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), start_dim, end_dim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::flatten(int64_t start_dim, int64_t end_dim, Dimname out_dim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::flatten(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::flatten(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, int64_t, int64_t, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::flatten(Dimname start_dim, Dimname end_dim, Dimname out_dim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::flatten(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::flatten(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, Dimname, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::flatten(DimnameList dims, Dimname out_dim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::flatten(const_cast<Tensor&>(*this), dims, out_dim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::flatten(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, DimnameList, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dims, out_dim);
+#endif
+}
+#endif
 inline Tensor & Tensor::fill_(Scalar value) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::fill_(const_cast<Tensor&>(*this), value);
@@ -1231,6 +1267,16 @@ inline Tensor Tensor::logsumexp(IntArrayRef dim, bool keepdim) const {
     return table->getOp<Tensor (const Tensor &, IntArrayRef, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::logsumexp(DimnameList dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::logsumexp(const_cast<Tensor&>(*this), dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::logsumexp.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, DimnameList, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim);
+#endif
+}
+#endif
 inline Tensor Tensor::matmul(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::matmul(const_cast<Tensor&>(*this), other);
@@ -1263,6 +1309,26 @@ inline Tensor Tensor::max_values(IntArrayRef dim, bool keepdim) const {
     return table->getOp<Tensor (const Tensor &, IntArrayRef, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline std::tuple<Tensor,Tensor> Tensor::max(Dimname dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::max(const_cast<Tensor&>(*this), dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::max.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
+    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, Dimname, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::max_values(DimnameList dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::max_values(const_cast<Tensor&>(*this), dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::max_values.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, DimnameList, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim);
+#endif
+}
+#endif
 inline Tensor Tensor::mean(c10::optional<ScalarType> dtype) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::mean(const_cast<Tensor&>(*this), dtype);
@@ -1279,6 +1345,16 @@ inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, c10::optional<ScalarTy
     return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim, dtype);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::mean(DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::mean(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim, dtype);
+#endif
+}
+#endif
 inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::median(const_cast<Tensor&>(*this), dim, keepdim);
@@ -1287,6 +1363,16 @@ inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const
     return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, int64_t, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline std::tuple<Tensor,Tensor> Tensor::median(Dimname dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::median(const_cast<Tensor&>(*this), dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::median.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
+    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, Dimname, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim);
+#endif
+}
+#endif
 inline std::tuple<Tensor,Tensor> Tensor::min(int64_t dim, bool keepdim) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::min(const_cast<Tensor&>(*this), dim, keepdim);
@@ -1303,6 +1389,26 @@ inline Tensor Tensor::min_values(IntArrayRef dim, bool keepdim) const {
     return table->getOp<Tensor (const Tensor &, IntArrayRef, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline std::tuple<Tensor,Tensor> Tensor::min(Dimname dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::min(const_cast<Tensor&>(*this), dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::min.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
+    return table->getOp<std::tuple<Tensor,Tensor> (const Tensor &, Dimname, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::min_values(DimnameList dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::min_values(const_cast<Tensor&>(*this), dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::min_values.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, DimnameList, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, keepdim);
+#endif
+}
+#endif
 inline Tensor Tensor::mm(const Tensor & mat2) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(type_id())) {
@@ -2005,6 +2111,16 @@ inline Tensor Tensor::std(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::std(DimnameList dim, bool unbiased, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::std(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::std.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, DimnameList, bool, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
+#endif
+}
+#endif
 inline Tensor Tensor::prod(c10::optional<ScalarType> dtype) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::prod(const_cast<Tensor&>(*this), dtype);
@@ -2215,6 +2331,16 @@ inline Tensor Tensor::var(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::var(DimnameList dim, bool unbiased, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::var(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::var.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, DimnameList, bool, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim, unbiased, keepdim);
+#endif
+}
+#endif
 inline Tensor Tensor::view_as(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::view_as(const_cast<Tensor&>(*this), other);
@@ -2263,6 +2389,26 @@ inline Tensor Tensor::norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdi
     return table->getOp<Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), p, dim, keepdim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::norm(c10::optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::norm(const_cast<Tensor&>(*this), p, dim, keepdim, dtype);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::norm.names_ScalarOpt_dim_dtype(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), p, dim, keepdim, dtype);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::norm(c10::optional<Scalar> p, DimnameList dim, bool keepdim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::norm(const_cast<Tensor&>(*this), p, dim, keepdim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::norm.names_ScalarOpt_dim(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), p, dim, keepdim);
+#endif
+}
+#endif
 inline Tensor Tensor::clone() const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(type_id())) {
@@ -3618,13 +3764,7 @@ inline Tensor & Tensor::triu_(int64_t diagonal) const {
 }
 inline Tensor & Tensor::digamma_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::digamma_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("digamma_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::digamma_(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::digamma_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
@@ -3632,13 +3772,7 @@ inline Tensor & Tensor::digamma_() const {
 }
 inline Tensor & Tensor::polygamma_(int64_t n) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::polygamma_(const_cast<Tensor&>(*this), n);
-            break;
-        default:
-            AT_ERROR("polygamma_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::polygamma_(const_cast<Tensor&>(*this), n);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::polygamma_(Tensor(a!) self, int n) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), n);
@@ -4208,6 +4342,9 @@ inline Tensor Tensor::index_select(int64_t dim, const Tensor & index) const {
         case Backend::CPU:
             return CPUType::index_select(const_cast<Tensor&>(*this), dim, index);
             break;
+        case Backend::SparseCPU:
+            return SparseCPUType::index_select(const_cast<Tensor&>(*this), dim, index);
+            break;
         default:
             AT_ERROR("index_select not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
     }
@@ -4468,13 +4605,7 @@ inline Tensor Tensor::lgamma() const {
 }
 inline Tensor Tensor::digamma() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::digamma(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("digamma not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::digamma(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::digamma(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
@@ -4482,13 +4613,7 @@ inline Tensor Tensor::digamma() const {
 }
 inline Tensor Tensor::polygamma(int64_t n) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::polygamma(n, const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("polygamma not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::polygamma(n, const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::polygamma(int n, Tensor self) -> Tensor");
     return table->getOp<Tensor (int64_t, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(n, const_cast<Tensor&>(*this));
@@ -4504,13 +4629,7 @@ inline Tensor Tensor::erfinv() const {
 }
 inline Tensor & Tensor::erfinv_() const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::erfinv_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("erfinv_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
+    return TypeDefault::erfinv_(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::erfinv_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
@@ -4843,10 +4962,6 @@ inline Tensor Tensor::alias() const {
     static auto table = globalATenDispatch().getOpTable("aten::alias(Tensor(a) self) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
 #endif
-}
-
-inline bool Tensor::is_variable() const noexcept {
-  return impl_->is_variable();
 }
 
 inline caffe2::TypeMeta Tensor::dtype() const noexcept {

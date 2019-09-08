@@ -11,6 +11,7 @@ import threading
 import time
 import unittest
 from datetime import timedelta
+from sys import platform
 
 from itertools import groupby
 from functools import partial, reduce
@@ -36,6 +37,12 @@ load_tests = load_tests
 if not c10d.is_available():
     print('c10d not available, skipping tests')
     sys.exit(0)
+
+
+if platform == 'darwin':
+    LOOPBACK = 'lo0'
+else:
+    LOOPBACK = 'lo'
 
 
 def gpus_for_rank(world_size):
@@ -511,7 +518,7 @@ class TimeoutTest(TestCase):
 class ProcessGroupGlooTest(MultiProcessTestCase):
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
-        opts.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        opts.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         opts.timeout = 5.0
         opts.threads = threads
         return opts
@@ -521,8 +528,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         opts = c10d.ProcessGroupGloo.Options()
         opts.timeout = 5.0
         opts.devices = [
-            c10d.ProcessGroupGloo.create_tcp_device(interface="lo"),
-            c10d.ProcessGroupGloo.create_tcp_device(interface="lo"),
+            c10d.ProcessGroupGloo.create_device(interface=LOOPBACK),
+            c10d.ProcessGroupGloo.create_device(interface=LOOPBACK),
         ]
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, opts)
 
@@ -645,7 +652,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     (i * self.world_size) + (i % self.world_size)
                 ]),
                 inputs[i],
-                "Mismatch in iteration %d" % i,
+                message=("Mismatch in iteration %d" % i),
             )
 
     def test_broadcast_stress(self):
@@ -727,7 +734,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     (self.world_size * (self.world_size - 1) / 2)
                 ]),
                 inputs[i],
-                "Mismatch in iteration %d" % i,
+                message=("Mismatch in iteration %d" % i),
             )
 
     def test_allreduce_stress(self):
@@ -763,9 +770,16 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t3, t3.clone()], opts)
 
+    @skip_if_lt_x_gpu(1)
+    def test_allreduce_coalesced_checks_cuda(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        t1 = torch.zeros(1, dtype=torch.float32)
+
         with self.assertRaisesRegex(ValueError, "unsupported device type"):
             opts = c10d.AllreduceCoalescedOptions()
-            pg.allreduce_coalesced([t1.cuda(), t2.cuda()], opts)
+            pg.allreduce_coalesced([t1.cuda(), t1.cuda()], opts)
 
     def _test_allreduce_coalesced_basics(self, fn):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -793,7 +807,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 2 * [torch.Tensor([(i * self.world_size) + (self.world_size * (self.world_size - 1) / 2)])],
                 inputs[i],
-                "Mismatch in interation {}".format(i)
+                message="Mismatch in interation {}".format(i)
             )
 
     def test_allreduce_coalesced_stress(self):
@@ -972,7 +986,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 torch.Tensor([iter + root]),
                 outputs[iter][root],
-                "Mismatch in iteration %d for rank %d" % (iter, root)
+                message=("Mismatch in iteration %d for rank %d" % (iter, root)),
             )
 
     def test_scatter_stress(self):
@@ -1118,7 +1132,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(
                     expected_outputs[iter],
                     outputs[iter],
-                    "Mismatch in iteration %d for root %d" % (iter, root)
+                    message=("Mismatch in iteration %d for root %d" % (iter, root))
                 )
 
     def test_gather_stress(self):
@@ -1218,7 +1232,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 expected_outputs[i],
                 outputs[i],
-                "Mismatch in iteration %d" % i
+                message=("Mismatch in iteration %d" % i),
             )
 
     def test_allgather_stress(self):
@@ -1306,7 +1320,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                         (self.world_size * (self.world_size - 1) / 2)
                     ]),
                     outputs[i],
-                    "Mismatch in iteration %d with root rank %d" % (iter, root),
+                    message=("Mismatch in iteration %d with root rank %d" % (iter, root)),
                 )
 
     def test_reduce_stress(self):
@@ -1356,6 +1370,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 continue
             self.assertEqual(torch.Tensor([i]), outputs[i])
 
+    @unittest.skipIf(platform == 'darwin', 'ProcessGroup timeout not yet supported on macOS')
     def test_timeout_kwarg(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(
@@ -1825,7 +1840,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def _test_gloo_backend(self, devices, device_ids, multi_device=False):
         store = c10d.FileStore(self.file.name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         self._test_ddp_with_process_group(process_group, devices, device_ids, multi_device)
 
@@ -1967,7 +1982,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_dist_broadcast_coalesced_gloo(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
 
         device = torch.device('cuda')
@@ -2006,7 +2021,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_sync_params_no_buffers(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
 
         # Use all available devices on every process here (data is small, so should be fine).
@@ -2033,7 +2048,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_sync_params_with_buffers(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
 
         devices = gpus_for_rank(self.world_size)[self.rank]
@@ -2893,12 +2908,20 @@ class CommTest(MultiProcessTestCase):
         # Need to skip return code checking for these tests since the child
         # processes don't exit cleanly.
         self.skip_return_code_checks = [
-            self.test_nccl_errors_blocking_abort,
-            self.test_nccl_errors_blocking_sigkill,
-            self.test_nccl_errors_blocking_sigstop,
-            self.test_nccl_errors_blocking_sigterm,
+            self._get_wrapped_func(self.test_nccl_errors_blocking_abort),
+            self._get_wrapped_func(self.test_nccl_errors_blocking_sigkill),
+            self._get_wrapped_func(self.test_nccl_errors_blocking_sigterm),
+            self._get_wrapped_func(self.test_nccl_errors_blocking_nonzero_exit),
         ]
-        self.op_timeout_sec = 1
+
+    def _get_wrapped_func(self, func):
+        # Get the original function which was wrapped in the decorator.
+        if hasattr(func, '__wrapped__'):
+            # py3 way.
+            return func.__wrapped__
+        else:
+            # py2 way.
+            return func.func_closure[0].cell_contents
 
     def tearDown(self):
         super(CommTest, self).tearDown()
@@ -2906,7 +2929,10 @@ class CommTest(MultiProcessTestCase):
             os.remove(self.file.name)
         except OSError:
             pass
-        os.environ["NCCL_BLOCKING_WAIT"] = "0"
+
+    @property
+    def op_timeout_sec(self):
+        return 1
 
     @property
     def world_size(self):
@@ -2959,8 +2985,9 @@ class CommTest(MultiProcessTestCase):
             # Now the work scheduled next should hang forever since the previous
             # allreduce will never complete.
             t = threading.Thread(target=self._run_all_reduce, args=(process_group,))
+            t.daemon = True
             t.start()
-            t.join(int(get_timeout(self.id()) / 2))
+            t.join(int(get_timeout(self.id()) / 5))
             self.assertTrue(t.is_alive())
 
     def _test_nccl_errors_blocking(self, func):
@@ -2983,6 +3010,11 @@ class CommTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    def test_nccl_errors_blocking_nonzero_exit(self):
+        self._test_nccl_errors_blocking(lambda : sys.exit(1))
+
+    @requires_nccl()
+    @skip_if_not_multigpu
     def test_nccl_errors_blocking_abort(self):
         self._test_nccl_errors_blocking(lambda : os.abort())
 
@@ -2990,15 +3022,6 @@ class CommTest(MultiProcessTestCase):
     @skip_if_not_multigpu
     def test_nccl_errors_blocking_sigkill(self):
         self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGKILL))
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_blocking_sigstop(self):
-        self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGSTOP))
-        if self.rank == 0:
-            time.sleep(2 * self.op_timeout_sec)
-            for i in range(1, len(self.processes)):
-                os.kill(self.processes[i].pid, signal.SIGCONT)
 
     @requires_nccl()
     @skip_if_not_multigpu
@@ -3032,7 +3055,7 @@ class CommTest(MultiProcessTestCase):
     def test_broadcast_coalesced_gloo_cuda(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         device = torch.device('cuda:%d' % self.rank)
         self._test_broadcast_coalesced(process_group, device)
@@ -3041,7 +3064,7 @@ class CommTest(MultiProcessTestCase):
     def test_broadcast_coalesced_gloo_cpu(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         device = torch.device('cpu')
         self._test_broadcast_coalesced(process_group, device)
