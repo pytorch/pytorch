@@ -5,6 +5,10 @@
 #include <torch/csrc/jit/fuser/cpu/temp_file.h>
 #include <torch/csrc/utils/memory.h>
 
+#ifdef _MSC_VER
+#include <torch/csrc/jit/fuser/cpu/msvc_arch.h>
+#endif
+
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
@@ -107,9 +111,21 @@ static CompilerConfig& getConfig() {
 // optimization can be re-enabled by tracking down the platforms where
 // this error occurs and only selectively disabling it.
 #ifdef _MSC_VER
+static std::string getArchFlags() {
+  if (InstructionSet::AVX512F()) {
+    return "/arch:AVX512";
+  } else if (InstructionSet::AVX2()) {
+    return "/arch:AVX2";
+  } else if (InstructionSet::AVX()) {
+    return "/arch:AVX";
+  } else {
+    return "";
+  }
+}
+static const std::string arch_flags = getArchFlags();
 static const std::string compile_string =
     "cd /D \"" + temp_dir + "\" && "
-    "${cxx} /MD /Ox /LD /EHsc "
+    "${cxx} /nologo /MD /Ox " + arch_flags + " /LD /EHsc "
     "${fopenmp} \"${cpp_file}\" /link /out:\"${so_file}\"";
 #else
 static const std::string compile_string =
