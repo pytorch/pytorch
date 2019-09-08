@@ -1335,6 +1335,13 @@ jobs:
             PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib" 
 
+            set +x
+            export AWS_ACCESS_KEY_ID="${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
+            export AWS_SECRET_ACCESS_KEY="${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
+            set +x
+            echo ${AWS_ACCESS_KEY_ID}
+            echo ${AWS_SECRET_ACCESS_KEY}
+
             # Install conda
             curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
             chmod +x ~/Downloads/conda.sh
@@ -1344,6 +1351,8 @@ jobs:
             # Install dependencies
             conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
             
+
+          
             # sync submodules
             cd ${PROJ_ROOT}
             git submodule sync
@@ -1385,19 +1394,21 @@ jobs:
         
             # zip the library
             cd   ${WORKSPACE}/zip/
-            zip -r libtorch.zip install src
+            export FILE_NAME=libtorch_ios_`date +%m%d%Y`_arm64.zip
+            zip -r ${FILE_NAME} install src
             
             # store the artifact
             mkdir ${WORKSPACE}/artifact
-            cp libtorch.zip ${WORKSPACE}/artifact
+            cp ${FILE_NAME} ${WORKSPACE}/artifact
 
             # upload to aws
-            aws s3 cp libtorch.zip s3://ossci-ios-build/libtorch.zip --acl public-read
+            brew install awscli
+            aws s3 cp ${FILE_NAME} s3://ossci-ios-build/ --acl public-read
 
          
       - store_artifacts:
           path: ~/workspace/artifact
-          destination: libtorch.zip
+          destination: ${FILE_NAME}
 
 ##############################################################################
 ##############################################################################
@@ -1416,3 +1427,32 @@ workflows:
             - setup
   
       
+  # Scheduled to run 4 hours after the binary jobs start
+  # These jobs need to run after all the binary jobs run, regardless of if the
+  # jobs failed or not. There's no way to do this in CircleCI right now, so we
+  # just schedule this to run after all the binary jobs should've finished.
+  # These jobs are all idempotent and very lightweight; they just upload html
+  # files that track what binaries are available and what their sizes are.
+  update_s3_htmls:
+    triggers:
+      - schedule:
+          cron: "0 9 * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - setup
+      - update_s3_htmls_for_nightlies:
+          context: org-member
+          requires:
+            - setup
+      - update_s3_htmls_for_nightlies_devtoolset7:
+          context: org-member
+          requires:
+            - setup
+      - upload_binary_sizes:
+          context: org-member
+          requires:
+            - setup
+
