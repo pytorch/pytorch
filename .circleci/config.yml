@@ -1385,12 +1385,6 @@ jobs:
             echo "Begin running build script"
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
             CMAKE_ARGS=() 
-            if [ -n "${IOS_ARCH:-}" ]; then
-              CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
-            fi
-            if [ -n "${IOS_PLATFORM:-}" ]; then
-              CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
-            fi
             if [ -n "${USE_NNPACK:-}" ]; then 
               CMAKE_ARGS+=("-DUSE_NNPACK=${USE_NNPACK}")
             fi
