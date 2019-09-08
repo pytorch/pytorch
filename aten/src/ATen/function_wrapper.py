@@ -1226,6 +1226,10 @@ def create_generic(top_env, declarations):
         if BUILD_NAMEDTENSOR or not is_named_tensor_only:
             top_env['registration_declarations'].append(
                 REGISTRATION_DECLARATION.substitute(option))
+        if option['use_c10_dispatcher']:
+            top_env['c10_ops_already_moved_from_aten_to_c10'].append(
+                check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
+            )
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1249,9 +1253,6 @@ def create_generic(top_env, declarations):
             if option['use_c10_dispatcher']:
                 top_env['c10_function_registrations'].append(
                     check_namedtensor_enabled(C10_DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
-                top_env['c10_ops_already_moved_from_aten_to_c10'].append(
-                    check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
-                )
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
