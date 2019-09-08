@@ -1,7 +1,7 @@
 name: Lint
 
 on:
-  push
+  pull_request
 
 jobs:
   flake8_py3:
