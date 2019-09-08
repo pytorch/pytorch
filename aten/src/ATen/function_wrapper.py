@@ -190,11 +190,14 @@ static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_function_body}
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
+    static c10::OperatorHandle op = c10::Dispatcher::singleton()
+        .findSchema({"aten::${name}", "${overload_name}"}).value();
     if (${inferred_is_variable}) {
-        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${formals_types_with_return}>(op ${native_actuals_with_comma_prefix});
+        return c10::Dispatcher::singleton().callUnboxedAutogradKernel<${formals_types_with_return}>(
+            op ${native_actuals_with_comma_prefix});
     } else {
-        return c10::Dispatcher::singleton().lookup(op, backendToTensorTypeId(${inferred_backend})).callUnboxed<${formals_types_with_return}>(${native_actuals});
+        return c10::Dispatcher::singleton().lookup(op, backendToTensorTypeId(${inferred_backend}))
+            .callUnboxed<${formals_types_with_return}>(${native_actuals});
     }
 #endif
 }
@@ -1170,12 +1173,16 @@ def create_generic(top_env, declarations):
 
             if not option['use_c10_dispatcher']:
                 return FunctionCode(
-                    declaration=TENSOR_METHOD_DECLARATION.substitute(option, static_dispatch_method_body=static_dispatch_method_body),
-                    definition=TENSOR_METHOD_DEFINITION.substitute(option, static_dispatch_method_body=static_dispatch_method_body))
+                    declaration=TENSOR_METHOD_DECLARATION.substitute(
+                        option, static_dispatch_method_body=static_dispatch_method_body),
+                    definition=TENSOR_METHOD_DEFINITION.substitute(
+                        option, static_dispatch_method_body=static_dispatch_method_body))
             else:
                 return FunctionCode(
-                    declaration=TENSOR_METHOD_DECLARATION.substitute(option, static_dispatch_method_body=static_dispatch_method_body),
-                    definition=C10_TENSOR_METHOD_DEFINITION.substitute(option, static_dispatch_method_body=static_dispatch_method_body))
+                    declaration=TENSOR_METHOD_DECLARATION.substitute(
+                        option, static_dispatch_method_body=static_dispatch_method_body),
+                    definition=C10_TENSOR_METHOD_DEFINITION.substitute(
+                        option, static_dispatch_method_body=static_dispatch_method_body))
 
         def gen_namespace_function(option, dispatch_tensor, dispatch_options):
             # type: (Any, Optional[str], Any) -> FunctionCode
@@ -1210,12 +1217,15 @@ def create_generic(top_env, declarations):
                     option, native_arguments=option['native_actuals'])
 
             if is_factory_method:
-                fn_definition = FACTORY_DEFINITION.substitute(option, static_dispatch_function_body=static_dispatch_function_body)
+                fn_definition = FACTORY_DEFINITION.substitute(
+                    option, static_dispatch_function_body=static_dispatch_function_body)
             else:
                 if not option['use_c10_dispatcher']:
-                    fn_definition = FUNCTION_DEFINITION.substitute(option, static_dispatch_function_body=static_dispatch_function_body)
+                    fn_definition = FUNCTION_DEFINITION.substitute(
+                        option, static_dispatch_function_body=static_dispatch_function_body)
                 else:
-                    fn_definition = C10_FUNCTION_DEFINITION.substitute(option, static_dispatch_function_body=static_dispatch_function_body)
+                    fn_definition = C10_FUNCTION_DEFINITION.substitute(
+                        option, static_dispatch_function_body=static_dispatch_function_body)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
         # Emit #ifdef BUILD_NAMEDTENSOR macros for any code generated here
