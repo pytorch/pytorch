@@ -3,30 +3,13 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/tracer.h>
+#include <ATen/core/ATenDispatch.h>
 #include <unordered_set>
 
 namespace torch {
 namespace jit {
 
-std::unordered_set<c10::OperatorName> ops_blacklisted_from_c10_to_jit_export_0();
-std::unordered_set<c10::OperatorName> ops_blacklisted_from_c10_to_jit_export_1();
-std::unordered_set<c10::OperatorName> ops_blacklisted_from_c10_to_jit_export_2();
-
 namespace {
-
-std::unordered_set<c10::OperatorName> ops_blacklisted_from_c10_to_jit_export() {
-  std::unordered_set<c10::OperatorName> result;
-  for (c10::OperatorName name : ops_blacklisted_from_c10_to_jit_export_0()) {
-    result.insert(std::move(name));
-  }
-  for (c10::OperatorName name : ops_blacklisted_from_c10_to_jit_export_1()) {
-    result.insert(std::move(name));
-  }
-  for (c10::OperatorName name : ops_blacklisted_from_c10_to_jit_export_2()) {
-    result.insert(std::move(name));
-  }
-  return result;
-}
 
 at::Tensor wrap_tensor(at::Tensor&& tensor) {
   if (tensor.is_variable()) {
@@ -190,7 +173,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
 class RegistrationListener final : public c10::OpRegistrationListener {
 public:
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
-    static auto blacklist = ops_blacklisted_from_c10_to_jit_export();
+    static auto blacklist = at::aten_ops_already_moved_to_c10();
     if (0 != blacklist.count(op.schema().operator_name())) {
       // Ignore ATen ops for now because they have their own code
       // to expose them to JIT in register_aten_ops.cpp
