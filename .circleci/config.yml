@@ -187,7 +187,7 @@ pytorch_ios_params: &pytorch_ios_params
       default: "ON"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
-    IOS_ARC: << parameters.ios_arch >>
+    IOS_ARCH: << parameters.ios_arch >>
     IOS_PLATFORM: << parameters.ios_platform >>
     USE_NNPACK: << parameters.use_nnpack >>
 caffe2_params: &caffe2_params
