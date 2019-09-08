@@ -69,11 +69,6 @@ ios_brew_update: &ios_brew_update
   no_output_timeout: "1h"
   command: |
     set -ex
-    brew update
-    brew unlink parallel
-    brew install moreutils
-    brew link parallel --overwrite
-    brew install expect
     brew install libtool
 
 

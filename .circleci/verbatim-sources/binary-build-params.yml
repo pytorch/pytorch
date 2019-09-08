@@ -59,6 +59,10 @@ binary_ios_params: &binary_ios_params
     ios_arch:
       type: string
       default: ""
+    ios_platform: ""
+      type: string
+      default: ""
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARC: << parameters.arch >>
+    IOS_PLATFORM: << parameters.ios_platform >>

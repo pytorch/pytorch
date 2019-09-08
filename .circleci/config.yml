@@ -69,11 +69,6 @@ ios_brew_update: &ios_brew_update
   no_output_timeout: "1h"
   command: |
     set -ex
-    brew update
-    brew unlink parallel
-    brew install moreutils
-    brew link parallel --overwrite
-    brew install expect
     brew install libtool
 
 
@@ -171,6 +166,21 @@ pytorch_params: &pytorch_params
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
   resource_class: << parameters.resource_class >>
 
+pytorch_ios_params: &pytorch_ios_params
+  parameters:
+    build_environment:
+      type: string
+      default: ""
+    ios_arch:
+      type: string
+      default: ""
+    ios_platform: ""
+      type: string
+      default: ""
+  environment:
+    BUILD_ENVIRONMENT: << parameters.build_environment >>
+    IOS_ARC: << parameters.arch >>
+    IOS_PLATFORM: << parameters.ios_platform >>
 caffe2_params: &caffe2_params
   parameters:
     build_environment:
@@ -260,9 +270,13 @@ binary_ios_params: &binary_ios_params
     ios_arch:
       type: string
       default: ""
+    ios_platform: ""
+      type: string
+      default: ""
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARC: << parameters.arch >>
+    IOS_PLATFORM: << parameters.ios_platform >>
 ##############################################################################
 # Job specs
 ##############################################################################
@@ -1312,8 +1326,7 @@ jobs:
   #       destination: artifacts.tgz
   
   pytorch_ios_build:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-ios-build
+    <<: *pytorch_ios_params  
     macos:
       xcode: "10.2.1"
     steps:
@@ -1324,23 +1337,25 @@ jobs:
           <<: *should_run_job
       - checkout
       - run:
+          <<: *macos_brew_update
+      - run:
           <<: *ios_brew_update
       - run:
           name: Build
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CIRCLECI=1
+            # export IN_CIRCLECI=1
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib" 
 
-            set +x
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            set +x
-            echo "KEY: ${AWS_ACCESS_KEY_ID}"
-            echo "SECRET: ${AWS_SECRET_ACCESS_KEY}"
+            # set +x
+            # export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            # export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            # set +x
+            # echo "KEY: ${AWS_ACCESS_KEY_ID}"
+            # echo "SECRET: ${AWS_SECRET_ACCESS_KEY}"
 
             # Install conda
             curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
@@ -1350,8 +1365,6 @@ jobs:
             source ~/anaconda/bin/activate
             # Install dependencies
             conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
-            
-
           
             # sync submodules
             cd ${PROJ_ROOT}
@@ -1364,51 +1377,60 @@ jobs:
             # run build script
             echo "Begin running build script"
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
-            BUILD_PYTORCH_IOS=1
-            IOS_ARCH=arm64
-            unbuffer ${PROJ_ROOT}/./scripts/build_ios.sh \
-            -DIOS_ARCH=arm64 \
-            -DBUILD_CAFFE2_MOBILE=OFF \
-            -DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())') \
-            -DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)') 2>&1 | ts
+            CMAKE_ARGS=() 
+            if [ -n "${IOS_ARCH:-}" ]; then
+              CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
+            fi
+            if [ -n "${IOS_PLATFORM:-}" ]; then
+              CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
+            fi
+            CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+            CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+            CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+          
+            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh ${CMAKE_ARGS[@]} 2>&1 | ts
 
-            #archive the static libraries
-            cd ${PROJ_ROOT}/build_ios/install/lib
+            # -DBUILD_CAFFE2_MOBILE=OFF \
+            # -DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())') \
+            # -DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)') 2>&1 | ts
+
+            # #archive the static libraries
+            # cd ${PROJ_ROOT}/build_ios/install/lib
             
-            #for testing
-            rm -rf libprotobuf-lite.a
-            rm -rf libpthreadpool.a
-            libtool -static *.a -o libtorch_arm64.a
+            # #for testing
+            # rm -rf libprotobuf-lite.a
+            # rm -rf libpthreadpool.a
+            # libtool -static *.a -o libtorch_arm64.a
 
-            #store the binary
-            mkdir -p ${WORKSPACE}/zip/install
-            cp -R ${PROJ_ROOT}/build_ios/install/include ${WORKSPACE}/zip/install
-            mkdir -p ${WORKSPACE}/zip/install/lib
-            cp ${PROJ_ROOT}/build_ios/install/lib/libtorch_arm64.a  ${WORKSPACE}/zip/install/lib
+            # #store the binary
+            # mkdir -p ${WORKSPACE}/zip/install
+            # cp -R ${PROJ_ROOT}/build_ios/install/include ${WORKSPACE}/zip/install
+            # mkdir -p ${WORKSPACE}/zip/install/lib
+            # cp ${PROJ_ROOT}/build_ios/install/lib/libtorch_arm64.a  ${WORKSPACE}/zip/install/lib
 
-            #create the unmbrella header
-            mkdir -p ${WORKSPACE}/zip/src
-            cd ${WORKSPACE}/zip/src
-            touch LibTorch.h
-            echo "#import <script/torch.h>" > LibTorch.h
+            # #create the unmbrella header
+            # mkdir -p ${WORKSPACE}/zip/src
+            # cd ${WORKSPACE}/zip/src
+            # touch LibTorch.h
+            # echo "#import <script/torch.h>" > LibTorch.h
         
-            # zip the library
-            cd   ${WORKSPACE}/zip/
-            export FILE_NAME=libtorch_ios_`date +%m%d%Y`_arm64.zip
-            zip -r ${FILE_NAME} install src
+            # # zip the library
+            # cd   ${WORKSPACE}/zip/
+            # export FILE_NAME=libtorch_ios_`date +%m%d%Y`_arm64.zip
+            # zip -r ${FILE_NAME} install src
             
-            # store the artifact
-            mkdir ${WORKSPACE}/artifact
-            cp ${FILE_NAME} ${WORKSPACE}/artifact
+            # # store the artifact
+            # mkdir ${WORKSPACE}/artifact/ios
+            # cp ${FILE_NAME} ${WORKSPACE}/artifact/ios
 
-            # upload to aws
-            brew install awscli
-            aws s3 cp ${FILE_NAME} s3://ossci-ios-build/ --acl public-read
+            # # upload to aws
+            # brew install awscli
+            # aws s3 cp ${FILE_NAME} s3://ossci-ios-build/ --acl public-read
 
          
-      - store_artifacts:
-          path: ~/workspace/artifact
-          destination: ${FILE_NAME}
+      # - store_artifacts:
+      #     path: ~/workspace/artifact
+      #     destination: ${FILE_NAME}
 
 ##############################################################################
 ##############################################################################
@@ -1423,6 +1445,13 @@ workflows:
       - setup
       # Pytorch iOS builds
       - pytorch_ios_build:
+          name: pytorch_ios_10_2_1_x86_64_build
+          build_environment: "pytorch-ios-10-2-1-x86_64_build"
+          requires: 
+            - setup
+      - pytorch_ios_build:
+          name: pytorch_ios_10_2_1_arm64_build
+          build_environment: "pytorch-ios-10-2-1-arm64_build"
           requires: 
             - setup
   
