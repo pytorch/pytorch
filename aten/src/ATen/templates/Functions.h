@@ -15,7 +15,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/core/ATenDispatch.h>
 #include <ATen/Context.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 
 namespace at {
 
