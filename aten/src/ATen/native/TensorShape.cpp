@@ -1086,6 +1086,12 @@ std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {
   return tensors;
 }
 
+#ifdef BUILD_NAMEDTENSOR
+std::vector<Tensor> unbind(const Tensor& self, Dimname dim) {
+  return at::unbind(self, dimname_to_position(self, dim));
+}
+#endif
+
 std::vector<Tensor> meshgrid(TensorList tensors) {
   int64_t size = tensors.size();
   TORCH_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
