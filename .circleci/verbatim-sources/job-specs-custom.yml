@@ -420,8 +420,6 @@
           <<: *should_run_job
       - checkout
       - run:
-          <<: *macos_brew_update
-      - run:
           <<: *ios_brew_update
       - run:
           name: Build
@@ -470,7 +468,7 @@
             CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
             CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
             CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
-          
+
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh ${CMAKE_ARGS[@]} 2>&1 | ts
 
             # -DBUILD_CAFFE2_MOBILE=OFF \
