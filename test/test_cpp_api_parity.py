@@ -8,7 +8,6 @@ import inspect
 import re
 
 import torch
-from torch._C import ListType
 from torch._six import PY2
 import common_utils as common
 import common_nn
@@ -109,7 +108,13 @@ TORCH_CHECK(
 TORCH_NN_MODULE_TEST_CTOR_ARGS = Template("""\n
 void ${module_name}_test_ctor_args() {
   ${module_qualified_name} m_init_by_cpp(${module_option});
+
+  ${extra_stmts}
 }
+""")
+
+TORCH_NN_MODULE_TEST_OPTIONS_ARG = Template("""\
+m_init_by_cpp->options.${options_arg_name}();
 """)
 
 TORCH_NN_MODULE_TEST_INIT = Template("""\n
@@ -246,14 +251,26 @@ class TestCppApiParity(common.TestCase):
         cpp_module_option = 'torch::nn::{}Options{}'.format(module_name, cpp_default_constructor_args_str)
         init_kwargs = init_arg_spec.args[-len(init_kwargs_defaults):]
         for arg_name, python_default_value in zip(init_kwargs, init_kwargs_defaults):
+            # NOTE: If a Python module constructor arg's default value is None, we don't test its corresponding
+            # options arg in C++ module (because the way to set the C++ options arg to an empty value is to not
+            # specify it, which means we can't test that the options arg exists).
+            # Instead, we test that all options args exist by calling their accessors after constructing the
+            # C++ module with the options.
             if python_default_value is not None:
                 cpp_module_option += '.{}({})'.format(arg_name, self._python_arg_to_cpp_arg(python_default_value).value)
+
+        extra_stmts = []
+        for arg_name in python_default_constructor_arg_names + init_kwargs:
+            extra_stmts.append(TORCH_NN_MODULE_TEST_OPTIONS_ARG.substitute(
+                options_arg_name=arg_name,
+            ))
 
         cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + module_metadata.cpp_sources
         cpp_sources += TORCH_NN_MODULE_TEST_CTOR_ARGS.substitute(
             module_name=module_name,
             module_qualified_name='torch::nn::{}'.format(module_name),
-            module_option=cpp_module_option)
+            module_option=cpp_module_option,
+            extra_stmts=''.join(extra_stmts))
         cpp_test_name = module_name + '_test_ctor_args'
         cpp_module = self._compile_cpp_code_inline(
             name=cpp_test_name, cpp_sources=cpp_sources, functions=cpp_test_name)
@@ -385,7 +402,7 @@ class TestCppApiParity(common.TestCase):
                             # which will automatically be converted to `IntList` later and match the type
                             # of the corresponding attribute in C++ module (which is initially an `ExpandingArray`
                             # and is converted to `IntList` by the `IValue` constructor).
-                            value_type = ListType(torch.jit.annotations.ann_to_type(type(value[0])))
+                            value_type = torch._C.ListType(torch.jit.annotations.ann_to_type(type(value[0])))
                         else:
                             value_type = torch.jit.annotations.ann_to_type(type(value))
                         script_module._c._register_attribute(
