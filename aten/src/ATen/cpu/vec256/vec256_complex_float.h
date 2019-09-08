@@ -29,7 +29,6 @@ public:
     values[2] = val3;
     values[3] = val4;
   }
-  operator __m256d() = delete;
   template <int64_t mask>
   static Vec256<std::complex<float>> blend(const Vec256<std::complex<float>>& a, const Vec256<std::complex<float>>& b) {
     int64_t mask_ = mask;
@@ -120,7 +119,6 @@ public:
     }
     return ret;
   }
-  #if 0
   Vec256<std::complex<float>> acos() const {
     return map(std::acos);
   }
@@ -247,10 +245,8 @@ public:
   Vec256<std::complex<float>> operator>=(const Vec256<std::complex<float>>& other) const {
     AT_ERROR("not supported for complex numbers");
   }
-  #endif
 };
 
-#if 0
 template <>
 Vec256<std::complex<float>> inline operator+(const Vec256<std::complex<float>>& a, const Vec256<std::complex<float>>& b) {
   Vec256<std::complex<float>> ret;
@@ -331,7 +327,5 @@ template <>
 inline void convert(const std::complex<float>* src, std::complex<float>* dst, int64_t n) {
   AT_ERROR("not supported for complex numbers");
 }
-
-#endif
 
 }}}
