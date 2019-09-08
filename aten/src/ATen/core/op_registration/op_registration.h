@@ -201,6 +201,12 @@ public:
 
       return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
     }
+    template<class FuncType>
+    // enable_if: only enable it if FuncType is actually a function, but not a stack based KernelFunction.
+    guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, Options&&>
+    impl_unboxedOnlyKernel(TensorTypeId dispatch_key, FuncType* func) && {
+      return std::move(*this).kernelFunctorUnboxedOnly<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(dispatch_key, func);
+    }
 
     // TODO Remove impl_unboxedOnlyCatchAllKernel once all of aten can generate boxed kernels
     template<class FuncType, FuncType* kernel_func>
@@ -210,6 +216,12 @@ public:
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernelFunctorUnboxedOnly<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
+    }
+    template<class FuncType>
+    // enable_if: only enable it if FuncType is actually a function, but not a stack based KernelFunction.
+    guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, Options&&>
+    impl_unboxedOnlyCatchAllKernel(FuncType* func) && {
+      return std::move(*this).kernelFunctorUnboxedOnly<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(c10::nullopt, func);
     }
 
     /**
