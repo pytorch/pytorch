@@ -142,12 +142,36 @@ static Tensor align(const Tensor& tensor, DimnameList names, bool is_aligning_tw
 }
 
 Tensor align_to(const Tensor& tensor, DimnameList names) {
-  TORCH_CHECK(
-      names.size() >= tensor.dim(),
-      "Cannot align tensor with dims ",
-      tensor.names(),
-      " to a shorter list of dims ", names, ".");
-  return align(tensor, names, /*aligning_two_tensors=*/false);
+  auto tensor_names = tensor.names();
+  auto tensor_sizes = tensor.sizes();
+  auto tensor_strides = tensor.strides();
+  std::vector<int64_t> new_sizes(names.size(), 1);
+  std::vector<int64_t> new_strides(names.size(), 0);
+
+  for (auto idx = 0; idx < tensor_names.size(); ++idx) {
+    const auto& dim = tensor_names[idx];
+    TORCH_CHECK(dim.is_normal(),
+        "align_to: All input dims must be named. Found unnamed dim at index ",
+        dim, " of Tensor", tensor_names);
+    auto it = std::find(names.begin(), names.end(), dim);
+    TORCH_CHECK(it != names.end(),
+        "align_to: Cannot find dim ", dim, " from Tensor", names,
+        " in desired alignment ", names, ".");
+    int64_t new_idx = std::distance(names.begin(), it);
+    new_sizes[new_idx] = tensor_sizes[idx];
+    new_strides[new_idx] = tensor_strides[idx];
+  }
+  Tensor result;
+  {
+    NoNamesGuard guard;
+    result = tensor.as_strided(new_sizes, new_strides);
+  }
+  internal_set_names_inplace(result, names);
+  return result;
+}
+
+Tensor align_as(const Tensor& tensor, const Tensor& other) {
+  return native::align_to(tensor, other.names());
 }
 
 static std::vector<Tensor> align_tensors_to(TensorList tensors, DimnameList names) {

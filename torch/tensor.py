@@ -485,6 +485,9 @@ class Tensor(torch._C._TensorBase):
         names = _resolve_glob(names, self.names, 'as_named')
         return super(Tensor, self).as_named(names)
 
+    def align_to(self, *names):
+        return super(Tensor, self).align_to(names)
+
     def names_(self, *names, **rename_map):
         # Note [names_ / renamed API]
         # The Python API for these is different from the C++ API. In Python:

@@ -100,11 +100,19 @@ inline Tensor Tensor::align_to(DimnameList names) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::align_to(const_cast<Tensor&>(*this), names);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::align_to(Tensor self, DimnameList names) -> Tensor");
+    static auto table = globalATenDispatch().getOpTable("aten::align_to(Tensor(a) self, DimnameList names) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, DimnameList)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
 #endif
 }
 #endif
+inline Tensor Tensor::align_as(const Tensor & other) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::align_as(const_cast<Tensor&>(*this), other);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::align_as(Tensor self, Tensor other) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), other);
+#endif
+}
 #ifdef BUILD_NAMEDTENSOR
 inline Tensor Tensor::as_named(DimnameList names) const {
 #ifdef USE_STATIC_DISPATCH
