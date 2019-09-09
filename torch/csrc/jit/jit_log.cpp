@@ -25,9 +25,9 @@ std::string jit_log_prefix(
     const std::string& prefix,
     const std::string& in_str) {
   std::stringstream in_ss(in_str);
-  std::stringstream out_ss(in_str);
+  std::stringstream out_ss;
   std::string line;
-  while (std::getline(in_ss, line, '\n')) {
+  while (std::getline(in_ss, line)) {
     out_ss << prefix << line << std::endl;
   }
 
