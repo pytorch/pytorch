@@ -376,7 +376,7 @@ class CAFFE2_API Tensor {
   Tensor & names_(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
-  Tensor view_names(c10::optional<DimnameList> names) const;
+  Tensor renamed(c10::optional<DimnameList> names) const;
   #endif
   #ifdef BUILD_NAMEDTENSOR
   Tensor align_to(DimnameList names) const;
@@ -445,6 +445,8 @@ class CAFFE2_API Tensor {
   Tensor div(Scalar other) const;
   Tensor & div_(Scalar other) const;
   Tensor dot(const Tensor & tensor) const;
+  Tensor new_empty(IntArrayRef size, const TensorOptions & options={}) const;
+  Tensor new_full(IntArrayRef size, Scalar fill_value, const TensorOptions & options={}) const;
   Tensor & resize_(IntArrayRef size) const;
   Tensor erf() const;
   Tensor & erf_() const;
@@ -457,6 +459,15 @@ class CAFFE2_API Tensor {
   Tensor expand(IntArrayRef size, bool implicit=false) const;
   Tensor expand_as(const Tensor & other) const;
   Tensor flatten(int64_t start_dim=0, int64_t end_dim=-1) const;
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor flatten(int64_t start_dim, int64_t end_dim, Dimname out_dim) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor flatten(Dimname start_dim, Dimname end_dim, Dimname out_dim) const;
+  #endif
+  #ifdef BUILD_NAMEDTENSOR
+  Tensor flatten(DimnameList dims, Dimname out_dim) const;
+  #endif
   Tensor & fill_(Scalar value) const;
   Tensor & fill_(const Tensor & value) const;
   Tensor floor() const;
@@ -678,6 +689,9 @@ class CAFFE2_API Tensor {
   Tensor values() const;
   int64_t numel() const;
   std::vector<Tensor> unbind(int64_t dim=0) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::vector<Tensor> unbind(Dimname dim) const;
+  #endif
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
