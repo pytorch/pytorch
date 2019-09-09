@@ -13821,14 +13821,15 @@ a")
                     self.some_state = torch.tensor((100,))
 
         if not PY2:
-            FileCheck().check("TorchScript will now drop the function.").run(str(warns[0]))
+            FileCheck().check("TorchScript will now drop the function").run(str(warns[0]))
 
         # Assert ignored code is run
         m = M()
 
         m2 = self.getExportImportCopy(m)
         pp = str(m2.forward.code)
-        self.assertNotIn('ignored_code', pp)
+        FileCheck().check("annotated to be ignored").run(pp)
+        FileCheck().check_not("ignored_code").run(pp)
 
         with self.assertRaisesRegex(torch.jit.Error, "annotated to be ignored and cannot be run"):
             m2.forward(torch.ones(1))
