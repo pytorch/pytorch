@@ -199,13 +199,16 @@ def _lazy_init():
         # we need to just return without initializing in that case.
         # However, we must not let any *other* threads in!
         _tls.is_initializing = True
-        for queued_call, orig_traceback in _queued_calls:
-            try:
-                queued_call()
-            except Exception as e:
-                msg = ("CUDA call failed lazily at initialization with error: {}\n\n"
-                       "CUDA call was originally invoked at:\n\n{}").format(str(e), orig_traceback)
-                raise_from(DeferredCudaCallError(msg), e)
+        try:
+            for queued_call, orig_traceback in _queued_calls:
+                try:
+                    queued_call()
+                except Exception as e:
+                    msg = ("CUDA call failed lazily at initialization with error: {}\n\n"
+                           "CUDA call was originally invoked at:\n\n{}").format(str(e), orig_traceback)
+                    raise_from(DeferredCudaCallError(msg), e)
+        finally:
+            delattr(_tls, 'is_initializing')
         _initialized = True
 
 
