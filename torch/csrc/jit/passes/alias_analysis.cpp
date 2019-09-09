@@ -363,7 +363,6 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeConservative(node);
     case prim::Print:
     case prim::Uninitialized:
-    case prim::IgnoredPythonOp:
       // These ops do nothing
       return;
     default:
@@ -739,8 +738,7 @@ bool AliasDb::nonAliasingValue(const Value* elem) const {
   // these are values which can point to aliasing types in the graph,
   // as with a None value pointing to an optional if node output,
   // but will never alias themselves
-  return elem->mustBeNone() || elem->node()->kind() == prim::Uninitialized ||
-      elem->node()->kind() == prim::IgnoredPythonOp;
+  return elem->mustBeNone() || elem->node()->kind() == prim::Uninitialized;
 }
 
 // Register the fact that `from` is a pointer to `to`
@@ -1228,7 +1226,6 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::DifferentiableGraph,
       prim::Constant,
       prim::Uninitialized,
-      prim::IgnoredPythonOp,
       prim::DictConstruct,
       prim::ListConstruct,
       prim::TupleConstruct,
