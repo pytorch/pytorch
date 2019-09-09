@@ -16,6 +16,7 @@
 #include <c10/core/Event.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/util/Optional.h>
+#include <c10/core/StreamGuard.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -573,12 +574,7 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
 
   // Switches to a function's CUDA stream (if applicable) before calling it
   const auto opt_parent_stream = (*task.fn_).stream(c10::DeviceType::CUDA);
-  c10::optional<c10::Event> opt_parent_event = c10::nullopt;
-  if (opt_parent_stream) {
-    const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-    guard.exchangeStream(*opt_parent_stream);
-    opt_parent_event = c10::Event{c10::DeviceType::CUDA};
-  }
+  c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 
   auto outputs = call_function(task);
 
@@ -644,12 +640,11 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
       InputBuffer input_buffer(next.function->num_inputs());
 
       // Accumulates into buffer
-      const auto child_stream = next.function->input_metadata(next.input_nr).stream();
+      const auto opt_next_stream = next.function->stream(c10::DeviceType::CUDA);
       input_buffer.add(next.input_nr,
                        std::move(output),
                        opt_parent_stream,
-                       opt_parent_event,
-                       child_stream);
+                       opt_next_stream);
 
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
@@ -662,12 +657,11 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
       auto &input_buffer = not_ready_it->second;
 
       // Accumulates into buffer
-      const auto child_stream = next.function->input_metadata(next.input_nr).stream();
+      const auto opt_next_stream = next.function->stream(c10::DeviceType::CUDA);
       input_buffer.add(next.input_nr,
                        std::move(output),
                        opt_parent_stream,
-                       opt_parent_event,
-                       child_stream);
+                       opt_next_stream);
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
         queue.push(NodeTask(task.base_, next.function, std::move(input_buffer)));
@@ -798,7 +792,7 @@ auto Engine::execute(const edge_list& roots,
     const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
     const auto default_stream = guard.getDefaultStream(leaf_stream.device());
     if (leaf_stream != default_stream) {
-      auto event = c10::Event(c10::DeviceType::CUDA);
+      auto event = c10::Event{c10::DeviceType::CUDA};
       event.record(leaf_stream);
       default_stream.wait(event);
     }

@@ -2,7 +2,8 @@
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
-
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAStream.h>
 
 #include <cstddef>
 #include <utility>
@@ -14,22 +15,66 @@ namespace torch { namespace autograd {
   void InputBuffer::add(size_t pos,
                         Variable var,
                         const c10::optional<c10::Stream>& opt_producer_stream,
-                        c10::optional<c10::Event>& opt_event,
-                        const c10::Stream& consumer_stream) {
-  AT_ASSERT(pos < buffer.size());
+                        const c10::optional<c10::Stream>& opt_consumer_stream) {
+  TORCH_INTERNAL_ASSERT(pos < buffer.size());
   if (!var.defined()) {
     return;
   }
 
-  // Switches to consumer's stream (old_var's stream)
-  c10::OptionalStreamGuard stream_guard{consumer_stream};
+  // Switches to accumulate stream
+  // Note: streams are only used with CUDA variables.
+  // The stream chosen for accumulation is decided as follows:
+  //
+  //  (1) If both the producer and consumer stream are CUDA streams on the
+  //      same device, then the consumer is synced with the producer and
+  //      accumulation happens on the consumer's stream.
+  //  (2) If the producer is not a CUDA function the consumer is synced
+  //      with its device's current stream and accumulation happens on the
+  //      consumer's stream.
+  //  (3) If the consumer is not a CUDA function the default stream
+  //      on the producer's device is synced with the producer's stream
+  //      and accumulation happens on the default stream.
+  //  (4) If neither the producer nor consumer is a CUDA function then
+  //      accumulation happens on the CPU. (This case actually
+  //      occurs and is not an error.)
+  //
+  // The use of the default stream in (3) is because the producer has
+  // set its own stream on the device. Another option would be to pass in
+  // the device's previously current stream to this function.
+  //
+  TORCH_INTERNAL_ASSERT(device_of(var));
+  c10::OptionalStreamGuard stream_guard{opt_consumer_stream};
+  if (device_of(var)->is_cuda()) {
+    const auto on_producer = opt_producer_stream
+                        && device_of(var) == opt_producer_stream->device();
+    const auto on_consumer = opt_consumer_stream
+                        && device_of(var) == opt_consumer_stream->device();
 
-  // Syncs (optional) producer stream with consumer stream, if necessary
-  if (consumer_stream.device_type() == c10::DeviceType::CUDA
-   && opt_producer_stream
-   && consumer_stream != *opt_producer_stream) {
-    opt_event->recordOnce(*opt_producer_stream);
-    consumer_stream.wait(*opt_event);
+    if (on_producer && on_consumer && opt_consumer_stream == opt_producer_stream) {
+      // (1a) no synchronization necessary, accumulates on consumer
+    } else if (on_producer && on_consumer) {
+      // (1b) Syncs consumer with producer, accumulates on consumer
+      auto event = c10::Event{c10::DeviceType::CUDA};
+      event.record(*opt_producer_stream);
+      opt_consumer_stream->wait(event);
+    } else if (on_consumer) {
+      // (2) Syncs consumer with current, accumulates on consumer
+      const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+      const auto current_stream = guard.getStream(opt_consumer_stream->device());
+      auto event = c10::Event{c10::DeviceType::CUDA};
+      event.record(current_stream);
+      opt_consumer_stream->wait(event);
+    } else if (on_producer) {
+      // (3) Syncs default with producer, accumulates on default
+      const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+      const auto default_stream = guard.getDefaultStream(opt_producer_stream->device());
+      auto event = c10::Event{c10::DeviceType::CUDA};
+      event.record(*opt_producer_stream);
+      default_stream.wait(event);
+      stream_guard.reset_stream(default_stream);
+    } else {
+      // (4) accumulates on cpu
+    }
   }
 
   auto& old_var = buffer[pos];

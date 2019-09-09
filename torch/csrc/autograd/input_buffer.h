@@ -25,13 +25,12 @@ struct InputBuffer {
   InputBuffer& operator=(InputBuffer&& other) = default;
 
   // Accumulates the variable at a specified index.
-  // Syncs the producer and consumer streams if they're both CUDA streams
-  // using the given event.
+  // The optional CUDA streams determine which stream the accumulation
+  // is run on and how the addition is synchronized.
   void add(size_t pos,
            Variable var,
            const c10::optional<c10::Stream>& opt_producer_stream,
-           c10::optional<c10::Event>& opt_event,
-           const c10::Stream& consumer_stream);
+           const c10::optional<c10::Stream>& opt_consumer_stream);
 
   at::Device device() const;
 
