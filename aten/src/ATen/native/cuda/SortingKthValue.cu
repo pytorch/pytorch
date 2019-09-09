@@ -21,6 +21,7 @@
 #include <THC/THCThrustAllocator.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
+#include <c10/macros/Macros.h>
 
 namespace at {
 namespace native {
