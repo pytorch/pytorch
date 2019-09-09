@@ -418,9 +418,9 @@
           at: ~/workspace
       - run:
           <<: *should_run_job
-      # - checkout
-      # - run:
-      #     <<: *ios_brew_update
+      - checkout
+      - run:
+          <<: *ios_brew_update
       - run:
           name: Build
           no_output_timeout: "1h"
@@ -431,20 +431,7 @@
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib" 
-
-            set +x
-            export AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}
-            export AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}
-            export AWS_ACCESS_KEY_ID_1=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
-            export AWS_SECRET_ACCESS_KEY_1=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
-            set +x
-            echo "KEY: ${AWS_ACCESS_KEY_ID}"
-            echo "SECRET: ${AWS_SECRET_ACCESS_KEY}"
-            echo "KEY1: ${AWS_ACCESS_KEY_ID_1}"
-            echo "SECRET1: ${AWS_SECRET_ACCESS_KEY_1}"
-
-             
-
+            
             # Install conda
             curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
             chmod +x ~/Downloads/conda.sh
@@ -463,32 +450,31 @@
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
             
             # run build script
-            echo "Begin running build script"
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
-            CMAKE_ARGS=() 
-            if [ -n "${IOS_ARCH:-}" ]; then
-              CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
-            fi
-            if [ -n "${IOS_PLATFORM:-}" ]; then
-              CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
-            fi
-            if [ -n "${USE_NNPACK:-}" ]; then 
-              CMAKE_ARGS+=("-DUSE_NNPACK=${USE_NNPACK}")
-            fi 
-            CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
-            CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
-            CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+            echo "IOS_ARCH: ${IOS_ARCH}"
+            echo "IOS_PLATFORM: ${IOS_PLATFORM}"
+            BUILD_PYTORCH_MOBILE=1
+            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
 
-            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh ${CMAKE_ARGS[@]} 2>&1 | ts
+            # CMAKE_ARGS=() 
+            # if [ -n "${IOS_ARCH:-}" ]; then
+            #   CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
+            # fi
+            # if [ -n "${IOS_PLATFORM:-}" ]; then
+            #   CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
+            # fi
+            # if [ -n "${USE_NNPACK:-}" ]; then 
+            #   CMAKE_ARGS+=("-DUSE_NNPACK=${USE_NNPACK}")
+            # fi 
+            # CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+            # CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+            # CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
 
-            # -DBUILD_CAFFE2_MOBILE=OFF \
-            # -DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())') \
-            # -DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)') 2>&1 | ts
+            # unbuffer ${PROJ_ROOT}/scripts/build_ios.sh ${CMAKE_ARGS[@]} 2>&1 | ts
 
-            # #archive the static libraries
-            # cd ${PROJ_ROOT}/build_ios/install/lib
-            
-            
+            #archive the static libraries
+            cd ${PROJ_ROOT}/build_ios/install/lib
+                        
             ####### for testing ########
             if [ -d libprotobuf-lite.a ]; then
               rm -rf libprotobuf-lite.a
@@ -498,37 +484,41 @@
               rm -rf libpthreadpool.a
             fi
             #############################
-
-            # rm -rf libprotobuf-lite.a
-            # rm -rf libpthreadpool.a
-            # libtool -static *.a -o libtorch_arm64.a
-
-            # #store the binary
-            # mkdir -p ${WORKSPACE}/zip/install
-            # cp -R ${PROJ_ROOT}/build_ios/install/include ${WORKSPACE}/zip/install
-            # mkdir -p ${WORKSPACE}/zip/install/lib
-            # cp ${PROJ_ROOT}/build_ios/install/lib/libtorch_arm64.a  ${WORKSPACE}/zip/install/lib
-
-            # #create the unmbrella header
-            # mkdir -p ${WORKSPACE}/zip/src
-            # cd ${WORKSPACE}/zip/src
-            # touch LibTorch.h
-            # echo "#import <script/torch.h>" > LibTorch.h
-        
-            # # zip the library
-            # cd   ${WORKSPACE}/zip/
-            # export FILE_NAME=libtorch_ios_`date +%m%d%Y`_arm64.zip
-            # zip -r ${FILE_NAME} install src
+            OUTPUT=libtorch_${IOS_ARCH}.a
+            libtool -static *.a -o ${OUTPUT}
             
-            # # store the artifact
-            # mkdir ${WORKSPACE}/artifact/ios
-            # cp ${FILE_NAME} ${WORKSPACE}/artifact/ios
+            #store the binary
+            mkdir -p ${WORKSPACE}/zip/install
+            cp -R ${PROJ_ROOT}/build_ios/install/include ${WORKSPACE}/zip/install
+            mkdir -p ${WORKSPACE}/zip/install/lib
+            cp ${PROJ_ROOT}/build_ios/install/${OUTPUT}  ${WORKSPACE}/zip/install/lib
 
-            # # upload to aws
-            # brew install awscli
-            # aws s3 cp ${FILE_NAME} s3://ossci-ios-build/ --acl public-read
+            #copy files
+            mkdir -p ${WORKSPACE}/zip/src
+            cp ${PROJ_ROOT}/ios/LibTorch.h ${WORKSPACE}/zip/src
+            cp ${PROJ_ROOT}/ios/framework.module ${WORKSPACE}/zip/src
+            
+            # zip the library
+            cd ${WORKSPACE}/zip/
+            export FILE_NAME=libtorch_ios_`date +%m%d%Y`_arm64.zip
+            zip -r ${FILE_NAME} install src
+            
+            # store the artifact
+            mkdir ${WORKSPACE}/artifact/ios
+            cp ${FILE_NAME} ${WORKSPACE}/artifact/ios
 
-         
-      # - store_artifacts:
-      #     path: ~/workspace/artifact
-      #     destination: ${FILE_NAME}
+            # upload to aws
+            brew install awscli
+
+            set +x
+            export AWS_ACCESS_KEY_ID=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
+            export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
+            set +x
+            echo "AWS KEY: ${AWS_ACCESS_KEY_ID}"
+            echo "AWS SECRET: ${AWS_SECRET_ACCESS_KEY}"
+            
+            aws s3 cp ${FILE_NAME} s3://ossci-ios-build/ --acl public-read
+
+      - store_artifacts:
+          path: ~/workspace/artifact
+          destination: ${FILE_NAME}
