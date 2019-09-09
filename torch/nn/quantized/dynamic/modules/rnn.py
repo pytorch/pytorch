@@ -19,10 +19,6 @@ class RNNBase(torch.nn.Module):
 
     _FLOAT_MODULE = nn.RNNBase
 
-    __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
-                     'batch_first', 'dropout', 'bidirectional', '_packed_weights',
-                     '_quantized_weights']
-
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
                  dropout=0., bidirectional=False):
@@ -99,10 +95,8 @@ class RNNBase(torch.nn.Module):
                     'hh', layer, suffix, w_hh, b_hh)
 
                 for (ih, ih_name), (hh, hh_name) in zip(zip(ih_params, ih_param_names), zip(hh_params, hh_param_names)):
-                    self.register_buffer(ih_name, torch.tensor(
-                        ih) if not isinstance(ih, torch.Tensor) else ih)
-                    self.register_buffer(hh_name, torch.tensor(
-                        hh) if not isinstance(hh, torch.Tensor) else hh)
+                    setattr(self, ih_name, ih)
+                    setattr(self, hh_name, hh)
                     self._all_weights.extend([ih_name, hh_name])
 
     def check_input(self, input, batch_sizes):
@@ -237,10 +231,8 @@ class RNNBase(torch.nn.Module):
                 hh_params, hh_param_names = process_weights('hh', layer, suffix)
 
                 for (ih, ih_name), (hh, hh_name) in zip(zip(ih_params, ih_param_names), zip(hh_params, hh_param_names)):
-                    qRNNBase.register_buffer(ih_name, torch.tensor(
-                        ih) if not isinstance(ih, torch.Tensor) else ih)
-                    qRNNBase.register_buffer(hh_name, torch.tensor(
-                        hh) if not isinstance(hh, torch.Tensor) else hh)
+                    setattr(qRNNBase, ih_name, ih)
+                    setattr(qRNNBase, hh_name, hh)
                     qRNNBase._all_weights.extend([ih_name, hh_name])
 
         qRNNBase._packed_weights = packed_weights
@@ -283,6 +275,7 @@ class LSTM(RNNBase):
 
         return output, hidden
 
+    @torch.jit.export
     def forward_tensor(self, input, hx=None):
         # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
         batch_sizes = None
@@ -295,6 +288,7 @@ class LSTM(RNNBase):
 
         return output, self.permute_hidden(hidden, unsorted_indices)
 
+    @torch.jit.export
     def forward_packed(self, input, hx=None):
         # type: (PackedSequence, Optional[Tuple[Tensor, Tensor]]) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]  # noqa
         input, batch_sizes, sorted_indices, unsorted_indices = input
@@ -315,7 +309,7 @@ class LSTM(RNNBase):
         return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
 
     def check_forward_args(self, input, hidden, batch_sizes):
-        # type : (Tensor, Tuple[Tensor, Tensor], Optional[Tensor])->None
+        # type: (Tensor, Tuple[Tensor, Tensor], Optional[Tensor])->None
         self.check_input(input, batch_sizes)
         expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
 
@@ -324,6 +318,7 @@ class LSTM(RNNBase):
         self.check_hidden_size(hidden[1], expected_hidden_size,
                                'Expected hidden[1] size {}, got {}')
 
+    @torch.jit.ignore
     def forward(self, input, hx=None):
         if isinstance(input, PackedSequence):
             return self.forward_packed(input, hx)

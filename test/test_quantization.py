@@ -519,8 +519,24 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         torch.testing.assert_allclose(output_int8, ref_out)
         self.assertEqual(output_int8, ref_out)
-        for out, ref in zip(final_hiddens_int8, ref_hid):
-            torch.testing.assert_allclose(out, ref)
+        for out_val, ref_val in zip(final_hiddens_int8, ref_hid):
+            torch.testing.assert_allclose(out_val, ref_val)
+
+        class ScriptWrapper(torch.nn.Module):
+            def __init__(self, cell):
+                super(ScriptWrapper, self).__init__()
+                self.cell = cell
+
+            def forward(self, x, hiddens):
+                # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+                return self.cell(x, hiddens)
+
+        # TODO: TorchScript overloads don't work without this wrapper
+        cell_script = torch.jit.script(ScriptWrapper(cell_int8))
+        out_script, hid_script = cell_script(x, hiddens)
+        self.assertEqual(len(out_script), len(ref_out))
+        for out_val, ref_val in zip(out_script, ref_out):
+            torch.testing.assert_allclose(out_val, ref_val)
 
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),

@@ -226,6 +226,7 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
     for (const std::string& method_name : method_names_) {
       auto cls = module_->type()->expect<ClassType>();
       const auto fn = cls->getMethod(method_name);
+      TORCH_INTERNAL_ASSERT(fn, "Expected class to have method ", method_name);
       auto match = tryMatchSchema(
           fn->getSchema(),
           loc,
