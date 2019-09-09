@@ -337,7 +337,7 @@ static void check_shape_forward(const at::Tensor& input,
                                 const ConvParams& params, bool input_is_mkldnn) {
   int64_t k = input.ndimension();
   int64_t weight_dim = weight.ndimension();
-  std::vector<int64_t> weight_sizes(k);
+  std::vector<int64_t> weight_sizes(weight_dim);
   // mkldnn conv2d weights could have been re-ordered to 5d by
   // mkldnn_reorder_conv2d_weight
   if ((weight_dim == k + 1) && input_is_mkldnn) {
@@ -347,7 +347,7 @@ static void check_shape_forward(const at::Tensor& input,
     weight_dim = k;
   } else {
     std::copy_n(
-        weight.sizes().cbegin(), k, weight_sizes.begin());
+        weight.sizes().cbegin(), weight_dim, weight_sizes.begin());
   }
   int64_t groups = params.groups;
   auto padding = params.padding;
