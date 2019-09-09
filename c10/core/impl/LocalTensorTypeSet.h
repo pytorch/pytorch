@@ -2,10 +2,11 @@
 
 // TLS management for TensorTypeSet
 //
-// This manages thread-local TensorTypeSet of excluded keys which.  Keys which are
-// in this set, even if they appear in a list of potential valid keys on a
-// tensor, are not considered for dispatch.  This is used to, for example, turn
-// off autograd after we have handled autograd for a top-level element.
+// This manages thread-local TensorTypeSet of excluded keys which disqualify
+// tensor types from dispatch.  Keys which are in this set, even if they appear
+// in a list of potential valid keys on a tensor, are not considered for
+// dispatch.  This is used to, for example, turn off autograd after we have
+// handled autograd for a top-level element.
 //
 // Originally, I implemented this as storing the inverted set, but
 // TLS is defined to be zero-initialized, so this doesn't actually work
