@@ -805,23 +805,27 @@ class TestNamedTensor(TestCase):
             'supports_complete_reduce',
             'supports_multidim_reduce',
             'supports_out_variant',
+            'supports_keepdim',
+            'output_lambda',
         ])
 
         tests = [
-            Case('sum', True, True, True),
-            Case('prod', True, False, True),
-            Case('mean', True, True, True),
-            Case('var', True, True, True),
-            Case('std', True, True, True),
-            Case('std_mean', True, True, False),
-            Case('var_mean', True, True, False),
+            Case('sum', True, True, True, True, None),
+            Case('prod', True, False, True, True, None),
+            Case('mean', True, True, True, True, None),
+            Case('var', True, True, True, True, None),
+            Case('std', True, True, True, True, None),
+            Case('std_mean', True, True, False, True, None),
+            Case('var_mean', True, True, False, True, None),
+            Case('unbind', False, False, False, False, None),
         ]
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             op_name = testcase.op_name
             test_simple_reduce(op_name, device)
-            test_keepdim(op_name, device)
 
+            if testcase.supports_keepdim:
+                test_keepdim(op_name, device)
             if testcase.supports_out_variant:
                 test_out_variant(op_name, device)
             if testcase.supports_complete_reduce:

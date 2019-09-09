@@ -1,6 +1,5 @@
 import torch
 from collections import OrderedDict
-from collections.abc import Iterable
 
 """
 This file contains helper functions that implement experimental functionality
@@ -32,9 +31,9 @@ def _build_dim_map(tensor):
 def _unzip_namedshape(namedshape):
     if isinstance(namedshape, OrderedDict):
         namedshape = namedshape.items()
-    if not isinstance(namedshape, Iterable):
+    if not isinstance(namedshape, list) and not isinstance(namedshape, tuple):
         raise RuntimeError(
-            'Expected namedshape to be OrderedDict or iterable of tuples, got: {}'
+            'Expected namedshape to be OrderedDict or list/tuple of tuples, got: {}'
             .format(type(namedshape)))
     if len(namedshape) == 0:
         raise RuntimeError('Expected namedshape to non-empty.')
