@@ -1722,6 +1722,18 @@ class _DistTestBase(object):
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
+    def test_DistributedDataParallel_python(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        gpus = list(rank_to_GPU[rank])
+
+        # a module without gradients shouldn't be accepted
+        self.assertRaises(AssertionError, lambda: nn.parallel.DistributedDataParallel(nn.Module(), device_ids=gpus))
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
     def test_DistributedDataParallel(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
