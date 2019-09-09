@@ -195,7 +195,6 @@ class TestQuantizedOps(TestCase):
                 torch.qint32 : np.int32
             }
             qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
-            # print('C', qC)
             qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized addition failed.")
@@ -678,9 +677,9 @@ class TestDynamicQuantizedLinear(TestCase):
                      use_bias, use_relu, use_multi_dim_input, use_channelwise):
         qlinear_prepack = torch.ops.quantized.linear_prepack
         if use_relu:
-            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_relu_dynamic
+            qlinear_dynamic = torch.ops.quantized.linear_relu_dynamic
         else:
-            qlinear_dynamic = torch.ops.quantized.fbgemm_linear_dynamic
+            qlinear_dynamic = torch.ops.quantized.linear_dynamic
 
         if use_multi_dim_input:
             batch_size *= 3  # Test the multi-dim input tensor
@@ -761,9 +760,9 @@ class TestDynamicQuantizedLinear(TestCase):
         X_q = torch.quantize_linear(X_fp32, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
 
         # Weight prepacking operator for dynamic quantized Linear
-        W_prepack = qlinear_prepack(W_q)
+        W_prepack = qlinear_prepack(W_q, b_fp32)
         # Dynamic quantized Linear operator with prepacked weight
-        Y_fp32 = qlinear_dynamic(X_q.dequantize(), W_prepack, b_fp32)
+        Y_fp32 = qlinear_dynamic(X_q.dequantize(), W_prepack)
         # Y_fp32 = qlinear_dynamic(X_fp32, W_prepack, b_fp32)
 
         Y_fp32_ref = F.linear(X_q.dequantize(), W_q.dequantize(), b_fp32)
@@ -872,13 +871,13 @@ class TestQuantizedLinear(unittest.TestCase):
         Y_zp = 5
 
         # Weight prepacking operator for quantized Linear
-        W_prepack = qlinear_prepack(W_q)
+        W_prepack = qlinear_prepack(W_q, b_q)
 
         if use_multi_dim_input:
             X_q = X_q.view(3, int(batch_size / 3), input_channels)
 
         # Quantized Linear operator with prepacked weight
-        Y_q = qlinear(X_q, W_prepack, b_q, Y_scale, Y_zp)
+        Y_q = qlinear(X_q, W_prepack, Y_scale, Y_zp)
 
         if not use_channelwise:
             # Test the per-tensor quantization only
@@ -936,7 +935,7 @@ class TestQuantizedLinear(unittest.TestCase):
         # Weight prepacking operator for quantized Linear
         W_prepack = qlinear_prepack(W_q)
         # Weight unpack operator for quantized Linear (Used for serialization)
-        W_q_origin = qlinear_unpack(W_prepack)
+        W_q_origin = qlinear_unpack(W_prepack)[0]
 
         # Assert equal
         np.testing.assert_equal(W_q.int_repr(), W_q_origin.int_repr().numpy())
