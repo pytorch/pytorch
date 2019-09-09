@@ -8179,7 +8179,7 @@ a")
 
     def test_is_scripting(self):
         def foo():
-            return torch.jit._is_scripting()
+            return torch.jit.is_scripting()
 
         self.assertFalse(foo())
         scripted = torch.jit.script(foo)

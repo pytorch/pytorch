@@ -473,7 +473,7 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::_is_scripting() -> bool",
+        "aten::is_scripting() -> bool",
         [](Stack& stack) {
           push(stack, true);
           return 0;
