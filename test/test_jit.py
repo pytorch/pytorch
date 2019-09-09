@@ -13828,8 +13828,7 @@ a")
 
         m2 = self.getExportImportCopy(m)
         pp = str(m2.forward.code)
-        FileCheck().check("annotated to be ignored").run(pp)
-        FileCheck().check_not("ignored_code").run(pp)
+        self.assertNotIn('ignored_code', pp)
 
         with self.assertRaisesRegex(torch.jit.Error, "annotated to be ignored and cannot be run"):
             m2.forward(torch.ones(1))
