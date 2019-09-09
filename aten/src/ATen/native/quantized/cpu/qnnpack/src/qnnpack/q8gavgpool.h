@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define PYTORCH_DECLARE_Q8MPGAVGPOOL_UKERNEL_FUNCTION(fn_name)      \
+#define DECLARE_PYTORCH_Q8MPGAVGPOOL_UKERNEL_FUNCTION(fn_name)      \
   PYTORCH_QNNP_INTERNAL void fn_name(                       \
       size_t m,                                             \
       size_t n,                                             \
@@ -30,10 +30,10 @@ extern "C" {
       const union pytorch_qnnp_avgpool_quantization_params* \
           quantization_params);
 
-PYTORCH_DECLARE_Q8MPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_mp8x7p7q__neon)
-PYTORCH_DECLARE_Q8MPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_mp8x7p7q__sse2)
+DECLARE_PYTORCH_Q8MPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_mp8x7p7q__neon)
+DECLARE_PYTORCH_Q8MPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_mp8x7p7q__sse2)
 
-#define PYTORCH_DECLARE_Q8UPGAVGPOOL_UKERNEL_FUNCTION(fn_name)      \
+#define DECLARE_PYTORCH_Q8UPGAVGPOOL_UKERNEL_FUNCTION(fn_name)      \
   PYTORCH_QNNP_INTERNAL void fn_name(                       \
       size_t m,                                             \
       size_t n,                                             \
@@ -44,10 +44,10 @@ PYTORCH_DECLARE_Q8MPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_mp8x7p7
       const union pytorch_qnnp_avgpool_quantization_params* \
           quantization_params);
 
-PYTORCH_DECLARE_Q8UPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_up8x7__neon)
-PYTORCH_DECLARE_Q8UPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_up8xm__neon)
-PYTORCH_DECLARE_Q8UPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_up8x7__sse2)
-PYTORCH_DECLARE_Q8UPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_up8xm__sse2)
+DECLARE_PYTORCH_Q8UPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_up8x7__neon)
+DECLARE_PYTORCH_Q8UPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_up8xm__neon)
+DECLARE_PYTORCH_Q8UPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_up8x7__sse2)
+DECLARE_PYTORCH_Q8UPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_up8xm__sse2)
 
 #ifdef __cplusplus
 } /* extern "C" */
