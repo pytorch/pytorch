@@ -219,7 +219,7 @@ namespace c10 {
   _(attr, idx)                       \
   _(attr, split)                     \
   _(attr, slot)
-#else
+#elif !defined(CAFFE2_IS_XPLAT_BUILD)
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
   _(namespaces, aten)              \
@@ -229,6 +229,9 @@ namespace c10 {
   _(namespaces, user)              \
   _(namespaces, _caffe2)           \
   _(namespaces, dimname)           \
+  _(namespaces, namespaces)
+#else
+#define FORALL_NS_SYMBOLS(_) \
   _(namespaces, namespaces)
 #endif
 
@@ -309,9 +312,7 @@ struct CAFFE2_API Symbol {
   bool is_onnx() const;
   bool is_user() const;
   bool is_caffe2() const;
-#ifdef BUILD_NAMEDTENSOR
   bool is_dimname() const;
-#endif
 
   // So we can switch on this
   constexpr operator unique_t() const {
@@ -375,13 +376,13 @@ inline Symbol Symbol::caffe2(const std::string & s) { return Symbol::fromQualStr
 #ifdef BUILD_NAMEDTENSOR
 inline Symbol Symbol::dimname(const std::string & s) { return Symbol::fromQualString("dimname::" + s); }
 #endif
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 inline bool Symbol::is_attr() const { return ns() == namespaces::attr; }
 inline bool Symbol::is_aten() const { return ns() == namespaces::aten; }
 inline bool Symbol::is_prim() const { return ns() == namespaces::prim; }
 inline bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
 inline bool Symbol::is_user() const { return ns() == namespaces::user; }
 inline bool Symbol::is_caffe2() const { return ns() == namespaces::_caffe2; }
-#ifdef BUILD_NAMEDTENSOR
 inline bool Symbol::is_dimname() const { return ns() == namespaces::dimname; }
 #endif
 
