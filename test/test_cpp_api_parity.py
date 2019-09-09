@@ -265,7 +265,7 @@ class TestCppApiParity(common.TestCase):
 
         # Step 3: Generate code to check existence of all Python module constructor args in the C++ module options.
         extra_stmts = [TORCH_NN_MODULE_TEST_OPTIONS_ARG.substitute(options_arg_name=arg_name)
-            for arg_name in python_default_constructor_arg_names + init_kwargs]
+                       for arg_name in python_default_constructor_arg_names + init_kwargs]
 
         # Step 4: Compile the test code and run the tests.
         cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + module_metadata.cpp_sources
