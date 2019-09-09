@@ -194,9 +194,9 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #endif
 
 #ifdef __HIP_PLATFORM_HCC__
-#define C10_WARP_SIZE = 64;
+#define C10_WARP_SIZE 64
 #else
-#define C10_WARP_SIZE = 32;
+#define C10_WARP_SIZE 32
 #endif
 
 #ifdef __APPLE__
