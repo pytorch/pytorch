@@ -44,38 +44,73 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
 }
 
 void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
-  const auto exp = exp_scalar.to<double>();
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "pow_cuda", [&]() {
-    if (exp == 0.5) {
-      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-        return ::sqrt(base);
-      });
-    } else if (exp == 2) {
-      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-        return base * base;
-      });
-    } else if (exp == 3) {
-      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-        return base * base * base;
-      });
-    } else if (exp == -0.5) {
-      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-        return 1.0 / ::sqrt(base);
-      });
-    } else if (exp == -1) {
-      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-        return 1.0 / base;
-      });
-    } else if (exp == -2) {
-      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-        return 1.0 / (base * base);
-      });
-    } else {
-      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-        return std::pow((double)base, exp);
-      });
-    }
-  });
+  if (isFloatingType(iter.dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "pow_cuda", [&]() {
+      const auto exp = exp_scalar.to<scalar_t>();
+      if (exp == 0.5) {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return ::sqrt(base);
+        });
+      } else if (exp == 2) {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return base * base;
+        });
+      } else if (exp == 3) {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return base * base * base;
+        });
+      } else if (exp == -0.5) {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return 1.0 / ::sqrt(base);
+        });
+      } else if (exp == -1) {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return 1.0 / base;
+        });
+      } else if (exp == -2) {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return 1.0 / (base * base);
+        });
+      } else {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return std::pow(base, exp);
+        });
+      }
+    });
+  } else {
+    const auto exp = exp_scalar.to<float>();
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow_cuda", [&]() {
+      if (exp == 0.5) {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return ::sqrt(base);
+        });
+      } else if (exp == 2) {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return base * base;
+        });
+      } else if (exp == 3) {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return base * base * base;
+        });
+      } else if (exp == -0.5) {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return 1.0 / ::sqrt(base);
+        });
+      } else if (exp == -1) {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return 1.0 / base;
+        });
+      } else if (exp == -2) {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return 1.0 / (base * base);
+        });
+      } else {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return std::pow(base, exp);
+        });
+      }
+    });
+  }
 }
 
 } // anonymous namespace
