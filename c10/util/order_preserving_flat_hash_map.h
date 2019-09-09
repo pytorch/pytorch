@@ -23,7 +23,6 @@
 #include <iterator>
 #include <utility>
 #include <type_traits>
-#include <c10/util/Exception.h>
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
@@ -900,9 +899,7 @@ private:
     }
 
     void swap_adjacent_nodes(EntryPointer before, EntryPointer after) {
-      // sentinel never gets swapped
-      TORCH_INTERNAL_ASSERT(before->prev != after);
-
+      // sentinel stays consant, so before->prev cannot equal after
       auto before_prev = before->prev;
       auto after_next = after->next;
 
@@ -967,6 +964,11 @@ private:
         }
         value_type to_insert(std::forward<Key>(key), std::forward<Args>(args)...);
         swap(distance_from_desired, current_entry->distance_from_desired);
+        // We maintain the invariant that:
+        // - result.current_entry contains the new value we're inserting
+        //   and is in the LinkedList position of to_insert
+        // - to_insert contains the value that reprseents the position of
+        //   result.current_entry
         swap(to_insert, current_entry->value);
         iterator result = { current_entry };
         for (++distance_from_desired, ++current_entry;; ++current_entry)
@@ -975,6 +977,8 @@ private:
             {
                 current_entry->emplace(distance_from_desired, std::move(to_insert));
                 append_to_list(current_entry);
+                // now we can swap back the displaced value to its correct position,
+                // putting the new value we're inserting to the front of the list
                 swap_positions(current_entry, result.current);
                 ++num_elements;
                 return { result, true };
@@ -983,6 +987,8 @@ private:
             {
                 swap(distance_from_desired, current_entry->distance_from_desired);
                 swap(to_insert, current_entry->value);
+                // to maintain our invariants we need to swap positions
+                // of result.current & current_entry:
                 swap_positions(result.current, current_entry);
                 ++distance_from_desired;
             }
