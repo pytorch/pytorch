@@ -99,7 +99,11 @@ __global__ void DepthwiseConv3dGPUKernelNCHW(
 
             const int input_offset = (input_offset_temp) +
                 (in_l * in_cols * in_rows) + (in_r * in_cols) + in_c;
+#if __CUDA_ARCH__ >= 350
             sum += __ldg(input + input_offset) * __ldg(filter_offset + f_c);
+#else
+            sum += input[input_offset] * filter_offset[f_c];
+#endif
           }
         }
       }
@@ -120,7 +124,11 @@ __global__ void DepthwiseConv3dGPUKernelNCHW(
                 in_l >= 0 && in_l < in_length) {
               const int input_offset = (input_offset_temp) +
                   (in_l * in_cols * in_rows) + (in_r * in_cols) + in_c;
+#if __CUDA_ARCH__ >= 350
               sum += __ldg(input + input_offset) * __ldg(filter_offset + f_c);
+#else
+              sum += input[input_offset] * filter_offset[f_c];
+#endif
             }
           }
         }
@@ -181,7 +189,11 @@ __global__ void DepthwiseConv3dBackpropFilterGPUKernelNCHW(
         (OC * out_length * out_rows * out_cols) + (OL * out_rows * out_cols) +
         (OH * out_cols) + (OW);
 
+#if __CUDA_ARCH__ >= 350
     const T out_bp = __ldg(out_backprop + out_backprop_offset);
+#else
+    const T out_bp = out_backprop[out_backprop_offset];
+#endif
     if (in_r_start >= 0 && in_c_start >= 0 && in_r_end < in_rows &&
         in_c_end < in_cols && in_l_start >= 0 && in_l_end < in_length) {
 #pragma unroll
@@ -200,7 +212,11 @@ __global__ void DepthwiseConv3dBackpropFilterGPUKernelNCHW(
           for (int f_c = 0; f_c < filter_cols; ++f_c) {
             const int in_c = in_c_start + f_c;
             const int input_offset = input_offset_temp + in_c;
+#if __CUDA_ARCH__ >= 350
             T partial_sum = __ldg(input + input_offset) * out_bp;
+#else
+            T partial_sum = input[input_offset] * out_bp;
+#endif
             T* addr = filter_backprop +
                 (in_d * filter_rows * filter_cols * filter_length) +
                 (f_l * filter_rows * filter_cols) + (f_c + filter_cols * f_r);
@@ -227,7 +243,11 @@ __global__ void DepthwiseConv3dBackpropFilterGPUKernelNCHW(
             if (in_r >= 0 && in_r < in_rows && in_c >= 0 && in_c < in_cols &&
                 in_l >= 0 && in_l < in_length) {
               const int input_offset = input_offset_temp + in_c;
+#if __CUDA_ARCH__ >= 350
               T partial_sum = __ldg(input + input_offset) * out_bp;
+#else
+              T partial_sum = input[input_offset] * out_bp;
+#endif
               T* addr = filter_backprop +
                   (in_d * filter_rows * filter_cols * filter_length) +
                   (f_l * filter_rows * filter_cols) + (f_c + filter_cols * f_r);
@@ -300,8 +320,13 @@ __global__ void DepthwiseConv3dBackpropInputGPUKernelNCHW(
               (IC * out_length * out_rows * out_cols) +
               (out_l * out_rows * out_cols) + (out_r * out_cols) + (out_c);
 
+#if __CUDA_ARCH__ >= 350
           sum += __ldg(out_backprop + out_backprop_offset) *
               __ldg(filter + filter_offset);
+#else
+          sum += out_backprop[out_backprop_offset] *
+              filter[filter_offset];
+#endif
         }
       }
     }
