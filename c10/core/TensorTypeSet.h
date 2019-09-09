@@ -31,7 +31,7 @@ namespace c10 {
 // handling code if one of the inputs requires grad.)
 //
 // An undefined tensor is one with an empty tensor type set.
-class TensorTypeSet {
+class TensorTypeSet final {
 public:
   TensorTypeSet() {}
   explicit TensorTypeSet(TensorTypeId t)

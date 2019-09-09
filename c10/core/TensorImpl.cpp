@@ -202,6 +202,12 @@ std::unique_ptr<NamedTensorMetaInterface> NamedTensorMetaInterface::clone() cons
       false,
       "Attempting to clone a NamedTensorMetaInterface instance.");
 }
+
+int64_t NamedTensorMetaInterface::slow_dim() const {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "NamedTensorMetaInterface::slow_dim not implemented.");
+}
 #endif
 
 /// NOTE [ Treating Variables as non-Variables in type dispatch ]
