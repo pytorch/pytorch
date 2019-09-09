@@ -10,9 +10,9 @@ import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
-from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
-    ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler, \
-    CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
+from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
+    MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
+    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
 from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
 
@@ -1224,19 +1224,15 @@ class TestLRScheduler(TestCase):
         self.opt.param_groups[1]['lr'] = 0.4
         targets = [[0.05 * (0.9 ** x) for x in range(epochs)], [0.4 * (0.8 ** x) for x in range(epochs)]]
         scheduler = LambdaLR(self.opt,
-                             lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2],
-                             chainable=False)
+                             lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
         self._test(scheduler, targets, epochs)
 
-
-    def test_lambda_lr_chainable(self):
+    def test_multiplicative_lr(self):
         epochs = 10
         self.opt.param_groups[0]['lr'] = 0.05
         self.opt.param_groups[1]['lr'] = 0.4
         targets = [[0.05 * (0.9 ** x) for x in range(epochs)], [0.4 * (0.8 ** x) for x in range(epochs)]]
-        scheduler = LambdaLR(self.opt,
-                             lr_lambda=[lambda x1: 0.9, lambda x2: 0.8],
-                             chainable=True)
+        scheduler = MultiplicativeLR(self.opt, lr_lambda=[lambda x1: 0.9, lambda x2: 0.8])
         self._test(scheduler, targets, epochs)
 
     def test_CosineAnnealingWarmRestarts_lr1(self):
@@ -1329,22 +1325,22 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
 
     def test_lambda_lr_state_dict_fn(self):
-        scheduler = LambdaLR(self.opt, lr_lambda=lambda x: x, chainable=False)
+        scheduler = LambdaLR(self.opt, lr_lambda=lambda x: x)
         state = scheduler.state_dict()
         self.assertIsNone(state['lr_lambdas'][0])
 
-        scheduler_copy = LambdaLR(self.opt, lr_lambda=lambda x: x, chainable=False)
+        scheduler_copy = LambdaLR(self.opt, lr_lambda=lambda x: x)
         scheduler_copy.load_state_dict(state)
         for key in scheduler.__dict__.keys():
             if key not in {'optimizer', 'lr_lambdas'}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
 
     def test_lambda_lr_state_dict_obj(self):
-        scheduler = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(10), chainable=False)
+        scheduler = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(10))
         state = scheduler.state_dict()
         self.assertIsNotNone(state['lr_lambdas'][0])
 
-        scheduler_copy = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(-1), chainable=False)
+        scheduler_copy = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(-1))
         scheduler_copy.load_state_dict(state)
         for key in scheduler.__dict__.keys():
             if key not in {'optimizer'}:
