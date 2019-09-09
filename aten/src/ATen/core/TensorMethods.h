@@ -135,40 +135,12 @@ inline Tensor Tensor::real() const {
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
 #endif
 }
-inline Tensor & Tensor::real_() const {
-#ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::real_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("real_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
-#else
-    static auto table = globalATenDispatch().getOpTable("aten::real_(Tensor(a!) self) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
-#endif
-}
 inline Tensor Tensor::imag() const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::imag(const_cast<Tensor&>(*this));
 #else
     static auto table = globalATenDispatch().getOpTable("aten::imag(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
-#endif
-}
-inline Tensor & Tensor::imag_() const {
-#ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(type_id())) {
-        case Backend::CPU:
-            return CPUType::imag_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("imag_ not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
-    }
-#else
-    static auto table = globalATenDispatch().getOpTable("aten::imag_(Tensor(a!) self) -> Tensor(a!)");
-    return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this));
 #endif
 }
 inline Tensor Tensor::acos() const {

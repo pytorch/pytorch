@@ -29,6 +29,7 @@
 #include <cstring>
 #include <iostream>
 #include <type_traits>
+#include <complex.h>
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 #include <mkl.h>

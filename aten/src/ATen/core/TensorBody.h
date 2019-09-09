@@ -384,9 +384,7 @@ class CAFFE2_API Tensor {
   Tensor abs() const;
   Tensor & abs_() const;
   Tensor real() const;
-  Tensor & real_() const;
   Tensor imag() const;
-  Tensor & imag_() const;
   Tensor acos() const;
   Tensor & acos_() const;
   Tensor add(const Tensor & other, Scalar alpha=1) const;

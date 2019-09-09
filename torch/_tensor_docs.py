@@ -1006,13 +1006,6 @@ real() -> Tensor
 See :func:`torch.real`
 """)
 
-add_docstr_all('real_',
-               r"""
-real_() -> Tensor
-
-In-place version of :meth:`~Tensor.real`
-""")
-
 add_docstr_all('roll',
                r"""
 roll(shifts, dims) -> Tensor
@@ -1114,13 +1107,6 @@ add_docstr_all('imag',
 imag() -> Tensor
 
 See :func:`torch.imag`
-""")
-
-add_docstr_all('imag_',
-               r"""
-imag_() -> Tensor
-
-In-place version of :meth:`~Tensor.imag`
 """)
 
 add_docstr_all('indices',
