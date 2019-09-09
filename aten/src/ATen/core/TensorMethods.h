@@ -4540,7 +4540,13 @@ inline Tensor Tensor::lu_solve(const Tensor & LU_data, const Tensor & LU_pivots)
 }
 inline Tensor Tensor::multinomial(int64_t num_samples, bool replacement, Generator * generator) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::multinomial(const_cast<Tensor&>(*this), num_samples, replacement, generator);
+    switch(tensorTypeIdToBackend(type_id())) {
+        case Backend::CPU:
+            return CPUType::multinomial(const_cast<Tensor&>(*this), num_samples, replacement, generator);
+            break;
+        default:
+            AT_ERROR("multinomial not implemented for ", at::toString(tensorTypeIdToBackend(type_id())));
+    }
 #else
     static auto table = globalATenDispatch().getOpTable("aten::multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor");
     return table->getOp<Tensor (const Tensor &, int64_t, bool, Generator *)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), num_samples, replacement, generator);

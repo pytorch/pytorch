@@ -20,6 +20,7 @@
 #include <functional>
 #include <assert.h>
 #include <cpuinfo.h>
+#include <float.h>
 
 #include <TH/THMath.h>
 
