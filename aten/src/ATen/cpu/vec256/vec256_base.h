@@ -10,6 +10,7 @@
 #include <ATen/native/Copy.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
+#include <c10/util/BFloat16.h>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
