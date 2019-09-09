@@ -451,11 +451,13 @@
             
             # run build script
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
-            cat build_ios.sh
+            echo "########################################################"
+            cat ${PROJ_ROOT}/scripts/build_ios.sh
+            echo "########################################################"
 
             echo "IOS_ARCH: ${IOS_ARCH}"
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
-            # BUILD_PYTORCH_MOBILE=1
+            BUILD_PYTORCH_MOBILE=1
             # unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
 
             CMAKE_ARGS=() 
