@@ -5,7 +5,6 @@ import torch.nn as nn
 from torch import Tensor  # noqa: F401
 from torch.nn import _VF
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
-from torch._jit_internal import _parameter_list
 from torch.nn.utils.rnn import PackedSequence
 import numbers
 
@@ -51,9 +50,7 @@ class RNNBase(torch.nn.Module):
             raise ValueError("Unrecognized RNN mode: " + mode)
 
         self._all_weights = []
-
-        packed_weights = []
-        quantized_weights = []
+        self._all_weight_values = []
 
         for layer in range(num_layers):
             for direction in range(num_directions):
@@ -73,8 +70,6 @@ class RNNBase(torch.nn.Module):
                     pos_names = ['w', 'b']
                     ret_name = ['{}_{}_l{}{}'.format(
                         name, ihhh, layer, suffix) for name in pos_names]
-                    quantized_weights.append(qweight)
-                    packed_weights.append(ret_name[0])
                     return params, ret_name
 
                 w_ih = torch._empty_affine_quantized(
@@ -95,9 +90,11 @@ class RNNBase(torch.nn.Module):
                     'hh', layer, suffix, w_hh, b_hh)
 
                 for (ih, ih_name), (hh, hh_name) in zip(zip(ih_params, ih_param_names), zip(hh_params, hh_param_names)):
-                    setattr(self, ih_name, ih)
-                    setattr(self, hh_name, hh)
+
                     self._all_weights.extend([ih_name, hh_name])
+                    self._all_weight_values.extend([ih, hh])
+
+
 
     def check_input(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> None
@@ -142,30 +139,52 @@ class RNNBase(torch.nn.Module):
             return hx
         return apply_permutation(hx, permutation)
 
-    @property
-    def all_weights(self):
-        return [getattr(self, weight) for weight in self._all_weights]
+    @torch.jit.export
+    def __getstate__(self):
+        vals = (
+            self.mode,
+            self.input_size,
+            self.hidden_size,
+            self.num_layers,
+            self.bias,
+            self.batch_first,
+            self.dropout,
+            self.bidirectional,
+            self._all_weights,
+            self.__overloads__,
+            self.training,
+        )
 
-    def _get_all_weights_names(self):
-        return [weight for weight in self._all_weights]
+        dynamic_vals = []
 
-    @_parameter_list(_get_all_weights_names)
-    def _get_all_weights(self):
-        return self.all_weights
+        for i, weight_name in enumerate(self._all_weights):
+            if weight_name.find('w_') != -1:
+                dynamic_vals.append(torch.ops.quantized.linear_unpack(self._all_weight_values[i])[0])
+            else:
+                dynamic_vals.append(self._all_weight_values[i])
+        return vals, dynamic_vals
 
-    def _get_packed_weights_names(self):
-        return self._packed_weights
+    @torch.jit.export
+    def __setstate__(self, state):
+        vals, dynamic_vals = state
+        self.mode = vals[0]
+        self.input_size = vals[1]
+        self.hidden_size = vals[2]
+        self.num_layers = vals[3]
+        self.bias = vals[4]
+        self.batch_first = vals[5]
+        self.dropout = vals[6]
+        self.bidirectional = vals[7]
+        self._all_weights = vals[8]
+        self.__overloads__ = vals[9]
+        self.training = vals[10]
 
-    @_parameter_list(_get_packed_weights_names)
-    def _get_packed_weights(self):
-        return [getattr(self, name) for name in self._packed_weights]
-
-    def _get_quantized_weights_names(self):
-        return self._quantized_weights
-
-    @_parameter_list(_get_quantized_weights_names)
-    def _get_quantized_weights(self):
-        return [getattr(self, name) for name in self._quantized_weights]
+        self._all_weight_values = []
+        for i, weight_name in enumerate(self._all_weights):
+            if weight_name.find('w_') != -1:
+                self._all_weight_values.append(torch.ops.quantized.linear_prepack(dynamic_vals[i]))
+            else:
+                self._all_weight_values.append(dynamic_vals[i])
 
     @classmethod
     def from_float(cls, mod):
@@ -195,8 +214,7 @@ class RNNBase(torch.nn.Module):
             raise RuntimeError('Only LSTM is supported for QuantizedRNN')
 
         qRNNBase._all_weights = []
-        packed_weights = []
-        quantized_weights = []
+        qRNNBase._all_weight_values = []
         for layer in range(qRNNBase.num_layers):
             for direction in range(num_directions):
                 layer_input_size = qRNNBase.input_size if layer == 0 else qRNNBase.hidden_size * num_directions
@@ -222,8 +240,6 @@ class RNNBase(torch.nn.Module):
                     pos_names = ['w', 'b']
                     ret_name = ['{}_{}_l{}{}'.format(
                         name, ihhh, layer, suffix) for name in pos_names]
-                    quantized_weights.append(qweight)
-                    packed_weights.append(ret_name[0])
                     return params, ret_name
 
                 suffix = '_reverse' if direction == 1 else ''
@@ -231,13 +247,9 @@ class RNNBase(torch.nn.Module):
                 hh_params, hh_param_names = process_weights('hh', layer, suffix)
 
                 for (ih, ih_name), (hh, hh_name) in zip(zip(ih_params, ih_param_names), zip(hh_params, hh_param_names)):
-                    setattr(qRNNBase, ih_name, ih)
-                    setattr(qRNNBase, hh_name, hh)
                     qRNNBase._all_weights.extend([ih_name, hh_name])
+                    qRNNBase._all_weight_values.extend([ih, hh])
 
-        qRNNBase._packed_weights = packed_weights
-        # DO WE NEED _quantized_weights? @jianyuh: will remove _quantized_weight as now we support the fbgemm_linear_unpack function
-        qRNNBase._quantized_weights = quantized_weights
 
         return qRNNBase
 
@@ -267,7 +279,7 @@ class LSTM(RNNBase):
         self.check_forward_args(input, hx, batch_sizes)
         assert batch_sizes is None
 
-        result = _VF.quantized_lstm(input, hx, self._get_all_weights(), self.bias, self.num_layers,
+        result = _VF.quantized_lstm(input, hx, self._all_weight_values, self.bias, self.num_layers,
                                     float(self.dropout), self.training, self.bidirectional,
                                     self.batch_first, dtype=torch.int8, use_dynamic=True)
         output = result[0]

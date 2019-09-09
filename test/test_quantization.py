@@ -538,6 +538,14 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         for out_val, ref_val in zip(out_script, ref_out):
             torch.testing.assert_allclose(out_val, ref_val)
 
+        # Test save/load
+        b = io.BytesIO()
+        torch.jit.save(cell_script, b)
+        b.seek(0)
+        loaded = torch.jit.load(b)
+        out_loaded, hid_loaded = loaded(x, hiddens)
+
+
 @unittest.skipIf(
     not torch.fbgemm_is_cpu_supported(),
     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
