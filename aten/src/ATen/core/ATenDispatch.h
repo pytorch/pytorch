@@ -52,7 +52,7 @@ class CAFFE2_API ATenOpTable {
  private:
   void registerOp(TensorTypeId tid, void* fn) {
     TORCH_CHECK(function_table_[static_cast<int64_t>(tid)] == nullptr,
-        "Attempting to register variable function for schema ", schema_,
+        "Attempting to register function for schema ", schema_,
         " and tensor type ", toString(tid),
         " but there is already a function registered");
     function_table_[static_cast<int64_t>(tid)] = fn;

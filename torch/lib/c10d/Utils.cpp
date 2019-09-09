@@ -21,7 +21,7 @@ namespace tcputil {
 
 namespace {
 
-constexpr int LISTEN_QUEUE_SIZE = 64;
+constexpr int LISTEN_QUEUE_SIZE = 2048;
 
 void setSocketNoDelay(int socket) {
   int flag = 1;
@@ -156,9 +156,12 @@ int connect(
 
   struct ::addrinfo* nextAddr = addresses.get();
   int socket;
-  // we'll loop over the addresses only if at least of them gave us ECONNREFUSED
-  // Maybe the host was up, but the server wasn't running.
+
+  // Loop over the addresses if at least one of them gave us ECONNREFUSED
+  // or ECONNRESET. This may happen if the server hasn't started listening
+  // yet, or is listening but has its listen backlog exhausted.
   bool anyRefused = false;
+  bool anyReset = false;
   while (true) {
     try {
       SYSCHECK_ERR_RETURN_NEG1(
@@ -210,8 +213,13 @@ int connect(
       break;
 
     } catch (std::exception& e) {
+      // ECONNREFUSED happens if the server is not yet listening.
       if (errno == ECONNREFUSED) {
         anyRefused = true;
+      }
+      // ECONNRESET happens if the server's listen backlog is exhausted.
+      if (errno == ECONNRESET) {
+        anyReset = true;
       }
 
       // We need to move to the next address because this was not available
@@ -220,11 +228,12 @@ int connect(
 
       // We have tried all addresses but could not connect to any of them.
       if (!nextAddr) {
-        if (!wait || !anyRefused) {
+        if (!wait || (!anyRefused && !anyReset)) {
           throw;
         }
         std::this_thread::sleep_for(std::chrono::seconds(1));
         anyRefused = false;
+        anyReset = false;
         nextAddr = addresses.get();
       }
     }

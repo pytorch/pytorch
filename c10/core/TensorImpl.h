@@ -147,6 +147,7 @@ struct C10_API NonVariableTypeMode {
 struct C10_API NamedTensorMetaInterface {
   virtual ~NamedTensorMetaInterface();
   virtual std::unique_ptr<NamedTensorMetaInterface> clone() const;
+  virtual int64_t slow_dim() const;
 };
 #endif
 
@@ -854,7 +855,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_named_tensor_meta(std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta) {
 #ifdef DEBUG
     if (named_tensor_meta) {
-      TORCH_INTERNAL_ASSERT(dim() == named_tensor_meta->names.size());
+      TORCH_INTERNAL_ASSERT(named_tensor_meta->slow_dim() == dim());
     }
 #endif
     named_tensor_meta_ = std::move(named_tensor_meta);
@@ -1527,10 +1528,15 @@ protected:
     dest_impl->storage_offset_ = src_impl->storage_offset_;
     dest_impl->data_type_ = src_impl->data_type_;
     dest_impl->device_opt_ = src_impl->device_opt_;
-    // We do NOT set autograd_meta_ in this function, so we must
-    // also strip variable tensor id from here.  This never
-    // gets exercised in PyTorch but it is exercised in XLA
-    dest_impl->type_set_ = src_impl->type_set_.remove(TensorTypeId::VariableTensorId);
+    // This may temporarily violate invariant that
+    // type_set_.has(VariableTensorId) iff autograd_meta_ != nullptr...
+    dest_impl->type_set_ = src_impl->type_set_;
+    // ...so refresh Variable in autograd_meta_
+    if (dest_impl->autograd_meta_) {
+      dest_impl->type_set_ = dest_impl->type_set_.add(TensorTypeId::VariableTensorId);
+    } else {
+      dest_impl->type_set_ = dest_impl->type_set_.remove(TensorTypeId::VariableTensorId);
+    }
     dest_impl->is_contiguous_ = src_impl->is_contiguous_;
     dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
     dest_impl->reserved_ = src_impl->reserved_;
