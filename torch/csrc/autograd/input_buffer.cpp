@@ -2,8 +2,6 @@
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAStream.h>
 
 #include <cstddef>
 #include <utility>

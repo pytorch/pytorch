@@ -13,7 +13,6 @@
 #include <torch/csrc/autograd/variable.h>
 #include <c10/util/Optional.h>
 #include <c10/core/Stream.h>
-#include <c10/core/Event.h>
 
 namespace torch { namespace autograd {
 
