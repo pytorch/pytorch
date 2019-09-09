@@ -70,38 +70,49 @@ class TORCH_API ScriptUserDelete final : public RRefMessageBase {
 
 // The OwnerRRef uses this message to accept a UserRRef. A UserRRef cannot be
 // deleted before receiving this message.
-class TORCH_API ScriptUserAccept final : public RRefMessageBase {
+class TORCH_API ScriptUserAccept final {
  public:
-  ScriptUserAccept(at::IValue value)
-      : RRefMessageBase(std::move(value), MessageType::RREF_USER_ACCEPT) {}
+  ScriptUserAccept(
+      worker_id_t owner, const RRefId& rrefId, const ForkId& forkId)
+      : owner_(owner), rrefId_(rrefId), forkId_(forkId) {}
 
+  Message toMessage();
   static ScriptUserAccept fromMessage(const Message& message);
+
+  const worker_id_t owner_;
+  const RRefId rrefId_;
+  const ForkId forkId_;
 };
 
 // A UserRRef uses this message to notify owner on fork.
-class TORCH_API ScriptForkNotify final : public RRefMessageBase {
+class TORCH_API ScriptForkNotify final {
  public:
-  ScriptForkNotify(at::IValue value, worker_id_t forkDst)
-      : RRefMessageBase(std::move(value), MessageType::RREF_FORK_NOTIFY),
-        forkDst_(forkDst) {}
+  ScriptForkNotify(
+      worker_id_t owner,
+      const RRefId& rrefId,
+      const ForkId& forkId,
+      worker_id_t forkDst)
+      : owner_(owner), rrefId_(rrefId), forkId_(forkId), forkDst_(forkDst) {}
 
-  worker_id_t forkDst() const;
-
-  Message toMessage() const override;
+  Message toMessage() const;
   static ScriptForkNotify fromMessage(const Message& message);
 
- private:
+  const worker_id_t owner_;
+  const RRefId rrefId_;
+  const ForkId forkId_;
   const worker_id_t forkDst_;
 };
 
 // The OwnerRRef uses this message to a UserRRef that its fork request has been
 // accepted. A UserRRef cannot be deleted if it has any pending fork requests.
-class TORCH_API ScriptForkAccept final : public RRefMessageBase {
+class TORCH_API ScriptForkAccept final {
  public:
-  ScriptForkAccept(at::IValue value)
-      : RRefMessageBase(std::move(value), MessageType::RREF_FORK_ACCEPT) {}
+  ScriptForkAccept(const ForkId& forkId) : forkId_(forkId) {}
 
+  Message toMessage();
   static ScriptForkAccept fromMessage(const Message& message);
+
+  const ForkId forkId_;
 };
 
 } // namespace rpc

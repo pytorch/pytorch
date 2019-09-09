@@ -14,16 +14,17 @@ enum MessageType {
   PYTHON_RET = 3,
   SCRIPT_REMOTE_CALL = 4, // A remote call on a builtin operator
   PYTHON_REMOTE_CALL = 5, // A remote call on a Python UDF
-  SCRIPT_RREF_FETCH_CALL = 6, // A UserRRef<IValue> fetches value from owner
-  PYTHON_RREF_FETCH_CALL = 7, // A UserRRef<py::object> fetches value from owner
-  RREF_FETCH_RET = 8, // An OwnerRRef sends value to user
-  RREF_USER_ACCEPT = 9, // An OwnerRRef accepts a user
-  RREF_USER_DELETE = 10, // A UserRRef tells the owner to deref
-  RREF_FORK_NOTIFY = 11, // A UserRRef tells the owner on fork
-  RREF_FORK_ACCEPT = 12, // An OwnerRRef accepts a fork request
-  SHUTDOWN = 13,
-  EXCEPTION = 14,
-  UNKNOWN = 15
+  REMOTE_RET = 6, // A remote call on a Python UDF
+  SCRIPT_RREF_FETCH_CALL = 7, // A UserRRef<IValue> fetches value from owner
+  PYTHON_RREF_FETCH_CALL = 8, // A UserRRef<py::object> fetches value from owner
+  RREF_FETCH_RET = 9, // An OwnerRRef sends value to user
+  RREF_USER_ACCEPT = 10, // An OwnerRRef accepts a user
+  RREF_USER_DELETE = 11, // A UserRRef tells the owner to deref
+  RREF_FORK_NOTIFY = 12, // A UserRRef tells the owner on fork
+  RREF_FORK_ACCEPT = 13, // An OwnerRRef accepts a fork request
+  SHUTDOWN = 14,
+  EXCEPTION = 15,
+  UNKNOWN = 16
 };
 
 // A message to be sent/received by an RpcAgent.

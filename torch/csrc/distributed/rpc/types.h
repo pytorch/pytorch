@@ -10,7 +10,7 @@ namespace rpc {
 using worker_id_t = int16_t;
 using local_id_t = int64_t;
 
-struct GloballyUniqueId final {
+struct TORCH_API GloballyUniqueId final {
   GloballyUniqueId(worker_id_t createdOn, local_id_t localId);
   GloballyUniqueId(const GloballyUniqueId& other) = default;
 

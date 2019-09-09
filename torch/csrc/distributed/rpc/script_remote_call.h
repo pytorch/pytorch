@@ -11,9 +11,9 @@ namespace rpc {
 
 using torch::jit::Operator;
 
-// A ScriptCall instance represents an invocation of a builtin operator for a
-// TorchScript function (not implemented yet). If it is a builtin operator, it
-// contains a shared ptr to the `Operator` and a list of arguments.
+// A ScriptRemoteCall instance represents an invocation of a builtin operator
+// or a TorchScript function (not implemented yet). If it is a builtin operator,
+// it contains a shared ptr to the `Operator` and a list of arguments.
 class TORCH_API ScriptRemoteCall final : public ScriptCall {
  public:
   ScriptRemoteCall(

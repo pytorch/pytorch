@@ -122,7 +122,13 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
     }
     case MessageType::RREF_USER_ACCEPT: {
       ScriptUserAccept sua = ScriptUserAccept::fromMessage(request);
-      RRefContext::getInstance()->finishUserRRef(sua.valueRef());
+      auto& ctx = RRefContext::getInstance();
+      TORCH_INTERNAL_ASSERT(ctx->getWorkerId() == sua.owner_,
+          "Worker ",
+          ctx->getWorkerId(),
+          " received a RREF_USER_ACCEPT message of a different owner ",
+          sua.owner_);
+      ctx->finishUserRRef(sua.rrefId_, sua.forkId_);
       break;
     }
     case MessageType::RREF_USER_DELETE: {
@@ -132,12 +138,17 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
     }
     case MessageType::RREF_FORK_NOTIFY: {
       ScriptForkNotify sfn = ScriptForkNotify::fromMessage(request);
-      return RRefContext::getInstance()->acceptForkRequest(
-          sfn.valueRef(), sfn.forkDst());
+      auto& ctx = RRefContext::getInstance();
+      TORCH_INTERNAL_ASSERT(ctx->getWorkerId() == sfn.owner_,
+          "Worker ",
+          ctx->getWorkerId(),
+          " received a RREF_USER_ACCEPT message of a different owner ",
+          sfn.owner_);
+      return ctx->acceptForkRequest(sfn.rrefId_, sfn.forkId_, sfn.forkDst_);
     }
     case MessageType::RREF_FORK_ACCEPT: {
       ScriptForkAccept sfa = ScriptForkAccept::fromMessage(request);
-      RRefContext::getInstance()->finishForkRequest(sfa.valueRef());
+      RRefContext::getInstance()->finishForkRequest(sfa.forkId_);
       break;
     }
     default: {

@@ -26,99 +26,37 @@ class RRefContext {
   RRefId genRRefId();
   const std::shared_ptr<RpcAgent>& agent() const;
 
+
   // create a new RRef
   template <typename T>
-  std::shared_ptr<OwnerRRef<T>> createOwnerRRef(worker_id_t ownerId) {
-    TORCH_CHECK(ownerId == getWorkerId(), "Cannot create OwnerRRef on user.");
-    return getOrCreateOwnerRRef<T>(genRRefId());
-  }
+  std::shared_ptr<OwnerRRef<T>> createOwnerRRef(worker_id_t ownerId);
 
   template <typename T>
-  std::shared_ptr<UserRRef<T>> createUserRRef(worker_id_t ownerId) {
-    TORCH_CHECK(ownerId != getWorkerId(), "Cannot create UserRRef on owner.");
-    return createUserRRef<T>(ownerId, genRRefId(), genRRefId());
-  }
+  std::shared_ptr<UserRRef<T>> createUserRRef(worker_id_t ownerId);
 
   template <typename T>
   std::shared_ptr<UserRRef<T>> createUserRRef(
-      worker_id_t ownerId,
-      const RRefId& rrefId,
-      const ForkId& forkId) {
-    TORCH_CHECK(
-        ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
-    // RRefContext does not track user RRefs, it will be destructed when there
-    // is no shared_ptrs pointing to it. NB: cannot use make_shared here as the
-    // constructor of UserRRef is private
-    auto userRRef =
-        std::shared_ptr<UserRRef<T>>(new UserRRef<T>(ownerId, rrefId, forkId));
-
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      TORCH_CHECK(
-          pendingUsers_.find(forkId) == pendingUsers_.end(),
-          "Inconsistent state, attempt to create the same UserRRef twice.")
-
-      auto iter = pendingAcceptedUsers_.find(forkId);
-      if (iter == pendingAcceptedUsers_.end()) {
-        // UserRRef created before receiving RREF_USER_ACCEPT message
-        pendingUsers_[forkId] = userRRef;
-      } else {
-        // RREF_USER_ACCEPT arrives before UserRRef is created, remove it
-        pendingAcceptedUsers_.erase(iter);
-      }
-    }
-    return userRRef;
-  }
+      worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
 
   // get an existing RRef or create a new one from a serialized
   // ``RRefForkData``.
   template <typename T>
-  std::shared_ptr<RRef> getOrCreateRRef(at::IValue&& value) {
-    auto rfd = RRefForkData::fromIValue(std::move(value));
-    return getOrCreateRRef<T>(rfd.ownerId_, rfd.rrefId_, rfd.forkId_);
-  }
+  std::shared_ptr<RRef> getOrCreateRRef(at::IValue&& value);
 
   template <typename T>
   std::shared_ptr<RRef> getOrCreateRRef(
-      worker_id_t ownerId,
-      const RRefId& rrefId,
-      const ForkId& forkId) {
-    if (ownerId == getWorkerId()) {
-      return getOrCreateOwnerRRef<T>(rrefId);
-    } else {
-      return createUserRRef<T>(ownerId, rrefId, forkId);
-    }
-  }
+      worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
 
   template <typename T>
-  std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    const auto iter = owners_.find(rrefId);
-    if (iter == owners_.end()) {
-      // Scenario (1) the first time this owner knows about this RRef
-      // Scenario (2) This owner is also the creator.
-      //
-      // NB: cannot use make_shared here as the constructor of OwnerRRef is
-      // private.
-      auto rref = std::shared_ptr<OwnerRRef<T>>(
-          new OwnerRRef<T>(getWorkerId(), rrefId));
-      owners_[rref->id()] = rref;
-      return rref;
-
-    } else {
-      // Scenario (3) retrieving an existing RRef
-      return std::dynamic_pointer_cast<OwnerRRef<T>>(iter->second);
-    }
-  }
-
-
+  std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);
 
   RRefForkData forkTo(const std::shared_ptr<RRef>&, worker_id_t forkDst);
 
   Message acceptUserRRef(const RRefId& rrefId, const ForkId& forkId);
-  Message acceptForkRequest(const IValue& request, worker_id_t forkDst);
-  void finishForkRequest(const IValue& request);
-  void finishUserRRef(const IValue& forkId);
+  Message acceptForkRequest(
+      const RRefId& rrefId, const ForkId& forkId, worker_id_t forkDst);
+  void finishForkRequest(const ForkId& forkId);
+  void finishUserRRef(const RRefId& rrefId, const ForkId& forkId);
 
   void addForkOfOwner(const IValue& value);
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
