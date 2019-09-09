@@ -10,6 +10,8 @@
 
 namespace {
 
+#define ASSERT_EQUAL(t1, t2) ASSERT_TRUE(t1 == t2);
+
 using dict_int_int = ska_ordered::order_preserving_flat_hash_map<int64_t, int64_t>;
 
 dict_int_int test_dict(dict_int_int& dict) {
@@ -157,6 +159,83 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
     TORCH_INTERNAL_ASSERT(dict.size() == order.size());
   }
 }
+
+
+// Tests taken from https://github.com/Tessil/ordered-map/blob/master/tests/ordered_map_tests.cpp
+
+TEST(OrderedPreservingDictTest, test_range_insert) {
+    // insert x values in vector, range insert x-15 values from vector to map, check values
+    const int nb_values = 1000;
+    std::vector<std::pair<int, int>> values;
+    for(int i = 0; i < nb_values; i++) {
+        values.push_back(std::make_pair(i, i+1));
+    }
+
+    dict_int_int map = {{-1, 0}, {-2, 0}};
+    map.insert(values.begin() + 10, values.end() - 5);
+
+    TORCH_INTERNAL_ASSERT(map.size(), 987);
+
+    ASSERT_EQUAL(map.at(-1), 0);
+
+    ASSERT_EQUAL(map.at(-2), 0);
+
+    for(int i = 10, j = 2; i < nb_values - 5; i++, j++) {
+        ASSERT_EQUAL(map.at(i), i+1);
+    }
+}
+
+TEST(OrderedPreservingDictTest, test_range_erase_all) {
+    // insert x values, delete all
+    const std::size_t nb_values = 1000;
+    dict_int_int map;
+    for (size_t i = 0; i < nb_values; ++i) {
+      map[i] = i + 1;
+    }
+    auto it = map.erase(map.begin(), map.end());
+    ASSERT_TRUE(it == map.end());
+    ASSERT_TRUE(map.empty());
+}
+
+TEST(OrderedPreservingDictTest, test_range_erase) {
+    // insert x values, delete all with iterators except 10 first and 780 last values
+    using HMap = ska_ordered::order_preserving_flat_hash_map<std::string, std::int64_t>;
+
+    const std::size_t nb_values = 1000;
+    HMap map;
+    for (size_t i = 0; i < nb_values; ++i) {
+      map[std::to_string(i)] = i;
+      auto begin = map.begin();
+      for (size_t j = 0; j <= i; ++j, begin++) {
+        TORCH_INTERNAL_ASSERT(begin->second == j);
+      }
+    }
+
+    auto it_first = std::next(map.begin(), 10);
+    auto it_last = std::next(map.begin(), 220);
+
+    auto it = map.erase(it_first, it_last);
+    ASSERT_EQUAL(std::distance(it, map.end()), 780);
+    ASSERT_EQUAL(map.size(), 790);
+    ASSERT_EQUAL(std::distance(map.begin(), map.end()), 790);
+
+    for(auto& val: map) {
+        ASSERT_EQUAL(map.count(val.first), 1);
+    }
+
+    // Check order
+    it = map.begin();
+    for(std::size_t i = 0; i < nb_values; i++) {
+        if(i >= 10 && i < 220) {
+            continue;
+        }
+        auto exp_it = std::pair<std::string, std::int64_t>(std::to_string(i), i);
+        TORCH_INTERNAL_ASSERT(*it == exp_it);
+        ++it;
+    }
+}
+
+
 
 
 }

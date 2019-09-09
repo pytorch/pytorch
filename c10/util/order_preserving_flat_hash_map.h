@@ -23,6 +23,7 @@
 #include <iterator>
 #include <utility>
 #include <type_traits>
+#include <c10/util/Exception.h>
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
@@ -898,6 +899,52 @@ private:
       next->prev = new_elem;
     }
 
+    void swap_adjacent_nodes(EntryPointer before, EntryPointer after) {
+      // sentinel never gets swapped
+      TORCH_INTERNAL_ASSERT(before->prev != after);
+
+      auto before_prev = before->prev;
+      auto after_next = after->next;
+
+      before_prev->next = after;
+      after->prev = before_prev;
+
+      after_next->prev = before;
+      before->next = after_next;
+
+      before->prev = after;
+      after->next = before;
+    }
+
+    void swap_positions(EntryPointer p1, EntryPointer p2) {
+      if (p1 == p2) {
+        return;
+      }
+      if (p1->next == p2) {
+        return swap_adjacent_nodes(p1, p2);
+      } else if (p2->next == p1) {
+        return swap_adjacent_nodes(p2, p1);
+      }
+
+      auto p1_prev = p1->prev;
+      auto p1_next = p1->next;
+
+      auto p2_prev = p2->prev;
+      auto p2_next = p2->next;
+
+      p1_prev->next = p2;
+      p2->prev = p1_prev;
+
+      p1_next->prev = p2;
+      p2->next = p1_next;
+
+      p2_prev->next = p1;
+      p1->prev = p2_prev;
+
+      p2_next->prev = p1;
+      p1->next = p2_next;
+    }
+
     void append_to_list(EntryPointer new_tail) {
       insert_after(new_tail, sentinel->prev);
     }
@@ -928,6 +975,7 @@ private:
             {
                 current_entry->emplace(distance_from_desired, std::move(to_insert));
                 append_to_list(current_entry);
+                swap_positions(current_entry, result.current);
                 ++num_elements;
                 return { result, true };
             }
@@ -935,6 +983,7 @@ private:
             {
                 swap(distance_from_desired, current_entry->distance_from_desired);
                 swap(to_insert, current_entry->value);
+                swap_positions(result.current, current_entry);
                 ++distance_from_desired;
             }
             else
