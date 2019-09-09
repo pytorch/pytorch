@@ -9,7 +9,7 @@ from torch.quantization import \
     QConfig_dynamic, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
     quantize_dynamic, default_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, MinMaxObserver, QuantWrapper
+    default_dynamic_qconfig, MinMaxObserver, TensorObserver, QuantWrapper
 
 from common_utils import run_tests, tempfile
 from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
@@ -710,6 +710,32 @@ class FusionTest(QuantizationTestCase):
 
 
 class ObserverTest(QuantizationTestCase):
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
+    def test_tensor_observer(self, qdtype, qscheme):
+        myobs = TensorObserver(dtype=qdtype, qscheme=qscheme)
+        x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        myobs(x)
+        self.assertTrue(torch.equal(myobs.get_output(), x))
+
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
+    def test_tensor_observer_scriptable(self, qdtype, qscheme):
+        obs = TensorObserver(dtype=qdtype, qscheme=qscheme)
+        scripted = torch.jit.script(obs)
+
+        x = torch.rand(3, 4)
+        obs(x)
+        scripted(x)
+
+        self.assertTrue(torch.equal(obs.get_output(), scripted.get_output()))
+
+        buf = io.BytesIO()
+        torch.jit.save(scripted, buf)
+        buf.seek(0)
+        loaded = torch.jit.load(buf)
+        self.assertTrue(torch.equal(obs.get_output(), loaded.get_output()))
+
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())

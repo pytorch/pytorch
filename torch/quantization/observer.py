@@ -139,6 +139,31 @@ class MinMaxObserver(ObserverBase):
     def extra_repr(self):
         return 'min_val={}, max_val={}'.format(self.min_val, self.max_val)
 
+class TensorObserver(ObserverBase):
+    r"""Tensor Observer Module
+    The module will record the running value of the output tensor of the module
+    it attaches to. It can be used for debugging of the model numerics.
+    """
+    __annotations__ = {
+        "output": Optional[torch.Tensor],
+    }
+
+    def __init__(self, **kwargs):
+        super(TensorObserver, self).__init__(**kwargs)
+        self.output = None
+
+    def forward(self, x):
+        self.output = x
+        return x
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        return 0
+
+    @torch.jit.export
+    def get_output(self):
+        return self.output
+
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
 
