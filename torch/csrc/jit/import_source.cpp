@@ -132,6 +132,7 @@ struct SourceResolver : public Resolver {
         {"fork", std::make_shared<ForkValue>()},
         {"annotate", std::make_shared<AnnotateValue>()},
         {"uninitialized", std::make_shared<UninitializedValue>()},
+        {"__ignored_python_op__", std::make_shared<IgnoredPythonOp>()},
         {"inf",
          std::make_shared<ConstantValue>(
              std::numeric_limits<double>::infinity())},

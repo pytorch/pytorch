@@ -423,6 +423,13 @@ struct TORCH_API UninitializedValue : public SugaredValue {
   }
 };
 
+struct TORCH_API IgnoredPythonOp : public SugaredValue {
+  IgnoredPythonOp() = default;
+  std::string kind() const override {
+    return "ignored_python_op";
+  }
+};
+
 // matched against for special handling of getattr expressions
 struct TORCH_API GetAttrValue : SugaredValue {
   GetAttrValue() = default;

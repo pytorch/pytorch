@@ -13803,34 +13803,35 @@ a")
         out = m(torch.ones(5, 5, 5).cuda())
         self.assertTrue(out[0].is_cuda)
 
+
     def test_ignore_decorator(self):
-        with warnings.catch_warnings(record=True) as warns:
-            class M(torch.jit.ScriptModule):
-                def __init__(self):
-                    super(M, self).__init__()
-                    tensor = torch.zeros(1, requires_grad=False)
-                    self.register_buffer('some_state', torch.nn.Parameter(tensor))
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                tensor = torch.zeros(1, requires_grad=False)
+                self.register_buffer('some_state', torch.nn.Parameter(tensor))
 
-                @torch.jit.script_method
-                def forward(self, x):
-                    self.ignored_code(x)
-                    return x
+            @torch.jit.script_method
+            def forward(self, x):
+                self.ignored_code(x)
+                return x
 
-                @torch.jit.ignore(drop_on_export=True)
-                def ignored_code(self, x):
-                    self.some_state = torch.tensor((100,))
-
-        if not PY2:
-            FileCheck().check("TorchScript will now drop the function.").run(str(warns[0]))
+            @torch.jit.ignore(drop_on_export=True)
+            def ignored_code(self, x):
+                self.some_state = torch.tensor((100,))
 
         # Assert ignored code is run
         m = M()
+        self.assertEqual(m.some_state, torch.zeros(1))
+        m(torch.ones(1))
+        self.assertEqual(m.some_state, torch.zeros(1) + 100)
 
         m2 = self.getExportImportCopy(m)
         pp = str(m2.forward.code)
+        self.assertIn('IgnoredPythonOp', pp)
         self.assertNotIn('ignored_code', pp)
 
-        with self.assertRaisesRegex(torch.jit.Error, "annotated to be ignored and cannot be run"):
+        with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
             m2.forward(torch.ones(1))
 
     def test_ignored_as_value(self):
@@ -13838,19 +13839,19 @@ a")
             def __init__(self):
                 super(Model, self).__init__()
 
-            @torch.jit.unused
+            @torch.jit.ignore(drop_on_export=True)
             def tuple_ignored(self, x):
                 # type: (Tensor) -> Tuple[Tensor, Tensor]
                 return x, x
 
-            @torch.jit.unused
+            @torch.jit.ignore(drop_on_export=True)
             def single_val_ignored(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor
                 return x
 
             def forward(self, x, use_ignore_path):
                 # type: (Tensor, bool) -> Tuple[Tensor, Tensor]
-                if False:
+                if self.training:
                     return self.tuple_ignored(x)
                 if use_ignore_path:
                     return self.single_val_ignored(x, x), self.single_val_ignored(x, x)
@@ -13865,8 +13866,8 @@ a")
         buffer.seek(0)
         loaded = torch.jit.load(buffer)
 
-        with self.assertRaisesRegex(torch._C.JITException, "annotated to be ignored and cannot be run"):
-            loaded(torch.tensor(.5), True)
+        with self.assertRaisesRegex(torch._C.JITException, "ignored operations are never executed after import"):
+            loaded(torch.tensor(.5), False)
 
     def test_module_error(self):
         class MyModule(torch.nn.Module):

@@ -2278,6 +2278,17 @@ struct to_ir {
       auto out = graph->insertNode(graph->createUninitialized(type))
                      ->setSourceRange(loc);
       return std::make_shared<SimpleValue>(out->output());
+    } else if (auto py_op = dynamic_cast<IgnoredPythonOp*>(sv.get())) {
+      checkApplyExpr(apply, loc, 2);
+      TypePtr out_type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+      auto op_inputs = asSimple(emitSugaredExpr(apply.inputs()[1], 1));
+      TORCH_INTERNAL_ASSERT(op_inputs->node()->kind() == prim::TupleConstruct);
+      auto out = graph->insertNode(create(prim::IgnoredPythonOp, loc, 1));
+      out->output()->setType(out_type);
+      for (const auto& op_input : op_inputs->node()->inputs()) {
+        out->addInput(op_input);
+      }
+      return std::make_shared<SimpleValue>(out->output());
     } else if (auto isinstance = dynamic_cast<IsInstanceValue*>(sv.get())) {
       // NOTE: for `isinstance` builtin call in JIT, we only check the static
       // types on the inputs to evaluate, and insert the corresponding constant
