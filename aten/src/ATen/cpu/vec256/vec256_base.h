@@ -382,6 +382,30 @@ inline T minimum(const T& a, const T& b) {
   return c;
 }
 
+// To save BC, it will not propagate NaN based on IEEE 754 201X
+template <class T> Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = a[i] < min_vec[i] ? min_vec[i] : (a[i] > max_vec[i] ? max_vec[i] : a[i]);
+  }
+  return c;
+}
+
+template <class T> Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = a[i] > max_vec[i] ? max_vec[i] : a[i];
+  }
+  return c;
+}
+
+template <class T> Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = a[i] < min_vec[i] ? min_vec[i] : a[i];
+  }
+  return c;
+}
 
 #define DEFINE_BITWISE_OP(op)                                               \
 template <class T>                                                          \
@@ -466,7 +490,7 @@ namespace {
   };
 }
 template<typename dst_t, typename src_t>
-Vec256<dst_t> cast(const Vec256<src_t>& src) {
+inline Vec256<dst_t> cast(const Vec256<src_t>& src) {
   return CastImpl<dst_t, src_t>::apply(src);
 }
 
@@ -534,7 +558,7 @@ interleave2(const Vec256<T>& a, const Vec256<T>& b) {
 }
 
 template <typename src_T, typename dst_T>
-void convert(const src_T *src, dst_T *dst, int64_t n) {
+inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 #ifndef _MSC_VER
 # pragma unroll
 #endif

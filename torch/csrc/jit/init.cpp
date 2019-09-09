@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/onnx.h>
@@ -88,13 +89,7 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
-#if defined(_WIN32)
-void runJITCPPTests(bool runCuda) {
-  AT_ERROR("JIT tests not yet supported on Windows");
-}
-#else
-CAFFE2_API void runJITCPPTests(bool runCuda);
-#endif
+TORCH_API void runJITCPPTests(bool runCuda);
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -113,13 +108,18 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
-      .def("_jit_pass_onnx_cast_all_constant_to_floating", CastAllConstantToFloating)
+      .def(
+          "_jit_pass_onnx_cast_all_constant_to_floating",
+          CastAllConstantToFloating)
       .def(
           "_jit_pass_onnx_constant_fold",
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, at::Tensor>& paramsDict,
              int opset_version) {
-            ConstantFoldONNX(graph->block(), paramsDict, opset_version); // overload resolution
+            ConstantFoldONNX(
+                graph->block(),
+                paramsDict,
+                opset_version); // overload resolution
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -132,7 +132,12 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_dce_allow_deleting_nodes_with_side_effects",
           [](std::shared_ptr<Graph>& g) {
-            return EliminateDeadCode(g->block(), true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS); // overload resolution
+            return EliminateDeadCode(
+                g->block(),
+                true,
+                DCESideEffectPolicy::
+                    ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS); // overload
+                                                             // resolution
           })
       .def(
           "_jit_pass_cse",
@@ -144,78 +149,23 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
           "_jit_pass_insert_observers",
-          [](const script::Module& moduleObj,
-             const std::string& methodName,
-             py::function pyObserverFunction) {
-            // Create a new node that would be used in the insert observer pass:
-            // all observer nodes will be cloned from this one.
-            Graph g;
-            Node* new_node = g.createPythonOp(
-                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(moduleObj, methodName, new_node);
-            // We don't need this node anymore, don't forget to remove it.
-            new_node->destroy();
-          })
-      .def(
-          "_jit_pass_insert_observers",
-          [](const StrongFunctionPtr& function_var,
-             py::function pyObserverFunction) {
-            // Overloaded jit pass for pure functions instead of modules.
-            // Create a new node that would be used in the insert observer pass:
-            // all observer nodes will be cloned from this one.
-            Graph g;
-            Node* new_node = g.createPythonOp(
-                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(function_var.function_, new_node);
-            // We don't need this node anymore, don't forget to remove it.
-            new_node->destroy();
-          })
-      .def(
-          "_jit_pass_insert_quantdequant",
-          [](const script::Module& moduleObj,
-             const std::string& methodName,
-             py::dict& pyQParamDict) {
-            if (!pyQParamDict.size()) {
-              return;
-            }
-
-            auto qparam_dict = py::cast<std::unordered_map<
-                std::string,
-                std::tuple<std::string, float, int>>>(pyQParamDict);
-            return InsertQuantDequantNodes(moduleObj, methodName, qparam_dict);
-          })
-      .def(
-          "_jit_pass_insert_quantdequant_for_weight_bias",
-          [](const script::Module& moduleObj,
+          [](script::Module& module,
              const std::string& method_name,
-             const std::string& param_name,
-             py::function pyGetQParamFunc) {
-            // For different static params we pass different getQParamFunc via
-            // same interface exposed by the quantizer.
-            if (param_name == std::string("weight")) {
-              auto getQParamFunc =
-                  py::cast<std::function<std::tuple<std::string, float, int>(
-                      at::Tensor)>>(pyGetQParamFunc);
-              InsertQuantDequantNodesForParam(
-                  moduleObj,
-                  method_name,
-                  param_name,
-                  getQParamFunc,
-                  at::ScalarType::QInt8);
-            } else if (param_name == std::string("bias")) {
-              auto getQParamFunc =
-                  py::cast<std::function<std::tuple<std::string, float, int>(
-                      float, float)>>(pyGetQParamFunc);
-              InsertQuantDequantNodesForParam(
-                  moduleObj,
-                  method_name,
-                  param_name,
-                  getQParamFunc,
-                  at::ScalarType::QInt32);
-            } else {
-              TORCH_CHECK(false, "Invalid Param Name");
-            }
+             const py::dict& qconfig_dict) {
+            auto dict = py::cast<std::unordered_map<
+                std::string,
+                std::tuple<script::Module, script::Module>>>(qconfig_dict);
+            return InsertObservers(module, method_name, dict);
           })
+      .def(
+          "_jit_pass_insert_quant_dequant",
+          [](script::Module& module, const std::string& method_name) {
+            return InsertQuantDeQuant(module, method_name);
+          })
+      .def(
+          "_jit_pass_quant_fusion",
+          [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
+      .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
       .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
@@ -271,9 +221,9 @@ void initJITBindings(PyObject* module) {
             }
             ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
             arg_spec_creator.specializeTypes(*graph, spec);
-            // We only get DimensionedTensorType from the arg_spec_creator, but
-            // we want CompleteTensorType. The alternative would be to have a
-            // "complete type inference" function in ArguemntSpecCreator.
+            // We only get partial specialization from the arg_spec_creator, but
+            // we want full shape specialization. The alternative would be to
+            // have a "complete type inference" function in ArguemntSpecCreator.
             auto g_inputs = graph->inputs();
             for (size_t i = 0; i < inputs.size(); ++i) {
               if (stack[i].isTensor()) {
@@ -285,6 +235,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
+      .def("_jit_pass_inline", Inline)
       .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
@@ -347,11 +298,14 @@ void initJITBindings(PyObject* module) {
           "_jit_set_inline_everything_mode",
           [](bool enabled) { script::getInlineEverythingMode() = enabled; })
       .def(
+          "_jit_get_inline_everything_mode",
+          []() { return script::getInlineEverythingMode(); })
+      .def(
           "_jit_try_infer_type",
           [](py::object obj) -> TypePtr {
             auto match = tryToInferType(obj);
-            if (match.type) {
-              return *match.type;
+            if (match.success()) {
+              return match.type();
             }
             return nullptr;
           })
@@ -463,6 +417,7 @@ void initJITBindings(PyObject* module) {
     script::parseIR(input, &*graph);
     return graph;
   });
+  m.def("parse_schema", parseSchema);
 
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(
@@ -474,6 +429,10 @@ void initJITBindings(PyObject* module) {
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(
           "returns", [](FunctionSchema& self) { return self.returns(); })
+      .def("__eq__", [](const FunctionSchema& self,
+            const FunctionSchema& other) {
+          return self == other;
+        })
       .def("__str__", [](FunctionSchema& self) {
         std::stringstream ss;
         ss << self;
@@ -493,6 +452,13 @@ void initJITBindings(PyObject* module) {
         IValue v = *self.default_value();
         return toPyObject(std::move(v));
       });
+  m.def(
+      "_jit_get_all_schemas", []() {
+    const std::vector<std::shared_ptr<Operator>>& operations = getAllOperators();
+    return fmap(operations, [](const std::shared_ptr<Operator>& op) {
+      return op->schema();
+    });
+  });
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
     auto operations = getAllOperatorsFor(symbol);

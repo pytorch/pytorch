@@ -58,7 +58,7 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::Ty
       data_type_(data_type),
       device_opt_(device_opt),
       type_id_(type_id) {
-  if (type_id != UndefinedTensorId()) {
+  if (type_id != TensorTypeId::UndefinedTensorId) {
     AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
               device_opt_.has_value());
     // UndefinedTensorImpl is a singleton, so we skip logging it
@@ -201,6 +201,12 @@ std::unique_ptr<NamedTensorMetaInterface> NamedTensorMetaInterface::clone() cons
   TORCH_INTERNAL_ASSERT(
       false,
       "Attempting to clone a NamedTensorMetaInterface instance.");
+}
+
+int64_t NamedTensorMetaInterface::slow_dim() const {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "NamedTensorMetaInterface::slow_dim not implemented.");
 }
 #endif
 

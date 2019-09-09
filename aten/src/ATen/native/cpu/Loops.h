@@ -111,7 +111,7 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
 // is 0, then there are no scalar inputs.
 template <typename func_t, typename vec_func_t>
 static inline void
-vectorized_loop(char** C10_RESTRICT data_, int64_t n, size_t S, func_t op, vec_func_t vop) {
+vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t op, vec_func_t vop) {
   using traits = function_traits<vec_func_t>;
   using scalar_t = typename function_traits<func_t>::result_type;
   using Vec = Vec256<scalar_t>;
@@ -177,6 +177,7 @@ void cpu_kernel(TensorIterator& iter, func_t op) {
       });
     }
   });
+  iter.cast_outputs();
 }
 
 template <typename func_t, typename vec_func_t>
@@ -198,6 +199,24 @@ void cpu_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
       });
     }
   });
+  iter.cast_outputs();
+}
+
+template <typename func_t>
+void cpu_serial_kernel(TensorIterator& iter, func_t op) {
+  using traits = function_traits<func_t>;
+  TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
+
+  iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
+    if (is_contiguous<traits>(strides)) {
+      basic_loop(data, strides, 0, n, op);
+    } else {
+      using Indices = c10::guts::make_index_sequence<traits::arity>;
+      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
+        basic_loop(data, strides, 0, n, op);
+      });
+    }
+  }, {0, iter.numel()});
 }
 
 }}}  // namespace at::native::<anonymous>

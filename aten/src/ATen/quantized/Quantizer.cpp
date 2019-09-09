@@ -57,7 +57,7 @@ void checkZeroPoint(std::string fn_name, int64_t zero_point) {
 
 template <typename T>
 void checkZeroPoints(std::string fn_name, std::vector<int64_t> zero_points) {
-  for (int i = 0; i < zero_points.size(); ++i) {
+  for (size_t i = 0; i < zero_points.size(); ++i) {
     TORCH_CHECK(zero_points[i] <= std::numeric_limits<T>::max(),
                 fn_name,
                 "zero_point",
@@ -92,6 +92,16 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   return static_cast<T>(qvalue);
 }
 
+template <typename T, int precision>
+void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, size_t count) {
+  fbgemm::Quantize<typename T::underlying>(
+    src,
+    (typename T::underlying*)dst,
+    count,
+    fbgemm::TensorQuantizationParams{(float)scale, (int32_t)zero_point, precision}
+  );
+}
+
 // TODO: dequantize_val?
 
 template <typename T>
@@ -100,8 +110,8 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
-  const float* rd = rtensor.data<float>();
-  auto qd = reinterpret_cast<typename T::underlying*>(qtensor.data<T>());
+  const float* rd = rtensor.data_ptr<float>();
+  auto qd = reinterpret_cast<typename T::underlying*>(qtensor.data_ptr<T>());
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = scale;
   qparams.zero_point = zero_point;
@@ -120,7 +130,6 @@ inline float dequantize_val(double scale, int64_t zero_point, T value) {
     .zero_point = static_cast<int32_t>(zero_point)
   };
   return fbgemm::Dequantize<typename T::underlying>(value.val_, qparams);
-
 }
 
 template <typename T>
@@ -129,12 +138,12 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
-  const auto* qd = reinterpret_cast<const typename T::underlying*>(qtensor.data<T>());
+  const auto* qd = reinterpret_cast<const typename T::underlying*>(qtensor.data_ptr<T>());
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = scale;
   qparams.zero_point = zero_point;
   qparams.precision = CHAR_BIT * sizeof(typename T::underlying);
-  float* rd = rtensor.data<float>();
+  float* rd = rtensor.data_ptr<float>();
   fbgemm::Dequantize<typename T::underlying>(/*src=*/qd,
                               /*dst=*/rd,
                               /*len=*/qtensor.numel(),
@@ -162,14 +171,21 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   return static_cast<T>(qvalue);
 }
 
+template <typename T, int precision>
+void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, size_t count) {
+  for (int64_t i = 0; i < count; ++i) {
+    dst[i] = quantize_val<T>(scale, zero_point, src[i]);
+  }
+}
+
 template <typename T>
 Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
   auto fn_name = "quantize_tensor";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
-  const float* rdata = rtensor.data<float>();
-  auto qdata = qtensor.data<T>();
+  const float* rdata = rtensor.data_ptr<float>();
+  auto qdata = qtensor.data_ptr<T>();
   for (int i = 0; i < rtensor.numel(); ++i) {
     qdata[i] = quantize_val<T>(scale, zero_point, rdata[i]);
   }
@@ -189,8 +205,8 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
-  const auto* qd = qtensor.data<T>();
-  float* rd = rtensor.data<float>();
+  const auto* qd = qtensor.data_ptr<T>();
+  float* rd = rtensor.data_ptr<float>();
   for (auto i = 0; i < qtensor.numel(); ++i) {
     rd[i] = dequantize_val<T>(scale, zero_point, qd[i]);
   }
@@ -209,6 +225,9 @@ DST_T requantize_val(double src_scale, int64_t src_zero_point,
 template CAFFE2_API qint8 quantize_val<qint8>(double scale, int64_t zero_point, float value);
 template CAFFE2_API quint8 quantize_val<quint8>(double scale, int64_t zero_point, float value);
 template CAFFE2_API qint32 quantize_val<qint32>(double scale, int64_t zero_point, float value);
+template CAFFE2_API void quantize_vec<c10::qint8>(double scale, int64_t zero_point, const float *src, c10::qint8 *dst, size_t count);
+template CAFFE2_API void quantize_vec<c10::quint8>(double scale, int64_t zero_point, const float *src, c10::quint8 *dst, size_t count);
+template CAFFE2_API void quantize_vec<c10::qint32, 32>(double scale, int64_t zero_point, const float *src, c10::qint32 *dst, size_t count);
 template CAFFE2_API Tensor quantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 template CAFFE2_API Tensor quantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 template CAFFE2_API Tensor quantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
@@ -246,12 +265,12 @@ Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
   int64_t batches = size_to_dim_(channel_axis, rtensor.sizes());
   int64_t elements_per_channel = size_from_dim_(channel_axis + 1, rtensor.sizes());
   int64_t channel = rtensor.size(channel_axis);
-  TORCH_CHECK(channel == scales.size(),
+  TORCH_CHECK(channel == int64_t(scales.size()),
               "length of scales must equal to channel");
-  TORCH_CHECK(channel == zero_points.size(),
+  TORCH_CHECK(channel == int64_t(zero_points.size()),
               "length of zero_points must equal to channel");
-  const float* rdata = rtensor.data<float>();
-  auto qdata = qtensor.data<T>();
+  const float* rdata = rtensor.data_ptr<float>();
+  auto qdata = qtensor.data_ptr<T>();
   for (auto b = 0; b < batches; ++b) {
     for (auto c = 0; c < channel; ++c) {
       for (auto e = 0; e < elements_per_channel; ++e) {
@@ -279,12 +298,12 @@ Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
   int64_t batches = size_to_dim_(channel_axis, rtensor.sizes());
   int64_t elements_per_channel = size_from_dim_(channel_axis + 1, rtensor.sizes());
   int64_t channel = rtensor.size(channel_axis);
-  TORCH_CHECK(channel == scales.size(),
+  TORCH_CHECK(channel == int64_t(scales.size()),
               "length of scales must equal to channel");
-  TORCH_CHECK(channel == zero_points.size(),
+  TORCH_CHECK(channel == int64_t(zero_points.size()),
               "length of zero_points must equal to channel");
-  const auto* qd = qtensor.data<T>();
-  float* rd = rtensor.data<float>();
+  const auto* qd = qtensor.data_ptr<T>();
+  float* rd = rtensor.data_ptr<float>();
   for (auto b = 0; b < batches; ++b) {
     for (auto c = 0; c < channel; ++c) {
       for (auto e = 0; e < elements_per_channel; ++e) {
@@ -344,7 +363,7 @@ inline Tensor new_qtensor_cpu(
       allocator,
       /*resizable=*/true);
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage, at::QuantizedCPUTensorId(), quantizer);
+      storage, at::TensorTypeId::QuantizedCPUTensorId, quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   get_qtensorimpl(tensor)->empty_tensor_restride(memory_format);
   return tensor;
