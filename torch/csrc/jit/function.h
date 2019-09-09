@@ -21,9 +21,7 @@ struct TORCH_API Function {
         graph_(std::move(graph)),
         function_creator_(std::move(function_creator)) {}
 
-  void run(Stack& stack) {
-    get_executor().run(stack);
-  }
+  void run(Stack &stack);
 
   void run(Stack&& stack) {
     run(stack);
@@ -86,6 +84,8 @@ struct TORCH_API Function {
         graph()->outputs().size() == 1,
         "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
   }
+
+  std::string toString() const;
 
   GraphExecutor& get_executor() {
     ensure_defined();

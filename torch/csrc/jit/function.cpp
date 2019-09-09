@@ -1,5 +1,7 @@
+#include <sstream>
 #include <torch/csrc/jit/function.h>
-
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/error_report.h>
 
 namespace torch {
@@ -26,6 +28,20 @@ FunctionSchema defaultSchemaFor(const Function& function) {
 struct RecursiveMethodCallError : public std::exception {};
 void placeholderCreator(Function&) {
   throw RecursiveMethodCallError();
+}
+
+std::string Function::toString() const {
+  std::stringstream ss;
+  std::vector<at::Tensor> tensors;
+  std::vector<c10::NamedTypePtr> deps;
+  SourceRangeRecords source_ranges;
+  PythonPrint(ss, source_ranges, *this, false, tensors, deps, false);
+  return ss.str();
+}
+
+void Function::run(Stack &stack) {
+  GRAPH_DUMP("\n\n\n=== Running a function: ===\n\n\n", this);
+  get_executor().run(stack);
 }
 
 void Function::ensure_defined() {
