@@ -418,7 +418,7 @@
           at: ~/workspace
       - run:
           <<: *should_run_job
-      - checkout
+      # - checkout
       # - run:
       #     <<: *ios_brew_update
       - run:
