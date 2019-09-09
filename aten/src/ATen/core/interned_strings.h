@@ -231,8 +231,7 @@ namespace c10 {
   _(namespaces, dimname)           \
   _(namespaces, namespaces)
 #else
-#define FORALL_NS_SYMBOLS(_) \
-  _(namespaces, namespaces)
+#define FORALL_NS_SYMBOLS(_)
 #endif
 
 // 'prim' symbols are synthetic operators that occur only in the IR
