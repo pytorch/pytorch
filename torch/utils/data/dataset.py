@@ -4,7 +4,7 @@ import numpy
 
 from torch._utils import _accumulate
 from torch import randperm
-from torch.utils.data import StrideSampler
+from torch.utils.data import DistributedSampler, DistributedChunkSampler
 from torch.utils.data._utils.worker import get_worker_info
 
 
@@ -272,8 +272,7 @@ class ChunkDataReader(object):
     of a text file, etc
 
     In a distributed setup, each worker would draw different indices
-    by feeding their `worker_id` into the chunk sampler, which is a
-    `StrideSampler` implementation.
+    by feeding their ID (aka `rank`) into the chunk sampler.
 
     The reading logic must be implemented inside `__call__` method
     """
@@ -303,7 +302,7 @@ class ChunkDataset(IterableDataset):
     size of the dataset is unknown .
 
     Arguments:
-        chunk_sampler (StrideSampler): Sampler used to split dataset in multiple chunks.
+        chunk_sampler (DistributedSampler or DistributedChunkSampler): Sampler used to split dataset in multiple chunks.
                                        Typically used to split data amongst dataloader workers
         chunk_reader (ChunkDataReader): Specialized reader
         shuffle_cache (bool): Setting `True` forces shuffling of the internal chunk cache
@@ -311,7 +310,7 @@ class ChunkDataset(IterableDataset):
 
     def __init__(self, chunk_sampler, chunk_reader, shuffle_cache=True):
         super(ChunkDataset, self).__init__()
-        assert isinstance(chunk_sampler, StrideSampler), 'sampler must be a `StrideSampler`'
+        assert isinstance(chunk_sampler, DistributedSampler) or isinstance(chunk_sampler, DistributedChunkSampler), 'sampler must be a `DistributedSampler` or `DistributedChunkSampler`'
         assert callable(chunk_reader), 'chunk_reader must be `callable()` and return a container with data'
         assert isinstance(shuffle_cache, bool), 'shuffle_cache must be a `bool`'
 
@@ -389,9 +388,9 @@ class ChunkDataset(IterableDataset):
         worker_id = 0
         try:
             worker_id = get_worker_info().id
+            self.chunk_sampler.set_rank(worker_id)
         except Exception:
             pass
-        self.chunk_sampler.reset(worker_id)
         self._chunk_sampler_iter = iter(self.chunk_sampler)
 
     next = __next__  # py2 compatibility

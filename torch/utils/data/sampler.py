@@ -211,60 +211,75 @@ class BatchSampler(Sampler):
         else:
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size
 
-
-class StrideSampler(Sampler):
-    r"""This sampler introduces the stride concept into a regular sampler.
+class DistributedChunkSampler(Sampler):
+    r"""This sampler introduces the distributed sampling.
 
     Python DataLoader uses multi-processing instead of
     multi-threading for parallelism, therefore, each worker
-    is a separate process with a copy of sampler.
+    is a separate process with an identical copy of sampler.
+    Because of that, on a distributed environment, different processes
+    could read the same portion of the dataset. This sampler uses strides,
+    based on processes `rank`s, to coordinate parallel reading of chunks of data.
 
-    To prevent different processes to read the same data in a dataset
-    with unknown size, sampler strides are needed to coordinate reading.
-
-    Each instance of `StrideSampler` must be configured with different strides,
-    so that sampling happens in a round-robin fashion:
-    stride0, stride1, ..., strideN, stride0, stride1, ..., strideN, ...
+    Each instance of `DistributedChunkSampler` must be configured with different a `rank`
+    (aka strides), so that chunk sampling happens in a round-robin fashion on each worker:
+    rank0, rank1, ..., rankN, rank0, rank1, ..., rankN, ...
 
     For example, assume 2 workers reading the same `ChunkDataset` dataset.
-    Each worker process needs to configure their `StrideSampler`
-    so that one of them reads all even (stride 0) batches
-    while the other reads all odd batches (stride 1).
+    Each worker process needs to configure their `DistributedChunkSampler`
+    so that one of them reads all even batches (e.g. rank 0)
+    while the other process reads all odd batches (e.g. rank 1).
+
+    Similarly to `DataLoader`, either a custom :attr:`sampler` can be specified or
+    the number of chunks (:attr:`num_chunks`) and :attr:`shuffle` flag.
+    In the latter case, `SequentialSampler` is used when :attr:`shuffle` is ``False``
+    and `RandomSampler` otherwise.
 
     Args:
-        sampler (Sampler): Sampler to be strided
-        current_stride (int): Current stride for the sampler, starting at 0.
-        total_strides (int): Total number of strides (must match the number of workers).
+        num_replicas (int): Number of workers participating in the sampling.
+        rank (int, optional): Current rank for the sampler, starting at 0.
+            Typically set during worker initialization function on distributed setup.
+        num_chunks (int, optional): Number of chunks participating in the sampling.
+            (default: ``0``)
+        shuffle (bool, optional): set to ``True`` to have the chunk indices reshuffled.
+            (default: ``False``)
     """
 
-    def __init__(self, sampler, current_stride, total_strides):
-        super(StrideSampler, self).__init__(None)
-        assert isinstance(sampler, Sampler), 'sampler must be an instance of `Sampler` class'
-        assert current_stride >= 0, 'current_stride must be >= 0'
-        assert total_strides >= 0, 'total_strides must be >= 0'
-        assert current_stride <= total_strides, 'current_stride must be <= total_strides'
+    def __init__(self, num_replicas, rank=0, num_chunks=0, shuffle=False):
+        super(DistributedChunkSampler, self).__init__(None)
+        assert rank >= 0, 'rank must be >= 0'
+        assert num_replicas >= 0, 'num_replicas must be >= 0'
+        assert rank <= num_replicas, 'rank must be <= num_replicas'
+        assert num_chunks >= num_replicas, 'num_chunks must be >= num_replicas'
+        self.rank = rank
+        self.num_replicas = num_replicas
+        self.num_chunks = num_chunks
+        self.shuffle = shuffle
+
+        if shuffle:
+            sampler = RandomSampler(data_source=range(num_chunks))
+        else:
+            sampler = SequentialSampler(data_source=range(num_chunks))
         self.sampler = sampler
-        self.current_stride = current_stride
-        self.total_strides = total_strides
 
     def __iter__(self):
         r"""Stride logic is implemented here"""
         for idx in self.sampler:
-            if self.total_strides == 0:
+            if self.num_replicas == 0:
                 yield idx
             else:
-                if idx % self.total_strides == self.current_stride:
+                if idx % self.num_replicas == self.rank:
                     yield idx
 
     def __len__(self):
         raise NotImplementedError
 
-    def reset(self, current_stride):
-        r"""Resets current stride
+    def set_rank(self, rank):
+        r"""Sets current rank
 
         Typically used after new processes are spawned with a copy of this sampler
         to prevent sampling the same indices in different workers
         """
-        assert current_stride >= 0, 'current_stride must be >= 0'
-        assert current_stride == 0 or current_stride < self.total_strides, 'current_stride must < total_strides'
-        self.current_stride = current_stride
+        assert rank >= 0, 'rank must be >= 0'
+        assert rank == 0 or rank < self.num_replicas, 'rank must < num_replicas'
+        self.rank = rank

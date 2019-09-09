@@ -1,4 +1,4 @@
-from .sampler import Sampler, SequentialSampler, RandomSampler, SubsetRandomSampler, WeightedRandomSampler, BatchSampler, StrideSampler  # noqa: F401
+from .sampler import Sampler, SequentialSampler, RandomSampler, SubsetRandomSampler, WeightedRandomSampler, BatchSampler, DistributedChunkSampler  # noqa: F401
 from .distributed import DistributedSampler  # noqa: F401
 from .dataset import Dataset, IterableDataset, TensorDataset, ConcatDataset, ChainDataset, Subset, ChunkDataset, ChunkDataReader, random_split  # noqa: F401
 from .dataloader import DataLoader, _DatasetKind, get_worker_info  # noqa: F401
