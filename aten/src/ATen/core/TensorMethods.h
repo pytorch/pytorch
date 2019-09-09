@@ -84,11 +84,11 @@ inline Tensor & Tensor::names_(c10::optional<DimnameList> names) const {
 }
 #endif
 #ifdef BUILD_NAMEDTENSOR
-inline Tensor Tensor::view_names(c10::optional<DimnameList> names) const {
+inline Tensor Tensor::renamed(c10::optional<DimnameList> names) const {
 #ifdef USE_STATIC_DISPATCH
-    return TypeDefault::view_names(const_cast<Tensor&>(*this), names);
+    return TypeDefault::renamed(const_cast<Tensor&>(*this), names);
 #else
-    static auto table = globalATenDispatch().getOpTable("aten::view_names(Tensor(a) self, Dimname[]? names) -> Tensor(a)");
+    static auto table = globalATenDispatch().getOpTable("aten::renamed(Tensor(a) self, Dimname[]? names) -> Tensor(a)");
     return table->getOp<Tensor (const Tensor &, c10::optional<DimnameList>)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), names);
 #endif
 }
@@ -892,6 +892,36 @@ inline Tensor Tensor::flatten(int64_t start_dim, int64_t end_dim) const {
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), start_dim, end_dim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::flatten(int64_t start_dim, int64_t end_dim, Dimname out_dim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::flatten(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::flatten(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, int64_t, int64_t, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::flatten(Dimname start_dim, Dimname end_dim, Dimname out_dim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::flatten(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::flatten(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Dimname, Dimname, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), start_dim, end_dim, out_dim);
+#endif
+}
+#endif
+#ifdef BUILD_NAMEDTENSOR
+inline Tensor Tensor::flatten(DimnameList dims, Dimname out_dim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::flatten(const_cast<Tensor&>(*this), dims, out_dim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::flatten(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, DimnameList, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dims, out_dim);
+#endif
+}
+#endif
 inline Tensor & Tensor::fill_(Scalar value) const {
 #ifdef USE_STATIC_DISPATCH
     return TypeDefault::fill_(const_cast<Tensor&>(*this), value);
@@ -2736,6 +2766,16 @@ inline std::vector<Tensor> Tensor::unbind(int64_t dim) const {
     return table->getOp<std::vector<Tensor> (const Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim);
 #endif
 }
+#ifdef BUILD_NAMEDTENSOR
+inline std::vector<Tensor> Tensor::unbind(Dimname dim) const {
+#ifdef USE_STATIC_DISPATCH
+    return TypeDefault::unbind(const_cast<Tensor&>(*this), dim);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::unbind(Tensor(a) self, Dimname dim) -> Tensor(a)[]");
+    return table->getOp<std::vector<Tensor> (const Tensor &, Dimname)>(tensorTypeIdToBackend(type_id()), is_variable())(const_cast<Tensor&>(*this), dim);
+#endif
+}
+#endif
 inline Tensor Tensor::to_sparse(int64_t sparse_dim) const {
 #ifdef USE_STATIC_DISPATCH
     switch(tensorTypeIdToBackend(type_id())) {
