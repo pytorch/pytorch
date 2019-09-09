@@ -201,9 +201,6 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'expected shape'):
             input = torch.randn(5, 5, dtype=torch.float, requires_grad=True)
             MyFunction.apply(input).sum().backward()
-        with self.assertRaisesRegex(RuntimeError, 'expected type'):
-            input = torch.randn(10, dtype=torch.double, requires_grad=True)
-            MyFunction.apply(input).sum().backward()
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
@@ -900,7 +897,10 @@ class TestAutograd(TestCase):
         for i in range(3):
             x.detach_()
             x.copy_(mu + i)
-            loss += (x * torch.tensor([float(i)])).sum()
+            ft = torch.tensor([float(i)])
+            multiplied = x * ft
+            s = multiplied.sum()
+            loss += s
         loss.backward()
 
     def test_no_grad(self):
@@ -1066,6 +1066,18 @@ class TestAutograd(TestCase):
         expected_grad = torch.Tensor(4, 4, 4).zero_()
         expected_grad[1].fill_(3)
         self.assertEqual(y.grad.data, expected_grad)
+
+    def test_index_backward_does_not_save_tensor(self):
+        # Example from https://github.com/pytorch/pytorch/issues/24853.
+        # if `index(tensor, indices)` saves `tensor` for backwards, then it will
+        # trigger a version check on `tensor` during the backward pass, which
+        # will cause the following code to error because `tensor` gets modified
+        # by the indexing line.
+        a = torch.tensor([1., 0, 0])
+        b = torch.zeros(3, requires_grad=True)
+        tensor = b + 0
+        tensor[a != 0] = tensor[a != 0]
+        tensor.backward(torch.zeros_like(tensor))
 
     def test_volatile_deprecated(self):
         v = torch.autograd.torch.randn(3, 3)

@@ -1256,64 +1256,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_digamma
-  cname: digamma
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_digamma_
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  cname: digamma
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: _th_polygamma
-  cname: polygamma
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - int64_t n
-    - THTensor* self
-]]
-[[
-  name: _th_polygamma_
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  cname: polygamma
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - int64_t n
-    - THTensor* self
-]]
-[[
   name: _th_exp
   cname: exp
   types:
@@ -1730,20 +1672,6 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
-]]
-[[
-  name: _th_reciprocal_
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  options:
-    - cname: cinv
-      return: self
-      arguments:
-        - THTensor* self
         - THTensor* self
 ]]
 [[
@@ -2504,7 +2432,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - function
