@@ -52,6 +52,7 @@
 
 cmake_policy(PUSH)
 cmake_policy(SET CMP0007 NEW)
+cmake_policy(SET CMP0010 NEW)
 if(NOT generated_file)
   message(FATAL_ERROR "You must specify generated_file on the command line")
 endif()
@@ -75,7 +76,8 @@ set(CUDA_NVCC_EXECUTABLE "@CUDA_NVCC_EXECUTABLE@") # path
 set(CUDA_NVCC_FLAGS @CUDA_NVCC_FLAGS@ ;; @CUDA_WRAP_OPTION_NVCC_FLAGS@) # list
 @CUDA_NVCC_FLAGS_CONFIG@
 set(nvcc_flags @nvcc_flags@) # list
-set(CUDA_NVCC_INCLUDE_DIRS "@CUDA_NVCC_INCLUDE_DIRS@") # list (needs to be in quotes to handle spaces properly).
+set(CUDA_NVCC_INCLUDE_DIRS [==[@CUDA_NVCC_INCLUDE_DIRS@]==]) # list (needs to be in lua quotes to address backslashes)
+string(REPLACE "\\" "/" CUDA_NVCC_INCLUDE_DIRS "${CUDA_NVCC_INCLUDE_DIRS}")
 set(CUDA_NVCC_COMPILE_DEFINITIONS [==[@CUDA_NVCC_COMPILE_DEFINITIONS@]==]) # list (needs to be in lua quotes see #16510 ).
 set(format_flag "@format_flag@") # string
 set(cuda_language_flag @cuda_language_flag@) # list
@@ -85,8 +87,7 @@ list(REMOVE_DUPLICATES CUDA_NVCC_INCLUDE_DIRS)
 set(CUDA_NVCC_INCLUDE_ARGS)
 foreach(dir ${CUDA_NVCC_INCLUDE_DIRS})
   # Extra quotes are added around each flag to help nvcc parse out flags with spaces.
-  file(TO_CMAKE_PATH "${dir}" converted_dir)
-  list(APPEND CUDA_NVCC_INCLUDE_ARGS "-I${converted_dir}")
+  list(APPEND CUDA_NVCC_INCLUDE_ARGS "-I${dir}")
 endforeach()
 
 # Clean up list of compile definitions, add -D flags, and append to nvcc_flags

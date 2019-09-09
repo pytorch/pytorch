@@ -124,15 +124,19 @@ REGISTRATION_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
 """)
 
-# add non-virtual declaration to Tensor.h
+# add non-virtual declaration to TensorBody.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 # add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals}) const {
+#ifdef USE_STATIC_DISPATCH
+    ${static_dispatch_method_body}
+#else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
     return table->getOp<${return_type} (${formals_types})>(tensorTypeIdToBackend(type_id()), is_variable())(${method_actuals});
+#endif
 }
 """)
 # add a method declaration in Functions.h
@@ -146,10 +150,33 @@ C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults}
 # add method definition in Functions.h
 FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
+#ifdef USE_STATIC_DISPATCH
+    ${static_dispatch_function_body}
+#else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
     return table->getOp<${return_type} (${formals_types})>(${inferred_backend}, ${inferred_is_variable})(${native_actuals});
+#endif
 }
 """)
+
+# In order to rely on the linker to strip unused ops, it requires us to dispatch statically
+# in Functions.h and TensorMethods.h.
+STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
+${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
+""")
+STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
+switch(${backend}) {
+    ${static_dispatch_function_switches}
+    default:
+        AT_ERROR("${api_name} not implemented for ", at::toString(${backend}));
+}
+""")
+STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT = CodeTemplate("""\
+case Backend::${backend}:
+    ${return_call} ${backend}Type::${api_name}(${native_arguments});
+    break;
+""")
+
 # add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
 CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
@@ -158,9 +185,13 @@ CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults
 # special method definition for factory functions in Functions.h that initializes backends
 FACTORY_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
+#ifdef USE_STATIC_DISPATCH
+    ${static_dispatch_function_body}
+#else
     globalLegacyTypeDispatch().initForBackend(${inferred_backend});
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
     return table->getOp<${return_type} (${formals_types})>(${inferred_backend}, ${inferred_is_variable})(${native_actuals});
+#endif
 }
 """)
 
@@ -204,6 +235,8 @@ scalar_types = [
     ('Half', 'Half', 'Double', True),
     ('BFloat16', 'BFloat16', 'BFloat16AccrealNotDefined', True),
 ]
+
+static_dispatch_backends = ['CPU', 'QuantizedCPU', 'SparseCPU']
 
 
 class NYIError(Exception):
@@ -335,19 +368,19 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                  '(c10::Storage(caffe2::TypeMeta::Make<${ScalarType}>(), 0, allocator(), true),'
-                 '${Backend}TensorId()).release()',
+                 'TensorTypeId::${Backend}TensorId).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
-                     '${Backend}TensorId()).release()',
+                     'TensorTypeId::${Backend}TensorId).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
-                     '${Backend}TensorId()).release()',
+                     'TensorTypeId::${Backend}TensorId).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
-                     '${Backend}TensorId()).release()',
+                     'TensorTypeId::${Backend}TensorId).release()',
     'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                         '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Int), 0, allocator(), true),'
-                        '${Backend}TensorId()).release()',
+                        'TensorTypeId::${Backend}TensorId).release()',
 }
 
 ALLOC_WRAP = {
@@ -1059,9 +1092,26 @@ def create_generic(top_env, declarations):
 
         def gen_tensor_method(option):
             # type: (Any) -> FunctionCode
+            if isinstance(type_method_dispatch, dict):
+                static_dispatch_function_switches = []
+                for backend in static_dispatch_backends:
+                    if backend in type_method_dispatch:
+                        static_dispatch_function_switches.append(STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT.substitute(
+                            option,
+                            backend=backend,
+                            backend_function=type_method_dispatch[backend],
+                            native_arguments=option['method_actuals']))
+                static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
+                    option,
+                    backend='tensorTypeIdToBackend(type_id())',
+                    static_dispatch_function_switches=static_dispatch_function_switches)
+            else:
+                static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
+                    option, native_arguments=option['method_actuals'])
+
             return FunctionCode(
-                declaration=TENSOR_METHOD_DECLARATION.substitute(option),
-                definition=TENSOR_METHOD_DEFINITION.substitute(option))
+                declaration=TENSOR_METHOD_DECLARATION.substitute(option, static_dispatch_method_body=static_dispatch_method_body),
+                definition=TENSOR_METHOD_DEFINITION.substitute(option, static_dispatch_method_body=static_dispatch_method_body))
 
         def gen_namespace_function(option, dispatch_tensor, dispatch_options):
             # type: (Any, Optional[str], Any) -> FunctionCode
@@ -1077,17 +1127,36 @@ def create_generic(top_env, declarations):
                 option['inferred_is_variable'] = 'false'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
-            if is_factory_method:
-                fn_definition = FACTORY_DEFINITION.substitute(option)
+
+            if isinstance(type_method_dispatch, dict):
+                static_dispatch_function_switches = []
+                for backend in static_dispatch_backends:
+                    if backend in type_method_dispatch:
+                        static_dispatch_function_switches.append(STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT.substitute(
+                            option,
+                            backend=backend,
+                            backend_function=type_method_dispatch[backend],
+                            native_arguments=option['native_actuals']))
+                static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
+                    option,
+                    backend=option['inferred_backend'],
+                    static_dispatch_function_switches=static_dispatch_function_switches)
             else:
-                fn_definition = FUNCTION_DEFINITION.substitute(option)
+                static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
+                    option, native_arguments=option['native_actuals'])
+
+            if is_factory_method:
+                fn_definition = FACTORY_DEFINITION.substitute(option, static_dispatch_function_body=static_dispatch_function_body)
+            else:
+                fn_definition = FUNCTION_DEFINITION.substitute(option, static_dispatch_function_body=static_dispatch_function_body)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
         # Emit #ifdef BUILD_NAMEDTENSOR macros for any code generated here
         # that is sent to top_env. This is because some of this code (Type.h,
-        # Tensor.h, TensorMethods.h) is checked into the repo and must be
+        # TensorBody.h, TensorMethods.h) is checked into the repo and must be
         # the same regardless of BUILD_NAMEDTENSOR status.
-        is_named_tensor_only = has_named_tensor_formals(formals)
+        is_named_tensor_only = (has_named_tensor_formals(formals) or
+                                option['api_name'] == 'align_tensors')
 
         def check_namedtensor_enabled(code):
             if is_named_tensor_only:

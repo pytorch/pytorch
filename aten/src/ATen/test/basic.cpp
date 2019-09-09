@@ -217,7 +217,7 @@ void TestToCFloat() {
   ASSERT_EQ_RESOLVED(c.size(1), 11);
 
   Tensor e = rand({});
-  ASSERT_EQ_RESOLVED(*e.data<float>(), e.sum().item<float>());
+  ASSERT_EQ_RESOLVED(*e.data_ptr<float>(), e.sum().item<float>());
 }
 void TestToString() {
   Tensor b = ones({3, 7}) * .0000001f;
@@ -294,6 +294,13 @@ void TestView(DeprecatedTypeProperties& type) {
   ASSERT_TRUE(viewed.sizes().equals({3, 4}));
 }
 
+void TestIntArrayRefExpansion(DeprecatedTypeProperties& type) {
+  max_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
+  max_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
+  avg_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1);
+  avg_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1);
+}
+
 void test(DeprecatedTypeProperties& type) {
   TestResize(type);
   TestOnesAndDot(type);
@@ -322,6 +329,7 @@ void test(DeprecatedTypeProperties& type) {
   TestDispatch();
   TestNegativeDim(type);
   TestView(type);
+  TestIntArrayRefExpansion(type);
 }
 
 TEST(BasicTest, BasicTestCPU) {

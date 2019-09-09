@@ -114,6 +114,13 @@ def main():
         help='Comma-delimited list of frameworks to test (Caffe2, PyTorch)',
         default="Caffe2,PyTorch")
 
+    parser.add_argument(
+        '--wipe_cache',
+        help='Wipe cache before benchmarking each operator',
+        action='store_true',
+        default=False
+    )
+
     args, _ = parser.parse_known_args()
 
     if benchmark_utils.is_caffe2_enabled(args.framework):

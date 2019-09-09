@@ -103,7 +103,6 @@ void concatAddMulNaNClipElim(NNModule* nn) {
 
   // Iterate through each match and replace them
   for (const auto& match : gm.getMatches(nn->dataFlow)) {
-
     // Various attributes we care about for this fusion
     NOM_REQUIRE_OR_CONT(nn::get<Concat>(match["Concat"])->getAxis() == 1);
     NOM_REQUIRE_OR_CONT(nn::get<Add>(match["Add"])->getBroadcast() == 1);
@@ -137,6 +136,68 @@ void concatAddMulNaNClipElim(NNModule* nn) {
 }
 
 REGISTER_OPT_PASS_FROM_FUNC(ConcatAddMulNaNClipElim, concatAddMulNaNClipElim);
+
+void gatherFuse8BitRowwiseQuantFloatMulLengthsSumElim(NNModule* nn) {
+  using namespace nom::repr;
+
+  nom::nql::GraphMatcher gm;
+  gm.initFromString(R"NQL(def query {
+    %gather = Gather(%a, %b)
+    %ff = Fused8BitRowwiseQuantizedToFloat(%gather)
+    %mu = Mul(%ff, %mul_in)
+    %out = LengthsSum(%mu, %len_in)
+  })NQL");
+  CAFFE_ENFORCE(gm.getMatcher(), "Unable to parse NQL query.");
+
+  // Iterate through each match and replace them
+  for (const auto& match : gm.getMatches(nn->dataFlow)) {
+    NOM_REQUIRE_OR_CONT(nn::get<Mul>(match["Mul"])->getBroadcast() == 1);
+    NOM_REQUIRE_OR_CONT(nn::get<Mul>(match["Mul"])->getAxis() == 0);
+    // Figure out the input/output order (creating new nodes if needed)
+    std::vector<NNGraph::NodeRef> inputs, outputs;
+
+    // First set up the inputs
+    const auto& gather_inputs = nn::getInputs(match["Gather"]);
+    inputs.emplace_back(gather_inputs.at(0));
+    inputs.emplace_back(match["\%mul_in"]);
+    inputs.emplace_back(gather_inputs.at(1));
+    inputs.emplace_back(match["\%len_in"]);
+
+    // Set up the outputs
+    outputs.emplace_back(match["\%out"]);
+
+    // Check if outputs of the subgraph contain intermediate tensors
+    // If so, abort fusion.
+    std::unordered_set<NNGraph::NodeRef> internal;
+    for (const auto& output : nn::getOutputs(match["Gather"])) {
+      internal.emplace(output);
+    }
+    for (const auto& output :
+         nn::getOutputs(match["Fused8BitRowwiseQuantizedToFloat"])) {
+      internal.emplace(output);
+    }
+    for (const auto& output : nn::getOutputs(match["Mul"])) {
+      internal.emplace(output);
+    }
+    for (const auto& output : nn::getOutputs(match.subgraph)) {
+      if (internal.count(output)) {
+        LOG(INFO) << "Skip fusing Gather-Fused8BitRowwiseQuantizedToFloat"
+                  << "-Mul-LengthsSum as internal tensor "
+                  << nn::getName(output)
+                  << " is used as external output of the subgraph.";
+        return;
+      }
+    }
+
+    // This will do all the work
+    nn->replaceSubgraphWithOperator<SparseLengthsWeightedSumFused8BitRowwise>(
+        match.subgraph, inputs, outputs);
+  }
+}
+
+REGISTER_OPT_PASS_FROM_FUNC(
+    GatherFuse8BitRowwiseQuantFloatMulLengthsSumElim,
+    gatherFuse8BitRowwiseQuantFloatMulLengthsSumElim);
 
 } // namespace opt
 } // namespace caffe2

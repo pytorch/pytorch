@@ -229,10 +229,17 @@ struct Environment {
     return std::make_shared<SimpleValue>(load->output());
   }
 
-  void insertStore(const std::string& name, const SourceRange& loc, Value* v) {
+  // note: type is not always the same as v->type(), e.g.
+  // type: Optional[Tensor]
+  // v->type(): Tensor
+  void insertStore(
+      const std::string& name,
+      const SourceRange& loc,
+      Value* v,
+      TypePtr type) {
     auto g = b->owningGraph();
-    auto store = g->insertNode(g->createStore(name, v))->setSourceRange(loc);
-    type_table[name] = store->input()->type();
+    g->insertNode(g->createStore(name, v))->setSourceRange(loc);
+    type_table[name] = type;
   }
 
   SugaredValuePtr findInThisFrame(const std::string& name) {
@@ -269,13 +276,18 @@ struct Environment {
   }
 
   void setVar(const SourceRange& loc, const std::string& name, Value* value) {
-    setSugaredVar(loc, name, std::make_shared<SimpleValue>(value));
+    setSugaredVar(
+        loc,
+        name,
+        std::make_shared<SimpleValue>(value),
+        /*annotated_type=*/nullptr);
   }
 
   void setSugaredVar(
       const SourceRange& loc,
       const std::string& name,
-      SugaredValuePtr value) {
+      SugaredValuePtr value,
+      TypePtr annotated_type) {
     Value* as_simple_value = asSimple(value);
     if (as_simple_value && !as_simple_value->hasDebugName() &&
         meaningfulName(name) &&
@@ -293,6 +305,11 @@ struct Environment {
     // requires 'a' to be first-class in the graph since its value depends on
     // control flow
     if (auto parent = findInParentFrame(name)) {
+      if (annotated_type) {
+        throw ErrorReport(loc)
+            << "Attempting to declare and annotate the type of variable '"
+            << name << "' but it is already defined in an outer block";
+      }
       if (!as_simple_value) {
         throw ErrorReport(loc)
             << "Cannot re-assign '" << name << "' to a value of type "
@@ -306,8 +323,16 @@ struct Environment {
             << value->kind() << " and " << name
             << " is not a first-class value.  Only reassignments to first-class values are allowed";
       }
-      if (!as_simple_value->type()->isSubtypeOf(
-              unshapedType(simple_parent->type()))) {
+      
+      auto parent_type = unshapedType(simple_parent->type());
+      as_simple_value = tryConvertToType(
+          loc,
+          *b->owningGraph(),
+          parent_type,
+          as_simple_value,
+          /*allow_conversions=*/true);
+      std::stringstream why_not;
+      if (!as_simple_value->type()->isSubtypeOfExt(parent_type, &why_not)) {
         auto error = ErrorReport(loc);
         error << "Variable '" << name << "' previously has type "
               << simple_parent->type()->python_str()
@@ -317,16 +342,27 @@ struct Environment {
         // Special-cased error msg if we're trying to assign to a tensor list.
         if (simple_parent->type()->kind() == TypeKind::ListType &&
             as_simple_value->type()->kind() == TypeKind::ListType) {
-          error << "\n. (Note: empty lists are constructed as Tensor[]; "
-                << "if you want an empty list of a different type, "
-                << "use `torch.jit.annotate(List[T], [])`, "
-                << "where `T` is the type of elements in the list)";
+          error << "\nEmpty lists default to List[Tensor]. Add a variable "
+                   "annotation to the assignment to create an empty list "
+                   "of another type (torch.jit.annotate(List[T, []]) where T "
+                   "is the type of elements in the list for Python 2)";
         }
+        error << "\n" << why_not.str();
         throw error;
       }
     }
     if (as_simple_value) {
-      insertStore(name, loc, std::move(as_simple_value));
+      if (!annotated_type) {
+        annotated_type = as_simple_value->type();
+      }
+      if (!as_simple_value->type()->isSubtypeOf(annotated_type)) {
+        throw ErrorReport(loc)
+            << "Variable '" << name << "' is annotated with type "
+            << annotated_type->python_str()
+            << " but is being assigned to a value of type "
+            << as_simple_value->type()->python_str();
+      }
+      insertStore(name, loc, std::move(as_simple_value), annotated_type);
     } else {
       value_table[name] = std::move(value);
     }
@@ -348,6 +384,7 @@ struct Environment {
     if (!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
           {"print", std::make_shared<PrintValue>()},
+          {"tuple", std::make_shared<TupleCallValue>()},
           {"float",
            makeMagic(
                "__float__",
@@ -465,7 +502,7 @@ static Value* materializeConstant(
   }
 
   WithInsertPoint guard(graph.block()->nodes().front());
-  auto new_constant = graph.insertConstant(val, nullptr, r);
+  auto new_constant = graph.insertConstant(val, r);
   map[val] = new_constant;
 
   return new_constant;
@@ -522,6 +559,10 @@ struct to_ir {
   // `next` that points to the most immediate enclosing scope's value.
   std::shared_ptr<Environment> environment_stack;
   std::vector<DefContext> def_stack_;
+  size_t temp_name_count_ = 0;
+  std::string createTempName(const std::string& prefix) {
+    return prefix + std::to_string(temp_name_count_++);
+  }
 
   void pushFrame(Block* b, bool starts_def = false) {
     if (starts_def) {
@@ -564,7 +605,7 @@ struct to_ir {
   }
 
   FunctionSchema emitDef(const Def& def, const Self* self, Block* block) {
-    auto schema = extractSchemaFromDef(def, self);
+    auto schema = typeParser_.parseSchemaFromDef(def, bool(self));
     // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
       def_stack_.back().declared_return_type_ = schema.returns().at(0).type();
@@ -578,135 +619,6 @@ struct to_ir {
     handleMaybeNoReturn(def, block);
     std::vector<Argument> returns = {emitOutput(def.range(), schema, block)};
     return {def.name().name(), "", std::move(arguments), std::move(returns)};
-  }
-
-  std::vector<IValue> evaluateDefaults(
-      const SourceRange& r,
-      const std::vector<Expr>& default_types,
-      const std::vector<Expr>& default_exprs) {
-    std::vector<IValue> default_values;
-    if (default_exprs.empty())
-      return default_values;
-    // To evaluate the default expressions, we create a graph with no inputs,
-    // and whose returns are the default values we need.
-    // We then run constant prop on this graph and check the results are
-    // constant. This approach avoids having to have separate handling of
-    // default arguments from standard expressions by piecing together existing
-    // machinery for graph generation, constant propgation, and constant
-    // extraction.
-    auto tuple_type = Subscript::create(
-        r,
-        Var::create(r, Ident::create(r, "Tuple")),
-        List<Expr>::create(r, default_types));
-    auto blank_decl = Decl::create(
-        r, List<Param>::create(r, {}), Maybe<Expr>::create(r, tuple_type));
-
-    auto tuple_expr =
-        TupleLiteral::create(r, List<Expr>::create(r, default_exprs));
-    auto ret = Return::create(r, tuple_expr);
-    auto def = Def::create(
-        r,
-        Ident::create(r, "defaults"),
-        blank_decl,
-        List<Stmt>::create(r, {ret}));
-
-    CompilationUnit cu;
-    cu.define(c10::nullopt, {def}, {resolver}, nullptr);
-    Stack stack;
-    // XXX: We need to turn optimization off here because otherwise we try to
-    // recursively initialize stuff in DecomposeOps.
-    GraphOptimizerEnabledGuard guard(false);
-    cu.get_function(def.name().name()).run(stack);
-    return stack.at(0).toTuple()->elements();
-  }
-
-  std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self* self) {
-    auto params_begin = decl.params().begin();
-    auto params_end = decl.params().end();
-    if (self) {
-      ++params_begin;
-    }
-    std::vector<Argument> retval;
-
-    std::vector<Expr> default_types;
-    std::vector<Expr> default_exprs;
-    // gather any non-empty default arguments
-    for (auto it = params_begin; it != params_end; ++it) {
-      auto param = *it;
-      auto def = param.defaultValue();
-      if (def.present()) {
-        default_types.emplace_back(param.type().get());
-        default_exprs.emplace_back(def.get());
-      }
-    }
-    auto default_values =
-        evaluateDefaults(decl.range(), default_types, default_exprs);
-
-    auto defaults_it = default_values.begin();
-    for (auto it = params_begin; it != params_end; ++it) {
-      auto decl_arg = *it;
-
-      TypePtr type;
-      c10::optional<int32_t> N;
-      bool is_inferred_type = false;
-      if (!decl_arg.type().present()) {
-        // If this param doesn't have a type, default to "tensor"
-        is_inferred_type = true;
-        type = TensorType::get();
-        N = c10::nullopt;
-      } else {
-        // BroadcastList list can only appear at the argument level
-        if (auto maybe_broad_list =
-                typeParser_.parseBroadcastList(decl_arg.type().get())) {
-          type = maybe_broad_list->first;
-          N = maybe_broad_list->second;
-        } else {
-          type = typeParser_.parseTypeFromExpr(decl_arg.type().get());
-          N = c10::nullopt;
-        }
-      }
-      c10::optional<IValue> default_value = c10::nullopt;
-      if (decl_arg.defaultValue().present()) {
-        default_value = *defaults_it++;
-      }
-      auto arg = Argument(
-          decl_arg.ident().name(),
-          type,
-          N,
-          default_value,
-          decl_arg.kwarg_only(),
-          /*alias_info=*/c10::nullopt,
-          is_inferred_type);
-      retval.push_back(arg);
-    }
-    return retval;
-  }
-
-  std::vector<Argument> parseReturnFromDecl(const Decl& decl) {
-    // we represent no annoation on a return type as having no values in the
-    // schema's return() list
-    // in emitReturn we take the actual return value to be the value of the
-    // return statement if no one was provided here
-    if (!decl.return_type().present())
-      return {};
-
-    if (typeParser_.parseBroadcastList(decl.return_type().get()))
-      throw ErrorReport(decl.return_type().range())
-          << "Broadcastable lists cannot appear as a return type";
-    auto parsed_type = typeParser_.parseTypeFromExpr(decl.return_type().get());
-    return {Argument(
-        "",
-        parsed_type,
-        /*N =*/c10::nullopt,
-        /*default_value =*/c10::nullopt,
-        /*kwarg_only =*/false)};
-  }
-  FunctionSchema extractSchemaFromDef(const Def& def, const Self* self) {
-    const auto name = def.name().name();
-    std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
-    std::vector<Argument> returns = parseReturnFromDecl(def.decl());
-    return FunctionSchema(
-        name, "", std::move(args), std::move(returns), false, false);
   }
 
   // see [setstate type]
@@ -772,7 +684,10 @@ struct to_ir {
       const auto& name = (*it).ident().name();
       Value* new_input = block->addInput()->setDebugName(name);
       environment_stack->setSugaredVar(
-          (*it).ident().range(), name, self->makeSugared(new_input));
+          (*it).ident().range(),
+          name,
+          self->makeSugared(new_input),
+          /*annotated_type=*/nullptr);
       arguments.emplace_back(name, new_input->type());
       ++it;
     }
@@ -867,7 +782,10 @@ struct to_ir {
     };
     auto closure_value = emitClosure(emit_body);
     environment_stack->setSugaredVar(
-        def.name().range(), def.name().name(), closure_value);
+        def.name().range(),
+        def.name().name(),
+        closure_value,
+        /*annotated_type=*/nullptr);
   }
 
   void emitBreak(const Break& stmt) {
@@ -911,13 +829,15 @@ struct to_ir {
       if (!result_type) {
         result_type = result->type();
       }
-      if (!unifyTypes(result_type, result->type())) {
+      auto merged_result_type = unifyTypes(result_type, result->type());
+      if (!merged_result_type) {
         throw ErrorReport(stmt.range())
             << "Previous return statement returned a value of type "
             << result_type->python_str()
             << " but this return statement returns a value of type "
             << result->type()->python_str();
       }
+      result_type = merged_result_type.value();
     }
     AT_ASSERT(result_type);
     def_stack_.back().merged_return_type_ = result_type;
@@ -946,13 +866,6 @@ struct to_ir {
           break;
         case TK_AUG_ASSIGN:
           emitAugAssignment(AugAssign(stmt));
-          break;
-        case TK_GLOBAL:
-          for (auto ident : Global(stmt).names()) {
-            const auto& name = Ident(ident).name();
-            environment_stack->setVar(
-                ident.range(), name, graph->addInput(name));
-          }
           break;
         case TK_EXPR_STMT: {
           auto expr = ExprStmt(stmt).expr();
@@ -1015,11 +928,29 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
+  // emit a single expr from the loop comprehension so that we can correctly
+  // type the list we create, then remove the nodes we emitted
+  TypePtr getListCompType(
+      const ListComp& lc,
+      const ListTypePtr& input_list_type) {
+    auto b = graph->insertNode(graph->create(prim::Loop))->addBlock();
+    pushFrame(b);
+    WithInsertPoint guard(b);
+    auto li_elem = graph->insertNode(
+        graph->createUninitialized(input_list_type->getElementType()));
+    emitExprsAssign(
+        List<Expr>::create(lc.range(), {lc.target()}),
+        {std::make_shared<SimpleValue>(li_elem->output())},
+        lc.range(),
+        /*n_binders*/ 1);
+    auto ret_type = emitExpr(lc.elt())->type();
+    popFrame();
+    b->owningNode()->destroy();
+    return ret_type;
+  }
+
   Value* emitListComprehension(const ListComp& lc) {
-    // this avoids a race condition where we would re-use the same temp name
-    static std::atomic<size_t> tmp_count{0};
-    const auto tmp_name =
-        std::string("___list_acc") + std::to_string(tmp_count++);
+    const auto tmp_name = createTempName("$list_acc");
     const auto list_value = emitExpr(lc.iter());
     if (list_value->type()->kind() != TypeKind::ListType) {
       // TODO: constraining iterators to be simple lists for now
@@ -1027,19 +958,14 @@ struct to_ir {
       throw ErrorReport(lc.range())
           << "iterator expression is expected to be a list";
     }
-    auto elem_types = list_value->type()->containedTypes();
-    // TODO: users can easily change the type to (x,1) or float(x)
-    // as in `float(x) for x in my_list_of_ints`
-    // eventually, we would probably want to temporarily inject x
-    // so we can evaluate the generator expression (e.g. `float(x)`) depending
-    // on x
 
     // given `[x*2 for x in my_list]` this generates the following AST:
     // __list_acc = []
     // for x in my_list:
     //  __list_acc.append(x*2)
-    const auto n = graph->insertNode(
-        graph->createList(elem_types.at(0), at::ArrayRef<Value*>{}));
+    const auto n = graph->insertNode(graph->createList(
+        getListCompType(lc, list_value->type()->expect<ListType>()),
+        at::ArrayRef<Value*>{}));
     environment_stack->setVar(lc.range(), tmp_name, n->output());
     const auto tmp_list_ident = Ident::create(lc.range(), tmp_name);
     const auto tmp_list_var = Var::create(lc.range(), tmp_list_ident);
@@ -1096,11 +1022,11 @@ struct to_ir {
     // if it's an OR the first expr is emitted in the true branch
     // and the second expr in the false branch, if it's an AND the opposite
     if (is_or) {
-      first_value_returned = graph->insertConstant(true, nullptr, loc);
+      first_value_returned = graph->insertConstant(true, loc);
       first_expr_refinements = &first_bool_info.true_refinements_;
       second_expr_refinements = &first_bool_info.false_refinements_;
     } else {
-      first_value_returned = graph->insertConstant(false, nullptr, loc);
+      first_value_returned = graph->insertConstant(false, loc);
       first_expr_refinements = &first_bool_info.false_refinements_;
       second_expr_refinements = &first_bool_info.true_refinements_;
     }
@@ -1459,7 +1385,7 @@ struct to_ir {
         out = emitCond(cond.value());
       } else {
         WithInsertPoint insert(n);
-        out = graph->insertConstant(true, nullptr, range);
+        out = graph->insertConstant(true, range);
       }
       condition_block->registerOutput(out);
       popFrame();
@@ -1559,7 +1485,7 @@ struct to_ir {
   // We ignore the expression following raise
   void emitRaise(const SourceRange& loc) {
     const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, nullptr, loc);
+    auto string_input = insertConstant(*graph, exception, loc);
     graph->insert(prim::RaiseException, {string_input}, {}, loc);
     exit_blocks.insert(environment_stack->block());
   }
@@ -1944,7 +1870,10 @@ struct to_ir {
           break;
         case TK_VAR:
           environment_stack->setSugaredVar(
-              assignee.range(), Var(assignee).name().name(), outputs.at(i));
+              assignee.range(),
+              Var(assignee).name().name(),
+              outputs.at(i),
+              /*annotated_type=*/nullptr);
           i++;
           break;
         case TK_STARRED: {
@@ -1987,6 +1916,32 @@ struct to_ir {
   }
 
   void emitAssignment(const Assign& stmt) {
+    if (stmt.lhs_list().size() == 1) {
+      return emitSingleAssignment(stmt);
+    }
+    // multiple assign & annotated type not supported in python
+    TORCH_INTERNAL_ASSERT(stmt.lhs_list().size() > 1 && !stmt.type().present());
+    // a = b = expr()
+    // the semantics of multiple assignment is that expr() is emitted once, then
+    // from left to right the assignments are made
+    const auto tmp_name = createTempName("$tmp_assign_");
+    environment_stack->setSugaredVar(
+        stmt.rhs().range(),
+        tmp_name,
+        emitSugaredExpr(stmt.rhs().get(), 1),
+        /*annotated_type=*/nullptr);
+    auto ident = Var::create(
+        stmt.rhs().range(), Ident::create(stmt.rhs().range(), tmp_name));
+    for (auto expr : stmt.lhs_list()) {
+      emitSingleAssignment(Assign::create(
+          stmt.range(),
+          List<Expr>::create(expr.range(), {expr}),
+          Maybe<Expr>::create(stmt.rhs().range(), ident),
+          Maybe<Expr>::create(stmt.range())));
+    }
+  }
+
+  void emitSingleAssignment(const Assign& stmt) {
     if (!stmt.rhs().present()) {
       throw ErrorReport(stmt.range())
           << "For an assignment, expected an expression on the right-hand side";
@@ -2000,7 +1955,10 @@ struct to_ir {
           type = typeParser_.parseTypeFromExpr(stmt.type().get());
         }
         environment_stack->setSugaredVar(
-            v.range(), v.name().name(), emitSugaredExpr(rhs, 1, type));
+            v.range(),
+            v.name().name(),
+            emitSugaredExpr(rhs, 1, type),
+            /*annotated_type=*/type);
       } break;
       case TK_TUPLE_LITERAL:
         emitTupleAssign(TupleLiteral(stmt.lhs()), rhs);
@@ -2094,6 +2052,8 @@ struct to_ir {
         return "__sub__";
       case TK_UNARY_MINUS:
         return "__neg__";
+      case '~':
+        return "__invert__";
       case '*':
         return "__mul__";
       case TK_POW:
@@ -2205,20 +2165,26 @@ struct to_ir {
           emitExpr(apply.inputs()[1], type),
           /*allow_conversions=*/true);
 
-      // This is to ensure even if user forgets to call annotate None with the
-      // Optional wrapper type, we still generate the correct value with the
-      // Optional type. e.g. it makes annoate(Tensor, None) to behave the same
-      // with annotate(Optional[Tensor], None). It also maintains the backward
-      // compatibility of exported model on Optional undefined tensor/None
-      auto opt_type = expr->type()->cast<OptionalType>();
-      bool forget_opt_annotate =
-          opt_type && *opt_type->getElementType() == *type;
-
-      if (!forget_opt_annotate && !expr->type()->isSubtypeOf(type)) {
+      std::stringstream why_not;
+      if (!expr->type()->isSubtypeOfExt(type, &why_not)) {
         throw ErrorReport(apply.inputs())
             << "expected an expression of type " << type->python_str()
-            << " but found " << expr->type()->python_str();
+            << " but found " << expr->type()->python_str() << "\n"
+            << why_not.str();
       }
+
+      // None is a subtype of Optional[T], but we want to remember what T is,
+      // after annotation so that variables assigned to this None will still
+      // get the right type. To do this, we make a None constant that
+      // has the type Optional[T]
+      if (type->kind() == OptionalType::Kind &&
+          expr->type()->isSubtypeOf(NoneType::get())) {
+        Node* none = graph->createNone();
+        none->output()->setType(type);
+        graph->insertNode(none);
+        expr = none->output();
+      }
+
       return std::make_shared<SimpleValue>(expr);
     } else if (auto getattr = dynamic_cast<GetAttrValue*>(sv.get())) {
       checkApplyExpr(apply, loc);
@@ -2238,6 +2204,15 @@ struct to_ir {
       auto out = graph->insertNode(graph->createUninitialized(type))
                      ->setSourceRange(loc);
       return std::make_shared<SimpleValue>(out->output());
+    } else if (auto tuple_call = dynamic_cast<TupleCallValue*>(sv.get())) {
+      checkApplyExpr(apply, loc, /*expected_inputs*/ 1);
+      auto arg = emitSugaredExpr(apply.inputs()[0], 1);
+      auto inputs = arg->asTuple(apply.range(), method);
+      auto inp_values = fmap(inputs, [&](const SugaredValuePtr& sv) {
+        return sv->asValue(loc, method);
+      });
+      return std::make_shared<SimpleValue>(
+          graph->insertNode(graph->createTuple(inp_values))->output());
     } else if (auto isinstance = dynamic_cast<IsInstanceValue*>(sv.get())) {
       // NOTE: for `isinstance` builtin call in JIT, we only check the static
       // types on the inputs to evaluate, and insert the corresponding constant
@@ -2283,7 +2258,7 @@ struct to_ir {
       bool is_instance_val =
           isInstanceCheck(apply.inputs()[0], apply.inputs()[1]);
       return std::make_shared<SimpleValue>(
-          graph->insertConstant(is_instance_val, nullptr, loc));
+          graph->insertConstant(is_instance_val, loc));
     } else if (auto classNew = dynamic_cast<ClassNewMethod*>(sv.get())) {
       if (apply.inputs().size() != 1) {
         throw ErrorReport(loc) << "Only one argument to __new__ allowed";
@@ -2407,31 +2382,32 @@ struct to_ir {
     }
   }
 
-  Value* emitNegate(const TreeRef& tree) {
+  Value* emitUnaryOp(const TreeRef& tree, const std::string &magicMethod, const c10::Symbol &opSymbol) {
     const auto& inputs = tree->trees();
     auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-    auto neg_val =
+    auto val =
         asSimple(makeMagic(
-                     "__neg__",
-                     std::make_shared<BuiltinFunction>(aten::neg, at::nullopt))
+                     magicMethod,
+                     std::make_shared<BuiltinFunction>(opSymbol, at::nullopt))
                      ->call(tree->range(), method, named_values, {}, 0));
 
-    // if we emitted a aten::neg and not some other overloaded function,
+    // if we emitted the unary op and not some other overloaded function,
     // then try to constantfold
-    if (neg_val->node()->kind() != aten::neg) {
-      return neg_val;
+    if (val->node()->kind() != opSymbol) {
+      return val;
     }
-    auto maybe_constant_input = toIValue(neg_val->node()->input());
+    auto maybe_constant_input = toIValue(val->node()->input());
     if (!maybe_constant_input) {
-      return neg_val;
+      return val;
     }
-    auto op = getOperation(neg_val->node());
+    auto op = getOperation(val->node());
     Stack stack;
     stack.push_back(*maybe_constant_input);
     op(stack);
     AT_ASSERT(stack.size() == 1);
-    return graph->insertConstant(stack[0], nullptr, tree->range());
+    return graph->insertConstant(stack[0], tree->range());
   }
+
 
   // We construct the iterable tree here using the IterableTree SugaredValue,
   // The tree consists of SimpleValue, RangeValue or IterableValue:
@@ -2599,7 +2575,10 @@ struct to_ir {
       }
 
       case TK_UNARY_MINUS: {
-        return emitNegate(tree);
+        return emitUnaryOp(tree, "__neg__", aten::neg);
+      }
+      case '~': {
+        return emitUnaryOp(tree, "__invert__", aten::bitwise_not);
       }
       case TK_AND:
       case TK_OR: {
@@ -2615,21 +2594,13 @@ struct to_ir {
         return emitConst(Const(tree));
       } break;
       case TK_TRUE: {
-        return graph->insertConstant(true, nullptr, tree->range());
+        return graph->insertConstant(true, tree->range());
       } break;
       case TK_FALSE: {
-        return graph->insertConstant(false, nullptr, tree->range());
+        return graph->insertConstant(false, tree->range());
       } break;
       case TK_NONE: {
-        // A None can be inserted even if the type_hint is not an Optional or
-        // None (e.g. `torch.jit.annotate(Tensor, None)`)
-        TypePtr hint = type_hint;
-        if (hint != nullptr && !hint->isSubtypeOf(NoneType::get()) &&
-            hint->kind() != TypeKind::OptionalType) {
-          // Implicitly wrap in an Optional if necessary
-          hint = OptionalType::create(hint);
-        }
-        return graph->insertConstant(IValue(), hint, tree->range());
+        return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_SUBSCRIPT: {
         return emitSubscript(Subscript(tree));
@@ -2664,10 +2635,13 @@ struct to_ir {
           }
         }
         for (auto v : values) {
-          if (!v->type()->isSubtypeOf(elem_type)) {
+          std::stringstream ss;
+          if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
-                << *elem_type << " but found " << *v->type() << " instead";
+                << elem_type->python_str() << " but found "
+                << v->type()->python_str() << " instead.\n"
+                << ss.str();
           }
         }
         Value* result =
@@ -2729,7 +2703,7 @@ struct to_ir {
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
-    return insertConstant(*graph, c.text(), nullptr, c.range());
+    return insertConstant(*graph, c.text(), c.range());
   }
 
   // Desugars select indexing: tensor[i] -> tensor.select(dim, i)
@@ -2835,7 +2809,7 @@ struct to_ir {
     std::vector<Value*> tensor_indices;
 
     auto insert_value_for_dim = [&](int64_t dim) {
-      return graph->insertConstant(dim, nullptr, loc);
+      return graph->insertConstant(dim, loc);
     };
     std::vector<int64_t> dims(subscript_exprs.size());
     std::vector<c10::optional<Value*>> exprs(
@@ -2936,8 +2910,7 @@ struct to_ir {
     // create None node with optional tensor output type and pass to at::index.
     for (auto& index : tensor_indices) {
       if (index == nullptr) {
-        index =
-            graph->insertNode(graph->createNone(TensorType::get()))->output();
+        index = graph->insertNode(graph->createNone())->output();
       }
     }
     return std::make_pair(sliceable, tensor_indices);
@@ -2995,7 +2968,7 @@ struct to_ir {
     Value* maybe_dim = nullptr;
     if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
-      maybe_dim = graph->insertConstant(0, nullptr, loc);
+      maybe_dim = graph->insertConstant(0, loc);
     }
     return emitSlice(loc, sliceable, maybe_dim, slice_exp);
   }
@@ -3151,7 +3124,8 @@ CompilationUnit::CompilationUnit(const std::string& source)
   define(c10::nullopt, source, nativeResolver(), nullptr);
 }
 
-c10::QualifiedName CompilationUnit::mangle(const c10::QualifiedName& name) const {
+c10::QualifiedName CompilationUnit::mangle(
+    const c10::QualifiedName& name) const {
   static const std::string manglePrefix = "___torch_mangle_";
   std::vector<std::string> atoms = name.atoms();
 
@@ -3195,15 +3169,9 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     // Store the function name so that it can be referenced if there is an error
     // while compiling this function
-    if (self) {
-      // Include the fully qualified name if this is a method
-      ErrorReport::CallStack::push_function(method.qualname().qualifiedName());
-    } else {
-      ErrorReport::CallStack::push_function(method.qualname().name());
-    }
+    ErrorReport::CallStack call(
+        self ? method.qualname().qualifiedName() : method.qualname().name());
     to_ir(def, _resolver, self, method);
-    // Compilation was successful, so remove the function def info
-    ErrorReport::CallStack::pop_function();
   };
   auto name = prefix ? QualifiedName(*prefix, def.name().name())
                      : QualifiedName(def.name().name());
@@ -3343,6 +3311,41 @@ void lambdaLiftFork(Node* fork_node) {
   // Separate the subgraph and clean up the orignal one
   fork_node->g_(attr::Subgraph, forked_graph);
   fork_node->eraseBlock(0);
+}
+
+void CompilationUnit::define_interface(
+    const c10::QualifiedName& qualifiedName,
+    const ClassDef& classDef,
+    ResolverPtr rcb) {
+  ScriptTypeParser typeParser(rcb);
+  InterfaceTypePtr iface =
+      InterfaceType::create(c10::QualifiedName(qualifiedName));
+  for (const Stmt& stmt : classDef.body()) {
+    if (stmt.kind() != TK_DEF) {
+      throw ErrorReport(stmt)
+          << "interface declartions can only contain method definitions";
+    }
+    auto method_def = Def(stmt);
+    if (!method_def.decl().return_type().present()) {
+      throw ErrorReport(method_def)
+          << "interface declarations must have a return type annotated.";
+    }
+    FunctionSchema schema =
+        typeParser.parseSchemaFromDef(method_def, /* skip_self*/ true);
+    // need to add self as the first because we skipped it
+    std::vector<Argument> arguments;
+    arguments.emplace_back(
+        Argument(method_def.decl().params()[0].ident().name(), iface));
+    arguments.insert(
+        arguments.end(), schema.arguments().begin(), schema.arguments().end());
+    iface->addMethod(schema.cloneWithArguments(std::move(arguments)));
+    if (method_def.statements().size() != 1 ||
+        method_def.statements()[0].kind() != TK_PASS) {
+      throw ErrorReport(method_def.range())
+          << "interfaces declarations should only contain a single 'pass' statement.";
+    }
+  }
+  this->register_type(iface);
 }
 
 } // namespace script
