@@ -216,8 +216,7 @@ class CMake:
             # adding a new build option to this block: Consider making these two names identical and adding this option
             # in the block below.
             '_GLIBCXX_USE_CXX11_ABI': 'GLIBCXX_USE_CXX11_ABI',
-            'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA',
-            'CUDNN_LIB_DIR': 'CUDNN_LIBRARY'
+            'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA'
         }
         additional_options.update({
             # Build options that have the same environment variable name and CMake variable name and that do not start
@@ -227,8 +226,6 @@ class CMake:
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
              'CUDA_NVCC_EXECUTABLE',
-             'CUDNN_LIBRARY',
-             'CUDNN_INCLUDE_DIR',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'INSTALL_TEST',
              'MKL_THREADING',

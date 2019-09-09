@@ -168,46 +168,45 @@ def _lazy_init():
     global _initialized, _cudart, _original_pid, _queued_calls
     if _initialized or hasattr(_tls, 'is_initializing'):
         return
-    _initialization_lock.acquire()
-    # We be double-checked locking, boys!  This is OK because
-    # the above test was GIL protected anyway.  The inner test
-    # is for when a thread blocked on some other thread which was
-    # doing the initialization; when they get the lock, they will
-    # find there is nothing left to do.
-    if _initialized:
-        return
-    # It is important to prevent other threads from entering _lazy_init
-    # immediately, while we are still guaranteed to have the GIL, because some
-    # of the C calls we make below will release the GIL
-    if _in_bad_fork:
-        from sys import version_info
-        if version_info < (3, 4):
-            msg = ("To use CUDA with multiprocessing, you must use Python "
-                   "3.4+ and the 'spawn' start method")
-        else:
-            msg = ("To use CUDA with multiprocessing, you must use the "
-                   "'spawn' start method")
-        raise RuntimeError(
-            "Cannot re-initialize CUDA in forked subprocess. " + msg)
-    _check_driver()
-    torch._C._cuda_init()
-    _cudart = _load_cudart()
-    _cudart.cudaGetErrorName.restype = ctypes.c_char_p
-    _cudart.cudaGetErrorString.restype = ctypes.c_char_p
-    _original_pid = os.getpid()
-    # Some of the queued calls may reentrantly call _lazy_init();
-    # we need to just return without initializing in that case.
-    # However, we must not let any *other* threads in!
-    _tls.is_initializing = True
-    for queued_call, orig_traceback in _queued_calls:
-        try:
-            queued_call()
-        except Exception as e:
-            msg = ("CUDA call failed lazily at initialization with error: {}\n\n"
-                   "CUDA call was originally invoked at:\n\n{}").format(str(e), orig_traceback)
-            raise_from(DeferredCudaCallError(msg), e)
-    _initialized = True
-    _initialization_lock.release()
+    with _initialization_lock:
+        # We be double-checked locking, boys!  This is OK because
+        # the above test was GIL protected anyway.  The inner test
+        # is for when a thread blocked on some other thread which was
+        # doing the initialization; when they get the lock, they will
+        # find there is nothing left to do.
+        if _initialized:
+            return
+        # It is important to prevent other threads from entering _lazy_init
+        # immediately, while we are still guaranteed to have the GIL, because some
+        # of the C calls we make below will release the GIL
+        if _in_bad_fork:
+            from sys import version_info
+            if version_info < (3, 4):
+                msg = ("To use CUDA with multiprocessing, you must use Python "
+                       "3.4+ and the 'spawn' start method")
+            else:
+                msg = ("To use CUDA with multiprocessing, you must use the "
+                       "'spawn' start method")
+            raise RuntimeError(
+                "Cannot re-initialize CUDA in forked subprocess. " + msg)
+        _check_driver()
+        torch._C._cuda_init()
+        _cudart = _load_cudart()
+        _cudart.cudaGetErrorName.restype = ctypes.c_char_p
+        _cudart.cudaGetErrorString.restype = ctypes.c_char_p
+        _original_pid = os.getpid()
+        # Some of the queued calls may reentrantly call _lazy_init();
+        # we need to just return without initializing in that case.
+        # However, we must not let any *other* threads in!
+        _tls.is_initializing = True
+        for queued_call, orig_traceback in _queued_calls:
+            try:
+                queued_call()
+            except Exception as e:
+                msg = ("CUDA call failed lazily at initialization with error: {}\n\n"
+                       "CUDA call was originally invoked at:\n\n{}").format(str(e), orig_traceback)
+                raise_from(DeferredCudaCallError(msg), e)
+        _initialized = True
 
 
 def _after_fork(arg):

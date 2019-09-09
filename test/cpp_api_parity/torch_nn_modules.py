@@ -20,8 +20,8 @@ from cpp_api_parity import TorchNNModuleMetadata
 #     as the Python module constructor.
 #
 # `num_attrs_recursive`: the number of attributes (including parameters, buffers and non-tensor
-#     attributes) of a module. If the module contains any submodule, the submodule's attributes
-#     also need to be counted.
+#     attributes) of the Python module. If the module contains any submodule, the submodule's
+#     attributes also need to be counted.
 module_metadata_map = {
     'Conv1d': TorchNNModuleMetadata(),
     'Conv2d': TorchNNModuleMetadata(),
