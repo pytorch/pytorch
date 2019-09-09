@@ -64,11 +64,12 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
 template <bool ReLUFused = false>
 void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
   int64_t zero_point = out.q_zero_point();
-  double scale = out.q_scale();
+  float scale = out.q_scale();
+  float inv_scale = 1.0f / scale;
   int64_t self_zero_point = self.q_zero_point();
-  double self_scale = self.q_scale();
+  float self_scale = self.q_scale();
   int64_t other_zero_point = other.q_zero_point();
-  double other_scale = other.q_scale();
+  float other_scale = other.q_scale();
 
   // Broadcast out the parameters here to amortize out that cost across
   // loop iterations.
@@ -78,6 +79,9 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
   auto self_scale_vec = Vec256<float>(self_scale);
   auto other_zero_point_vec = Vec256<float>((float)other_zero_point);
   auto other_scale_vec = Vec256<float>(other_scale);
+
+  auto self_scale_zp_premul_vec = self_scale_vec * self_zero_point_vec.neg();
+  auto other_scale_zp_premul_vec = other_scale_vec * other_zero_point_vec.neg();
 
   auto iter = TensorIterator::binary_op(out, self, other);
 
@@ -95,8 +99,10 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
           return at::quantize_val<scalar_t>(scale, zero_point, c);
         },
         [&](Vec a, Vec b) -> Vec {
-          const auto da = a.dequantize(self_scale_vec, self_zero_point_vec);
-          const auto db = b.dequantize(other_scale_vec, other_zero_point_vec);
+          const auto da = a.dequantize(
+              self_scale_vec, self_zero_point_vec, self_scale_zp_premul_vec);
+          const auto db = b.dequantize(
+              other_scale_vec, other_zero_point_vec, other_scale_zp_premul_vec);
           Vec::float_vec_return_type retvals;
           for (int i = 0; i < Vec::float_num_vecs(); ++i) {
             auto c = da[i] + db[i];
@@ -111,7 +117,7 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
           // TODO: specialize fbgemm::Quantize for a single vector and make it
           // inlineable. This could help with interleaving as suggested by the
           // TensorIterator implementations
-          auto rv = Vec::quantize(retvals, scale, zero_point);
+          auto rv = Vec::quantize(retvals, scale, zero_point, inv_scale);
           return rv;
         });
   });

@@ -46,7 +46,7 @@ bool check_ivalue_equality(const c10::IValue& ivalue1, const c10::IValue& ivalue
   } else if (ivalue1.isBool()) {
     return ivalue1.toBool() == ivalue2.toBool();
   } else if (ivalue1.isString()) {
-    return ivalue1.toString() == ivalue2.toString();
+    return ivalue1.toStringRef() == ivalue2.toStringRef();
   } else if (ivalue1.isTensor()) {
     return check_tensor_equality(ivalue1.toTensor(), ivalue2.toTensor());
   } else {
@@ -82,11 +82,11 @@ TORCH_CHECK(
 CHECK_MODULE_ATTR_EQUALITY = Template("""\
 TORCH_CHECK(
   check_ivalue_equality(
-    ${script_module_prefix}.get_attribute("${attr_name}"), c10::IValue(${cpp_module_prefix}->${attr_name})),
+    ${script_module_prefix}.get_attribute("${python_attr_name}"), c10::IValue(${cpp_module_prefix}->${cpp_attr_name})),
   GENERATE_PARITY_TEST_ERROR_MSG(
-    "`${cpp_module_prefix}->${attr_name}`",
-    ${cpp_module_prefix}->${attr_name},
-    ${script_module_prefix}.get_attribute("${attr_name}")));
+    "`${cpp_module_prefix}->${cpp_attr_name}`",
+    ${cpp_module_prefix}->${cpp_attr_name},
+    ${script_module_prefix}.get_attribute("${python_attr_name}")));
 """)
 
 TORCH_NN_MODULE_TEST_CTOR_ARGS = Template("""\n
@@ -275,12 +275,18 @@ class TestCppApiParity(common.TestCase):
                         script_module_prefix=script_module_prefix,
                         cpp_module_prefix=cpp_module_prefix,
                         buffer_name=name))
+                module_metadata = torch_nn_modules.module_metadata_map[module.__class__.__name__]
                 for name, attr in module.__dict__.items():
                     if name not in TORCH_NN_MODULE_IGNORED_ATTRS:
+                        if name in module_metadata.options_args:
+                            cpp_attr_name = 'options.{}()'.format(name)
+                        else:
+                            cpp_attr_name = name
                         stmts.append(CHECK_MODULE_ATTR_EQUALITY.substitute(
                             script_module_prefix=script_module_prefix,
                             cpp_module_prefix=cpp_module_prefix,
-                            attr_name=name))
+                            python_attr_name=name,
+                            cpp_attr_name=cpp_attr_name))
                 return stmts
 
             device = test_params.device
@@ -456,6 +462,7 @@ def _process_test_params(test_params_dict, module_metadata, device):
         has_parity=test_params_dict.get('has_parity', True),
         cpp_sources=module_metadata.cpp_sources,
         num_attrs_recursive=module_metadata.num_attrs_recursive,
+        options_args=module_metadata.options_args,
         device=device,
     )
 

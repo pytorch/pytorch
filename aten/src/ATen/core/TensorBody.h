@@ -689,6 +689,9 @@ class CAFFE2_API Tensor {
   Tensor values() const;
   int64_t numel() const;
   std::vector<Tensor> unbind(int64_t dim=0) const;
+  #ifdef BUILD_NAMEDTENSOR
+  std::vector<Tensor> unbind(Dimname dim) const;
+  #endif
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
