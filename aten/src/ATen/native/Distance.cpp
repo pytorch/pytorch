@@ -26,15 +26,13 @@ Tensor pdist(const Tensor& self, const double p) {
 
 Tensor euclidean_dist_out(const Tensor& x1, const Tensor& x2) {
   Tensor x1_norm = x1.pow(2).sum(-1, true);
+  Tensor x1_pad = at::ones_like(x1_norm);
   Tensor x2_norm = x2.pow(2).sum(-1, true);
-  Tensor result;
-  if (x1.dim() == 2) {
-    result = at::addmm(x2_norm.transpose(-2, -1), x1, x2.transpose(-2, -1), 1, -2);
-  } else {
-    result = at::baddbmm(x2_norm.transpose(-2, -1), x1, x2.transpose(-2, -1), 1, -2);
-  }
-  result.add_(x1_norm);
-  result.sqrt_();
+  Tensor x2_pad = at::ones_like(x2_norm);
+  Tensor x1_ = at::cat([-2 * x1, x1_norm, x1_pad], -1);
+  Tensor x2_ = at::cat([x2, x2_pad, x2_norm], -1);
+  Tensor result = x1_.matmul(x2_.transpose(-2, -1))
+  result.clamp_min_(0).sqrt_()
   return result;
 }
 
