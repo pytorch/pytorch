@@ -431,12 +431,18 @@
             PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib" 
 
-            # set +x
-            # export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            # export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            # set +x
-            # echo "KEY: ${AWS_ACCESS_KEY_ID}"
-            # echo "SECRET: ${AWS_SECRET_ACCESS_KEY}"
+            set +x
+            export AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}
+            export AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}
+            export AWS_ACCESS_KEY_ID_1=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
+            export AWS_SECRET_ACCESS_KEY_1=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
+            set +x
+            echo "KEY: ${AWS_ACCESS_KEY_ID}"
+            echo "SECRET: ${AWS_SECRET_ACCESS_KEY}"
+            echo "KEY1: ${AWS_ACCESS_KEY_ID_1}"
+            echo "SECRET1: ${AWS_SECRET_ACCESS_KEY_1}"
+
+             
 
             # Install conda
             curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
@@ -466,7 +472,7 @@
               CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
             fi
             if [ -n "${USE_NNPACK:-}" ]; then 
-              CMAKE_ARGS+=("-DUSE_QNNPACK=${USE_NNPACK}")
+              CMAKE_ARGS+=("-DUSE_NNPACK=${USE_NNPACK}")
             fi 
             CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
             CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")

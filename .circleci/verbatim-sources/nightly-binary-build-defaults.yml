@@ -68,3 +68,14 @@ binary_macos_brew_update: &binary_macos_brew_update
     brew link parallel --overwrite
     brew install expect
 
+binary_ios_brew_update: &binary_ios_brew_update
+  name: Brew update and install moreutils and expect
+  no_output_timeout: "1h"
+  command: |
+    brew update
+    brew unlink parallel
+    brew install moreutils
+    brew link parallel --overwrite
+    brew install expect
+    brew install libtool
+

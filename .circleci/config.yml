@@ -148,6 +148,17 @@ binary_macos_brew_update: &binary_macos_brew_update
     brew link parallel --overwrite
     brew install expect
 
+binary_ios_brew_update: &binary_ios_brew_update
+  name: Brew update and install moreutils and expect
+  no_output_timeout: "1h"
+  command: |
+    brew update
+    brew unlink parallel
+    brew install moreutils
+    brew link parallel --overwrite
+    brew install expect
+    brew install libtool
+
 ##############################################################################
 # Build parameters
 ##############################################################################
@@ -269,24 +280,7 @@ binary_mac_params: &binary_mac_params
       type: string
       default: ""
   environment:
-    BUILD_ENVIRONMENT: << parameters.build_environment >>
-
-binary_ios_params: &binary_ios_params
-  parameters:
-    build_environment:
-      type: string
-      default: ""
-    ios_arch:
-      type: string
-      default: ""
-    ios_platform:
-      type: string
-      default: ""
-  environment:
-    BUILD_ENVIRONMENT: << parameters.build_environment >>
-    IOS_ARC: << parameters.ios_arch >>
-    IOS_PLATFORM: << parameters.ios_platform >>
-##############################################################################
+    BUILD_ENVIRONMENT: << parameters.build_environment >>##############################################################################
 # Job specs
 ##############################################################################
 jobs:
@@ -776,7 +770,7 @@ jobs:
       - run:
           <<: *binary_populate_env
       - run:
-          <<: *binary_macos_brew_update
+          <<: *binary_mac_brew_update
       - run:
           <<: *binary_install_miniconda
       - run:
@@ -860,37 +854,62 @@ jobs:
           cat "$script"
           source "$script"
 
-#  binary_ios_build:
-#     <<: *binary_ios_params
-#     macos:
-#       xcode: "10.2.1"
-#     steps:
-#     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-#     - attach_workspace:
-#         at: ~/workspace
-#     - run:
-#         <<: *should_run_job
-#     - run:
-#         <<: *binary_checkout
-#     - run:
-#         <<: *binary_populate_env
-#     - run:
-#         <<: *binary_macos_brew_update
-#     - run:
-#         <<: *binary_install_miniconda
+  binary_ios_build:
+    <<: *pytorch_ios_params
+    macos:
+      xcode: "10.2.1"
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - attach_workspace:
+        at: ~/workspace
+    - run:
+        <<: *should_run_job
+    - run:
+        <<: checkout
+    - run:
+        <<: *binary_populate_env
+    - run:
+        <<: *binary_ios_brew_update
+    - run:
+        name: Build
+        no_output_timeout: "1h"
+        command: |
+          set -eux -o pipefail
+          script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_build.sh"
+          cat "$script"
+          source "$script"
 
-#     - run:
-#         name: Build
-#         no_output_timeout: "1h"
-#         command: |
-#           set -eux -o pipefail
-#           script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_build.sh"
-#           cat "$script"
-#           source "$script"
+    - persist_to_workspace:
+        root: /Users/distiller/project
+        paths: final_pkgs
 
-#     - persist_to_workspace:
-#         root: /Users/distiller/project
-#         paths: final_pkgs  
+  binary_ios_upload: 
+    <<: *binary_mac_params
+    macos:
+      xcode: "9.0"
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - attach_workspace:
+        at: ~/workspace
+    - run:
+        <<: *should_run_job
+    - run:
+        <<: *binary_checkout
+    - run:
+        <<: *binary_populate_env
+    - run:
+        <<: *binary_macos_brew_update
+    - run:
+        <<: *binary_install_miniconda
+    - attach_workspace: # TODO - we can `cp` from ~/workspace
+        at: /Users/distiller/project
+    - run:
+        name: Upload
+        no_output_timeout: "10m"
+        command: |
+          script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_upload.sh"
+          cat "$script"
+          source "$script"  
   setup:
     docker:
       - image: circleci/python:3.7.3
@@ -1357,12 +1376,18 @@ jobs:
             PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib" 
 
-            # set +x
-            # export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            # export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            # set +x
-            # echo "KEY: ${AWS_ACCESS_KEY_ID}"
-            # echo "SECRET: ${AWS_SECRET_ACCESS_KEY}"
+            set +x
+            export AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}
+            export AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}
+            export AWS_ACCESS_KEY_ID_1=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
+            export AWS_SECRET_ACCESS_KEY_1=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
+            set +x
+            echo "KEY: ${AWS_ACCESS_KEY_ID}"
+            echo "SECRET: ${AWS_SECRET_ACCESS_KEY}"
+            echo "KEY1: ${AWS_ACCESS_KEY_ID_1}"
+            echo "SECRET1: ${AWS_SECRET_ACCESS_KEY_1}"
+
+             
 
             # Install conda
             curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
@@ -1392,7 +1417,7 @@ jobs:
               CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
             fi
             if [ -n "${USE_NNPACK:-}" ]; then 
-              CMAKE_ARGS+=("-DUSE_QNNPACK=${USE_NNPACK}")
+              CMAKE_ARGS+=("-DUSE_NNPACK=${USE_NNPACK}")
             fi 
             CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
             CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
@@ -1456,14 +1481,14 @@ workflows:
       # Pytorch iOS builds
       - pytorch_ios_build:
           name: pytorch_ios_10_2_1_x86_64_build
-          build_environment: "pytorch-ios-10.2.1-x86_64_build"
+          build_environment: "pytorch-ios-10.2.1-x86_64-build"
           ios_platform: "SIMULATOR"
           use_nnpack: "OFF"
           requires: 
             - setup
       - pytorch_ios_build:
           name: pytorch_ios_10_2_1_arm64_build
-          build_environment: "pytorch-ios-10.2.1-arm64_build"
+          build_environment: "pytorch-ios-10.2.1-arm64-build"
           ios_arch: "arm64"
           requires: 
             - setup
