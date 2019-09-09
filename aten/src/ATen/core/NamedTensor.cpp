@@ -41,6 +41,10 @@ DimnameList default_names(size_t len) {
   return DimnameList(&all_unnamed.front(), len);
 }
 
+void check_names_valid_for(const Tensor& tensor, DimnameList names) {
+  return impl::check_names_valid_for(tensor.unsafeGetTensorImpl(), names);
+}
+
 namespace impl {
 
 // Two Dimnames cannot be in the same Tensor if one of them can refer to the other.
@@ -91,7 +95,7 @@ static const NamedTensorMeta* get_named_tensor_meta(const TensorImpl* impl) {
   return static_cast<const NamedTensorMeta*>(impl->named_tensor_meta());
 }
 
-void check_valid_names(TensorImpl* impl, DimnameList names) {
+void check_names_valid_for(TensorImpl* impl, DimnameList names) {
   auto ndim = impl->dim();
   TORCH_CHECK(
       ndim <= kMaxNamedTensorDim,
@@ -109,7 +113,7 @@ void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names) {
     impl->set_named_tensor_meta(nullptr);
     return;
   }
-  check_valid_names(impl, *names);
+  check_names_valid_for(impl, *names);
   auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
     impl->set_named_tensor_meta(c10::guts::make_unique<NamedTensorMeta>(*names));
@@ -120,7 +124,7 @@ void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names) {
 
 void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names) {
   if (validate_names) {
-    check_valid_names(impl, names);
+    check_names_valid_for(impl, names);
   }
   auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {

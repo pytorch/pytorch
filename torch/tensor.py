@@ -1,7 +1,7 @@
 import sys
 import torch
 import torch._C as _C
-from torch.namedtensor import _update_names, _check_serializing_named_tensor
+from torch.namedtensor import _update_names, _check_serializing_named_tensor, _resolve_glob
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -480,6 +480,10 @@ class Tensor(torch._C._TensorBase):
         data = (self.data_ptr(), False)  # read-only is false
 
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
+
+    def as_named(self, *names):
+        names = _resolve_glob(names, self.names, 'as_named')
+        return super(Tensor, self).as_named(names)
 
     def names_(self, *names, **rename_map):
         # Note [names_ / renamed API]

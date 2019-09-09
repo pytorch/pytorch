@@ -155,6 +155,42 @@ class TestNamedTensor(TestCase):
         self.assertTrue(partially_named.has_names())
         self.assertTrue(fully_named.has_names())
 
+    def test_as_named(self):
+        # Unnamed tensor -> Unnamed tensor
+        self._test_name_inference(Tensor.as_named,
+                                  [create('None:1,None:2,None:3'), 'N', 'C', 'H'],
+                                  ['N', 'C', 'H'])
+
+        # Named tensor -> Named tensor
+        self._test_name_inference(Tensor.as_named,
+                                  [create('N:1,C:2,H:3'), 'N', 'C', 'H'],
+                                  ['N', 'C', 'H'])
+
+        # Partially named tensor -> named tensor
+        self._test_name_inference(Tensor.as_named,
+                                  [create('None:1,C:2,None:3'), None, 'C', 'H'],
+                                  [None, 'C', 'H'])
+
+        # Too few names
+        self._test_name_inference(Tensor.as_named,
+                                  [create('None:2,None:3'), 'N', 'C', 'H'],
+                                  maybe_raises_regex="different number of dims")
+
+        # Cannot change Tensor[D] to Tensor[N]
+        self._test_name_inference(Tensor.as_named,
+                                  [create('D:3'), 'N'],
+                                  maybe_raises_regex="is different from")
+
+        # Cannot change Tensor[D] to Tensor[None]
+        self._test_name_inference(Tensor.as_named,
+                                  [create('D:3'), None],
+                                  maybe_raises_regex="'D' is more specific than None")
+
+        # globbing behavior exists
+        self._test_name_inference(Tensor.as_named,
+                                  [create('None:1,None:1,None:2,None:3'), '*', 'C', 'H'],
+                                  [None, None, 'C', 'H'])
+
     def test_repr(self):
         named_tensor = torch.zeros(2, 3).names_('N', 'C')
         expected = "tensor([[0., 0., 0.],\n        [0., 0., 0.]], names=('N', 'C'))"
