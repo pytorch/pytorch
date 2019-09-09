@@ -302,7 +302,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         def checkQuantized(model):
             self.checkDynamicQuantizedLinear(model.fc1)
-            self.checkScriptable(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -326,7 +326,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         def checkQuantized(model):
             self.assertEqual(type(model.fc1), torch.nn.Linear)
             self.checkDynamicQuantizedLinear(model.fc2)
-            self.checkScriptable(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -352,7 +352,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.fc3)
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
             self.checkLinear(model.sub2.fc2)
-            self.checkScriptable(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -379,7 +379,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
             self.checkDynamicQuantizedLinear(model.sub2.fc2)
             self.checkDynamicQuantizedLinear(model.fc3)
-            self.checkScriptable(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -410,7 +410,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.sub2.fc1)
             self.checkDynamicQuantizedLinear(model.sub2.fc2)
             self.checkDynamicQuantizedLinear(model.fc3)
-            self.checkScriptable(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
@@ -439,7 +439,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
             self.checkLinear(model.sub2.fc1)
             self.checkDynamicQuantizedLinear(model.sub2.fc2)
             test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
         checkQuantized(model)
 
