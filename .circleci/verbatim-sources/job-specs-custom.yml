@@ -419,11 +419,12 @@
       - run:
           <<: *should_run_job
       - checkout
-      - run:
-          <<: *ios_brew_update
+      # - run:
+      #     <<: *ios_brew_update
       - run:
           name: Build
           no_output_timeout: "1h"
+          contxt: org-member
           command: |
             set -e
             # export IN_CIRCLECI=1
@@ -487,7 +488,17 @@
             # #archive the static libraries
             # cd ${PROJ_ROOT}/build_ios/install/lib
             
-            # #for testing
+            
+            ####### for testing ########
+            if [ -d libprotobuf-lite.a ]; then
+              rm -rf libprotobuf-lite.a
+            fi
+
+            if [ -d libpthreadpool.a ]; then
+              rm -rf libpthreadpool.a
+            fi
+            #############################
+
             # rm -rf libprotobuf-lite.a
             # rm -rf libpthreadpool.a
             # libtool -static *.a -o libtorch_arm64.a
