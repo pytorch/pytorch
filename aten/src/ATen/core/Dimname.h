@@ -1,10 +1,10 @@
 #pragma once
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/interned_strings.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 #include <ostream>
 
+#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 enum class NameType: uint8_t { NORMAL, WILDCARD, TAGGED };

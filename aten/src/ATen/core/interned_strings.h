@@ -7,13 +7,13 @@
 
 #include <c10/macros/Macros.h>
 
-#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && (!defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE))
 #include <ATen/core/aten_interned_strings.h>
 #endif
 
 namespace c10 {
 
-#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && (!defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE))
 #define FORALL_NS_SYMBOLS(_)         \
   _(namespaces, prim)                \
   _(namespaces, aten)                \
