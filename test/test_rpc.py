@@ -11,7 +11,8 @@ from common_distributed import MultiProcessTestCase
 from common_utils import load_tests, run_tests
 from os import getenv
 
-BACKEND = getenv('BACKEND', dist.RpcBackend.PROCESS_GROUP)
+BACKEND = getenv('RPC_BACKEND', dist.RpcBackend.PROCESS_GROUP)
+RPC_INIT_URL = getenv('RPC_INIT_URL', '')
 
 # it is used to test python user defined function over rpc
 def my_function(a, b, c):
@@ -79,9 +80,12 @@ def _wrap_with_rpc(func):
     '''
     def wrapper(self):
         store = dist.FileStore(self.file.name, self.world_size)
-        dist.init_model_parallel('worker%d' % self.rank, rpc_backend=BACKEND,
-                                 rank=self.rank, world_size=self.world_size,
-                                 store=store)
+        dist.init_process_group(backend='gloo', rank=self.rank,
+                                world_size=self.world_size, store=store)
+        dist.init_model_parallel(rpc_backend=BACKEND,
+                                 self_name='worker%d' % self.rank,
+                                 self_rank=self.rank,
+                                 rpc_init_url=RPC_INIT_URL)
         func(self)
         dist.join_rpc()
 
@@ -127,11 +131,36 @@ class RpcTest(MultiProcessTestCase):
 
     def test_reinit(self):
         store = dist.FileStore(self.file.name, self.world_size)
-        dist.init_model_parallel('worker%d' % self.rank, rpc_backend=BACKEND,
-                                 rank=self.rank, world_size=self.world_size,
-                                 store=store)
-        with self.assertRaisesRegex(RuntimeError, "RPC is already initialized"):
-            dist.init_model_parallel("duplicated_name")
+        dist.init_process_group(backend="gloo", rank=self.rank,
+                                world_size=self.world_size, store=store)
+        with self.assertRaisesRegex(RuntimeError, "is not unique"):
+            dist.init_model_parallel(rpc_backend=BACKEND,
+                                     self_name="duplicate_name",
+                                     self_rank=self.rank,
+                                     rpc_init_url=RPC_INIT_URL)
+        dist.join_rpc()
+
+    def test_invalid_names(self):
+        store = dist.FileStore(self.file.name, self.world_size)
+        dist.init_process_group(backend="gloo", rank=self.rank,
+                                world_size=self.world_size, store=store)
+
+        with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
+            dist.init_model_parallel(self_name="abc*")
+
+        with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
+            dist.init_model_parallel(self_name=" ")
+
+        with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
+            dist.init_model_parallel(self_name="")
+
+        # If the number in the message does not match, it is likely that the
+        # value of MAX_NAME_LEN in RPC WorkerId has changed.
+        with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
+            dist.init_model_parallel(rpc_backend=BACKEND,
+                                     self_name="".join(["a" for _ in range(500)]),
+                                     self_rank=self.rank,
+                                     rpc_init_url=RPC_INIT_URL)
         dist.join_rpc()
 
     @_wrap_with_rpc
@@ -163,7 +192,6 @@ class RpcTest(MultiProcessTestCase):
             "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), n)
         )
         self.assertEqual(ret, (torch.ones(n, n) + n))
-
 
     @_wrap_with_rpc
     def test_async_add(self):
@@ -368,5 +396,33 @@ class RpcTest(MultiProcessTestCase):
     def test_stress_heavy_rpc(self):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
 
-if __name__ == "__main__":
+    @_wrap_with_rpc
+    def test_builtin_remote_ret(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref = dist.remote('worker{}'.format(dst_rank), torch.add,
+                           args=(torch.ones(n, n), torch.ones(n, n)))
+        self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
+
+    @_wrap_with_rpc
+    def test_multi_builtin_remote_ret(self):
+        m = 10
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rrefs = []
+        expected = []
+        for i in range(m):
+            n = n + i
+            rrefs.append(dist.remote(
+                'worker{}'.format(dst_rank),
+                torch.add,
+                args=(torch.ones(n, n), torch.ones(n, n))
+            ))
+            expected.append(torch.ones(n, n) * 2)
+
+        for i in range(m):
+            self.assertEqual(rrefs[i].to_here(), expected[i])
+
+
+if __name__ == '__main__':
     run_tests()

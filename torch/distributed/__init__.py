@@ -23,8 +23,10 @@ if is_available():
         from .rpc import _init_rpc
         from .rpc import *  # noqa: F401
 
-        def init_model_parallel(worker_name, rpc_backend=RpcBackend.PROCESS_GROUP,
-                                rank=-1, world_size=-1, store=None):
+        def init_model_parallel(rpc_backend=RpcBackend.PROCESS_GROUP,
+                                self_name=None,
+                                self_rank=-1,
+                                rpc_init_url=None):
             r"""
             Initializes model parallel primitives such as the local rpc agent
             and distributed autograd.
@@ -36,16 +38,18 @@ if is_available():
             ``init_process_group`` must be invoked prior to this method.
 
             Arguments:
-                worker_name (str): a globally unique name of this node. (e.g.,
-                            ``Trainer3``, ``ParameterServer2``, ``Master``,
-                            ``Worker1``) Name can only contain number, alphabet,
-                            underscore, and/or dash, and must be shorter than
-                            128 characters.
                 rpc_backend (Enum): type of RPC backend implementation.
                             Currently, process group backend is the only
                             available backend implementation. (default:
                             ``RpcBackend.PROCESS_GROUP``).
+                self_name (str): a globally unique name of this node. (e.g.,
+                            ``Trainer3``, ``ParameterServer2``, ``Master``,
+                            ``Worker1``) Name can only contain number, alphabet,
+                            underscore, and/or dash, and must be shorter than
+                            128 characters.
+                self_rank (int): a globally unique id/rank of this node.
+                rpc_init_url(str): backend specific init arguments.
             """
-            _init_rpc(worker_name, rpc_backend, world_size, rank, store)
+            _init_rpc(rpc_backend, self_name, self_rank, rpc_init_url)
             from .rpc import _agent
             autograd._init(_agent.get_worker_id().id)

@@ -137,6 +137,8 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // unsigned int (a.k.a uint32_t) and may cause a compile error with the message:
 // error C2397: conversion from 'long' to 'uint32_t' requires a narrowing conversion
 // Here the static cast is used to pass the build.
+// if this is used inside a lambda the __func__ macro expands to operator(),
+// which isn't very useful, but hard to fix in a macro so suppressing the warning.
 #define C10_THROW_ERROR(err_type, msg) \
   throw ::c10::err_type({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
 
