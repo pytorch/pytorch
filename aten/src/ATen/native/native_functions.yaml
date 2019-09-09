@@ -3021,6 +3021,11 @@
 
 - func: unbind(Tensor(a) self, int dim=0) -> Tensor(a)[]
   variants: function, method
+  named_guard: False
+
+- func: unbind(Tensor(a) self, Dimname dim) -> Tensor(a)[]
+  variants: function, method
+  named_guard: False
 
 - func: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
   variants: method
