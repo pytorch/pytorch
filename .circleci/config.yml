@@ -1906,18 +1906,19 @@ workflows:
       # Pytorch iOS builds
       - pytorch_ios_build:
           name: pytorch_ios_10_2_1_x86_64_build
-          build_environment: "pytorch-ios-10.2.1-x86_64_build"
+          build_environment: "pytorch-ios-10-2-1-x86_64_build"
           ios_platform: "SIMULATOR"
           use_nnpack: "OFF"
           requires: 
             - setup
       - pytorch_ios_build:
           name: pytorch_ios_10_2_1_arm64_build
-          build_environment: "pytorch-ios-10.2.1-arm64_build"
+          build_environment: "pytorch-ios-10-2-1-arm64_build"
           ios_arch: "arm64"
           requires: 
             - setup
-        - caffe2_linux_build:
+
+      - caffe2_linux_build:
           name: caffe2_py2_gcc4_8_ubuntu14_04_build
           requires:
             - setup
