@@ -5,18 +5,16 @@ Pod::Spec.new do |s|
     s.license          = { :type => 'BSD' }
     s.homepage         = 'https://github.com/pytorch/pytorch'
     s.source           = { :http => 'http://ossci-macos.s3.amazonaws.com/libtorch_x86_arm64.zip' }
-    s.summary          = 'PyTorch C++ library for iOS'
+    s.summary          = 'The PyTorch C++ library for iOS'
     s.description      = <<-DESC
-        PyTorch C++ library for iOS
+        The PyTorch C++ library for iOS.
     DESC
-
     s.default_subspec = 'Core'
     s.subspec 'Core' do |ss|
         ss.dependency 'LibTorch/Torch'
         ss.source_files = 'src/*.{h,cpp,cc}'
         ss.public_header_files = ['src/LibTorch.h']
     end
-    
     s.subspec 'Torch' do |ss|
         ss.header_mappings_dir = 'install/include/'
         ss.preserve_paths = 'install/include/**/*.{h,cpp,cc,c}' 
