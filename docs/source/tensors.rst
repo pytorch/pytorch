@@ -277,6 +277,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: hardshrink
    .. automethod:: histc
    .. automethod:: ifft
+   .. automethod:: imag
    .. automethod:: index_add_
    .. automethod:: index_add
    .. automethod:: index_copy_
@@ -375,6 +376,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: q_per_channel_scales
    .. automethod:: q_per_channel_zero_points
    .. automethod:: random_
+   .. automethod:: real
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
    .. automethod:: record_stream

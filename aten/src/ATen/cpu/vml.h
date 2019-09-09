@@ -39,11 +39,26 @@
 // There is a bug in Glibc2.23
 // https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280. Calling zeroall
 // when using AVX/AVX2 code resolves this.
+template <typename TYPE>
+inline void dl_runtime_bug (TYPE (*op)(TYPE)) {
+    volatile TYPE x = (TYPE)(1);
+    x = op(x);
+    _mm256_zeroall();
+}
+
+template<>
+inline void dl_runtime_bug <std::complex<float>> (std::complex<float> (*op)(std::complex<float>)) {
+  return;
+}
+
+template<>
+inline void dl_runtime_bug <std::complex<double>> (std::complex<double> (*op)(std::complex<double>)) {
+  return;
+}
+
 #if defined(__AVX__) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
 #define DL_RUNTIME_BUG(op, type) \
-  volatile type x = (type)(1);   \
-  x = std::op(x);                \
-  _mm256_zeroall();
+  dl_runtime_bug<type>(op);
 #else
 #define DL_RUNTIME_BUG(op, type)
 #endif
