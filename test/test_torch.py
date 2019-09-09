@@ -1647,8 +1647,7 @@ class _TestTorchMixin(torchtest):
             RuntimeError, "multinomial arguments must have the same device",
             lambda: torch.multinomial(x, 2, out=y))
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_multinomial_constrains(self):
+    def test_multinomial_constraints(self):
         for device in torch.testing.get_all_device_types():
             x = torch.empty(1, 2, 3, dtype=torch.double, device=device)
             self.assertRaisesRegex(

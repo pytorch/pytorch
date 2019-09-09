@@ -297,7 +297,7 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator *gen) {
 }
 
 /* The largest consecutive integer representable in float32 (2^24) */
-constexpr int64_t FLOAT32_MAX_CONSECUTIVE_INT = 16777216;
+constexpr int64_t FLOAT32_MAX_CONSECUTIVE_INT = 1 << (FLT_MANT_DIG);
 
 Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bool with_replacement, Generator *gen) {
   TORCH_CHECK(result.device() == self.device(), "multinomial arguments must have the same device");
