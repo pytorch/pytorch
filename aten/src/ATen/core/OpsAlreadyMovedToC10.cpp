@@ -160,6 +160,7 @@ const std::unordered_set<c10::OperatorName>& aten_ops_already_moved_to_c10() {
         {"aten::fbgemm_pack_gemm_matrix_fp16", ""},
         {"aten::fbgemm_linear_fp16_weight", ""},
         {"aten::fbgemm_pack_quantized_matrix", ""},
+        {"aten::fbgemm_pack_quantized_matrix", "KN"},
         {"aten::fbgemm_is_cpu_supported", ""},
         {"aten::log", ""},
         {"aten::log10", ""},
