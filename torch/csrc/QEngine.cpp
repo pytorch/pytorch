@@ -1,42 +1,42 @@
-#include <torch/csrc/QBackend.h>
+#include <torch/csrc/QEngine.h>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
 
-#include <c10/core/QBackend.h>
+#include <c10/core/QEngine.h>
 
 #include <structmember.h>
 #include <cstring>
 #include <string>
 
-PyObject* THPQBackend_New(at::QBackend qbackend, const std::string& name) {
-  auto type = (PyTypeObject*)&THPQBackendType;
+PyObject* THPQEngine_New(at::QEngine qengine, const std::string& name) {
+  auto type = (PyTypeObject*)&THPQEngineType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
     throw python_error();
-  auto self_ = reinterpret_cast<THPQBackend*>(self.get());
-  self_->qbackend = qbackend;
-  std::strncpy(self_->name, name.c_str(), QBACKEND_NAME_LEN);
-  self_->name[QBACKEND_NAME_LEN] = '\0';
+  auto self_ = reinterpret_cast<THPQEngine*>(self.get());
+  self_->qengine = qengine;
+  std::strncpy(self_->name, name.c_str(), QENGINE_NAME_LEN);
+  self_->name[QENGINE_NAME_LEN] = '\0';
   return self.release();
 }
 
-PyObject* THPQBackend_repr(THPQBackend* self) {
+PyObject* THPQEngine_repr(THPQEngine* self) {
   std::string name = self->name;
   return THPUtils_packString("torch." + name);
 }
 
-PyTypeObject THPQBackendType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.qbackend", /* tp_name */
-    sizeof(THPQBackend), /* tp_basicsize */
+PyTypeObject THPQEngineType = {
+    PyVarObject_HEAD_INIT(nullptr, 0) "torch.qengine", /* tp_name */
+    sizeof(THPQEngine), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
     nullptr, /* tp_print */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    (reprfunc)THPQBackend_repr, /* tp_repr */
+    (reprfunc)THPQEngine_repr, /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
@@ -67,12 +67,12 @@ PyTypeObject THPQBackendType = {
     nullptr, /* tp_new */
 };
 
-void THPQBackend_init(PyObject* module) {
-  if (PyType_Ready(&THPQBackendType) < 0) {
+void THPQEngine_init(PyObject* module) {
+  if (PyType_Ready(&THPQEngineType) < 0) {
     throw python_error();
   }
-  Py_INCREF(&THPQBackendType);
-  if (PyModule_AddObject(module, "qbackend", (PyObject*)&THPQBackendType) !=
+  Py_INCREF(&THPQEngineType);
+  if (PyModule_AddObject(module, "qengine", (PyObject*)&THPQEngineType) !=
       0) {
     throw python_error();
   }

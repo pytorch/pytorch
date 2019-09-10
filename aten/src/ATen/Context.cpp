@@ -87,11 +87,11 @@ bool Context::hasLAPACK() const {
 #endif
 }
 
-at::QBackend Context::preferredQuantizedEngine() const {
+at::QEngine Context::preferredQuantizedEngine() const {
   return quantized_engine;
 }
 
-void Context::setPreferredQuantizedEngine(at::QBackend e) {
+void Context::setPreferredQuantizedEngine(at::QEngine e) {
   quantized_engine = e;
 }
 

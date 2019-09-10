@@ -1,10 +1,10 @@
 #pragma once
-#include <torch/csrc/QBackend.h>
+#include <torch/csrc/QEngine.h>
 
 namespace torch {
 namespace utils {
 
-void initializeQBackends();
+void initializeQEngines();
 
 } // namespace utils
 } // namespace torch
