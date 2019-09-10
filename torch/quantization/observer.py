@@ -1,14 +1,16 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import torch
-import torch.nn as nn
+import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
-import warnings
 
+import torch
+import torch.nn as nn
 from torch._jit_internal import Optional
 
-ABC = ABCMeta(str('ABC'), (object,), {})  # compatible with Python 2 *and* 3:
+
+ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
+
 
 class ObserverBase(ABC, nn.Module):
     r"""Observer base Module
@@ -52,8 +54,10 @@ class ObserverBase(ABC, nn.Module):
         """
 
         if max_val is None or min_val is None:
-            warnings.warn("must run observer before calling calculate_qparams.\
-                                    Returning default scale and zero point ")
+            warnings.warn(
+                "must run observer before calling calculate_qparams.\
+                                    Returning default scale and zero point "
+            )
             return torch.tensor([1.0]), torch.tensor([0])
 
         assert min_val <= max_val, "min {} should be less than max {}".format(
@@ -102,7 +106,10 @@ class MinMaxObserver(ObserverBase):
     calculate_qparams will calculate scale and zero_point
     """
 
-    __annotations__ = {'min_val' : Optional[torch.Tensor], 'max_val' : Optional[torch.Tensor]}
+    __annotations__ = {
+        "min_val": Optional[torch.Tensor],
+        "max_val": Optional[torch.Tensor],
+    }
 
     def __init__(self, **kwargs):
         #  For x86 quantized kernels, we need to ensure that the vpmaddubsw instruction
@@ -137,15 +144,70 @@ class MinMaxObserver(ObserverBase):
 
     @torch.jit.export
     def extra_repr(self):
-        return 'min_val={}, max_val={}'.format(self.min_val, self.max_val)
+        return "min_val={}, max_val={}".format(self.min_val, self.max_val)
+
+
+class PerChannelMinMaxObserver(ObserverBase):
+    r"""Per Channel Observer Module
+    The module will record the running average of max and min value for each
+    channel of the observed Tensor and calculate_qparams will calculate
+    scales and zero_points for each channel
+    """
+
+    __annotations__ = {
+        "min_vals": Optional[torch.Tensor],
+        "max_vals": Optional[torch.Tensor],
+    }
+
+    def __init__(self, ch_axis=0, **kwargs):
+        super(PerChannelMinMaxObserver, self).__init__(**kwargs)
+        self.ch_axis = ch_axis
+        self.min_vals = None
+        self.max_vals = None
+
+    def forward(self, x):
+        min_vals = self.min_vals
+        max_vals = self.max_vals
+        if min_vals is None or max_vals is None:
+            min_vals = torch.min(x, self.ch_axis)[0]
+            max_vals = torch.max(x, self.ch_axis)[0]
+        else:
+            min_vals = torch.min(torch.min(x, self.ch_axis)[0], min_vals)
+            max_vals = torch.max(torch.max(x, self.ch_axis)[0], max_vals)
+        self.min_vals = min_vals
+        self.max_vals = max_vals
+        return x
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        min_vals = self.min_vals
+        max_vals = self.max_vals
+        if min_vals is None or max_vals is None:
+            scales = torch.ones(1)
+            zero_points = torch.zeros(1)
+        else:
+            scales = torch.ones(min_vals.size())
+            zero_points = torch.ones(min_vals.size())
+            for i in range(len(scales)):
+                scales[i], zero_points[i] = self._calculate_qparams(
+                    min_vals[i], max_vals[i]
+                )
+        return scales, zero_points
+
+    @torch.jit.export
+    def extra_repr(self):
+        return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
+
 
 def observer(observer_cls, **kwargs):
     return partial(observer_cls, **kwargs)
+
 
 def default_observer(**kwargs):
     # Restrict activations to be in the range (0,127)
     kwargs.setdefault("reduce_range", True)
     return observer(MinMaxObserver, **kwargs)
+
 
 def default_weight_observer(**kwargs):
     kwargs.setdefault("dtype", torch.qint8)
