@@ -89,6 +89,16 @@ inline int64_t THPUtils_unpackIndex(PyObject* obj) {
   return THPUtils_unpackLong(obj);
 }
 
+inline bool THPUtils_unpackBool(PyObject* obj) {
+  if (obj == Py_True) {
+    return true;
+  } else if (obj == Py_False) {
+    return false;
+  } else {
+    throw std::runtime_error("couldn't convert python object to boolean");
+  }
+}
+
 inline bool THPUtils_checkDouble(PyObject* obj) {
   bool is_numpy_scalar;
 #ifdef USE_NUMPY

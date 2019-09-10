@@ -4,22 +4,20 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 namespace {
-py::object module_;
-py::object runUDFFunction_;
-py::object loadResultFunction_;
+py::object runUDFFunction_ = py::none();
+py::object loadResultFunction_ = py::none();
 } // anonymous namespace
 
 namespace PythonRpcHandler {
 void init() {
   AutoGIL ag;
-  if (module_ == nullptr) {
-    module_ = py::module::import("torch.distributed.internal_rpc_utils");
+  py::module module =
+      py::module::import("torch.distributed.internal_rpc_utils");
+  if (runUDFFunction_.is(py::none())) {
+    runUDFFunction_ = module.attr("run_python_udf_internal");
   }
-  if (runUDFFunction_ == nullptr) {
-    runUDFFunction_ = module_.attr("run_python_udf_internal");
-  }
-  if (loadResultFunction_ == nullptr) {
-    loadResultFunction_ = module_.attr("load_python_udf_result_internal");
+  if (loadResultFunction_.is(py::none())) {
+    loadResultFunction_ = module.attr("load_python_udf_result_internal");
   }
 }
 
