@@ -319,7 +319,10 @@ public:
       return std::move(*this).kernel(
         std::move(dispatch_key),
         nullptr,
-        nullptr,  // setting cache creator to nullptr so calling the kernel doesn't need to call it, which would be expensive
+        // setting cache creator to nullptr so calling the kernel doesn't need to call it, which would be expensive
+        // This, however, only works if there are no constructor parameters (i.e. no runtime function pointer)
+        // Backend extensions use runtime function pointers, so we need a cache if sizeof...(ConstructorParameters) != 0
+        (sizeof...(ConstructorParameters) == 0) ? KernelCacheCreatorFunction(nullptr) : detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
         reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
         detail::FunctionSchemaInferer<KernelFunctor>()()
       );
