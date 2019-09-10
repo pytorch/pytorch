@@ -160,6 +160,7 @@ top_env = {
     'function_registrations': [],
     'c10_function_registrations': [],
     'c10_ops_already_moved_from_aten_to_c10': [],
+    'c10_ops_not_moved_from_aten_to_c10_yet': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'tensor_method_declarations': [],
