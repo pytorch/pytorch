@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -ex -o pipefail
 
+retry () {
+    $*  || $* || $* || $* || $*
+}
+
 # Set up NVIDIA docker repo
-curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+retry curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
 echo "deb https://nvidia.github.io/libnvidia-container/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
 echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
 echo "deb https://nvidia.github.io/nvidia-docker/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
@@ -13,8 +17,8 @@ sudo rm -f /etc/apt/heroku.list
 sudo rm -f /etc/apt/openjdk-r-ubuntu-ppa-xenial.list
 sudo rm -f /etc/apt/partner.list
 
-sudo apt-get -y update
-sudo apt-get -y remove linux-image-generic linux-headers-generic linux-generic docker-ce
+retry sudo apt-get -y update
+retry sudo apt-get -y remove linux-image-generic linux-headers-generic linux-generic docker-ce
 # WARNING: Docker version is hardcoded here; you must update the
 # version number below for docker-ce and nvidia-docker2 to get newer
 # versions of Docker.  We hardcode these numbers because we kept
@@ -27,7 +31,7 @@ sudo apt-get -y remove linux-image-generic linux-headers-generic linux-generic d
 # Ubuntu version (e.g., docker run -it ubuntu:16.04) and then ask
 # apt what the packages you need are.  Note that the CircleCI image
 # comes with Docker.
-sudo apt-get -y install \
+retry sudo apt-get -y install \
   linux-headers-$(uname -r) \
   linux-image-generic \
   moreutils \
@@ -37,10 +41,6 @@ sudo apt-get -y install \
   expect-dev
 
 sudo pkill -SIGHUP dockerd
-
-retry () {
-    $*  || $* || $* || $* || $*
-}
 
 retry sudo pip -q install awscli==1.16.35
 
