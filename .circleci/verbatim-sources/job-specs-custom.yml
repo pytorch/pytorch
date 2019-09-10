@@ -541,7 +541,7 @@
             mkdir -p ${DEST_DIR}
 
             cp -R ${PROJ_ROOT}/build_ios/install ${DEST_DIR}
-            mv ${DEST_DIR} ${IOS_ARCH}
+            mv ${DEST_DIR}/install ${DEST_DIR}/${IOS_ARCH}
             # cp ${PROJ_ROOT}/build_ios/install/lib/${OUTPUT}  ${DEST_DIR}
 
             #copy files

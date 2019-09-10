@@ -265,7 +265,7 @@
           source "$script"
 
     - persist_to_workspace:
-        path: /Users/distiller/workspace/ios
+        path: /Users/distiller/workspace/artifacts/ios
         destination: libtorch.zip
   
   binary_ios_upload: 
