@@ -155,10 +155,7 @@ def checkpoint(function, *args, **kwargs):
     return CheckpointFunction.apply(function, preserve, *args)
 
 
-# TODO(sublee): When releasing PyTorch 1.3,
-# fix the function signature to not accept variadic arguments.
-# See also: https://github.com/pytorch/pytorch/issues/19260
-def checkpoint_sequential(functions, segments, *inputs, **kwargs):
+def checkpoint_sequential(functions, segments, input, preserve_rng_state=True):
     r"""A helper function for checkpointing sequential models.
 
     Sequential models execute a list of modules/functions in order
@@ -194,23 +191,6 @@ def checkpoint_sequential(functions, segments, *inputs, **kwargs):
         >>> model = nn.Sequential(...)
         >>> input_var = checkpoint_sequential(model, chunks, input_var)
     """
-    # Hack to mix *args with **kwargs in a python 2.7-compliant way
-    preserve = kwargs.pop('preserve_rng_state', True)
-    if kwargs:
-        raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
-
-    # To accept variadic arguments is not consistent with nn.Sequential.
-    # This interface will be changed at PyTorch 1.3.
-    # See also: https://github.com/pytorch/pytorch/issues/19260
-    if not inputs:
-        warnings.warn('Giving no input to checkpoint_sequential has been deprecated, '
-                      'a TypeError will be raised after PyTorch 1.3',
-                      DeprecationWarning)
-    elif len(inputs) > 1:
-        warnings.warn('multiple inputs to checkpoint_sequential has been deprecated, '
-                      'a TypeError will be raised after PyTorch 1.3',
-                      DeprecationWarning)
-
     def run_function(start, end, functions):
         def forward(*inputs):
             for j in range(start, end + 1):
@@ -229,8 +209,6 @@ def checkpoint_sequential(functions, segments, *inputs, **kwargs):
     end = -1
     for start in range(0, segment_size * (segments - 1), segment_size):
         end = start + segment_size - 1
-        inputs = checkpoint(run_function(start, end, functions), *inputs,
-                            preserve_rng_state=preserve)
-        if not isinstance(inputs, tuple):
-            inputs = (inputs,)
-    return run_function(end + 1, len(functions) - 1, functions)(*inputs)
+        input = checkpoint(run_function(start, end, functions), input,
+                           preserve_rng_state=preserve_rng_state)
+    return run_function(end + 1, len(functions) - 1, functions)(input)
