@@ -113,7 +113,7 @@ def masked_select(g, self, mask):
 
 
 def masked_scatter(g, self, mask, source):
-    from torch.onnx.symbolic_opset9 import nonzero, expand_as, view, size, add
+    from torch.onnx.symbolic_opset9 import nonzero, expand_as, view, size
     index = nonzero(g, expand_as(g, mask, self))
     # NOTE: source can have more elements than needed.
     # It could also have arbitrary shape.

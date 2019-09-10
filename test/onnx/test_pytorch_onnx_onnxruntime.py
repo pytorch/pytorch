@@ -1097,7 +1097,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_masked_scatter(self):
         class MaskedScatterModel(torch.nn.Module):
             def forward(self, x):
-                return torch.masked_scatter(x, x.ge(0.5), torch.ones(100, 100)*5)
+                return torch.masked_scatter(x, x.ge(0.5), torch.ones(100, 100) * 5)
 
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(MaskedScatterModel(), x)
