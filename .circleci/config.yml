@@ -940,7 +940,7 @@ jobs:
           contxt: org-member
           command: |
             set -e
-            ARTIFACTS_DIR= ~/workspace/artifact/ios
+            ARTIFACTS_DIR= ~/workspace/artifacts/ios
             ZIP_DIR=~/workspace/zip
             mkdir -p ${ZIP_DIR}/install/lib
             mkdir -p ${ZIP_DIR}/src
@@ -1053,11 +1053,12 @@ jobs:
             #workspace/ios/x86_64
             #workspace/ios/arm64
             #workspace/ios/armv7s
-            DEST_DIR=${WORKSPACE}/artifacts/ios/${IOS_ARCH}
+            DEST_DIR=${WORKSPACE}/artifacts/ios
             mkdir -p ${DEST_DIR}
 
-            cp -R ${PROJ_ROOT}/build_ios/install/include ${DEST_DIR}
-            cp ${PROJ_ROOT}/build_ios/install/lib/${OUTPUT}  ${DEST_DIR}
+            cp -R ${PROJ_ROOT}/build_ios/install ${DEST_DIR}
+            mv ${DEST_DIR} ${IOS_ARCH}
+            # cp ${PROJ_ROOT}/build_ios/install/lib/${OUTPUT}  ${DEST_DIR}
 
             #copy files
             # mkdir -p ${WORKSPACE}/zip/src
@@ -1085,7 +1086,7 @@ jobs:
             # mkdir -p ${WORKSPACE}/artifact/ios
             # cp ${FILE_NAME} ${WORKSPACE}/artifact/ios
       - store_artifacts:
-          path: ~/workspace/artifacts/ios/${IOS_ARCH}
+          path: ~/workspace/artifacts/ios
 
 ##############################################################################
 ##############################################################################
