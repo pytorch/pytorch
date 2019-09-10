@@ -27,7 +27,7 @@ struct InputBuffer {
   // The optional CUDA streams determine which stream the accumulation
   // is run on and how the addition is synchronized.
   void add(size_t pos,
-           Variable var,
+           Variable&& var,
            const c10::optional<c10::Stream>& opt_producer_stream,
            const c10::optional<c10::Stream>& opt_consumer_stream);
 
