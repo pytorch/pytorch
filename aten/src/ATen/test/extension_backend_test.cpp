@@ -25,7 +25,7 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
 TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(empty({5, 5}, at::kMSNPU));
   globalATenDispatch().registerOp(
-    Backend::MSNPU,
+    TensorTypeId::MSNPUTensorId,
     "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
     &empty_override);
   Tensor a = empty({5, 5}, at::kMSNPU);
@@ -41,7 +41,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
 
   EXPECT_ANY_THROW(add(a, b));
   globalATenDispatch().registerOp(
-    Backend::MSNPU,
+    TensorTypeId::MSNPUTensorId,
     "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
     &add_override);
   add(a, b);
@@ -54,7 +54,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   // Attempt to register on a schema that has already has a function
   EXPECT_ANY_THROW(
     globalATenDispatch().registerOp(
-      Backend::MSNPU,
+      TensorTypeId::MSNPUTensorId,
       "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
       &empty_override)
   );
