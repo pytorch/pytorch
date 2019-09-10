@@ -1084,11 +1084,8 @@ jobs:
             # store the artifact
             # mkdir -p ${WORKSPACE}/artifact/ios
             # cp ${FILE_NAME} ${WORKSPACE}/artifact/ios
-
-            
       - store_artifacts:
           path: ~/workspace/artifact/ios/${IOS_ARCH}
-          destination: ${FILE_NAME}
 
 ##############################################################################
 ##############################################################################
