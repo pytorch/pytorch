@@ -112,7 +112,7 @@ TEST_F(ModulesTest, AvgPool1d) {
 
   s.backward();
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1 ,2})));
+  ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1, 2})));
   ASSERT_EQ(s.ndimension(), 0);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
@@ -125,7 +125,7 @@ TEST_F(ModulesTest, AvgPool2dEven) {
 
   s.backward();
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
   ASSERT_EQ(s.ndimension(), 0);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
 }

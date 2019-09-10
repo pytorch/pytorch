@@ -14,10 +14,10 @@ struct AvgPoolOptions {
   AvgPoolOptions(ExpandingArray<D> kernel_size)
       : kernel_size_(kernel_size), stride_(kernel_size) {}
 
-  /// the size of the window to take a average over
+  /// the size of the window to take an average over
   TORCH_ARG(ExpandingArray<D>, kernel_size);
 
-  /// the stride of the window. Default value is `kernel_size
+  /// the stride of the window. Default value is `kernel_size`
   TORCH_ARG(ExpandingArray<D>, stride);
 
   /// implicit zero padding to be added on both sides
