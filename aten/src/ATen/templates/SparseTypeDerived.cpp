@@ -17,6 +17,7 @@
 #include <c10/util/Half.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 #include <cstddef>
 #include <functional>
@@ -32,5 +33,8 @@ ${type_derived_method_definitions}
 
 static auto& registerer = globalATenDispatch()
   ${function_registrations};
+
+static auto c10_registerer = torch::RegisterOperators()
+  ${c10_function_registrations};
 
 }
