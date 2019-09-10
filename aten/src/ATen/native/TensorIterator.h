@@ -122,10 +122,10 @@ struct CAFFE2_API OperandInfo {
 
 struct SplitUntil32Bit;
 
-enum class CommonDTypeStrategy {
-  COMPUTE_ALL, // Compute common dtype based on inputs and outputs. Try to promote common dtype to inputs and outputs
-  COMPUTE_INPUTS, // Compute common dtype based only on inputs. Try to promote common dtype only to inputs
-  COMPUTE_NONE, // Do not compute and promote common dtype
+enum class CommonDTypeStrategy : uint8_t {
+  COMPUTE_ALL = 0, // Compute common dtype based on inputs and outputs. Try to promote common dtype to inputs and outputs
+  COMPUTE_INPUTS = 1, // Compute common dtype based only on inputs. Try to promote common dtype only to inputs
+  COMPUTE_NONE = 2, // Do not compute and promote common dtype
 };
 
 struct CAFFE2_API TensorIterator {
@@ -339,11 +339,11 @@ protected:
 #endif
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
+  CommonDTypeStrategy compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_ALL;
   bool has_coalesced_dimensions_ = false;
   bool accumulate_ = false;
   bool resize_outputs_ = true;
   bool is_reduction_ = false;
-  CommonDTypeStrategy compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_ALL;
   bool allow_cpu_scalars_ = false;
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
