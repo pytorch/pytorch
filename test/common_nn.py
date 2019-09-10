@@ -1264,7 +1264,7 @@ new_module_tests = [
     dict(
         module_name='MaxPool1d',
         constructor_args=(4, 4),
-        cpp_constructor_args='(MaxPool1dOptions(4).stride(4))',
+        cpp_constructor_args='(torch::nn::MaxPool1dOptions(4).stride(4))',
         input_size=(2, 10, 4),
         desc='stride',
     ),
@@ -1378,7 +1378,7 @@ new_module_tests = [
     dict(
         module_name='MaxPool2d',
         constructor_args=((3, 3), (2, 2), (1, 1)),
-        cpp_constructor_args='(MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1}))',
+        cpp_constructor_args='(torch::nn::MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1}))',
         input_size=(1, 3, 7, 7),
     ),
     dict(
@@ -1589,14 +1589,14 @@ new_module_tests = [
     dict(
         module_name='MaxPool3d',
         constructor_args=(2, (2, 2, 2)),
-        cpp_constructor_args='(MaxPool3dOptions(2).stride({2, 2, 2}))',
+        cpp_constructor_args='(torch::nn::MaxPool3dOptions(2).stride({2, 2, 2}))',
         input_size=(2, 3, 5, 5, 5),
         desc='stride',
     ),
     dict(
         module_name='MaxPool3d',
         constructor_args=(2, 2, (1, 1, 1)),
-        cpp_constructor_args='(MaxPool3dOptions(2).stride(2).padding({1, 1, 1}))',
+        cpp_constructor_args='(torch::nn::MaxPool3dOptions(2).stride(2).padding({1, 1, 1}))',
         input_size=(2, 3, 5, 5, 5),
         desc='stride_padding',
     ),
