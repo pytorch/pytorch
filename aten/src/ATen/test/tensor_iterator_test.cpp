@@ -120,7 +120,7 @@ TEST(TensorIteratorTest, InputDType) {
 TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
   auto iter = at::TensorIterator();
   iter.add_output(at::ones({1, 1}, at::dtype(at::kBool)));
-  iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
+  iter.add_input(at::ones({1, 1}, at::dtype(at::kFloat)));
   iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
   iter.compute_common_dtype_only_for_inputs();
   iter.build();
@@ -140,14 +140,5 @@ TEST(TensorIteratorTest, DoNotComputeCommonDTypeInputOnly) {
   EXPECT_TRUE(iter.dtype(0) == at::kLong);
   EXPECT_TRUE(iter.dtype(1) == at::kFloat);
   EXPECT_TRUE(iter.dtype(2) == at::kDouble);
-}
-
-TEST(TensorIteratorTest, ComputeCommonDTypeInputOnlyWithDiffTypes) {
-  auto iter = at::TensorIterator();
-  iter.add_output(at::ones({1, 1}, at::dtype(at::kLong)));
-  iter.add_input(at::ones({1, 1}, at::dtype(at::kFloat)));
-  iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
-  iter.compute_common_dtype_only_for_inputs();
-  ASSERT_ANY_THROW(iter.build());
 }
 

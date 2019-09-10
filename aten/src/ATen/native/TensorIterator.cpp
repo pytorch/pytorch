@@ -240,7 +240,9 @@ void TensorIterator::compute_types() {
       if (!compute_common_dtype_only_for_inputs) {
         validate_dtype(op, common_dtype, ninputs());
       }
-      maybe_promote_common_dtype(op, common_dtype);
+      if (!compute_common_dtype_only_for_inputs || !op.is_output) {
+        maybe_promote_common_dtype(op, common_dtype);
+      }
 
       if (op.tensor.defined() && op.device != op.tensor.device()) {
         if (op.is_output) {
