@@ -3861,12 +3861,22 @@ def foo(xyz):
         self.checkScript(f_grad, (y,))
 
     def test_tensor_data(self):
-        x = torch.randn(3, 4)
+        x = torch.randn(3, 4, requires_grad=True)
+        y = torch.randn(4, 5)
 
         def f_data(x):
             return x.data
 
-        self.checkScript(f_data, (x,))
+        scripted_f_data = torch.jit.script(f_data)
+
+        scripted_x = scripted_f_data(x)
+        self.assertEqual(scripted_x, f_data(x))
+        self.assertEqual(scripted_x.requires_grad, False)
+
+        scripted_y = scripted_f_data(y)
+        self.assertEqual(scripted_y, f_data(y))
+        self.assertEqual(scripted_x.requires_grad, False)
+
 
     def test_tensor_dtype(self):
         x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
