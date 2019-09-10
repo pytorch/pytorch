@@ -1,9 +1,9 @@
 #include <ATen/core/NamedTensor.h>
 
+#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/Tensor.h>
 #include <c10/util/C++17.h>
 
-#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 bool NamedTensorMeta::has_names() const {
@@ -13,31 +13,15 @@ bool NamedTensorMeta::has_names() const {
       });
 }
 
-/// thread_local is a feature that is not enabled by Caffe2 mobile
-/// build (e.g. iOS). Therefore, we only provide `at::NamesMode`
-/// when we are not in mobile build or when FEATURE_TORCH_MOBILE
-/// is on.
-#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 thread_local bool NamesMode_enabled = true;
 
 bool NamesMode::is_enabled() {
   return NamesMode_enabled;
 }
+
 void NamesMode::set_enabled(bool enabled) {
    NamesMode_enabled = enabled;
 }
-
-#else
-
-bool NamesMode::is_enabled() {
-  throw std::runtime_error("NamesMode is not supported on mobile");
-}
-void NamesMode::set_enabled(bool enabled) {
-  throw std::runtime_error("NamesMode is not supported on mobile");
-}
-
-#endif
-
 
 Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
   impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), names);
