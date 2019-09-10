@@ -207,7 +207,14 @@ void BlockToONNX(
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
-        outputs[i]->setType(old->type());
+        if(!outputs[i]->type()) {
+          if(outputs[i]->type() != old->type()){
+            std::ostringstream ss;
+            ss << "Output type of the ONNX model does not match with PT graph";
+            throw std::runtime_error(ss.str());
+          }
+          outputs[i]->setType(old->type());
+        }
         // Copy over source location and scope information to all nodes
         // created by the symbolic
         outputs[i]->node()->setSourceRange(node->sourceRange());
