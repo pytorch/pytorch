@@ -122,9 +122,9 @@ Node* insertObserver(
   script::Module observer_module;
   if (v->node()->kind() == prim::GetAttr &&
       v->node()->s(attr::name) == "weight") {
-    observer_module = std::get<1>(qconfig);
-  } else {
     observer_module = std::get<0>(qconfig);
+  } else {
+    observer_module = std::get<1>(qconfig);
   }
   std::string observer_name = "observer_for_" + v->debugName();
   script::Module observer = observer_module.clone();
