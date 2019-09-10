@@ -361,7 +361,11 @@ class BuildExtension(build_ext, object):
         # If `no_python_abi_suffix` is `True`, we omit the Python 3 ABI
         # component. This makes building shared libraries with setuptools that
         # aren't Python modules nicer.
-        if self.no_python_abi_suffix and sys.version_info >= (3, 0):
+        no_python_abi_suffix = self.no_python_abi_suffix
+        for ext in self.extensions:
+            if ext.name.rsplit('.')[-1] == ext_name:
+                no_python_abi_suffix |= not getattr(ext, 'is_python_module' , True)
+        if no_python_abi_suffix and sys.version_info >= (3, 0):
             # The parts will be e.g. ["my_extension", "cpython-37m-x86_64-linux-gnu", "so"].
             ext_filename_parts = ext_filename.split('.')
             # Omit the second to last element.
@@ -402,12 +406,12 @@ class BuildExtension(build_ext, object):
         self._add_compile_flag(extension, '-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI)))
 
 
-def CppExtension(name, sources, *args, **kwargs):
+class CppExtension(setuptools.Extension):
     '''
-    Creates a :class:`setuptools.Extension` for C++.
+    Subclass of :class:`setuptools.Extension` for C++ PyTorch extensions.
 
-    Convenience method that creates a :class:`setuptools.Extension` with the
-    bare minimum (but often sufficient) arguments to build a C++ extension.
+    This class includes the bare minimum (but often sufficient) arguments
+    to build a C++ extension.
 
     All arguments are forwarded to the :class:`setuptools.Extension`
     constructor.
@@ -427,37 +431,41 @@ def CppExtension(name, sources, *args, **kwargs):
                     'build_ext': BuildExtension
                 })
     '''
-    include_dirs = kwargs.get('include_dirs', [])
-    include_dirs += include_paths()
-    kwargs['include_dirs'] = include_dirs
+    def __init__(self, name, sources, *args, cuda=False, is_python_module=True, **kwargs):
+        include_dirs = kwargs.get('include_dirs', [])
+        include_dirs += include_paths(cuda=cuda)
+        kwargs['include_dirs'] = include_dirs
 
-    if IS_WINDOWS:
         library_dirs = kwargs.get('library_dirs', [])
-        library_dirs += library_paths()
+        library_dirs += library_paths(cuda=cuda)
         kwargs['library_dirs'] = library_dirs
 
         libraries = kwargs.get('libraries', [])
-        libraries.append('c10')
-        libraries.append('torch')
-        libraries.append('torch_python')
-        libraries.append('_C')
-        kwargs['libraries'] = libraries
 
-    kwargs['language'] = 'c++'
-    return setuptools.Extension(name, sources, *args, **kwargs)
+        if IS_WINDOWS:
+            libraries.append('c10')
+            libraries.append('torch')
+            libraries.append('torch_python')
+            libraries.append('_C')
+
+        kwargs['libraries'] = libraries
+        kwargs['language'] = 'c++'
+
+        self.is_python_module = is_python_module
+        super(CppExtension, self).__init__(name, sources, *args, **kwargs)
 
 
 def CUDAExtension(name, sources, *args, **kwargs):
     '''
-    Creates a :class:`setuptools.Extension` for CUDA/C++.
+    Creates a :class:`CppExtension` for CUDA/C++.
 
-    Convenience method that creates a :class:`setuptools.Extension` with the
+    Convenience method that creates a :class:`CppExtension` with the
     bare minimum (but often sufficient) arguments to build a CUDA/C++
     extension. This includes the CUDA include path, library path and runtime
     library.
 
-    All arguments are forwarded to the :class:`setuptools.Extension`
-    constructor.
+    All arguments are forwarded to the :class:`CppExtension`
+    constructor and ultimately to the one of :class:`setuptools.Extension`.
 
     Example:
         >>> from setuptools import setup
@@ -482,20 +490,10 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries = kwargs.get('libraries', [])
     libraries.append('cudart')
     if IS_WINDOWS:
-        libraries.append('c10')
         libraries.append('c10_cuda')
-        libraries.append('torch')
-        libraries.append('torch_python')
-        libraries.append('_C')
     kwargs['libraries'] = libraries
 
-    include_dirs = kwargs.get('include_dirs', [])
-    include_dirs += include_paths(cuda=True)
-    kwargs['include_dirs'] = include_dirs
-
-    kwargs['language'] = 'c++'
-
-    return setuptools.Extension(name, sources, *args, **kwargs)
+    return CppExtension(name, sources, *args, cuda=True, **kwargs)
 
 
 def include_paths(cuda=False):
