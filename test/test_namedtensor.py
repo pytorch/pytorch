@@ -89,8 +89,8 @@ class TestNamedTensor(TestCase):
     # Right now I don't know what it should look like.
     def assertTensorDataAndNamesEqual(self, x, y):
         self.assertEqual(x.names, y.names)
-        unnamed_x = x.view_names(None)
-        unnamed_y = y.view_names(None)
+        unnamed_x = x.renamed(None)
+        unnamed_y = y.renamed(None)
         self.assertEqual(unnamed_x, unnamed_y)
 
     def _test_factory(self, factory, device):
@@ -186,7 +186,7 @@ class TestNamedTensor(TestCase):
 
     def test_big_tensor_repr(self):
         def check_repr(named_tensor):
-            unnamed_tensor = named_tensor.view_names(None)
+            unnamed_tensor = named_tensor.renamed(None)
             expected = "{}, names={})".format(repr(unnamed_tensor)[:-1], named_tensor.names)
             self.assertEqual(repr(named_tensor), expected)
 
@@ -218,82 +218,82 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
             tensor.names_('N', 'N')
 
-    def test_view_names(self):
+    def test_renamed(self):
         tensor = torch.empty(1, 1, names=('N', 'C'))
 
-        self.assertEqual(tensor.view_names(None).names, (None, None))
-        self.assertEqual(tensor.view_names('H', 'W').names, ('H', 'W'))
+        self.assertEqual(tensor.renamed(None).names, (None, None))
+        self.assertEqual(tensor.renamed('H', 'W').names, ('H', 'W'))
 
         # Check that we didn't modify tensor.names
         self.assertEqual(tensor.names, ('N', 'C'))
 
         with self.assertRaisesRegex(RuntimeError, 'Number of names'):
-            tensor.view_names('N', 'C', 'W')
+            tensor.renamed('N', 'C', 'W')
         with self.assertRaisesRegex(RuntimeError, 'duplicate names'):
-            tensor.view_names('N', 'N')
+            tensor.renamed('N', 'N')
 
         with self.assertRaisesRegex(RuntimeError, 'either positional args or keyword args'):
-            tensor.view_names(None, N='batch')
+            tensor.renamed(None, N='batch')
 
-        # view_names returns a view on the tensor
-        self.assertEqual(tensor.view_names('H', 'W').data_ptr(), tensor.data_ptr())
-        self.assertEqual(tensor.view_names(None).data_ptr(), tensor.data_ptr())
+        # renamed returns a view on the tensor
+        self.assertEqual(tensor.renamed('H', 'W').data_ptr(), tensor.data_ptr())
+        self.assertEqual(tensor.renamed(None).data_ptr(), tensor.data_ptr())
 
-    def test_view_names_globber(self):
+    def test_renamed_globber(self):
         scalar = torch.randn([])
         unnamed_tensor = torch.empty(1, 1, 1, 1)
         named_tensor = torch.empty(1, 1, 1, 1, names=('N', 'C', 'H', 'W'))
 
-        self.assertEqual(scalar.view_names(None).names, [])
-        self.assertEqual(scalar.view_names('*').names, [])
+        self.assertEqual(scalar.renamed(None).names, [])
+        self.assertEqual(scalar.renamed('*').names, [])
 
         # Check that it works with unnamed tensors
-        self.assertEqual(unnamed_tensor.view_names('*').names, unnamed_tensor.names)
-        self.assertEqual(unnamed_tensor.view_names('*', 'H', 'W').names,
+        self.assertEqual(unnamed_tensor.renamed('*').names, unnamed_tensor.names)
+        self.assertEqual(unnamed_tensor.renamed('*', 'H', 'W').names,
                          [None, None, 'H', 'W'])
-        self.assertEqual(unnamed_tensor.view_names('N', '*', 'W').names,
+        self.assertEqual(unnamed_tensor.renamed('N', '*', 'W').names,
                          ['N', None, None, 'W'])
-        self.assertEqual(unnamed_tensor.view_names('N', 'C', '*').names,
+        self.assertEqual(unnamed_tensor.renamed('N', 'C', '*').names,
                          ['N', 'C', None, None])
 
         # Check that it works with named tensors
-        self.assertEqual(named_tensor.view_names('*').names, named_tensor.names)
-        self.assertEqual(named_tensor.view_names('*', 'width').names,
+        self.assertEqual(named_tensor.renamed('*').names, named_tensor.names)
+        self.assertEqual(named_tensor.renamed('*', 'width').names,
                          ['N', 'C', 'H', 'width'])
-        self.assertEqual(named_tensor.view_names('batch', 'channels', '*', 'width').names,
+        self.assertEqual(named_tensor.renamed('batch', 'channels', '*', 'width').names,
                          ['batch', 'channels', 'H', 'width'])
-        self.assertEqual(named_tensor.view_names('batch', '*').names,
+        self.assertEqual(named_tensor.renamed('batch', '*').names,
                          ['batch', 'C', 'H', 'W'])
 
         # Test empty glob
-        self.assertEqual(unnamed_tensor.view_names('*', None, None, None, None).names,
+        self.assertEqual(unnamed_tensor.renamed('*', None, None, None, None).names,
                          [None, None, None, None])
-        self.assertEqual(named_tensor.view_names('N', 'C', 'H', '*', 'W').names,
+        self.assertEqual(named_tensor.renamed('N', 'C', 'H', '*', 'W').names,
                          ['N', 'C', 'H', 'W'])
 
         # Multiple globs throw
         with self.assertRaisesRegex(RuntimeError, 'More than one '):
-            named_tensor.view_names('*', 'channels', '*')
+            named_tensor.renamed('*', 'channels', '*')
 
-    def test_view_names_rename_map(self):
+    def test_renamed_rename_map(self):
         scalar = torch.randn([])
         unnamed_tensor = torch.empty(1, 1, 1, 1)
         named_tensor = torch.empty(1, 1, 1, 1, names=('N', 'C', 'H', 'W'))
 
         with self.assertRaisesRegex(RuntimeError, "dim 'N' does not exist"):
-            scalar.view_names(N='batch')
+            scalar.renamed(N='batch')
         with self.assertRaisesRegex(RuntimeError, "dim 'N' does not exist"):
-            unnamed_tensor.view_names(N='batch')
+            unnamed_tensor.renamed(N='batch')
         with self.assertRaisesRegex(RuntimeError, "dim 'B' does not exist"):
-            named_tensor.view_names(B='batch')
+            named_tensor.renamed(B='batch')
         with self.assertRaisesRegex(RuntimeError, "dim 'B' does not exist"):
-            named_tensor.view_names(H='height', B='batch')
+            named_tensor.renamed(H='height', B='batch')
 
-        self.assertEqual(named_tensor.view_names(N='batch').data_ptr(),
+        self.assertEqual(named_tensor.renamed(N='batch').data_ptr(),
                          named_tensor.data_ptr())
-        self.assertEqual(named_tensor.view_names(N='batch').names,
+        self.assertEqual(named_tensor.renamed(N='batch').names,
                          ['batch', 'C', 'H', 'W'])
-        self.assertEqual(named_tensor.view_names(N='batch', H='height').names,
+        self.assertEqual(named_tensor.renamed(N='batch', H='height').names,
                          ['batch', 'C', 'height', 'W'])
 
     def test_set_names_property(self):
@@ -487,7 +487,7 @@ class TestNamedTensor(TestCase):
             out_fn = getattr(torch, name)
 
             def fn(a, b):
-                result = a.new_empty([0])
+                result = torch.empty([0], dtype=a.dtype, device=a.device)
                 out_fn(a, b, *args, out=result, **kwargs)
                 return result
 
@@ -564,7 +564,7 @@ class TestNamedTensor(TestCase):
             out_fn = getattr(torch, name)
 
             def fn(tensor):
-                result = tensor.new_empty([0])
+                result = torch.empty([0], dtype=tensor.dtype, device=tensor.device)
                 out_fn(tensor, *args, out=result, **kwargs)
                 return result
 
@@ -686,6 +686,39 @@ class TestNamedTensor(TestCase):
             torch.bernoulli(tensor, out=result)
             self.assertEqual(result.names, names)
 
+    def test_flatten(self):
+        tensor = torch.randn(2, 3, 5, 7, 11, names=('N', 'C', 'D', 'H', 'W'))
+
+        # basic
+        out = tensor.flatten('D', 'W', 'features')
+        self.assertEqual(out.names, ['N', 'C', 'features'])
+        self.assertEqual(out.renamed(None), tensor.renamed(None).view(2, 3, -1))
+
+        # int overload
+        out = tensor.flatten(2, 4, 'features')
+        self.assertEqual(out.names, ['N', 'C', 'features'])
+        self.assertEqual(out.renamed(None), tensor.renamed(None).view(2, 3, -1))
+
+        # list overload
+        out = tensor.flatten(['D', 'H', 'W'], 'features')
+        self.assertEqual(out.names, ['N', 'C', 'features'])
+        self.assertEqual(out.renamed(None), tensor.renamed(None).view(2, 3, -1))
+
+        # Non-contiguous flatten: N and H are not "adjacent" in memory.
+        sentences = torch.randn(2, 3, 5, 7, names=('N', 'T', 'H', 'D'))
+        sentences = sentences.transpose('T', 'H')
+        out = sentences.flatten('N', 'H', 'N_H')
+        self.assertEqual(out.names, ['N_H', 'T', 'D'])
+
+        with self.assertRaisesRegex(RuntimeError, "Name 'L' not found in"):
+            tensor.flatten(['D', 'L'], 'features')
+
+        with self.assertRaisesRegex(RuntimeError, "must be consecutive in"):
+            tensor.flatten(['D', 'W'], 'features')
+
+        with self.assertRaisesRegex(RuntimeError, "must be consecutive in"):
+            tensor.flatten(['H', 'D', 'W'], 'features')
+
     def test_reduction_fns(self):
         def check_output(output, expected_names):
             if isinstance(output, torch.Tensor):
@@ -721,7 +754,7 @@ class TestNamedTensor(TestCase):
 
         def test_out_variant(op_name, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
-            out = t.new_empty([0])
+            out = torch.empty([0], device=device)
             getattr(torch, op_name)(t, 'C', out=out)
             check_output(out, ['N', 'L'])
 
@@ -763,31 +796,31 @@ class TestNamedTensor(TestCase):
         # simple
         self._test_name_inference(
             torch.masked_select,
-            (create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C')),
+            (create('N:2,C:3'), (create('2,3') > 0).renamed('N', 'C')),
             expected_names=[None])
 
         # left broadcast
         self._test_name_inference(
             torch.masked_select,
-            (create('C:3'), (create('2,3') > 0).view_names('N', 'C')),
+            (create('C:3'), (create('2,3') > 0).renamed('N', 'C')),
             expected_names=[None])
 
         # right broadcast
         self._test_name_inference(
             torch.masked_select,
-            (create('N:2,C:3'), (create('3') > 0).view_names('C')),
+            (create('N:2,C:3'), (create('3') > 0).renamed('C')),
             expected_names=[None])
 
         # error
         self._test_name_inference(
             torch.masked_select,
-            (create('N:2,C:3'), (create('3') > 0).view_names('D')),
+            (create('N:2,C:3'), (create('3') > 0).renamed('D')),
             maybe_raises_regex='do not match')
 
         # out=
         self._test_name_inference(
             out_fn(torch.masked_select),
-            (create('0'), create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C')),
+            (create('0'), create('N:2,C:3'), (create('2,3') > 0).renamed('N', 'C')),
             expected_names=[None])
 
     def test_cat(self):
@@ -825,37 +858,37 @@ class TestNamedTensor(TestCase):
         # simple
         self._test_name_inference(
             Tensor.masked_fill,
-            (create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C'), 3.14),
+            (create('N:2,C:3'), (create('2,3') > 0).renamed('N', 'C'), 3.14),
             expected_names=['N', 'C'])
 
         # left broadcast
         self._test_name_inference(
             Tensor.masked_fill,
-            (create('C:3'), (create('2,3') > 0).view_names('N', 'C'), 3.14),
+            (create('C:3'), (create('2,3') > 0).renamed('N', 'C'), 3.14),
             maybe_raises_regex="must be less than or equal to")
 
         # right broadcast
         self._test_name_inference(
             Tensor.masked_fill,
-            (create('N:2,C:3'), (create('3') > 0).view_names('C'), 3.14),
+            (create('N:2,C:3'), (create('3') > 0).renamed('C'), 3.14),
             expected_names=['N', 'C'])
 
         # error
         self._test_name_inference(
             Tensor.masked_fill,
-            (create('N:2,C:3'), (create('3') > 0).view_names('D'), 3.14),
+            (create('N:2,C:3'), (create('3') > 0).renamed('D'), 3.14),
             maybe_raises_regex='do not match')
 
         # inplace
         self._test_name_inference(
             Tensor.masked_fill_,
-            (create('N:2,C:3'), (create('2,3') > 0).view_names('N', 'C'), 3.14),
+            (create('N:2,C:3'), (create('2,3') > 0).renamed('N', 'C'), 3.14),
             expected_names=['N', 'C'])
 
         # inplace, computed names don't match output tensor names
         self._test_name_inference(
             Tensor.masked_fill_,
-            (create('N:2,None:3'), (create('2,3') > 0).view_names('N', 'C'), 3.14),
+            (create('N:2,None:3'), (create('2,3') > 0).renamed('N', 'C'), 3.14),
             maybe_raises_regex="not the same as the computed output names")
 
 

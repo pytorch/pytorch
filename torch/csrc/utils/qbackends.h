@@ -4,7 +4,6 @@
 namespace torch {
 namespace utils {
 
-PyObject* getTHPQBackend(at::QBackend qbackend);
 void initializeQBackends();
 
 } // namespace utils

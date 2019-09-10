@@ -22,15 +22,6 @@ PyObject* THPQBackend_New(at::QBackend qbackend, const std::string& name) {
   return self.release();
 }
 
-PyObject* THPQBackend_reduce(THPQBackend* self) {
-  return THPUtils_packString(self->name);
-}
-
-static PyMethodDef THPQBackend_methods[] = {
-    {"__reduce__", (PyCFunction)THPQBackend_reduce, METH_NOARGS, nullptr},
-    {nullptr} /* Sentinel */
-};
-
 PyObject* THPQBackend_repr(THPQBackend* self) {
   std::string name = self->name;
   return THPUtils_packString("torch." + name);
@@ -63,7 +54,7 @@ PyTypeObject THPQBackendType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPQBackend_methods, /* tp_methods */
+    nullptr, /* tp_methods */
     nullptr, /* tp_members */
     nullptr, /* tp_getset */
     nullptr, /* tp_base */
