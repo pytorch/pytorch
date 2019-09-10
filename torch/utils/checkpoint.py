@@ -176,11 +176,15 @@ def checkpoint_sequential(functions, segments, input, preserve_rng_state=True):
         grads are needed for model inputs, otherwise the checkpointed part of the
         model won't have gradients.
 
+    .. warning:
+        Since PyTorch 1.3, it allows only one Tensor as the input and
+        intermediate outputs, just like :class:`torch.nn.Sequential`.
+
     Args:
         functions: A :class:`torch.nn.Sequential` or the list of modules or
             functions (comprising the model) to run sequentially.
         segments: Number of chunks to create in the model
-        inputs: tuple of Tensors that are inputs to :attr:`functions`
+        input: A Tensor that is input to :attr:`functions`
         preserve_rng_state(bool, optional, default=True):  Omit stashing and restoring
             the RNG state during each checkpoint.
 
