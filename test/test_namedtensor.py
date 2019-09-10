@@ -20,6 +20,9 @@ def check_env_flag(name, default=''):
 
 TEST_NAMEDTENSOR = check_env_flag('TEST_NAMEDTENSOR')
 
+skipIfNamedTensorDisabled = \
+    unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
+                    'PyTorch not compiled with namedtensor support')
 
 skipIfNotTestingNamedTensor = \
     unittest.skipIf(not TEST_NAMEDTENSOR,
@@ -1450,7 +1453,7 @@ class TestNamedTensor(TestCase):
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
     if attr.startswith('test_'):
-        new_test = skipIfNotTestingNamedTensor(getattr(TestNamedTensor, attr))
+        new_test = skipIfNamedTensorDisabled(skipIfNotTestingNamedTensor(getattr(TestNamedTensor, attr)))
         setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':
