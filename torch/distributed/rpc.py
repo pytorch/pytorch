@@ -24,15 +24,6 @@ def _require_initialized(func):
     return wrapper
 
 
-def get_agent(agent):
-    return _agent
-
-
-def set_agent(agent):
-    global _agent
-    _agent = agent
-
-
 def join_rpc():
     r"""
     Block until all local and remote RPC processes reach this method, process
