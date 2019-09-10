@@ -2557,7 +2557,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types([torch.float, torch.half])
-    @skipIfRocm
     def test_softmax_dtype(self, dtype=torch.float):
         input = torch.rand(32, 100, device="cuda", dtype=dtype, requires_grad=True)
         inputf = input.to(torch.float).detach().requires_grad_(True)
