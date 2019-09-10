@@ -28,8 +28,8 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-#include <ATen/core/Tensor.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
+#include <ATen/core/Tensor.h>
 #include <ATen/core/ivalue.h>
 #endif
 

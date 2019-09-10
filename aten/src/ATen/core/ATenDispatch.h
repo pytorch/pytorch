@@ -76,13 +76,13 @@ class CAFFE2_API ATenDispatch {
   ATenDispatch& registerOp(Backend backend, const char* schema, FuncType* fn) {
     if (op_was_already_moved_to_c10(schema)) {
       if (backend == Backend::Undefined) {
-        c10_op_registrations_.push_back(
+        add_c10_op_registration_(
           torch::RegisterOperators().op(schema, torch::RegisterOperators::options()
             .impl_unboxedOnlyCatchAllKernel(fn)
             .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
         ));
       } else {
-        c10_op_registrations_.push_back(
+        add_c10_op_registration_(
           torch::RegisterOperators().op(schema, torch::RegisterOperators::options()
             .impl_unboxedOnlyKernel(c10::backendToTensorTypeId(backend), fn)
             .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
@@ -101,7 +101,7 @@ class CAFFE2_API ATenDispatch {
   template <class FuncType>
   ATenDispatch& registerVariableOp(const char* schema, FuncType* fn) {
     if (op_was_already_moved_to_c10(schema)) {
-      c10_op_registrations_.push_back(
+      add_c10_op_registration_(
         torch::RegisterOperators().op(schema, torch::RegisterOperators::options()
           .impl_unboxedAutogradKernel(fn)
           .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
@@ -148,8 +148,34 @@ class CAFFE2_API ATenDispatch {
   }
 
   std::unordered_map<std::string, ATenOpTable> op_tables_;
-  std::vector<torch::RegisterOperators> c10_op_registrations_;
   std::mutex mutex_;
+
+  // Store a torch::RegisterOperators object so it isn't destructed
+  // (which would deregister it)
+  void add_c10_op_registration_(torch::RegisterOperators&& registration) {
+    // This function stores a vector<RegisterOperators> using a singleton pattern.
+    // We cannot just store this vector as a member in ATenDispatch, because
+    // then the destruction order would be wrong (Destruction always happens
+    // in opposite order of creation and ATenDispatch can be created
+    // before c10::Dispatcher, and would then be destroyed after, which would
+    // destroy the registration objects and try to register an operator after
+    // the c10::Dispatcher is already destroyed and crash).
+    // Using this singleton pattern, however, we can make sure that the vector
+    // is destroyed and the operators are deregistered before the c10::Dispatcher
+    // is destructed.
+    // This is an ugly pattern, but it's only temporary for while ATenDispatch
+    // is still around.
+
+    // First make sure the c10::Dispatcher is already created before we create
+    // our vector
+    c10::Dispatcher::singleton();
+
+    // Then create the vector
+    static std::vector<torch::RegisterOperators> registrations;
+
+    // And make sure we add the new registration to it
+    registrations.push_back(std::move(registration));
+  }
 };
 
 CAFFE2_API ATenDispatch& globalATenDispatch();
