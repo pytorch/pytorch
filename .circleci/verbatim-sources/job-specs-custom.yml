@@ -537,7 +537,7 @@
             #workspace/ios/x86_64
             #workspace/ios/arm64
             #workspace/ios/armv7s
-            DEST_DIR=${WORKSPACE}/ios/${IOS_ARCH}
+            DEST_DIR=${WORKSPACE}/artifacts/ios/${IOS_ARCH}
             mkdir -p ${DEST_DIR}
 
             cp -R ${PROJ_ROOT}/build_ios/install/include ${DEST_DIR}
@@ -569,4 +569,4 @@
             # mkdir -p ${WORKSPACE}/artifact/ios
             # cp ${FILE_NAME} ${WORKSPACE}/artifact/ios
       - store_artifacts:
-          path: ~/workspace/artifact/ios/${IOS_ARCH}
+          path: ~/workspace/artifacts/ios/${IOS_ARCH}
