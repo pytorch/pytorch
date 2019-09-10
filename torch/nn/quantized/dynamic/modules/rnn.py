@@ -49,7 +49,7 @@ class RNNBase(torch.nn.Module):
         else:
             raise ValueError("Unrecognized RNN mode: " + mode)
 
-        self._all_weights = []
+        self._all_weight_names = []
         self._all_weight_values = []
 
         for layer in range(num_layers):
@@ -91,7 +91,7 @@ class RNNBase(torch.nn.Module):
 
                 for (ih, ih_name), (hh, hh_name) in zip(zip(ih_params, ih_param_names), zip(hh_params, hh_param_names)):
 
-                    self._all_weights.extend([ih_name, hh_name])
+                    self._all_weight_names.extend([ih_name, hh_name])
                     self._all_weight_values.extend([ih, hh])
 
 
@@ -150,14 +150,14 @@ class RNNBase(torch.nn.Module):
             self.batch_first,
             self.dropout,
             self.bidirectional,
-            self._all_weights,
+            self._all_weight_names,
             self.__overloads__,
             self.training,
         )
 
         dynamic_vals = []
 
-        for i, weight_name in enumerate(self._all_weights):
+        for i, weight_name in enumerate(self._all_weight_names):
             if weight_name.find('w_') != -1:
                 dynamic_vals.append(torch.ops.quantized.linear_unpack(self._all_weight_values[i])[0])
             else:
@@ -175,12 +175,12 @@ class RNNBase(torch.nn.Module):
         self.batch_first = vals[5]
         self.dropout = vals[6]
         self.bidirectional = vals[7]
-        self._all_weights = vals[8]
+        self._all_weight_names = vals[8]
         self.__overloads__ = vals[9]
         self.training = vals[10]
 
         self._all_weight_values = []
-        for i, weight_name in enumerate(self._all_weights):
+        for i, weight_name in enumerate(self._all_weight_names):
             if weight_name.find('w_') != -1:
                 self._all_weight_values.append(torch.ops.quantized.linear_prepack(dynamic_vals[i]))
             else:
@@ -213,7 +213,7 @@ class RNNBase(torch.nn.Module):
         if qRNNBase.mode != 'LSTM':
             raise RuntimeError('Only LSTM is supported for QuantizedRNN')
 
-        qRNNBase._all_weights = []
+        qRNNBase._all_weight_names = []
         qRNNBase._all_weight_values = []
         for layer in range(qRNNBase.num_layers):
             for direction in range(num_directions):
@@ -247,7 +247,7 @@ class RNNBase(torch.nn.Module):
                 hh_params, hh_param_names = process_weights('hh', layer, suffix)
 
                 for (ih, ih_name), (hh, hh_name) in zip(zip(ih_params, ih_param_names), zip(hh_params, hh_param_names)):
-                    qRNNBase._all_weights.extend([ih_name, hh_name])
+                    qRNNBase._all_weight_names.extend([ih_name, hh_name])
                     qRNNBase._all_weight_values.extend([ih, hh])
 
 
