@@ -300,7 +300,7 @@ struct CAFFE2_API TensorIterator {
   }
 
   void compute_common_dtype_only_for_inputs() {
-    compute_common_dtype_only_for_inputs_ = false;
+    compute_common_dtype_only_for_inputs_ = true;
   }
 
   void dont_resize_outputs() {
