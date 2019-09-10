@@ -94,62 +94,24 @@ static void avg_pool2d_out_frame(
 void avg_pool2d_out_template(
           Tensor &output,
           const Tensor &input_,
-          IntArrayRef kernel_size,
-          IntArrayRef stride,
-          IntArrayRef padding,
-          bool ceil_mode,
+          int kW,
+          int kH,
+          int dW,
+          int dH,
+          int padW,
+          int padH,
           bool count_include_pad,
           c10::optional<int64_t> divisor_override)
 {
-  // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
-    "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
-
-  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
-    "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
-
-  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
-    "avg_pool2d: padding must either be a single int, or a tuple of two ints");
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-
-  TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-    "non-empty 2D or 3D (batch mode) tensor expected for input");
-
-  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
-    "divisor must be not zero");
-
-  /* sizes */
   const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
   const int64_t nInputPlane = input_.size(-3);
   const int64_t inputHeight = input_.size(-2);
   const int64_t inputWidth = input_.size(-1);
 
-  const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
-  const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
+  const int64_t outputHeight = output.size(-2);
+  const int64_t outputWidth = output.size(-1);
 
-  pool2d_shape_check(
-    input_,
-    kH, kW, dH, dW, padH, padW, 1, 1,
-    nInputPlane,
-    inputHeight, inputWidth,
-    outputHeight, outputWidth);
 
-  if (input_.ndimension() == 3) {
-    output = at::_empty_affine_quantized(
-            {nInputPlane, outputHeight, outputWidth},
-            input_.options(), input_.q_scale(), input_.q_zero_point());
-  }
-  else {
-    output = at::_empty_affine_quantized(
-            {nbatch, nInputPlane, outputHeight, outputWidth},
-            input_.options(), input_.q_scale(), input_.q_zero_point());
-  }
 
   TORCH_CHECK(output.is_contiguous(), "avg_pool2d: output must be contiguous");
 
@@ -175,6 +137,45 @@ void avg_pool2d_out_template(
   );
 }
 
+inline std::pair<int, int> get_kernel(IntArrayRef kernel_size) {
+  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
+    "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
+  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+  return std::make_pair(kW, kH);
+}
+
+inline std::pair<int, int> get_stride(IntArrayRef stride, int kW, int kH) {
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
+    "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
+  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
+  const int dW = stride.empty() ? kW :
+                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+  return std::make_pair(dW, dH);
+}
+
+inline std::pair<int, int> get_padding(IntArrayRef padding) {
+  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
+    "avg_pool2d: padding must either be a single int, or a tuple of two ints");
+  const int padH = safe_downcast<int, int64_t>(padding[0]);
+  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+  return std::make_pair(padW, padH);
+}
+
+std::vector<int64_t> get_output_shape(const Tensor& input_, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode) {
+
+  const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
+  const int64_t nInputPlane = input_.size(-3);
+  const int64_t inputHeight = input_.size(-2);
+  const int64_t inputWidth = input_.size(-1);
+  const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
+  const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
+  if (input_.ndimension() == 3) {
+    return {nInputPlane, outputHeight, outputWidth};
+  }
+  return {nbatch, nInputPlane, outputHeight, outputWidth};
+}
+
 } // namespace
 
 Tensor& quantized_avg_pool2d_out(
@@ -186,8 +187,24 @@ Tensor& quantized_avg_pool2d_out(
   bool ceil_mode,
   bool count_include_pad,
   c10::optional<int64_t> divisor_override) {
-  avg_pool2d_out_template(output, input, kernel_size, stride, padding, ceil_mode,
-                          count_include_pad, divisor_override);
+  int kW, kH, dW, dH, padW, padH;
+  std::tie(kW, kH) = get_kernel(kernel_size);
+  std::tie(dW, dH) = get_stride(stride, kW, kH);
+  std::tie(padW, padH) = get_padding(padding);
+
+  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
+    "divisor must be not zero");
+
+  auto output_shape = get_output_shape(input, kW, kH, dW, dH, padW, padH, ceil_mode);
+  TORCH_CHECK(
+      output.is_quantized() && output.sizes() == output_shape,
+      "Output Tensor must be quantized and have a shape of ",
+      "{ ",
+      output_shape,
+      " }.");
+
+  avg_pool2d_out_template(output, input, kW, kH, dW, dH, padW, padH, count_include_pad, divisor_override);
+
   return output;
 }
 
@@ -199,9 +216,21 @@ Tensor quantized_avg_pool2d(
   bool ceil_mode,
   bool count_include_pad,
   c10::optional<int64_t> divisor_override) {
-  auto output = at::empty({0}, input.options());
-  avg_pool2d_out_template(output, input, kernel_size, stride, padding, ceil_mode,
-                          count_include_pad, divisor_override);
+  int kW, kH, dW, dH, padW, padH;
+  std::tie(kW, kH) = get_kernel(kernel_size);
+  std::tie(dW, dH) = get_stride(stride, kW, kH);
+  std::tie(padW, padH) = get_padding(padding);
+
+  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
+    "divisor must be not zero");
+
+  auto output_shape = get_output_shape(input, kW, kH, dW, dH, padW, padH, ceil_mode);
+  // so far, we have no support of resize on qtensor, let's allocate aot
+  auto output = at::_empty_affine_quantized(
+            output_shape, input.options(), input.q_scale(), input.q_zero_point());
+
+  avg_pool2d_out_template(output, input, kW, kH, dW, dH, padW, padH, count_include_pad, divisor_override);
+
   return output;
 }
 
