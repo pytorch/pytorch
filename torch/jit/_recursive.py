@@ -28,8 +28,12 @@ def copy_to_script_module(original, stubs):
             object.__setattr__(script_module, name, item)
         elif item is script_module:
             continue
-        elif isinstance(item, (Parameter, Module, torch.jit.Attribute)):
+        elif isinstance(item, (Parameter, torch.jit.Attribute)):
             setattr(script_module, name, item)
+        elif isinstance(item, Module):
+            # Eagerly compile modules to ScriptModules with no code, but a complete type that is
+            # parameterized by constants and all slot types
+            setattr(script_module, name, recursive_script(item, methods=[]))
 
     # Copy buffers
     for name in original._buffers:
@@ -96,7 +100,7 @@ def copy_to_script_module(original, stubs):
     return script_module
 
 
-def recursive_script(mod, exclude_methods=()):
+def recursive_script(mod, *, methods=None, exclude_methods=()):
     """
     Makes a ScriptModule from an nn.Module. If `_methods` is provided,
     these methods are treated as @script_methods. If not, it defaults to
@@ -113,28 +117,30 @@ def recursive_script(mod, exclude_methods=()):
         raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
                            .format(type(mod).__name__))
 
-    methods = ()
-    if hasattr(mod, 'forward'):
-        if mod.forward.__func__ == torch.nn.Module.forward:
-            raise RuntimeError("No forward method was defined on {}".format(mod))
-        if not _jit_internal.is_ignored_fn(mod.forward):
-            methods = ('forward',)
-    exported = []
     overloads = []
-    for name in dir(mod):
-        item = getattr(mod, name)
-        if callable(item):
-            if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
-                exported.append(name)
+    if methods is None:
+        methods = ()
+        if hasattr(mod, 'forward'):
+            if mod.forward.__func__ == torch.nn.Module.forward:
+                raise RuntimeError("No forward method was defined on {}".format(mod))
+            if not _jit_internal.is_ignored_fn(mod.forward):
+                methods = ('forward',)
+        exported = []
 
-            # builtin functions like repr() in python 2 do not have __module__ defined
-            if hasattr(item, "__module__") and item.__module__ is not None:
-                method_overloads = _jit_internal._get_overloaded_methods(item, mod.__class__)
+        for name in dir(mod):
+            item = getattr(mod, name)
+            if callable(item):
+                if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
+                    exported.append(name)
 
-                if method_overloads is not None:
-                    overloads.append((item, method_overloads))
+                # builtin functions like repr() in python 2 do not have __module__ defined
+                if hasattr(item, "__module__") and item.__module__ is not None:
+                    method_overloads = _jit_internal._get_overloaded_methods(item, mod.__class__)
 
-    methods = methods + tuple(exported)
+                    if method_overloads is not None:
+                        overloads.append((item, method_overloads))
+
+        methods = methods + tuple(exported)
 
     methods = tuple(name for name in methods if name not in exclude_methods)
 

@@ -687,7 +687,7 @@ def make_module(mod, _module_class, _compilation_unit, exclude_methods=()):
     if isinstance(mod, ScriptModule):
         return mod
     elif torch._jit_internal.module_has_exports(mod):
-        return torch.jit._recursive.recursive_script(mod, exclude_methods)
+        return torch.jit._recursive.recursive_script(mod, exclude_methods=exclude_methods)
     else:
         if _module_class is None:
             _module_class = TopLevelTracedModule
