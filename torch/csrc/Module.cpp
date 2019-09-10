@@ -516,13 +516,13 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_benchmark", (PyCFunction)THPModule_setBenchmarkCuDNN, METH_O,  nullptr},
   {"_get_cudnn_deterministic", (PyCFunction)THPModule_deterministicCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_deterministic", (PyCFunction)THPModule_setDeterministicCuDNN, METH_O,  nullptr},
-  {"_get_preferred_engine", (PyCFunction)THPModule_preferredQuantizedEngine, METH_NOARGS,     nullptr},
-  {"_set_preferred_engine", (PyCFunction)THPModule_setPreferredQuantizedEngine, METH_O,  nullptr},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       nullptr},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       nullptr},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     nullptr},
   {"get_default_dtype", (PyCFunction)THPModule_getDefaultDtype, METH_NOARGS,  nullptr},
   {"_get_default_device", (PyCFunction)THPModule_getDefaultDevice, METH_NOARGS,  nullptr},
+  {"_get_preferred_engine", (PyCFunction)THPModule_preferredQuantizedEngine, METH_NOARGS,     nullptr},
+  {"_set_preferred_engine", (PyCFunction)THPModule_setPreferredQuantizedEngine, METH_O,  nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

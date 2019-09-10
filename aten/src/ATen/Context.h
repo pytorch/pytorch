@@ -122,7 +122,7 @@ private:
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
-  at::QBackend quantized_engine;
+  at::QBackend quantized_engine = at::QBackend::FBGEMM;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
 };

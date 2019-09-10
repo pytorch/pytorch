@@ -11,14 +11,16 @@
 namespace torch {
 namespace utils {
 
-#define _ADD_QBACKEND(qbackend, name)                                \
-  {                                                                  \
-    PyObject* qbackend_obj = THPQBackend_New(qbackend, name);        \
-    Py_INCREF(qbackend_obj);                                         \
-    if (PyModule_AddObject(torch_module, name, qbackend_obj) != 0) { \
-      throw python_error();                                          \
-    }                                                                \
+void addQBackend(
+    at::QBackend qbackend,
+    const std::string& name,
+    PyObject* torch_module) {
+  PyObject* qbackend_obj = THPQBackend_New(qbackend, name);
+  Py_INCREF(qbackend_obj);
+  if (PyModule_AddObject(torch_module, name.c_str(), qbackend_obj) != 0) {
+    throw python_error();
   }
+}
 
 void initializeQBackends() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
@@ -26,8 +28,8 @@ void initializeQBackends() {
     throw python_error();
   }
 
-  _ADD_QBACKEND(at::kFBGEMM, "fbgemm");
-  _ADD_QBACKEND(at::kQNNPACK, "qnnpack");
+  addQBackend(at::kFBGEMM, "fbgemm", torch_module);
+  addQBackend(at::kQNNPACK, "qnnpack", torch_module);
 }
 
 } // namespace utils
