@@ -686,6 +686,39 @@ class TestNamedTensor(TestCase):
             torch.bernoulli(tensor, out=result)
             self.assertEqual(result.names, names)
 
+    def test_flatten(self):
+        tensor = torch.randn(2, 3, 5, 7, 11, names=('N', 'C', 'D', 'H', 'W'))
+
+        # basic
+        out = tensor.flatten('D', 'W', 'features')
+        self.assertEqual(out.names, ['N', 'C', 'features'])
+        self.assertEqual(out.renamed(None), tensor.renamed(None).view(2, 3, -1))
+
+        # int overload
+        out = tensor.flatten(2, 4, 'features')
+        self.assertEqual(out.names, ['N', 'C', 'features'])
+        self.assertEqual(out.renamed(None), tensor.renamed(None).view(2, 3, -1))
+
+        # list overload
+        out = tensor.flatten(['D', 'H', 'W'], 'features')
+        self.assertEqual(out.names, ['N', 'C', 'features'])
+        self.assertEqual(out.renamed(None), tensor.renamed(None).view(2, 3, -1))
+
+        # Non-contiguous flatten: N and H are not "adjacent" in memory.
+        sentences = torch.randn(2, 3, 5, 7, names=('N', 'T', 'H', 'D'))
+        sentences = sentences.transpose('T', 'H')
+        out = sentences.flatten('N', 'H', 'N_H')
+        self.assertEqual(out.names, ['N_H', 'T', 'D'])
+
+        with self.assertRaisesRegex(RuntimeError, "Name 'L' not found in"):
+            tensor.flatten(['D', 'L'], 'features')
+
+        with self.assertRaisesRegex(RuntimeError, "must be consecutive in"):
+            tensor.flatten(['D', 'W'], 'features')
+
+        with self.assertRaisesRegex(RuntimeError, "must be consecutive in"):
+            tensor.flatten(['H', 'D', 'W'], 'features')
+
     def test_reduction_fns(self):
         def check_output(output, expected_names):
             if isinstance(output, torch.Tensor):
@@ -735,23 +768,27 @@ class TestNamedTensor(TestCase):
             'supports_complete_reduce',
             'supports_multidim_reduce',
             'supports_out_variant',
+            'supports_keepdim',
+            'output_lambda',
         ])
 
         tests = [
-            Case('sum', True, True, True),
-            Case('prod', True, False, True),
-            Case('mean', True, True, True),
-            Case('var', True, True, True),
-            Case('std', True, True, True),
-            Case('std_mean', True, True, False),
-            Case('var_mean', True, True, False),
+            Case('sum', True, True, True, True, None),
+            Case('prod', True, False, True, True, None),
+            Case('mean', True, True, True, True, None),
+            Case('var', True, True, True, True, None),
+            Case('std', True, True, True, True, None),
+            Case('std_mean', True, True, False, True, None),
+            Case('var_mean', True, True, False, True, None),
+            Case('unbind', False, False, False, False, None),
         ]
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             op_name = testcase.op_name
             test_simple_reduce(op_name, device)
-            test_keepdim(op_name, device)
 
+            if testcase.supports_keepdim:
+                test_keepdim(op_name, device)
             if testcase.supports_out_variant:
                 test_out_variant(op_name, device)
             if testcase.supports_complete_reduce:
