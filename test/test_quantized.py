@@ -488,6 +488,50 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          message="ops.quantized.max_pool2d results are off")
 
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           kernel=st.sampled_from((3, 5, 7)),
+           stride=st.sampled_from((None, 1, 2)),
+           padding=st.integers(0, 2))
+    def test_avg_pool2d(self, X, output_size_h, output_size_w):
+        X, (scale, zero_point, torch_type) = X
+
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iH, iW = X.shape[-2:]
+        oH = pool_output_shape(iH, kernel, padding, stride, 0)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, 0)
+        assume(oW > 0)
+
+        a = torch.from_numpy(X)
+        a_pool = torch.nn.functional.avg_pool2d(a, kernel_size=kernel,
+                                                stride=stride,
+                                                padding=padding)
+        a_ref = torch.quantize_linear(a_pool, scale=scale,
+                                      zero_point=zero_point, dtype=torch_type)
+        a_ref = a_ref.dequantize()
+        qa = torch.quantize_linear(a, scale=scale, zero_point=zero_point,
+                                   dtype=torch_type)
+
+        ops_under_test = {
+            "torch": torch.avg_pool2d,
+            "nn.functional": torch.nn.functional.avg_pool2d,
+            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool2d
+        }
+
+        for name, op in ops_under_test.items():
+            a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding)
+            self.assertEqual(a_ref, a_hat.dequantize(),
+                             message="{} results are off".format(name))
+        # Test the ops.quantized separately, because None is not treated.
+        a_hat = torch.ops.quantized.avg_pool2d(
+            qa, kernel_size=_pair(kernel),
+            stride=_pair(kernel if stride is None else stride),
+            padding=_pair(padding))
+        self.assertEqual(a_ref, a_hat.dequantize(),
+                         message="ops.quantized.avg_pool2d results are off")
+
     @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
