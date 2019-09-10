@@ -137,6 +137,7 @@ SET(PYTORCH_QNNPACK_INIT_SRCS
   src/average-pooling.c
   src/channel-shuffle.c
   src/clamp.c
+  src/conv-prepack.cc
   src/convolution.c
   src/deconvolution.c
   src/fc-prepack.cc
@@ -149,6 +150,7 @@ SET(PYTORCH_QNNPACK_INIT_SRCS
   src/operator-delete.c)
 
 SET(PYTORCH_QNNPACK_EXEC_SRCS
+  src/conv-run.cc
   src/fc-run.cc
   src/indirection.c
   src/operator-run.c)
@@ -367,7 +369,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(convolution-test PRIVATE src test)
-  TARGET_LINK_LIBRARIES(convolution-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  TARGET_LINK_LIBRARIES(convolution-test PRIVATE pytorch_qnnpack clog cpuinfo fp16 gtest gtest_main)
   ADD_TEST(convolution-test convolution-test)
 
   ADD_EXECUTABLE(deconvolution-test test/deconvolution.cc)
