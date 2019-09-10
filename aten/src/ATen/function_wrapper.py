@@ -127,7 +127,7 @@ C10_DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 C10_BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op("${schema_string}", torch::RegisterOperators::options()
   .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(
-    c10::backendToTensorTypeId(Backend::${Backend}))
+    TensorTypeId::${Backend}TensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
