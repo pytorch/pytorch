@@ -3,8 +3,8 @@ from jit_utils import JitTestCase
 from torch.testing import FileCheck
 from typing import NamedTuple, List, Optional
 import unittest
+import sys
 import torch
-
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
@@ -47,6 +47,21 @@ class TestScriptPy3(JitTestCase):
             return rv
 
         self.assertEqual(foo(torch.rand(3, 4)), 18.0)
+
+    @unittest.skipIf(sys.version_info[0] < 3 and sys.version_info[1] < 6, "dict not ordered")
+    def test_dict_preserves_order(self):
+        def dict_ordering():
+            a : Dict[int, int] = {}
+            for i in range(1000):
+                a[i] = i + 1
+            return a
+
+        self.checkScript(dict_ordering, ())
+        di = torch.jit.script(dict_ordering)()
+        res = list(di.items())
+        for i in range(1000):
+            key, value = res[i]
+            self.assertTrue(key == i and value == i + 1)
 
     def test_return_named_tuple(self):
         class FeatureVector(NamedTuple):

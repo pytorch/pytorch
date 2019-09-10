@@ -5,6 +5,7 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/order_preserving_flat_hash_map.h>
 #include <c10/util/Optional.h>
 #include <ATen/core/Tensor.h>
 
@@ -39,7 +40,7 @@ struct DictKeyEqualTo {
 };
 
 struct DictImpl final : public c10::intrusive_ptr_target {
-  using dict_map_type = ska::flat_hash_map<IValue, IValue, DictKeyHash, DictKeyEqualTo>;
+  using dict_map_type = ska_ordered::order_preserving_flat_hash_map<IValue, IValue, DictKeyHash, DictKeyEqualTo>;
   struct DictElementTypes final {
     TypePtr keyType;
     TypePtr valueType;
