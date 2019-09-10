@@ -1,7 +1,6 @@
 #pragma once
 
-// We are incrementally working on deleting the BUILD_NAMEDTENSOR flag from
-// the codebase. For now, always define the macro.
+// We are working on removing the BUILD_NAMEDTENSOR flag from the codebase.
 //
 // PyTorch's codegen also uses a similar flag. You can find it in
 // - aten/src/ATen/env.py
