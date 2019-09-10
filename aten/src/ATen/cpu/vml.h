@@ -41,8 +41,7 @@
 #include <ATen/native/cpu/zmath.h>
 #if defined(__AVX__) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
 #define DL_RUNTIME_BUG(op, tp) \
-  using type = typename at::native::ztype<tp>::type;  \
-  volatile type x;   \
+  volatile tp x = (tp)(1);   \
   x = std::op(x);                \
   _mm256_zeroall();
 #else
