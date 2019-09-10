@@ -5935,7 +5935,7 @@ class _TestTorchMixin(torchtest):
             x_exp = torch.stack(x_exp_list)  # Stacked output
             x_act = torch.triangular_solve(b, A, upper=upper,
                                            unitriangular=unitriangular, transpose=transpose)[0]  # Actual output
-            self.assertEqual(x_exp, x_act)  # Equality check
+            self.assertEqual(x_act, x_exp)  # Equality check
             if transpose:
                 self.assertLessEqual(b.dist(torch.matmul(A.transpose(-2, -1), x_act)), 2e-12)  # Correctness check
             else:
@@ -5993,8 +5993,8 @@ class _TestTorchMixin(torchtest):
 
         def run_test(A_dims, b_dims, cast, upper, transpose, unitriangular):
             b, A = triangular_solve_test_helper(A_dims, b_dims, cast, upper, unitriangular)
-            x_exp = torch.Tensor(scipy_tri_solve_batched(A.cpu().numpy(), b.cpu().numpy(),
-                                                         upper, transpose, unitriangular))
+            x_exp = torch.as_tensor(scipy_tri_solve_batched(A.cpu().numpy(), b.cpu().numpy(),
+                                                            upper, transpose, unitriangular))
             x = torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
 
             self.assertEqual(x, cast(x_exp))
@@ -7333,7 +7333,7 @@ class _TestTorchMixin(torchtest):
                 x_exp_list.append(torch.cholesky_solve(b[i], L[i], upper=upper))
             x_exp = torch.stack(x_exp_list)  # Stacked output
             x_act = torch.cholesky_solve(b, L, upper=upper)  # Actual output
-            self.assertEqual(x_exp, x_act)  # Equality check
+            self.assertEqual(x_act, x_exp)  # Equality check
             self.assertLessEqual(b.dist(torch.matmul(A, x_act)), 2e-12)  # Correctness check
 
         for upper, batchsize in product([True, False], [1, 3, 4]):
