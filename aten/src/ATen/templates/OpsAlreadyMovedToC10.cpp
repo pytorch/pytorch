@@ -1,4 +1,6 @@
-#include "OpsAlreadyMovedToC10.h"
+#include <ATen/core/OpsAlreadyMovedToC10.h>
+
+// ${generated_comment}
 
 namespace at {
 
