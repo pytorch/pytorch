@@ -1046,15 +1046,6 @@ jobs:
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
-            mkdir -p /Users/distiller/pytorch-ci-env/workspace
-
-            # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
-            cp -a /Users/distiller/project/. /Users/distiller/pytorch-ci-env/workspace
-      - persist_to_workspace:
-          root: /Users/distiller/pytorch-ci-env
-          paths:
-            - "*"
-
   pytorch_macos_10_13_py3_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
@@ -1080,7 +1071,7 @@ jobs:
             # TODO: I'm not sure why we can't just run our job in
             # ~/workspace and call it a day
             # NB: Yes, you need workspace twice
-            cp -a ~/workspace/workspace/. /Users/distiller/project
+            # cp -a ~/workspace/workspace/. /Users/distiller/project
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
