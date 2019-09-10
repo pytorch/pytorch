@@ -240,7 +240,7 @@ static bool varargsCanBeUsedAsList(
       schema.arguments()[arg_index + 1].kwarg_only();
 
   // The formal must be an intlist
-  bool argument_is_intlist = arg.type() == ListType::ofInts();
+  bool argument_is_intlist = *arg.type() == *ListType::ofInts();
 
   // it must not be a broadcasting list like int[3],
   // otherwise a single int is a valid input
@@ -299,11 +299,12 @@ c10::optional<MatchedSchema> tryMatchSchema(
               err,
               allow_conversions,
               type_env);
-          if (list) {
-            used_args = args.size();
-            positional_inputs.push_back(list);
-            continue;
+          if (!list) {
+            return c10::nullopt;
           }
+          used_args = args.size();
+          positional_inputs.push_back(list);
+          continue;
         }
       }
 
