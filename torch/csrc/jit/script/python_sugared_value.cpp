@@ -348,29 +348,19 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return std::make_shared<ConstantParameterList>(list);
   }
 
-  // Recursively create a ScriptModule and register it as
-  // as submodule or register a python method as a script::Method
   if (py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
-    // If the module is a submodule of the py_module, convert it to a
-    // ScriptModule and add it as a submodule to the script::Module. This
-    // enables lazy strong-ification of modules.
-    auto result =
-        py::module::import("torch.jit._recursive")
-            .attr("make_strong_submodule")(field, attr, py_module_);
-    if (!result.is_none()) {
-      auto submodule = as_module(result);
-      TORCH_CHECK(
-          submodule,
-          "Result of torch.torch.jit._recursive.make_strong_submodule "
-          "was not a ScriptModule");
-      // The module was a submodule of the nn.Module, so register it here
-      // and return the submodule.
-      module_.register_module(field, *submodule);
-      auto v = module_.find_module(field);
-      return std::make_shared<ModuleValue>(
-          m.graph()->insertGetAttr(self_, field), *v, result);
-    }
+    // Submodules should be eagerly compiled, so they should already be `ScriptModule`s
+    auto v = module_.find_module(field);
+    TORCH_INTERNAL_ASSERT(
+        v,
+        "Expected a module named '",
+        field,
+        "', but didn't find it in submodules.");
+    return std::make_shared<ModuleValue>(
+        m.graph()->insertGetAttr(self_, field), *v, attr);
   } else if (py::isinstance<py::function>(attr)) {
+    // Code is lazily compiled, so compile a method and register it
+    // on this module
     auto stub = py::module::import("torch.jit._recursive")
                     .attr("create_method_from_fn")(py_module_, attr);
     if (!stub.is_none()) {

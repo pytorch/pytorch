@@ -1449,7 +1449,8 @@ class ScriptMeta(type):
                 # this is the init of the concrete type of self,
                 # we have already resolved all _methods
                 methods = [v for k, v in sorted(cls._methods.items())]
-                _create_methods_from_stubs(self, methods)
+                # _create_methods_from_stubs(self, methods)
+                torch.jit._recursive.copy_to_script_module(self, stubs=methods, script_module=self)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
@@ -1468,7 +1469,10 @@ if _enabled:
         def __get__(self, obj, cls):
             return self.__getattr__('forward')
 
-    class ScriptModule(with_metaclass(ScriptMeta, Module)):
+    class ScriptModule(Module):
+        pass
+
+    class RealScriptModule(with_metaclass(ScriptMeta, Module)):
         r"""
         The core data structure in TorchScript is the ``ScriptModule``. It is an
         analogue of torch's ``nn.Module`` and represents an entire model as a tree of

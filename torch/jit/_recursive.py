@@ -7,20 +7,30 @@ from torch.nn import Module, ModuleList, Parameter, Sequential
 from torch._six import get_function_from_type
 
 
-def copy_to_script_module(original, stubs):
+def copy_to_script_module(original, stubs, script_module=None):
     """
     Copies the parameters, buffers, constants, attributes, and submodules
-    of an nn.Module into itself.
+    of an nn.Module into a ScriptModule (either by creating a new one or using
+    the one passed in `script_module`).
     """
-    qualified_name = torch.jit._qualified_name(type(original))
-    script_module = torch.jit.ScriptModule(_qualified_name=qualified_name)
+    if script_module is None:
+        qualified_name = torch.jit._qualified_name(type(original))
+        script_module = torch.jit.ScriptModule(_qualified_name=qualified_name)
 
     constants_set = set(getattr(original, "__constants__", []))
     script_module.__dict__["_constants_set"] = {}
 
+    def is_valid_attr(name):
+        # Anything in `dir(original)` could be faked with the __dir__ magic
+        # method, so check `hasattr` to ensure there's an actual value
+        # For example thhis happens for `script_module.code`
+        return hasattr(original, name)
+
 
     # Copy Parameters and Modules
     for name in dir(original):
+        if not is_valid_attr(name):
+            continue
         item = getattr(original, name)
         if item is None and name in original._parameters:
             # XXX: treat None value simply as module attributes instead of adding them to the parameter list
@@ -36,7 +46,7 @@ def copy_to_script_module(original, stubs):
             setattr(script_module, name, recursive_script(item, methods=[]))
 
     # Copy buffers
-    for name in original._buffers:
+    for name, _buffer in original._buffers.items():
         if original._buffers[name] is None:
             object.__setattr__(script_module, name, None)
         else:
@@ -62,6 +72,8 @@ def copy_to_script_module(original, stubs):
     # the type if possible
     class_annotations = getattr(original, '__annotations__', {})
     for name in dir(original):
+        if not is_valid_attr(name):
+            continue
         if name in ("training", "__dict__"):
             # TODO: removing this skip should let us remove the code to add training as an
             # attribute in python_sugared_value.cpp
@@ -82,6 +94,8 @@ def copy_to_script_module(original, stubs):
 
     # Copy links to Python methods so they can be resolved when compiling
     for name in dir(original):
+        if not is_valid_attr(name):
+            continue
         item = getattr(original, name)
         if hasattr(script_module, name):
             # Skip Python builtins and all the module methods that are already
@@ -184,20 +198,6 @@ def create_method_from_fn(module, fn):
         # this function is not yet complete
         torch.jit._create_methods_from_stubs(module, (stub,))
     return stub
-
-
-def make_strong_submodule(field, module, parent):
-    if field not in parent._modules:
-        # It's not a submodule, don't do anything
-        return None
-
-    # Convert the module to a ScriptModule
-    new_strong_submodule = recursive_script(module)
-
-    # Install the ScriptModule on the python side
-    parent._modules._python_modules[field] = new_strong_submodule
-
-    return new_strong_submodule
 
 
 def try_compile_fn(fn, loc):
