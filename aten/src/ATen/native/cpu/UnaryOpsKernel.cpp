@@ -30,7 +30,7 @@ namespace {
 using namespace vec256;
 
 static void sigmoid_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sigmoid_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sigmoid_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return (decltype(a)(1) / (decltype(a)(1) + std::exp((-a)))); },
@@ -63,7 +63,7 @@ static void abs_kernel(TensorIterator& iter) {
 }
 
 static void real_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "real_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "real_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return real_impl(a); },
@@ -72,7 +72,7 @@ static void real_kernel(TensorIterator& iter) {
 }
 
 static void imag_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "imag_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "imag_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return imag_impl(a); },
@@ -119,7 +119,7 @@ static void logical_not_kernel(TensorIterator& iter) {
 }
 
 static void reciprocal_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "reciprocal_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "reciprocal_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return decltype(a)(1.0) / a; },
@@ -128,7 +128,7 @@ static void reciprocal_kernel(TensorIterator& iter) {
 }
 
 static void neg_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "neg_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "neg_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return -a; },
@@ -160,7 +160,7 @@ static void sign_kernel(TensorIterator& iter){
 }
 
 static void sinh_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sinh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::sinh(a); });
@@ -168,7 +168,7 @@ static void sinh_kernel(TensorIterator& iter) {
 }
 
 static void cosh_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "cosh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "cosh_cpu", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::cosh(a); });
@@ -299,7 +299,7 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
 #endif
 
 static void rsqrt_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "rsqrt_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rsqrt_cpu", [&] {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t {
@@ -314,7 +314,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                             \
   static void op##_kernel(TensorIterator& iter) {                             \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), op##_vml_cpu, [&]() {\
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), op##_vml_cpu, [&]() {\
       iter.serial_for_each(                                                   \
           [&](char** data_, const int64_t* strides, int64_t n) {              \
             scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \
