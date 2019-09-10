@@ -28,6 +28,7 @@ $storage_tensor_headers
 #include <memory>
 #include <utility>
 
+#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/Config.h>
 $extra_cuda_headers
 $legacy_th_headers
