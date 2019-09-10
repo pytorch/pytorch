@@ -63,7 +63,17 @@ macos_brew_update: &macos_brew_update
     brew install expect
     brew install libomp
 
-
+ios_brew_update: &ios_brew_update
+  name: Brew update and install iOS toolchains
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    brew update
+    brew unlink parallel
+    brew install moreutils
+    brew link parallel --overwrite
+    brew install expect
+    brew install libtool
 ##############################################################################
 # Binary build (nightlies nightly build) defaults
 # The binary builds use the docker executor b/c at time of writing the machine
@@ -155,6 +165,26 @@ pytorch_params: &pytorch_params
     DOCKER_IMAGE: << parameters.docker_image >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
   resource_class: << parameters.resource_class >>
+
+pytorch_ios_params: &pytorch_ios_params
+  parameters:
+    build_environment:
+      type: string
+      default: ""
+    ios_arch:
+      type: string
+      default: ""
+    ios_platform:
+      type: string
+      default: ""
+    use_nnpack:
+      type: string
+      default: "ON"
+  environment:
+    BUILD_ENVIRONMENT: << parameters.build_environment >>
+    IOS_ARCH: << parameters.ios_arch >>
+    IOS_PLATFORM: << parameters.ios_platform >>
+    USE_NNPACK: << parameters.use_nnpack >>
 
 caffe2_params: &caffe2_params
   parameters:
@@ -1244,7 +1274,61 @@ jobs:
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
-  
+
+  pytorch_ios_build:
+    <<: *pytorch_ios_params  
+    macos:
+      xcode: "10.2.1"
+    steps:
+      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+      - attach_workspace:
+          at: ~/workspace
+      - run:
+          <<: *should_run_job
+      - checkout
+      - run:
+          <<: *ios_brew_update
+      - run:
+          name: Build
+          no_output_timeout: "1h"
+          command: |
+            set -e
+            export IN_CIRCLECI=1
+            WORKSPACE=/Users/distiller/workspace
+            PROJ_ROOT=/Users/distiller/project
+            export TCLLIBPATH="/usr/local/lib" 
+
+            # Install conda
+            curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+            chmod +x ~/Downloads/conda.sh
+            /bin/bash ~/Downloads/conda.sh -b -p ~/anaconda
+            export PATH="~/anaconda/bin:${PATH}"
+            source ~/anaconda/bin/activate
+            # Install dependencies
+            conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
+            # sync submodules
+            cd ${PROJ_ROOT}
+            git submodule sync
+            git submodule update --init --recursive
+            # export 
+            export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+            # run build script
+            chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
+            CMAKE_ARGS=() 
+            if [ -n "${IOS_ARCH:-}" ]; then
+              CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
+            fi
+            if [ -n "${IOS_PLATFORM:-}" ]; then
+              CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
+            fi
+            if [ -n "${USE_NNPACK:-}" ]; then 
+              CMAKE_ARGS+=("-DUSE_NNPACK=${USE_NNPACK}")
+            fi
+            CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+            CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+            CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+
+            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh ${CMAKE_ARGS[@]} 2>&1 | ts  
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
@@ -1815,6 +1899,21 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
+      # Pytorch iOS builds
+      - pytorch_ios_build:
+          name: pytorch_ios_10_2_1_x86_64_build
+          build_environment: "pytorch-ios-10.2.1-x86_64_build"
+          ios_platform: "SIMULATOR"
+          use_nnpack: "OFF"
+          requires: 
+            - setup
+      - pytorch_ios_build:
+          name: pytorch_ios_10_2_1_arm64_build
+          build_environment: "pytorch-ios-10.2.1-arm64_build"
+          ios_arch: "arm64"
+          requires: 
+            - setup
+
       - caffe2_linux_build:
           name: caffe2_py2_gcc4_8_ubuntu14_04_build
           requires:

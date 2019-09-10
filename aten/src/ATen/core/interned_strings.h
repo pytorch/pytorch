@@ -6,7 +6,6 @@
 #include <algorithm>
 
 #include <c10/macros/Macros.h>
-#include <c10/core/EnableNamedTensor.h>
 
 #if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 #include <ATen/core/aten_interned_strings.h>
@@ -298,9 +297,7 @@ struct CAFFE2_API Symbol {
   static Symbol prim(const std::string & s);
   static Symbol user(const std::string & s);
   static Symbol caffe2(const std::string & s);
-#ifdef BUILD_NAMEDTENSOR
   static Symbol dimname(const std::string & s);
-#endif
   // TODO: eliminate me
   static Symbol scope(const std::string & s);
 
@@ -310,9 +307,7 @@ struct CAFFE2_API Symbol {
   bool is_onnx() const;
   bool is_user() const;
   bool is_caffe2() const;
-#ifdef BUILD_NAMEDTENSOR
   bool is_dimname() const;
-#endif
 
   // So we can switch on this
   constexpr operator unique_t() const {

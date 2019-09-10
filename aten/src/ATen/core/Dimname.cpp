@@ -1,28 +1,15 @@
 #include <ATen/core/Dimname.h>
 #include <c10/util/Exception.h>
 #include <cctype>
-#include <string>
 
 #ifdef BUILD_NAMEDTENSOR
 namespace at {
-
-#ifdef DIMNAME_USE_SYMBOL
-static InternedString kDimnameWildcard = Symbol::dimname("*");
-static std::string interned_to_string(InternedString symbol) { return symbol.toUnqualString(); }
-static InternedString string_to_interned(const std::string& str) { return Symbol::dimname(str); }
-static bool is_dimname(InternedString symbol) { return symbol.is_dimname(); }
-#else
-static InternedString kDimnameWildcard = "*";
-static std::string interned_to_string(InternedString symbol) { return symbol; }
-static InternedString string_to_interned(const std::string& str) { return str; }
-static bool is_dimname(const std::string& symbol) { return true; }
-#endif
 
 std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
   if (dimname.type() == NameType::WILDCARD) {
     out << "None";
   } else {
-    out << "'" << interned_to_string(dimname.full_name()) << "'";
+    out << "'" << dimname.full_name().toUnqualString() << "'";
   }
   return out;
 }
@@ -61,13 +48,13 @@ static void check_valid_identifier(const std::string& name) {
       name, "'.");
 }
 
-Dimname Dimname::fromSymbol(InternedString full_name) {
-  TORCH_INTERNAL_ASSERT(is_dimname(full_name));
-  if (full_name == kDimnameWildcard) {
+Dimname Dimname::fromSymbol(Symbol full_name) {
+  TORCH_INTERNAL_ASSERT(full_name.is_dimname());
+  if (full_name == kWildcard) {
     return Dimname::wildcard();
   }
   const std::string delimiter = ".";
-  const std::string str(interned_to_string(full_name));
+  const std::string str(full_name.toUnqualString());
   auto it = str.find(delimiter);
 
   // Check for normal name
@@ -83,13 +70,13 @@ Dimname Dimname::fromSymbol(InternedString full_name) {
       "Invalid name '", str, "': A tagged name can only contain one '.'");
   auto untagged_name = str.substr(0, it);
   auto tag = str.substr(it + 1);
-  check_valid_identifier(untagged_name);
+  check_valid_identifier(untagged_name); 
   check_valid_identifier(tag);
-  return Dimname(NameType::TAGGED, full_name, string_to_interned(untagged_name));
+  return Dimname(NameType::TAGGED, full_name, Symbol::dimname(untagged_name));
 }
 
 Dimname Dimname::wildcard() {
-  static Dimname result(NameType::WILDCARD, kDimnameWildcard, kDimnameWildcard);
+  static Dimname result(NameType::WILDCARD, kWildcard, kWildcard);
   return result;
 }
 
