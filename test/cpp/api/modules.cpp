@@ -5,6 +5,7 @@
 #include <torch/nn/modules/conv.h>
 #include <torch/nn/modules/dropout.h>
 #include <torch/nn/modules/embedding.h>
+#include <torch/nn/modules/fold.h>
 #include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/maxpool.h>
@@ -169,6 +170,21 @@ TEST_F(ModulesTest, Linear) {
   ASSERT_EQ(y.size(1), 2);
 
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
+}
+
+TEST_F(ModulesTest, Fold) {
+  Fold model(FoldOptions({4, 5}, {2, 2}));
+  auto x = torch::randn({1, 3 * 2 * 2, 12});
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.size(0), 1);
+  ASSERT_EQ(y.size(1), 3);
+  ASSERT_EQ(y.size(2), 4);
+  ASSERT_EQ(y.size(3), 5);
 }
 
 TEST_F(ModulesTest, SimpleContainer) {

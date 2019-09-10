@@ -293,6 +293,9 @@ endif()
 # When it's disabled it builds libtorch mobile library, which contains ATen/TH ops and native support for
 # TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
 if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+  if (NOT BUILD_SHARED_LIBS)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNO_EXPORT")
+  endif()
   set(BUILD_PYTHON OFF)
   set(BUILD_CAFFE2_OPS OFF)
   set(USE_DISTRIBUTED OFF)
@@ -301,6 +304,7 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(USE_FBGEMM OFF)
   set(USE_STATIC_DISPATCH ON)
   set(INTERN_DISABLE_ONNX ON)
+  set(INTERN_DISABLE_AUTOGRAD ON)
 endif()
 
 # ---[ Utils

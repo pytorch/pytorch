@@ -16,7 +16,7 @@ torch.nn.ConvTranspose1d|No|No
 torch.nn.ConvTranspose2d|No|No
 torch.nn.ConvTranspose3d|No|No
 torch.nn.Unfold|No|No
-torch.nn.Fold|No|No
+torch.nn.Fold|Yes|No
 torch.nn.MaxPool1d|Yes|No
 torch.nn.MaxPool2d|Yes|No
 torch.nn.MaxPool3d|Yes|No
