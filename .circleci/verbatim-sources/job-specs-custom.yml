@@ -407,7 +407,51 @@
   #   - store_artifacts:
   #       path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
   #       destination: artifacts.tgz
-  
+  pytorch_ios_upload:
+    <<: *pytorch_ios_params
+    macos:
+      xcode: "10.2.1"
+    steps:
+      - attach_workspace:
+          at: ~/workspace
+      - run:
+          <<: *should_run_job
+      - run:
+          <<: *ios_brew_update
+      - run:
+          name: Upload
+          no_output_timeout: "1h"
+          contxt: org-member
+          command: |
+            set -e
+            ARTIFACTS_DIR= ~/workspace/artifact/ios
+            ZIP_DIR=~/workspace/zip
+            mkdir -p ${ZIP_DIR}/install/lib
+            mkdir -p ${ZIP_DIR}/src
+            # copy header files
+            cp -R ${ARTIFACTS_DIR}/arm64/include ${ZIP_DIR}/installs
+            # archvie to FAT bianry
+            lipo -create ${ARTIFACTS_DIR}/x86_64/libtorch_x86_64.a ${ARTIFACTS_DIR}/arm64/libtorch_arm64.a ${ARTIFACTS_DIR}/armv7s/libtorch_armv7s.a -o ${ZIP_DIR}/lib/libtorch.a
+            lipo -i {ZIP_DIR}/lib/libtorch.a
+            # make the zip
+            touch ${ZIP_DIR}/src/LibTorch.h
+            echo "import <torch/script.h>" > ${ZIP_DIR}/src/LibTorch.h
+            # zip the library
+            export ZIPFILE=libtorch_ios_`date +%m%d%Y`_0.0.1.zip
+            cd ${ZIP_DIR}
+            zip -r ${ZIPFILE} install src
+            # upload to aws
+            brew install awscli
+            set +x
+            export AWS_ACCESS_KEY_ID=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
+            export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
+            set +x
+            echo "AWS KEY: ${AWS_ACCESS_KEY_ID}"
+            echo "AWS SECRET: ${AWS_SECRET_ACCESS_KEY}"  
+            aws s3 cp ${ZIPFILE} s3://ossci-ios-build/ --acl public-read
+            
+
+
   pytorch_ios_build:
     <<: *pytorch_ios_params  
     macos:
@@ -463,6 +507,7 @@
             CMAKE_ARGS=() 
             if [ -n "${IOS_ARCH:-}" ]; then
               CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
+              export IOS_ARCH=${IOS_ARCH}
             fi
             if [ -n "${IOS_PLATFORM:-}" ]; then
               CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
@@ -489,38 +534,42 @@
             libtool -static *.a -o ${OUTPUT}
             
             #store the binary
-            mkdir -p ${WORKSPACE}/zip/install
-            cp -R ${PROJ_ROOT}/build_ios/install/include ${WORKSPACE}/zip/install
-            mkdir -p ${WORKSPACE}/zip/install/lib
-            cp ${PROJ_ROOT}/build_ios/install/lib/${OUTPUT}  ${WORKSPACE}/zip/install/lib
+            #workspace/ios/x86_64
+            #workspace/ios/arm64
+            #workspace/ios/armv7s
+            DEST_DIR=${WORKSPACE}/ios/${IOS_ARCH}
+            mkdir -p ${DEST_DIR}
+
+            cp -R ${PROJ_ROOT}/build_ios/install/include ${DEST_DIR}
+            cp ${PROJ_ROOT}/build_ios/install/lib/${OUTPUT}  ${DEST_DIR}
 
             #copy files
-            mkdir -p ${WORKSPACE}/zip/src
-            touch ${WORKSPACE}/zip/src/LibTorch.h
-            echo "import <torch/script.h>" > ${WORKSPACE}/zip/src/LibTorch.h
+            # mkdir -p ${WORKSPACE}/zip/src
+            # touch ${WORKSPACE}/zip/src/LibTorch.h
+            # echo "import <torch/script.h>" > ${WORKSPACE}/zip/src/LibTorch.h
             # cp ${PROJ_ROOT}/ios/LibTorch.h ${WORKSPACE}/zip/src
             # cp ${PROJ_ROOT}/ios/framework.module ${WORKSPACE}/zip/src
 
             # zip the library
-            cd ${WORKSPACE}/zip/
-            export FILE_NAME=libtorch_ios_`date +%m%d%Y`_${IOS_ARCH}.zip
-            zip -r ${FILE_NAME} install src
+            # cd ${WORKSPACE}/zip/
+            # export FILE_NAME=libtorch_ios_`date +%m%d%Y`_${IOS_ARCH}.zip
+            # zip -r ${FILE_NAME} install src
             
             # upload to aws
-            brew install awscli
-            set +x
-            export AWS_ACCESS_KEY_ID=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
-            export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
-            set +x
-            echo "AWS KEY: ${AWS_ACCESS_KEY_ID}"
-            echo "AWS SECRET: ${AWS_SECRET_ACCESS_KEY}"            
-            aws s3 cp ${FILE_NAME} s3://ossci-ios-build/ --acl public-read
+            # brew install awscli
+            # set +x
+            # export AWS_ACCESS_KEY_ID=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
+            # export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
+            # set +x
+            # echo "AWS KEY: ${AWS_ACCESS_KEY_ID}"
+            # echo "AWS SECRET: ${AWS_SECRET_ACCESS_KEY}"            
+            # aws s3 cp ${FILE_NAME} s3://ossci-ios-build/ --acl public-read
 
             # store the artifact
-            mkdir -p ${WORKSPACE}/artifact/ios
-            cp ${FILE_NAME} ${WORKSPACE}/artifact/ios
+            # mkdir -p ${WORKSPACE}/artifact/ios
+            # cp ${FILE_NAME} ${WORKSPACE}/artifact/ios
 
             
       - store_artifacts:
-          path: ~/workspace/artifact/ios
+          path: ~/workspace/artifact/ios/${IOS_ARCH}
           destination: ${FILE_NAME}
