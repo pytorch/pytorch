@@ -331,7 +331,6 @@ class TestCppApiParity(common.TestCase):
             module_option=cpp_module_option,
             extra_stmts=''.join(extra_stmts))
         cpp_test_name = module_name + '_test_ctor_args'
-
         cpp_module = self._compile_cpp_code_inline(
             name=cpp_test_name, cpp_sources=cpp_sources, functions=cpp_test_name)
 
@@ -672,21 +671,17 @@ def add_torch_nn_module_tests(module_tests, is_criterion):
         add_ctor_args_test_for_module(module_name, has_impl_parity)
         add_variant_test_for_module(module_name, test_params_dict, has_impl_parity)
 
-'''
 add_torch_nn_module_tests(
     sample_module.module_tests + common_nn.module_tests + common_nn.new_module_tests,
     is_criterion=False)
-'''
 
 add_torch_nn_module_tests(
     common_nn.criterion_tests + common_nn.new_criterion_tests,
     is_criterion=True)
 
-'''
 # Assert that there exists auto-generated tests for SampleModule.
 assert len([name for name in TestCppApiParity.__dict__ if 'SampleModule' in name]) == \
     len(sample_module.module_tests) * len(devices) + 1
-'''
 
 
 if __name__ == "__main__":
