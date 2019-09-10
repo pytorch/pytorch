@@ -78,6 +78,9 @@ def _init_rpc(rpc_backend=RpcBackend.PROCESS_GROUP,
         from .distributed_c10d import _get_default_group
 
         group = _get_default_group()
+        if (self_rank != -1) and (self_rank != group.rank()):
+            raise RuntimeError("self_rank argument {} doesn't match pg rank {}".format(
+                               self_rank, group.rank()))
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(self_name, group)
         init_rref_context(_agent)
