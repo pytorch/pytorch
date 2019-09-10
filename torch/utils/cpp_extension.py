@@ -431,7 +431,15 @@ class CppExtension(setuptools.Extension):
                     'build_ext': BuildExtension
                 })
     '''
-    def __init__(self, name, sources, *args, cuda=False, is_python_module=True, **kwargs):
+    def __init__(self, name, sources, *args, **kwargs):
+        # works around Python2 not having key word args after *args
+        cuda = kwargs.get('cuda', False)
+        if 'cuda' in kwargs:
+            del kwargs['cuda']
+        is_python_module = kwargs.get('is_python_module', True)
+        if 'is_python_module' in kwargs:
+            del kwargs['is_python_module']
+
         include_dirs = kwargs.get('include_dirs', [])
         include_dirs += include_paths(cuda=cuda)
         kwargs['include_dirs'] = include_dirs
