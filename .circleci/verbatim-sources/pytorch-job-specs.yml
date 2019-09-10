@@ -84,7 +84,7 @@ jobs:
           output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
-            NAMED_FLAG="export BUILD_NAMEDTENSOR=1 && export TEST_NAMEDTENSOR=1"
+            NAMED_FLAG="export BUILD_NAMEDTENSOR=1"
           elif [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
           else
