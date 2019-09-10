@@ -110,13 +110,13 @@ std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandInfo> op
   // See [Result type computation] in TensorIterator.h
 
   auto result_type =
-      compute_result_type(operands_,
+      compute_result_type(operands,
         [](const OperandInfo& op) { return op.tensor.dim() > 0; },
         [](const OperandInfo& op) { return !op.tensor.unsafeGetTensorImpl()->is_wrapped_number(); },
         [](const OperandInfo& op) { return true; });
 
   if (ScalarType::Bool == std::get<1>(result_type)) {
-    auto alternate = compute_result_type(operands_,
+    auto alternate = compute_result_type(operands,
         [](const OperandInfo& op) {
           return op.tensor.dim() == 0;
         }
@@ -130,7 +130,7 @@ std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandInfo> op
   // if non-zero-dim tensor result is an integral type and there's a zero-dim
   // floating point operand, we'll promote the floating point type.
   if (isIntegralType(std::get<1>(result_type), false)) {
-    auto alternate = compute_result_type(operands_,
+    auto alternate = compute_result_type(operands,
         [](const OperandInfo& op) {
           return isFloatingType(op.tensor.scalar_type()) && op.tensor.dim() == 0;
         }
