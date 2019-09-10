@@ -1125,9 +1125,10 @@ workflows:
           requires: 
             - setup
       - pytorch_ios_upload:
+          build_environment: "pytorch-ios-bianry-upload"
+          context: org-member
           requires:
             - setup
             - pytorch_ios_10_2_1_x86_64_build
             - pytorch_ios_10_2_1_arm64_build
             - pytorch_ios_10_2_1_armv7s_build
-      

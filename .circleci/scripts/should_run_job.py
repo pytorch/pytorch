@@ -39,6 +39,7 @@ default_set = set([
     'libtorch-macos-10.2.1-ios-sdk-12-x86_64-binary-build',
     'libtorch-macos-10.2.1-ios-sdk-12-arm64-binary-build',
     'libtorch-macos-10.2.1-ios-sdk-12-armv7s-binary-build',
+    'pytorch-ios-bianry-upload',
 
     # Caffe2 Android
     'caffe2-py2-android-ubuntu16.04',
