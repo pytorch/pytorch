@@ -480,26 +480,19 @@
             cd ${PROJ_ROOT}/build_ios/install/lib
                         
             ####### for testing ########
-            if [ -d libprotobuf-lite.a ]; then
-              rm -rf libprotobuf-lite.a
-            fi
-
-            if [ -d libprotobuf.a ]; then
-              rm -rf libprotobuf.a
-            fi
+            rm -rf ${PROJ_ROOT}/build_ios/install/lib/libprotobuf-lite.a
+            rm -rf ${PROJ_ROOT}/build_ios/install/lib/libpthreadpool.a
             
-            if [ -d libpthreadpool.a ]; then
-              rm -rf libpthreadpool.a
-            fi
             #############################
             OUTPUT=libtorch_${IOS_ARCH}.a
+            cd ${PROJ_ROOT}/build_ios/install/lib
             libtool -static *.a -o ${OUTPUT}
             
             #store the binary
             mkdir -p ${WORKSPACE}/zip/install
             cp -R ${PROJ_ROOT}/build_ios/install/include ${WORKSPACE}/zip/install
             mkdir -p ${WORKSPACE}/zip/install/lib
-            cp ${PROJ_ROOT}/build_ios/install/${OUTPUT}  ${WORKSPACE}/zip/install/lib
+            cp ${PROJ_ROOT}/build_ios/install/lib/${OUTPUT}  ${WORKSPACE}/zip/install/lib
 
             #copy files
             mkdir -p ${WORKSPACE}/zip/src

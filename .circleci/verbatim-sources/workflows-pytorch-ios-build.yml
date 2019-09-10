@@ -4,6 +4,7 @@
           context: org-member
           build_environment: "pytorch-ios-10.2.1-x86_64-build"
           ios_platform: "SIMULATOR"
+          ios_arch: "x86_64"
           use_nnpack: "OFF"
           requires: 
             - setup
@@ -12,6 +13,7 @@
           context: org-member
           build_environment: "pytorch-ios-10.2.1-arm64-build"
           ios_arch: "arm64"
+          ios_platform: "OS"
           requires: 
             - setup
       
