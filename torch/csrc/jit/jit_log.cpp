@@ -1,10 +1,15 @@
-#include <torch/csrc/jit/jit_log.h>
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/ir.h>
-#include <c10/util/StringUtil.h>
+
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
+
+#include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
+#include <torch/csrc/jit/function.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/script/error_report.h>
 
 namespace torch {
 namespace jit {
@@ -15,6 +20,16 @@ JitLoggingLevels jit_log_level() {
       ? static_cast<JitLoggingLevels>(std::atoi(c_log_level))
       : JitLoggingLevels::OFF;
   return log_level;
+}
+
+std::string log_function(const std::shared_ptr<torch::jit::Graph> &graph) {
+  torch::jit::Function func("SOURCE_DUMP", graph, nullptr);
+  std::stringstream ss;
+  std::vector<at::Tensor> tensors;
+  std::vector<c10::NamedTypePtr> deps;
+  SourceRangeRecords source_ranges;
+  PythonPrint(ss, source_ranges, func, false, tensors, deps, false);
+  return ss.str();
 }
 
 std::string debugValueOrDefault(const Node* n) {
