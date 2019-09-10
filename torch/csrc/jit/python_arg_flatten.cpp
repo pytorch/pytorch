@@ -53,18 +53,20 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
       flatten_rec(item.ptr(), args);
     }
     structure.push_back(D::DictClose);
-    // print warning : input dict are allowed in tracing but their
-    //                 behavior can be unpredictable if not handled with
-    //                 care.
-    //                 ex: if model saved with input_dict {"a1":b1}
-    //                     and called with input {"a2":b2}.
-    //                     Accessing input_dict["a1"] will be treated as
-    //                     accessing input_dict["a2"] in the saved onnx graph..
+    std::string msg =
+        "Warning : Input dictionaries are allowed in ONNX but they should be handled with care. "
+        "Usages of dictionaries is not recommended, and should not be used except "
+        "for configuration use. "
+        "Also note that the order and values of the keys must remain the same.\n";
+    std::cerr << msg;
   } else if (THPUtils_checkString(obj)) {
     string str = THPUtils_unpackString(obj);
     args.desc.strings.emplace_back(str);
     args.desc.structure.push_back(D::String);
-    // print warning : input strings will not be in the ONNX graph.
+    std::string msg =
+        "Warning : The model seems to have string inputs/outputs. "
+        "Note that strings will not appear as inputs/outputs of the ONNX graph.\n";
+    std::cerr << msg;
   } else if (THPVariable_Check(obj)) {
     auto& var = reinterpret_cast<THPVariable*>(obj)->cdata;
     args.vars.push_back(var);
@@ -72,7 +74,9 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.structure.push_back(D::Variable);
   } else {
     std::string msg =
-        "Only tuples, lists and Variables supported as JIT inputs, but got ";
+        "Only tuples, lists and Variables supported as JIT inputs/outputs. "
+        "Dictionaries and strings are also accepted but their usage is not "
+        "recommended. But got unsupported type ";
     msg += THPUtils_typename(obj);
     throw std::runtime_error(msg);
   }
