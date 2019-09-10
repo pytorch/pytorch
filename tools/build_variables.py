@@ -191,6 +191,7 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/modules/embedding.cpp",
         "torch/csrc/api/src/nn/modules/functional.cpp",
         "torch/csrc/api/src/nn/modules/linear.cpp",
+        "torch/csrc/api/src/nn/modules/maxpool.cpp",
         "torch/csrc/api/src/nn/modules/named_any.cpp",
         "torch/csrc/api/src/nn/modules/rnn.cpp",
         "torch/csrc/api/src/optim/adagrad.cpp",
