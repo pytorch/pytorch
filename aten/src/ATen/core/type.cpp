@@ -319,7 +319,31 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   return c10::nullopt;
 }
 
-MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
+c10::optional<TypePtr> unifyTypeList(at::ArrayRef<TypePtr> elements) {
+  if (elements.size() == 0) {
+    return c10::nullopt;
+  }
+
+  auto begin = elements.begin();
+  auto end = elements.end();
+
+  auto unified_type = std::accumulate(
+      begin, end, *begin, [](TypePtr t1, TypePtr t2) -> TypePtr {
+        if (!t1 || !t2) {
+          return nullptr;
+        }
+        auto out_type = unifyTypes(t1, t2);
+        return out_type ? *out_type : nullptr;
+      });
+
+  if (unified_type) {
+    return unified_type;
+  } else {
+    return c10::nullopt;
+  }
+}
+
+MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env, bool allow_conversions) {
   if(!formal->hasFreeVariables()) {
     return MatchTypeReturn::Success();
   }
@@ -342,18 +366,24 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(),
           lt_actual->getElementType(),
-          type_env);
+          type_env,
+          allow_conversions);
       if (!innerMatch.success()) {
         // propagate the errMsg onward
         return innerMatch;
       }
       return MatchTypeReturn::Success();
-    } else {
-      std::stringstream ss;
-      ss << "Cannot match " << lt_formal->python_str() << " to "
-         << actual->python_str();
-      return ss.str();
+    } else if (actual->cast<TupleType>() && allow_conversions) {
+      auto maybe_tuple_unified = unifyTypeList(actual->cast<TupleType>()->elements());
+      if (maybe_tuple_unified) {
+        return matchTypeVariables(lt_formal->getElementType(), *maybe_tuple_unified, type_env, allow_conversions);
+      }
     }
+
+    std::stringstream ss;
+    ss << "Cannot match " << lt_formal->python_str() << " to "
+       << actual->python_str();
+    return ss.str();
   } else if(auto tp_formal = formal->cast<TupleType>()) {
     if(auto tp_actual = actual->cast<TupleType>()) {
       if(tp_formal->elements().size() != tp_actual->elements().size()) {
@@ -363,7 +393,8 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
         const auto result = matchTypeVariables(
             tp_formal->elements()[i],
             tp_actual->elements()[i],
-            type_env);
+            type_env,
+            allow_conversions);
         if (!result.success()) {
           return result;
         }
@@ -377,7 +408,7 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
   } else if (auto lt_formal = formal->cast<FutureType>()) {
     if (auto lt_actual = actual->cast<FutureType>()) {
       const auto innerMatch = matchTypeVariables(
-          lt_formal->getElementType(), lt_actual->getElementType(), type_env);
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env, allow_conversions);
       if (!innerMatch.success()) {
         return innerMatch;
       }
@@ -390,7 +421,7 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
   } else if (auto opt_formal = formal->cast<OptionalType>()) {
     if (auto opt_actual = actual->cast<OptionalType>()) {
       const auto optionedMatch = matchTypeVariables(
-          opt_formal->getElementType(), opt_actual->getElementType(), type_env);
+          opt_formal->getElementType(), opt_actual->getElementType(), type_env, allow_conversions);
       if (!optionedMatch.success()) {
         return optionedMatch;
       }
@@ -399,7 +430,7 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       // its element type matches the actual.
       // Don't match None because it is already an optional (but one of
       // unknown type).
-      return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
+      return matchTypeVariables(opt_formal->getElementType(), actual, type_env, allow_conversions);
     }
     // note: if actual was non here we potentially did not fill in the type variables
     // contained in the formal. It is still a valid match because None matches Optional[T]
@@ -411,7 +442,8 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       auto key_match = matchTypeVariables(
         dict_formal->getKeyType(),
         dict_actual->getKeyType(),
-        type_env
+        type_env,
+        allow_conversions
       );
       if (!key_match.success()) {
         return key_match;
@@ -419,7 +451,8 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       auto value_match = matchTypeVariables(
         dict_formal->getValueType(),
         dict_actual->getValueType(),
-        type_env
+        type_env,
+        allow_conversions
       );
       if (!value_match.success()) {
         return value_match;

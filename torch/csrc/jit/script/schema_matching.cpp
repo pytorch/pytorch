@@ -130,8 +130,8 @@ static Value* tryMatchArgument(
   }
 
   // Resolve VarType variables
-  const MatchTypeReturn matched =
-      matchTypeVariables(arg.type(), value->type(), type_env);
+  const MatchTypeReturn matched = matchTypeVariables(
+      arg.type(), value->type(), type_env, allow_conversions);
   if (!matched.success()) {
     if (failure_messages) {
       err() << "Could not match type " << value->type()->python_str() << " to "
@@ -239,14 +239,14 @@ static bool varargsCanBeUsedAsList(
   bool is_last_argument = arg_index + 1 == schema.arguments().size() ||
       schema.arguments()[arg_index + 1].kwarg_only();
 
-  // The formal must be a list
-  bool argument_is_list = arg.type()->kind() == TypeKind::ListType;
+  // The formal must be an intlist
+  bool argument_is_intlist = arg.type() == ListType::ofInts();
 
   // it must not be a broadcasting list like int[3],
   // otherwise a single int is a valid input
   bool arg_is_broadcasting_list = bool(arg.N());
 
-  return is_last_argument && argument_is_list & !arg_is_broadcasting_list;
+  return is_last_argument && argument_is_intlist & !arg_is_broadcasting_list;
 }
 
 c10::optional<MatchedSchema> tryMatchSchema(
@@ -299,12 +299,11 @@ c10::optional<MatchedSchema> tryMatchSchema(
               err,
               allow_conversions,
               type_env);
-          if (!list) {
-            return c10::nullopt;
+          if (list) {
+            used_args = args.size();
+            positional_inputs.push_back(list);
+            continue;
           }
-          used_args = args.size();
-          positional_inputs.push_back(list);
-          continue;
         }
       }
 
