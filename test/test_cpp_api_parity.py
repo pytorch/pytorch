@@ -283,6 +283,14 @@ class TestCppApiParity(common.TestCase):
         example_targets = self._prepare_tensors_for_module_input_or_target(test_params, example_targets)
         return example_targets
 
+    def _get_forward_input_args(self, test_params):
+        example_inputs = self._get_example_inputs(test_params)
+        if isinstance(test_params.test_instance, common_nn.CriterionTest):
+            example_targets = self._get_example_targets(test_params)
+            return (*example_inputs, *example_targets)
+        else:
+            return (*example_inputs, )
+
     # This tests that Python and C++ torch.nn modules have matching constructor arg names and types.
     def _test_torch_nn_module_ctor_args(self, module_name):
         module_metadata = torch_nn_modules.module_metadata_map[module_name]
@@ -338,12 +346,8 @@ class TestCppApiParity(common.TestCase):
 
     def _test_torch_nn_module_variant(self, test_params):
         def generate_test_cpp_sources(test_params, template, extra_stmts):
-            example_inputs = self._get_example_inputs(test_params)
-            if isinstance(test_params.test_instance, common_nn.CriterionTest):
-                example_targets = self._get_example_targets(test_params)
-            else:
-                example_targets = []
-            input_arg_types = [self._python_arg_to_cpp_arg(arg).type for arg in example_inputs + example_targets]
+            input_args = self._get_forward_input_args(test_params)
+            input_arg_types = [self._python_arg_to_cpp_arg(arg).type for arg in list(input_args)]
             input_args = ['arg{}'.format(str(i)) for i in range(len(input_arg_types))]
             input_arg_declarations = ['{} {}'.format(arg_type, arg_name) for arg_type, arg_name in zip(input_arg_types, input_args)]
             test_cpp_sources = template.substitute(
@@ -414,22 +418,13 @@ class TestCppApiParity(common.TestCase):
             device = test_params.device
             python_constructor = test_params.test_instance.constructor
             python_constructor_args = test_params.test_instance.constructor_args
-            example_inputs = self._get_example_inputs(test_params)
-            if isinstance(test_params.test_instance, common_nn.CriterionTest):
-                example_targets = self._get_example_targets(test_params)
+            input_args = self._get_forward_input_args(test_params)
 
             torch.manual_seed(2)
             module = python_constructor(*python_constructor_args).to(device)
-            if isinstance(test_params.test_instance, common_nn.CriterionTest):
-                python_output = module(*example_inputs, *example_targets)
-            else:
-                python_output = module(*example_inputs)
+            python_output = module(*input_args)
 
-            ret_args = ([module], device, python_output, example_inputs)
-            if isinstance(test_params.test_instance, common_nn.CriterionTest):
-                ret_args += (example_targets, )
-
-            return (ret_args,
+            return (([module], device, python_output, input_args),
                     generate_test_cpp_sources(
                         test_params=test_params, template=TORCH_NN_MODULE_TEST_FORWARD, extra_stmts=''))
 
@@ -437,18 +432,11 @@ class TestCppApiParity(common.TestCase):
             device = test_params.device
             python_constructor = test_params.test_instance.constructor
             python_constructor_args = test_params.test_instance.constructor_args
-            example_inputs = self._get_example_inputs(test_params)
-            if isinstance(test_params.test_instance, common_nn.CriterionTest):
-                example_targets = self._get_example_targets(test_params)
-            else:
-                example_targets = None
+            input_args = self._get_forward_input_args(test_params)
 
             torch.manual_seed(2)
             module = python_constructor(*python_constructor_args).to(device)
-            if isinstance(test_params.test_instance, common_nn.CriterionTest):
-                python_output = module(*example_inputs, *example_targets)
-            else:
-                python_output = module(*example_inputs)
+            python_output = module(*input_args)
             python_output.sum().backward()
             # JIT tracing does not save a module's parameters' gradients into ScriptModule.
             # Instead, we create another module `grad_module` with the same structure as `module`,
@@ -460,11 +448,7 @@ class TestCppApiParity(common.TestCase):
                 if param.grad is not None:
                     grad_param.data = param.grad
 
-            ret_args = ([module, grad_module], device, example_inputs)
-            if isinstance(test_params.test_instance, common_nn.CriterionTest):
-                ret_args += (example_targets, )
-
-            return (ret_args,
+            return (([module, grad_module], device, input_args),
                     generate_test_cpp_sources(
                         test_params=test_params, template=TORCH_NN_MODULE_TEST_BACKWARD, extra_stmts=''))
 
@@ -504,9 +488,7 @@ class TestCppApiParity(common.TestCase):
 
         def test_methods(test_params):
             module_variant_name = test_params.module_variant_name
-            example_inputs = self._get_example_inputs(test_params)
-            if isinstance(test_params.test_instance, common_nn.CriterionTest):
-                example_targets = self._get_example_targets(test_params)
+            input_args = self._get_forward_input_args(test_params)
 
             args_map = {}
 
@@ -531,16 +513,14 @@ class TestCppApiParity(common.TestCase):
             for method_name, _ in torch_nn_test_methods:
                 args = args_map[method_name]
                 modules = args[0]
-                if isinstance(test_params.test_instance, common_nn.CriterionTest):
-                    script_modules = [trace_module(module, (*example_inputs, *example_targets)) for module in modules]
-                else:
-                    script_modules = [trace_module(module, (*example_inputs, )) for module in modules]
-
+                script_modules = [trace_module(module, input_args) for module in modules]
                 module_file_names = [serialize_module_into_file(script_module) for script_module in script_modules]
 
                 cpp_args = module_file_names[:]
                 for arg in args[1:]:
-                    if isinstance(arg, list):
+                    if isinstance(arg, tuple):
+                        cpp_args += list(arg)
+                    elif isinstance(arg, list):
                         cpp_args += arg
                     else:
                         cpp_args.append(arg)
