@@ -106,7 +106,7 @@ compute_result_type(at::ArrayRef<OperandInfo> operands,
   return compute_result_type(operands, predicates...);
 }
 
-std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
+std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandInfo> operands) {
   // See [Result type computation] in TensorIterator.h
 
   auto result_type =
@@ -143,6 +143,10 @@ std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
 
   TORCH_INTERNAL_ASSERT(std::get<1>(result_type) != ScalarType::Undefined);
   return result_type;
+}
+
+std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
+  return compute_common_type_(operands_);
 }
 
 static void validate_dtype(OperandInfo& op, ScalarType common_dtype, int ninputs) {
@@ -182,15 +186,23 @@ static void maybe_promote_common_dtype(OperandInfo& op, ScalarType common_dtype)
 
 void TensorIterator::compute_types() {
   bool missing_dtypes = false;
+  bool missing_output_dtypes = false;
   ScalarType common_dtype = dtype();
   for (auto& op : operands_) {
     if (!op.tensor.defined() && !op.is_type_defined()) {
       missing_dtypes = true;
+      if (op.is_output) {
+        missing_output_dtypes = true;
+      }
     }
   }
 
+  bool compute_common_dtype_only_for_inputs =
+      (!missing_output_dtypes && compute_common_dtype_ && compute_common_dtype_only_for_inputs_);
+
   if (missing_dtypes || compute_common_dtype_) {
-    auto common_type = compute_common_type();
+    auto operands = compute_common_dtype_only_for_inputs ? at::ArrayRef<OperandInfo>(operands_).slice(noutputs()) : operands_;
+    auto common_type = compute_common_type_(operands);
     auto common_device = std::get<0>(common_type);
     common_dtype = std::get<1>(common_type);
     bool has_cpu_scalar = false;
@@ -217,11 +229,17 @@ void TensorIterator::compute_types() {
           op.dtype = op.tensor.scalar_type();
         } else {
           op.device = common_device;
-          op.dtype = common_dtype;
+          if (compute_common_dtype_only_for_inputs && op.is_output) {
+            op.dtype = op.tensor.scalar_type();
+          } else {
+            op.dtype = common_dtype;
+          }
         }
       }
 
-      validate_dtype(op, common_dtype, ninputs());
+      if (!compute_common_dtype_only_for_inputs) {
+        validate_dtype(op, common_dtype, ninputs());
+      }
       maybe_promote_common_dtype(op, common_dtype);
 
       if (op.tensor.defined() && op.device != op.tensor.device()) {
