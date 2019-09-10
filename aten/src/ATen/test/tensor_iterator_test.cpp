@@ -151,3 +151,13 @@ TEST(TensorIteratorTest, DoNotComputeCommonDTypeIfInputSameAsOutput) {
   iter.compute_common_dtype_only_for_inputs();
   ASSERT_ANY_THROW(iter.build());
 }
+
+TEST(TensorIteratorTest, DoNotComputeCommonDTypeIfOutputIsUndefined) {
+  Tensor out;
+  auto iter = at::TensorIterator();
+  iter.add_output(out);
+  iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
+  iter.add_input(at::ones({1, 1}, at::dtype(at::kFloat)));
+  iter.compute_common_dtype_only_for_inputs();
+  ASSERT_ANY_THROW(iter.build());
+}

@@ -106,7 +106,7 @@ compute_result_type(at::ArrayRef<OperandInfo> operands,
   return compute_result_type(operands, predicates...);
 }
 
-std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandInfo> operands) {
+static std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandInfo> operands) {
   // See [Result type computation] in TensorIterator.h
 
   auto result_type =
@@ -201,14 +201,15 @@ void TensorIterator::compute_types() {
     }
   }
 
-  if (has_read_write_op && compute_common_dtype_ && compute_common_dtype_only_for_inputs_) {
-    AT_ERROR("unable to compute and promote common dtype based only on inputs if input is same as output");
+  if (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_INPUTS) {
+    TORCH_CHECK(!missing_output_dtypes, "unable to compute and promote common dtype based only on inputs if there are missing dtypes for outputs");
+    TORCH_CHECK(!has_read_write_op, "unable to compute and promote common dtype based only on inputs if input is same as output");
   }
 
-  bool compute_common_dtype_only_for_inputs =
-      (!missing_output_dtypes && compute_common_dtype_ && compute_common_dtype_only_for_inputs_);
+  bool compute_common_dtype = (compute_common_dtype_strategy_ != CommonDTypeStrategy::COMPUTE_NONE);
+  bool compute_common_dtype_only_for_inputs = (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_INPUTS);
 
-  if (missing_dtypes || compute_common_dtype_) {
+  if (missing_dtypes || compute_common_dtype) {
     auto operands = compute_common_dtype_only_for_inputs ? at::ArrayRef<OperandInfo>(operands_).slice(noutputs()) : operands_;
     auto common_type = compute_common_type_(operands);
     auto common_device = std::get<0>(common_type);
@@ -218,7 +219,7 @@ void TensorIterator::compute_types() {
       if (!op.is_type_defined()) {
         op.device = common_device;
         op.dtype = common_dtype;
-      } else if (compute_common_dtype_ &&
+      } else if (compute_common_dtype &&
                  (op.device != common_device || op.dtype != common_dtype)) {
         if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
             common_device.is_cuda() && op.tensor.device().is_cpu() &&
@@ -245,10 +246,10 @@ void TensorIterator::compute_types() {
         }
       }
 
-      if (!compute_common_dtype_only_for_inputs) {
+      if (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_ALL) {
         validate_dtype(op, common_dtype, ninputs());
       }
-      if (!compute_common_dtype_only_for_inputs || !op.is_output) {
+      if ((compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_ALL) || !op.is_output) {
         maybe_promote_common_dtype(op, common_dtype);
       }
 

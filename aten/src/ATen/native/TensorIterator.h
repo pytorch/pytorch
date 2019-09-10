@@ -122,6 +122,12 @@ struct CAFFE2_API OperandInfo {
 
 struct SplitUntil32Bit;
 
+enum class CommonDTypeStrategy {
+  COMPUTE_ALL, // Compute common dtype based on inputs and outputs. Try to promote common dtype to inputs and outputs
+  COMPUTE_INPUTS, // Compute common dtype based only on inputs. Try to promote common dtype only to inputs
+  COMPUTE_NONE, // Do not compute and promote common dtype
+};
+
 struct CAFFE2_API TensorIterator {
   using DimMask = std::bitset<64>;
   using PtrVector = SmallVector<char*, 4>;
@@ -193,7 +199,7 @@ struct CAFFE2_API TensorIterator {
   }
 
   void cast_outputs() {
-    if (compute_common_dtype_ && !compute_common_dtype_only_for_inputs_) {
+    if (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_ALL) {
       for(int i=0; i < noutputs(); i++) {
         if (operands_[i].original_tensor.defined() && dtype(i) != operands_[i].original_tensor.scalar_type()) {
           operands_[i].original_tensor.copy_(operands_[i].tensor);
@@ -296,11 +302,11 @@ struct CAFFE2_API TensorIterator {
   }
 
   void dont_compute_common_dtype() {
-    compute_common_dtype_ = false;
+    compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_NONE;
   }
 
   void compute_common_dtype_only_for_inputs() {
-    compute_common_dtype_only_for_inputs_ = true;
+    compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_INPUTS;
   }
 
   void dont_resize_outputs() {
@@ -337,8 +343,7 @@ protected:
   bool accumulate_ = false;
   bool resize_outputs_ = true;
   bool is_reduction_ = false;
-  bool compute_common_dtype_ = true;
-  bool compute_common_dtype_only_for_inputs_ = false;
+  CommonDTypeStrategy compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_ALL;
   bool allow_cpu_scalars_ = false;
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
