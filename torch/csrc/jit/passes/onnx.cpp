@@ -213,7 +213,7 @@ void BlockToONNX(
         else if(outputs[i]->type() != old->type()){
           std::ostringstream ss;
           ss << "Output type of the ONNX model does not match with PT graph";
-          throw std::runtime_error(ss.str())
+          throw std::runtime_error(ss.str());
         }
         // Copy over source location and scope information to all nodes
         // created by the symbolic
