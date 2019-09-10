@@ -9,10 +9,10 @@ from torch.nn.modules.utils import _pair
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
+from hypothesis_utils import no_deadline
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_WINDOWS, IS_PPC
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams
-from common_quantization import no_deadline
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
@@ -195,7 +195,6 @@ class TestQuantizedOps(TestCase):
                 torch.qint32 : np.int32
             }
             qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
-            # print('C', qC)
             qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized addition failed.")
@@ -422,6 +421,63 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                        dilation=dilation)
+            self.assertEqual(a_ref, a_hat.dequantize(),
+                             message="{} results are off".format(name))
+        # Test the ops.quantized separately, because None is not treated.
+        a_hat = torch.ops.quantized.max_pool2d(
+            qa, kernel_size=_pair(kernel),
+            stride=_pair(kernel if stride is None else stride),
+            padding=_pair(padding), dilation=_pair(dilation))
+        self.assertEqual(a_ref, a_hat.dequantize(),
+                         message="ops.quantized.max_pool2d results are off")
+
+    """Tests max pool operation on NHWC quantized tensors."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           kernel=st.sampled_from((3, 5, 7)),
+           stride=st.sampled_from((None, 1, 2)),
+           dilation=st.integers(1, 2),
+           padding=st.integers(0, 2))
+    def test_max_pool2d_nhwc(self, X, kernel, stride, dilation, padding):
+        X, (scale, zero_point, torch_type) = X
+        # Ensure we hit the vectorized paths
+        # 176 = 128 + 32 + 16
+        # 128 hits the interleaved path
+        # 32 hits the non-interleaved path
+        # 16 hits the scalar path
+        if X.shape[1] < 176:
+            X = np.repeat(X, 176 / X.shape[1], 1)
+        # Check constraints
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iH, iW = X.shape[-2:]
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation)
+        assume(oW > 0)
+
+        X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
+        a = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
+        a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
+                                                stride=stride,
+                                                padding=padding, dilation=dilation)
+        a_ref = torch.quantize_linear(a_pool, scale=scale,
+                                      zero_point=zero_point, dtype=torch_type)
+        a_ref = a_ref.dequantize()
+        qa = torch.quantize_linear(torch.from_numpy(X_nchw), scale=scale, zero_point=zero_point,
+                                   dtype=torch_type).permute([0, 3, 1, 2])
+        self.assertTrue(qa.stride() != sorted(qa.stride()))
+
+        ops_under_test = {
+            "torch": torch.max_pool2d,
+            "nn.functional": torch.nn.functional.max_pool2d,
+            "nn.quantized.functional": torch.nn.quantized.functional.max_pool2d
+        }
+
+        for name, op in ops_under_test.items():
+            a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
+                       dilation=dilation)
+            self.assertTrue(a_hat.stride() != sorted(a_hat.stride()))
             self.assertEqual(a_ref, a_hat.dequantize(),
                              message="{} results are off".format(name))
         # Test the ops.quantized separately, because None is not treated.
