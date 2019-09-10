@@ -39,9 +39,22 @@
 // https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280. Calling zeroall
 // when using AVX/AVX2 code resolves this.
 #if defined(__AVX__) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
-#define DL_RUNTIME_BUG(op, type) \
-  volatile type x = (type)(1);   \
-  x = std::op(x);                \
+template <typename TYPE>
+struct ztype {
+  using value_t = TYPE;
+};
+template <>
+struct ztype<std::complex<double>> {
+  using value_t = double;
+};
+template <>
+struct ztype<std::complex<float>> {
+  using value_t = float;
+};
+#define DL_RUNTIME_BUG(op, type)                  \
+  using value_t = typename ztype<type>::value_t;  \
+  volatile value_t x = (value_t)(1);        \
+  x = std::op(x);                                 \
   _mm256_zeroall();
 #else
 #define DL_RUNTIME_BUG(op, type)
