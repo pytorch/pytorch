@@ -23,6 +23,7 @@
 #include <iterator>
 #include <utility>
 #include <type_traits>
+#include <c10/util/C++17.h>
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
@@ -830,14 +831,15 @@ private:
     int8_t max_lookups = detailv3::min_lookups - 1;
     float _max_load_factor = 0.5f;
     uint64_t num_elements = 0;
-    sherwood_v3_entry<T> sentinel_val;
+    std::unique_ptr<sherwood_v3_entry<T>> sentinel_val;
 
     // head of doubly linked list
     EntryPointer sentinel = initSentinel();
 
-
     EntryPointer initSentinel() {
-      sentinel = &sentinel_val;
+      // needs to be a pointer so that hash map can be used with forward declared types
+      sentinel_val = c10::guts::make_unique<sherwood_v3_entry<T>>();
+      sentinel = sentinel_val.get();
       reset_list();
       return sentinel;
     }
