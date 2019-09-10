@@ -27,9 +27,6 @@ else
   fi
 fi
 
-export MACOSX_DEPLOYMENT_TARGET=10.9
-export CXX=clang++
-export CC=clang
 if which sccache > /dev/null; then
   printf "#!/bin/sh\nexec sccache $(which clang++) \$*" > "${WORKSPACE_DIR}/clang++"
   chmod a+x "${WORKSPACE_DIR}/clang++"
