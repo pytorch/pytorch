@@ -271,7 +271,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   // The store is used to broadcast the NCCL unique ID of rank 0.
   std::shared_ptr<Store> store_;
 
-  // The number of NCCL communicators that have been create during
+  // The number of NCCL communicators that have been created during
   // the lifetime of this process group. This sequence number is
   // used to scope keys used in the store.
   uint64_t ncclCommCounter_{0};
