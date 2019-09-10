@@ -1038,7 +1038,7 @@ jobs:
 
             
       - store_artifacts:
-          path: ~/workspace/artifact
+          path: ~/workspace/artifact/ios
           destination: ${FILE_NAME}
 
 ##############################################################################
@@ -1070,4 +1070,18 @@ workflows:
           ios_platform: "OS"
           requires: 
             - setup
+      - pytorch_ios_build:
+          name: pytorch_ios_10_2_1_armv7s_build
+          context: org-member
+          build_environment: "pytorch-ios-10.2.1-armv7s-build"
+          ios_arch: "armv7s"
+          ios_platform: "OS"
+          requires: 
+            - setup
+      - pytorch_ios_upload:
+          requires:
+            - setup
+            - pytorch_ios_10_2_1_x86_64_build
+            - pytorch_ios_10_2_1_arm64_build
+            - pytorch_ios_10_2_1_armv7s_build
       

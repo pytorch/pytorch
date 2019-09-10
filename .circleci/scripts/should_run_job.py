@@ -36,9 +36,9 @@ default_set = set([
     'libtorch 2.7m cpu devtoolset7',
     'libtorch 2.7m cpu gcc5.4_cxx11-abi',
     # iOS binary jobs
-    'libtorch-ios-10.2.1-x86_64-binary-build',
-    'libtorch-ios-10.2.1-arm64-binary-build',
-    'libtorch-ios-10.2.1-armv7s-binary-build',
+    'libtorch-macos-10.2.1-ios-sdk-12-x86_64-binary-build',
+    'libtorch-macos-10.2.1-ios-sdk-12-arm64-binary-build',
+    'libtorch-macos-10.2.1-ios-sdk-12-armv7s-binary-build',
 
     # Caffe2 Android
     'caffe2-py2-android-ubuntu16.04',
@@ -53,6 +53,7 @@ default_set = set([
     # PyTorch iOS build
     'pytorch-ios-10.2.1-x86_64-build',
     'pytorch-ios-10.2.1-arm64-build',
+    'pytorch-ios-10.2.1-armv7s-build',
 
     # XLA
     'pytorch-xla-linux-xenial-py3.6-clang7',

@@ -522,5 +522,5 @@
 
             
       - store_artifacts:
-          path: ~/workspace/artifact
+          path: ~/workspace/artifact/ios
           destination: ${FILE_NAME}
