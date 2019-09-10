@@ -114,7 +114,10 @@ module_metadata_map = {
     'EmbeddingBag': TorchNNModuleMetadata(),
     'CosineSimilarity': TorchNNModuleMetadata(),
     'PairwiseDistance': TorchNNModuleMetadata(),
-    'L1Loss': TorchNNModuleMetadata(),
+    'L1Loss': TorchNNModuleMetadata(
+        cpp_default_constructor_args="()",
+        num_attrs_recursive=1,
+    ),
     'MSELoss': TorchNNModuleMetadata(),
     'CrossEntropyLoss': TorchNNModuleMetadata(),
     'CTCLoss': TorchNNModuleMetadata(),
