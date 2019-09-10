@@ -4007,7 +4007,6 @@ class TestNN(NNTestCase):
         self._test_batchnorm_grad()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_batchnorm_grad_cuda(self):
         self._test_batchnorm_grad("cuda")
         if TEST_CUDNN:
