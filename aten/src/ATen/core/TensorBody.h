@@ -16,9 +16,7 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/NamedTensor.h>
-#endif
 
 namespace caffe2 {
 class Tensor;
