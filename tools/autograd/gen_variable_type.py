@@ -472,10 +472,11 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
-        wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-            declaration, formal_types=formal_types))
         if declaration['use_c10_dispatcher']:
             c10_wrapper_registrations.append(C10_WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
+        else:
+            wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
                 declaration, formal_types=formal_types))
 
     env = {
