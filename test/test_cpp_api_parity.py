@@ -216,7 +216,7 @@ class TestCppApiParity(common.TestCase):
         elif type(python_arg) == bool:
             return CppArg(type='bool', value=str(python_arg).lower())
         elif type(python_arg) == str:
-            # if `python_arg` is one of the reduction options, then we use the corresponding Reduction enum
+            # if `python_arg` is one of the reduction types, we use the corresponding `Reduction::Reduction` enum.
             if python_arg in ['none', 'mean', 'sum']:
                 if python_arg == 'none':
                     cpp_arg = 'Reduction::None'
