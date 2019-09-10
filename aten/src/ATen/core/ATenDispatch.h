@@ -76,7 +76,6 @@ class CAFFE2_API ATenOpTable {
 
   std::string schema_;
   void* function_table_[static_cast<int64_t>(TensorTypeId::NumTensorIds)] = {nullptr};
-  void* variable_function_ = nullptr;
 };
 
 class CAFFE2_API ATenDispatch {
