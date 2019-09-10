@@ -496,12 +496,15 @@
 
             #copy files
             mkdir -p ${WORKSPACE}/zip/src
-            cp ${PROJ_ROOT}/ios/LibTorch.h ${WORKSPACE}/zip/src
-            cp ${PROJ_ROOT}/ios/framework.module ${WORKSPACE}/zip/src
+            touch ${WORKSPACE}/zip/src/LibTorch.h
+            echo "import <torch/script.h>" > ${PROJ_ROOT}/ios/LibTorch.h
+            # cp ${PROJ_ROOT}/ios/LibTorch.h ${WORKSPACE}/zip/src
+            # cp ${PROJ_ROOT}/ios/framework.module ${WORKSPACE}/zip/src
+
             
             # zip the library
             cd ${WORKSPACE}/zip/
-            export FILE_NAME=libtorch_ios_`date +%m%d%Y`_arm64.zip
+            export FILE_NAME=libtorch_ios_`date +%m%d%Y`_${IOS_ARCH}.zip
             zip -r ${FILE_NAME} install src
             
             # store the artifact
