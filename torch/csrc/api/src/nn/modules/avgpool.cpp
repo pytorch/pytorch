@@ -36,7 +36,8 @@ Tensor AvgPool2dImpl::forward(const Tensor& input) {
       options.stride_,
       options.padding_,
       options.ceil_mode_,
-      options.count_include_pad_);
+      options.count_include_pad_,
+      options.divisor_override_);
 }
 
 Tensor AvgPool3dImpl::forward(const Tensor& input) {
@@ -46,7 +47,8 @@ Tensor AvgPool3dImpl::forward(const Tensor& input) {
       options.stride_,
       options.padding_,
       options.ceil_mode_,
-      options.count_include_pad_);
+      options.count_include_pad_,
+      options.divisor_override_);
 }
 
 template struct AvgPoolOptions<1>;

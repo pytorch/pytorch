@@ -28,6 +28,9 @@ struct AvgPoolOptions {
 
   /// when True, will include the zero-padding in the averaging calculation
   TORCH_ARG(bool, count_include_pad) = true;
+
+  /// if specified, it will be used as divisor, otherwise `kernel_size` will be used
+  TORCH_ARG(c10::optional<int64_t>, divisor_override) = c10::nullopt;
 };
 
 /// Base class for all (dimension-specialized) avgpool modules.
