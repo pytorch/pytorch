@@ -2193,8 +2193,7 @@ class _TestTorchMixin(torchtest):
         for k, n in zip([2, 3, 5], [3, 5, 7]):
             b, A, LU_data, LU_pivots = lu_solve_test_helper(self, (n,), (n, k), cast, pivot)
             x = torch.lu_solve(b, LU_data, LU_pivots)
-            b_ = torch.matmul(A, x)
-            self.assertEqual(b_, b)
+            self.assertLessEqual(b.dist(A.mm(x)), 1e-12)
 
     @skipIfNoLapack
     def test_lu_solve(self):
@@ -7317,8 +7316,7 @@ class _TestTorchMixin(torchtest):
         for (k, n), upper in product(zip([2, 3, 5], [3, 5, 7]), [True, False]):
             b, A, L = cholesky_solve_test_helper((n,), (n, k), cast, upper)
             x = torch.cholesky_solve(b, L, upper=upper)
-            b_ = torch.matmul(A, x)
-            self.assertEqual(b_, b)
+            self.assertLessEqual(b.dist(A.mm(x)), 1e-12)
 
     @skipIfNoLapack
     def test_cholesky_solve(self):
