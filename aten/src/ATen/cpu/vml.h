@@ -39,10 +39,10 @@
 // https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280. Calling zeroall
 // when using AVX/AVX2 code resolves this.
 #include <ATen/native/cpu/zmath.h>
-#if defined(__AVX__) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
+#if 1
 #define DL_RUNTIME_BUG(op, tp) \
   using type = typename at::native::ztype<tp>::type;  \
-  volatile type x = static_cast<type>(1);   \
+  volatile type x;   \
   x = std::op(x);                \
   _mm256_zeroall();
 #else
