@@ -11,7 +11,7 @@ namespace {
 
 // Check if pytorch is compiled with MIOpen.
 bool use_miopen(const at::Tensor& input, const double dropout_state) {
-    bool is_miopen_acceptable = (input.scalar_type() == at::kFloat) && 
+    bool is_miopen_acceptable = (input.scalar_type() == at::kFloat) &&
                                 (detail::getCUDAHooks().compiledWithMIOpen()) &&
                                 (input.is_cuda()) &&
                                 (dropout_state == 0.0);
@@ -170,10 +170,10 @@ struct QuantizedCellParamsDynamic {
   }
 
   Tensor linear_ih(const Tensor& input_ih) const {
-    const auto kFuncName = "quantized::fbgemm_linear_dynamic";
+    const auto kFuncName = "quantized::linear_dynamic";
     const auto kOvrldName = "";
     const std::vector<c10::IValue> output_ih_list =
-        callOp(kFuncName, kOvrldName, input_ih, w_ih, b_ih);
+        callOp(kFuncName, kOvrldName, input_ih, w_ih);
     TORCH_INTERNAL_ASSERT(
         output_ih_list.size() == 1,
         "The output vector should have exact one element");
@@ -181,10 +181,10 @@ struct QuantizedCellParamsDynamic {
     return output_ih;
   }
   Tensor linear_hh(const Tensor& input_hh) const {
-    const auto kFuncName = "quantized::fbgemm_linear_dynamic";
+    const auto kFuncName = "quantized::linear_dynamic";
     const auto kOvrldName = "";
     const std::vector<c10::IValue> output_hh_list =
-        callOp(kFuncName, kOvrldName, input_hh, w_hh, b_hh);
+        callOp(kFuncName, kOvrldName, input_hh, w_hh);
     TORCH_INTERNAL_ASSERT(
         output_hh_list.size() == 1,
         "The output vector should have exact one element");
@@ -966,7 +966,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(output, hy, cy);
-  } 
+  }
 
   if (use_miopen(_input, dropout_p)) {
     Tensor output, hy, cy;
@@ -995,7 +995,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     lstm_packed_cudnn_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(output, hy, cy);
-  } 
+  }
 
   if (use_miopen(data, dropout_p)) {
     Tensor output, hy, cy;
@@ -1003,7 +1003,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(output, hy, cy);
   }
-  
+
   PackedSequence input { data, batch_sizes };
   auto params = gather_params(_params, has_biases);
   auto result = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(

@@ -139,7 +139,6 @@ void ConcretePythonOp::cloneFrom(Node* other_) {
   this->cconv = other->cconv;
   Py_INCREF(other->pyobj.get());
   this->pyobj = THPObjectPtr(other->pyobj.get());
-  this->ignore_on_export = other->ignore_on_export;
   for (auto& sa : other->scalar_args) {
     Py_INCREF(sa.get());
     this->scalar_args.emplace_back(sa.get());
