@@ -1583,7 +1583,7 @@ new_module_tests = [
     dict(
         module_name='MaxPool3d',
         constructor_args=((2, 2, 2),),
-        cpp_constructor_args='({2, 2, 2})',
+        cpp_constructor_args='(torch::nn::MaxPool3dOptions({2, 2, 2}))',
         input_size=(2, 3, 5, 5, 5),
     ),
     dict(
