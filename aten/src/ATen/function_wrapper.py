@@ -482,6 +482,7 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'function_registrations': List[str],
     'c10_function_registrations': List[str],
     'c10_ops_already_moved_from_aten_to_c10': List[str],
+    'c10_ops_not_moved_from_aten_to_c10_yet': List[str],
     'type_method_declarations': List[str],
     'type_method_definitions': List[str],
     'tensor_method_declarations': List[str],
@@ -1289,6 +1290,10 @@ def create_generic(top_env, declarations):
                 REGISTRATION_DECLARATION.substitute(option))
         if option['use_c10_dispatcher']:
             top_env['c10_ops_already_moved_from_aten_to_c10'].append(
+                check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
+            )
+        else:
+            top_env['c10_ops_not_moved_from_aten_to_c10_yet'].append(
                 check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
             )
         option['native_type_method_dispatch'] = type_method_dispatch
