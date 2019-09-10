@@ -247,6 +247,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
 
   set(GENERATED_CXX_TORCH
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
     "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp"
     "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
     "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
@@ -254,7 +255,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND GENERATED_CXX_TORCH
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
@@ -264,12 +264,12 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   set(GENERATED_H_TORCH
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
     )
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND GENERATED_H_TORCH
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
     )
   endif()
