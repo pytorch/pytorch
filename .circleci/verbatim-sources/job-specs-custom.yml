@@ -497,7 +497,7 @@
             #copy files
             mkdir -p ${WORKSPACE}/zip/src
             touch ${WORKSPACE}/zip/src/LibTorch.h
-            echo "import <torch/script.h>" > ${PROJ_ROOT}/ios/LibTorch.h
+            echo "import <torch/script.h>" > ${WORKSPACE}/zip/src/LibTorch.h
             # cp ${PROJ_ROOT}/ios/LibTorch.h ${WORKSPACE}/zip/src
             # cp ${PROJ_ROOT}/ios/framework.module ${WORKSPACE}/zip/src
 
