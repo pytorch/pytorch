@@ -400,7 +400,6 @@ class TestOptim(TestCase):
              lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
         )
 
-    @skipIfRocm
     def test_adamax(self):
         self._test_basic_cases(
             lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
