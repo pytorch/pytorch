@@ -14,4 +14,12 @@ const std::unordered_set<c10::OperatorName>& aten_ops_already_moved_to_c10() {
   return result;
 }
 
+const std::unordered_set<c10::OperatorName>& aten_ops_not_moved_to_c10_yet() {
+  static std::unordered_set<c10::OperatorName> result {
+    ${c10_ops_not_moved_from_aten_to_c10_yet}
+    {"", ""}
+  };
+  return result;
+}
+
 }
