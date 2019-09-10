@@ -424,8 +424,8 @@
           contxt: org-member
           command: |
             set -e
-            ARTIFACTS_DIR= ~/workspace/artifacts/ios
-            ZIP_DIR=~/workspace/zip
+            ARTIFACTS_DIR= /Users/distiller/workspace/ios
+            ZIP_DIR=/Users/distiller/workspace/zip
             mkdir -p ${ZIP_DIR}/install/lib
             mkdir -p ${ZIP_DIR}/src
             # copy header files
@@ -570,4 +570,4 @@
             # mkdir -p ${WORKSPACE}/artifact/ios
             # cp ${FILE_NAME} ${WORKSPACE}/artifact/ios
       - store_artifacts:
-          path: ~/workspace/artifacts/ios
+          path: /Users/distiller/workspace/artifacts/ios
