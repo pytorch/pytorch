@@ -204,7 +204,7 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
     const std::size_t nb_values = 1000;
     HMap map;
     for (size_t i = 0; i < nb_values; ++i) {
-      map[std::to_string(i)] = i;
+      map[c10::guts::to_string(i)] = i;
       auto begin = map.begin();
       for (size_t j = 0; j <= i; ++j, begin++) {
         TORCH_INTERNAL_ASSERT(begin->second == j);
@@ -229,7 +229,7 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
         if(i >= 10 && i < 220) {
             continue;
         }
-        auto exp_it = std::pair<std::string, std::int64_t>(std::to_string(i), i);
+        auto exp_it = std::pair<std::string, std::int64_t>(c10::guts::to_string(i), i);
         TORCH_INTERNAL_ASSERT(*it == exp_it);
         ++it;
     }
