@@ -32,6 +32,9 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, torchtest, TEST_WITH_ROCM
 from multiprocessing.reduction import ForkingPickler
+from common_device_type import instantiate_device_type_tests, dtypes, \
+    dtypesIfCPU, dtypesIfCUDA, skipIf, skipCPUIf, skipCUDAIf, \
+    skipCPUIfNoLapack, skipCUDAIfNoMagma
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1871,45 +1874,6 @@ class _TestTorchMixin(torchtest):
         res_csub = a.clone()
         res_csub.sub_(scalar)
         self.assertEqual(res_add, res_csub)
-
-    @staticmethod
-    def _test_neg(self, cast):
-        float_types = [torch.DoubleTensor, torch.FloatTensor, torch.LongTensor]
-        int_types = [torch.IntTensor, torch.ShortTensor, torch.ByteTensor,
-                     torch.CharTensor]
-
-        for t in float_types + int_types:
-            if t in float_types:
-                a = cast(torch.randn(100, 90).type(t))
-            else:
-                a = cast(torch.randint(-128, 128, (100, 90), dtype=t.dtype))
-            zeros = cast(torch.Tensor().type(t)).resize_as_(a).zero_()
-
-            if t == torch.ByteTensor:
-                res_add = torch.add(zeros, a, alpha=255)
-            else:
-                res_add = torch.add(zeros, a, alpha=-1)
-            res_neg = a.clone()
-            res_neg.neg_()
-            self.assertEqual(res_neg, res_add)
-
-            # test out of place as well
-            res_neg_out_place = a.clone().neg()
-            self.assertEqual(res_neg_out_place, res_add)
-
-            # test via __neg__ operator
-            res_neg_op = -a.clone()
-            self.assertEqual(res_neg_op, res_add)
-
-            # bool
-            self.assertRaisesRegex(
-                RuntimeError,
-                r"Negation, the `\-` operator, on a bool tensor is not supported. "
-                r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
-                lambda: - cast(torch.tensor([False, True])))
-
-    def test_neg(self):
-        self._test_neg(self, lambda t: t)
 
     @staticmethod
     def _test_bitwise_not(self, device):
@@ -4066,21 +4030,6 @@ class _TestTorchMixin(torchtest):
         res2 = torch.Tensor()
         torch.diag(x, out=res2)
         self.assertEqual(res1, res2)
-
-    @staticmethod
-    def _test_diagonal(self, dtype, device):
-        x = torch.randn((100, 100), dtype=dtype, device=device)
-        result = torch.diagonal(x)
-        expected = torch.diag(x)
-        self.assertEqual(result, expected)
-
-        x = torch.randn((100, 100), dtype=dtype, device=device)
-        result = torch.diagonal(x, 17)
-        expected = torch.diag(x, 17)
-        self.assertEqual(result, expected)
-
-    def test_diagonal(self):
-        self._test_diagonal(self, dtype=torch.float32, device='cpu')
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_diagonal_multidim(self):
@@ -6555,75 +6504,6 @@ class _TestTorchMixin(torchtest):
         self._test_signal_window_functions(self)
 
     @staticmethod
-    def _test_inverse(self, conv_fn):
-        from common_utils import random_fullrank_matrix_distinct_singular_value
-
-        # no batches: 2-D tensors
-        matrix = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
-        matrix_inverse = torch.inverse(matrix)
-        identity = conv_fn(torch.eye(5))
-        self.assertEqual(identity, torch.mm(matrix, matrix_inverse), 1e-8, 'inverse value')
-        self.assertEqual(identity, torch.mm(matrix_inverse, matrix), 1e-8, 'inverse value')
-
-        matrix_inverse_out = conv_fn(torch.empty(5, 5))
-        torch.inverse(matrix, out=matrix_inverse_out)
-        self.assertEqual(matrix_inverse_out, matrix_inverse, 0, 'inverse value in-place')
-        # second call, now that matrix_inverse_out is transposed
-        torch.inverse(matrix, out=matrix_inverse_out)
-        self.assertEqual(matrix_inverse_out, matrix_inverse, 0, 'inverse value in-place')
-
-        # one batch
-        matrix = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 1))
-        matrix_inverse = torch.inverse(matrix)
-        expected_inv = matrix.squeeze(0).inverse()
-        self.assertEqual(matrix_inverse, expected_inv.unsqueeze(0))
-
-        # four batches
-        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 4))
-        expected_inv_list = []
-        for i in range(0, 4):
-            expected_inv_list.append(torch.inverse(matrices[i]))
-        expected_inv = torch.stack(expected_inv_list)
-        matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(matrices_inverse, expected_inv)
-
-        # six batches (2 x 3)
-        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 2, 3))
-        expected_inv_list = []
-        for mat in matrices.view(-1, 5, 5):
-            expected_inv_list.append(torch.inverse(mat))
-        expected_inv = torch.stack(expected_inv_list).view(2, 3, 5, 5)
-        matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(matrices_inverse, expected_inv)
-
-        # incorrect input test
-        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
-            torch.inverse(torch.randn(2, 3, 4, 3))
-
-        # correctness test
-        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 3))
-        matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(torch.matmul(matrices, matrices_inverse), identity.expand_as(matrices))
-        self.assertEqual(torch.matmul(matrices_inverse, matrices), identity.expand_as(matrices))
-
-        # torch.inverse with out and batches
-        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 3))
-        matrices_inverse = conv_fn(torch.empty(3, 5, 5))
-        torch.inverse(matrices, out=matrices_inverse)
-        self.assertEqual(torch.inverse(matrices), matrices_inverse)
-
-        # non-contiguous inputs
-        if not TEST_NUMPY:
-            return
-
-        from numpy.linalg import inv
-        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(3, 2)).permute(0, 2, 1)
-        assert not matrices.is_contiguous()
-        matrices_inverse = torch.inverse(matrices)
-        expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
-        self.assertEqual(matrices_inverse, conv_fn(expected_inv))
-
-    @staticmethod
     def _test_inverse_slow(self, conv_fn):
         from common_utils import random_fullrank_matrix_distinct_singular_value
 
@@ -6636,10 +6516,6 @@ class _TestTorchMixin(torchtest):
         matrices_inverse = torch.inverse(matrices)
         self.assertEqual(torch.matmul(matrices, matrices_inverse),
                          conv_fn(torch.eye(3)).expand_as(matrices))
-
-    @skipIfNoLapack
-    def test_inverse(self):
-        self._test_inverse(self, lambda t: t)
 
     @slowTest
     @skipIfNoLapack
@@ -13451,8 +13327,126 @@ def add_neg_dim_tests():
         assert not hasattr(_TestTorchMixin, test_name), "Duplicated test name: " + test_name
         setattr(_TestTorchMixin, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
 
-add_neg_dim_tests()
+# Device-agnostic tests. Instantiated below and not run directly.
+class _TestTorchDeviceType(object):
+    def test_diagonal(self, device):
+        x = torch.randn((100, 100), device=device)
+        result = torch.diagonal(x)
+        expected = torch.diag(x)
+        self.assertEqual(result, expected)
 
+        x = torch.randn((100, 100), device=device)
+        result = torch.diagonal(x, 17)
+        expected = torch.diag(x, 17)
+        self.assertEqual(result, expected)
+
+    @dtypes(torch.float, torch.double, torch.long, torch.int, torch.short,
+            torch.uint8, torch.int8)
+    def test_neg(self, device, dtype):
+        float_types = [torch.float, torch.double, torch.long]
+
+        if dtype in float_types:
+            a = torch.randn(100, 90).type(dtype).to(device)
+        else:
+            a = torch.randint(-128, 128, (100, 90), dtype=dtype, device=device)
+        zeros = torch.Tensor().type(dtype).resize_as_(a).zero_().to(device)
+
+        if dtype == torch.uint8:
+            res_add = torch.add(zeros, a, alpha=255)
+        else:
+            res_add = torch.add(zeros, a, alpha=-1)
+
+        res_neg = a.clone()
+        res_neg.neg_()
+        self.assertEqual(res_neg, res_add)
+
+        # test out of place as well
+        res_neg_out_place = a.clone().neg()
+        self.assertEqual(res_neg_out_place, res_add)
+
+        # test via __neg__ operator
+        res_neg_op = -a.clone()
+        self.assertEqual(res_neg_op, res_add)
+
+        # bool
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"Negation, the `\-` operator, on a bool tensor is not supported. "
+            r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
+            lambda: - torch.tensor([False, True], device=device))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    def test_inverse(self, device):
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+
+        # no batches: 2-D tensors
+        matrix = random_fullrank_matrix_distinct_singular_value(5).to(device)
+        matrix_inverse = torch.inverse(matrix)
+        identity = torch.eye(5).to(device)
+        self.assertEqual(identity, torch.mm(matrix, matrix_inverse), 1e-8, 'inverse value')
+        self.assertEqual(identity, torch.mm(matrix_inverse, matrix), 1e-8, 'inverse value')
+
+        matrix_inverse_out = torch.empty(5, 5).to(device)
+        torch.inverse(matrix, out=matrix_inverse_out)
+        self.assertEqual(matrix_inverse_out, matrix_inverse, 0, 'inverse value in-place')
+        # second call, now that matrix_inverse_out is transposed
+        torch.inverse(matrix, out=matrix_inverse_out)
+        self.assertEqual(matrix_inverse_out, matrix_inverse, 0, 'inverse value in-place')
+
+        # one batch
+        matrix = random_fullrank_matrix_distinct_singular_value(5, 1).to(device)
+        matrix_inverse = torch.inverse(matrix)
+        expected_inv = matrix.squeeze(0).inverse()
+        self.assertEqual(matrix_inverse, expected_inv.unsqueeze(0))
+
+        # four batches
+        matrices = random_fullrank_matrix_distinct_singular_value(5, 4).to(device)
+        expected_inv_list = []
+        for i in range(0, 4):
+            expected_inv_list.append(torch.inverse(matrices[i]))
+        expected_inv = torch.stack(expected_inv_list)
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(matrices_inverse, expected_inv)
+
+        # six batches (2 x 3)
+        matrices = random_fullrank_matrix_distinct_singular_value(5, 2, 3).to(device)
+        expected_inv_list = []
+        for mat in matrices.view(-1, 5, 5):
+            expected_inv_list.append(torch.inverse(mat))
+        expected_inv = torch.stack(expected_inv_list).view(2, 3, 5, 5)
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(matrices_inverse, expected_inv)
+
+        # incorrect input test
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+            torch.inverse(torch.randn(2, 3, 4, 3))
+
+        # correctness test
+        matrices = random_fullrank_matrix_distinct_singular_value(5, 3).to(device)
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(torch.matmul(matrices, matrices_inverse), identity.expand_as(matrices))
+        self.assertEqual(torch.matmul(matrices_inverse, matrices), identity.expand_as(matrices))
+
+        # torch.inverse with out and batches
+        matrices = random_fullrank_matrix_distinct_singular_value(5, 3).to(device)
+        matrices_inverse = torch.empty(3, 5, 5).to(device)
+        torch.inverse(matrices, out=matrices_inverse)
+        self.assertEqual(torch.inverse(matrices), matrices_inverse)
+
+        # non-contiguous inputs
+        if not TEST_NUMPY:
+            return
+
+        from numpy.linalg import inv
+        matrices = random_fullrank_matrix_distinct_singular_value(3, 2).to(device).permute(0, 2, 1)
+        assert not matrices.is_contiguous()
+        matrices_inverse = torch.inverse(matrices)
+        expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
+        self.assertEqual(matrices_inverse, expected_inv.to(device))
+
+add_neg_dim_tests()
+instantiate_device_type_tests(_TestTorchDeviceType, globals())
 
 class TestTorch(TestCase, _TestTorchMixin):
     pass

@@ -1094,9 +1094,6 @@ class TestCuda(TestCase):
             for num in abs_zeros:
                 self.assertGreater(math.copysign(1.0, num), 0.0)
 
-    def test_neg(self):
-        _TestTorchMixin._test_neg(self, lambda t: t.cuda())
-
     def test_bitwise_not(self):
         _TestTorchMixin._test_bitwise_not(self, 'cuda')
 
@@ -2206,10 +2203,6 @@ class TestCuda(TestCase):
     def _select_broadcastable_dims(dims_full=None):
         return _TestTorchMixin._select_broadcastable_dims(dims_full)
 
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_inverse(self):
-        _TestTorchMixin._test_inverse(self, lambda t: t.cuda())
-
     @slowTest
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_inverse_many_batches(self):
@@ -2745,9 +2738,6 @@ class TestCuda(TestCase):
 
     def test_lerp(self):
         _TestTorchMixin._test_lerp(self, lambda t: t.cuda())
-
-    def test_diagonal(self):
-        _TestTorchMixin._test_diagonal(self, dtype=torch.float32, device='cuda')
 
     def test_diagflat(self):
         _TestTorchMixin._test_diagflat(self, dtype=torch.float32, device='cuda')
