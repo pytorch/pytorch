@@ -79,11 +79,13 @@ class CAFFE2_API ATenDispatch {
         c10_op_registrations_.push_back(
           torch::RegisterOperators().op(schema, torch::RegisterOperators::options()
             .impl_unboxedOnlyCatchAllKernel(fn)
+            .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
         ));
       } else {
         c10_op_registrations_.push_back(
           torch::RegisterOperators().op(schema, torch::RegisterOperators::options()
             .impl_unboxedOnlyKernel(c10::backendToTensorTypeId(backend), fn)
+            .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
         ));
       }
     } else {
@@ -102,6 +104,7 @@ class CAFFE2_API ATenDispatch {
       c10_op_registrations_.push_back(
         torch::RegisterOperators().op(schema, torch::RegisterOperators::options()
           .impl_unboxedAutogradKernel(fn)
+          .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
       ));
     } else {
       std::lock_guard<std::mutex> lock(mutex_);
