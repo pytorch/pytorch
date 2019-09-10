@@ -4,7 +4,7 @@ from .observer import *
 from .fake_quantize import *
 
 QConfig = namedtuple('QConfig',
-                     ['weight', 'activation'])
+                     ['activation', 'weight'])
 
 default_qconfig = QConfig(default_weight_observer(),
                           default_observer())
