@@ -368,18 +368,14 @@ inline Symbol Symbol::prim(const std::string & s)  { return Symbol::fromQualStri
 inline Symbol Symbol::scope(const std::string & s) { return Symbol::fromQualString("scope::" + s); }
 inline Symbol Symbol::user(const std::string & s) { return Symbol::fromQualString("user::" + s); }
 inline Symbol Symbol::caffe2(const std::string & s) { return Symbol::fromQualString("_caffe2::" + s); }
-#ifdef BUILD_NAMEDTENSOR
 inline Symbol Symbol::dimname(const std::string & s) { return Symbol::fromQualString("dimname::" + s); }
-#endif
 inline bool Symbol::is_attr() const { return ns() == namespaces::attr; }
 inline bool Symbol::is_aten() const { return ns() == namespaces::aten; }
 inline bool Symbol::is_prim() const { return ns() == namespaces::prim; }
 inline bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
 inline bool Symbol::is_user() const { return ns() == namespaces::user; }
 inline bool Symbol::is_caffe2() const { return ns() == namespaces::_caffe2; }
-#ifdef BUILD_NAMEDTENSOR
 inline bool Symbol::is_dimname() const { return ns() == namespaces::dimname; }
-#endif
 
 } // namespace c10
 
