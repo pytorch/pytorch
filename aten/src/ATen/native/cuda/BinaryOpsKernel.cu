@@ -76,11 +76,20 @@ void logical_xor_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void lt_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "lt_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+      return a < b;
+  });
+  });
+}
+
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
 REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
 REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel_cuda);
+REGISTER_DISPATCH(lt_stub, &lt_kernel_cuda);
 
 }} // namespace at::native

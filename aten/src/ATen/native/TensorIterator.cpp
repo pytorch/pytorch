@@ -625,6 +625,19 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
   return iter;
 }
 
+TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
+    const Tensor& b, bool check_mem_overlap) {
+  auto iter = TensorIterator::Builder();
+  iter.set_check_mem_overlap(check_mem_overlap);
+  iter.add_output(out, a.device(), ScalarType::Bool);
+  iter.add_input(a);
+  iter.add_input(b);
+  iter.allow_cpu_scalars_ = true;
+  iter.dont_compute_common_dtype();
+  iter.build();
+  return iter;
+}
+
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
     bool check_mem_overlap) {
   auto iter = TensorIterator();

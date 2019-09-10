@@ -15,6 +15,7 @@ DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(logical_xor_stub);
+DEFINE_DISPATCH(lt_stub);
 
 static constexpr char alpha_mismatch_err[] =
   "For integral input tensors, argument alpha must not be a floating point number.";
@@ -244,6 +245,34 @@ Tensor logical_xor(const Tensor& self, const Tensor& other) {
 
 Tensor& logical_xor_(Tensor& self, const Tensor& other) {
   return native::logical_xor_out(self, self, other);
+}
+
+Tensor& lt_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::comparison_op(result, self, other, true);
+  lt_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor lt(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  native::lt_out(result, self, other);
+  return result;
+}
+
+Tensor& lt_(Tensor& self, const Tensor& other) {
+  return native::lt_out(self, self, other);
+}
+
+Tensor lt(const Tensor& self, Scalar other) {
+  return native::lt(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& lt_(Tensor& self, Scalar other) {
+  return native::lt_(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) {
+  return native::lt_out(result, self, wrapped_scalar_tensor(other));
 }
 
 }
