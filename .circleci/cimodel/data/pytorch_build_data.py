@@ -57,9 +57,9 @@ CONFIG_TREE_DATA = [
             ("r19c", [
                 ("3.6", [
                     ("android_abi", [XImportant("x86_32")]),
-                    ("android_abi", [X("x86_64")]),
-                    ("android_abi", [X("arm-v7a")]),
-                    ("android_abi", [X("arm-v8a")]),
+                    ("android_abi", [XImportant("x86_64")]),
+                    ("android_abi", [XImportant("arm-v7a")]),
+                    ("android_abi", [XImportant("arm-v8a")]),
                 ])
             ]),
         ]),

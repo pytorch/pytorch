@@ -163,6 +163,10 @@ def sqrt(g, self):
     return g.op("Sqrt", self)
 
 
+def rsqrt(g, self):
+    return div(g, sym_help._if_scalar_type_as(g, torch.ones(1), self), sqrt(g, self))
+
+
 def tanh(g, self):
     return g.op("Tanh", self)
 
