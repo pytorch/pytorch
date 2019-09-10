@@ -44,7 +44,7 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
 }
 
 template<typename Base_type, typename Exp_type>
-static inline void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
+void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
                                                  Exp_type exp) {
   const auto d_exp = static_cast<double>(exp);
   if (d_exp == 0.5) {
