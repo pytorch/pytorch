@@ -58,51 +58,49 @@ endif()
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
 
-if (NOT BUILD_ATEN_ONLY)
-  add_subdirectory(core)
-  add_subdirectory(proto)
-  add_subdirectory(serialize)
-  add_subdirectory(utils)
-  add_subdirectory(perfkernels)
+add_subdirectory(core)
+add_subdirectory(serialize)
+add_subdirectory(utils)
+add_subdirectory(perfkernels)
 
-  # Skip modules that are not used by libtorch mobile yet.
-  if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
-    add_subdirectory(contrib)
-    add_subdirectory(predictor)
-    add_subdirectory(predictor/emulator)
-    add_subdirectory(core/nomnigraph)
-    if (USE_NVRTC)
-      add_subdirectory(cuda_rtc)
-    endif()
-    add_subdirectory(db)
-    add_subdirectory(distributed)
-    # add_subdirectory(experiments) # note, we may remove this folder at some point
-    add_subdirectory(ideep)
-    add_subdirectory(image)
-    add_subdirectory(video)
-    add_subdirectory(mobile)
-    add_subdirectory(mpi)
-    add_subdirectory(observers)
-    add_subdirectory(onnx)
-    if (BUILD_CAFFE2_OPS)
-      add_subdirectory(operators)
-      add_subdirectory(operators/rnn)
-      if (USE_FBGEMM)
-        add_subdirectory(quantization)
-        add_subdirectory(quantization/server)
-      endif()
-      if (USE_QNNPACK)
-        add_subdirectory(operators/quantized)
-      endif()
-    endif()
-    add_subdirectory(opt)
-    add_subdirectory(python)
-    add_subdirectory(queue)
-    add_subdirectory(sgd)
-    add_subdirectory(share)
-    # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
-    add_subdirectory(transforms)
+# Skip modules that are not used by libtorch mobile yet.
+if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
+  add_subdirectory(contrib)
+  add_subdirectory(predictor)
+  add_subdirectory(predictor/emulator)
+  add_subdirectory(core/nomnigraph)
+  if (USE_NVRTC)
+    add_subdirectory(cuda_rtc)
   endif()
+  add_subdirectory(db)
+  add_subdirectory(distributed)
+  # add_subdirectory(experiments) # note, we may remove this folder at some point
+  add_subdirectory(ideep)
+  add_subdirectory(image)
+  add_subdirectory(video)
+  add_subdirectory(mobile)
+  add_subdirectory(mpi)
+  add_subdirectory(observers)
+  add_subdirectory(onnx)
+  if (BUILD_CAFFE2_OPS)
+    add_subdirectory(operators)
+    add_subdirectory(operators/rnn)
+    if (USE_FBGEMM)
+      add_subdirectory(quantization)
+      add_subdirectory(quantization/server)
+    endif()
+    if (USE_QNNPACK)
+      add_subdirectory(operators/quantized)
+    endif()
+  endif()
+  add_subdirectory(opt)
+  add_subdirectory(proto)
+  add_subdirectory(python)
+  add_subdirectory(queue)
+  add_subdirectory(sgd)
+  add_subdirectory(share)
+  # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
+  add_subdirectory(transforms)
 endif()
 
 # Advanced: if we have white list specified, we will do intersections for all
@@ -172,8 +170,8 @@ if (FALSE)
   endforeach()
 endif()
 
-# ---[ List of libraries to link with
-if(NOT BUILD_ATEN_ONLY)
+if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
+  # ---[ List of libraries to link with
   add_library(caffe2_protos STATIC $<TARGET_OBJECTS:Caffe2_PROTO>)
   add_dependencies(caffe2_protos Caffe2_PROTO)
   # If we are going to link protobuf locally inside caffe2 libraries, what we will do is
@@ -209,7 +207,6 @@ if(NOT BUILD_ATEN_ONLY)
     INSTALL(TARGETS caffe2_protos ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
   endif()
 endif()
-
 
 # ==========================================================
 # formerly-libtorch
@@ -373,7 +370,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/irparser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/jit_log.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_c10_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/subgraph_matcher.cpp
@@ -455,11 +451,17 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if (NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_rref_proto.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_ret.cpp
       ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
     )
     if (NOT WIN32)
       list(APPEND TORCH_SRCS
@@ -468,12 +470,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   if (USE_CUDA)
-    if (NOT USE_ROCM)
-      list(APPEND Caffe2_GPU_SRCS
-        ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
-      )
-    endif()
     list(APPEND Caffe2_GPU_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
@@ -486,12 +484,14 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   if (USE_ROCM)
     list(APPEND Caffe2_HIP_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
     )
     # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
     # See NOTE [ ATen NVRTC Stub and HIP ]
     add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+    target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${PYTORCH_HIP_HCC_LIBRARIES} ${ROCM_HIPRTC_LIB})
     target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
     target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
     target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_HCC__)
@@ -573,14 +573,15 @@ ENDIF()
 # formerly-libtorch flags
 # ==========================================================
 
-if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
-
+if (NOT INTERN_BUILD_MOBILE)
   # Forces caffe2.pb.h to be generated before its dependents are compiled.
   # Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
   # to establish the dependency, since the generation procedure is declared in a different CMake file.
   # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
   add_dependencies(torch Caffe2_PROTO)
+endif()
 
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   target_compile_definitions(torch PUBLIC _THP_CORE)
 
 
@@ -724,6 +725,7 @@ ENDIF()
 
   if (BUILD_TEST AND NOT NO_API)
     add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/dist_autograd ${CMAKE_BINARY_DIR}/dist_autograd)
   endif()
 
   # XXX This ABI check cannot be run with arm-linux-androideabi-g++
@@ -768,7 +770,7 @@ ENDIF()
     DESTINATION share/cmake/Torch)
 
   if (USE_DISTRIBUTED)
-    if (NOT MSVC AND NOT APPLE)
+    if (NOT MSVC)
       add_subdirectory(${TORCH_SRC_DIR}/lib/c10d lib_c10d)
     endif()
   endif()
@@ -830,8 +832,7 @@ if (NOT WIN32 AND NOT USE_ASAN)
   target_compile_options(torch PRIVATE "-fvisibility=hidden")
 endif()
 
-
-if(NOT BUILD_ATEN_ONLY)
+if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
   caffe2_interface_library(caffe2_protos caffe2_protos_whole)
   target_link_libraries(torch PRIVATE caffe2_protos_whole)
   if (${CAFFE2_LINK_LOCAL_PROTOBUF})
