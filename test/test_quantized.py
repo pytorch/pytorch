@@ -525,8 +525,6 @@ class TestQuantizedOps(TestCase):
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding)
             self.assertEqual(a_ref, a_hat.dequantize(),
                              message="{} results are off".format(name, a_hat.dequantize(), a_ref))
-            import pdb
-            pdb.set_trace()
 
     @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
