@@ -8,9 +8,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
-#if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/dispatch/Dispatcher.h>
-#endif
 #ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/NamedTensor.h>
 #endif
