@@ -82,8 +82,8 @@ def _wrap_with_rpc(func):
         store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend='gloo', rank=self.rank,
                                 world_size=self.world_size, store=store)
-        dist.init_model_parallel(rpc_backend=BACKEND,
-                                 self_name='worker%d' % self.rank,
+        dist.init_model_parallel(self_name='worker%d' % self.rank,
+                                 rpc_backend=BACKEND,
                                  self_rank=self.rank,
                                  rpc_init_url=RPC_INIT_URL)
         func(self)
@@ -134,8 +134,8 @@ class RpcTest(MultiProcessTestCase):
         dist.init_process_group(backend="gloo", rank=self.rank,
                                 world_size=self.world_size, store=store)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
-            dist.init_model_parallel(rpc_backend=BACKEND,
-                                     self_name="duplicate_name",
+            dist.init_model_parallel(self_name="duplicate_name",
+                                     rpc_backend=BACKEND,
                                      self_rank=self.rank,
                                      rpc_init_url=RPC_INIT_URL)
         dist.join_rpc()
@@ -157,8 +157,8 @@ class RpcTest(MultiProcessTestCase):
         # If the number in the message does not match, it is likely that the
         # value of MAX_NAME_LEN in RPC WorkerId has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
-            dist.init_model_parallel(rpc_backend=BACKEND,
-                                     self_name="".join(["a" for _ in range(500)]),
+            dist.init_model_parallel(self_name="".join(["a" for _ in range(500)]),
+                                     rpc_backend=BACKEND,
                                      self_rank=self.rank,
                                      rpc_init_url=RPC_INIT_URL)
         dist.join_rpc()

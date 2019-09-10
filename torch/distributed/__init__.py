@@ -23,8 +23,8 @@ if is_available():
         from .rpc import _init_rpc
         from .rpc import *  # noqa: F401
 
-        def init_model_parallel(rpc_backend=RpcBackend.PROCESS_GROUP,
-                                self_name=None,
+        def init_model_parallel(self_name,
+                                rpc_backend=RpcBackend.PROCESS_GROUP,
                                 self_rank=-1,
                                 rpc_init_url=None):
             r"""

@@ -88,7 +88,7 @@ def _init_rpc(rpc_backend=RpcBackend.PROCESS_GROUP,
                                      init_url=rpc_init_url)
         init_rref_context(_agent)
     else:
-        raise RuntimeError("Unrecognized RPC backend ", backend)
+        raise RuntimeError("Unrecognized RPC backend ", rpc_backend)
 
 
 @_require_initialized
