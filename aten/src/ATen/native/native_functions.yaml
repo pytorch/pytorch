@@ -1468,8 +1468,9 @@
   use_c10_dispatcher: True
 
 - func: fbgemm_pack_quantized_matrix(Tensor input) -> Tensor
+  use_c10_dispatcher: True
 
-- func: fbgemm_pack_quantized_matrix(Tensor input, int K, int N) -> Tensor
+- func: fbgemm_pack_quantized_matrix.KN(Tensor input, int K, int N) -> Tensor
   use_c10_dispatcher: True
 
 - func: fbgemm_is_cpu_supported() -> bool
