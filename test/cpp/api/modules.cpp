@@ -6,6 +6,7 @@
 #include <torch/nn/modules/dropout.h>
 #include <torch/nn/modules/embedding.h>
 #include <torch/nn/modules/functional.h>
+#include <torch/nn/modules/loss.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/types.h>
 #include <torch/utils.h>
@@ -324,6 +325,18 @@ TEST_F(ModulesTest, Linear2_CUDA) {
   ASSERT_EQ(y.size(1), 2);
 
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
+}
+
+TEST_F(ModulesTest, L1Loss) {
+  L1Loss loss;
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = loss->forward(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
 TEST_F(ModulesTest, PrettyPrintLinear) {
