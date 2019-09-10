@@ -23,8 +23,8 @@ from cpp_api_parity import TorchNNModuleMetadata
 #     attributes) of the Python module. If the module contains any submodule, the submodule's
 #     attributes also need to be counted.
 #
-# `python_legacy_constructor_args`: list of legacy Python constructor args that are ignored in
-#     Python/C++ API parity test.
+# `python_legacy_constructor_args`: (optional) list of legacy Python constructor args that are
+#     ignored in Python/C++ API parity test.
 module_metadata_map = {
     'Conv1d': TorchNNModuleMetadata(),
     'Conv2d': TorchNNModuleMetadata(),
