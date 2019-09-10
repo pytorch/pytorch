@@ -11,9 +11,10 @@
 
 namespace torch { namespace autograd {
 
-  void accumulate(std::vector<Variable>& buffer,
-                  const size_t pos,
-                  Variable&& var) {
+  static void accumulate(std::vector<Variable>& buffer,
+                         const size_t pos,
+                         Variable&& var) {
+    TORCH_INTERNAL_ASSERT(pos < buffer.size());
     auto& old_var = buffer[pos];
     // ATen doesn't route sparse additions correctly...
     // do dense + sparse in-place if possible
@@ -91,7 +92,7 @@ namespace torch { namespace autograd {
     } else {
       // (1) non-CUDA variable
       //     Accumulation happens on variable's device
-      c10::DeviceGuard device_guard{*device_of(var)};
+      c10::OptionalDeviceGuard device_guard{device_of(var)};
       accumulate(buffer, pos, std::move(var));
     }
   }
