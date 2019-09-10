@@ -776,17 +776,28 @@ class _TestTorchMixin(torchtest):
     def test_erfc(self):
         self._test_math_by_name('erfc')
 
-    def test_erfinv(self):
-        def checkType(tensor):
-            inputValues = torch.randn(4, 4, out=tensor()).clamp(-2., 2.)
-            self.assertEqual(tensor(inputValues).erf().erfinv(), tensor(inputValues))
+    @torchtest.for_all_device_types()
+    def test_erfinv(self, device):
+        def checkType(dtype):
+            # general testing. Narrow the range to avoid accuracy issues
+            input_values = torch.randn(4, 4, dtype=dtype, device=device).clamp(-0.3, 0.3)
+            self.assertEqual(input_values.erf().erfinv(), input_values)
             # test inf
-            self.assertTrue(torch.equal(tensor([-1, 1]).erfinv(), tensor([-inf, inf])))
+            self.assertTrue(torch.equal(torch.tensor([-1, 1], dtype=dtype, device=device).erfinv(),
+                            torch.tensor([-inf, inf], dtype=dtype, device=device)))
             # test nan
-            self.assertEqual(tensor([-2, 2]).erfinv(), tensor([nan, nan]))
+            self.assertEqual(torch.tensor([-2, 2], dtype=dtype, device=device).erfinv(),
+                             torch.tensor([nan, nan], dtype=dtype, device=device))
 
-        checkType(torch.FloatTensor)
-        checkType(torch.DoubleTensor)
+        if device != 'cpu':
+            checkType(torch.half)
+        checkType(torch.float)
+        checkType(torch.double)
+
+        # double precision
+        a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
+        self.assertAlmostEqual(a[0].item(), 0.47693627620447, places=13)
+        self.assertAlmostEqual(a[1].item(), 0.90619380243682, places=13)
 
     def test_exp(self):
         def exp(x):
@@ -1630,6 +1641,54 @@ class _TestTorchMixin(torchtest):
         x = torch.cuda.BoolTensor()
         self.assertTrue(x.all())
         self.assertFalse(x.any())
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_multinomial_device_constrain(self):
+        x = torch.empty(0, device="cpu")
+        y = torch.empty(0, device="cuda")
+        self.assertRaisesRegex(
+            RuntimeError, "multinomial arguments must have the same device",
+            lambda: torch.multinomial(x, 2, out=y))
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_multinomial_gpu_device_constrain(self):
+        x = torch.empty(0, device="cuda:0")
+        y = torch.empty(0, device="cuda:1")
+        self.assertRaisesRegex(
+            RuntimeError, "multinomial arguments must have the same device",
+            lambda: torch.multinomial(x, 2, out=y))
+
+    def test_multinomial_constraints(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.empty(1, 2, 3, dtype=torch.double, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "prob_dist must be 1 or 2 dim",
+                lambda: torch.multinomial(x, 2))
+            x = torch.empty(1, 2, dtype=torch.long, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "multinomial only supports floating-point dtypes for input",
+                lambda: torch.multinomial(x, 2))
+            x = torch.empty(1, 2, dtype=torch.double, device=device)
+            y = torch.empty(1, 2, dtype=torch.double, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "multinomial expects Long tensor out",
+                lambda: torch.multinomial(x, 2, out=y))
+            x = torch.empty(2, dtype=torch.double, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "cannot sample n_sample <= 0 samples",
+                lambda: torch.multinomial(x, 0))
+            x = torch.empty(2, dtype=torch.double, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "cannot sample n_sample <= 0 samples",
+                lambda: torch.multinomial(x, -1))
+            x = torch.empty(2, dtype=torch.double, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "cannot sample n_sample > prob_dist",
+                lambda: torch.multinomial(x, 3, False))
+            x = torch.empty(16777217, dtype=torch.double, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "number of categories cannot exceed",
+                lambda: torch.multinomial(x, 3))
 
     def test_mv(self):
         def _test_mv(m1, v1):
@@ -6883,7 +6942,7 @@ class _TestTorchMixin(torchtest):
                 elif mat_chars[mat_type] == 'sym_pd':
                     list_of_matrices.append(random_symmetric_pd_matrix(matsize).to(device=device))
                 elif mat_chars[mat_type] == 'sing':
-                    list_of_matrices.append(random_square_matrix_of_rank(matsize, matsize // 2).to(device=device))
+                    list_of_matrices.append(torch.ones(matsize, matsize, device=device))
                 elif mat_chars[mat_type] == 'non_sing':
                     list_of_matrices.append(random_square_matrix_of_rank(matsize, matsize).to(device=device))
             full_tensor = torch.stack(list_of_matrices, dim=0).reshape(batchdims + (matsize, matsize))

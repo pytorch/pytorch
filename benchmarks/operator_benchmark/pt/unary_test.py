@@ -56,7 +56,6 @@ unary_ops_list = op_bench.op_list(
         ['cos', torch.cos],
         ['cos_', torch.cos_],
         ['cosh', torch.cosh],
-        ['cosh_', torch.cosh_],
         ['digamma', torch.digamma],
         ['erf', torch.erf],
         ['erf_', torch.erf_],
