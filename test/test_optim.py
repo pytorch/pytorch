@@ -424,7 +424,6 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
             optim.RMSprop(None, lr=1e-2, momentum=-1.0)
 
-    @skipIfRocm
     def test_asgd(self):
         self._test_basic_cases(
             lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100)
@@ -449,7 +448,6 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
             optim.Rprop(None, lr=1e-2, etas=(1.0, 0.5))
 
-    @skipIfRocm
     def test_lbfgs(self):
         self._test_basic_cases(
             lambda weight, bias: optim.LBFGS([weight, bias]),
