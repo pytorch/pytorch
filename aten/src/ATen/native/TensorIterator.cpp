@@ -187,6 +187,7 @@ static void maybe_promote_common_dtype(OperandInfo& op, ScalarType common_dtype)
 void TensorIterator::compute_types() {
   bool missing_dtypes = false;
   bool missing_output_dtypes = false;
+  bool has_read_write_op = false;
   ScalarType common_dtype = dtype();
   for (auto& op : operands_) {
     if (!op.tensor.defined() && !op.is_type_defined()) {
@@ -195,6 +196,13 @@ void TensorIterator::compute_types() {
         missing_output_dtypes = true;
       }
     }
+    if (op.is_read_write) {
+      has_read_write_op = true;
+    }
+  }
+
+  if (has_read_write_op && compute_common_dtype_ && compute_common_dtype_only_for_inputs_) {
+    AT_ERROR("unable to compute and promote common dtype based only on inputs if input is same as output");
   }
 
   bool compute_common_dtype_only_for_inputs =

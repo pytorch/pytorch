@@ -142,3 +142,12 @@ TEST(TensorIteratorTest, DoNotComputeCommonDTypeInputOnly) {
   EXPECT_TRUE(iter.dtype(2) == at::kDouble);
 }
 
+TEST(TensorIteratorTest, DoNotComputeCommonDTypeIfInputSameAsOutput) {
+  Tensor inout = at::ones({1, 1}, at::dtype(at::kFloat));
+  auto iter = at::TensorIterator();
+  iter.add_output(inout);
+  iter.add_input(inout);
+  iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
+  iter.compute_common_dtype_only_for_inputs();
+  ASSERT_ANY_THROW(iter.build());
+}
