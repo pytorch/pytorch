@@ -459,6 +459,67 @@ class CudaMemoryLeakCheck():
                     warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
                         self.name, after - before, i), RuntimeWarning)
 
+#  "min_satisfying_examples" setting has been deprecated in hypythesis
+#  3.56.0 and removed in hypothesis 4.x
+try:
+    import hypothesis
+    if hypothesis.version.__version_info__ >= (3, 56, 0):
+        hypothesis.settings.register_profile(
+            "pytorch_ci",
+            hypothesis.settings(
+                derandomize=True,
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=100,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "dev",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=10,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "debug",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=1000,
+                verbosity=hypothesis.Verbosity.verbose))
+    else:
+        hypothesis.settings.register_profile(
+            "pytorch_ci",
+            hypothesis.settings(
+                derandomize=True,
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=100,
+                min_satisfying_examples=1,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "dev",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=10,
+                min_satisfying_examples=1,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "debug",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=1000,
+                min_satisfying_examples=1,
+                verbosity=hypothesis.Verbosity.verbose))
+
+        hypothesis.settings.load_profile(
+            "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
+                                                         'dev')
+        )
+except ImportError:
+    print('Fail to import hypothesis in common_utils, tests are not derandomized')
+
 class TestCase(expecttest.TestCase):
     precision = 1e-5
     maxDiff = None
