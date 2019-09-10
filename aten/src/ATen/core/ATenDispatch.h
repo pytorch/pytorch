@@ -158,7 +158,7 @@ class CAFFE2_API ATenDispatch {
     // then the destruction order would be wrong (Destruction always happens
     // in opposite order of creation and ATenDispatch can be created
     // before c10::Dispatcher, and would then be destroyed after, which would
-    // destroy the registration objects and try to register an operator after
+    // destroy the registration objects and try to deregister an operator after
     // the c10::Dispatcher is already destroyed and crash).
     // Using this singleton pattern, however, we can make sure that the vector
     // is destroyed and the operators are deregistered before the c10::Dispatcher
