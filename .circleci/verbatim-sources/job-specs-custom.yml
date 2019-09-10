@@ -150,6 +150,19 @@
           at: ~/workspace
       - run:
           <<: *should_run_job
+      - run:
+          name: Update brew
+          no_output_timeout: "1h"
+          command: |
+            set -e
+            for repo in $(find . -name .git -type d); do
+              cd $repo/..
+              pwd
+              git fetch --depth=1 origin
+              git reset --hard origin/master
+            done
+      - run:
+          <<: *macos_brew_update
 
   pytorch_macos_10_13_py3_build:
     environment:
