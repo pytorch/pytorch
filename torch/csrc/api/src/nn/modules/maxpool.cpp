@@ -26,8 +26,7 @@ Tensor MaxPool1dImpl::forward(const Tensor& input) {
       options.stride_,
       options.padding_,
       options.dilation_,
-      options.ceil_mode_,
-      options.return_indices_);
+      options.ceil_mode_);
 }
 
 Tensor MaxPool2dImpl::forward(const Tensor& input) {
@@ -37,8 +36,7 @@ Tensor MaxPool2dImpl::forward(const Tensor& input) {
       options.stride_,
       options.padding_,
       options.dilation_,
-      options.ceil_mode_,
-      options.return_indices_);
+      options.ceil_mode_);
 }
 
 Tensor MaxPool3dImpl::forward(const Tensor& input) {
@@ -48,8 +46,7 @@ Tensor MaxPool3dImpl::forward(const Tensor& input) {
       options.stride_,
       options.padding_,
       options.dilation_,
-      options.ceil_mode_,
-      options.return_indices_);
+      options.ceil_mode_);
 }
 
 template struct MaxPoolOptions<1>;
