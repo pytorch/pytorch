@@ -22,6 +22,9 @@ from cpp_api_parity import TorchNNModuleMetadata
 # `num_attrs_recursive`: the number of attributes (including parameters, buffers and non-tensor
 #     attributes) of the Python module. If the module contains any submodule, the submodule's
 #     attributes also need to be counted.
+#
+# `python_legacy_constructor_args`: list of legacy Python constructor args that are ignored in
+#     Python/C++ API parity test.
 module_metadata_map = {
     'Conv1d': TorchNNModuleMetadata(),
     'Conv2d': TorchNNModuleMetadata(),
@@ -117,6 +120,7 @@ module_metadata_map = {
     'L1Loss': TorchNNModuleMetadata(
         cpp_default_constructor_args="()",
         num_attrs_recursive=1,
+        python_legacy_constructor_args=['size_average', 'reduce'],
     ),
     'MSELoss': TorchNNModuleMetadata(),
     'CrossEntropyLoss': TorchNNModuleMetadata(),

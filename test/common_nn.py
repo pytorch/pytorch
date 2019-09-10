@@ -2768,6 +2768,7 @@ loss_reference_fns = {
 criterion_tests = [
     dict(
         module_name='L1Loss',
+        cpp_constructor_args='',
         input_size=(2, 3, 4),
         target_size=(2, 3, 4),
         reference_fn=lambda i, t, _: 1. / i.numel() *
@@ -3094,6 +3095,7 @@ new_criterion_tests = [
     ),
     dict(
         module_name='L1Loss',
+        cpp_constructor_args='',
         input_size=(),
         target_size=(),
         reference_fn=lambda i, t, _: 1. / i.numel() * (i - t).abs().sum(),
