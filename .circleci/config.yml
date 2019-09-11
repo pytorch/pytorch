@@ -1026,7 +1026,7 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            for repo in $(find . -name .git -type d); do
+            for repo in $(find /usr/local/Homebrew -name .git -type d); do
               cd $repo/..
               pwd
               git fetch --depth=1 origin
