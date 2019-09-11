@@ -77,7 +77,7 @@ YAML_SOURCES = [
     File("nightly-binary-build-defaults.yml"),
     Header("Build parameters"),
     File("pytorch-build-params.yml"),
-    # File("caffe2-build-params.yml"),
+    File("caffe2-build-params.yml"),
     File("binary-build-params.yml"),
     Header("Job specs"),
     File("pytorch-job-specs.yml"),
