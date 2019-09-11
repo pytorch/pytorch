@@ -201,7 +201,7 @@ class TestTypePromotion(TestCase):
 
         self.assertRaisesRegex(RuntimeError, "Boolean alpha only supported",
                                lambda: torch.add(1, 1, alpha=True))
-        self.assertEquals(torch.add(torch.tensor(True), torch.tensor(True), True), torch.tensor(True))
+        self.assertEqual(torch.add(torch.tensor(True), torch.tensor(True), True), torch.tensor(True))
 
     def test_create_bool_tensors(self):
         expected = torch.tensor([0], dtype=torch.int64, device=self.device)
@@ -224,6 +224,56 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.result_type(torch.tensor(1, dtype=torch.long), torch.tensor([1, 1], dtype=torch.int)), torch.int)
         self.assertEqual(torch.result_type(torch.tensor([1., 1.], dtype=torch.float), 1.), torch.float)
         self.assertEqual(torch.result_type(torch.tensor(1., dtype=torch.float), torch.tensor(1, dtype=torch.double)), torch.double)
+
+    def test_sparse(self):
+        t = torch.ones([5, 5], dtype=torch.int, device=self.device) * 5
+        t[0, 0] = 0
+        t[1, 1] = 0
+        t[2, 2] = 0
+        s = t.to_sparse()
+        self.assertEqual((s + s).to_dense(), t + t)
+        self.assertEqual(t + s, (s + s).to_dense())
+        self.assertEqual(t + s.to(torch.int), (s + s).to_dense())
+        self.assertEqual(t + s.to(torch.double), (t + t).to(torch.double))
+        self.assertEqual((s + s.to(torch.double)).to_dense(), t + t)
+
+        inplace = s.clone().to(torch.float)
+        torch.add(inplace, s.to(torch.double), out=inplace)
+        self.assertEqual(inplace.to_dense(), t + t)
+        self.assertEqual(inplace.dtype, torch.float)
+
+        zeroDim = torch.tensor(5, device=self.device).to_sparse()
+        self.assertEqual((zeroDim - zeroDim).to_dense(), torch.tensor(0, device=self.device))
+        self.assertEqual((s - s).to_dense(), t - t)
+        self.assertEqual((s - s.to(torch.float)).to_dense(), t - t.to(torch.float))
+
+        self.assertEqual((s * s).to_dense(), t * t)
+        self.assertEqual(s * s.to(torch.double), (t * t).to_sparse().to(torch.double))
+        self.assertEqual((s * s.to(torch.double)).dtype, torch.double)
+
+        inplace = s.clone()
+        uint = s.to(torch.uint8)
+        self.assertRaisesRegex(RuntimeError, "Can't convert result type", 
+                               lambda: inplace.mul_(s.to(torch.double)))
+        inplace *= uint
+        self.assertEqual(inplace.to_dense(), t * t)
+        uint *= s
+        self.assertEqual(uint.to_dense(), t * t)
+        self.assertEqual(uint.dtype, torch.uint8)
+
+        o = t.to_sparse().to(torch.float)
+        x = torch.mul(s, s.to(torch.double), out=o)
+        self.assertEqual(o.to_dense(), t * t)
+        self.assertEqual(o.dtype, torch.float)
+
+        self.assertEqual((s * 2).to_dense(), t * 2)
+        self.assertEqual((s * 2).to_dense().dtype, (t * 2).dtype)
+        self.assertEqual((s * 2.0).to_dense().dtype, (t * 2.0).dtype)
+
+        # sparse division only supports division by a scalar
+        self.assertEqual((s / 2).to_dense(), t / 2)
+        self.assertEqual((s / 2).to_dense().dtype, (t / 2).dtype)
+        self.assertEqual((s / 2.0).to_dense().dtype, (t / 2.0).dtype)
 
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):

@@ -42,7 +42,8 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
 Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
   Tensor result;
   if (other.is_sparse()) {
-    result = at::empty({0}, self.options());
+    auto promotedType = at::result_type(self, other);
+    result = at::empty({0}, self.options().dtype(promotedType));
     return native::add_out(result, self, other, alpha);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
@@ -73,7 +74,8 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
 Tensor div(const Tensor& self, const Tensor& other) {
   Tensor result;
   if (self.is_sparse()) {
-    result = at::empty({0}, self.options());
+    auto promotedType = at::result_type(self, other);
+    result = at::empty({0}, self.options().dtype(promotedType));
     return native::div_out(result, self, other);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
@@ -98,7 +100,8 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
 Tensor mul(const Tensor& self, const Tensor& other) {
   Tensor result;
   if (self.is_sparse() || other.is_sparse()) {
-    result = at::empty({0}, self.options());
+    auto promotedType = at::result_type(self, other);
+    result = at::empty({0}, self.options().dtype(promotedType));
     return native::mul_out(result, self, other);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
@@ -147,7 +150,8 @@ Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
   sub_check(self, other);
   Tensor result;
   if (other.is_sparse()) {
-    result = at::empty({0}, self.options());
+    auto promotedType = at::result_type(self, other);
+    result = at::empty({0}, self.options().dtype(promotedType));
     return native::sub_out(result, self, other, alpha);
   }
   auto iter = TensorIterator::binary_op(result, self, other);
