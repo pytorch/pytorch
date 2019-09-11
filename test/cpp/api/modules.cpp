@@ -472,6 +472,23 @@ TEST_F(ModulesTest, PrettyPrintConv) {
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
 }
 
+TEST_F(ModulesTest, PrettyPrintMaxPool) {
+  ASSERT_EQ(
+      c10::str(MaxPool1d(5)),
+      "torch::nn::MaxPool1d(kernel_size=5, stride=5)");
+  ASSERT_EQ(
+      c10::str(MaxPool2d(5)),
+      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[5, 5])");
+  ASSERT_EQ(
+      c10::str(MaxPool2d(MaxPool2dOptions(5).stride(2))),
+      "torch::nn::MaxPool2d(kernel_size=[5, 5], stride=[2, 2])");
+
+  const auto options =
+      MaxPool2dOptions(torch::IntArrayRef{5, 6}).stride({1, 2});
+  ASSERT_EQ(
+      c10::str(MaxPool2d(options)),
+      "torch::nn::MaxPool2d(kernel_size=[5, 6], stride=[1, 2])");
+
 TEST_F(ModulesTest, PrettyPrintAvgPool) {
   ASSERT_EQ(
       c10::str(AvgPool1d(5)),
