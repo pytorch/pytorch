@@ -4,7 +4,7 @@ namespace torch {
 namespace nn {
 
 L1LossImpl::L1LossImpl(torch::nn::L1LossOptions options)
-    : options(std::move(options)) {}
+    : options(options) {}
 
 void L1LossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::L1Loss";
