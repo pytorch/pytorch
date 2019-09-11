@@ -17524,7 +17524,6 @@ class TestList(JitTestCase):
         self.checkScript(str_in, (['hi', 'bye'],))
         self.checkScript(str_in, ([],))
 
-
     def test_list_literal(self):
         def reassign():
             x = [1]

@@ -1748,18 +1748,6 @@ int listContains(Stack& stack) {
   return 0;
 }
 
-Operation listContainsStr(const Node* node) {
-  auto list = node->inputs().at(0)->type()->expect<ListType>();
-
-  if (!list->getElementType()->isSubtypeOf(StringType::get())) {
-    throw script::ErrorReport(node->sourceRange())
-        << "'in' checks can only be"
-           " used on List[str], List[int], and List[float]";
-  }
-
-  return listContains<std::string>;
-}
-
 template <class T>
 int listAdd(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
@@ -2398,6 +2386,7 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("t", c10::List<IValue>),
 
     // `listContains<T>` is not implemented for non-primitive types
+    // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
     Operator(
         "aten::__contains__(int[] l, int item) -> bool",
         listContains<int64_t>,
@@ -2408,7 +2397,7 @@ RegisterOperators reg2({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::__contains__(str[] l, str item) -> bool",
-        listContainsStr,
+        listContains<std::string>,
         aliasAnalysisFromSchema()),
 #undef CREATE_LIST_OPS
     Operator(
