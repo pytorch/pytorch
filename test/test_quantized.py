@@ -871,7 +871,8 @@ class TestQuantizedLinear(unittest.TestCase):
         Y_zp = 5
 
         # Weight prepacking operator for quantized Linear
-        W_prepack = qlinear_prepack(W_q, b_q)
+        float_bias = b if use_bias else None
+        W_prepack = qlinear_prepack(W_q, float_bias)
 
         if use_multi_dim_input:
             X_q = X_q.view(3, int(batch_size / 3), input_channels)
@@ -1101,16 +1102,11 @@ class TestQuantizedConv(unittest.TestCase):
                                                     W_zero_points_tensor.to(dtype=torch.long),
                                                     [0],
                                                     dtype=torch.qint8)
-            b_q = torch.quantize_linear_per_channel(b,
-                                                    X_scale * W_scales_tensor.to(dtype=torch.double),
-                                                    torch.zeros(output_channels, dtype=torch.long),
-                                                    [0],
-                                                    dtype=torch.qint32) if use_bias else None
         else:
             W_q = torch.quantize_linear(W_KRSC, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
-            b_q = torch.quantize_linear(b, scale=X_scale * W_scale[0], zero_point=0, dtype=torch.qint32) if use_bias else None
 
-        W_prepack = qconv_prepack(W_q, b_q, stride, pad, dilation, groups)
+        bias_float = b if use_bias else None
+        W_prepack = qconv_prepack(W_q, bias_float, stride, pad, dilation, groups)
 
         Y_q = qconv(
             X_q,
