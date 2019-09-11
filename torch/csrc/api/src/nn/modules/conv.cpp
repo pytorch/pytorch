@@ -1,6 +1,9 @@
+#include <torch/nn/functional/conv.h>
+#include <torch/nn/functional/padding.h>
 #include <torch/nn/modules/conv.h>
 
 #include <torch/expanding_array.h>
+#include <torch/nn/init.h>
 #include <torch/types.h>
 #include <torch/utils.h>
 
@@ -9,6 +12,8 @@
 #include <functional>
 #include <utility>
 #include <vector>
+
+namespace F = torch::nn::functional;
 
 namespace torch {
 namespace nn {
@@ -20,119 +25,163 @@ ConvImpl<D, Derived>::ConvImpl(const ConvOptions<D>& options_)
 
 template <size_t D, typename Derived>
 void ConvImpl<D, Derived>::reset() {
-  if (!options.transposed()) {
-    for (auto pad : *options.output_padding()) {
-      TORCH_CHECK(
-          pad == 0, "Only transposed convolutions support output padding!");
-    }
-  }
+  TORCH_CHECK(options.in_channels().has_value(), "in_channels needs to be specified in options");
+  TORCH_CHECK(options.out_channels().has_value(), "out_channels needs to be specified in options");
+  TORCH_CHECK(options.kernel_size().has_value(), "kernel_size needs to be specified in options");
 
-  std::vector<int64_t> weights_size;
+  TORCH_CHECK(
+    *options.in_channels() % options.groups() == 0,
+    "in_channels must be divisible by groups");
+  TORCH_CHECK(
+    *options.out_channels() % options.groups() == 0,
+    "out_channels must be divisible by groups");
+
   if (options.transposed()) {
-    weights_size.push_back(options.input_channels());
-    weights_size.push_back(options.output_channels() / options.groups());
+    std::vector<int64_t> weight_sizes = {
+      *options.in_channels(),
+      *options.out_channels() / options.groups()};
+    weight_sizes.insert(weight_sizes.end(), (*options.kernel_size().value()).begin(), (*options.kernel_size().value()).end());
+    weight = this->register_parameter(
+      "weight",
+      torch::empty(weight_sizes));
   } else {
-    weights_size.push_back(options.output_channels());
-    weights_size.push_back(options.input_channels() / options.groups());
-  }
-  weights_size.insert(
-      weights_size.end(),
-      options.kernel_size()->begin(),
-      options.kernel_size()->end());
-  AT_ASSERT(weights_size.size() == 2 + options.kernel_size()->size());
-
-  weight = this->register_parameter("weight", torch::empty(weights_size));
-  if (options.with_bias()) {
-    bias = this->register_parameter(
-        "bias", torch::empty(options.output_channels()));
+    std::vector<int64_t> weight_sizes = {
+      *options.out_channels(),
+      *options.in_channels() / options.groups()};
+    weight_sizes.insert(weight_sizes.end(), (*options.kernel_size().value()).begin(), (*options.kernel_size().value()).end());
+    weight = this->register_parameter(
+      "weight",
+      torch::empty(weight_sizes));
   }
 
-  const auto number_of_features = std::accumulate(
-      options.kernel_size()->begin(),
-      options.kernel_size()->end(),
-      options.input_channels(),
-      std::multiplies<int64_t>{});
-  const auto stdv = 1.0 / std::sqrt(number_of_features);
-  NoGradGuard no_grad;
-  for (auto& p : this->parameters()) {
-    p.uniform_(-stdv, stdv);
+  if (options.bias()) {
+    bias = this->register_parameter("bias", torch::empty({*options.out_channels()}));
+  } else {
+    this->register_parameter("bias", Tensor(), /*requires_grad=*/false);
+  }
+
+  init::kaiming_uniform_(weight, /*a=*/std::sqrt(5));
+
+  if (bias.defined()) {
+    int64_t fan_in, fan_out;
+    std::tie(fan_in, fan_out) = init::_calculate_fan_in_and_fan_out(weight);
+    auto bound = 1 / std::sqrt(fan_in);
+    init::uniform_(bias, -bound, bound);
   }
 }
 
 template <size_t D, typename Derived>
 void ConvImpl<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Conv" << D << "d"
-         << "(input_channels=" << options.input_channels()
-         << ", output_channels=" << options.output_channels()
-         << ", kernel_size=" << options.kernel_size()
-         << ", stride=" << options.stride() << ")";
+         << "(" << *options.in_channels()
+         << ", " << *options.out_channels()
+         << ", kernel_size=" << *options.kernel_size()
+         << ", stride=" << options.stride();
+  if (*options.padding() != *ExpandingArray<D>(0)) {
+    stream << ", padding=" << options.padding();
+  }
+  if (*options.dilation() != *ExpandingArray<D>(1)) {
+    stream << ", dilation=" << options.dilation();
+  }
+  if (*options.output_padding() != *ExpandingArray<D>(0)) {
+    stream << ", output_padding=" << options.output_padding();
+  }
+  if (options.groups() != 1) {
+    stream << ", groups=" << options.groups();
+  }
+  if (!options.bias()) {
+    stream << ", bias=" << std::boolalpha << false;
+  }
+  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
+    stream << ", padding_mode=" << enumtype::get_enum_name(options.padding_mode());
+  }
+  stream << ")";
 }
+
+Conv1dImpl::Conv1dImpl(
+    ConvOptions<1> options_)
+    : ConvImpl(std::move(options_).transposed(false).output_padding(0)) {}
 
 Tensor Conv1dImpl::forward(const Tensor& input) {
-  if (options.transposed()) {
-    return torch::conv_transpose1d(
-        input,
-        weight,
-        bias,
-        options.stride(),
-        options.padding(),
-        options.output_padding(),
-        options.groups(),
-        options.dilation());
+  if (c10::get_if<enumtype::kCircular>(&options.padding_mode())) {
+    std::vector<int64_t> expanded_padding = {((*options.padding())[0] + 1) / 2, (*options.padding())[0] / 2};
+    return F::conv1d(
+      F::pad(input, PadOptions(expanded_padding).mode(torch::kCircular)),
+      weight, bias,
+      Conv1dOptions()
+        .stride(options.stride())
+        .padding(0)
+        .dilation(options.dilation())
+        .groups(options.groups()));
   }
-  return torch::conv1d(
-      input,
-      weight,
-      bias,
-      options.stride(),
-      options.padding(),
-      options.dilation(),
-      options.groups());
+  return F::conv1d(
+    input,
+    weight,
+    bias,
+    Conv1dOptions()
+      .stride(options.stride())
+      .padding(options.padding())
+      .dilation(options.dilation())
+      .groups(options.groups()));
 }
+
+Conv2dImpl::Conv2dImpl(
+    ConvOptions<2> options_)
+    : ConvImpl(std::move(options_).transposed(false).output_padding(0)) {}
 
 Tensor Conv2dImpl::forward(const Tensor& input) {
-  if (options.transposed()) {
-    return torch::conv_transpose2d(
-        input,
-        weight,
-        bias,
-        options.stride(),
-        options.padding(),
-        options.output_padding(),
-        options.groups(),
-        options.dilation());
+  if (c10::get_if<enumtype::kCircular>(&options.padding_mode())) {
+    std::vector<int64_t> expanded_padding = {
+      ((*options.padding())[1] + 1) / 2, (*options.padding())[1] / 2,
+      ((*options.padding())[0] + 1) / 2, (*options.padding())[0] / 2};
+    return F::conv2d(
+      F::pad(input, PadOptions(expanded_padding).mode(torch::kCircular)),
+      weight, bias,
+      Conv2dOptions()
+        .stride(options.stride())
+        .padding(0)
+        .dilation(options.dilation())
+        .groups(options.groups()));
   }
-  return torch::conv2d(
-      input,
-      weight,
-      bias,
-      options.stride(),
-      options.padding(),
-      options.dilation(),
-      options.groups());
+  return F::conv2d(
+    input,
+    weight,
+    bias,
+    Conv2dOptions()
+      .stride(options.stride())
+      .padding(options.padding())
+      .dilation(options.dilation())
+      .groups(options.groups()));
 }
 
+Conv3dImpl::Conv3dImpl(
+    ConvOptions<3> options_)
+    : ConvImpl(std::move(options_).transposed(false).output_padding(0)) {}
+
 Tensor Conv3dImpl::forward(const Tensor& input) {
-  if (options.transposed()) {
-    return torch::conv_transpose3d(
-        input,
-        weight,
-        bias,
-        options.stride(),
-        options.padding(),
-        options.output_padding(),
-        options.groups(),
-        options.dilation());
-  } else {
-    return torch::conv3d(
-        input,
-        weight,
-        bias,
-        options.stride(),
-        options.padding(),
-        options.dilation(),
-        options.groups());
+  if (c10::get_if<enumtype::kCircular>(&options.padding_mode())) {
+    std::vector<int64_t> expanded_padding = {
+      ((*options.padding())[2] + 1) / 2, (*options.padding())[2] / 2,
+      ((*options.padding())[1] + 1) / 2, (*options.padding())[1] / 2,
+      ((*options.padding())[0] + 1) / 2, (*options.padding())[0] / 2};
+    return F::conv3d(
+      F::pad(input, PadOptions(expanded_padding).mode(torch::kCircular)),
+      weight, bias,
+      Conv3dOptions()
+        .stride(options.stride())
+        .padding(0)
+        .dilation(options.dilation())
+        .groups(options.groups()));
   }
+  return F::conv3d(
+    input,
+    weight,
+    bias,
+    Conv3dOptions()
+      .stride(options.stride())
+      .padding(options.padding())
+      .dilation(options.dilation())
+      .groups(options.groups()));
 }
 
 template class ConvImpl<1, Conv1dImpl>;

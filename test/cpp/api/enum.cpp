@@ -40,7 +40,8 @@ TEST(EnumTest, AllEnums) {
     torch::enumtype::kMean,
     torch::enumtype::kMax,
     torch::enumtype::kNone,
-    torch::enumtype::kBatchMean
+    torch::enumtype::kBatchMean,
+    torch::enumtype::kZeros
   > v;
 
   TORCH_ENUM_PRETTY_PRINT_TEST(Linear)
@@ -70,4 +71,5 @@ TEST(EnumTest, AllEnums) {
   TORCH_ENUM_PRETTY_PRINT_TEST(Max)
   TORCH_ENUM_PRETTY_PRINT_TEST(None)
   TORCH_ENUM_PRETTY_PRINT_TEST(BatchMean)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Zeros)
 }
