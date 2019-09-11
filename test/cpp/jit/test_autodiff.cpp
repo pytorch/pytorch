@@ -167,15 +167,29 @@ void testADFormulas() {
 }
 
 void testDifferentiate() {
+  // Note: can't use IRParser for this test due to issue #23989
   auto graph = std::make_shared<Graph>();
-  at::ScalarType s = at::ScalarType::Float;
-  auto type = ProfiledTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  const auto type = TensorType::create(at::ScalarType::Float, at::kCPU, {2, 3, 4}, {12, 4, 1});
 
-  // Build up a fake graph
-  auto a = SymbolicVariable::asNewInput(*graph, type);
-  auto b = SymbolicVariable::asNewInput(*graph, type);
-  auto c = a * b * a + b;
-  graph->registerOutput(c.value());
+  // Builds graph a * b * a + b
+  auto* a = graph->addInput()->setType(type);
+  auto* b = graph->addInput()->setType(type);
+  auto* cOne = graph->insertConstant(1);
+
+  auto* ab = graph->insertNode(graph->create(aten::mul, /*num_outputs =*/ 1));
+  ab->addInput(a);
+  ab->addInput(b);
+
+  auto* aba = graph->insertNode(graph->create(aten::mul, /*num_outputs =*/ 1));
+  aba->addInput(ab->output());
+  aba->addInput(a);
+
+  auto* abaplusb = graph->insertNode(graph->create(aten::add, /*num_outputs =*/ 1));
+  abaplusb->addInput(aba->output());
+  abaplusb->addInput(b);
+  abaplusb->addInput(cOne);
+
+  graph->registerOutput(abaplusb->output());
 
   auto grad_spec = differentiate(graph);
   std::vector<size_t> expected_captured_inputs = {0, 1};
@@ -200,27 +214,31 @@ void testDifferentiate() {
 }
 
 void testDifferentiateWithRequiresGrad() {
-  // Build up a fake graph
-  auto graph = std::make_shared<Graph>();
-  auto a = SymbolicVariable::asNewInput(*graph);
-  auto b = SymbolicVariable::asNewInput(*graph);
-  auto d = b * b + b;
-  auto e = (d + a) * a + b;
-  graph->registerOutput(d.value());
-  graph->registerOutput(e.value());
+  const auto graph_string = R"IR(
+    graph(%0 : Tensor,
+          %1 : Tensor):
+      %2 : int = prim::Constant[value=1]()
+      %3 : Tensor = aten::mul(%1, %1)
+      %4 : Tensor = aten::add(%3, %1, %2)
+      %5 : Tensor = aten::add(%4, %0, %2)
+      %6 : Tensor = aten::mul(%5, %0)
+      %7 : Tensor = aten::add(%6, %1, %2)
+      return (%4, %7))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::script::parseIR(graph_string, g.get());
 
   auto a_var = autograd::make_variable(
       at::empty_strided(2, 2, at::CPU(at::kFloat).options()), true);
   auto b_var = autograd::make_variable(
       at::empty_strided(2, 2, at::CPU(at::kFloat).options()), false);
 
-  ArgumentSpecCreator asc(*graph);
-  asc.specializeTypes(*graph, asc.create(true, {a_var, b_var}));
+  ArgumentSpecCreator asc(*g);
+  asc.specializeTypes(*g, asc.create(true, {a_var, b_var}));
 
-  PropagateInputShapes(graph);
-  PropagateRequiresGrad(graph);
+  PropagateInputShapes(g);
+  PropagateRequiresGrad(g);
 
-  auto grad_spec = differentiate(graph);
+  auto grad_spec = differentiate(g);
   std::vector<size_t> expected_input_vjps = {1, 2}; // for e and %4 = (d + a)
   std::vector<size_t> expected_output_vjps = {0}; // only a requires grad
   ASSERT_EQ(grad_spec.f_real_outputs, 2);

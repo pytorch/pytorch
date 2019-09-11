@@ -21,7 +21,6 @@ namespace jit {
   _(CustomFusion)                      \
   _(Differentiate)                     \
   _(DifferentiateWithRequiresGrad)     \
-  _(DynamicDAG)                        \
   _(FromQualString)                    \
   _(InternedStrings)                   \
   _(IValue)                            \
@@ -59,11 +58,11 @@ namespace jit {
   _(ProfiledTensorTypeHashing)         \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
-  _(InsertConstant)                    \
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
   _(ImportTooNew)                      \
-  _(ClassDerive)
+  _(ClassDerive)                       \
+  _(Inliner)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

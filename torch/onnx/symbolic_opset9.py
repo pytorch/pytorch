@@ -163,6 +163,10 @@ def sqrt(g, self):
     return g.op("Sqrt", self)
 
 
+def rsqrt(g, self):
+    return div(g, sym_help._if_scalar_type_as(g, torch.ones(1), self), sqrt(g, self))
+
+
 def tanh(g, self):
     return g.op("Tanh", self)
 
@@ -976,9 +980,10 @@ def selu(g, input):
 
 @parse_args('v', 'i', 'v')
 def index_select(g, self, dim, index):
-    # In case of a scaler index, index_select returns a tensor with the same rank as the input.
-    # To match this bahavior in ONNX, we make index a 1D tensor so that the following gather
+    # In case of a scalar index, index_select returns a tensor with the same rank as the input.
+    # To match this behavior in ONNX, we make index a 1D tensor so that the following gather
     # also produces a tensor with the same rank as the input.
+
     index_const = sym_help._maybe_get_scalar(index)
     index_dim = index.type().dim()
     if not sym_help._is_value(index_const):
@@ -1025,6 +1030,10 @@ def abs(g, self):
 
 def log(g, self):
     return g.op("Log", self)
+
+
+def log1p(g, self):
+    return log(g, add(g, sym_help._if_scalar_type_as(g, torch.ones(1), self), self))
 
 
 def pow(g, self, exponent):

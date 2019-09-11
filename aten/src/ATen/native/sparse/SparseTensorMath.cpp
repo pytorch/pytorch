@@ -231,9 +231,9 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
 
     AT_DISPATCH_ALL_TYPES(
         t_values.scalar_type(), "cadd_sparse", [&] {
-          scalar_t* t_values_ptr = t_values.data<scalar_t>();
-          scalar_t* s_values_ptr = s_values.data<scalar_t>();
-          scalar_t* r_values_ptr = r_values.data<scalar_t>();
+          scalar_t* t_values_ptr = t_values.data_ptr<scalar_t>();
+          scalar_t* s_values_ptr = s_values.data_ptr<scalar_t>();
+          scalar_t* r_values_ptr = r_values.data_ptr<scalar_t>();
           scalar_t cast_value = value.to<scalar_t>();
           while (t_i < t_nnz || s_i < s_nnz) {
             if (t_i >= t_nnz) {
@@ -314,7 +314,7 @@ void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sp
   auto indices_accessor = indices.accessor<int64_t, 2>();
   auto values_accessor = values.accessor<scalar_t, 1>();
 
-  scalar_t* r_ptr = r.data<scalar_t>();
+  scalar_t* r_ptr = r.data_ptr<scalar_t>();
   scalar_t cast_value = value.to<scalar_t>();
 
   at::parallel_for(0, sparse._nnz(), 0, [&](int64_t start, int64_t end) {
@@ -498,8 +498,8 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
   auto indices_accessor = indices.accessor<int64_t, 2>();
 
   auto values_accessor = values.accessor<scalar_t, 1>();
-  scalar_t* dense_ptr = dense.data<scalar_t>();
-  scalar_t* r_ptr = r.data<scalar_t>();
+  scalar_t* dense_ptr = dense.data_ptr<scalar_t>();
+  scalar_t* r_ptr = r.data_ptr<scalar_t>();
 
   int64_t dense_stride0 = dense.stride(0);
   int64_t dense_stride1 = dense.stride(1);
@@ -754,7 +754,7 @@ SparseTensor& _sspaddmm_out_cpu(
   LongTensor indices = sparse._indices();
   Tensor values      = sparse._values();
 
-  LongTensor csr = _to_csr(indices.data<int64_t>(), dim_i, nnz);
+  LongTensor csr = _to_csr(indices.data_ptr<int64_t>(), dim_i, nnz);
 
   int64_t t_nnz = t._nnz();
   int64_t r_nnz = nnz * dim_k + t_nnz;
@@ -784,8 +784,8 @@ SparseTensor& _sspaddmm_out_cpu(
   AT_DISPATCH_ALL_TYPES(
       values.scalar_type(), "sspmm", [&] {
         auto values_accessor = values.accessor<scalar_t, 1>();
-        scalar_t* dense_ptr = dense.data<scalar_t>();
-        scalar_t* newv_ptr = newv.data<scalar_t>();
+        scalar_t* dense_ptr = dense.data_ptr<scalar_t>();
+        scalar_t* newv_ptr = newv.data_ptr<scalar_t>();
         scalar_t cast_alpha = alpha.to<scalar_t>();
 
         for (int64_t h = 0; h < dim_i; h++) {

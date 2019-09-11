@@ -46,15 +46,16 @@ IValue wrap(IValue&& ivalue) {
 Operator createOperatorFromC10(const c10::OperatorHandle& op) {
   return Operator(op, [op](Stack& stack) {
       RECORD_FUNCTION(op.schema().name(), stack);
-
       const auto input_size = op.schema().arguments().size();
       const auto output_size = op.schema().returns().size();
 
       Node* node = nullptr;
+      std::shared_ptr<jit::tracer::TracingState> tracer_state;
 
       // trace the input before unwrapping, otherwise we may lose
       // the input information
       if (jit::tracer::isTracing()) {
+        tracer_state = jit::tracer::getTracingState();
         auto symbol = Symbol::fromQualString(op.schema().name());
         const auto& graph = tracer::getTracingState()->graph;
         node = graph->create(symbol, 0);
@@ -69,12 +70,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           auto type = args[i].type();
           if (type->kind() == TypeKind::OptionalType) {
             if (iter->isNone()) {
-              Value* none =
-                  graph
-                      ->insertNode(graph->createNone(
-                          reinterpret_cast<OptionalType*>(args[i].type().get())
-                              ->getElementType()))
-                      ->output();
+              Value* none = graph->insertNode(graph->createNone())->output();
               node->addInput(none);
               continue;
             } else {
@@ -135,6 +131,8 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           }
         }
         graph->insertNode(node);
+
+        jit::tracer::setTracingState(nullptr);
       }
 
       c10::Dispatcher::singleton().lookup(op, &stack).call(&stack);
@@ -144,7 +142,8 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
         *iter = wrap(std::move(*iter));
       }
 
-      if (jit::tracer::isTracing()) {
+      if (tracer_state) {
+        jit::tracer::setTracingState(std::move(tracer_state));
         int i = 0;
         for (auto iter = stack.end() - output_size; iter != stack.end();
              ++iter, ++i) {

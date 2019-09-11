@@ -3,6 +3,7 @@
 #else
 
 #include "ATen/cuda/CUDAContext.h"
+#include <ATen/NamedTensorUtils.h>
 
 #define ERROR_ONLY_FP_TYPES(func) \
   THError("%s for CUDA tensors only supports floating-point types. Try converting the tensors with .float()", func);
@@ -41,6 +42,9 @@ accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 
   THCTensor_(free)(state, src);
   THCTensor_(free)(state, self);
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::check_names_for_dot(self, src);
+#endif
   return result;
 
 #else
@@ -73,6 +77,9 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   if(r_ != t)
   {
+#ifdef BUILD_NAMEDTENSOR
+    at::NoNamesGuard guard;
+#endif
     THCTensor_(resizeAs)(state, r_, t);
     THCTensor_(copy)(state, r_, t);
   }
@@ -153,6 +160,9 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 #endif
 #else
   ERROR_ONLY_FP_TYPES("addmv");
+#endif
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
 #endif
 }
 
@@ -255,6 +265,12 @@ void THCTensor_(addr)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor *
 
 void THCTensor_(addmm)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor *t, scalar_t alpha, THCTensor *m1, THCTensor *m2)
 {
+#ifdef BUILD_NAMEDTENSOR
+  // The logic in this function changes around the pointers, so save a copy of the originals.
+  THCTensor* orig_m1 = m1;
+  THCTensor* orig_m2 = m2;
+#endif
+
 #if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
 
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, m1, m2));
@@ -284,6 +300,9 @@ void THCTensor_(addmm)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
   {
     THCTensor_(resizeAs)(state, r_, t);
     if (ScalarConvert<scalar_t, double>::to(beta) != 0.0) {
+#ifdef BUILD_NAMEDTENSOR
+      at::NoNamesGuard guard;
+#endif
       THCTensor_(copy)(state, r_, t);
     }
   }
@@ -414,6 +433,10 @@ void THCTensor_(addmm)(THCState *state, THCTensor *r_, scalar_t beta, THCTensor 
 #else
   ERROR_ONLY_FP_TYPES("addmm");
 #endif
+
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmm(r_, orig_m1, orig_m2, t);
+#endif
 }
 
 void THCTensor_(addbmm)(THCState *state, THCTensor *result, scalar_t beta, THCTensor *t,
@@ -491,6 +514,11 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
              "equal number of batches expected");
   THArgCheck(THCTensor_(size)(state, t, 0) == THCTensor_(size)(state, batch2, 0), 7,
              "equal number of batches expected");
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = at::namedinference::compute_baddbmm_outnames(result, batch1, batch2, t);
+  {
+    at::NoNamesGuard guard;
+#endif
   THArgCheck(THCTensor_(size)(state, t, 1) == THCTensor_(size)(state, batch1, 1), 6,
              "wrong matrix size");
   THArgCheck(THCTensor_(size)(state, t, 2) == THCTensor_(size)(state, batch2, 2), 7,
@@ -744,6 +772,10 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
   if (result_ != result) {
     THCTensor_(freeCopyTo)(state, result_, result);
   }
+#ifdef BUILD_NAMEDTENSOR
+  }
+  at::namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
 
 #else
   ERROR_ONLY_FP_TYPES("baddbmm");

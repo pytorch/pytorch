@@ -16,7 +16,7 @@ bool getRequiresGrad(Value* value) {
 }
 
 void setRequiresGrad(Value* value, bool req_value) {
-  if (auto type = value->type()->cast<ProfiledTensorType>()) {
+  if (auto type = value->type()->cast<TensorType>()) {
     value->setType(type->withRequiresGrad(req_value));
   }
 }
@@ -72,7 +72,7 @@ void PropagateRequiresGradSimpleNode(Node* node) {
         return setRequiresGrad(node->output(), *const_arg);
       }
     }
-    if (auto type = node->output()->type()->cast<ProfiledTensorType>()) {
+    if (auto type = node->output()->type()->cast<TensorType>()) {
       if (type->scalarType()) {
         setRequiresGrad(node->output(), at::isFloatingType(*type->scalarType()));
       }
@@ -85,7 +85,7 @@ void PropagateRequiresGradSimpleNode(Node* node) {
   bool should_require =
       std::any_of(inputs.begin(), inputs.end(), getRequiresGrad);
   for (Value* output : outputs) {
-    if (auto type = output->type()->cast<ProfiledTensorType>()) {
+    if (auto type = output->type()->cast<TensorType>()) {
       if (type->scalarType()) {
         setRequiresGrad(
             output, should_require && at::isFloatingType(*type->scalarType()));

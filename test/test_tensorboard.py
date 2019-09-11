@@ -44,8 +44,6 @@ skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
 from common_utils import TestCase, run_tests, TEST_WITH_ASAN
-from google.protobuf import text_format
-from PIL import Image
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -66,6 +64,8 @@ if TEST_TENSORBOARD:
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from torch.utils.tensorboard._convert_np import make_np
     from torch.utils.tensorboard import _caffe2_graph as c2_graph
+    from google.protobuf import text_format
+    from PIL import Image
 
     class TestTensorBoardPyTorchNumpy(BaseTestCase):
         def test_pytorch_np(self):
@@ -387,6 +387,30 @@ if TEST_TENSORBOARD:
                       'USA': {'dow': ['Margin', ['dow/aaa', 'dow/bbb', 'dow/ccc']],
                               'nasdaq': ['Margin', ['nasdaq/aaa', 'nasdaq/bbb', 'nasdaq/ccc']]}}
             summary.custom_scalars(layout)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
+
+        def test_hparams_smoke(self):
+            hp = {'lr': 0.1, 'bsize': 4}
+            mt = {'accuracy': 0.1, 'loss': 10}
+            summary.hparams(hp, mt)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
+
+            hp = {'use_magic': True, 'init_string': "42"}
+            mt = {'accuracy': 0.1, 'loss': 10}
+            summary.hparams(hp, mt)
+
+            mt = {'accuracy': torch.zeros(1), 'loss': torch.zeros(1)}
+            summary.hparams(hp, mt)
+
+        def test_hparams_wrong_parameter(self):
+            with self.assertRaises(TypeError):
+                summary.hparams([], {})
+            with self.assertRaises(TypeError):
+                summary.hparams({}, [])
+            with self.assertRaises(ValueError):
+                res = summary.hparams({'pytorch': [1, 2]}, {'accuracy': 2.0})
+            # metric data is used in writer.py so the code path is different, which leads to different exception type.
+            with self.assertRaises(NotImplementedError):
+                with SummaryWriter() as writer:
+                    writer.add_hparams({'pytorch': 1.0}, {'accuracy': [1, 2]})
 
         def test_mesh(self):
             v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)

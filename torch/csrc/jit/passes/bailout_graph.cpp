@@ -172,7 +172,7 @@ struct BailOutInserter {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
       if (it->kind() == prim::Guard) {
         // this will need to be profiled again
-        it->input()->setType(TensorType::create());
+        it->input()->setType(TensorType::get());
         // destroy the guard
         it->output()->replaceAllUsesWith(it->input());
         it.destroyCurrent();
@@ -274,7 +274,7 @@ static void removeBailouts(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
     if (it->kind() == prim::BailOut) {
       // clear profiling information
-      it->inputs().at(0)->setType(TensorType::create());
+      it->inputs().at(0)->setType(TensorType::get());
       it->output()->replaceAllUsesWith(it->inputs().at(0));
       it.destroyCurrent();
     } else {

@@ -464,6 +464,31 @@ Vec256<int64_t> inline emulate(const Vec256<int64_t>& a, const Vec256<int64_t>& 
   return _mm256_set_epi64x(c3, c2, c1, c0);
 }
 
+template <typename op_t>
+Vec256<int64_t> inline emulate(const Vec256<int64_t>& a, const Vec256<int64_t>& b, const Vec256<int64_t>& c, const op_t& op) {
+  int64_t a0 = _mm256_extract_epi64(a, 0);
+  int64_t a1 = _mm256_extract_epi64(a, 1);
+  int64_t a2 = _mm256_extract_epi64(a, 2);
+  int64_t a3 = _mm256_extract_epi64(a, 3);
+
+  int64_t b0 = _mm256_extract_epi64(b, 0);
+  int64_t b1 = _mm256_extract_epi64(b, 1);
+  int64_t b2 = _mm256_extract_epi64(b, 2);
+  int64_t b3 = _mm256_extract_epi64(b, 3);
+
+  int64_t c0 = _mm256_extract_epi64(c, 0);
+  int64_t c1 = _mm256_extract_epi64(c, 1);
+  int64_t c2 = _mm256_extract_epi64(c, 2);
+  int64_t c3 = _mm256_extract_epi64(c, 3);
+
+  int64_t d0 = op(a0, b0, c0);
+  int64_t d1 = op(a1, b1, c1);
+  int64_t d2 = op(a2, b2, c2);
+  int64_t d3 = op(a3, b3, c3);
+
+  return _mm256_set_epi64x(d3, d2, d1, d0);
+}
+
 // AVX2 has no intrinsic for int64_t multiply so it needs to be emulated
 // This could be implemented more efficiently using epi32 instructions
 // This is also technically avx compatible, but then we'll need AVX
@@ -511,6 +536,51 @@ Vec256<int32_t> inline maximum(const Vec256<int32_t>& a, const Vec256<int32_t>& 
 template <>
 Vec256<int16_t> inline maximum(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
   return _mm256_max_epi16(a, b);
+}
+
+template <>
+Vec256<int64_t> inline clamp(const Vec256<int64_t>& a, const Vec256<int64_t>& min_val, const Vec256<int64_t>& max_val) {
+  return emulate(a, min_val, max_val, [](int64_t a_point, int64_t min_point, int64_t max_point) {return std::min(max_point, std::max(a_point, min_point));});
+}
+
+template <>
+Vec256<int32_t> inline clamp(const Vec256<int32_t>& a, const Vec256<int32_t>& min_val, const Vec256<int32_t>& max_val) {
+  return _mm256_min_epi32(max_val, _mm256_max_epi32(a, min_val));
+}
+
+template <>
+Vec256<int16_t> inline clamp(const Vec256<int16_t>& a, const Vec256<int16_t>& min_val, const Vec256<int16_t>& max_val) {
+  return _mm256_min_epi16(max_val, _mm256_max_epi16(a, min_val));
+}
+
+template <>
+Vec256<int64_t> inline clamp_max(const Vec256<int64_t>& a, const Vec256<int64_t>& max_val) {
+  return emulate(a, max_val, [](int64_t a_point, int64_t max_point) {return std::min(max_point, a_point);});
+}
+
+template <>
+Vec256<int32_t> inline clamp_max(const Vec256<int32_t>& a, const Vec256<int32_t>& max_val) {
+  return _mm256_min_epi32(max_val, a);
+}
+
+template <>
+Vec256<int16_t> inline clamp_max(const Vec256<int16_t>& a, const Vec256<int16_t>& max_val) {
+  return _mm256_min_epi16(max_val, a);
+}
+
+template <>
+Vec256<int64_t> inline clamp_min(const Vec256<int64_t>& a, const Vec256<int64_t>& min_val) {
+  return emulate(a, min_val, [](int64_t a_point, int64_t min_point) {return std::max(min_point, a_point);});
+}
+
+template <>
+Vec256<int32_t> inline clamp_min(const Vec256<int32_t>& a, const Vec256<int32_t>& min_val) {
+  return _mm256_max_epi32(min_val, a);
+}
+
+template <>
+Vec256<int16_t> inline clamp_min(const Vec256<int16_t>& a, const Vec256<int16_t>& min_val) {
+  return _mm256_max_epi16(min_val, a);
 }
 
 template <typename T>

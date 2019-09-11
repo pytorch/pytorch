@@ -44,11 +44,12 @@ struct ArgumentInfo {
   TypePtr toType() const {
     if (!defined())
       return TensorType::get();
-    return ProfiledTensorType::create(type(),
-      ConvertIntToCPUOrCUDA(device()),
-      c10::VaryingShape(dim()),
-      c10::VaryingShape(dim()),
-      requires_grad());
+    return TensorType::create(
+        type(),
+        ConvertIntToCPUOrCUDA(device()),
+        c10::VaryingShape(dim()),
+        c10::VaryingShape(dim()),
+        requires_grad());
   }
   operator TypePtr() const {
     return toType();
@@ -349,7 +350,7 @@ struct CompleteArgumentInfo {
   operator TypePtr() const {
     if (!defined())
       return TensorType::get();
-    return ProfiledTensorType::create(
+    return TensorType::create(
         type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
   }
 
@@ -447,8 +448,8 @@ struct hash<c10::VaryingShape> {
 };
 
 template <>
-struct hash<c10::ProfiledTensorType> {
-  size_t operator()(const c10::ProfiledTensorType& ptt) const {
+struct hash<c10::TensorType> {
+  size_t operator()(const c10::TensorType& ptt) const {
     return torch::get_hash<
         c10::optional<int8_t>,
         c10::VaryingShape,

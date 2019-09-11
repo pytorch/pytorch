@@ -276,6 +276,7 @@ struct Expr : public TreeView {
       case '+':
       case '-':
       case TK_UNARY_MINUS:
+      case '~':
       case '*':
       case TK_STARRED:
       case '/':
@@ -596,14 +597,20 @@ struct Assign : public Stmt {
   }
   static Assign create(
       const SourceRange& range,
-      const Expr& lhs,
+      const List<Expr>& lhs,
       const Maybe<Expr>& rhs,
       const Maybe<Expr>& type) {
     return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs, type}));
   }
 
+  List<Expr> lhs_list() const {
+    return List<Expr>(subtree(0));
+  }
+
   Expr lhs() const {
-    return Expr(subtree(0));
+    const auto& li = lhs_list();
+    TORCH_INTERNAL_ASSERT(li.size() == 1);
+    return *li.begin();
   }
 
   Maybe<Expr> rhs() const {
@@ -766,6 +773,7 @@ struct UnaryOp : public Expr {
   explicit UnaryOp(const TreeRef& tree) : Expr(tree) {
     switch (tree->kind()) {
       case TK_UNARY_MINUS:
+      case '~':
       case TK_NOT:
         if (tree->trees().size() != 1)
           throw ErrorReport(tree)

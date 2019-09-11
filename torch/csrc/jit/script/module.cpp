@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -138,6 +139,8 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     Graph& g_,
     size_t self_offset = 0) {
   std::shared_ptr<Graph> g = g_.copy();
+  // Inline to remove method/function calls
+  Inline(*g);
   std::vector<Slot> extra_ivalues;
   std::unordered_map<Slot, size_t> slot_to_offset;
   struct ToScan {
@@ -402,9 +405,9 @@ void Module::apply(const std::function<void(Module&)>& fn) {
 }
 
 std::string Module::_dump_to_string(
-    bool omit_method_bodies,
-    bool omit_attr_values,
-    bool omit_param_values,
+    bool print_method_bodies,
+    bool print_attr_values,
+    bool print_param_values,
     int level) const {
   std::stringstream ss;
   std::stringstream parameters_ss;
@@ -414,7 +417,7 @@ std::string Module::_dump_to_string(
 
   for (Slot param : get_parameters()) {
     parameters_ss << param.name() << " = ";
-    if (!omit_param_values) {
+    if (print_param_values) {
       parameters_ss << param.value().toTensor() << std::endl;
     } else {
       parameters_ss << "..." << std::endl;
@@ -423,7 +426,7 @@ std::string Module::_dump_to_string(
 
   for (Slot attr : get_attributes()) {
     attributes_ss << attr.name() << " = ";
-    if (!attr.value().isTensor() || !omit_attr_values) {
+    if (!attr.value().isTensor() || print_attr_values) {
       attributes_ss << attr.value() << std::endl;
     } else {
       attributes_ss << "..." << std::endl;
@@ -432,7 +435,7 @@ std::string Module::_dump_to_string(
 
   for (const Method& method : get_methods()) {
     methods_ss << "  method " << method.name() << " {" << std::endl;
-    if (!omit_method_bodies) {
+    if (print_method_bodies) {
       methods_ss << torch::jit::jit_log_prefix(
                         "    ", method.graph()->toString())
                  << std::endl;
@@ -455,7 +458,7 @@ std::string Module::_dump_to_string(
     // We do level + 2, because one level of indentation comes from 'submodules'
     // scope and the other one goes from a specific submodule we're printing.
     ss << submodule._dump_to_string(
-        omit_method_bodies, omit_attr_values, omit_param_values, level + 2);
+        print_method_bodies, print_attr_values, print_param_values, level + 2);
   }
   ss << "  }" << std::endl;
   ss << "}" << std::endl;
@@ -465,11 +468,14 @@ std::string Module::_dump_to_string(
 }
 
 void Module::dump(
-    bool omit_method_bodies = true,
-    bool omit_attr_values = true,
-    bool omit_param_values = true) const {
+    bool print_method_bodies = true,
+    bool print_attr_values = true,
+    bool print_param_values = true) const {
   std::cout << _dump_to_string(
-                   omit_method_bodies, omit_attr_values, omit_param_values, 0)
+                   print_method_bodies,
+                   print_attr_values,
+                   print_param_values,
+                   0)
             << std::endl;
 }
 

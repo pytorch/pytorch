@@ -255,6 +255,21 @@ Vec256<float> inline minimum(const Vec256<float>& a, const Vec256<float>& b) {
 }
 
 template <>
+Vec256<float> inline clamp(const Vec256<float>& a, const Vec256<float>& min, const Vec256<float>& max) {
+  return _mm256_min_ps(max, _mm256_max_ps(min, a));
+}
+
+template <>
+Vec256<float> inline clamp_max(const Vec256<float>& a, const Vec256<float>& max) {
+  return _mm256_min_ps(max, a);
+}
+
+template <>
+Vec256<float> inline clamp_min(const Vec256<float>& a, const Vec256<float>& min) {
+  return _mm256_max_ps(min, a);
+}
+
+template <>
 Vec256<float> inline operator&(const Vec256<float>& a, const Vec256<float>& b) {
   return _mm256_and_ps(a, b);
 }

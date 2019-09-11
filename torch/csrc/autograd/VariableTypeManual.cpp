@@ -125,7 +125,7 @@ Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blockin
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
-    grad_fn->src_type = &src.type();
+    grad_fn->src_options = src.options();
     grad_fn->src_device = src.device();
   }
   {

@@ -39,7 +39,7 @@ std::string jit_log_prefix(
     const char* fn,
     int l,
     const std::string& in_str) {
-  std::stringstream prefix_ss(in_str);
+  std::stringstream prefix_ss;
   prefix_ss << "[";
   prefix_ss << level << " ";
   prefix_ss << c10::detail::StripBasename(std::string(fn)) << ":";

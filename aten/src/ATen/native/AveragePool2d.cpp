@@ -150,8 +150,8 @@ void avg_pool2d_out_cpu_template(
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
     "avg_pool2d_out_frame",
     [&] {
-      scalar_t *input_data = input.data<scalar_t>();
-      scalar_t *output_data = output.data<scalar_t>();
+      scalar_t *input_data = input.data_ptr<scalar_t>();
+      scalar_t *output_data = output.data_ptr<scalar_t>();
 
       avg_pool2d_out_frame(
         input_data,
@@ -307,8 +307,8 @@ Tensor& avg_pool2d_backward_out_cpu_template(
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
     "avg_pool2d_backward_out_frame",
     [&] {
-       scalar_t *gradInput_data = gradInput.data<scalar_t>();
-       scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
+       scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+       scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
 
        avg_pool2d_backward_out_frame(
          gradInput_data,

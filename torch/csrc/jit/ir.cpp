@@ -315,7 +315,7 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   c10::optional<at::Device> device = c10::nullopt;
   auto checkValue = [&](const Value* v) {
-    if (ProfiledTensorTypePtr type = v->type()->cast<ProfiledTensorType>()) {
+    if (TensorTypePtr type = v->type()->cast<TensorType>()) {
       if (type->device() && !has_device) {
         has_device = true;
         device = *type->device();
@@ -670,7 +670,7 @@ void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
 }
 
 void Value::inferTypeFrom(const at::Tensor& output) {
-  setType(ProfiledTensorType::create(output));
+  setType(TensorType::create(output));
 }
 
 bool Value::mustBeNone() const {
@@ -919,20 +919,24 @@ bool Node::hasSideEffects() const {
 
   if (kind_.is_prim() || kind_.is_aten()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
-    // ops using AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::INTERNAL_SPECIAL_CASE,
-    // but this is the intended behavior for all current ops and a good error check.
-    // We can consider lifting this constraint later if we have a use case for it.
+    // ops using AliasAnalysisKind::FROM_SCHEMA,
+    // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, or
+    // AliasAnalysisKind::CONSERVATIVE but this is the intended behavior for all
+    // current ops and a good error check. We can consider lifting this
+    // constraint later if we have a use case for it.
     TORCH_INTERNAL_ASSERT(
         op->aliasAnalysisKind() == AliasAnalysisKind::INTERNAL_SPECIAL_CASE ||
-            op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA,
-        "aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE or AliasAnalysisKind::FROM_SCHEMA but ",
+            op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA ||
+            op->aliasAnalysisKind() == AliasAnalysisKind::CONSERVATIVE,
+        "aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE"
+        ", AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::CONSERVATIVE but ",
         kind_.toDisplayString(),
         " has ",
         toString(op->aliasAnalysisKind()));
   }
 
   switch (op->aliasAnalysisKind()) {
-    case AliasAnalysisKind::PURE:
+    case AliasAnalysisKind::PURE_FUNCTION:
       return false;
     case AliasAnalysisKind::FROM_SCHEMA:
       return false;
@@ -1332,9 +1336,9 @@ Node* Graph::createAutogradZero() {
   return create(prim::AutogradZero);
 }
 
-Node* Graph::createNone(TypePtr typ) {
+Node* Graph::createNone() {
   Node* n = create(prim::Constant);
-  n->output()->setType(OptionalType::create(std::move(typ)));
+  n->output()->setType(NoneType::get());
   return n;
 }
 
@@ -1439,7 +1443,7 @@ Node* Graph::createDict(
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
-  result->output()->setType(ProfiledTensorType::fromNumberType(std::move(typ)));
+  result->output()->setType(TensorType::fromNumberType(std::move(typ)));
   return result;
 }
 
@@ -1490,7 +1494,7 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 
 Value* Graph::insertFunctionCall(
     Function* callee,
-    script::MatchedSchema& matched) {
+    const script::MatchedSchema& matched) {
   std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->s_(attr::name, func_name)
@@ -1506,7 +1510,7 @@ Value* Graph::insertFunctionCall(
 
 Value* Graph::insertMethodCall(
     std::string method_name,
-    script::MatchedSchema& matched) {
+    const script::MatchedSchema& matched) {
   Value* result = insertNode(create(prim::CallMethod, matched.inputs))
                       ->s_(attr::name, std::move(method_name))
                       ->output()
@@ -1537,11 +1541,10 @@ Node* Graph::createClone(
 
 Value* Graph::insertConstant(
     IValue val,
-    const TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   return jit::insertConstant(
-      *this, std::move(val), result_type, std::move(loc), std::move(scope));
+      *this, std::move(val), std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString(bool print_source_locations) const {

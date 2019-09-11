@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
-import pickle
+import collections
 import copyreg
 import io
-import collections
+import pickle
+import traceback
+
 
 def serialize(obj):
     f = io.BytesIO()
@@ -12,16 +14,24 @@ def serialize(obj):
     p.dump(obj)
     return f.getvalue()
 
+
 def run_python_udf_internal(pickled_python_udf):
+    python_udf = pickle.loads(pickled_python_udf)
     try:
-        python_udf = pickle.loads(pickled_python_udf)
         result = python_udf.func(*python_udf.args, **python_udf.kwargs)
     except Exception as e:
-        result = "run_python_udf_internal caught exception: " + str(e)
+        # except str = exception info + traceback string
+        except_str = "{}\n{}".format(repr(e), traceback.format_exc())
+        result = RemoteException(except_str)
     return serialize(result)
 
+
 def load_python_udf_result_internal(pickled_python_result):
-    return pickle.loads(pickled_python_result)
+    result = pickle.loads(pickled_python_result)
+    if isinstance(result, RemoteException):
+        raise Exception(result.msg)
+    return result
 
 
 PythonUDF = collections.namedtuple("PythonUDF", ["func", "args", "kwargs"])
+RemoteException = collections.namedtuple("RemoteException", ["msg"])

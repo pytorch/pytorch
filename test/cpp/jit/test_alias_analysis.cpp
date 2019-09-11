@@ -830,7 +830,7 @@ graph():
             .catchAllKernel([](torch::List<at::Tensor> in) {
               return torch::rand({2, 3});
             })
-            .aliasAnalysis(AliasAnalysisKind::PURE));
+            .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
     // Write to the inside of a list. Check that we can't reorder a
     // print across it.
     auto graph = std::make_shared<Graph>();
@@ -872,7 +872,7 @@ graph():
             .catchAllKernel([](torch::List<at::Tensor> in) {
               return torch::rand({2, 3});
             })
-            .aliasAnalysis(AliasAnalysisKind::PURE));
+            .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
     // Write to the inside of a list. Check that we can't reorder a
     // print across it.
     auto graph = std::make_shared<Graph>();
@@ -1011,7 +1011,16 @@ void testMemoryDAG() {
     // But a and f don't alias
     ASSERT_FALSE(t.mayAlias(a, f));
   }
-
+  {
+    // Test invalidation of memory locations
+    MemoryDAG t;
+    auto a = t.makeFreshValue(aValue);
+    auto b = t.makeFreshValue(bValue);
+    // `a` does not point to `b`
+    ASSERT_FALSE(a->getMemoryLocations().test(b->index));
+    t.makePointerTo(a, b);
+    ASSERT_TRUE(a->getMemoryLocations().test(b->index));
+  }
   {
     // x(y) -> x contains y
 
@@ -1191,7 +1200,7 @@ void testAliasRegistration() {
             .catchAllKernel([](at::Tensor) -> at::Tensor {
               return at::rand({2, 2});
             })
-            .aliasAnalysis(AliasAnalysisKind::PURE));
+            .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
     const auto rand_op = Symbol::fromQualString("foo::rand9");
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
@@ -1207,7 +1216,7 @@ void testAliasRegistration() {
             .catchAllKernel([](at::Tensor) -> at::Tensor {
               return at::rand({2, 2});
             })
-            .aliasAnalysis(AliasAnalysisKind::PURE));
+            .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
     const auto rand_op = Symbol::fromQualString("foo::rand10");
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
@@ -1224,7 +1233,7 @@ void testAliasRegistration() {
               torch::RegisterOperators::options()
                   .catchAllKernel(
                       [](at::Tensor t) -> at::Tensor { return t * 2; })
-                  .aliasAnalysis(AliasAnalysisKind::PURE));
+                  .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
         },
         "Tried to register operator foo::rand11(Tensor(a) arg1) -> Tensor(a) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
@@ -1236,7 +1245,7 @@ void testAliasRegistration() {
               torch::RegisterOperators::options()
                   .catchAllKernel(
                       [](at::Tensor t) -> at::Tensor { return t * 2; })
-                  .aliasAnalysis(AliasAnalysisKind::PURE));
+                  .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
         },
         "Tried to register operator foo::rand12(Tensor(a) arg1) -> Tensor(b) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }

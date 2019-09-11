@@ -8,7 +8,6 @@ import torch
 from torch._C import _infer_size, _add_docstr
 from . import _reduction as _Reduction
 from .modules import utils
-from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from . import _VF
@@ -1379,6 +1378,22 @@ def linear(input, weight, bias=None):
 
 def bilinear(input1, input2, weight, bias=None):
     # type: (Tensor, Tensor, Tensor, Optional[Tensor]) -> Tensor
+    r"""
+    Applies a bilinear transformation to the incoming data:
+    :math:`y = x_1 A x_2 + b`
+
+    Shape:
+
+        - input1: :math:`(N, *, H_{in1})` where :math:`H_{in1}=\text{in1\_features}`
+          and :math:`*` means any number of additional dimensions.
+          All but the last dimension of the inputs should be the same.
+        - input2: :math:`(N, *, H_{in2})` where :math:`H_{in2}=\text{in2\_features}`
+        - weight: :math:`(\text{out\_features}, \text{in1\_features},
+          \text{in2\_features})`
+        - bias: :math:`(\text{out\_features})`
+        - output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
+          and all but the last dimension are the same shape as the input.
+    """
     return torch.bilinear(input1, input2, weight, bias)
 
 
@@ -2613,7 +2628,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
           and becomes ``x' = 1.5``, then reflects by border ``1`` and becomes
           ``x'' = -0.5``.
 
-    .. Note:: This function is often used in building `Spatial Transformer Networks`_ .
+    .. note::
+        This function is often used in conjunction with :func:`affine_grid`
+        to build `Spatial Transformer Networks`_ .
     .. include:: cuda_deterministic_backward.rst
 
     Args:
@@ -2643,10 +2660,10 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         https://arxiv.org/abs/1506.02025
 
     .. warning::
-        With ``align_corners = True``, the grid positions depend on the pixel
-        size relative to the input size, and so the sampled locations will differ
-        for the same input given at different resolutions (that is, after being
-        upsampled or downsampled).
+        When ``align_corners = True``, the grid positions depend on the pixel
+        size relative to the input image size, and so the locations sampled by
+        :func:`grid_sample` will differ for the same input given at different
+        resolutions (that is, after being upsampled or downsampled).
         The default behavior up to version 1.2.0 was ``align_corners = True``.
         Since then, the default behavior has been changed to ``align_corners = False``,
         in order to bring it in line with the default for :func:`interpolate`.
@@ -2683,13 +2700,20 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
 
 def affine_grid(theta, size, align_corners=None):
     # type: (Tensor, List[int], bool) -> Tensor
-    r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`.
-    Generally used in conjunction with :func:`grid_sample` to
-    implement Spatial Transformer Networks.
+    r"""Generates a 2D or 3D flow field (sampling grid), given a batch of
+    affine matrices :attr:`theta`.
+
+    .. note::
+        This function is often used in conjunction with :func:`grid_sample`
+        to build `Spatial Transformer Networks`_ .
 
     Args:
-        theta (Tensor): input batch of affine matrices (:math:`N \times 2 \times 3`)
-        size (torch.Size): the target output image size (:math:`N \times C \times H \times W`).
+        theta (Tensor): input batch of affine matrices with shape
+            (:math:`N \times 2 \times 3`) for 2D or
+            (:math:`N \times 3 \times 4`) for 3D
+        size (torch.Size): the target output image size.
+            (:math:`N \times C \times H \times W` for 2D or
+            :math:`N \times C \times D \times H \times W` for 3D)
             Example: torch.Size((32, 3, 24, 24))
         align_corners (bool, optional): if ``True``, consider ``-1`` and ``1``
             to refer to the centers of the corner pixels rather than the image corners.
@@ -2701,14 +2725,27 @@ def affine_grid(theta, size, align_corners=None):
     Returns:
         output (Tensor): output Tensor of size (:math:`N \times H \times W \times 2`)
 
+    .. _`Spatial Transformer Networks`:
+        https://arxiv.org/abs/1506.02025
+
     .. warning::
-        With ``align_corners = True``, the grid positions depend on the pixel
-        size relative to the input size, and so the sampled locations will differ
-        for the same input given at different resolutions (that is, after being
-        upsampled or downsampled).
+        When ``align_corners = True``, the grid positions depend on the pixel
+        size relative to the input image size, and so the locations sampled by
+        :func:`grid_sample` will differ for the same input given at different
+        resolutions (that is, after being upsampled or downsampled).
         The default behavior up to version 1.2.0 was ``align_corners = True``.
         Since then, the default behavior has been changed to ``align_corners = False``,
         in order to bring it in line with the default for :func:`interpolate`.
+    .. warning::
+        When ``align_corners = True``, 2D affine transforms on 1D data and
+        3D affine transforms on 2D data (that is, when one of the spatial
+        dimensions has unit size) are ill-defined, and not an intended use case.
+        This is not a problem when ``align_corners = False``.
+        Up to version 1.2.0, all grid points along a unit dimension were
+        considered arbitrarily to be at ``-1``.
+        From version 1.3.0, under ``align_corners = True`` all grid points
+        along a unit dimension are condsidered to be at ```0``
+        (the center of the input image).
     """
     if align_corners is None:
         warnings.warn("Default grid_sample and affine_grid behavior has changed "
@@ -2716,7 +2753,37 @@ def affine_grid(theta, size, align_corners=None):
                       "align_corners=True if the old behavior is desired. "
                       "See the documentation of grid_sample for details.")
         align_corners = False
-    return vision.affine_grid_generator(theta, size, align_corners)
+
+    # enforce floating point dtype on theta
+    if not theta.is_floating_point():
+        raise ValueError("Expected theta to have floating point type, but got {}"
+                         .format(theta.dtype))
+    # check that shapes and sizes match
+    if len(size) == 4:
+        if theta.dim() != 3 or theta.shape[-2] != 2 or theta.shape[-1] != 3:
+            raise ValueError("Expected a batch of 2D affine matrices of shape Nx2x3 "
+                             "for size {}. Got {}.".format(size, theta.shape))
+        spatial_size = size[-2:]  # spatial dimension sizes
+    elif len(size) == 5:
+        if theta.dim() != 3 or theta.shape[-2] != 3 or theta.shape[-1] != 4:
+            raise ValueError("Expected a batch of 3D affine matrices of shape Nx3x4 "
+                             "for size {}. Got {}.".format(size, theta.shape))
+        spatial_size = size[-3:]  # spatial dimension sizes
+    else:
+        raise NotImplementedError("affine_grid only supports 4D and 5D sizes, "
+                                  "for 2D and 3D affine transforms, respectively. "
+                                  "Got size {}.".format(size))
+    # check for empty span
+    if align_corners and min(spatial_size) == 1:
+        warnings.warn("Since version 1.3.0, affine_grid behavior has changed "
+                      "for unit-size grids when align_corners=True. "
+                      "This is not an intended use case of affine_grid. "
+                      "See the documentation of affine_grid for details.")
+    elif min(size) <= 0:
+        raise ValueError("Expected non-zero, positive output size. Got {}"
+                         .format(size))
+
+    return torch.affine_grid_generator(theta, size, align_corners)
 
 
 def pad(input, pad, mode='constant', value=0):

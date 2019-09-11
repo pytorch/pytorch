@@ -111,6 +111,10 @@ class ProcessGroup {
       std::vector<at::Tensor>& data,
       const AllreduceOptions& opts = AllreduceOptions()) = 0;
 
+  virtual std::shared_ptr<ProcessGroup::Work> allreduce_coalesced(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceCoalescedOptions& opts = AllreduceCoalescedOptions()) = 0;
+
   virtual std::shared_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) = 0;
