@@ -1,6 +1,5 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
-
-#include <torch/csrc/distributed/rpc/script_rref_proto.h>
+#include <torch/csrc/distributed/rpc/rref_proto.h>
 
 namespace torch {
 namespace distributed {
@@ -186,7 +185,7 @@ RRefForkData RRefContext::forkTo(
         pendingForkRequests_[forkRequest.forkId_] = rref;
       }
       // notify owner
-      agent_->send(
+      auto fm = agent_->send(
           agent_->getWorkerId(rref->owner()),
           ScriptForkNotify(
               forkRequest.ownerId_,
@@ -194,6 +193,11 @@ RRefForkData RRefContext::forkTo(
               forkRequest.forkId_,
               forkDst
           ).toMessage());
+
+      fm->addCallback([this](const Message& message) {
+        auto sfa = ScriptForkAccept::fromMessage(message);
+        this->finishForkRequest(sfa.forkId_);
+      });
     }
   }
   return forkRequest;

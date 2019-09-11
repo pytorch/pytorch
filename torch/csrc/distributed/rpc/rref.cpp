@@ -2,7 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
-#include <torch/csrc/distributed/rpc/script_rref_proto.h>
+#include <torch/csrc/distributed/rpc/rref_proto.h>
 
 namespace torch {
 namespace distributed {

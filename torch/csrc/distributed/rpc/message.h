@@ -24,7 +24,8 @@ enum MessageType {
   RREF_FORK_ACCEPT = 13, // An OwnerRRef accepts a fork request
   SHUTDOWN = 14,
   EXCEPTION = 15,
-  UNKNOWN = 16
+  ACK = 16,
+  UNKNOWN = 17
 };
 
 // A message to be sent/received by an RpcAgent.

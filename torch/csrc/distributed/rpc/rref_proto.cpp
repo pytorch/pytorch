@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/rpc/script_rref_proto.h>
+#include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/jit/pickle.h>
 
 #include <limits>

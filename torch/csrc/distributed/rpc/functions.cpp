@@ -5,10 +5,10 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_ret.h>
-#include <torch/csrc/distributed/rpc/script_rref_proto.h>
 
 namespace torch {
 namespace distributed {
@@ -146,16 +146,11 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
           sfn.owner_);
       return ctx->acceptForkRequest(sfn.rrefId_, sfn.forkId_, sfn.forkDst_);
     }
-    case MessageType::RREF_FORK_ACCEPT: {
-      ScriptForkAccept sfa = ScriptForkAccept::fromMessage(request);
-      RRefContext::getInstance()->finishForkRequest(sfa.forkId_);
-      break;
-    }
     default: {
       AT_ERROR("Request type ", request.type(), " not supported.");
     }
   }
-  return Message();
+  return Message({}, {}, MessageType::ACK, request.id());
 }
 
 } // namespace rpc
