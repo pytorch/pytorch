@@ -51,9 +51,8 @@ TORCH_API std::ostream& operator<<(std::ostream& out, JitLoggingLevels level);
   }
 
 // tries to reconstruct original python source
-#define SOURCE_DUMP(G)                                                         \
-  JIT_LOG(JitLoggingLevels::GRAPH_DUMP,                                        \
-          "Optimizing the following function:\n", log_function(G));
+#define SOURCE_DUMP(MSG, G)                                                    \
+  JIT_LOG(JitLoggingLevels::GRAPH_DUMP, MSG, "\n", log_function(G));
 // use GRAPH_DUMP for dumping graphs after optimization passes
 #define GRAPH_DUMP(MSG, G) \
   JIT_LOG(JitLoggingLevels::GRAPH_DUMP, MSG, "\n", (G)->toString());
