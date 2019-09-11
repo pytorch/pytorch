@@ -663,15 +663,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
 
 class TestCuda(TestCase):
     _do_cuda_memory_leak_check = True
-    # See https://github.com/pytorch/pytorch/issues/21589
-    # We used to have this turned on for the tests in this file which
-    # we had tested to be OK, but when people added new tests to
-    # this file, it would trigger nondeterministic failures that
-    # are hard to debug.  Since there are KNOWN bugs with our
-    # stream handling, we shouldn't turn this on by default.
-    # If you decide to make this True, be sure to run the test suite
-    # under cuda-memcheck
-    _do_cuda_non_default_stream = False
+    _do_cuda_non_default_stream = True
     FIFTY_MIL_CYCLES = 50000000
 
     @staticmethod
@@ -2959,6 +2951,7 @@ class TestCuda(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(y[0, 0, 0, 2**31 - 2], expected)
 
+    @skipCUDANonDefaultStreamIf(True)
     def test_streaming_backwards_sync(self):
         default_stream = torch.cuda.current_stream()
         stream = torch.cuda.Stream()
