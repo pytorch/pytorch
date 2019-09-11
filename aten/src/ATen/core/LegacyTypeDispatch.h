@@ -20,11 +20,11 @@ namespace at {
 class CAFFE2_API LegacyTypeDispatch {
  public:
   void initForTensorTypeSet(TensorTypeSet ts) {
-    // TODO: When Variable gets turned on in TensorTypeSet, this
-    // will skip initialization when you initially process a
-    // Variable CUDA tensor, for example (because I'll get Variable
-    // and it's not gonna have any device type.)  Is that OK?
-    auto b = tensorTypeIdToBackend(impl::dispatchTypeId(ts));
+    // TODO: Avoid use of legacyExtractTypeId here.  The key
+    // problem is that you may get a TensorTypeSet with
+    // VariableTensorId set; should you initialize the "underlying"
+    // type in that case?  Hard to say.
+    auto b = tensorTypeIdToBackend(legacyExtractTypeId(ts));
     auto p = backendToDeviceType(b);
     static std::once_flag cpu_once;
     static std::once_flag cuda_once;
