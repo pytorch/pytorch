@@ -33,11 +33,14 @@ ls ${ARTIFACTS_DIR}
 # cd ${ZIP_DIR}
 # zip -r ${ZIPFILE} install src
 # # upload to aws
-# brew install awscli
-# set +x
-# export AWS_ACCESS_KEY_ID=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
-# export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
-# set +x
-# # echo "AWS KEY: ${AWS_ACCESS_KEY_ID}"
-# # echo "AWS SECRET: ${AWS_SECRET_ACCESS_KEY}"  
-# aws s3 cp ${ZIPFILE} s3://ossci-ios-build/ --acl public-read
+brew install awscli
+set +x
+export AWS_ACCESS_KEY_ID=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
+export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
+set +x
+# echo "AWS KEY: ${AWS_ACCESS_KEY_ID}"
+# echo "AWS SECRET: ${AWS_SECRET_ACCESS_KEY}"  
+cd ${WORKSPACE}
+touch test_upload
+echo `date +"%Y-%m-%d_%H-%M-%S"` > test_upload
+aws s3 cp ${WORKSPACE}/test_upload s3://ossci-ios-build/ --acl public-read
