@@ -1,10 +1,10 @@
 #pragma once
-#ifdef BUILD_NAMEDTENSOR
 
 #include <ATen/core/Dimname.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/C++17.h>
 
+#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 // XXX: This file exists because TensorImpl is in c10, but Dimname is in ATen.
@@ -32,6 +32,11 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
 
   bool has_names() const;
   DimnameList names() const { return names_; }
+
+  // Used for an assertion in TensorImpl.h
+  int64_t slow_dim() const override {
+    return names_.size();
+  }
 
   void set_names(DimnameList new_names) {
     TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());

@@ -13,6 +13,28 @@ tensor as input. Correct code for this case is generated, however, nvrtc does
 not know how to handle int*_t integer types, so typedefs help it handle those
 cases*/
 
+#ifdef __HIP_PLATFORM_HCC__
+static auto type_declarations_template = CodeTemplate(R"(
+#include <hip/hip_runtime.h>
+${HalfHeader}
+${RandHeader}
+
+#define POS_INFINITY INFINITY
+#define NEG_INFINITY -INFINITY
+
+typedef ${IndexType} IndexType;
+template<typename T, size_t N>
+struct TensorInfo {
+  T* data;
+  IndexType sizes[N];
+  IndexType strides[N];
+};
+template<typename T>
+struct TensorInfo<T, 0> {
+  T * data;
+};
+)");
+#else
 static auto type_declarations_template = CodeTemplate(R"(
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
@@ -37,6 +59,7 @@ struct TensorInfo<T, 0> {
   T * data;
 };
 )");
+#endif
 
 // We rewrite the code for philox RNG from curand as nvrtc couldn't resolve the
 // curand header correctly.

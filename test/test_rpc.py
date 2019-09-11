@@ -131,6 +131,7 @@ class RpcTest(MultiProcessTestCase):
             dist.init_model_parallel("duplicated_name")
         dist.join_rpc()
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
         store = dist.FileStore(self.file.name, self.world_size)
         dist.init_process_group(backend="gloo", rank=self.rank,
@@ -385,5 +386,33 @@ class RpcTest(MultiProcessTestCase):
     def test_stress_heavy_rpc(self):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
 
-if __name__ == "__main__":
+    @_wrap_with_rpc
+    def test_builtin_remote_ret(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref = dist.remote('worker{}'.format(dst_rank), torch.add,
+                           args=(torch.ones(n, n), torch.ones(n, n)))
+        self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
+
+    @_wrap_with_rpc
+    def test_multi_builtin_remote_ret(self):
+        m = 10
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rrefs = []
+        expected = []
+        for i in range(m):
+            n = n + i
+            rrefs.append(dist.remote(
+                'worker{}'.format(dst_rank),
+                torch.add,
+                args=(torch.ones(n, n), torch.ones(n, n))
+            ))
+            expected.append(torch.ones(n, n) * 2)
+
+        for i in range(m):
+            self.assertEqual(rrefs[i].to_here(), expected[i])
+
+
+if __name__ == '__main__':
     run_tests()
