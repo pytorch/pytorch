@@ -48,22 +48,31 @@ std::tuple<Tensor,Tensor,Tensor> fake_convolution_backward(
 }
 
 void init_msnpu_extension() {
-  globalATenDispatch().registerOp(
-    Backend::MSNPU,
-    "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-    &empty_override);
-  globalATenDispatch().registerOp(
-    Backend::MSNPU,
-    "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
-    &add_override);
-  globalATenDispatch().registerOp(
-    Backend::MSNPU,
-    "aten::convolution_overrideable(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor",
-    &fake_convolution);
-  globalATenDispatch().registerOp(
-    Backend::MSNPU,
-    "aten::convolution_backward_overrideable(Tensor grad_output, Tensor input, Tensor weight, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)",
-    &fake_convolution_backward);
+  static auto registry = torch::RegisterOperators()
+    .op("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor", torch::RegisterOperators::options()
+      .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(
+        "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+        TensorTypeId::MSNPUTensorId)
+      .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+    )
+    .op("aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", torch::RegisterOperators::options()
+      .impl_unboxedOnlyKernel<decltype(add_override), &add_override>(
+        "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
+        TensorTypeId::MSNPUTensorId)
+      .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+    )
+    .op("aten::convolution_overrideable(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor", torch::RegisterOperators::options()
+      .impl_unboxedOnlyKernel<decltype(fake_convolution), &fake_convolution>(
+        "aten::convolution_overrideable(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor",
+        TensorTypeId::MSNPUTensorId)
+      .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+    )
+    .op("aten::convolution_backward_overrideable(Tensor grad_output, Tensor input, Tensor weight, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)", torch::RegisterOperators::options()
+      .impl_unboxedOnlyKernel<decltype(fake_convolution), &fake_convolution_backward>(
+        "aten::convolution_backward_overrideable(Tensor grad_output, Tensor input, Tensor weight, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)",
+        TensorTypeId::MSNPUTensorId)
+      .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+    );
 }
 
 // TODO: Extend this to exercise multi-device setting.  In that case,
