@@ -33,7 +33,6 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
     IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, torchtest, TEST_WITH_ROCM
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, dtypes, \
-    dtypesIfCPU, dtypesIfCUDA, skipIf, skipCPUIf, skipCUDAIf, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma
 
 # load_tests from common_utils is used to automatically filter tests for
