@@ -414,7 +414,4 @@ TEST(OrderedPreservingDictTest, test_swap_empty) {
     TORCH_INTERNAL_ASSERT(map2 == (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{{1, 10}, {8, 80}, {3, 30}, {4, 40}}));
 }
 
-
-
-
 }
