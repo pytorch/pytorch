@@ -34,7 +34,7 @@ ${type_derived_method_definitions}
 
 namespace {
 
-static auto registerer = c10::RegisterOperators()
+static auto registerer = torch::RegisterOperators()
   ${wrapper_registrations};
 
 }

@@ -31,7 +31,8 @@ namespace at {
 
 ${type_derived_method_definitions}
 
+#ifndef USE_STATIC_DISPATCH
 static auto registerer = torch::RegisterOperators()
   ${function_registrations};
-
+#endif
 }

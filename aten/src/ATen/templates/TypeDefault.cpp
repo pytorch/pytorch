@@ -20,11 +20,8 @@ namespace at {
 
 ${type_method_definitions}
 
-namespace {
-
+#ifndef USE_STATIC_DISPATCH
 static auto registerer = torch::RegisterOperators()
   ${function_registrations};
-
-}
-
+#endif
 }
