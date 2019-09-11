@@ -781,9 +781,9 @@ class QuantizationDebugTest(QuantizationTestCase):
         dump_tensor(model, "$", tensor_dict)
 
         # we can torch,save() and torch_load() in bento for further analysis
-        self.assertTrue('$.fc1.activation' in tensor_dict.keys(),
+        self.assertTrue('$.fc1.module.activation' in tensor_dict.keys(),
                         'activation is not recorded in the dict')
-        self.assertEqual(len(tensor_dict['$.fc1.activation']), 2*len(self.calib_data))
+        self.assertEqual(len(tensor_dict['$.fc1.module.activation']), 2*len(self.calib_data))
 
 if __name__ == '__main__':
     run_tests()

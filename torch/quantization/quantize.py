@@ -332,10 +332,6 @@ def swap_module(mod, mapping):
     if hasattr(mod, 'qconfig') and mod.qconfig is not None:
         if type(mod) in mapping:
             new_mod = mapping[type(mod)].from_float(mod)
-        # for debug supportt, maybe qconfig with debug setting
-        if mod.qconfig.debug is not None:
-            new_mod.add_module('observer', mod.qconfig.debug())
-            new_mod.register_forward_hook(_observer_forward_hook)
     return new_mod
 
 def dump_tensor(mod, prefix, target_dict):
