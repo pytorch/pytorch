@@ -23,9 +23,9 @@ torch.nn.MaxPool3d|No|No
 torch.nn.MaxUnpool1d|No|No
 torch.nn.MaxUnpool2d|No|No
 torch.nn.MaxUnpool3d|No|No
-torch.nn.AvgPool1d|No|No
-torch.nn.AvgPool2d|No|No
-torch.nn.AvgPool3d|No|No
+torch.nn.AvgPool1d|Yes|No
+torch.nn.AvgPool2d|Yes|No
+torch.nn.AvgPool3d|Yes|No
 torch.nn.FractionalMaxPool2d|No|No
 torch.nn.LPPool1d|No|No
 torch.nn.LPPool2d|No|No

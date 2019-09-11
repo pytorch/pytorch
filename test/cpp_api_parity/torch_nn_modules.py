@@ -43,9 +43,18 @@ module_metadata_map = {
     'MaxUnpool1d': TorchNNModuleMetadata(),
     'MaxUnpool2d': TorchNNModuleMetadata(),
     'MaxUnpool3d': TorchNNModuleMetadata(),
-    'AvgPool1d': TorchNNModuleMetadata(),
-    'AvgPool2d': TorchNNModuleMetadata(),
-    'AvgPool3d': TorchNNModuleMetadata(),
+    'AvgPool1d': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(2)",
+        num_attrs_recursive=5,
+    ),
+    'AvgPool2d': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(2)",
+        num_attrs_recursive=6,
+    ),
+    'AvgPool3d': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(2)",
+        num_attrs_recursive=6,
+    ),
     'FractionalMaxPool2d': TorchNNModuleMetadata(),
     'LPPool1d': TorchNNModuleMetadata(),
     'LPPool2d': TorchNNModuleMetadata(),
