@@ -433,6 +433,10 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.sqrt(x), x)
 
+    def test_rsqrt(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.rsqrt(x), x)
+
     def test_equal(self):
         x = torch.randn(1, 2, 3, 1, requires_grad=False).int()
         y = torch.randn(1, 4, requires_grad=False).int()
