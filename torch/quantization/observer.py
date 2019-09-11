@@ -164,7 +164,7 @@ def default_observer(**kwargs):
     kwargs.setdefault("reduce_range", True)
     return observer(MinMaxObserver, **kwargs)
 
-def default_tensor_observer(**kwargs):
+def default_debug_observer(**kwargs):
     return observer(TensorObserver, **kwargs)
 
 def default_weight_observer(**kwargs):
