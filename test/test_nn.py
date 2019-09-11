@@ -4309,7 +4309,6 @@ class TestNN(NNTestCase):
         torch.autograd.gradcheck(fn, (m.t_rg,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel_rnn(self):
 
         class TestModule(torch.nn.Module):
