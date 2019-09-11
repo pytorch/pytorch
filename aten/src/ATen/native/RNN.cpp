@@ -582,8 +582,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     std::vector<hidden_type> hiddens;
     int64_t input_offset = 0;
     int64_t num_steps = input.batch_sizes.size(0);
-    int64_t* batch_sizes = input.batch_sizes.data_ptr<int64_t>();
-    int64_t last_batch_size = batch_sizes[0];
+    int64_t last_batch_size = input.batch_sizes[0].item().toInt();
 
     const Tensor* input_ptr = &input.data;
     bool pre_compute_input = false;
@@ -602,7 +601,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     // to return a tensor of final hidden state.
     auto hidden = input_hidden;
     for (int64_t i = 0; i < num_steps; ++i) {
-      const int64_t batch_size = batch_sizes[i];
+      const int64_t batch_size = input.batch_sizes[i].item().toInt();
       auto step_input = input_ptr->narrow(0, input_offset, batch_size);
       input_offset += batch_size;
       const int64_t dec = last_batch_size - batch_size;
@@ -641,8 +640,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     std::vector<at::Tensor> step_outputs;
     int64_t input_offset = input.data.size(0);
     int64_t num_steps = input.batch_sizes.size(0);
-    int64_t* batch_sizes = input.batch_sizes.data_ptr<int64_t>();
-    int64_t last_batch_size = batch_sizes[num_steps - 1];
+    int64_t last_batch_size = input.batch_sizes[num_steps - 1].item().toInt();
 
     const Tensor* input_ptr = &input.data;
     bool pre_compute_input = false;
@@ -657,9 +655,9 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     // the smallest batch size (and a small set of hidden states we actually use),
     // and progressively expand the hidden states, as we move backwards over the
     // 1D list of inputs.
-    auto hidden = hidden_slice(input_hidden, 0, batch_sizes[num_steps - 1]);
+    auto hidden = hidden_slice(input_hidden, 0, input.batch_sizes[num_steps - 1].item().toInt());
     for (int64_t i = num_steps - 1; i >= 0; --i) {
-      const int64_t batch_size = batch_sizes[i];
+      const int64_t batch_size = input.batch_sizes[i].item().toInt();
       const int64_t inc = batch_size - last_batch_size;
       if (inc > 0) {
         hidden = hidden_concat(ArrayRef<hidden_type>{
