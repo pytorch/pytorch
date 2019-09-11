@@ -684,6 +684,14 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         input = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
         self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
 
+    def test_rsqrt(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, input):
+                return input.rsqrt()
+
+        input = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
+
     def test_log(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
