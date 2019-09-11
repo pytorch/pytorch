@@ -9,9 +9,8 @@ import traceback
 from . import set_current_rpc_dst
 
 
-def serialize(obj, to=None):
-    if to:
-        set_current_rpc_dst(to)
+def serialize(obj, to):
+    set_current_rpc_dst(to)
     f = io.BytesIO()
     p = pickle.Pickler(f)
     p.dispatch_table = copyreg.dispatch_table.copy()
