@@ -487,7 +487,7 @@ PyObject *THPModule_preferredQuantizedEngine(PyObject *_unused)
   return THPQEngine_New(at::globalContext().preferredQuantizedEngine(), "");
 }
 
-static std::array<PyMethodDef, 36> TorchMethods = {{
+static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       nullptr},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  nullptr},
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, nullptr},
@@ -523,7 +523,7 @@ static std::array<PyMethodDef, 36> TorchMethods = {{
   {"_get_default_device", (PyCFunction)THPModule_getDefaultDevice, METH_NOARGS,   nullptr},
   {"_get_preferred_engine", (PyCFunction)THPModule_preferredQuantizedEngine, METH_NOARGS, nullptr},
   {"_set_preferred_engine", (PyCFunction)THPModule_setPreferredQuantizedEngine, METH_O, nullptr},
-  {nullptr, nullptr, 0, nullptr}}
+  {nullptr, nullptr, 0, nullptr}
 };
 
 bool THCPDoubleStorage_init(PyObject *module);
@@ -624,7 +624,7 @@ PyObject* initModule() {
 
 #define ASSERT_TRUE(cmd) if (!(cmd)) return nullptr
 
-  THPUtils_addPyMethodDefs(methods, TorchMethods.data());
+  THPUtils_addPyMethodDefs(methods, TorchMethods);
   THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
   THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
   THPUtils_addPyMethodDefs(methods, torch::multiprocessing::python_functions());
