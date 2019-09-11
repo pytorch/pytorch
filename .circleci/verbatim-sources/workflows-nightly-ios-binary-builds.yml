@@ -2,7 +2,7 @@
   binarybuilds:
     triggers:
       - schedule:
-          cron: "0 16 * * *"
+          cron: "5 16 * * *"
           filters:
             branches:
               only:
@@ -32,7 +32,7 @@
           ios_platform: "OS"
           requires: 
             - setup
-      - bianry_ios_upload:
+      - binary_ios_upload:
           build_environment: "pytorch-ios-bianry-upload"
           context: org-member
           requires:
