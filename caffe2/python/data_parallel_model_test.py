@@ -1133,7 +1133,7 @@ class ParallelizeBMUFTest(TestCase):
         cpu_device=st.booleans()
     )
     def test_parallelize_bmuf(self, cpu_device):
-        assume(cpu_device or workspace.has_gpu_support or workspace.has_hip_support)
+        assume(cpu_device or workspace.has_gpu_support)
 
         workspace.ResetWorkspace()
 

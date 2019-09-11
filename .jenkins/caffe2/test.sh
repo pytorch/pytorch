@@ -86,15 +86,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
   EXTRA_TESTS+=("$caffe2_pypath/contrib/nccl")
 fi
 
-rocm_ignore_test=()
-if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
-  # Currently these tests are failing on ROCM platform:
-
-  # On ROCm, RCCL (distributed) development isn't complete.
-  # https://github.com/ROCmSoftwarePlatform/rccl
-  rocm_ignore_test+=("--ignore $caffe2_pypath/python/data_parallel_model_test.py")
-fi
-
 # NB: Warnings are disabled because they make it harder to see what
 # the actual erroring test is
 echo "Running Python tests.."
@@ -119,7 +110,6 @@ pip install --user pytest-sugar
   --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
   --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
   --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
-  ${rocm_ignore_test[@]} \
   "$caffe2_pypath/python" \
   "${EXTRA_TESTS[@]}"
 
