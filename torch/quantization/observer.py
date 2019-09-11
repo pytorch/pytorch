@@ -22,10 +22,12 @@ class ObserverBase(ABC, nn.Module):
     the collected statistics.
     """
 
-    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine):
+    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False):
         super(ObserverBase, self).__init__()
         self.dtype = dtype
         self.qscheme = qscheme
+        self.reduce_range = reduce_range
+
         self.eps = torch.finfo(torch.float32).eps
         assert self.qscheme in (
             torch.per_tensor_affine,
@@ -63,9 +65,16 @@ class ObserverBase(ABC, nn.Module):
         )
 
         if self.dtype == torch.qint8:
-            qmin, qmax = -128, 127
+            if self.reduce_range:
+                qmin, qmax = -64, 63
+            else:
+                qmin, qmax = -128, 127
         else:
-            qmin, qmax = 0, 255
+            if self.reduce_range:
+                qmin, qmax = 0, 127
+            else:
+                qmin, qmax = 0, 255
+
         max_val, min_val = float(max_val), float(min_val)
         min_val = min(0.0, min_val)
         max_val = max(0.0, max_val)
@@ -103,9 +112,18 @@ class MinMaxObserver(ObserverBase):
     }
 
     def __init__(self, **kwargs):
+        #  For x86 quantized kernels, we need to ensure that the vpmaddubsw instruction
+        #  does not overflow. We allow for a reduce_range argument to observers that
+        #  reduces the quantized range to (0,127) or (-64, 63). For more details see
+        #  aten/src/ATen/native/quantized/cpu/qconv.cpp
+        #  This is not the optimal choice for non x86 backends as
+        #  lose a bit of precision for activations.
+        #
         super(MinMaxObserver, self).__init__(**kwargs)
         self.min_val = None
         self.max_val = None
+        if self.qscheme == torch.per_tensor_symmetric and self.reduce_range and self.dtype == torch.quint8:
+            raise NotImplementedError("Cannot reduce range for symmetric quantization for quint8")
 
     def forward(self, x):
         min_val = self.min_val
@@ -195,6 +213,8 @@ def observer(observer_cls, **kwargs):
 
 
 def default_observer(**kwargs):
+    # Restrict activations to be in the range (0,127)
+    kwargs.setdefault("reduce_range", True)
     return observer(MinMaxObserver, **kwargs)
 
 
