@@ -20,6 +20,17 @@ export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
 source ${WORKSPACE_DIR}/miniconda3/bin/activate
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
 
+# The torch.hub tests make requests to GitHub.
+#
+# The certifi package from conda-forge is new enough to make the
+# following error disappear (included for future reference):
+#
+# > ssl.SSLCertVerificationError: [SSL: CERTIFICATE_VERIFY_FAILED]
+# > certificate verify failed: unable to get local issuer certificate
+# > (_ssl.c:1056)
+#
+conda install -y -c conda-forge certifi
+
 # Needed by torchvision, which is imported from TestHub in test_utils.py.
 conda install -y pillow
 
