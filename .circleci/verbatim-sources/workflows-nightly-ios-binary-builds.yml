@@ -1,4 +1,15 @@
-      # Pytorch iOS builds
+  
+  binarybuilds:
+    triggers:
+      - schedule:
+          cron: "5 15 * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - setup
+        # Pytorch iOS builds
       - pytorch_ios_build:
           name: pytorch_ios_10_2_1_nightly_x86_64_build
           build_environment: "libtorch-ios-10.2.1-nightly-x86_64-build"

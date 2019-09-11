@@ -174,7 +174,7 @@ def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
 
 
 def add_binary_build_jobs(jobs_dict):
-    add_jobs_and_render(jobs_dict, "binarybuilds", False, "5 5 * * *")
+    add_jobs_and_render(jobs_dict, "binarybuilds", False, "55 14 * * *")
 
 
 def add_binary_smoke_test_jobs(jobs_dict):

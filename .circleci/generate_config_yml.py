@@ -74,17 +74,17 @@ class Header(object):
 # Order of this list matters to the generated config.yml.
 YAML_SOURCES = [
     File("header-section.yml"),
-    # File("nightly-binary-build-defaults.yml"),
+    File("nightly-binary-build-defaults.yml"),
     Header("Build parameters"),
     File("pytorch-build-params.yml"),
-    File("caffe2-build-params.yml"),
-    # File("binary-build-params.yml"),
+    # File("caffe2-build-params.yml"),
+    File("binary-build-params.yml"),
     Header("Job specs"),
     File("pytorch-job-specs.yml"),
-    File("caffe2-job-specs.yml"),
-    # File("binary-job-specs.yml"),
+    # File("caffe2-job-specs.yml"),
+    File("binary-job-specs.yml"),
     File("job-specs-setup.yml"),
-    File("job-specs-custom.yml"),
+    # File("job-specs-custom.yml"),
     # File("binary_update_htmls.yml"),
     # File("binary-build-tests.yml"),
     File("workflows.yml"),
@@ -98,7 +98,7 @@ YAML_SOURCES = [
     # Treegen(binary_build_definitions.add_binary_smoke_test_jobs, 1),
     # Header("Daily binary build trigger"),
     # Treegen(binary_build_definitions.add_binary_build_jobs, 1),
-    # File("workflows-nightly-ios-binary-builds.yml")
+    File("workflows-nightly-ios-binary-builds.yml")
     # Header("Nightly tests"),
     # Listgen(binary_build_definitions.get_nightly_tests, 3),
     # File("workflows-nightly-uploads-header.yml"),
