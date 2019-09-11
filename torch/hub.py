@@ -386,7 +386,7 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
         response = requests.get(url, stream=True)
 
         content_length = response.headers['Content-Length']
-        file_size = content_length
+        file_size = int(content_length)
         u = response.raw
     else:
         u = urlopen(url)

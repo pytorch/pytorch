@@ -19,6 +19,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 #ifdef USE_FBGEMM
   Tensor operator()(
       Tensor weight,
+      c10::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
@@ -104,10 +105,19 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         scales[i] = weight.q_per_channel_scales()[i].item<float>();
       }
     }
-
+    c10::optional<at::Tensor> bias_contig;
+    if (bias.has_value()) {
+      Tensor bias_vec = bias.value();
+      TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
+      TORCH_CHECK(
+          bias_vec.size(0) == output_channels,
+          "bias should have K elements: " + std::to_string(output_channels));
+      bias_contig = bias->contiguous();
+    }
     auto ret_ptr = guts::make_unique<PackedConvWeight>(
         PackedConvWeight{guts::make_unique<fbgemm::PackWeightsForConv<2>>(
                              conv_p, weight_ptr_int8),
+                         bias_contig,
                          col_offsets,
                          {kernel_h, kernel_w},
                          scales,
@@ -120,6 +130,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 #else // USE_FBGEMM
   Tensor operator()(
       Tensor, /* weight */
+      c10::optional<Tensor>, /* bias */
       torch::List<int64_t>, /* stride */
       torch::List<int64_t>, /* padding */
       torch::List<int64_t>, /* dilation */
