@@ -488,6 +488,7 @@ TEST_F(ModulesTest, PrettyPrintMaxPool) {
   ASSERT_EQ(
       c10::str(MaxPool2d(options)),
       "torch::nn::MaxPool2d(kernel_size=[5, 6], stride=[1, 2])");
+}
 
 TEST_F(ModulesTest, PrettyPrintAvgPool) {
   ASSERT_EQ(
