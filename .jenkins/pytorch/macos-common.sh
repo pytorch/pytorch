@@ -20,6 +20,9 @@ export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
 source ${WORKSPACE_DIR}/miniconda3/bin/activate
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
 
+# Needed by torchvision, which is imported from TestHub in test_utils.py.
+conda install -y pillow
+
 # Building with USE_DISTRIBUTED=1 requires libuv (for Gloo).
 conda install -y libuv pkg-config
 
