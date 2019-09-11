@@ -96,7 +96,7 @@ ClassType::ClassType(
 bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   // to improve performance, this check can be cached
   if (auto iface = rhs->cast<InterfaceType>()) {
-    for (const FunctionSchema& schema : *iface->methods_) {
+    for (const FunctionSchema& schema : iface->methods()) {
       auto self_method = getMethod(schema.name());
       if (!self_method) {
         if (why_not) {

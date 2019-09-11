@@ -21,8 +21,8 @@ __global__ void upsample_trilinear3d_out_frame(
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
-    const PackedTensorAccessor<scalar_t, 5> idata,
-    PackedTensorAccessor<scalar_t, 5> odata) {
+    const PackedTensorAccessor64<scalar_t, 5> idata,
+    PackedTensorAccessor64<scalar_t, 5> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
@@ -105,8 +105,8 @@ __global__ void upsample_trilinear3d_backward_out_frame(
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
-    PackedTensorAccessor<scalar_t, 5> idata,
-    const PackedTensorAccessor<scalar_t, 5> odata) {
+    PackedTensorAccessor64<scalar_t, 5> idata,
+    const PackedTensorAccessor64<scalar_t, 5> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
@@ -245,8 +245,8 @@ static void upsample_trilinear3d_out_cuda_template(
       input.scalar_type(), "upsample_trilinear3d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor<scalar_t, 5>();
-        auto odata = output.packed_accessor<scalar_t, 5>();
+        auto idata = input.packed_accessor64<scalar_t, 5>();
+        auto odata = output.packed_accessor64<scalar_t, 5>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
             input_depth, output_depth, align_corners);
@@ -332,8 +332,8 @@ static void upsample_trilinear3d_backward_out_cuda_template(
       [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = grad_input.packed_accessor<scalar_t, 5>();
-        auto odata = grad_output.packed_accessor<scalar_t, 5>();
+        auto idata = grad_input.packed_accessor64<scalar_t, 5>();
+        auto odata = grad_output.packed_accessor64<scalar_t, 5>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
             input_depth, output_depth, align_corners);

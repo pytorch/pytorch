@@ -19,8 +19,8 @@ Tensor& pow_out(Tensor& result, const Tensor& base, const Tensor& exp) {
 
 Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
   // Numpy compatibility check:
-  TORCH_CHECK(!(isIntegralType(base.scalar_type()) &&
-              exp.isIntegral() && exp.toLong() < 0),
+  TORCH_CHECK(!(isIntegralType(base.scalar_type(), true) &&
+              exp.isIntegral(true) && exp.toLong() < 0),
               "Integers to negative integer powers are not allowed.");
   if (exp.toDouble() == 0.0) {
     result.resize_as_(base).fill_(1);
@@ -38,7 +38,7 @@ Tensor& pow_out(Tensor& result, Scalar base, const Tensor& exp) {
   if (base.toDouble() == 1.0) {
     result.resize_as_(exp).fill_(1);
   } else {
-    native::pow_out(result, c10::scalar_to_tensor(base), exp);
+    native::pow_out(result, c10::scalar_to_tensor(base, exp.device()), exp);
   }
   return result;
 }

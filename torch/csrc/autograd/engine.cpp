@@ -12,6 +12,11 @@
 #include <ATen/Parallel.h>
 #include <ATen/ThreadLocalDebugInfo.h>
 #include <c10/util/Exception.h>
+#include <c10/core/Stream.h>
+#include <c10/core/Event.h>
+#include <c10/core/DeviceGuard.h>
+#include <c10/util/Optional.h>
+#include <c10/core/StreamGuard.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -137,6 +142,35 @@ struct ReadyQueue {
 // When the GraphTask is finished, the parent worker thread that is waiting on
 // the task is notified and the current thread returns to the pool.
 
+// Note [Streaming backwards]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~
+// On CUDA devices the autograd engine's device operations are run on the
+// same stream that ran them in forward. This requires automatically
+// syncing the streams so that function A finishes producing its
+// output before function B consumes it.
+//
+// This synchronization occurs when outputs are placed into input buffers.
+// The functions corresponding to input buffer positions have metadata
+// recording their streams from forward, and during backward this
+// data is used to sync the producer's stream with the consumer's.
+//
+// When a CUDA function is run either all its inputs were accumulated on the
+// stream used to run the function OR the inputs are on different devices
+// and the function is responsible for properly acquiring them.
+//
+// Historically, the autograd engine ran all CUDA operations on their
+// device's DEFAULT stream. This meant that syncing (implicitly or
+// explicitly) with the default streams was required before and after
+// calling backward(). It also meant, however, that syncing with
+// the default streams after backward() was sufficient to ensure
+// that backward() had finished running. To preserve this historic
+// behavior the engine records "leaf streams," the streams of the
+// leaf variables, and syncs them with their device's default stream
+// at the end of backward. All other streams are already synchronized
+// to happen before at least one leaf stream (per the above), so syncing
+// the leaf streams with the default streams is sufficient to implement
+// the historic behavior.
+
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask {
   std::exception_ptr exception_;
@@ -181,6 +215,7 @@ struct GraphTask {
   std::vector<Variable> captured_vars_;
   std::shared_ptr<at::ThreadLocalDebugInfoBase> debug_info_ =
       at::getThreadLocalDebugInfo();
+  std::unordered_set<c10::Stream> leaf_streams;
 
   void init_to_execute(Node& graph_root, const edge_list& outputs);
 
@@ -454,11 +489,15 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       }
       grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
+    TORCH_CHECK(isFloatingType(grads[i].type().scalarType()));
+    if (metadata.type().scalarType() != grads[i].type().scalarType()) {
+      grads[i] = grads[i].to(metadata.type().scalarType());
+    }
     if (!is_compatible_type(metadata.type(), grads[i].type())) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected type ";
-      ss << metadata.type() << " but got " << grads[i].type();
-      AT_ERROR(format_error(ss.str()));
+       std::stringstream ss;
+       ss << "invalid gradient at index " << i << " - expected type ";
+       ss << metadata.type() << " but got " << grads[i].type();
+       AT_ERROR(format_error(ss.str()));
     }
     auto output_device = output.device();
     if (output_device != metadata.device()) {
@@ -537,6 +576,10 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
     if (!fn_info.needed_) return;
   }
 
+  // Switches to a function's CUDA stream (if applicable) before calling it
+  const auto opt_parent_stream = (*task.fn_).stream(c10::DeviceType::CUDA);
+  c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
+
   auto outputs = call_function(task);
 
   auto& fn = *task.fn_;
@@ -545,7 +588,14 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
   }
 
   int num_outputs = outputs.size();
-  if (num_outputs == 0) return; // Don't even acquire the mutex
+  if (num_outputs == 0) { // Note: doesn't acquire the mutex
+    // Records leaf stream (if applicable)
+    // See note "Streaming backwards"
+    if (opt_parent_stream) {
+      task.base_->leaf_streams.emplace(*opt_parent_stream);
+    }
+    return;
+  }
 
   if (AnomalyMode::is_enabled()) {
     AutoGradMode grad_mode(false);
@@ -592,7 +642,14 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
       }
       // No buffers have been allocated for the function
       InputBuffer input_buffer(next.function->num_inputs());
-      input_buffer.add(next.input_nr, std::move(output));
+
+      // Accumulates into buffer
+      const auto opt_next_stream = next.function->stream(c10::DeviceType::CUDA);
+      input_buffer.add(next.input_nr,
+                       std::move(output),
+                       opt_parent_stream,
+                       opt_next_stream);
+
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
         queue.push(NodeTask(task.base_, next.function, std::move(input_buffer)));
@@ -602,7 +659,13 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
     } else {
       // The function already has a buffer
       auto &input_buffer = not_ready_it->second;
-      input_buffer.add(next.input_nr, std::move(output));
+
+      // Accumulates into buffer
+      const auto opt_next_stream = next.function->stream(c10::DeviceType::CUDA);
+      input_buffer.add(next.input_nr,
+                       std::move(output),
+                       opt_parent_stream,
+                       opt_next_stream);
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
         queue.push(NodeTask(task.base_, next.function, std::move(input_buffer)));
@@ -725,6 +788,18 @@ auto Engine::execute(const edge_list& roots,
     cb_lock.unlock();
     final_callbacks_[i]();
     cb_lock.lock();
+  }
+
+  // Syncs leaf streams with default streams (if necessary)
+  // See note "Streaming backwards"
+  for (const auto& leaf_stream : graph_task.leaf_streams) {
+    const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+    const auto default_stream = guard.getDefaultStream(leaf_stream.device());
+    if (leaf_stream != default_stream) {
+      auto event = c10::Event{c10::DeviceType::CUDA};
+      event.record(leaf_stream);
+      default_stream.wait(event);
+    }
   }
 
   return graph_task.captured_vars_;
