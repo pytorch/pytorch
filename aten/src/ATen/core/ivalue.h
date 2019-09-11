@@ -54,6 +54,7 @@ struct Object;
   _(Object) \
   _(Uninitialized) \
   _(Capsule) \
+  _(ScalarType) \
 
 
 struct CAFFE2_API IValue final {
@@ -184,6 +185,10 @@ struct CAFFE2_API IValue final {
   double toDouble() const {
     AT_ASSERT(isDouble());
     return payload.as_double;
+  }
+
+  IValue(ScalarType t) : tag(Tag::ScalarType) {
+    payload.as_int = static_cast<std::underlying_type<ScalarType>::type>(t);
   }
 
   // Future

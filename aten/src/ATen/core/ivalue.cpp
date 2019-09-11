@@ -112,6 +112,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "Uninitialized";
     case IValue::Tag::Device:
       return out << v.toDevice();
+    case IValue::Tag::ScalarType:
+      return out << v.toScalarType();
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict());
     case IValue::Tag::Object:

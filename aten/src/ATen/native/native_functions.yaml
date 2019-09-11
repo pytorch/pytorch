@@ -3156,6 +3156,15 @@
   variants: method
   named_guard: False
 
+- func: result_type(Tensor tensor, Tensor other) -> ScalarType
+  variants: function
+
+- func: result_type(Tensor tensor, Scalar other) -> ScalarType
+  variants: function
+
+- func: _result_type(Tensor[] tensors) -> ScalarType
+  variants: function
+
 # NB: Does NOT check precondition that numel == 1
 - func: _local_scalar_dense(Tensor self) -> Scalar
   dispatch:
