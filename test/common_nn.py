@@ -1258,11 +1258,13 @@ new_module_tests = [
     dict(
         module_name='MaxPool1d',
         constructor_args=(4,),
+        cpp_constructor_args='(4)',
         input_size=(2, 10, 4),
     ),
     dict(
         module_name='MaxPool1d',
         constructor_args=(4, 4),
+        cpp_constructor_args='(torch::nn::MaxPool1dOptions(4).stride(4))',
         input_size=(2, 10, 4),
         desc='stride',
     ),
@@ -1376,6 +1378,7 @@ new_module_tests = [
     dict(
         module_name='MaxPool2d',
         constructor_args=((3, 3), (2, 2), (1, 1)),
+        cpp_constructor_args='(torch::nn::MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1}))',
         input_size=(1, 3, 7, 7),
     ),
     dict(
@@ -1580,17 +1583,20 @@ new_module_tests = [
     dict(
         module_name='MaxPool3d',
         constructor_args=((2, 2, 2),),
+        cpp_constructor_args='(torch::nn::MaxPool3dOptions({2, 2, 2}))',
         input_size=(2, 3, 5, 5, 5),
     ),
     dict(
         module_name='MaxPool3d',
         constructor_args=(2, (2, 2, 2)),
+        cpp_constructor_args='(torch::nn::MaxPool3dOptions(2).stride({2, 2, 2}))',
         input_size=(2, 3, 5, 5, 5),
         desc='stride',
     ),
     dict(
         module_name='MaxPool3d',
         constructor_args=(2, 2, (1, 1, 1)),
+        cpp_constructor_args='(torch::nn::MaxPool3dOptions(2).stride(2).padding({1, 1, 1}))',
         input_size=(2, 3, 5, 5, 5),
         desc='stride_padding',
     ),
@@ -2194,6 +2200,7 @@ new_module_tests = [
     dict(
         fullname='Fold',
         constructor=lambda: nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1)),
+        cpp_constructor_args='(torch::nn::FoldOptions({3, 3}, {2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1}))',
         input_size=(2, 16, 4),
         check_gradgrad=False,
         test_cuda=True,
@@ -2208,6 +2215,7 @@ new_module_tests = [
     dict(
         fullname='Fold_int_input',
         constructor=lambda: nn.Fold(3, 2, 1, 0, 1),
+        cpp_constructor_args='(torch::nn::FoldOptions(3, 2).dilation(1).padding(0).stride(1))',
         input_size=(2, 16, 4),
         check_gradgrad=False,
         test_cuda=True,
@@ -2768,6 +2776,7 @@ loss_reference_fns = {
 criterion_tests = [
     dict(
         module_name='L1Loss',
+        cpp_constructor_args='',
         input_size=(2, 3, 4),
         target_size=(2, 3, 4),
         reference_fn=lambda i, t, _: 1. / i.numel() *
@@ -3094,6 +3103,7 @@ new_criterion_tests = [
     ),
     dict(
         module_name='L1Loss',
+        cpp_constructor_args='',
         input_size=(),
         target_size=(),
         reference_fn=lambda i, t, _: 1. / i.numel() * (i - t).abs().sum(),
@@ -3402,7 +3412,8 @@ class TestBase(object):
             elif fn_name in self._extra_kwargs:
                 self._arg_cache[name] = self._extra_kwargs[fn_name]()
             else:
-                assert size_name in self._extra_kwargs
+                assert size_name in self._extra_kwargs, \
+                    "Missing `{}`, `{}` or `{}` for {}".format(name, size_name, fn_name, self.get_name())
 
                 def map_tensor_sizes(sizes):
                     if isinstance(sizes, list):

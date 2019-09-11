@@ -22,7 +22,7 @@ import subprocess
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
-from functools import wraps
+from functools import wraps, partial
 from itertools import product
 from copy import deepcopy
 from numbers import Number
@@ -458,6 +458,67 @@ class CudaMemoryLeakCheck():
                 if before != after:
                     warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
                         self.name, after - before, i), RuntimeWarning)
+
+#  "min_satisfying_examples" setting has been deprecated in hypythesis
+#  3.56.0 and removed in hypothesis 4.x
+try:
+    import hypothesis
+    if hypothesis.version.__version_info__ >= (3, 56, 0):
+        hypothesis.settings.register_profile(
+            "pytorch_ci",
+            hypothesis.settings(
+                derandomize=True,
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=100,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "dev",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=10,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "debug",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=1000,
+                verbosity=hypothesis.Verbosity.verbose))
+    else:
+        hypothesis.settings.register_profile(
+            "pytorch_ci",
+            hypothesis.settings(
+                derandomize=True,
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=100,
+                min_satisfying_examples=1,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "dev",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=10,
+                min_satisfying_examples=1,
+                verbosity=hypothesis.Verbosity.verbose))
+        hypothesis.settings.register_profile(
+            "debug",
+            hypothesis.settings(
+                suppress_health_check=[hypothesis.HealthCheck.too_slow],
+                database=None,
+                max_examples=1000,
+                min_satisfying_examples=1,
+                verbosity=hypothesis.Verbosity.verbose))
+
+        hypothesis.settings.load_profile(
+            "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
+                                                         'dev')
+        )
+except ImportError:
+    print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
 class TestCase(expecttest.TestCase):
     precision = 1e-5
@@ -1037,24 +1098,40 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     return A
 
 
-def random_fullrank_matrix_distinct_singular_value(l, *batches, **kwargs):
+def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims, **kwargs):
     silent = kwargs.get("silent", False)
     if silent and not torch._C.has_lapack:
-        return torch.ones(l, l)
+        return torch.ones(matrix_size, matrix_size)
 
-    if len(batches) == 0:
-        A = torch.randn(l, l)
-        u, _, v = A.svd()
-        s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-        return u.mm(torch.diag(s)).mm(v.t())
-    else:
-        all_matrices = []
-        for _ in range(0, torch.prod(torch.as_tensor(batches)).item()):
-            A = torch.randn(l, l)
-            u, _, v = A.svd()
-            s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-            all_matrices.append(u.mm(torch.diag(s)).mm(v.t()))
-        return torch.stack(all_matrices).reshape(*(batches + (l, l)))
+    A = torch.randn(batch_dims + (matrix_size, matrix_size))
+    u, _, v = A.svd()
+    s = torch.arange(1., matrix_size + 1).mul_(1.0 / (matrix_size + 1)).diag()
+    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(v.transpose(-2, -1)))
+
+
+def random_linalg_solve_processed_inputs(A_dims, b_dims, gen_fn, transform_fn, cast_fn):
+    """
+    For solve methods, this returns the following values:
+    RHS tensor: generated using torch.randn
+    LHS tensor: generated using gen_fn
+    Transformed LHS tensor(s): returned after calling transform_fn.
+                               This can be a tuple or a single tensor depending on transform_fn
+                               For instance, if transform_fn == torch.cholesky, then the return value
+                               is a single tensor. If transform_fn == torch.lu, then the return value
+                               is a tuple of tensors
+    """
+    RHS = cast_fn(torch.randn(*b_dims))
+    LHS = cast_fn(gen_fn(*A_dims))
+    transformed_LHS = transform_fn(LHS)
+    return RHS, LHS, transformed_LHS
+
+
+def lu_solve_test_helper(self, A_dims, b_dims, cast, pivot):
+    b, A, (LU_data, LU_pivots, info) = random_linalg_solve_processed_inputs(
+        A_dims, b_dims, random_fullrank_matrix_distinct_singular_value,
+        partial(torch.lu, get_infos=True, pivot=pivot), cast)
+    self.assertEqual(info, torch.zeros_like(info))
+    return b, A, LU_data, LU_pivots
 
 
 def brute_pdist(inp, p=2):

@@ -37,12 +37,37 @@ public:
   Stream getStream(Device d) const noexcept override {
     return impl_->getStream(d);
   }
+  Stream getDefaultStream(Device d) const override {
+    return impl_->getDefaultStream(d);
+  }
   Stream exchangeStream(Stream s) const noexcept override {
     return impl_->exchangeStream(s);
   }
   DeviceIndex deviceCount() const noexcept override {
     return impl_->deviceCount();
   }
+
+  // Event functions
+  void record(void** event,
+    const Stream& stream,
+    const DeviceIndex device_index,
+    const EventFlag flag) const override {
+    impl_->record(event, stream, device_index, flag);
+  }
+  void block(
+    void* event,
+    const Stream& stream) const override {
+    impl_->block(event, stream);
+  }
+  bool queryEvent(void* event) const override {
+    return impl_->queryEvent(event);
+  }
+  void destroyEvent(
+    void* event,
+    const DeviceIndex device_index) const noexcept override {
+    impl_->destroyEvent(event, device_index);
+  }
+
 private:
   const DeviceGuardImplInterface* impl_ = nullptr;
 };

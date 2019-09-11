@@ -8,9 +8,10 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
-#ifdef BUILD_NAMEDTENSOR
-#include <ATen/core/NamedTensor.h>
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
+#include <ATen/core/dispatch/Dispatcher.h>
 #endif
+#include <ATen/core/NamedTensor.h>
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
 #include <ATen/CPUType.h>
@@ -57,10 +58,6 @@ inline TensorOptions Tensor::options() const {
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 ${tensor_method_definitions}
-
-inline bool Tensor::is_variable() const noexcept {
-  return impl_->is_variable();
-}
 
 inline caffe2::TypeMeta Tensor::dtype() const noexcept {
   return impl_->dtype();

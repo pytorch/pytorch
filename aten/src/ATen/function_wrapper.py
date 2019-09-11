@@ -113,10 +113,10 @@ ${return_type} ${Type}::${api_name}(${type_method_formals}) {
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-.registerOp<${return_type} (${formals_types})>(Backend::Undefined, "${schema_string}", &TypeDefault::${api_name})
+.registerOp<${return_type} (${formals_types})>(TensorTypeId::UndefinedTensorId, "${schema_string}", &TypeDefault::${api_name})
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-.registerOp<${return_type} (${formals_types})>(Backend::${Backend}, "${schema_string}", &${Type}::${api_name})
+.registerOp<${return_type} (${formals_types})>(TensorTypeId::${Backend}TensorId, "${schema_string}", &${Type}::${api_name})
 """)
 
 # Generate a file that lists all functions and their schema string. Used for XLA
@@ -124,18 +124,19 @@ REGISTRATION_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
 """)
 
-# add non-virtual declaration to Tensor.h
+# add non-virtual declaration to TensorBody.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 # add non-virtual declaration to Tensor.cpp
+# TODO: This will need to be adjusted for multiple dispatch
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
-    ${mobile_method_body}
+    ${static_dispatch_method_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(tensorTypeIdToBackend(type_id()), is_variable())(${method_actuals});
+    return table->getOp<${return_type} (${formals_types})>(type_set())(${method_actuals});
 #endif
 }
 """)
@@ -151,27 +152,27 @@ C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults}
 FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
-    ${mobile_function_body}
+    ${static_dispatch_function_body}
 #else
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_backend}, ${inferred_is_variable})(${native_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
 #endif
 }
 """)
 
-# for mobile builds, we rely on the linker to strip unused ops.
-# this requires us to dispatch statically in Functions.h and TensorMethods.h
-MOBILE_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
+# In order to rely on the linker to strip unused ops, it requires us to dispatch statically
+# in Functions.h and TensorMethods.h.
+STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
 ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
-MOBILE_FUNCTION_SWITCH_BODY = CodeTemplate("""\
-switch(${backend}) {
-    ${mobile_function_switches}
+STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
+switch(tensorTypeIdToBackend(impl::dispatchTypeId(${type_set}))) {
+    ${static_dispatch_function_switches}
     default:
-        AT_ERROR("${api_name} not implemented for ", at::toString(${backend}));
+        AT_ERROR("${api_name} not implemented for ", at::toString(${type_set}));
 }
 """)
-MOBILE_FUNCTION_SWITCH_STATEMENT = CodeTemplate("""\
+STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT = CodeTemplate("""\
 case Backend::${backend}:
     ${return_call} ${backend}Type::${api_name}(${native_arguments});
     break;
@@ -186,11 +187,11 @@ CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults
 FACTORY_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
-    ${mobile_function_body}
+    ${static_dispatch_function_body}
 #else
-    globalLegacyTypeDispatch().initForBackend(${inferred_backend});
+    globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->getOp<${return_type} (${formals_types})>(${inferred_backend}, ${inferred_is_variable})(${native_actuals});
+    return table->getOp<${return_type} (${formals_types})>(${inferred_type_set})(${native_actuals});
 #endif
 }
 """)
@@ -236,7 +237,7 @@ scalar_types = [
     ('BFloat16', 'BFloat16', 'BFloat16AccrealNotDefined', True),
 ]
 
-mobile_backends = ['CPU', 'QuantizedCPU', 'SparseCPU']
+static_dispatch_backends = ['CPU', 'QuantizedCPU', 'SparseCPU']
 
 
 class NYIError(Exception):
@@ -550,8 +551,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_with_defaults': List[str],
     'formals': List[str],
     'formals_types': List[str],
-    'inferred_backend': str,
-    'inferred_is_variable': str,
+    'inferred_type_set': str,
     'inplace': bool,
     'matches_jit_signature': bool,
     # This controls whether or not we generate the interface in Type or
@@ -1093,67 +1093,77 @@ def create_generic(top_env, declarations):
         def gen_tensor_method(option):
             # type: (Any) -> FunctionCode
             if isinstance(type_method_dispatch, dict):
-                mobile_function_switches = []
-                for backend in mobile_backends:
+                static_dispatch_function_switches = []
+                # NB: As this code is currently written, there will NEVER be
+                # a backend generated for variable dispatch.  There is nothing
+                # stopping us from actually implementing this, however, if you
+                # really wanted variable on mobile, there's nothing stopping
+                # you from implementing this (however, you would have an
+                # annoying phase problem, since code generation for variable
+                # happens in tools/ which happens later than here.)
+                #
+                # If you pass in a variable to the dispatch, and variable is
+                # enabled, this switch will fail.  This is intentional: you
+                # probably need to disable variable globally in the mobile
+                # calling code.
+                for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
-                        mobile_function_switches.append(MOBILE_FUNCTION_SWITCH_STATEMENT.substitute(
+                        static_dispatch_function_switches.append(STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT.substitute(
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
                             native_arguments=option['method_actuals']))
-                mobile_method_body = MOBILE_FUNCTION_SWITCH_BODY.substitute(
+                static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
-                    backend='tensorTypeIdToBackend(type_id())',
-                    mobile_function_switches=mobile_function_switches)
+                    type_set='type_set()',
+                    static_dispatch_function_switches=static_dispatch_function_switches)
             else:
-                mobile_method_body = MOBILE_FUNCTION_DEFAULT_BODY.substitute(
+                static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, native_arguments=option['method_actuals'])
 
             return FunctionCode(
-                declaration=TENSOR_METHOD_DECLARATION.substitute(option, mobile_method_body=mobile_method_body),
-                definition=TENSOR_METHOD_DEFINITION.substitute(option, mobile_method_body=mobile_method_body))
+                declaration=TENSOR_METHOD_DECLARATION.substitute(option, static_dispatch_method_body=static_dispatch_method_body),
+                definition=TENSOR_METHOD_DEFINITION.substitute(option, static_dispatch_method_body=static_dispatch_method_body))
 
         def gen_namespace_function(option, dispatch_tensor, dispatch_options):
             # type: (Any, Optional[str], Any) -> FunctionCode
             if dispatch_tensor:
-                option['inferred_backend'] = 'at::detail::infer_backend({})'.format(dispatch_tensor)
-                option['inferred_is_variable'] = 'at::detail::infer_is_variable({})'.format(dispatch_tensor)
+                option['inferred_type_set'] = 'at::detail::infer_tensor_type_set({})'.format(dispatch_tensor)
             elif dispatch_options:
-                option['inferred_backend'] = '{}.backend()'.format(dispatch_options['name'])
-                option['inferred_is_variable'] = '{}.is_variable()'.format(dispatch_options['name'])
+                option['inferred_type_set'] = '{}.type_set()'.format(dispatch_options['name'])
             else:
-                # doesn't depend on a specific backend, use CPU
-                option['inferred_backend'] = 'Backend::CPU'
-                option['inferred_is_variable'] = 'false'
+                # doesn't depend on a specific backend, use the empty set
+                # TODO: Does this actually work?
+                option['inferred_type_set'] = 'TensorTypeSet()'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 
             if isinstance(type_method_dispatch, dict):
-                mobile_function_switches = []
-                for backend in mobile_backends:
+                static_dispatch_function_switches = []
+                for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
-                        mobile_function_switches.append(MOBILE_FUNCTION_SWITCH_STATEMENT.substitute(
+                        static_dispatch_function_switches.append(STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT.substitute(
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
                             native_arguments=option['native_actuals']))
-                mobile_function_body = MOBILE_FUNCTION_SWITCH_BODY.substitute(
+                static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
-                    backend=option['inferred_backend'],
-                    mobile_function_switches=mobile_function_switches)
+                    type_set=option['inferred_type_set'],
+                    static_dispatch_function_switches=static_dispatch_function_switches)
             else:
-                mobile_function_body = MOBILE_FUNCTION_DEFAULT_BODY.substitute(
+                static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, native_arguments=option['native_actuals'])
 
             if is_factory_method:
-                fn_definition = FACTORY_DEFINITION.substitute(option, mobile_function_body=mobile_function_body)
+                fn_definition = FACTORY_DEFINITION.substitute(option, static_dispatch_function_body=static_dispatch_function_body)
             else:
-                fn_definition = FUNCTION_DEFINITION.substitute(option, mobile_function_body=mobile_function_body)
+                fn_definition = FUNCTION_DEFINITION.substitute(option, static_dispatch_function_body=static_dispatch_function_body)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
         # Emit #ifdef BUILD_NAMEDTENSOR macros for any code generated here
         # that is sent to top_env. This is because some of this code (Type.h,
-        # Tensor.h, TensorMethods.h) is checked into the repo and must be
+        # TensorBody.h, TensorMethods.h) is checked into the repo and must be
         # the same regardless of BUILD_NAMEDTENSOR status.
         is_named_tensor_only = (has_named_tensor_formals(formals) or
                                 option['api_name'] == 'align_tensors')
