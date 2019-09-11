@@ -24,7 +24,7 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
 
 TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(empty({5, 5}, at::kMSNPU));
-  auto registry = torch::RegisterOperators()
+  auto registry1 = torch::RegisterOperators()
     .op("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor", torch::RegisterOperators::options()
       .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(
         "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
@@ -42,7 +42,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   ASSERT_EQ(b.dtype(), caffe2::TypeMeta::Make<float>());
 
   EXPECT_ANY_THROW(add(a, b));
-  auto registry = torch::RegisterOperators()
+  auto registry2 = torch::RegisterOperators()
     .op("aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", torch::RegisterOperators::options()
       .impl_unboxedOnlyKernel<decltype(add_override), &add_override>(
         "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
