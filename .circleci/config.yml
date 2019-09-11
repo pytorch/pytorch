@@ -1289,7 +1289,7 @@ workflows:
   binarybuilds:
     triggers:
       - schedule:
-          cron: "45 15 * * *"
+          cron: "50 15 * * *"
           filters:
             branches:
               only:
