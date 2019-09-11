@@ -176,10 +176,10 @@ struct FunctionSchema {
   //      and any positional arg in this schema is backward compatible
   //      with the corresponding one in old schema, which could be an arg
   //      or a kwarg, if it has, or it must provide a default value
-  //   3) this schema has the same or more kwargs than old,
-  //      and all the kwargs in old schema can find the corresponding
-  //      arg or kwarg which is backward compatible with the old kwarg,
-  //      and the extra kwargs in this schema always provide default values.
+  //   3) this schema has the same or more kwargs than old, and all the kwargs
+  //      in old schema can find the corresponding kwarg in this schema which
+  //      is backward compatible with the old kwarg, and the extra kwargs in
+  //      this schema must provide default values.
   bool isBackwardCompatibleWith(
       const FunctionSchema& old,
       std::ostream* why_not=nullptr) const;

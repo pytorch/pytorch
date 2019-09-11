@@ -57,6 +57,7 @@ inline bool Argument::isBackwardCompatibleWith(
       std::ostream* why_not) const {
     const Argument* lhs = this;
     const Argument* rhs = &old;
+    // functions are covariant in arguments but contravariant in returns
     if (is_return) {
       std::swap(lhs, rhs);
     }
@@ -73,9 +74,9 @@ inline bool Argument::isBackwardCompatibleWith(
     }
     if (!(detail::defaultValueEquals_(
             lhs->default_value(),
-            rhs->default_value())
-          || (lhs->default_value().has_value() &&
-              !rhs->default_value().has_value()))) {
+            rhs->default_value()) ||
+          (lhs->default_value().has_value() &&
+           !rhs->default_value().has_value()))) {
       return false;
     }
     return true;
