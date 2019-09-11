@@ -104,11 +104,11 @@ void logical_xor_kernel(TensorIterator& iter) {
 }
 
 void lt_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.input_dtype(0), "lt_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.input_dtype(0), "lt_cpu", [&]() {
     cpu_kernel(iter,
-      [=](scalar_t a, scalar_t b) -> bool {
-      return a < b;
-    });
+     [=](scalar_t a, scalar_t b) -> bool {
+       return a < b;
+     });
   });
 }
 
