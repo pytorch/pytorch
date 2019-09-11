@@ -20,14 +20,11 @@ namespace at {
 
 ${type_method_definitions}
 
-namespace {
-
+#ifndef USE_STATIC_DISPATCH
 static auto& registerer = globalATenDispatch()
   ${function_registrations};
 
-static auto c10_registerer = torch::RegisterOperators()
+static auto c10_registerer = c10::RegisterOperators()
   ${c10_function_registrations};
-
-}
-
+#endif
 }
