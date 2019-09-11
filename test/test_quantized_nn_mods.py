@@ -13,6 +13,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis_utils import no_deadline
 import unittest
+import io
 
 '''
 Note that tests in this file are just API test, to make sure we wrapped the
