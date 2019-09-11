@@ -172,9 +172,14 @@ RRefForkData RRefContext::forkTo(
     // properly
     if (rref->isOwner()) {
       // fork from owner
-      agent_->send(
+      auto fm = agent_->send(
           agent_->getWorkerId(forkDst),
           acceptUserRRef(forkRequest.rrefId_, forkRequest.forkId_));
+
+      fm->addCallback([forkRequest, this](const Message& message){
+        handleException(message);
+        this->delForkOfOwner(forkRequest.rrefId_, forkRequest.forkId_);
+      });
     } else {
       // fork from user, rref cannot be destructed until the fork request is
       // accepted by the owner
@@ -193,6 +198,7 @@ RRefForkData RRefContext::forkTo(
           ).toMessage());
 
       fm->addCallback([this](const Message& message) {
+        handleException(message);
         auto sfa = ScriptForkAccept::fromMessage(message);
         this->finishForkRequest(sfa.forkId_);
       });
@@ -208,9 +214,15 @@ Message RRefContext::acceptUserRRef(const RRefId& rrefId, const ForkId& forkId) 
 
 Message RRefContext::acceptForkRequest(
     const RRefId& rrefId, const ForkId& forkId, worker_id_t forkDst) {
-  agent_->send(
+  // TODO: add exception handling
+  auto fm = agent_->send(
       agent_->getWorkerId(forkDst),
       acceptUserRRef(rrefId, forkId));
+
+  fm->addCallback([rrefId, forkId, this](const Message& message){
+    handleException(message);
+    this->delForkOfOwner(rrefId, forkId);
+  });
   // notify fork caller UserRRef
   return ScriptForkAccept(forkId).toMessage();
 }
@@ -267,6 +279,15 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   if (rrefForks.empty()) {
     owners_.erase(rrefId);
     forks_.erase(rrefId);
+  }
+}
+
+void RRefContext::handleException(const Message& message) {
+  if (message.type() == MessageType::EXCEPTION) {
+    // TODO: allow users to register an error handler and call it here.
+    std::string err(message.payload().begin(), message.payload().end());
+    VLOG(1) << "Got exception: " << err << std::endl << std::flush;
+    throw std::runtime_error(err);
   }
 }
 

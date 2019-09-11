@@ -18,6 +18,8 @@ class RRefContext {
   static void initInstance(std::shared_ptr<RpcAgent>);
   static std::unique_ptr<RRefContext>& getInstance();
 
+  static void handleException(const Message& message);
+
   RRefContext(const RRefContext&) = delete;
   void operator=(const RRefContext&) = delete;
 

@@ -195,7 +195,6 @@ class RRef {
   RRef(worker_id_t ownerId, const RRefId& rrefId);
 
   RRefForkData fork() const;
-  void handleException(const Message& message) const;
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;

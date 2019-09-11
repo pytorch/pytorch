@@ -2,7 +2,7 @@
 
 from . import invoke_rpc_builtin, invoke_rpc_python_udf
 from . import invoke_remote_builtin, invoke_remote_python_udf
-from . import init_rref_context, set_current_rpc_dst
+from . import init_rref_context
 from . import ProcessGroupAgent
 from . import WorkerId
 from .internal_rpc_utils import serialize, PythonUDF
@@ -145,7 +145,6 @@ def remote(to, func, args=None, kwargs=None):
         return invoke_remote_builtin(
             _agent, to, qualified_name, *args, **kwargs)
     else:
-        #set_current_rpc_dst(to)
         rref = invoke_remote_python_udf(
             _agent, to, serialize(PythonUDF(func, args, kwargs), to.id))
 
