@@ -65,7 +65,6 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
   build_args=()
-  build_args+=("-DBUILD_SHARED_LIBS=ON")
   if [[ "${BUILD_ENVIRONMENT}" == *-arm-v7a* ]]; then
     build_args+=("-DANDROID_ABI=armeabi-v7a")
   elif [[ "${BUILD_ENVIRONMENT}" == *-arm-v8a* ]]; then
