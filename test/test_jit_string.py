@@ -1,5 +1,6 @@
 from test_jit import JitTestCase
 from common_utils import run_tests
+import six
 
 
 class TestScript(JitTestCase):
@@ -15,7 +16,7 @@ class TestScript(JitTestCase):
                 s.isspace(),
                 s.isalnum(),
                 s.isalpha(),
-                s.isdecimal(),
+                s.isdecimal() if six.PY3 else True,
                 s.isnumeric(),
                 s.isidentifier(),
                 s.istitle(),
