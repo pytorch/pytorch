@@ -53,5 +53,43 @@ class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
 /// module storage semantics.
 TORCH_MODULE(Linear);
 
+struct TORCH_API BilinearOptions {
+  BilinearOptions(int64_t in1, int64_t in2, int64_t out);
+  /// The number of input features (columns of the input matrix).
+  TORCH_ARG(int64_t, in1);
+
+  TORCH_ARG(int64_t, in2);
+  /// The number of output features to produce (columns of the output matrix).
+  TORCH_ARG(int64_t, out);
+  /// Whether to learn and add a bias after the linear transformation.
+  TORCH_ARG(bool, with_bias) = true;
+};
+
+/// Applies a linear transformation with optional bias.
+class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
+ public:
+  BilinearImpl(int64_t in1, int64_t in2, int64_t out) : BilinearImpl(BilinearOptions(in1, in2, out)) {}
+  explicit BilinearImpl(BilinearOptions options);
+
+  void reset() override;
+
+  /// Pretty prints the `Linear` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// Transforms the `input` tensor by multiplying with the `weight` and
+  /// optionally adding the `bias`, if `with_bias` is true in the options.
+  Tensor forward(const Tensor& input1, const Tensor& input2);
+
+  /// The options used to configure this module.
+  BilinearOptions options;
+
+  /// The learned weight.
+  Tensor weight;
+
+  /// The learned bias. If `with_bias` is false in the `options`, this tensor is
+  /// undefined.
+  Tensor bias;
+};
+
 } // namespace nn
 } // namespace torch
