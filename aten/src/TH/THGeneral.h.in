@@ -48,6 +48,11 @@
 #endif // defined(__GNUC__)
 #endif  // _WIN32
 
+#ifdef NO_EXPORT
+#undef TH_CPP_API
+#define TH_CPP_API
+#endif
+
 #define TH_API TH_EXTERNC TH_CPP_API
 
 #ifdef _WIN32

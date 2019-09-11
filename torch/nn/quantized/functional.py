@@ -53,10 +53,8 @@ def linear(input, weight, bias=None, scale=None, zero_point=None):
         scale = input.q_scale()
     if zero_point is None:
         zero_point = input.q_zero_point()
-    _packed_weight = torch.ops.quantized.linear_prepack(weight)
-    if bias is not None:
-        bias = torch.quantize_linear(bias.dequantize(), weight.q_scale() * input.q_scale(), 0, torch.qint32)
-    return torch.ops.quantized.linear(input, _packed_weight, bias, scale,
+    _packed_params = torch.ops.quantized.linear_prepack(weight, bias)
+    return torch.ops.quantized.linear(input, _packed_params, scale,
                                       zero_point)
 
 def conv2d(input, weight, bias,
@@ -117,11 +115,9 @@ def conv2d(input, weight, bias,
     dilation = _pair(dilation)
 
     prepacked_weight = torch.ops.quantized.conv_prepack(
-        weight.permute([0, 2, 3, 1]), stride, padding, dilation, groups)
-    if bias is not None:
-        bias = torch.quantize_linear(bias.dequantize(), scale=weight.q_scale() * input.q_scale(), zero_point=0, dtype=torch.qint32)
+        weight.permute([0, 2, 3, 1]), bias, stride, padding, dilation, groups)
     return torch.ops.quantized.conv2d(input.permute([0, 2, 3, 1]),
-                                      prepacked_weight, bias,
+                                      prepacked_weight,
                                       stride, padding, dilation,
                                       groups, scale, zero_point).permute([0, 3, 1, 2])
 
