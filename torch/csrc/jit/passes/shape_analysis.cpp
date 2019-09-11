@@ -1990,7 +1990,9 @@ class ShapePropagator {
       if (inferred) {
         SHAPE_ASSERT(size_product != 0);
         size_t numel = 1;
-        for (int64_t s : tensor_types.at(0)->sizes().concrete_sizes().value())
+        auto concrete_sizes =
+            tensor_types.at(0)->sizes().concrete_sizes().value();
+        for (int64_t s : concrete_sizes)
           numel *= s;
         int64_t inferred_size = numel / size_product;
         sizes[inferred_idx] = inferred_size;
