@@ -835,7 +835,7 @@ jobs:
           cat "$script"
           source "$script"
 
-  
+
   setup:
     docker:
       - image: circleci/python:3.7.3
@@ -1280,7 +1280,7 @@ jobs:
         destination: artifacts.tgz
 
   pytorch_ios_build:
-    <<: *pytorch_ios_params  
+    <<: *pytorch_ios_params
     macos:
       xcode: "10.2.1"
     steps:
@@ -1300,7 +1300,7 @@ jobs:
             export IN_CIRCLECI=1
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
-            export TCLLIBPATH="/usr/local/lib" 
+            export TCLLIBPATH="/usr/local/lib"
 
             # Install conda
             curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
@@ -1314,25 +1314,25 @@ jobs:
             cd ${PROJ_ROOT}
             git submodule sync
             git submodule update --init --recursive
-            # export 
+            # export
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
             # run build script
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
-            CMAKE_ARGS=() 
+            CMAKE_ARGS=()
             if [ -n "${IOS_ARCH:-}" ]; then
               CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
             fi
             if [ -n "${IOS_PLATFORM:-}" ]; then
               CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
             fi
-            if [ -n "${USE_NNPACK:-}" ]; then 
+            if [ -n "${USE_NNPACK:-}" ]; then
               CMAKE_ARGS+=("-DUSE_NNPACK=${USE_NNPACK}")
             fi
             CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
             CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
             CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
 
-            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh ${CMAKE_ARGS[@]} 2>&1 | ts  
+            unbuffer ${PROJ_ROOT}/scripts/build_ios.sh ${CMAKE_ARGS[@]} 2>&1 | ts
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
@@ -1909,13 +1909,13 @@ workflows:
           build_environment: "pytorch-ios-10.2.1-x86_64_build"
           ios_platform: "SIMULATOR"
           use_nnpack: "OFF"
-          requires: 
+          requires:
             - setup
       - pytorch_ios_build:
           name: pytorch_ios_10_2_1_arm64_build
           build_environment: "pytorch-ios-10.2.1-arm64_build"
           ios_arch: "arm64"
-          requires: 
+          requires:
             - setup
 
       - caffe2_linux_build:
