@@ -725,8 +725,8 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "string2", [] (const IValue& v) {EXPECT_EQ("string2", v.toString()->string());},
     "(str a) -> str");
   testArgTypes<Tensor>::test(
-    dummyTensor(c10::TensorTypeId::CPUTensorId), [] (const Tensor& v) {EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.type_id());},
-    dummyTensor(c10::TensorTypeId::CUDATensorId), [] (const IValue& v) {EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.toTensor().type_id());},
+    dummyTensor(c10::TensorTypeId::CPUTensorId), [] (const Tensor& v) {EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v));},
+    dummyTensor(c10::TensorTypeId::CUDATensorId), [] (const IValue& v) {EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.toTensor()));},
     "(Tensor a) -> Tensor");
 
 
@@ -752,8 +752,8 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     c10::optional<std::string>("string2"), [] (const IValue& v) {EXPECT_EQ("string2", v.toString()->string());},
     "(str? a) -> str?");
   testArgTypes<c10::optional<Tensor>>::test(
-    c10::optional<Tensor>(dummyTensor(c10::TensorTypeId::CPUTensorId)), [] (const c10::optional<Tensor>& v) {EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.value().type_id());},
-    c10::optional<Tensor>(dummyTensor(c10::TensorTypeId::CUDATensorId)), [] (const IValue& v) {EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.toTensor().type_id());},
+    c10::optional<Tensor>(dummyTensor(c10::TensorTypeId::CPUTensorId)), [] (const c10::optional<Tensor>& v) {EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.value()));},
+    c10::optional<Tensor>(dummyTensor(c10::TensorTypeId::CUDATensorId)), [] (const IValue& v) {EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.toTensor()));},
     "(Tensor? a) -> Tensor?");
 
 
@@ -831,13 +831,13 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<c10::List<Tensor>>::test(
     c10::List<Tensor>({dummyTensor(c10::TensorTypeId::CPUTensorId), dummyTensor(c10::TensorTypeId::CUDATensorId)}), [] (const c10::List<Tensor>& v) {
       EXPECT_EQ(2, v.size());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.get(0).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.get(1).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.get(0)));
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.get(1)));
     },
     c10::List<Tensor>({dummyTensor(c10::TensorTypeId::CUDATensorId), dummyTensor(c10::TensorTypeId::CPUTensorId)}), [] (const IValue& v) {
       EXPECT_EQ(2, v.to<c10::List<at::Tensor>>().size());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.to<c10::List<at::Tensor>>().get(0).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.to<c10::List<at::Tensor>>().get(1).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.to<c10::List<at::Tensor>>().get(0)));
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.to<c10::List<at::Tensor>>().get(1)));
     },
     "(Tensor[] a) -> Tensor[]");
 
@@ -882,13 +882,13 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<std::vector<Tensor>>::test<TestLegacyAPI>(
     std::vector<Tensor>({dummyTensor(c10::TensorTypeId::CPUTensorId), dummyTensor(c10::TensorTypeId::CUDATensorId)}), [] (const std::vector<Tensor>& v) {
       EXPECT_EQ(2, v.size());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.at(0).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.at(1).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.at(0)));
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.at(1)));
     },
     std::vector<Tensor>({dummyTensor(c10::TensorTypeId::CUDATensorId), dummyTensor(c10::TensorTypeId::CPUTensorId)}), [] (const IValue& v) {
       EXPECT_EQ(2, v.to<c10::List<at::Tensor>>().size());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.to<c10::List<at::Tensor>>().get(0).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.to<c10::List<at::Tensor>>().get(1).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.to<c10::List<at::Tensor>>().get(0)));
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.to<c10::List<at::Tensor>>().get(1)));
     },
     "(Tensor[] a) -> Tensor[]");
 
@@ -945,14 +945,14 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<c10::Dict<int64_t, Tensor>>::test(
     tensor_dict, [] (c10::Dict<int64_t, Tensor> v) {
       EXPECT_EQ(2, v.size());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.at(1).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.at(2).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.at(1)));
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.at(2)));
     },
     tensor_dict, [] (const IValue& v) {
       c10::Dict<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(v.toGenericDict());
       EXPECT_EQ(2, dict.size());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, dict.at(1).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, dict.at(2).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(dict.at(1)));
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(dict.at(2)));
     },
     "(Dict(int, Tensor) a) -> Dict(int, Tensor)");
 
@@ -979,14 +979,14 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<std::unordered_map<int64_t, Tensor>>::test<TestLegacyAPI>(
     tensor_map, [] (std::unordered_map<int64_t, Tensor> v) {
       EXPECT_EQ(2, v.size());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.at(1).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.at(2).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.at(1)));
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.at(2)));
     },
     tensor_map, [] (const IValue& v) {
       c10::Dict<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(v.toGenericDict());
       EXPECT_EQ(2, dict.size());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, dict.at(1).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, dict.at(2).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(dict.at(1)));
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(dict.at(2)));
     },
     "(Dict(int, Tensor) a) -> Dict(int, Tensor)");
 

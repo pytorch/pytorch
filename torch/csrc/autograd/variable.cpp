@@ -6,7 +6,6 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>

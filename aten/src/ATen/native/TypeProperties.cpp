@@ -37,7 +37,7 @@ bool is_quantized(const Tensor& self) {
 // TensorImpl can be copied to `self`.
 bool _has_compatible_shallow_copy_type(const Tensor& self, const Tensor& from) {
   return self.unsafeGetTensorImpl()->has_compatible_shallow_copy_type(
-      from.type_id());
+      from.type_set());
 }
 
 Tensor type_as(const Tensor& self, const Tensor& other) {
