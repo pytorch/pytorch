@@ -32,11 +32,6 @@ jobs:
             NAMED_FLAG="export BUILD_NAMEDTENSOR=1"
           fi
 
-          # dispatch aten ops statically for mobile
-          if [[ ${BUILD_ENVIRONMENT} == *"android"* ]]; then
-            NAMED_FLAG="export USE_STATIC_DISPATCH=1"
-          fi
-
           export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -108,4 +103,3 @@ jobs:
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"'&& echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
