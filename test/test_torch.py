@@ -30,7 +30,7 @@ from common_methods_invocations import tri_tests_args, run_additional_tri_tests,
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, torchtest, TEST_WITH_ROCM
+    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, torchtest
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -776,17 +776,28 @@ class _TestTorchMixin(torchtest):
     def test_erfc(self):
         self._test_math_by_name('erfc')
 
-    def test_erfinv(self):
-        def checkType(tensor):
-            inputValues = torch.randn(4, 4, out=tensor()).clamp(-2., 2.)
-            self.assertEqual(tensor(inputValues).erf().erfinv(), tensor(inputValues))
+    @torchtest.for_all_device_types()
+    def test_erfinv(self, device):
+        def checkType(dtype):
+            # general testing. Narrow the range to avoid accuracy issues
+            input_values = torch.randn(4, 4, dtype=dtype, device=device).clamp(-0.3, 0.3)
+            self.assertEqual(input_values.erf().erfinv(), input_values)
             # test inf
-            self.assertTrue(torch.equal(tensor([-1, 1]).erfinv(), tensor([-inf, inf])))
+            self.assertTrue(torch.equal(torch.tensor([-1, 1], dtype=dtype, device=device).erfinv(),
+                            torch.tensor([-inf, inf], dtype=dtype, device=device)))
             # test nan
-            self.assertEqual(tensor([-2, 2]).erfinv(), tensor([nan, nan]))
+            self.assertEqual(torch.tensor([-2, 2], dtype=dtype, device=device).erfinv(),
+                             torch.tensor([nan, nan], dtype=dtype, device=device))
 
-        checkType(torch.FloatTensor)
-        checkType(torch.DoubleTensor)
+        if device != 'cpu':
+            checkType(torch.half)
+        checkType(torch.float)
+        checkType(torch.double)
+
+        # double precision
+        a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
+        self.assertAlmostEqual(a[0].item(), 0.47693627620447, places=13)
+        self.assertAlmostEqual(a[1].item(), 0.90619380243682, places=13)
 
     def test_exp(self):
         def exp(x):
@@ -1630,6 +1641,54 @@ class _TestTorchMixin(torchtest):
         x = torch.cuda.BoolTensor()
         self.assertTrue(x.all())
         self.assertFalse(x.any())
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_multinomial_device_constrain(self):
+        x = torch.empty(0, device="cpu")
+        y = torch.empty(0, device="cuda")
+        self.assertRaisesRegex(
+            RuntimeError, "multinomial arguments must have the same device",
+            lambda: torch.multinomial(x, 2, out=y))
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_multinomial_gpu_device_constrain(self):
+        x = torch.empty(0, device="cuda:0")
+        y = torch.empty(0, device="cuda:1")
+        self.assertRaisesRegex(
+            RuntimeError, "multinomial arguments must have the same device",
+            lambda: torch.multinomial(x, 2, out=y))
+
+    def test_multinomial_constraints(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.empty(1, 2, 3, dtype=torch.double, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "prob_dist must be 1 or 2 dim",
+                lambda: torch.multinomial(x, 2))
+            x = torch.empty(1, 2, dtype=torch.long, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "multinomial only supports floating-point dtypes for input",
+                lambda: torch.multinomial(x, 2))
+            x = torch.empty(1, 2, dtype=torch.double, device=device)
+            y = torch.empty(1, 2, dtype=torch.double, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "multinomial expects Long tensor out",
+                lambda: torch.multinomial(x, 2, out=y))
+            x = torch.empty(2, dtype=torch.double, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "cannot sample n_sample <= 0 samples",
+                lambda: torch.multinomial(x, 0))
+            x = torch.empty(2, dtype=torch.double, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "cannot sample n_sample <= 0 samples",
+                lambda: torch.multinomial(x, -1))
+            x = torch.empty(2, dtype=torch.double, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "cannot sample n_sample > prob_dist",
+                lambda: torch.multinomial(x, 3, False))
+            x = torch.empty(16777217, dtype=torch.double, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "number of categories cannot exceed",
+                lambda: torch.multinomial(x, 3))
 
     def test_mv(self):
         def _test_mv(m1, v1):
@@ -2590,19 +2649,7 @@ class _TestTorchMixin(torchtest):
         floats = [0.0, 1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
         tensor = torch.tensor(ints, dtype=torch.int64, device=device)
         for pow in floats:
-            if device == 'cuda' and not TEST_WITH_ROCM:
-                # Current pow CUDA implementation casts exponent
-                # to tensor dtype, but numpy does not, that's why:
-                # pow CUDA  4 ^ 0.5 = 1
-                # numpy pow 4 ^ 0.5 = 2
-                # This line must be deleted as soon as
-                # pow CUDA implementation is fixed.
-                self._test_pow(tensor, pow, np_exponent=int(pow))
-            else:
-                # pow CPU implementation is already fixed and
-                # does not cast exponent to tensor dtype,
-                # that why it is compatible with numpy.
-                self._test_pow(tensor, pow)
+            self._test_pow(tensor, pow)
 
     @torchtest.for_all_device_types()
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
@@ -6883,7 +6930,7 @@ class _TestTorchMixin(torchtest):
                 elif mat_chars[mat_type] == 'sym_pd':
                     list_of_matrices.append(random_symmetric_pd_matrix(matsize).to(device=device))
                 elif mat_chars[mat_type] == 'sing':
-                    list_of_matrices.append(random_square_matrix_of_rank(matsize, matsize // 2).to(device=device))
+                    list_of_matrices.append(torch.ones(matsize, matsize, device=device))
                 elif mat_chars[mat_type] == 'non_sing':
                     list_of_matrices.append(random_square_matrix_of_rank(matsize, matsize).to(device=device))
             full_tensor = torch.stack(list_of_matrices, dim=0).reshape(batchdims + (matsize, matsize))
@@ -8725,6 +8772,28 @@ class _TestTorchMixin(torchtest):
 
     def test_scatterFill(self):
         self._test_scatter_base(self, lambda t: t, 'scatter_', True)
+
+    def test_scatter_to_large_input(self):
+        for device in torch.testing.get_all_device_types():
+            input = torch.zeros(4, 4, device=device)
+            src = torch.ones(2, 2, device=device)
+            index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
+            input.scatter_(0, index, src)
+            self.assertEqual(input, torch.tensor([[0, 0, 0, 0],
+                                                  [1, 0, 0, 0],
+                                                  [1, 0, 0, 0],
+                                                  [0, 0, 0, 0]], device=device))
+
+    def test_scatter_add_to_large_input(self):
+        for device in torch.testing.get_all_device_types():
+            input = torch.zeros(4, 4, device=device)
+            src = torch.ones(2, 2, device=device)
+            index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
+            input.scatter_add_(0, index, src)
+            self.assertEqual(input, torch.tensor([[0, 0, 0, 0],
+                                                  [1, 0, 0, 0],
+                                                  [1, 0, 0, 0],
+                                                  [0, 0, 0, 0]], device=device))
 
     def test_scatter_bool(self):
         for device in torch.testing.get_all_device_types():
@@ -13208,7 +13277,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             ("div", True, True, 'cpu'),
             ("div", True, True, 'cuda'),
             ("pow", True, True, 'cpu'),
-            ("pow", False, False, 'cuda')
+            ("pow", True, True, 'cuda')
         ]
 
         for (fn, has_input_output_mem_overlap_check,
@@ -13280,14 +13349,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         sz = 3
         doubles = torch.randn(2 * sz, device=device)
         self.check_internal_mem_overlap(
-            lambda t: t.pow_(42), num_inputs=1, device=device,
-            expected_failure=(device == 'cuda'))
+            lambda t: t.pow_(42), num_inputs=1, device=device)
         self.unary_check_input_output_mem_overlap(
-            doubles, sz, lambda input, out: torch.pow(input, 42, out=out),
-            expected_failure=(device == 'cuda'))
+            doubles, sz, lambda input, out: torch.pow(input, 42, out=out))
         self.unary_check_input_output_mem_overlap(
-            doubles, sz, lambda input, out: torch.pow(42, input, out=out),
-            expected_failure=(device == 'cuda'))
+            doubles, sz, lambda input, out: torch.pow(42, input, out=out))
 
 
 # Functions to test negative dimension wrapping
