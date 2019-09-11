@@ -424,6 +424,7 @@
           contxt: org-member
           command: |
             set -e
+            echo ""
             WORKSPACE=/Users/distiller/workspace
             ARTIFACTS_DIR=${WORKSPACE}/ios
             ls ${ARTIFACTS_DIR}
@@ -460,19 +461,6 @@
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - attach_workspace:
           at: ~/workspace
-      - run:
-          name: Build
-          # command: |
-          #   set -e
-          #   WORKSPACE=/Users/distiller/workspace
-          #   mkdir -p ${WORKSPACE}/ios
-          #   cd ${WORKSPACE}/ios
-          #   IOS_ARCH=${IOS_ARCH}
-          #   echo "PWD: `pwd`"
-          #   echo "IOS_ARCH: ${IOS_ARCH}"
-          #   FILENAME=ios_${IOS_ARCH}.h
-          #   touch ${FILENAME}
-          #   echo "hello world" > ${FILENAME}
       - run:
           <<: *should_run_job
       - checkout
