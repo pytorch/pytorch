@@ -80,6 +80,8 @@ bool check_ivalue_equality(const c10::IValue& ivalue_python, const c10::IValue& 
     return check_tensor_equality(ivalue_python.toTensor(), ivalue_cpp.toTensor());
   } else if (ivalue_python.isIntList()) {
     return ivalue_python.toIntListRef() == ivalue_cpp.toIntListRef();
+  } else if (ivalue_python.isNone()) {
+    return ivalue_cpp.isNone();
   } else {
     AT_ERROR("Unsupported value type: ", ivalue_python.tagKind());
   }
@@ -116,7 +118,7 @@ TORCH_CHECK(
     ${script_module_prefix}.get_attribute("${python_attr_name}"), c10::IValue(${cpp_module_prefix}->${cpp_attr_name})),
   GENERATE_PARITY_TEST_ERROR_MSG(
     "`${cpp_module_prefix}->${cpp_attr_name}`",
-    ${cpp_module_prefix}->${cpp_attr_name},
+    c10::IValue(${cpp_module_prefix}->${cpp_attr_name}),
     ${script_module_prefix}.get_attribute("${python_attr_name}")));
 """)
 
@@ -460,6 +462,7 @@ class TestCppApiParity(common.TestCase):
                         test_params=test_params, template=TORCH_NN_MODULE_TEST_BACKWARD, extra_stmts=''))
 
         def trace_module(module, input_args):
+            module_metadata = torch_nn_modules.module_metadata_map[module.__class__.__name__]
             # JIT tracing does not automatically save a module's non-parameter / non-buffer attributes
             # into a ScriptModule's slots, which means we can't access them via `get_attributes()` in C++.
             # Here, we manually register these attributes into the ScriptModule so that we can access them
@@ -469,7 +472,9 @@ class TestCppApiParity(common.TestCase):
                     register_attrs(sub_module, sub_script_module)
                 for key, value in module.__dict__.items():
                     if key not in TORCH_NN_MODULE_IGNORED_ATTRS:
-                        if type(value) == tuple:
+                        if value is None:
+                            value_type = module_metadata.python_optional_attribute_to_jit_type[key]
+                        elif type(value) == tuple:
                             assert all(isinstance(x, type(value[0])) for x in value), \
                                 "All elements in a tuple attribute of a Python torch.nn module must have the same type."
                             # Here, we set the Python tuple attribute's type to `ListType` in the ScriptModule,
@@ -479,8 +484,7 @@ class TestCppApiParity(common.TestCase):
                             value_type = torch._C.ListType(torch.jit.annotations.ann_to_type(type(value[0])))
                         else:
                             value_type = torch.jit.annotations.ann_to_type(type(value))
-                        script_module._c._register_attribute(
-                            key, value_type, value)
+                        script_module._c._register_attribute(key, value_type, value)
 
             # We use JIT tracing to serialize Python module state, so that we can load it into C++
             traced_script_module = torch.jit.trace(module, input_args)

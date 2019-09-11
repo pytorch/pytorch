@@ -1,3 +1,5 @@
+import torch
+
 from cpp_api_parity import TorchNNModuleMetadata
 
 # NOTE: In order to let Python/C++ API parity test pass for any of the modules here,
@@ -25,6 +27,10 @@ from cpp_api_parity import TorchNNModuleMetadata
 #
 # `python_legacy_constructor_args`: (optional) list of legacy Python constructor args that are
 #     ignored in Python/C++ API parity test.
+#
+# `python_optional_attribute_to_jit_type`: (optional) map between Python None-able module
+#     attribute to its corresponding JIT type. For example, in `AvgPool2d`:
+#     { "divisor_override": torch._C.OptionalType(torch._C.IntType.get()) }
 module_metadata_map = {
     'Conv1d': TorchNNModuleMetadata(),
     'Conv2d': TorchNNModuleMetadata(),
@@ -50,10 +56,16 @@ module_metadata_map = {
     'AvgPool2d': TorchNNModuleMetadata(
         cpp_default_constructor_args="(2)",
         num_attrs_recursive=6,
+        python_optional_attribute_to_jit_type={
+            "divisor_override": torch._C.OptionalType(torch._C.IntType.get()),
+        }
     ),
     'AvgPool3d': TorchNNModuleMetadata(
         cpp_default_constructor_args="(2)",
         num_attrs_recursive=6,
+        python_optional_attribute_to_jit_type={
+            "divisor_override": torch._C.OptionalType(torch._C.IntType.get()),
+        }
     ),
     'FractionalMaxPool2d': TorchNNModuleMetadata(),
     'LPPool1d': TorchNNModuleMetadata(),
