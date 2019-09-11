@@ -1,3 +1,4 @@
+import types
 import unittest
 
 import torch
@@ -9,28 +10,22 @@ from common_utils import TestCase
 #
 # To write a test that runs on a variety of devices do the following:
 #
-#   (1) Create a class, class _<name>(object):
-#       Tests defines in this class must not be discoverable by unittest.
-#       The class can inherit from classes other than object, but should
-#       not inherit from TestCase.
-#   (2) Write tests as usual, except they take a 'device' argument, for example
-#       def test_X(self, device):
-#       The device will be a string, like 'cpu' or 'cuda,' and the test
-#       should move tensors to and perform operations on this device.
-#   (3) Write tests as usual, except they take a 'device' and 'dtype'
-#       argument. These tests must also specify a list of dtypes using
-#       the dtypes, dtypesIfCPU, or dtypesIfCUDA decorators, for example
-#       @dtypes(torch.float, torch.long)
-#       def test_X(self, device, dtype):
-#       Tests should create tensors and perform operations using this dtype.
-#   (4) Write helper methods as usual, except they must all be staticmethods.
-#       To add non-static helpers or non-static attributes define them
-#       in a base class and inherit from it. This quirk is for Python 2
-#       compatability.
+#   (1) Create a class, "class <name>(<base>)"
+#   (2) Write tests as usual, except they must take a 'device' argument
+#       and may take a 'dtype' argument. If the test takes the 'dtype'
+#       argument then it must specify a set of dtypes using the @dtypes
+#       decorator. Additional decorators can specialize the set of dtypes
+#       for CPU or CUDA device types.
+#
+#       The device will be a string, like 'cpu' or 'cuda,' and dtype will be a
+#       member of the set passed to @dtypes, like torch.float.
+#       The test should use the given device and dtype. See test_torch.py's
+#       TestTorchDeviceType for an example.
+#   (3) Non-test attributes, like helper methods, must go in the base class.
+#       This quirk is for Python 2 compatibility.
 #   (5) Call instantiate_device_type_tests(_<name>, globals()) in your test
 #       test script. This will create the device-specific test cases from
-#       the generic test case, and make them discoverable by unittest by
-#       putting them into the global scope of your script.
+#       the generic test case and make them discoverable.
 #
 # See test_torch.py for an example.
 #
@@ -182,17 +177,20 @@ if torch.cuda.is_available():
 # generic_test_class.
 # See note "Generic Device Type Testing."
 def instantiate_device_type_tests(generic_test_class, scope):
-    assert generic_test_class.__name__.startswith('_'), \
-        "Generic device type test class name should start with _"
+    # Removes the generic test class from its enclosing scope so it's tests
+    # are not discoverable.
+    del scope[generic_test_class.__name__]
 
     # Creates an 'empty' version of the generic_test_class
-    empty_name = generic_test_class.__name__[1:] + "_base"
+    empty_name = generic_test_class.__name__ + "_base"
     empty_class = type(empty_name, (generic_test_class.__base__,), {})
 
     # Acquires member names
     generic_members = set(dir(generic_test_class)) - set(dir(empty_class))
     generic_tests = [x for x in generic_members if x.startswith('test_')]
     generic_nontests = generic_members - set(generic_tests)
+
+    assert len(generic_nontests) == 0, "Generic device class has non-test attributes"
 
     # Makes all tests in generic_test_class staticmethods
     # Note: necessary for Python 2 compatibility
@@ -202,25 +200,16 @@ def instantiate_device_type_tests(generic_test_class, scope):
 
     for base in device_type_test_bases:
         # Creates the device-specific test case
-        class_name = generic_test_class.__name__[1:] + base.device_type.upper()
+        class_name = generic_test_class.__name__ + base.device_type.upper()
         device_type_test_class = type(class_name, (base, empty_class), {})
-
-        # Ports non_tests from the generic_test_class
-        for name in generic_nontests:
-            nontest = getattr(generic_test_class, name)
-            assert not hasattr(device_type_test_class, name), \
-                "Device-specific test class attribute '{0}' redefinition".format(name)
-            # Verifies the non test attribute is a static method
-            bound_value = generic_test_class.__dict__[name]
-            assert isinstance(bound_value, staticmethod), \
-                "Non-test member '{0}' is not a staticmethod".format(name)
-            setattr(device_type_test_class, name, nontest)
 
         # Instantiates device-specific tests
         for name in generic_tests:
-            test = getattr(generic_test_class, name)
             assert not hasattr(device_type_test_class, name), \
                 "Device-specific test class attribute '{0}' redefinition".format(name)
+            test = getattr(generic_test_class, name)
+            if hasattr(test, '__func__'):
+                test = test.__func__
             device_type_test_class.instantiate_test(test)
 
         # Mimics defining the instantiated class in the caller's file
