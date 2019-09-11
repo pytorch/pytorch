@@ -106,17 +106,17 @@ compute_result_type(at::ArrayRef<OperandInfo> operands,
   return compute_result_type(operands, predicates...);
 }
 
-static std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandInfo> operands) {
+std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
   // See [Result type computation] in TensorIterator.h
 
   auto result_type =
-      compute_result_type(operands,
+      compute_result_type(operands_,
         [](const OperandInfo& op) { return op.tensor.dim() > 0; },
         [](const OperandInfo& op) { return !op.tensor.unsafeGetTensorImpl()->is_wrapped_number(); },
         [](const OperandInfo& op) { return true; });
 
   if (ScalarType::Bool == std::get<1>(result_type)) {
-    auto alternate = compute_result_type(operands,
+    auto alternate = compute_result_type(operands_,
         [](const OperandInfo& op) {
           return op.tensor.dim() == 0;
         }
@@ -130,7 +130,7 @@ static std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandI
   // if non-zero-dim tensor result is an integral type and there's a zero-dim
   // floating point operand, we'll promote the floating point type.
   if (isIntegralType(std::get<1>(result_type), false)) {
-    auto alternate = compute_result_type(operands,
+    auto alternate = compute_result_type(operands_,
         [](const OperandInfo& op) {
           return isFloatingType(op.tensor.scalar_type()) && op.tensor.dim() == 0;
         }
@@ -143,10 +143,6 @@ static std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandI
 
   TORCH_INTERNAL_ASSERT(std::get<1>(result_type) != ScalarType::Undefined);
   return result_type;
-}
-
-std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
-  return compute_common_type_(operands_);
 }
 
 static void validate_dtype(OperandInfo& op, ScalarType common_dtype, int ninputs) {
@@ -186,32 +182,15 @@ static void maybe_promote_common_dtype(OperandInfo& op, ScalarType common_dtype)
 
 void TensorIterator::compute_types() {
   bool missing_dtypes = false;
-  bool missing_output_dtypes = false;
-  bool has_read_write_op = false;
   ScalarType common_dtype = dtype();
   for (auto& op : operands_) {
     if (!op.tensor.defined() && !op.is_type_defined()) {
       missing_dtypes = true;
-      if (op.is_output) {
-        missing_output_dtypes = true;
-      }
-    }
-    if (op.is_read_write) {
-      has_read_write_op = true;
     }
   }
 
-  if (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_INPUTS) {
-    TORCH_CHECK(!missing_output_dtypes, "unable to compute and promote common dtype based only on inputs if there are missing dtypes for outputs");
-    TORCH_CHECK(!has_read_write_op, "unable to compute and promote common dtype based only on inputs if input is same as output");
-  }
-
-  bool compute_common_dtype = (compute_common_dtype_strategy_ != CommonDTypeStrategy::COMPUTE_NONE);
-  bool compute_common_dtype_only_for_inputs = (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_INPUTS);
-
-  if (missing_dtypes || compute_common_dtype) {
-    auto operands = compute_common_dtype_only_for_inputs ? at::ArrayRef<OperandInfo>(operands_).slice(noutputs()) : operands_;
-    auto common_type = compute_common_type_(operands);
+  if (missing_dtypes || compute_common_dtype_) {
+    auto common_type = compute_common_type();
     auto common_device = std::get<0>(common_type);
     common_dtype = std::get<1>(common_type);
     bool has_cpu_scalar = false;
@@ -219,7 +198,7 @@ void TensorIterator::compute_types() {
       if (!op.is_type_defined()) {
         op.device = common_device;
         op.dtype = common_dtype;
-      } else if (compute_common_dtype &&
+      } else if (compute_common_dtype_ &&
                  (op.device != common_device || op.dtype != common_dtype)) {
         if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
             common_device.is_cuda() && op.tensor.device().is_cpu() &&
@@ -238,20 +217,12 @@ void TensorIterator::compute_types() {
           op.dtype = op.tensor.scalar_type();
         } else {
           op.device = common_device;
-          if (compute_common_dtype_only_for_inputs && op.is_output) {
-            op.dtype = op.tensor.scalar_type();
-          } else {
-            op.dtype = common_dtype;
-          }
+          op.dtype = common_dtype;
         }
       }
 
-      if (!compute_common_dtype_only_for_inputs) {
-        validate_dtype(op, common_dtype, ninputs());
-      }
-      if (!compute_common_dtype_only_for_inputs || !op.is_output) {
-        maybe_promote_common_dtype(op, common_dtype);
-      }
+      validate_dtype(op, common_dtype, ninputs());
+      maybe_promote_common_dtype(op, common_dtype);
 
       if (op.tensor.defined() && op.device != op.tensor.device()) {
         if (op.is_output) {

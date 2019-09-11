@@ -122,12 +122,6 @@ struct CAFFE2_API OperandInfo {
 
 struct SplitUntil32Bit;
 
-enum class CommonDTypeStrategy : uint8_t {
-  COMPUTE_ALL = 0, // Compute common dtype based on inputs and outputs. Try to promote common dtype to inputs and outputs
-  COMPUTE_INPUTS = 1, // Compute common dtype based only on inputs. Try to promote common dtype only to inputs
-  COMPUTE_NONE = 2, // Do not compute and promote common dtype
-};
-
 struct CAFFE2_API TensorIterator {
   using DimMask = std::bitset<64>;
   using PtrVector = SmallVector<char*, 4>;
@@ -183,7 +177,6 @@ struct CAFFE2_API TensorIterator {
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
   ScalarType dtype(int arg=0) const { return operands_[arg].tensor.scalar_type(); }
-  ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].dtype; }
   Device device(int arg=0) const { return operands_[arg].device; }
   DeviceType device_type(int arg=0) const { return device(arg).type(); }
   int64_t element_size(int arg) const { return elementSize(dtype(arg)); }
@@ -199,7 +192,7 @@ struct CAFFE2_API TensorIterator {
   }
 
   void cast_outputs() {
-    if (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_ALL) {
+    if (compute_common_dtype_) {
       for(int i=0; i < noutputs(); i++) {
         if (operands_[i].original_tensor.defined() && dtype(i) != operands_[i].original_tensor.scalar_type()) {
           operands_[i].original_tensor.copy_(operands_[i].tensor);
@@ -302,11 +295,7 @@ struct CAFFE2_API TensorIterator {
   }
 
   void dont_compute_common_dtype() {
-    compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_NONE;
-  }
-
-  void compute_common_dtype_only_for_inputs() {
-    compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_INPUTS;
+    compute_common_dtype_ = false;
   }
 
   void dont_resize_outputs() {
@@ -339,11 +328,11 @@ protected:
 #endif
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
-  CommonDTypeStrategy compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_ALL;
   bool has_coalesced_dimensions_ = false;
   bool accumulate_ = false;
   bool resize_outputs_ = true;
   bool is_reduction_ = false;
+  bool compute_common_dtype_ = true;
   bool allow_cpu_scalars_ = false;
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
