@@ -403,9 +403,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_dump",
           &Module::dump,
-          py::arg("omit_method_bodies") = true,
-          py::arg("omit_attr_values") = true,
-          py::arg("omit_param_values") = true)
+          py::arg("code") = true,
+          py::arg("attrs") = true,
+          py::arg("params") = true)
       .def(
           "_define",
           [](Module& m,
