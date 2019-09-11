@@ -3,7 +3,7 @@ from collections import namedtuple
 from .observer import *
 from .fake_quantize import *
 
-QConfig = namedtuple('QConfig',
+QConfigT = namedtuple('QConfig',
                      ['weight', 'activation'])
 
 default_qconfig = QConfig(default_weight_observer(),
