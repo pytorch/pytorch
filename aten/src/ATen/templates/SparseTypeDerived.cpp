@@ -30,7 +30,8 @@ namespace at {
 
 ${type_derived_method_definitions}
 
+#ifndef USE_STATIC_DISPATCH
 static auto& registerer = globalATenDispatch()
   ${function_registrations};
-
+#endif
 }

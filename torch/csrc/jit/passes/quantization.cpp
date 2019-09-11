@@ -72,7 +72,7 @@ void inputOutputValuesToSkipObserver(
   auto method = module.get_method(module_method_name);
   auto graph = method.graph();
   auto inputs = v->node()->inputs();
-  for (auto i = 1; i < inputs.size(); ++i) {
+  for (size_t i = 1; i < inputs.size(); ++i) {
     if (values_to_skip.count(inputs[i]) > 0) {
       // propagate input values
       values_to_skip.insert(graph->inputs()[i]);
@@ -216,7 +216,6 @@ Node* insertObserver(
     observer_module = std::get<0>(qconfig);
   }
   std::string observer_name = "observer_for_" + v->debugName();
-  script::Module observer = observer_module.clone();
   // Temporary workaround to skip inserting duplicate modules,
   // full support will come in next PR
   for (script::Slot s: module.get_module_slots()) {
@@ -224,6 +223,7 @@ Node* insertObserver(
       return nullptr;
     }
   }
+  script::Module observer = observer_module.clone();
   module.register_module(observer_name, observer);
   // Get handle of observer module
   Node* observer_instance = g->create(c10::prim::GetAttr);
@@ -305,7 +305,7 @@ void InsertObserversImpl(
     if (v->type()->isSubtypeOf(TensorType::get()) &&
         values_to_skip.count(v) == 0 &&
         !valueObservedInAnotherMethod(v, self, module, child_module_set)) {
-      if (module_qconfig_map.count(module.module_object()) <= 0) {
+      if (module_qconfig_map.count(module.module_object()) == 0) {
         // the module is added by us, it's an observer module
         continue;
       }

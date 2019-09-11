@@ -6047,20 +6047,20 @@ Example::
 
 add_docstr(torch.where,
            r"""
-.. function:: where(condition, input, other) -> Tensor
+.. function:: where(condition, x, y) -> Tensor
 
-Return a tensor of elements selected from either :attr:`input` or :attr:`other`, depending on :attr:`condition`.
+Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
 
 The operation is defined as:
 
 .. math::
     \text{out}_i = \begin{cases}
-        \text{input}_i & \text{if } \text{condition}_i \\
-        \text{other}_i & \text{otherwise} \\
+        \text{x}_i & \text{if } \text{condition}_i \\
+        \text{y}_i & \text{otherwise} \\
     \end{cases}
 
 .. note::
-    The tensors :attr:`condition`, :attr:`input`, :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+    The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Arguments:
     condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
@@ -6068,7 +6068,7 @@ Arguments:
     y (Tensor): values selected at indices where :attr:`condition` is ``False``
 
 Returns:
-    Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`input`, :attr:`other`
+    Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
 
 Example::
 
