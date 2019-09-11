@@ -1,10 +1,10 @@
-#ifdef BUILD_NAMEDTENSOR
 #include <gtest/gtest.h>
 
 #include <ATen/Dimname.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#ifdef BUILD_NAMEDTENSOR
 using at::is_valid_identifier;
 using at::NameType;
 using at::Symbol;

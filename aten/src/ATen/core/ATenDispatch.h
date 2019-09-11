@@ -1,11 +1,15 @@
 #pragma once
 
+#include <c10/core/TensorTypeSet.h>
 #include <c10/core/Backend.h>
+#include <c10/core/impl/LocalTensorTypeSet.h>
 #include <unordered_map>
 #include <c10/util/C++17.h>
 #include <memory>
 #include <mutex>
 
+// TODO: Rewrite this comment
+//
 // This dispatch class serves as a replacement for our previous dispatch
 // mechanism, in which all functions were members of a Type class. A derived
 // class existed for each backend (and Variable), and the vtable was used to
@@ -15,6 +19,25 @@
 
 namespace at {
 
+namespace impl {
+
+// Take a TensorTypeSet for a Tensor, and combine it with the current thread
+// local valid (implemented) and enabled (not implemented) TensorTypeSets
+// to determine what the actual dispatch TensorTypeId should be.  Unlike
+// Tensor::type_set(), the value of this on a tensor can change depending
+// on TLS.
+//
+// NB: I didn't make this take a Tensor to avoid header include shenanigans.
+//
+// TODO: I'm not sure if this should live in this header or not; the operant
+// question is whether or not we have access to all the relevant TLS at this
+// point.
+static inline TensorTypeId dispatchTypeId(TensorTypeSet ts) {
+  return (ts - c10::impl::tls_excluded_tensor_type_set()).highestPriorityTypeId();
+}
+
+}
+
 // ATenOpTable stores the implementations for each backend, in addition to
 // an implementation for variables.
 class CAFFE2_API ATenOpTable {
@@ -23,70 +46,53 @@ class CAFFE2_API ATenOpTable {
     : schema_(std::move(schema)) {}
 
   template<class FuncType>
-  FuncType* getOp(Backend backend, bool is_variable) const {
-    if (is_variable) {
-      return reinterpret_cast<FuncType*>(getVariableOp());
-    }
-    return reinterpret_cast<FuncType*>(getBaseOp(backend));
+  FuncType* getOp(TensorTypeSet ts) const {
+    return reinterpret_cast<FuncType*>(getOp(impl::dispatchTypeId(ts)));
   }
  private:
-  void registerOp(Backend backend, void* fn) {
-    TORCH_CHECK(function_table_[static_cast<int64_t>(backend)] == nullptr,
-        "Attempting to register variable function for schema ", schema_,
-        " and backend ", toString(backend),
+  void registerOp(TensorTypeId tid, void* fn) {
+    TORCH_CHECK(function_table_[static_cast<int64_t>(tid)] == nullptr,
+        "Attempting to register function for schema ", schema_,
+        " and tensor type ", toString(tid),
         " but there is already a function registered");
-    function_table_[static_cast<int64_t>(backend)] = fn;
+    function_table_[static_cast<int64_t>(tid)] = fn;
   }
 
-  void registerVariableOp(void* fn) {
-    TORCH_CHECK(variable_function_ == nullptr,
-        "Attempting to register variable function for schema ", schema_,
-        " but there is already a function registered");
-    variable_function_ = fn;
-  }
-
-  void* getBaseOp(Backend backend) const {
-    if (function_table_[static_cast<int64_t>(backend)] == nullptr) {
-      TORCH_CHECK(function_table_[static_cast<int64_t>(Backend::Undefined)] != nullptr,
-          "No function is registered for schema ", schema_, " on backend ", toString(backend));
-      return function_table_[static_cast<int64_t>(Backend::Undefined)];
+  void* getOp(TensorTypeId tid) const {
+    // You might think we can minorly optimize this further by maintaining a
+    // bitmask of registered operator keys, so we don't select dispatch ids
+    // which don't have implementations here.  But the net effect is that if you
+    // get a Variable CPUTensor, if there is no variable registration, you'll
+    // fall back to the CPU implementation.  Is this what you want?  Unlikely...
+    if (function_table_[static_cast<int64_t>(tid)] == nullptr) {
+      TORCH_CHECK(function_table_[static_cast<int64_t>(TensorTypeId::UndefinedTensorId)] != nullptr,
+          "No function is registered for schema ", schema_, " on tensor type ", toString(tid));
+      return function_table_[static_cast<int64_t>(TensorTypeId::UndefinedTensorId)];
     }
-    return function_table_[static_cast<int64_t>(backend)];
-  }
-
-  void* getVariableOp() const {
-    TORCH_CHECK(variable_function_ != nullptr,
-        "No variable function registered for ", schema_);
-    return variable_function_;
+    return function_table_[static_cast<int64_t>(tid)];
   }
 
   friend class ATenDispatch;
 
   std::string schema_;
-  void* function_table_[static_cast<int64_t>(Backend::NumOptions)] = {nullptr};
-  void* variable_function_ = nullptr;
+  void* function_table_[static_cast<int64_t>(TensorTypeId::NumTensorIds)] = {nullptr};
 };
 
 class CAFFE2_API ATenDispatch {
  public:
   template<class FuncType>
-  ATenDispatch& registerOp(Backend backend, const char* schema, FuncType* fn) {
+  ATenDispatch& registerOp(TensorTypeId id, const char* schema, FuncType* fn) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (op_tables_.find(schema) == op_tables_.end()) {
       op_tables_.insert(std::make_pair(schema, ATenOpTable(schema)));
     }
-    op_tables_.at(schema).registerOp(backend, reinterpret_cast<void*>(fn));
+    op_tables_.at(schema).registerOp(id, reinterpret_cast<void*>(fn));
     return *this;
   }
 
-  template <class FuncType>
-  ATenDispatch& registerVariableOp(const char* schema, FuncType* fn) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (op_tables_.find(schema) == op_tables_.end()) {
-      op_tables_.insert(std::make_pair(schema, ATenOpTable(schema)));
-    }
-    op_tables_.at(schema).registerVariableOp(reinterpret_cast<void*>(fn));
-    return *this;
+  template<class FuncType>
+  ATenDispatch& registerOp(Backend b, const char* schema, FuncType* fn) {
+    return registerOp(backendToTensorTypeId(b), schema, fn);
   }
 
   const ATenOpTable* getOpTable(const char* schema) const {
