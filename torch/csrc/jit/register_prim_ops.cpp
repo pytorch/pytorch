@@ -1739,6 +1739,20 @@ int listList(Stack& stack) {
   return 0;
 }
 
+template <typename T>
+int listContains(Stack& stack) {
+  auto key = pop(stack).to<T>();
+  auto list = pop(stack).to<c10::List<T>>();
+  for (const T& item : list) {
+    if (item == key) {
+      push(stack, true);
+      return 0;
+    }
+  }
+  push(stack, false);
+  return 0;
+}
+
 template <class T>
 int listAdd(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
@@ -2375,6 +2389,21 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("bool", c10::List<bool>),
     CREATE_LIST_OPS("Tensor", c10::List<at::Tensor>),
     CREATE_LIST_OPS("t", c10::List<IValue>),
+
+    // `listContains<T>` is not implemented for non-primitive types
+    // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
+    Operator(
+        "aten::__contains__(int[] l, int item) -> bool",
+        listContains<int64_t>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::__contains__(float[] l, float item) -> bool",
+        listContains<double>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::__contains__(str[] l, str item) -> bool",
+        listContains<std::string>,
+        aliasAnalysisFromSchema()),
 #undef CREATE_LIST_OPS
     Operator(
         "aten::sort(int[](a!) self, bool reverse=False) -> ()",
