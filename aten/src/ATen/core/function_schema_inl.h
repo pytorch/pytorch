@@ -51,6 +51,36 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   return out;
 }
 
+inline bool Argument::isBackwardCompatibleWith(
+      const Argument& old,
+      bool is_return,
+      std::ostream* why_not) const {
+    const Argument* lhs = this;
+    const Argument* rhs = &old;
+    if (is_return) {
+      std::swap(lhs, rhs);
+    }
+    if (!(lhs->name() == rhs->name()
+        && lhs->N() == rhs->N()
+        && lhs->alias_info() == rhs->alias_info())) {
+      return false;
+    }
+    if (lhs->kwarg_only() && !rhs->kwarg_only()) {
+      return false;
+    }
+    if (!rhs->type()->isSubtypeOfExt(lhs->type(), why_not)) {
+      return false;
+    }
+    if (!(detail::defaultValueEquals_(
+            lhs->default_value(),
+            rhs->default_value())
+          || (lhs->default_value().has_value() &&
+              !rhs->default_value().has_value()))) {
+      return false;
+    }
+    return true;
+}
+
 inline std::string FunctionSchema::formatTypeMismatchMsg(
     const Argument& expected,
     const std::string& actual_type,
@@ -72,6 +102,80 @@ inline std::string FunctionSchema::formatTypeMismatchMsg(
       value_str,
       "Declaration: ",
       *this);
+}
+
+inline bool FunctionSchema::isBackwardCompatibleWith(
+    const FunctionSchema& old,
+    std::ostream* why_not) const {
+  if (!(name() == old.name()
+        && overload_name() == old.overload_name()
+        && is_vararg() == old.is_vararg()
+        && is_varret() == old.is_varret()
+        && returns().size() == old.returns().size()
+        && arguments().size() >= old.arguments().size())) {
+    return false;
+  }
+  for (size_t i = 0; i < returns().size(); ++i) {
+    if (!returns().at(i).isBackwardCompatibleWith(
+          old.returns().at(i), true /* is_return */, why_not)) {
+      return false;
+    }
+  }
+  std::vector<const Argument*> args, old_args;
+  std::unordered_map<std::string, const Argument*> kwargs, old_kwargs;
+  auto split_func = [](const auto& arguments,
+      std::vector<const Argument*>* positionals,
+      std::unordered_map<std::string, const Argument*>* nameds) {
+    for (const Argument& arg : arguments) {
+      if (!arg.kwarg_only()) {
+        positionals->emplace_back(&arg);
+      }
+      nameds->emplace(arg.name(), &arg);
+    }
+  };
+  split_func(arguments(), &args, &kwargs);
+  split_func(old.arguments(), &old_args, &old_kwargs);
+  if (old_args.size() > args.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < old_args.size(); ++i) {
+    if (!args.at(i)->isBackwardCompatibleWith(
+          *old_args.at(i),
+          false /* is_return */,
+          why_not)) {
+      return false;
+    }
+  }
+  for (size_t i = old_args.size(); i < args.size(); ++i) {
+    if (!args.at(i)->default_value()) {
+      auto it = old_kwargs.find(args.at(i)->name());
+      if (it == old_kwargs.end() ||
+          !args.at(i)->isBackwardCompatibleWith(
+            *it->second,
+            false /* is_return */,
+            why_not)) {
+        return false;
+      }
+    }
+  }
+  for (auto& kv : old_kwargs) {
+    auto it = kwargs.find(kv.first);
+    if (it == kwargs.end() ||
+        !it->second->isBackwardCompatibleWith(
+          *kv.second,
+          false /* is_return */,
+          why_not)) {
+      return false;
+    }
+    kwargs.erase(it);
+  }
+  for (auto& kv : kwargs) {
+    if (!kv.second->default_value()) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 inline void FunctionSchema::checkArg(

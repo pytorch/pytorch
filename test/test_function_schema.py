@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
-from common_utils import TestCase
+from common_utils import TestCase, run_tests
 from torch._C import parse_schema
 
 
@@ -15,24 +15,30 @@ class TestFunctionSchema(TestCase):
             self.assertEqual(parsed_schema, schema)
             self.assertTrue(parsed_schema.is_backcompat_with(schema))
 
-    def test_backward_compatible_optional_arg(self):
-        old_schema = parse_schema('any(Tensor self, int dim, bool keepdim=False) -> Tensor')
-        new_schema = parse_schema('any(Tensor self, int? dim, bool keepdim=False) -> Tensor')
-        self.assertTrue(new_schema.is_backcompat_with(old_schema))
-        self.assertFalse(old_schema.is_backcompat_with(new_schema))
-
-    def test_backward_compatible_default_value(self):
-        old_schema = parse_schema('any(Tensor self, int dim, bool keepdim=False) -> Tensor')
-        new_schema = parse_schema('any(Tensor self, int dim=5, bool keepdim=False) -> Tensor')
-        self.assertTrue(new_schema.is_backcompat_with(old_schema))
-        self.assertFalse(old_schema.is_backcompat_with(new_schema))
-
-    def test_backward_compatible_add_args(self):
+    def test_backward_compatible_args(self):
         old_schema = parse_schema('any(Tensor self, int dim) -> Tensor')
+        new_schema = parse_schema('any(Tensor self, int? dim) -> Tensor')
+        self.assertTrue(new_schema.is_backcompat_with(old_schema))
+        self.assertFalse(old_schema.is_backcompat_with(new_schema))
+        new_schema = parse_schema('any(Tensor self, int dim=5) -> Tensor')
+        self.assertTrue(new_schema.is_backcompat_with(old_schema))
+        self.assertFalse(old_schema.is_backcompat_with(new_schema))
         new_schema = parse_schema('any(Tensor self, int dim, bool keepdim=False) -> Tensor')
         self.assertTrue(new_schema.is_backcompat_with(old_schema))
         self.assertFalse(old_schema.is_backcompat_with(new_schema))
-        new_schema = parse_schema('any(Tensor self, int dim, bool? keepdim) -> Tensor')
+
+    def test_backward_compatible_kwargs(self):
+        old_schema = parse_schema('any(Tensor self, *, Tensor out) -> Tensor')
+        new_schema = parse_schema('any(Tensor self, *, bool extra1=True, Tensor out, bool extra2=False) -> Tensor')
+        self.assertTrue(new_schema.is_backcompat_with(old_schema))
+        self.assertFalse(old_schema.is_backcompat_with(new_schema))
+        new_schema = parse_schema('any(Tensor self, Tensor out) -> Tensor')
+        self.assertTrue(new_schema.is_backcompat_with(old_schema))
+        self.assertFalse(old_schema.is_backcompat_with(new_schema))
+
+    def test_backward_compatible_ret(self):
+        old_schema = parse_schema('any(Tensor self) -> Tensor?')
+        new_schema = parse_schema('any(Tensor self) -> Tensor')
         self.assertTrue(new_schema.is_backcompat_with(old_schema))
         self.assertFalse(old_schema.is_backcompat_with(new_schema))
 
@@ -48,20 +54,17 @@ class TestFunctionSchema(TestCase):
         self.assertFalse(new_schema.is_backcompat_with(old_schema))
         self.assertFalse(old_schema.is_backcompat_with(new_schema))
 
-    def test_backward_incompatible_varret(self):
+    def test_backward_incompatible_returns(self):
         old_schema = parse_schema('any(Tensor self, int dim, bool keepdim=False) -> Tensor')
         new_schema = parse_schema('any(Tensor self, int dim, bool keepdim=False) -> (Tensor, ...)')
         self.assertFalse(new_schema.is_backcompat_with(old_schema))
         self.assertFalse(old_schema.is_backcompat_with(new_schema))
-
-    def test_backward_incompatible_returns(self):
-        old_schema = parse_schema('any(Tensor self, int dim, bool keepdim=False) -> Tensor')
         new_schema = parse_schema('any(Tensor self, int dim, bool keepdim=False) -> int')
         self.assertFalse(new_schema.is_backcompat_with(old_schema))
         self.assertFalse(old_schema.is_backcompat_with(new_schema))
         new_schema = parse_schema('any(Tensor self, int dim, bool keepdim=False) -> Tensor?')
         self.assertFalse(new_schema.is_backcompat_with(old_schema))
-        self.assertFalse(old_schema.is_backcompat_with(new_schema))
+        self.assertTrue(old_schema.is_backcompat_with(new_schema))
         new_schema = parse_schema('any(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)')
         self.assertFalse(new_schema.is_backcompat_with(old_schema))
         self.assertFalse(old_schema.is_backcompat_with(new_schema))
@@ -74,9 +77,6 @@ class TestFunctionSchema(TestCase):
         new_schema = parse_schema('any(Tensor s, int[] dims, bool keepdim=False) -> Tensor')
         self.assertFalse(new_schema.is_backcompat_with(old_schema))
         self.assertFalse(old_schema.is_backcompat_with(new_schema))
-        new_schema = parse_schema('any(Tensor self, int[] dims, *, bool keepdim=False) -> Tensor')
-        self.assertFalse(new_schema.is_backcompat_with(old_schema))
-        self.assertFalse(old_schema.is_backcompat_with(new_schema))
         new_schema = parse_schema('any(Tensor self, int[3] dims, bool keepdim=False) -> Tensor')
         self.assertFalse(new_schema.is_backcompat_with(old_schema))
         self.assertFalse(old_schema.is_backcompat_with(new_schema))
@@ -84,6 +84,18 @@ class TestFunctionSchema(TestCase):
         self.assertFalse(new_schema.is_backcompat_with(old_schema))
         self.assertFalse(old_schema.is_backcompat_with(new_schema))
         new_schema = parse_schema('any(Tensor self, int dims, bool keepdim=False) -> Tensor')
+        self.assertFalse(new_schema.is_backcompat_with(old_schema))
+        self.assertFalse(old_schema.is_backcompat_with(new_schema))
+        new_schema = parse_schema('any(Tensor self, int[] dim, bool keepdim=False, bool? extra) -> Tensor')
+        self.assertFalse(new_schema.is_backcompat_with(old_schema))
+        self.assertFalse(old_schema.is_backcompat_with(new_schema))
+
+    def test_backward_incompatible_kwargs(self):
+        old_schema = parse_schema('any(Tensor self, int[] dims, *, bool keepdim=False) -> Tensor')
+        new_schema = parse_schema('any(Tensor self, int[] dims, *, bool keepdim) -> Tensor')
+        self.assertFalse(new_schema.is_backcompat_with(old_schema))
+        self.assertTrue(old_schema.is_backcompat_with(new_schema))
+        new_schema = parse_schema('any(Tensor self, int[] dims, *, bool keepdim=False, bool extra) -> Tensor')
         self.assertFalse(new_schema.is_backcompat_with(old_schema))
         self.assertFalse(old_schema.is_backcompat_with(new_schema))
 
