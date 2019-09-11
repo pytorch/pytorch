@@ -933,6 +933,8 @@ jobs:
       - run:
           <<: *should_run_job
       - run:
+          <<: checkout
+      - run:
           <<: *ios_brew_update
       - run:
           name: Build
