@@ -1911,3 +1911,21 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
     return g.op("Multinomial", log_input,
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
+
+
+def meshgrid(g, tensor_list):
+    tensors = [t for t in sym_help._unpack_list(tensor_list)]
+    out = []
+    repeats = [t.type().sizes()[0] if t.isCompleteTensor() else 0 for t in tensors]
+    for i, t in enumerate(tensors):
+        if t.isCompleteTensor():
+            shape_i = torch.ones(len(tensors), dtype=torch.int64)
+            shape_i[i] = t.type().sizes()[0]
+            repeats_i = torch.tensor(repeats, dtype=torch.int64)
+            repeats_i[i] = 1
+            t_reshaped = _reshape_from_tensor(g, t, g.op("Constant", value_t=torch.LongTensor(shape_i)))
+            out.append(repeat(g, t_reshaped, repeats_i))
+        else:
+            _unimplemented("meshgrid", "Unknown input rank. Cannot compute meshgird dimensions.")
+
+    return g.op("prim::ListConstruct", *out)
