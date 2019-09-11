@@ -2,7 +2,7 @@
   binarybuilds:
     triggers:
       - schedule:
-          cron: "35 15 * * *"
+          cron: "40 15 * * *"
           filters:
             branches:
               only:
