@@ -282,6 +282,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
 
+  // TODO: Skip this if not writing tensors
   memoized_storage_map_[addr] = pushNextBinPut();
   tensor_data_.push_back(getWriteableTensorData(tensor));
 }
