@@ -584,8 +584,13 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::data(Tensor(b) a) -> Tensor(b)",
-         noop,
+         "prim::data(Tensor(a) a) -> Tensor(a)",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, autograd::Variable(a).variable_data());
+           return 0;
+         },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::is_cuda(Tensor a) -> bool",
