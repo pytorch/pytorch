@@ -41,6 +41,13 @@ def mkdtemp():
     shutil.rmtree(path)
 
 
+@contextmanager
+def save_position(f):
+    old_pos = f.tell()
+    yield
+    f.seek(old_pos)
+
+
 _package_registry = []
 
 
@@ -583,6 +590,8 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
                 # since this tensor's position is unknown
                 pending_tensors.append(root_key)
 
+    storage_offsets = {}
+
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
         typename = maybe_decode_ascii(saved_id[0])
@@ -609,7 +618,9 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
             else:
                 result = storage
 
-            read_from_file(f, root_key)
+            with save_position(f):
+                f.seek(storage_offsets[root_key])
+                read_from_file(f, root_key)
             return result
         else:
             raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
@@ -641,12 +652,43 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
     # Read through the data pickle without actually loading anything, just
     # continue through it until a STOP opcode
     data_start = f.tell()
-    [_ for _ in pickletools.genops(f)]
+
+    # Skip until the next op with `expected_name` is seen
+    def get_next(expected_name, f):
+        op, value, _ = next(pickletools.genops(f))
+        while op.name != expected_name:
+            op, value, _ = next(pickletools.genops(f))
+        return value
+
+    storage_sizes = {}
+
+    # This small pickle implementation searches through the file for tensors
+    # to find the size of each tensor so they can be eagerly loaded when the
+    # real pickle load is called. Using the storage type and numel, each tensor's
+    # size can be found.
+    for op, value, _ in pickletools.genops(f):
+        if op.name == 'GLOBAL':
+            if 'torch._utils _rebuild_tensor_v2' in value:
+                type_name = get_next('GLOBAL', f)
+                key = get_next('BINUNICODE', f)
+                numel = get_next('BININT1', f)
+
+                # type_name is something like 'torch FloatStorage'
+                type_name = type_name.split(' ')[1]
+                storage_type = getattr(torch, type_name)()
+                storage_sizes[key] = storage_type.element_size() * numel
+    print(storage_sizes)
 
     deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
 
     # Store where the tensor data begins in the file
-    tensor_data_pos = [f.tell()]
+    print(deserialized_storage_keys)
+
+    pos = f.tell()
+    numel_size = 8
+    for key in deserialized_storage_keys:
+       storage_offsets[key] = pos
+       pos += storage_sizes[key] + numel_size
 
     # Go back to the start of the data pickle and read it in
     f.seek(data_start)
