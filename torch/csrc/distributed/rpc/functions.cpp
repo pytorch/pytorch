@@ -40,18 +40,14 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
             "TorchScript function should be a single IValue, got a vector of "
             "size ",
             stack.size());
-        auto response = ScriptRet(std::move(stack.front())).toMessage();
-
-        response.setId(request.id());
-        return response;
+        return ScriptRet(std::move(stack.front())).toMessage();
       }
       case MessageType::PYTHON_CALL: {
         auto payload = PythonRpcHandler::generatePythonUDFResult(request, from.id_);
         return Message(
             std::move(payload),
             std::vector<torch::Tensor>(),
-            MessageType::PYTHON_RET,
-            request.id());
+            MessageType::PYTHON_RET);
       }
       case MessageType::SCRIPT_REMOTE_CALL: {
         ScriptRemoteCall src = ScriptRemoteCall::fromMessage(request);
@@ -76,9 +72,7 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
         ownerRRef->setValue(std::move(stack.front()));
 
         ctx->addForkOfOwner(rrefId, forkId);
-        auto response = RemoteRet(ctx->getWorkerId(), rrefId, forkId).toMessage();
-        response.setId(request.id());
-        return response;
+        return RemoteRet(ctx->getWorkerId(), rrefId, forkId).toMessage();
       }
       case MessageType::PYTHON_REMOTE_CALL: {
         PythonRemoteCall prc = PythonRemoteCall::fromMessage(request);
@@ -91,9 +85,7 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
         ownerRRef->setValue(PythonRpcHandler::runPythonUDF(prc.udf()));
 
         ctx->addForkOfOwner(rrefId, forkId);
-        auto response = RemoteRet(ctx->getWorkerId(), rrefId, forkId).toMessage();
-        response.setId(request.id());
-        return response;
+        return RemoteRet(ctx->getWorkerId(), rrefId, forkId).toMessage();
       }
       case MessageType::SCRIPT_RREF_FETCH_CALL: {
         ScriptRRefFetchCall srf = ScriptRRefFetchCall::fromMessage(request);
@@ -101,9 +93,7 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
         std::shared_ptr<OwnerRRef<IValue>> rref =
             RRefContext::getInstance()->getOrCreateOwnerRRef<IValue>(
                 RRefId::fromIValue(srf.value()));
-        auto response = ScriptRRefFetchRet(rref->getValue()).toMessage();
-        response.setId(request.id());
-        return response;
+        return ScriptRRefFetchRet(rref->getValue()).toMessage();
       }
       case MessageType::PYTHON_RREF_FETCH_CALL: {
         PythonRRefFetchCall srf = PythonRRefFetchCall::fromMessage(request);
@@ -111,12 +101,10 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
         std::shared_ptr<OwnerRRef<py::object>> rref =
             RRefContext::getInstance()->getOrCreateOwnerRRef<py::object>(
                 RRefId::fromIValue(srf.value()));
-        auto response =
+        return
             ScriptRRefFetchRet(
                 PythonRpcHandler::serialize(rref->getValue(), from.id_)
             ).toMessage();
-        response.setId(request.id());
-        return response;
       }
       case MessageType::RREF_USER_ACCEPT: {
         ScriptUserAccept sua = ScriptUserAccept::fromMessage(request);
@@ -127,12 +115,12 @@ Message processRequestBlocking(const WorkerId& from, Message&& request) {
             " received a RREF_USER_ACCEPT message of a different owner ",
             sua.owner_);
         ctx->finishUserRRef(sua.rrefId_, sua.forkId_);
-        return Message({}, {}, MessageType::ACK, request.id());
+        return Message({}, {}, MessageType::ACK);
       }
       case MessageType::RREF_USER_DELETE: {
         ScriptUserDelete srd = ScriptUserDelete::fromMessage(request);
         RRefContext::getInstance()->delForkOfOwner(srd.rrefId_, srd.forkId_);
-        return Message({}, {}, MessageType::ACK, request.id());
+        return Message({}, {}, MessageType::ACK);
       }
       case MessageType::RREF_FORK_NOTIFY: {
         ScriptForkNotify sfn = ScriptForkNotify::fromMessage(request);
