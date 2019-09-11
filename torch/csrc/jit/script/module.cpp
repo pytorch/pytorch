@@ -405,9 +405,9 @@ void Module::apply(const std::function<void(Module&)>& fn) {
 }
 
 std::string Module::_dump_to_string(
-    bool omit_method_bodies,
-    bool omit_attr_values,
-    bool omit_param_values,
+    bool print_method_bodies,
+    bool print_attr_values,
+    bool print_param_values,
     int level) const {
   std::stringstream ss;
   std::stringstream parameters_ss;
@@ -417,7 +417,7 @@ std::string Module::_dump_to_string(
 
   for (Slot param : get_parameters()) {
     parameters_ss << param.name() << " = ";
-    if (!omit_param_values) {
+    if (print_param_values) {
       parameters_ss << param.value().toTensor() << std::endl;
     } else {
       parameters_ss << "..." << std::endl;
@@ -426,7 +426,7 @@ std::string Module::_dump_to_string(
 
   for (Slot attr : get_attributes()) {
     attributes_ss << attr.name() << " = ";
-    if (!attr.value().isTensor() || !omit_attr_values) {
+    if (!attr.value().isTensor() || print_attr_values) {
       attributes_ss << attr.value() << std::endl;
     } else {
       attributes_ss << "..." << std::endl;
@@ -435,7 +435,7 @@ std::string Module::_dump_to_string(
 
   for (const Method& method : get_methods()) {
     methods_ss << "  method " << method.name() << " {" << std::endl;
-    if (!omit_method_bodies) {
+    if (print_method_bodies) {
       methods_ss << torch::jit::jit_log_prefix(
                         "    ", method.graph()->toString())
                  << std::endl;
@@ -458,7 +458,7 @@ std::string Module::_dump_to_string(
     // We do level + 2, because one level of indentation comes from 'submodules'
     // scope and the other one goes from a specific submodule we're printing.
     ss << submodule._dump_to_string(
-        omit_method_bodies, omit_attr_values, omit_param_values, level + 2);
+        print_method_bodies, print_attr_values, print_param_values, level + 2);
   }
   ss << "  }" << std::endl;
   ss << "}" << std::endl;
@@ -468,11 +468,14 @@ std::string Module::_dump_to_string(
 }
 
 void Module::dump(
-    bool omit_method_bodies = true,
-    bool omit_attr_values = true,
-    bool omit_param_values = true) const {
+    bool print_method_bodies = true,
+    bool print_attr_values = true,
+    bool print_param_values = true) const {
   std::cout << _dump_to_string(
-                   omit_method_bodies, omit_attr_values, omit_param_values, 0)
+                   print_method_bodies,
+                   print_attr_values,
+                   print_param_values,
+                   0)
             << std::endl;
 }
 
