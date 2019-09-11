@@ -43,7 +43,7 @@ import torch.backends.mkl
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
-torch.backends.cudnn.disable_global_flags()
+torch.backends.disable_global_flags()
 
 
 parser = argparse.ArgumentParser(add_help=False)
@@ -120,6 +120,7 @@ PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
 
 IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
@@ -513,10 +514,10 @@ try:
                 min_satisfying_examples=1,
                 verbosity=hypothesis.Verbosity.verbose))
 
-        hypothesis.settings.load_profile(
-            "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
-                                                         'dev')
-        )
+    hypothesis.settings.load_profile(
+        "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
+                                                     'dev')
+    )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
