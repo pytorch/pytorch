@@ -100,7 +100,7 @@ torch.nn.Embedding|No|No
 torch.nn.EmbeddingBag|No|No
 torch.nn.CosineSimilarity|No|No
 torch.nn.PairwiseDistance|No|No
-torch.nn.L1Loss|No|No
+torch.nn.L1Loss|Yes|No
 torch.nn.MSELoss|No|No
 torch.nn.CrossEntropyLoss|No|No
 torch.nn.CTCLoss|No|No
