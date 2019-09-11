@@ -147,6 +147,7 @@ class TensorObserver(ObserverBase):
     __annotations__ = {
         "tensor_val": List[Optional[torch.Tensor]],
     }
+
     def __init__(self, **kwargs):
         super(TensorObserver, self).__init__(**kwargs)
         self.tensor_val = []
