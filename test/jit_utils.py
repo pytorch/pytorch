@@ -488,6 +488,24 @@ class JitTestCase(TestCase):
             results = func(*inputs, **kwargs)
         return results
 
+    def checkModule(self, nn_module, args):
+        """
+        Check that a nn.Module's results in Script mode match eager and that it
+        can be exported
+        """
+        sm = torch.jit.script(nn_module)
+
+        with freeze_rng_state():
+            eager_out = nn_module(*args)
+
+        with freeze_rng_state():
+            script_out = sm(*args)
+
+        self.assertEqual(eager_out, script_out)
+        self.assertExportImportModule(sm, args)
+
+        return sm
+
 @contextmanager
 def enable_profiling_mode():
     torch._C._jit_set_profiling_mode(True)

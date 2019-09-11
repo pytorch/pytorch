@@ -22,6 +22,9 @@ from cpp_api_parity import TorchNNModuleMetadata
 # `num_attrs_recursive`: the number of attributes (including parameters, buffers and non-tensor
 #     attributes) of the Python module. If the module contains any submodule, the submodule's
 #     attributes also need to be counted.
+#
+# `python_legacy_constructor_args`: (optional) list of legacy Python constructor args that are
+#     ignored in Python/C++ API parity test.
 module_metadata_map = {
     'Conv1d': TorchNNModuleMetadata(),
     'Conv2d': TorchNNModuleMetadata(),
@@ -34,9 +37,18 @@ module_metadata_map = {
         cpp_default_constructor_args="(3, 2)",
         num_attrs_recursive=5,
     ),
-    'MaxPool1d': TorchNNModuleMetadata(),
-    'MaxPool2d': TorchNNModuleMetadata(),
-    'MaxPool3d': TorchNNModuleMetadata(),
+    'MaxPool1d': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(2)",
+        num_attrs_recursive=6,
+    ),
+    'MaxPool2d': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(2)",
+        num_attrs_recursive=6,
+    ),
+    'MaxPool3d': TorchNNModuleMetadata(
+        cpp_default_constructor_args="(2)",
+        num_attrs_recursive=6,
+    ),
     'MaxUnpool1d': TorchNNModuleMetadata(),
     'MaxUnpool2d': TorchNNModuleMetadata(),
     'MaxUnpool3d': TorchNNModuleMetadata(),
@@ -117,7 +129,11 @@ module_metadata_map = {
     'EmbeddingBag': TorchNNModuleMetadata(),
     'CosineSimilarity': TorchNNModuleMetadata(),
     'PairwiseDistance': TorchNNModuleMetadata(),
-    'L1Loss': TorchNNModuleMetadata(),
+    'L1Loss': TorchNNModuleMetadata(
+        cpp_default_constructor_args="()",
+        num_attrs_recursive=1,
+        python_legacy_constructor_args=['size_average', 'reduce'],
+    ),
     'MSELoss': TorchNNModuleMetadata(),
     'CrossEntropyLoss': TorchNNModuleMetadata(),
     'CTCLoss': TorchNNModuleMetadata(),
