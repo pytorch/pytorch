@@ -1,11 +1,10 @@
 from test_jit import JitTestCase
 from common_utils import run_tests
-import sys
-sys.setrecursionlimit(1500)
 
 
 class TestScript(JitTestCase):
     def test_str_ops(self):
+        self.clearHooks()
         def test_str_is(s):
             # type: (str) -> Tuple[bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool]
             return s.isupper(), s.islower(), s.isdigit(), s.isspace(), \
