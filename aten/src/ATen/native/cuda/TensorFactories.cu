@@ -580,7 +580,9 @@ Tensor reservoir_sampling_cuda(
 
     Tensor samples = at::arange({nb_iterations}, options);
 
-    generate_samples<<<blocks, threads>>>(
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+    generate_samples<<<blocks, threads, 0, stream>>>(
       samples.data_ptr<int64_t>(),
       split,
       n,
@@ -591,7 +593,7 @@ Tensor reservoir_sampling_cuda(
 
     // This must be done in a separeted kernel
     // since this algorithm isn't thread safe
-    generate_reservoir<<<1, 1>>>(
+    generate_reservoir<<<1, 1, 0, stream>>>(
       indices_n.data_ptr<int64_t>(),
       samples.data_ptr<int64_t>(),
       nb_iterations,
@@ -642,7 +644,9 @@ Tensor reservoir_sampling_cuda(
     Tensor keys = at::empty({n}, weights_contiguous.options());
     dim3 all_blocks((n + threadsPerBlock - 1)/threadsPerBlock);
 
-    generate_keys<<<all_blocks, threads>>>(
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+    generate_keys<<<all_blocks, threads, 0, stream>>>(
       keys.data_ptr<float>(),
       weights_contiguous.data_ptr<float>(),
       n,
@@ -697,7 +701,7 @@ Tensor sampling_with_replacement_cuda(
       nullptr,
       at::cuda::detail::getDefaultCUDAGenerator()
     );
-    
+
     std::pair<uint64_t, uint64_t> next_philox_seed;
     {
          // See Note [Acquire lock when using random generators]
@@ -719,7 +723,9 @@ Tensor sampling_with_replacement_cuda(
     dim3 threads(threadsPerBlock);
     dim3 blocks((k + threadsPerBlock - 1)/threadsPerBlock);
 
-    sampling_with_replacement_kernel<<<blocks, threads>>>(
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+    sampling_with_replacement_kernel<<<blocks, threads, 0, stream>>>(
       samples.data_ptr<int64_t>(),
       cdf.data_ptr<float>(),
       n,
