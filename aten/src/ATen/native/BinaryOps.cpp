@@ -254,7 +254,7 @@ Tensor& lt_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor lt(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
   native::lt_out(result, self, other);
   return result;
 }
