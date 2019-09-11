@@ -13,7 +13,7 @@ cd ${ZIP_DIR}/install/lib
 target_libs=(libc10.a libclog.a libcpuinfo.a libqnnpack.a libtorch.a)
 for lib in ${target_libs[*]}
 do
-    libs=(${ARTIFACTS_DIR}/x86_64/lib/${lib} ${ARTIFACTS_DIR}/arm64/lib/${lib} ${ARTIFACTS_DIR}/armv7s/lib/l${lib} )
+    libs=(${ARTIFACTS_DIR}/x86_64/lib/${lib} ${ARTIFACTS_DIR}/arm64/lib/${lib} ${ARTIFACTS_DIR}/armv7s/lib/${lib} )
     lipo -create ${libs[@]} -o ${ZIP_DIR}/install/lib/${lib}
 done
 # for nnpack, we only support arm64/armv7s build
