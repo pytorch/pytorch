@@ -4211,7 +4211,6 @@ class TestNN(NNTestCase):
         _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_gather_cpu(self):
         self._test_gather(-1)
 
