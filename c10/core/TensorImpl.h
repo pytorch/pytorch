@@ -151,12 +151,12 @@ struct C10_API NamedTensorMetaInterface {
   virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
     TORCH_INTERNAL_ASSERT(
       false,
-      "Attempting to clone a NamedTensorMetaInterface instance.");
+      "Not implemented: NamedTensorMetaInterface::clone");
   };
   virtual int64_t slow_dim() const {
     TORCH_INTERNAL_ASSERT(
       false,
-      "Attempting to clone a NamedTensorMetaInterface instance.");
+      "Not implemented: NamedTensorMetaInterface::slow_dim");
   };
 };
 #endif
