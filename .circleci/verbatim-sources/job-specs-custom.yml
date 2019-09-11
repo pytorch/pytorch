@@ -150,6 +150,10 @@
           at: ~/workspace
       - run:
           <<: *should_run_job
+
+      - restore_cache:
+          key: homebrew-{{ arch }}
+
       - run:
           name: Update brew
           no_output_timeout: "1h"
@@ -171,11 +175,19 @@
 
             export HOMEBREW_NO_AUTO_UPDATE=1
 
+            set -x
+
+            brew cleanup
             brew unlink parallel
             brew install moreutils
             brew link parallel --overwrite
             brew install expect
             brew install libomp
+
+      - save_cache:
+          key: homebrew-{{ arch }}-{{ epoch }}
+          paths:
+            - "/usr/local/Homebrew"
 
 
   pytorch_macos_10_13_py3_build:
