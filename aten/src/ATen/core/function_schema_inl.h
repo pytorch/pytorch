@@ -123,7 +123,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   }
   std::vector<const Argument*> args, old_args;
   std::unordered_map<std::string, const Argument*> kwargs, old_kwargs;
-  std::function split_func = [](const std::vector<Argument>& arguments,
+  auto split_func = [](const std::vector<Argument>& arguments,
       std::vector<const Argument*>* positionals,
       std::unordered_map<std::string, const Argument*>* nameds) {
     for (const Argument& arg : arguments) {
