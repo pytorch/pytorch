@@ -9,7 +9,7 @@ import torch.jit._recursive
 from torch._jit_internal import _qualified_name
 from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
-from torch.nn import Module, ModuleList, Sequential
+from torch.nn import Module, ModuleList, Sequential, ModuleDict
 from torch.serialization import validate_cuda_device
 from torch._six import PY2, PY37, with_metaclass, string_classes
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
@@ -32,7 +32,7 @@ from collections import OrderedDict, namedtuple
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method  # noqa: F401
-from torch._jit_internal import ignore, export  # noqa: F401
+from torch._jit_internal import ignore, export, unused  # noqa: F401
 
 if sys.version_info[0] > 2:
     import pathlib
@@ -97,75 +97,6 @@ def optimized_execution(should_optimize):
 DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
 
 
-def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
-    r"""
-        Load a ``ScriptModule`` previously saved with :func:`torch.jit.save <torch.jit.save>`
-
-        All previously saved modules, no matter their device, are first loaded onto CPU,
-        and then are moved to the devices they were saved from. If this fails (e.g. because
-        the run time system doesn't have certain devices), an exception is raised.
-
-        Arguments:
-            f: a file-like object (has to implement read, readline, tell, and seek),
-                or a string containing a file name
-            map_location (string or torch.device): A simplified version of ``map_location`` in
-                ``torch.save`` used to dynamically remap storages to an alternative set of devices.
-            _extra_files (dictionary of filename to content): The extra
-                filenames given in the map would be loaded and their content
-                would be stored in the provided map.
-
-
-        Returns:
-            A ``ScriptModule`` object.
-
-        Example: ::
-
-            import torch
-            import io
-
-            torch.jit.load('scriptmodule.pt')
-
-            # Load ScriptModule from io.BytesIO object
-            with open('scriptmodule.pt', 'rb') as f:
-                buffer = io.BytesIO(f.read())
-
-            # Load all tensors to the original device
-            torch.jit.load(buffer)
-
-            # Load all tensors onto CPU, using a device
-            torch.jit.load(buffer, map_location=torch.device('cpu'))
-
-            # Load all tensors onto CPU, using a string
-            torch.jit.load(buffer, map_location='cpu')
-
-            # Load with extra files.
-            files = {'metadata.json' : ''}
-            torch.jit.load('scriptmodule.pt', _extra_files = files)
-            print(files['metadata.json'])
-    """
-    if isinstance(f, string_classes):
-        if not os.path.exists(f):
-            raise ValueError("The provided filename {} does not exist".format(f))
-    if isinstance(map_location, string_classes):
-        map_location = torch.device(map_location)
-    elif not (map_location is None or
-              isinstance(map_location, torch.device)):
-        raise ValueError("map_location should be either None, string or torch.device, "
-                         "but got type: " + str(type(map_location)))
-    if (str(map_location).startswith('cuda')):
-        validate_cuda_device(map_location)
-
-    cu = torch._C.CompilationUnit()
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        cpp_module = torch._C.import_ir_module(cu, f, map_location, _extra_files)
-    else:
-        cpp_module = torch._C.import_ir_module_from_buffer(cu, f.read(), map_location, _extra_files)
-
-    return ScriptModule(_cpp_module=cpp_module)
-
-
 def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     """
         Save an offline version of this module for use in a separate process. The saved
@@ -193,7 +124,9 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
 
             Please use something like ``io.BytesIO`` instead.
 
-        Example: ::
+        Example:
+
+        .. testcode::
 
             import torch
             import io
@@ -206,6 +139,8 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
 
             # Save to file
             torch.jit.save(m, 'scriptmodule.pt')
+            # This line is equivalent to the previous
+            m.save("scriptmodule.pt")
 
             # Save to io.BytesIO buffer
             buffer = io.BytesIO()
@@ -223,6 +158,89 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     else:
         ret = m.save_to_buffer(_extra_files=_extra_files)
         f.write(ret)
+
+
+def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
+    r"""
+        Load a ``ScriptModule`` previously saved with :func:`torch.jit.save <torch.jit.save>`
+
+        All previously saved modules, no matter their device, are first loaded onto CPU,
+        and then are moved to the devices they were saved from. If this fails (e.g. because
+        the run time system doesn't have certain devices), an exception is raised.
+
+        Arguments:
+            f: a file-like object (has to implement read, readline, tell, and seek),
+                or a string containing a file name
+            map_location (string or torch.device): A simplified version of ``map_location`` in
+                ``torch.save`` used to dynamically remap storages to an alternative set of devices.
+            _extra_files (dictionary of filename to content): The extra
+                filenames given in the map would be loaded and their content
+                would be stored in the provided map.
+
+        Returns:
+            A ``ScriptModule`` object.
+
+        Example:
+
+        .. testcode::
+
+            import torch
+            import io
+
+            torch.jit.load('scriptmodule.pt')
+
+            # Load ScriptModule from io.BytesIO object
+            with open('scriptmodule.pt', 'rb') as f:
+                buffer = io.BytesIO(f.read())
+
+            # Load all tensors to the original device
+            torch.jit.load(buffer)
+
+            # Load all tensors onto CPU, using a device
+            buffer.seek(0)
+            torch.jit.load(buffer, map_location=torch.device('cpu'))
+
+            # Load all tensors onto CPU, using a string
+            buffer.seek(0)
+            torch.jit.load(buffer, map_location='cpu')
+
+            # Load with extra files.
+            extra_files = torch._C.ExtraFilesMap()
+            extra_files['foo.txt'] = 'bar'
+            torch.jit.load('scriptmodule.pt', _extra_files=extra_files)
+            print(extra_files['foo.txt'])
+
+        .. testoutput::
+            :hide:
+
+            ...
+
+        .. testcleanup::
+
+            import os
+            os.remove("scriptmodule.pt")
+    """
+    if isinstance(f, string_classes):
+        if not os.path.exists(f):
+            raise ValueError("The provided filename {} does not exist".format(f))
+    if isinstance(map_location, string_classes):
+        map_location = torch.device(map_location)
+    elif not (map_location is None or
+              isinstance(map_location, torch.device)):
+        raise ValueError("map_location should be either None, string or torch.device, "
+                         "but got type: " + str(type(map_location)))
+    if (str(map_location).startswith('cuda')):
+        validate_cuda_device(map_location)
+
+    cu = torch._C.CompilationUnit()
+    if isinstance(f, str) or \
+            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
+            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+        cpp_module = torch._C.import_ir_module(cu, f, map_location, _extra_files)
+    else:
+        cpp_module = torch._C.import_ir_module_from_buffer(cu, f.read(), map_location, _extra_files)
+
+    return ScriptModule(_cpp_module=cpp_module)
 
 
 def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_inputs=False):
@@ -243,10 +261,11 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_input
         kwargs (dict): the keyword arguments to pass to the function/module
             to be traced.
 
-    Example: Trace a cell.
+    Example (trace a cell):
 
-        >>> trace, out = jit.trace(nn.LSTMCell(), (input, hidden))
-        >>> print(trace)
+    .. testcode::
+
+        trace = torch.jit.trace(nn.LSTMCell(), (input, hidden))
     """
     if kwargs is None:
         kwargs = {}
@@ -767,7 +786,9 @@ def trace(func,
         original ``nn.Module``.
         If ``callable`` is a standalone function, ``trace`` returns ``torch._C.Function``
 
-    Example (tracing a function)::
+    Example (tracing a function):
+
+    .. testcode::
 
         import torch
 
@@ -1056,7 +1077,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         The ``@torch.jit.script`` decorator will construct a ``torch._C.Function``
         by compiling the body of the function.
 
-        Example (scripting a function)::
+        Example (scripting a function):
+
+        .. testcode::
 
             import torch
 
@@ -1075,7 +1098,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         will construct ``torch.jit.ScriptModule`` that has copies of the attributes, parameters, and methods of
         the original module.
 
-        Example (scripting a simple module with a Parameter)::
+        Example (scripting a simple module with a Parameter):
+
+        .. testcode::
 
             import torch
 
@@ -1096,9 +1121,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                     output = self.linear(output)
                     return output
 
-            scripted_module = torch.jit.script(MyModule())
+            scripted_module = torch.jit.script(MyModule(2, 3))
 
-        Example (scripting a module with traced submodules)::
+        Example (scripting a module with traced submodules):
+
+        .. testcode::
 
             import torch
             import torch.nn as nn
@@ -1556,16 +1583,21 @@ if _enabled:
                 raise RuntimeError("attempting to re-assign constant '{}' in {}".format(attr, type(self).__name__))
 
             def conv_module_to_const(module_value):
-                if not isinstance(module_value, (ModuleList, Sequential)):
+                if not isinstance(module_value, (ModuleList, Sequential, ModuleDict)):
                     return module_value
-                for i in range(len(module_value)):
-                    module_value[i] = conv_module_to_const(module_value[i])
-                if isinstance(module_value, Sequential):
-                    return _ConstSequential(module_value)
+                if isinstance(module_value, ModuleDict):
+                    for key, val in module_value:
+                        module_value[key] = conv_module_to_const(val)
+                    return _ConstModuleDict(module_value)
                 else:
-                    return _ConstModuleList(module_value)
+                    for i in range(len(module_value)):
+                        module_value[i] = conv_module_to_const(module_value[i])
+                    if isinstance(module_value, Sequential):
+                        return _ConstSequential(module_value)
+                    else:
+                        return _ConstModuleList(module_value)
 
-            if isinstance(value, (ModuleList, Sequential)):
+            if isinstance(value, (ModuleList, Sequential, ModuleDict)):
                 # special case for list of modules. Modules need to be registered with their
                 # parent module. To do this, we create a ConstModuleList, which is itself a module, that
                 # contains each of these modules as submodules. The ConstModuleList then
@@ -1730,6 +1762,48 @@ class _ConstModuleList(ScriptModule):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
+class _ConstModuleDict(ScriptModule):
+    def __init__(self, modules):
+        super(_ConstModuleDict, self).__init__()
+
+        assert isinstance(modules, OrderedDict)
+
+        for key, module in modules.items():
+            if isinstance(module, torch.nn.Module):
+                module = torch.jit._recursive.recursive_script(module)
+            self.add_module(key, module)
+
+
+    def __getitem__(self, key):
+        return self._modules[key]
+
+    def __contains__(self, key):
+        return key in self._modules
+
+    def keys(self):
+        r"""Return an iterable of the ModuleDict keys.
+        """
+        return self._modules.keys()
+
+    def items(self):
+        r"""Return an iterable of the ModuleDict key/value pairs.
+        """
+        return self._modules.items()
+
+    def values(self):
+        r"""Return an iterable of the ModuleDict values.
+        """
+        return self._modules.values()
+
+    def __len__(self):
+        return len(self._modules)
+
+    def __iter__(self):
+        return iter(self._modules.values())
+
+    def forward(self):
+        raise NotImplementedError()
+
 
 class _ConstSequential(_ConstModuleList):
     __constants__ = ['mods']
@@ -1749,6 +1823,23 @@ class _ConstSequential(_ConstModuleList):
             return input
         """)
 
+def is_scripting():
+    r"""
+    Function that returns True when in compilation and False otherwise. This
+    is useful especially with the @unused decorator to leave code in your
+    model that is not yet TorchScript compatible.
+
+    @torch.jit.unused
+    def unsupported_linear_op(x):
+        return x
+
+    def linear(x):
+       if not torch.jit.is_scripting():
+          return torch.linear(x)
+       else:
+          return unsupported_linear_op(x)
+    """
+    return False
 
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"
@@ -1767,6 +1858,7 @@ _builtin_ops = [
     (_triple, "aten::_triple"),
     (_unwrap_optional, "aten::_unwrap_optional"),
     (_wait, 'aten::wait'),
+    (is_scripting, "aten::is_scripting"),
     (cudnn.is_acceptable, "aten::cudnn_is_acceptable"),
     (math.ceil, "aten::ceil"),
     (math.copysign, "aten::copysign"),

@@ -45,6 +45,9 @@
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
+  CPU:
+    forward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
+    backward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
 
 - name: _thnn_nll_loss2d(Tensor self, LongTensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
   cname: SpatialClassNLLCriterion
