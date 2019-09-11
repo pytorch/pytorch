@@ -154,8 +154,40 @@ bool valueObservedInAnotherMethod(
   return false;
 }
 
-static bool outputsNeedToBeObserved(Node* n) {
-  return n->kind() != prim::Constant;
+bool nodeQuantizable(Node* n) {
+  static std::vector<Symbol> aten_funcs = {
+    Symbol::aten("conv2d"),
+    Symbol::aten("linear")
+  };
+  bool is_quantizable = std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) != aten_funcs.end();
+  static std::vector<std::string> call_funcs = {
+    "linear",
+    "relu"
+  };
+  if (n->kind() == prim::CallFunction) {
+    auto func_node = n->inputs()[0]->node();
+    if (func_node->kind() == prim::Constant) {
+      is_quantizable |= std::find(call_funcs.begin(), call_funcs.end(), func_node->s(attr::name)) != call_funcs.end();
+    }
+  }
+  return is_quantizable;
+}
+
+bool valueNeedsToBeObserved(Value* v) {
+  if (!v->type()->isSubtypeOf(TensorType::get())) {
+    return false;
+  }
+  // Check whether producer is quantizable
+  if (nodeQuantizable(v->node())) {
+    return true;
+  }
+  // Check whether user is quantizable
+  for (const auto& use: v->uses()) {
+    if (nodeQuantizable(use.user)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 Node* traverseToQuantNode(Node* dq) {
@@ -301,15 +333,18 @@ void InsertObserversImpl(
   // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
   Value* self = graph->inputs()[0];
+  std::unordered_set<Value*> values_observed;
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
-    if (v->type()->isSubtypeOf(TensorType::get()) &&
+    if (valueNeedsToBeObserved(v) &&
         values_to_skip.count(v) == 0 &&
+        values_observed.count(v) == 0 &&
         !valueObservedInAnotherMethod(v, self, module, child_module_set)) {
       if (module_qconfig_map.count(module.module_object()) == 0) {
         // the module is added by us, it's an observer module
         continue;
       }
+      values_observed.emplace(v);
       auto qconfig = module_qconfig_map.at(module.module_object());
       if (qconfig) {
         auto observer_node =
@@ -328,16 +363,19 @@ void InsertObserversImpl(
     for (Node* n : b->nodes()) {
       // Skip nodes that we don't need to observe, e.g. 'prim::Constant' or
       // observer nodes
-      if (!outputsNeedToBeObserved(n) || observer_for_input.count(n) != 0) {
+      if (observer_for_input.count(n) != 0) {
         continue;
       }
 
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
-        if (values_to_skip.count(v) == 0 &&
+        if (valueNeedsToBeObserved(v) &&
+            values_to_skip.count(v) == 0 &&
+            values_observed.count(v) == 0 &&
             !valueObservedInAnotherMethod(v, self, module, child_module_set)) {
           values_to_observe.push_back(v);
+          values_observed.emplace(v);
         }
         if (v->node()->kind() == prim::CallMethod) {
           // If we find a call to a method of a child module,
@@ -381,9 +419,6 @@ void InsertObserversImpl(
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    if (!v->type()->isSubtypeOf(TensorType::get())) {
-      continue;
-    }
     // Skip inserting observer for bias
     if (v->node()->kind() == prim::GetAttr &&
         v->node()->s(c10::attr::name) == "bias") {

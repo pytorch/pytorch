@@ -1039,7 +1039,6 @@ graph(%x : Tensor,
         def test_module(module, relu_call, num_observers):
             m = torch.jit.script(module())
             observer = torch.jit.script(Observer())
-
             torch._C._jit_pass_constant_propagation(get_forward(m).graph)
             torch._C._jit_pass_constant_propagation(m._c._get_module('conv')._get_method('conv2d_forward').graph)
             qconfig_dict = {
