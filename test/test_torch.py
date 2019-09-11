@@ -5939,9 +5939,9 @@ class _TestTorchMixin(torchtest):
                                            unitriangular=unitriangular, transpose=transpose)[0]  # Actual output
             self.assertEqual(x_act, x_exp)  # Equality check
             if transpose:
-                self.assertLessEqual(b.dist(torch.matmul(A.transpose(-2, -1), x_act)), 2e-12)  # Correctness check
+                self.assertLessEqual(b.dist(torch.matmul(A.transpose(-2, -1), x_act)), 3e-12)  # Correctness check
             else:
-                self.assertLessEqual(b.dist(torch.matmul(A, x_act)), 2e-12)  # Correctness check
+                self.assertLessEqual(b.dist(torch.matmul(A, x_act)), 3e-12)  # Correctness check
 
         for (upper, unitriangular, transpose), batchsize in product(product([True, False], repeat=3), [1, 3, 4]):
             triangular_solve_batch_helper((batchsize, 5, 5), (batchsize, 5, 10), cast,
