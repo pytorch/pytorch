@@ -311,3 +311,8 @@ TEST(TensorTest, DataPtr) {
   ASSERT_EQ(tensor_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
   ASSERT_EQ(tensor_not_copy.data_ptr(), tensor.data_ptr());
 }
+
+TEST(TensorTest, Data) {
+  auto tensor = torch::ones({3, 3}, torch::requires_grad());
+  auto data = tensor.data();
+}

@@ -131,14 +131,14 @@ TEST(TestQTensor, EmptyPerchannelQuantized) {
       {ch_axis},
       at::device(at::kCPU).dtype(kQUInt8));
   // Assigning to QTensor
-  auto* q_data = q.data<quint8>();
+  auto* q_data = static_cast<quint8*>(q.data_ptr());
   for (int i = 0; i < numel; ++i) {
     q_data[i].val_ = val;
   }
 
   // dequantize
   auto r = q.dequantize();
-  auto* r_data = r.data<float>();
+  auto* r_data = static_cast<float*>(r.data_ptr());
   for (int i = 0; i < numel; ++i) {
     ASSERT_EQ(
         r_data[i],

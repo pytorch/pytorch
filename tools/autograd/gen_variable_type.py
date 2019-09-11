@@ -30,7 +30,7 @@ from .env import BUILD_NAMEDTENSOR
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward', 'set_data'
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward', 'set_data', 'data'
 }
 
 # These functions we don't want to record for tracing, because we always want
