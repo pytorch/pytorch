@@ -588,7 +588,6 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
-    @skipIfRocm
     @enable_cpu_fuser
     def test_kernel_cache_multi_gpu(self):
         def not_fusible(x):
