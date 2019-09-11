@@ -3274,13 +3274,7 @@ inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, const Tenso
 }
 inline Tensor & Tensor::lt_(Scalar other) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::lt_(const_cast<Tensor&>(*this), other);
-            break;
-        default:
-            AT_ERROR("lt_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::lt_(const_cast<Tensor&>(*this), other);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, Scalar)>(type_set(), is_variable())(const_cast<Tensor&>(*this), other);
@@ -3288,13 +3282,7 @@ inline Tensor & Tensor::lt_(Scalar other) const {
 }
 inline Tensor & Tensor::lt_(const Tensor & other) const {
 #ifdef USE_STATIC_DISPATCH
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::lt_(const_cast<Tensor&>(*this), other);
-            break;
-        default:
-            AT_ERROR("lt_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::lt_(const_cast<Tensor&>(*this), other);
 #else
     static auto table = globalATenDispatch().getOpTable("aten::lt_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &, const Tensor &)>(type_set(), is_variable())(const_cast<Tensor&>(*this), other);
