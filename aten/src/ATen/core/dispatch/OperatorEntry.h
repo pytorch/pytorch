@@ -57,9 +57,11 @@ private:
   : kernel_(kernel), cache_(cache_creator ? cache_creator() : nullptr), unboxed_kernel_(unboxed_kernel) {}
   friend class impl::OperatorEntry;
 
-  KernelFunction* kernel_; // can be nullptr, not all kernels have this
+  // All of these fields may be nullptr, but at least one of
+  // kernel_ or unboxed_kernel_ should be non-NULL
+  KernelFunction* kernel_;
   std::unique_ptr<c10::KernelCache> cache_;
-  void* unboxed_kernel_; // can be nullptr, not all kernels have this
+  void* unboxed_kernel_;
 };
 
 namespace impl {

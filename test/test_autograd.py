@@ -201,9 +201,6 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'expected shape'):
             input = torch.randn(5, 5, dtype=torch.float, requires_grad=True)
             MyFunction.apply(input).sum().backward()
-        with self.assertRaisesRegex(RuntimeError, 'expected type'):
-            input = torch.randn(10, dtype=torch.double, requires_grad=True)
-            MyFunction.apply(input).sum().backward()
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
@@ -900,7 +897,10 @@ class TestAutograd(TestCase):
         for i in range(3):
             x.detach_()
             x.copy_(mu + i)
-            loss += (x * torch.tensor([float(i)])).sum()
+            ft = torch.tensor([float(i)])
+            multiplied = x * ft
+            s = multiplied.sum()
+            loss += s
         loss.backward()
 
     def test_no_grad(self):
