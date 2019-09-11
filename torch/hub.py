@@ -385,7 +385,7 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
     if sys.version_info[0] == 2:
         response = requests.get(url, stream=True)
 
-        content_length = response.headers['Content-Length']
+        content_length = response.headers.get('Content-Length', None)
         file_size = content_length
         u = response.raw
     else:
